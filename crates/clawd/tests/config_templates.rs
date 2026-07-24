@@ -476,6 +476,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("map_merchant", &["net"]),
         ("make_dir", &["fs.write"]),
         ("music_generate", &["fs.write", "llm", "net"]),
+        ("office_workspace", &["fs.read", "fs.write"]),
         ("remove_file", &["fs.write"]),
         ("read_file", &["fs.read"]),
         // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.*`（按字典序）。
@@ -545,6 +546,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("map_merchant", &["net"]),
         ("make_dir", &["fs.write"]),
         ("music_generate", &["fs.write", "llm", "net"]),
+        ("office_workspace", &["fs.read", "fs.write"]),
         ("read_file", &["fs.read"]),
         ("remove_file", &["fs.write"]),
         ("rss_fetch", &["net"]),

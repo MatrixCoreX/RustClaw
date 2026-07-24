@@ -121,8 +121,15 @@ pub(crate) async fn run_skill_with_runner_once(
         .clone()
         .map(Value::String)
         .unwrap_or(Value::Null);
-    let skill_context =
-        build_runner_skill_context(state, task, source, credential_context, execution_context);
+    let storage_descriptor = storage_descriptor_for_skill(state, canonical_skill_name)?;
+    let skill_context = build_runner_skill_context(
+        state,
+        task,
+        source,
+        credential_context,
+        storage_descriptor,
+        execution_context,
+    );
     let req_line = serde_json::json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -524,6 +531,7 @@ pub(crate) fn build_runner_skill_context(
     task: &ClaimedTask,
     source: &str,
     credential_context: Value,
+    storage_descriptor: Option<crate::skill_storage::SkillStorageDescriptor>,
     execution_context: Option<&super::SkillExecutionContext>,
 ) -> Value {
     let mut ctx = serde_json::Map::new();
@@ -553,6 +561,12 @@ pub(crate) fn build_runner_skill_context(
             .unwrap_or(Value::Null),
     );
     ctx.insert("exchange_credentials".to_string(), credential_context);
+    if let Some(storage_descriptor) = storage_descriptor {
+        ctx.insert(
+            "skill_storage".to_string(),
+            serde_json::to_value(storage_descriptor).unwrap_or(Value::Null),
+        );
+    }
     if let Some(execution_context) = execution_context {
         ctx.insert(
             "execution".to_string(),
@@ -571,15 +585,6 @@ pub(crate) fn build_runner_skill_context(
         "workspace_root".to_string(),
         Value::String(state.skill_rt.workspace_root.display().to_string()),
     );
-    ctx.insert(
-        "database_sqlite_path".to_string(),
-        Value::String(state.worker.database_sqlite_path.display().to_string()),
-    );
-    ctx.insert(
-        "database_busy_timeout_ms".to_string(),
-        Value::from(state.worker.database_busy_timeout_ms),
-    );
-
     let recent_images = crate::collect_recent_image_candidates(
         state,
         task.user_key.as_deref(),
@@ -626,39 +631,35 @@ pub(crate) fn exchange_credential_context_for_task(
     else {
         return serde_json::json!({});
     };
-    let Ok(db) = state.core.db.get() else {
-        return serde_json::json!({});
+    crate::repo::crypto_credential_context_for_user_key(state, user_key)
+        .unwrap_or_else(|_| serde_json::json!({}))
+}
+
+fn storage_descriptor_for_skill(
+    state: &AppState,
+    canonical_skill_name: &str,
+) -> Result<Option<crate::skill_storage::SkillStorageDescriptor>, String> {
+    let registry = state.get_skills_registry();
+    let Some(declaration) = registry
+        .as_ref()
+        .and_then(|registry| registry.storage(canonical_skill_name))
+    else {
+        return Ok(None);
     };
-    let mut stmt = match db.prepare(
-        "SELECT exchange, api_key, api_secret, passphrase
-         FROM exchange_api_credentials
-         WHERE user_key = ?1 AND enabled = 1",
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return serde_json::json!({}),
-    };
-    let rows = match stmt.query_map(rusqlite::params![user_key], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return serde_json::json!({}),
-    };
-    let mut exchanges = serde_json::Map::new();
-    for row in rows.flatten() {
-        let (exchange, api_key, api_secret, passphrase) = row;
-        exchanges.insert(
-            exchange,
-            serde_json::json!({
-                "api_key": api_key,
-                "api_secret": api_secret,
-                "passphrase": passphrase,
-            }),
-        );
+    if declaration.kind != "sqlite"
+        || declaration.schema_version != 1
+        || declaration.migration_owner != canonical_skill_name
+    {
+        return Err(format!(
+            "invalid skill storage declaration: skill={canonical_skill_name}"
+        ));
     }
-    Value::Object(exchanges)
+    state
+        .core
+        .skill_storage
+        .descriptor(canonical_skill_name)
+        .map(Some)
+        .map_err(|error| {
+            format!("skill storage unavailable: skill={canonical_skill_name} error={error}")
+        })
 }

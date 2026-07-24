@@ -97,7 +97,6 @@ fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
         .max_size(8)
         .build(manager)
         .expect("build file-backed test pool");
-    state.worker.database_sqlite_path = db_path.to_path_buf();
     state.with_seeded_db_schema()
 }
 

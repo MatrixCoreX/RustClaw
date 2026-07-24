@@ -515,6 +515,14 @@ fn kb_docs_are_scoped_by_user_key() {
         db.execute_batch(crate::INIT_SQL).expect("init base schema");
         ensure_memory_schema(&db).expect("ensure memory schema");
         ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+    }
+    {
+        let db = state
+            .core
+            .skill_storage
+            .kb_pool()
+            .get()
+            .expect("KB db lock");
         db.execute(
             "INSERT INTO memory_retrieval_index (
                 source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,

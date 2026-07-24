@@ -844,6 +844,10 @@ impl Default for SendfileConfig {
 pub struct DatabaseConfig {
     pub sqlite_path: String,
     pub busy_timeout_ms: u64,
+    /// Root for storage owned by individual skills. Each persisted skill gets
+    /// a traversal-safe child directory and its own `state.db`.
+    #[serde(default = "default_skill_data_root")]
+    pub skill_data_root: String,
     /// SQLite 连接池最大连接数。≥ 2，默认 8（与 worker 并发*2 + http 路径预留）。
     /// 配合 WAL 模式：reader 不阻塞 writer，多 reader 并发；writer 串行（SQLite 限制）。
     #[serde(default = "default_db_pool_max_size")]
@@ -862,6 +866,10 @@ pub struct DatabaseConfig {
 
 fn default_db_pool_max_size() -> u32 {
     8
+}
+
+fn default_skill_data_root() -> String {
+    "data/skills".to_string()
 }
 
 fn default_audit_sqlite_path() -> String {

@@ -145,10 +145,32 @@ pub(crate) fn retrieve_indexed_memories(
         anchor_prompt,
         state.policy.memory.fts_candidate_limit.max(6) * 2,
     )?;
-    let mut by_id: HashMap<i64, RetrievalRow> =
-        candidates.into_iter().map(|row| (row.id, row)).collect();
-    for row in fts_rows {
-        by_id.entry(row.id).or_insert(row);
+    let kb = state
+        .core
+        .skill_storage
+        .kb_pool()
+        .get()
+        .map_err(|error| anyhow!("kb_skill_storage_pool:{error}"))?;
+    candidates.extend(fetch_kb_recent_candidates(
+        &kb,
+        &scope_user_key,
+        state.policy.memory.vector_candidate_limit.max(6),
+    )?);
+    let mut all_fts_rows = fts_rows;
+    all_fts_rows.extend(fetch_kb_fts_candidates(
+        &kb,
+        &scope_user_key,
+        anchor_prompt,
+        state.policy.memory.fts_candidate_limit.max(6),
+    )?);
+    let mut by_id: HashMap<(String, i64), RetrievalRow> = candidates
+        .into_iter()
+        .map(|row| ((row.source_kind.clone(), row.id), row))
+        .collect();
+    for row in all_fts_rows {
+        by_id
+            .entry((row.source_kind.clone(), row.id))
+            .or_insert(row);
     }
     let mut merged = by_id.into_values().collect::<Vec<_>>();
     if merged.is_empty() {
@@ -594,39 +616,6 @@ fn fetch_recent_candidates(
     for row in rows {
         out.push(row?);
     }
-    let kb_limit = limit.div_ceil(3).clamp(2, 16);
-    let mut kb_stmt = db.prepare(
-        "SELECT id, source_kind, memory_kind, role, search_text, vector_json,
-                embedding_model, embedding_dims, embedding_version, metadata_json, salience, success_state,
-                COALESCE(updated_at_ts, created_at_ts, 0)
-         FROM memory_retrieval_index
-         WHERE source_kind = ?1 AND COALESCE(user_key, '') = ?2
-         ORDER BY COALESCE(updated_at_ts, created_at_ts, 0) DESC, id DESC
-         LIMIT ?3",
-    )?;
-    let kb_rows = kb_stmt.query_map(
-        params![RETRIEVAL_SOURCE_KB_DOC, user_key, kb_limit as i64],
-        |row| {
-            Ok(RetrievalRow {
-                id: row.get(0)?,
-                source_kind: row.get(1)?,
-                memory_kind: row.get(2)?,
-                role: row.get::<_, Option<String>>(3)?,
-                search_text: row.get(4)?,
-                vector_json: row.get(5)?,
-                embedding_model: row.get(6)?,
-                embedding_dims: row.get::<_, i64>(7).unwrap_or(0).max(0) as usize,
-                embedding_version: row.get(8)?,
-                metadata_json: row.get(9)?,
-                salience: row.get::<_, f32>(10).unwrap_or(0.5),
-                success_state: row.get(11)?,
-                updated_at_ts: row.get::<_, i64>(12).unwrap_or(0),
-            })
-        },
-    )?;
-    for row in kb_rows {
-        out.push(row?);
-    }
     Ok(out)
 }
 
@@ -653,17 +642,16 @@ fn fetch_fts_candidates(
          JOIN memory_retrieval_index i ON i.id = f.rowid
          WHERE ((i.user_id = ?1 AND i.chat_id = ?2 AND COALESCE(i.user_key, '') = ?3)
            OR (i.source_kind = ?4 AND COALESCE(i.user_key, '') = ?3)
-           OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3)
-           OR (i.source_kind = ?6 AND COALESCE(i.user_key, '') = ?3))
-           AND f.memory_retrieval_index_fts MATCH ?7
+           OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3))
+           AND f.memory_retrieval_index_fts MATCH ?6
            AND NOT EXISTS (
              SELECT 1
              FROM memories m
-             WHERE i.source_kind = ?8
+             WHERE i.source_kind = ?7
                AND i.source_memory_id = m.id
-               AND m.memory_type = ?9
+               AND m.memory_type = ?8
            )
-         LIMIT ?10",
+         LIMIT ?9",
     ) {
         Ok(stmt) => stmt,
         Err(_) => return Ok(Vec::new()),
@@ -673,7 +661,6 @@ fn fetch_fts_candidates(
             user_id,
             chat_id,
             user_key,
-            RETRIEVAL_SOURCE_KB_DOC,
             RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
             RETRIEVAL_SOURCE_MEMORY_FACT,
             query,
@@ -707,6 +694,82 @@ fn fetch_fts_candidates(
         out.push(row?);
     }
     Ok(out)
+}
+
+fn fetch_kb_recent_candidates(
+    db: &Connection,
+    user_key: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<RetrievalRow>> {
+    let mut stmt = db.prepare(
+        "SELECT id, source_kind, memory_kind, role, search_text, vector_json,
+                embedding_model, embedding_dims, embedding_version,
+                metadata_json, salience, success_state,
+                COALESCE(updated_at_ts, created_at_ts, 0)
+         FROM memory_retrieval_index
+         WHERE source_kind = ?1 AND COALESCE(user_key, '') = ?2
+         ORDER BY COALESCE(updated_at_ts, created_at_ts, 0) DESC, id DESC
+         LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(
+        params![RETRIEVAL_SOURCE_KB_DOC, user_key, limit.clamp(2, 64) as i64],
+        map_retrieval_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn fetch_kb_fts_candidates(
+    db: &Connection,
+    user_key: &str,
+    prompt: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<RetrievalRow>> {
+    if !fts_table_exists(db)? {
+        return Ok(Vec::new());
+    }
+    let query = build_fts_query(prompt);
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db.prepare(
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text,
+                i.vector_json, i.embedding_model, i.embedding_dims,
+                i.embedding_version, i.metadata_json, i.salience,
+                i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
+         FROM memory_retrieval_index_fts f
+         JOIN memory_retrieval_index i ON i.id = f.rowid
+         WHERE i.source_kind = ?1 AND COALESCE(i.user_key, '') = ?2
+           AND f.memory_retrieval_index_fts MATCH ?3
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(
+        params![
+            RETRIEVAL_SOURCE_KB_DOC,
+            user_key,
+            query,
+            limit.clamp(2, 64) as i64
+        ],
+        map_retrieval_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn map_retrieval_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RetrievalRow> {
+    Ok(RetrievalRow {
+        id: row.get(0)?,
+        source_kind: row.get(1)?,
+        memory_kind: row.get(2)?,
+        role: row.get(3)?,
+        search_text: row.get(4)?,
+        vector_json: row.get(5)?,
+        embedding_model: row.get(6)?,
+        embedding_dims: row.get::<_, i64>(7).unwrap_or(0).max(0) as usize,
+        embedding_version: row.get(8)?,
+        metadata_json: row.get(9)?,
+        salience: row.get::<_, f32>(10).unwrap_or(0.5),
+        success_state: row.get(11)?,
+        updated_at_ts: row.get::<_, i64>(12).unwrap_or(0),
+    })
 }
 
 fn source_label_for_row(row: &RetrievalRow) -> Option<String> {

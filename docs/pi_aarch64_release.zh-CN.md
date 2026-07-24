@@ -32,6 +32,9 @@ Archive 同时上传为 workflow artifact 和 GitHub Release asset。
 - `logs/`
 - `.pids/`
 
+`data/` 同时包含主运行时数据库和 `data/skills/` 下的技能私有库；更新时必须
+保留整个目录，不能只保留 `rustclaw.db`。
+
 更新包提供二进制、脚本、prompt、migration 和 `UI/dist`，不得用包内默认值覆盖线上 secret 或 channel 设置。
 
 替换文件后重启所需服务。仅后端更新重启 `clawd`；完整 runtime 更新还应重启已选择 channel adapter。

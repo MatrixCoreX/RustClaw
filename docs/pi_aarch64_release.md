@@ -40,6 +40,10 @@ On the Pi, keep runtime state from the existing install:
 - `logs/`
 - `.pids/`
 
+`data/` includes the main runtime database and every private skill database
+under `data/skills/`; preserve the whole directory rather than selecting only
+`rustclaw.db`.
+
 Use the package as a source of updated binaries, scripts, prompts, migrations,
 and `UI/dist`. Do not overwrite live secrets or channel settings with packaged
 defaults.

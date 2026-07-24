@@ -1175,6 +1175,7 @@ group = "market/data"
 install_mode = "on_demand"
 install_package = "crypto-skill"
 config_files = ["configs/crypto.toml"]
+storage = { kind = "sqlite", schema_version = 1, migration_owner = "crypto" }
 aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
@@ -1433,6 +1434,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
 output_kind = "text"
 description = "Ingest local files into a namespace index and search or inspect indexed knowledge-base namespaces."
+storage = { kind = "sqlite", schema_version = 1, migration_owner = "kb" }
 semantic_tags = ["knowledge_base", "document_ingest", "retrieval_index"]
 capabilities = ["fs.read", "fs.write"]
 risk_level = "medium"

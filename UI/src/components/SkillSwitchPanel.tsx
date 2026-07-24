@@ -52,7 +52,7 @@ export interface SkillSwitchPanelProps {
   onSaveSkillSwitches: () => unknown | Promise<unknown>;
   onSkillsSearchQueryChange: (value: string) => void;
   onToggleSkillEnabled: (name: string, nextEnabled: boolean) => void;
-  onRemoveSkillFromStore: (name: string, preserveConfig: boolean) => unknown | Promise<unknown>;
+  onRemoveSkillFromStore: (name: string, preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
 }
 
 export function SkillSwitchPanel({
@@ -95,11 +95,11 @@ export function SkillSwitchPanel({
   const [pendingRemovalName, setPendingRemovalName] = useState<string | null>(null);
   const storeMutationRunning = skillStoreActionName !== null;
   const pendingRemovalItem = skillStoreData?.items.find((item) => item.name === pendingRemovalName);
-  const confirmRemoval = async (preserveConfig: boolean) => {
+  const confirmRemoval = async (preserveConfig: boolean, preserveData: boolean) => {
     if (!pendingRemovalName) return;
     const name = pendingRemovalName;
     setPendingRemovalName(null);
-    await onRemoveSkillFromStore(name, preserveConfig);
+    await onRemoveSkillFromStore(name, preserveConfig, preserveData);
   };
   const renderSkillRow = (name: string) => {
     const skillItem = skillItemsByName.get(name);
@@ -431,6 +431,8 @@ export function SkillSwitchPanel({
       <SkillRemovalDialog
         skillName={pendingRemovalName}
         existingConfigFiles={pendingRemovalItem?.existing_config_files}
+        storageKind={pendingRemovalItem?.storage_kind}
+        privateDataState={pendingRemovalItem?.private_data_state}
         t={t}
         onCancel={() => setPendingRemovalName(null)}
         onConfirm={confirmRemoval}

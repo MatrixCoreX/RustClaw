@@ -2,7 +2,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[发布验证](06-release-validation.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[技能独立存储](08-skill-owned-storage.zh-CN.md)
 
 <!-- ai-learning-navigation:end -->
 

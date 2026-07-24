@@ -3,6 +3,8 @@ struct SkillStoreMutationRequest {
     skill_name: String,
     #[serde(default)]
     preserve_config: Option<bool>,
+    #[serde(default)]
+    preserve_data: Option<bool>,
 }
 
 fn collect_uninstalled_skills(value: &toml::Value, state: &AppState) -> BTreeSet<String> {
@@ -218,6 +220,12 @@ async fn get_skill_store_catalog(
                 None
             };
             let (config_files, existing_config_files) = skill_config_state(&state, &name);
+            let storage = registry.storage(&name);
+            let private_data_state = storage
+                .map(|_| state.core.skill_storage.data_state(&name))
+                .transpose()
+                .ok()
+                .flatten();
             Some(json!({
                 "name": name,
                 "description": entry.description,
@@ -240,6 +248,8 @@ async fn get_skill_store_catalog(
                 "install_mode": entry.install_mode,
                 "config_files": config_files,
                 "existing_config_files": existing_config_files,
+                "storage_kind": storage.map(|value| value.kind.as_str()),
+                "private_data_state": private_data_state,
                 "skill": build_skill_list_item(&state, &entry.name),
             }))
         })
@@ -332,6 +342,7 @@ async fn remove_skill_store_item(
         Err(error) => return skill_store_error_response(error),
     };
     let preserve_config = request.preserve_config.unwrap_or(true);
+    let preserve_data = request.preserve_data.unwrap_or(true);
     let spec = match skill_store_install_spec(&state, &skill_name) {
         Ok(spec) => spec,
         Err(error) => return skill_store_error_response(error),
@@ -353,13 +364,36 @@ async fn remove_skill_store_item(
                     Err(error) => return skill_store_error_response(error),
                 }
             };
+            let deleted_data = if preserve_data {
+                None
+            } else {
+                let has_declared_storage = state
+                    .get_skills_registry()
+                    .is_some_and(|registry| registry.storage(&skill_name).is_some());
+                if has_declared_storage {
+                    match state.core.skill_storage.clear_skill_data(&skill_name) {
+                        Ok(result) => Some(result),
+                        Err(error) => {
+                            return skill_store_error_response(SkillStoreOperationError::new(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                SkillStoreErrorCode::DataRemoveFailed,
+                                error,
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                }
+            };
             if let Some(object) = data.as_object_mut() {
                 object.insert("binary_removed".to_string(), json!(binary_removed));
                 object.insert("config_preserved".to_string(), json!(preserve_config));
+                object.insert("data_preserved".to_string(), json!(preserve_data));
                 object.insert(
                     "deleted_config_files".to_string(),
                     json!(deleted_config_files),
                 );
+                object.insert("deleted_private_data".to_string(), json!(deleted_data));
             }
             (
             StatusCode::OK,

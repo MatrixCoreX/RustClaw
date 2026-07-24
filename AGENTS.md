@@ -135,6 +135,25 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
      External skills should use `extension_manager register_external_skill` to automatically write `skill_switches.<skill>=true` into `configs/config.toml`; do not maintain a duplicate manual switch flow unless debugging an automation failure.
 8. 如果技能需独立配置，补 `configs/*.toml` 与 README 说明，并在 `INTERFACE.md` 里新增 `## Config Entry Points`，写清楚真实配置入口（配置文件 / 环境变量 / 本地数据库或 API / 登录态 / 依赖）。
    If the skill needs dedicated config, add `configs/*.toml` and README docs, and add `## Config Entry Points` to `INTERFACE.md` so the real setup path is explicit (config file / environment variable / local DB or API / login state / dependency).
+   - 技能只要需要持久化状态，就必须在 registry 声明
+     `storage = { kind, schema_version, migration_owner }`，并通过 runtime
+     `SkillStorageResolver` 获得当前技能自己的路径/连接信息。技能不得读取
+     `[database].sqlite_path`、不得在主运行时数据库新增技能业务表，runner 也
+     不得向技能下发通用主数据库路径。
+     Any skill that persists state must declare
+     `storage = { kind, schema_version, migration_owner }` in the registry and
+     receive its own path/connection information from the runtime
+     `SkillStorageResolver`. Skills must not read `[database].sqlite_path`, add
+     skill-domain tables to the main runtime database, or receive a generic
+     main-database path from the runner.
+   - 旧共享表或文件迁移必须一次性、幂等、可验证：先复制并核对行数/摘要，
+     再物理删除旧副本；checkpoint 不得记录 secret。禁用/卸载技能默认保留
+     私有数据，显式删除时也只能删除该技能自己的目录或表。
+     Legacy shared-table/file migration must be one-shot, idempotent, and
+     verified: copy and verify counts/digests before physically removing the
+     old copy, and never put secrets in checkpoints. Disabling/uninstalling a
+     skill preserves private data by default; explicit deletion may affect only
+     that skill's own directory or tables.
 9. 新技能必须附带接口说明文档，便于生成给 LLM 判断/路由用的技能 md。
    New skills must include an interface spec document so that skill markdown for LLM judgment/routing can be generated reliably.
    - 建议路径 / Recommended path: `crates/skills/<skill>/INTERFACE.md` or
@@ -225,6 +244,8 @@ A skill is considered available only when “mapping complete + compile pass + r
   Keep production code and test code separate: when splitting production modules, do not put large `#[cfg(test)] mod tests` blocks directly into production module files; tests should live in sibling `*_tests.rs`, dedicated test module files, fixtures, or helpers, and be included via `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` from the production or parent module. Production modules may keep only a short test-module entry declaration, not fixtures, long cases, or test helpers.
 - 修改 Rust 代码时运行 `python3 scripts/check_long_files.py`；新增超阈值文件或让已有超长文件继续增长必须先拆分或给出明确豁免理由。Agent parity gate 必须继续在 `maintainability_skill_contracts.txt` 中记录 `LONG_FILE_CHECK ok`。
   When changing Rust code, run `python3 scripts/check_long_files.py`; new over-threshold files or growth in existing oversized files must be split first or explicitly justified. The agent parity gate must keep recording `LONG_FILE_CHECK ok` in `maintainability_skill_contracts.txt`.
+- 修改技能持久化、registry storage、runner context、认证 key 生命周期、迁移或部署数据目录后，必须运行 `python3 scripts/check_skill_storage_ownership.py --self-test && python3 scripts/check_skill_storage_ownership.py`。该检查必须保留在 agent parity gate 的 `maintainability_skill_contracts.txt` 中，禁止技能重新直连主库、恢复通用数据库 context 字段或让 main/docker registry 的存储 owner 漂移。
+  After changing skill persistence, registry storage, runner context, auth-key lifecycle, migration, or deployment data directories, run `python3 scripts/check_skill_storage_ownership.py --self-test && python3 scripts/check_skill_storage_ownership.py`. Keep this check in the agent parity gate's `maintainability_skill_contracts.txt`; it must prevent skills from reconnecting to the main database, restoring generic database context fields, or drifting storage ownership between main and Docker registries.
 - 一个完整计划的代码、最终测试和交付证据全部完成后，再检查仓库与 `target/` 磁盘占用并清理可再生成的 debug、test、incremental、交叉编译和临时构建缓存；计划仍在推进、还会反复编译/测试时必须保留增量缓存，避免清理后重复全量编译。清理时报告前后空间并保留当前运行、复测或发布所需的 release 产物。优先使用精确的 Cargo profile 清理（如 `cargo clean --profile dev`），不得在仍需 release 二进制时运行会连带删除 release 的宽泛 `cargo clean` 或未经验证的 target 清理。
   Only after an entire plan's implementation, final tests, and delivery evidence are complete, inspect repository and `target/` disk usage and remove regenerable debug, test, incremental, cross-target, and temporary build caches. While a plan is still active and repeated builds/tests remain, preserve incremental caches to avoid unnecessary full rebuilds. Report space before/after cleanup and keep release artifacts still required for runtime, verification, or publication. Prefer precise Cargo profile cleanup such as `cargo clean --profile dev`; do not run broad `cargo clean` or an unverified target cleanup that can also remove a required release binary.
 - 在树莓派或可用内存不高于约 16 GiB 的机器上编译/测试 `clawd` 等大型 crate 时，默认使用 `CARGO_BUILD_JOBS=1` 串行构建，并避免同时启动多个 Cargo 进程；只有确认内存余量足够时才提高并行度。系统异常或测试中断后先检查并终止残留 `cargo`/`rustc`/服务进程，再复用现有增量缓存继续，不要直接清理后重头编译。

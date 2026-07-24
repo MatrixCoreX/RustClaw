@@ -2,7 +2,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Release validation](06-release-validation.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [Skill-owned storage](08-skill-owned-storage.md)
 
 <!-- ai-learning-navigation:end -->
 

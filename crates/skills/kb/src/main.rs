@@ -1,6 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use claw_core::config::AppConfig;
-use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -8,13 +6,15 @@ use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_CHUNK_SIZE: usize = 1200;
 const DEFAULT_CHUNK_OVERLAP: usize = 180;
 const DEFAULT_TOP_K: usize = 5;
 const DEFAULT_MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
 const SKILL_NAME: &str = "kb";
+
+mod storage;
 
 #[derive(Debug, Deserialize)]
 struct SkillRequest {
@@ -38,9 +38,16 @@ struct SkillContext {
     #[serde(default)]
     workspace_root: Option<String>,
     #[serde(default)]
-    database_sqlite_path: Option<String>,
-    #[serde(default)]
-    database_busy_timeout_ms: Option<u64>,
+    skill_storage: Option<SkillStorageContext>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillStorageContext {
+    schema_version: u32,
+    skill_name: String,
+    storage_kind: String,
+    database_path: String,
+    database_busy_timeout_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,8 +63,8 @@ struct SkillResponse {
 struct KbRuntime {
     scope_user_key: String,
     workspace_root: PathBuf,
-    unified_index_db_path: Option<PathBuf>,
-    unified_index_busy_timeout_ms: Option<u64>,
+    storage_database_path: PathBuf,
+    storage_busy_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,27 +224,25 @@ fn build_runtime_context(req: &SkillRequest) -> Result<KbRuntime> {
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .unwrap_or_else(workspace_root);
-    let unified_index_db_path = req
+    let storage = req
         .context
         .as_ref()
-        .and_then(|ctx| ctx.database_sqlite_path.as_deref())
-        .map(PathBuf::from)
-        .map(|path| {
-            if path.is_absolute() {
-                path
-            } else {
-                workspace_root.join(path)
-            }
-        });
-    Ok(KbRuntime {
+        .and_then(|context| context.skill_storage.as_ref())
+        .ok_or_else(|| anyhow!("KB skill storage descriptor is required"))?;
+    if storage.schema_version != 1
+        || storage.skill_name != SKILL_NAME
+        || storage.storage_kind != "sqlite"
+    {
+        return Err(anyhow!("KB skill storage descriptor is invalid"));
+    }
+    let runtime = KbRuntime {
         scope_user_key,
         workspace_root,
-        unified_index_db_path,
-        unified_index_busy_timeout_ms: req
-            .context
-            .as_ref()
-            .and_then(|ctx| ctx.database_busy_timeout_ms),
-    })
+        storage_database_path: PathBuf::from(&storage.database_path),
+        storage_busy_timeout_ms: storage.database_busy_timeout_ms.max(1),
+    };
+    storage::initialize(&runtime)?;
+    Ok(runtime)
 }
 
 fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
@@ -253,9 +258,8 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             chunks: vec![],
         }
     } else {
-        let namespace_file = ns_file(runtime, &ingest.namespace);
-        if namespace_file.exists() {
-            load_namespace(runtime, &ingest.namespace)?
+        if storage::namespace_exists(runtime, &ingest.namespace)? {
+            storage::load_namespace(runtime, &ingest.namespace)?
         } else {
             NamespaceIndex {
                 namespace: ingest.namespace.clone(),
@@ -383,12 +387,12 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     }
 
     index.updated_at_epoch = now_epoch();
-    save_namespace(runtime, &index)?;
-    let (unified_index_synced, unified_index_rows) =
-        match sync_namespace_to_unified_index(runtime, &index) {
+    storage::save_namespace(runtime, &index)?;
+    let (retrieval_index_synced, retrieval_index_rows) =
+        match storage::sync_namespace_to_index(runtime, &index) {
             Ok(row_count) => (true, row_count),
             Err(err) => {
-                warnings.push(format!("unified index sync failed: {err}"));
+                warnings.push(format!("skill-owned retrieval index sync failed: {err}"));
                 return Err(anyhow!(warnings.join("; ")));
             }
         };
@@ -398,15 +402,15 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let effective_success = kb_ingest_effective_success(
         ingested_docs,
         total_docs,
-        unified_index_synced,
+        retrieval_index_synced,
         warnings_empty,
     );
     let idempotent_success = ingested_docs == 0 && effective_success;
     let result_kind = kb_ingest_result_kind(
         ingested_docs,
         total_docs,
-        unified_index_synced,
-        unified_index_rows,
+        retrieval_index_synced,
+        retrieval_index_rows,
         warnings_empty,
     );
 
@@ -429,8 +433,8 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             "skipped_files": skipped_files,
             "chunk_size": ingest.chunk_size,
             "chunk_overlap": ingest.chunk_overlap,
-            "unified_index_synced": unified_index_synced,
-            "unified_index_rows": unified_index_rows,
+            "retrieval_index_synced": retrieval_index_synced,
+            "retrieval_index_rows": retrieval_index_rows,
             "warnings": warnings
         }
     }))
@@ -439,22 +443,23 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
 fn kb_ingest_effective_success(
     ingested_docs: usize,
     total_docs: usize,
-    unified_index_synced: bool,
+    retrieval_index_synced: bool,
     warnings_empty: bool,
 ) -> bool {
-    warnings_empty && unified_index_synced && (ingested_docs > 0 || total_docs > 0)
+    warnings_empty && retrieval_index_synced && (ingested_docs > 0 || total_docs > 0)
 }
 
 fn kb_ingest_result_kind(
     ingested_docs: usize,
     total_docs: usize,
-    unified_index_synced: bool,
-    unified_index_rows: usize,
+    retrieval_index_synced: bool,
+    retrieval_index_rows: usize,
     warnings_empty: bool,
 ) -> &'static str {
     if ingested_docs > 0 {
         "updated"
-    } else if warnings_empty && total_docs > 0 && unified_index_synced && unified_index_rows > 0 {
+    } else if warnings_empty && total_docs > 0 && retrieval_index_synced && retrieval_index_rows > 0
+    {
         "already_indexed"
     } else if total_docs > 0 {
         "no_new_documents"
@@ -465,7 +470,7 @@ fn kb_ingest_result_kind(
 
 fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let s = parse_search_args(args)?;
-    let index = load_namespace(runtime, &s.namespace)
+    let index = storage::load_namespace(runtime, &s.namespace)
         .map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
     if s.query.trim().is_empty() {
         return Err(anyhow!("query is required"));
@@ -586,35 +591,13 @@ fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
 
 fn do_list_namespaces(runtime: &KbRuntime) -> Result<Value> {
     let mut namespaces = Vec::new();
-    let root = kb_root(runtime);
-    if !root.exists() {
-        return Ok(json!({
-            "status": "ok",
-            "namespaces": [],
-            "summary": "no namespace indexes found"
-        }));
-    }
-    for entry in
-        fs::read_dir(&root).with_context(|| format!("read_dir failed: {}", root.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let raw = fs::read_to_string(&path)?;
-        let index: NamespaceIndex = serde_json::from_str(&raw)?;
-        if !index.owner_user_key.trim().is_empty()
-            && index.owner_user_key != runtime.scope_user_key.as_str()
-        {
-            continue;
-        }
+    for index in storage::list_namespaces(runtime)? {
         namespaces.push(json!({
             "namespace": index.namespace,
             "docs": index.docs.len(),
             "chunks": index.chunks.len(),
             "updated_at_epoch": index.updated_at_epoch,
-            "path": path.display().to_string()
+            "storage_kind": "sqlite"
         }));
     }
     namespaces.sort_by_key(|item| {
@@ -643,7 +626,7 @@ fn do_list_namespaces(runtime: &KbRuntime) -> Result<Value> {
 fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let stats = parse_stats_args(args)?;
     if let Some(namespace) = stats.namespace {
-        let index = load_namespace(runtime, &namespace)
+        let index = storage::load_namespace(runtime, &namespace)
             .with_context(|| format!("load namespace failed: {namespace}"))?;
         let document_count = index.docs.len();
         let chunk_count = index.chunks.len();
@@ -683,7 +666,7 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         "status": "ok",
         "stats": {
             "namespace_count": count,
-            "kb_root": kb_root(runtime).display().to_string()
+            "storage": storage::storage_summary(runtime)
         },
         "summary": format!("{} namespace(s) available", count)
     }))
@@ -1097,28 +1080,6 @@ fn parse_epoch_value(v: &Value) -> Option<i64> {
     v.as_str().and_then(|s| s.parse::<i64>().ok())
 }
 
-fn kb_root(runtime: &KbRuntime) -> PathBuf {
-    if let Ok(p) = env::var("KB_ROOT") {
-        let pb = PathBuf::from(p);
-        if pb.is_absolute() {
-            return pb
-                .join("by_user")
-                .join(storage_segment(&runtime.scope_user_key));
-        }
-        return runtime
-            .workspace_root
-            .join(pb)
-            .join("by_user")
-            .join(storage_segment(&runtime.scope_user_key));
-    }
-    runtime
-        .workspace_root
-        .join("data")
-        .join("kb")
-        .join("by_user")
-        .join(storage_segment(&runtime.scope_user_key))
-}
-
 fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     let mut cur = start.to_path_buf();
     loop {
@@ -1129,46 +1090,6 @@ fn find_workspace_root(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
-}
-
-fn ns_file(runtime: &KbRuntime, namespace: &str) -> PathBuf {
-    kb_root(runtime).join(format!("{}.json", storage_segment(namespace)))
-}
-
-fn storage_segment(input: &str) -> String {
-    let preview = sanitize_fragment(input);
-    format!("{preview}--{:016x}", stable_hash64(input.trim()))
-}
-
-fn sanitize_fragment(input: &str) -> String {
-    let cleaned = input
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(24)
-        .collect::<String>();
-    if cleaned.trim_matches('_').is_empty() {
-        "scope".to_string()
-    } else {
-        cleaned
-    }
-}
-
-fn stable_hash64(input: &str) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET;
-    for byte in input.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
 }
 
 fn tokenize_terms(text: &str) -> Vec<String> {
@@ -1227,149 +1148,6 @@ fn normalize_search_path_prefix(workspace_root: &Path, raw: &str) -> String {
     normalize_path_string(Path::new(trimmed))
 }
 
-fn load_namespace(runtime: &KbRuntime, namespace: &str) -> Result<NamespaceIndex> {
-    let p = ns_file(runtime, namespace);
-    let raw =
-        fs::read_to_string(&p).with_context(|| format!("read index failed: {}", p.display()))?;
-    let mut idx: NamespaceIndex =
-        serde_json::from_str(&raw).with_context(|| "index json parse failed")?;
-    if idx.namespace.is_empty() {
-        idx.namespace = namespace.to_string();
-    }
-    if idx.owner_user_key.trim().is_empty() {
-        idx.owner_user_key = runtime.scope_user_key.clone();
-    }
-    if idx.owner_user_key != runtime.scope_user_key.as_str() {
-        return Err(anyhow!("namespace is owned by another user scope"));
-    }
-    Ok(idx)
-}
-
-fn save_namespace(runtime: &KbRuntime, index: &NamespaceIndex) -> Result<()> {
-    let root = kb_root(runtime);
-    fs::create_dir_all(&root).with_context(|| format!("mkdir failed: {}", root.display()))?;
-    let p = ns_file(runtime, &index.namespace);
-    let raw = serde_json::to_string_pretty(index)?;
-    fs::write(&p, raw).with_context(|| format!("write index failed: {}", p.display()))?;
-    Ok(())
-}
-
-#[cfg(test)]
-#[path = "main_tests.rs"]
-mod tests;
-fn sync_namespace_to_unified_index(runtime: &KbRuntime, index: &NamespaceIndex) -> Result<usize> {
-    let mut db = open_unified_index_db(runtime)?;
-    ensure_retrieval_schema(&db)?;
-    let source_ref_prefix = format!(
-        "kb:{}:{}:",
-        runtime.scope_user_key.trim(),
-        index.namespace.trim()
-    );
-    db.execute(
-        "DELETE FROM memory_retrieval_index
-         WHERE source_kind = 'kb_doc' AND COALESCE(user_key, '') = ?1 AND source_ref LIKE ?2",
-        params![
-            runtime.scope_user_key.as_str(),
-            format!("{source_ref_prefix}%")
-        ],
-    )?;
-    let _ = db.execute(
-        "DELETE FROM memory_retrieval_index_fts
-         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
-        [],
-    );
-    let tx = db.transaction()?;
-    let mut row_count = 0usize;
-    for chunk in &index.chunks {
-        let text = chunk.text.trim();
-        if text.is_empty() {
-            continue;
-        }
-        let metadata = json!({
-            "scope_kind": "user",
-            "owner_user_key": runtime.scope_user_key.as_str(),
-            "namespace": index.namespace,
-            "path": chunk.path,
-            "file_type": chunk.file_type,
-            "mtime_epoch": chunk.mtime_epoch,
-            "chunk_id": chunk.chunk_id,
-            "offset": chunk.offset,
-        });
-        let source_ref = format!(
-            "kb:{}:{}:{}",
-            runtime.scope_user_key.trim(),
-            index.namespace.trim(),
-            chunk.chunk_id.trim()
-        );
-        let topic_tags = build_topic_tags(text);
-        let vector_json = vector_to_json(&embed_text_locally(text));
-        let row_ts = if chunk.mtime_epoch > 0 {
-            chunk.mtime_epoch
-        } else {
-            index.updated_at_epoch.max(now_epoch())
-        };
-        tx.execute(
-            "INSERT INTO memory_retrieval_index (
-                source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
-                memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
-                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
-             )
-             VALUES (?1, NULL, NULL, ?2, 0, 0, ?3, ?4, NULL, ?5, NULL, ?6, ?7, ?8, ?9, 'succeeded', 'kb', ?10, ?10)",
-            params![
-                "kb_doc",
-                &source_ref,
-                runtime.scope_user_key.as_str(),
-                "knowledge_doc",
-                text,
-                topic_tags,
-                vector_json,
-                metadata.to_string(),
-                0.78_f32,
-                row_ts,
-            ],
-        )?;
-        let row_id = tx.last_insert_rowid();
-        let _ = tx.execute(
-            "INSERT INTO memory_retrieval_index_fts(rowid, search_text, topic_tags)
-             VALUES (?1, ?2, ?3)",
-            params![row_id, text, topic_tags],
-        );
-        row_count += 1;
-    }
-    tx.commit()?;
-    Ok(row_count)
-}
-
-fn open_unified_index_db(runtime: &KbRuntime) -> Result<Connection> {
-    let (db_path, busy_timeout_ms) = if let Some(path) = runtime.unified_index_db_path.clone() {
-        (path, runtime.unified_index_busy_timeout_ms.unwrap_or(5_000))
-    } else {
-        let config_path = runtime.workspace_root.join("configs/config.toml");
-        let config = AppConfig::load(
-            config_path
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid config path: {}", config_path.display()))?,
-        )
-        .with_context(|| format!("load config failed: {}", config_path.display()))?;
-        let sqlite_path = PathBuf::from(&config.database.sqlite_path);
-        let db_path = if sqlite_path.is_absolute() {
-            sqlite_path
-        } else {
-            runtime.workspace_root.join(sqlite_path)
-        };
-        (db_path, config.database.busy_timeout_ms)
-    };
-    if let Some(parent) = db_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-    let db = Connection::open(&db_path)
-        .with_context(|| format!("open unified index db failed: {}", db_path.display()))?;
-    db.busy_timeout(Duration::from_millis(busy_timeout_ms))?;
-    Ok(db)
-}
-
 fn workspace_root() -> PathBuf {
     if let Ok(root) = env::var("WORKSPACE_ROOT") {
         let path = PathBuf::from(root);
@@ -1381,116 +1159,6 @@ fn workspace_root() -> PathBuf {
     find_workspace_root(&cwd).unwrap_or(cwd)
 }
 
-fn ensure_retrieval_schema(db: &Connection) -> Result<()> {
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS memory_retrieval_index (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_kind       TEXT NOT NULL,
-            source_memory_id  INTEGER,
-            source_pref_key   TEXT,
-            source_ref        TEXT,
-            user_id           INTEGER NOT NULL,
-            chat_id           INTEGER NOT NULL,
-            user_key          TEXT,
-            memory_kind       TEXT NOT NULL,
-            role              TEXT,
-            search_text       TEXT NOT NULL,
-            trigger_text      TEXT,
-            topic_tags        TEXT NOT NULL DEFAULT '',
-            vector_json       TEXT NOT NULL DEFAULT '[]',
-            metadata_json     TEXT NOT NULL DEFAULT '{}',
-            salience          REAL NOT NULL DEFAULT 0.5,
-            success_state     TEXT NOT NULL DEFAULT 'neutral',
-            tool_or_skill_name TEXT,
-            created_at_ts     INTEGER NOT NULL DEFAULT 0,
-            updated_at_ts     INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_updated
-        ON memory_retrieval_index(user_key, chat_id, updated_at_ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_kind_updated
-        ON memory_retrieval_index(user_key, chat_id, memory_kind, updated_at_ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_kind
-        ON memory_retrieval_index(source_kind, updated_at_ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_ref
-        ON memory_retrieval_index(source_ref);",
-    )?;
-    ensure_column_exists(
-        db,
-        "memory_retrieval_index",
-        "source_ref",
-        "ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT",
-    )?;
-    ensure_column_exists(
-        db,
-        "memory_retrieval_index",
-        "metadata_json",
-        "ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
-    )?;
-    let _ = db.execute_batch(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_retrieval_index_fts
-         USING fts5(search_text, topic_tags);",
-    );
-    Ok(())
-}
-
-fn ensure_column_exists(
-    db: &Connection,
-    table_name: &str,
-    column_name: &str,
-    alter_sql: &str,
-) -> Result<()> {
-    let pragma = format!("PRAGMA table_info({table_name})");
-    let mut stmt = db.prepare(&pragma)?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        if row?.eq_ignore_ascii_case(column_name) {
-            return Ok(());
-        }
-    }
-    db.execute(alter_sql, [])?;
-    Ok(())
-}
-
-fn build_topic_tags(text: &str) -> String {
-    tokenize_for_index(text)
-        .into_iter()
-        .take(8)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn embed_text_locally(text: &str) -> Vec<f32> {
-    const DIMS: usize = 24;
-    let mut vec = vec![0.0_f32; DIMS];
-    for token in tokenize_for_index(text) {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        token.hash(&mut hasher);
-        let idx = (hasher.finish() as usize) % DIMS;
-        vec[idx] += 1.0;
-    }
-    normalize_vector(&mut vec);
-    vec
-}
-
-fn vector_to_json(vec: &[f32]) -> String {
-    serde_json::to_string(vec).unwrap_or_else(|_| "[]".to_string())
-}
-
-fn normalize_vector(vec: &mut [f32]) {
-    let norm = vec
-        .iter()
-        .map(|v| (*v as f64) * (*v as f64))
-        .sum::<f64>()
-        .sqrt() as f32;
-    if norm <= f32::EPSILON {
-        return;
-    }
-    for item in vec {
-        *item /= norm;
-    }
-}
-
-fn tokenize_for_index(text: &str) -> Vec<String> {
-    tokenize_terms(text)
-}
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

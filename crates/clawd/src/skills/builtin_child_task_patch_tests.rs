@@ -657,7 +657,6 @@ fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
         .expect("build db pool");
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.db = pool;
-    state.worker.database_sqlite_path = db_path.to_path_buf();
     state.with_seeded_db_schema()
 }
 

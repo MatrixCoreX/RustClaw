@@ -1113,6 +1113,8 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(script.contains("release.get(\"draft\") or release.get(\"prerelease\")"));
     assert!(script.contains("build-ui-nginx.sh --copy-if-configured"));
     assert!(script.contains("mv -f \"$temp_target\" \"$target_path\""));
+    assert!(script.contains("preserved_runtime_dirs=configs,data,logs,.pids"));
+    assert!(!script.contains("rm -rf data"));
     assert!(!script.contains("cp -a \"$package_dir/target/release/.\" target/release/"));
     assert!(!script.contains("build-ui-nginx.sh --deploy-if-configured"));
 }

@@ -19,6 +19,7 @@ const SKILL_STORE_ERROR_MESSAGES: Record<string, readonly [string, string]> = {
   skill_store_build_binary_missing: ["技能编译结束但没有找到运行文件，请查看服务日志。", "The skill build finished without producing its runner. Check the service log."],
   skill_store_binary_remove_failed: ["技能已停用，但运行文件删除失败，请检查文件权限。", "The skill was disabled, but its runner could not be removed. Check file permissions."],
   skill_store_config_remove_failed: ["技能已停用，但配置文件删除失败，请检查文件权限。", "The skill was disabled, but its configuration could not be removed. Check file permissions."],
+  skill_store_data_remove_failed: ["技能已停用，但私有数据删除失败，请检查文件权限和服务状态。", "The skill was disabled, but its private data could not be removed. Check file permissions and service status."],
   skill_store_operation_busy: ["另一个技能正在安装或删除，请等待完成后重试。", "Another skill is being installed or removed. Wait for it to finish, then try again."],
 };
 

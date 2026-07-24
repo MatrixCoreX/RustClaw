@@ -1,22 +1,29 @@
-import { Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { Database, Trash2, X } from "lucide-react";
 
 type Translate = (zh: string, en: string) => string;
 
 export interface SkillRemovalDialogProps {
   skillName: string;
   existingConfigFiles?: string[];
+  storageKind?: string | null;
+  privateDataState?: "present" | "empty" | null;
   t: Translate;
   onCancel: () => void;
-  onConfirm: (preserveConfig: boolean) => unknown | Promise<unknown>;
+  onConfirm: (preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
 }
 
 export function SkillRemovalDialog({
   skillName,
   existingConfigFiles = [],
+  storageKind,
+  privateDataState,
   t,
   onCancel,
   onConfirm,
 }: SkillRemovalDialogProps) {
+  const [preserveConfig, setPreserveConfig] = useState(true);
+  const [preserveData, setPreserveData] = useState(true);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -32,8 +39,8 @@ export function SkillRemovalDialog({
             </h3>
             <p className="mt-2 text-sm leading-6 text-white/60">
               {t(
-                "技能二进制会被删除，并从工具/技能页移除。请选择是否保留它的独立配置文件。",
-                "The skill binary will be deleted and removed from Tools/Skills. Choose whether to keep its dedicated configuration files.",
+                "技能运行文件会被删除，并从工具/技能页移除。默认保留配置和私有数据，方便以后重新安装。",
+                "The skill runner will be deleted and removed from Tools/Skills. Configuration and private data are preserved by default for reinstallation.",
               )}
             </p>
           </div>
@@ -61,24 +68,52 @@ export function SkillRemovalDialog({
             {t("当前没有检测到独立配置文件。", "No dedicated configuration file is currently present.")}
           </p>
         )}
+        <div className="mt-4 space-y-2">
+          <label className="flex cursor-pointer items-start gap-3 rounded border border-white/10 bg-white/5 px-3 py-3">
+            <input
+              type="checkbox"
+              checked={preserveConfig}
+              onChange={(event) => setPreserveConfig(event.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="block text-sm font-medium text-white/80">{t("保留独立配置", "Keep configuration")}</span>
+              <span className="mt-1 block text-xs leading-5 text-white/50">
+                {t("重新安装时继续使用当前设置。", "Reuse the current settings after reinstallation.")}
+              </span>
+            </span>
+          </label>
+          {storageKind ? (
+            <label className="flex cursor-pointer items-start gap-3 rounded border border-white/10 bg-white/5 px-3 py-3">
+              <input
+                type="checkbox"
+                checked={preserveData}
+                onChange={(event) => setPreserveData(event.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <Database className="mt-0.5 h-4 w-4 shrink-0 text-white/55" />
+              <span>
+                <span className="block text-sm font-medium text-white/80">{t("保留技能私有数据", "Keep private skill data")}</span>
+                <span className="mt-1 block text-xs leading-5 text-white/50">
+                  {privateDataState === "present"
+                    ? t("检测到已保存的数据。取消勾选会永久删除，且只影响这个技能。", "Saved data was detected. Clearing this option permanently removes only this skill's data.")
+                    : t("当前没有检测到业务数据；保留仍是更安全的默认选择。", "No domain data was detected; keeping it remains the safer default.")}
+                </span>
+              </span>
+            </label>
+          ) : null}
+        </div>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onCancel} className="theme-topbar-btn justify-center px-4 py-2 text-xs">
             {t("取消", "Cancel")}
           </button>
           <button
             type="button"
-            onClick={() => void onConfirm(false)}
+            onClick={() => void onConfirm(preserveConfig, storageKind ? preserveData : true)}
             className="inline-flex items-center justify-center gap-2 rounded border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-100 hover:bg-red-500/15"
           >
             <Trash2 className="h-4 w-4" />
-            {t("删除技能和配置", "Remove skill and config")}
-          </button>
-          <button
-            type="button"
-            onClick={() => void onConfirm(true)}
-            className="theme-accent-btn justify-center px-4 py-2 text-xs"
-          >
-            {t("保留配置并删除", "Keep config and remove")}
+            {t("确认删除技能", "Remove skill")}
           </button>
         </div>
       </div>

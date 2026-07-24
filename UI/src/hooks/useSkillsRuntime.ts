@@ -412,7 +412,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const mutateSkillStoreItem = async (skillName: string, installed: boolean, preserveConfig = true) => {
+  const mutateSkillStoreItem = async (
+    skillName: string,
+    installed: boolean,
+    preserveConfig = true,
+    preserveData = true,
+  ) => {
     setLocalSkillStoreActionName(skillName);
     setSkillStoreError(null);
     setSkillStoreMessage(null);
@@ -423,7 +428,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           skill_name: skillName,
-          ...(installed ? {} : { preserve_config: preserveConfig }),
+          ...(installed ? {} : { preserve_config: preserveConfig, preserve_data: preserveData }),
         }),
       });
       const body = (await res.json()) as ApiResponse<SkillStoreMutationResponse>;
@@ -450,14 +455,24 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
                 `${skillName} 已编译、安装并开启。`,
                 `${skillName} was compiled, installed, and enabled.`,
               )
-          : body.data.config_preserved
+          : body.data.config_preserved && body.data.data_preserved !== false
             ? t(
-                `${skillName} 已删除，配置文件已保留，可在重新安装时继续使用。`,
-                `${skillName} was removed. Its configuration was preserved for reinstallation.`,
+                `${skillName} 已删除，配置和私有数据已保留，可在重新安装时继续使用。`,
+                `${skillName} was removed. Its configuration and private data were preserved for reinstallation.`,
               )
+            : body.data.config_preserved
+              ? t(
+                  `${skillName} 已删除，配置已保留，私有数据已清除。`,
+                  `${skillName} was removed. Its configuration was preserved and its private data was cleared.`,
+                )
+              : body.data.data_preserved !== false
+                ? t(
+                    `${skillName} 已删除，私有数据已保留，独立配置已清除。`,
+                    `${skillName} was removed. Its private data was preserved and its dedicated configuration was cleared.`,
+                  )
             : t(
-                `${skillName} 及其独立配置已删除，仍可从 Skill Store 重新安装。`,
-                `${skillName} and its dedicated configuration were removed. It remains available in Skill Store.`,
+                `${skillName}、独立配置和私有数据已清除，仍可从 Skill Store 重新安装。`,
+                `${skillName}, its dedicated configuration, and its private data were removed. It remains available in Skill Store.`,
               ),
       );
       await fetchSkillsConfig();
@@ -472,8 +487,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   };
 
   const installSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, true);
-  const removeSkillFromStore = (skillName: string, preserveConfig = true) =>
-    mutateSkillStoreItem(skillName, false, preserveConfig);
+  const removeSkillFromStore = (skillName: string, preserveConfig = true, preserveData = true) =>
+    mutateSkillStoreItem(skillName, false, preserveConfig, preserveData);
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
     if (isUiHiddenSkill(name)) return;

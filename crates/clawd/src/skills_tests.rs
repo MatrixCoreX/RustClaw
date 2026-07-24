@@ -279,8 +279,14 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
         ts,
     )
     .expect("insert knowledge fact");
+    let kb_db = state
+        .core
+        .skill_storage
+        .kb_pool()
+        .get()
+        .expect("KB db pool");
     insert_kb_doc_row(
-        &db,
+        &kb_db,
         user_key,
         "kb:test:photo:allowed-doc",
         "PHOTO_ALLOWED_KB_DOC preserve original EXIF timestamp during organization",
@@ -1935,7 +1941,6 @@ fn whitelist_does_not_invent_keys_for_missing_source() {
 
 #[test]
 fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() {
-    // §E2 step1 防回归：白名单不能不小心放进 API key / RustClaw 专属变量。
     let banned = [
         "OPENAI_API_KEY",
         "MINIMAX_API_KEY",

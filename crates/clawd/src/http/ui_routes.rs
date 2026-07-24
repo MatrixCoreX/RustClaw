@@ -352,3 +352,7 @@ mod teaching_trace_security_tests;
 #[cfg(test)]
 #[path = "ui_routes/skill_store_tests.rs"]
 mod skill_store_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/crypto_credentials_tests.rs"]
+mod crypto_credentials_tests;

@@ -348,6 +348,11 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
         store_item(&initial, "weather")["existing_config_files"][0],
         "configs/weather.toml"
     );
+    assert_eq!(store_item(&initial, "crypto")["storage_kind"], "sqlite");
+    assert_eq!(
+        store_item(&initial, "crypto")["private_data_state"],
+        "empty"
+    );
     assert_eq!(
         store_item_names(&initial),
         BTreeSet::from([
@@ -411,6 +416,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(removed["data"]["installed"], false);
     assert_eq!(removed["data"]["binary_removed"], true);
     assert_eq!(removed["data"]["config_preserved"], true);
+    assert_eq!(removed["data"]["data_preserved"], true);
     assert!(!workspace.join("target/release/weather-skill").exists());
     assert!(workspace.join("configs/weather.toml").is_file());
 
@@ -453,6 +459,66 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(
         parsed["skills"]["skill_switches"]["weather"].as_bool(),
         Some(false)
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_requires_explicit_choice_before_deleting_private_data() {
+    let (state, workspace) = isolated_skill_store_state();
+    crate::repo::upsert_exchange_credential_for_user_key(
+        &state,
+        STORE_TEST_KEY,
+        "okx",
+        "api-key",
+        "api-secret",
+        None,
+    )
+    .expect("seed crypto private data");
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+
+    let (status, catalog) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        store_item(&catalog, "crypto")["private_data_state"],
+        "present"
+    );
+
+    let (status, installed) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "crypto"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(installed["data"]["installed"], true);
+
+    let (status, removed) = call_skill_store_api(
+        router,
+        Method::POST,
+        "/v1/skills/store/remove",
+        Some(serde_json::json!({
+            "skill_name": "crypto",
+            "preserve_config": true,
+            "preserve_data": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed["data"]["config_preserved"], true);
+    assert_eq!(removed["data"]["data_preserved"], false);
+    assert_eq!(removed["data"]["deleted_private_data"]["rows_deleted"], 1);
+    assert_eq!(
+        state
+            .core
+            .skill_storage
+            .data_state("crypto")
+            .expect("crypto private data state"),
+        "empty"
     );
     let _ = std::fs::remove_dir_all(workspace);
 }

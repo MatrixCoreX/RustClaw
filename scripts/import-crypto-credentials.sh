@@ -18,7 +18,9 @@ Options:
 
 Notes:
   - This script imports Binance / OKX credentials from configs/crypto.toml
-    into the SQLite table exchange_api_credentials.
+    into the crypto-owned SQLite database under database.skill_data_root.
+  - The main RustClaw database is opened read-only for auth-key selection and
+    never receives crypto-owned tables or secrets.
   - It does NOT delete configs/crypto.toml, because that file still contains
     non-secret crypto behavior settings.
   - If multiple enabled keys exist for the selected role, pass --user-key explicitly.
@@ -80,9 +82,23 @@ if not crypto_config_path.exists():
     raise SystemExit(f"crypto config not found: {crypto_config_path}")
 
 cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
-db_rel = cfg.get("database", {}).get("sqlite_path", "data/rustclaw.db")
-db_path = (root / db_rel).resolve()
-db_path.parent.mkdir(parents=True, exist_ok=True)
+database_cfg = cfg.get("database", {})
+main_db_configured = Path(database_cfg.get("sqlite_path", "data/rustclaw.db"))
+main_db_path = (
+    main_db_configured
+    if main_db_configured.is_absolute()
+    else root / main_db_configured
+).resolve()
+skill_root_configured = Path(database_cfg.get("skill_data_root", "data/skills"))
+skill_root = (
+    skill_root_configured
+    if skill_root_configured.is_absolute()
+    else root / skill_root_configured
+).resolve()
+crypto_db_path = skill_root / "crypto" / "state.db"
+busy_timeout_ms = max(int(database_cfg.get("busy_timeout_ms", 5000)), 1)
+crypto_db_path.parent.mkdir(parents=True, exist_ok=True)
+crypto_db_path.parent.chmod(0o700)
 
 crypto_raw = crypto_config_path.read_text(encoding="utf-8")
 crypto_cfg = tomllib.loads(crypto_raw)
@@ -210,15 +226,39 @@ def collect_credentials(cfg_obj: dict):
     return result
 
 
-conn = sqlite3.connect(db_path)
+if not main_db_path.exists():
+    raise SystemExit(f"RustClaw database not found: {main_db_path}")
+
+auth_conn = sqlite3.connect(f"file:{main_db_path}?mode=ro", uri=True)
+auth_table = auth_conn.execute(
+    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='auth_keys'"
+).fetchone()[0]
+if auth_table != 1:
+    raise SystemExit("RustClaw auth schema is not initialized; start clawd before importing")
+target_user_key = pick_target_user_key(auth_conn, user_key, role)
+auth_conn.close()
+
+conn = sqlite3.connect(crypto_db_path, timeout=busy_timeout_ms / 1000)
+conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA synchronous=NORMAL")
 conn.execute(
     """
-    CREATE TABLE IF NOT EXISTS auth_keys (
-        user_key     TEXT PRIMARY KEY,
-        role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
-        enabled      INTEGER NOT NULL DEFAULT 1,
-        created_at   TEXT NOT NULL,
-        last_used_at TEXT
+    CREATE TABLE IF NOT EXISTS skill_storage_metadata (
+        skill_name      TEXT PRIMARY KEY,
+        schema_version  INTEGER NOT NULL,
+        updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """
+)
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS skill_storage_migrations (
+        migration_id   TEXT PRIMARY KEY,
+        source_identity TEXT NOT NULL,
+        source_rows     INTEGER NOT NULL,
+        verified_digest TEXT NOT NULL,
+        completed_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """
 )
@@ -237,8 +277,21 @@ conn.execute(
     )
     """
 )
-
-target_user_key = pick_target_user_key(conn, user_key, role)
+conn.execute(
+    """
+    CREATE INDEX IF NOT EXISTS idx_exchange_api_credentials_user_exchange
+    ON exchange_api_credentials(user_key, exchange)
+    """
+)
+conn.execute(
+    """
+    INSERT INTO skill_storage_metadata (skill_name, schema_version)
+    VALUES ('crypto', 1)
+    ON CONFLICT(skill_name) DO UPDATE SET
+        schema_version=excluded.schema_version,
+        updated_at=CURRENT_TIMESTAMP
+    """
+)
 credentials = collect_credentials(crypto_cfg)
 if not credentials:
     raise SystemExit("no importable Binance/OKX credentials found in configs/crypto.toml")
@@ -272,10 +325,11 @@ for item in credentials:
     imported.append(item["exchange"])
 
 conn.commit()
+crypto_db_path.chmod(0o600)
 
 print(f"target_user_key={target_user_key}")
 for exchange in imported:
-    print(f"imported {exchange} credentials into exchange_api_credentials")
+    print(f"imported {exchange} credentials into crypto-owned storage")
 
 if scrub_config:
     scrubbed = write_toml_with_scrub(crypto_raw, imported)

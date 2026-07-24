@@ -5,6 +5,7 @@ pub(crate) mod child_patch;
 pub(crate) mod child_task_control;
 pub(crate) mod child_task_graph;
 pub(crate) mod child_tasks;
+pub(crate) mod crypto_storage;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
@@ -32,6 +33,7 @@ pub(crate) use auth::{
     FactoryResetDbResult, PendingChannelBindSession,
 };
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;
+pub(crate) use crypto_storage::credential_context_for_user_key as crypto_credential_context_for_user_key;
 pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
     check_submit_task_limits, insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,

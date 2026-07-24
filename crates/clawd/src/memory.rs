@@ -82,6 +82,7 @@ pub(crate) const MEMORY_SCOPE_USER: &str = "user";
 // `source_ref` is a stable, source-local identity key for update/dedup flows.
 // It should be machine-oriented and not treated as user-facing display text.
 // `tool_or_skill_name` is a best-effort producer label for debugging/analytics.
+#[cfg(test)]
 pub(crate) const RETRIEVAL_PRODUCER_KB: &str = "kb";
 pub(crate) const RETRIEVAL_PRODUCER_MEMORY_PIPELINE: &str = RETRIEVAL_SOURCE_MEMORY;
 const AGENT_DISPLAY_NAME_RESERVED_TOKENS: &[&str] = &[
@@ -195,6 +196,7 @@ pub(crate) fn retrieval_source_ref_for_preference(pref_key: &str) -> String {
     pref_key.trim().to_string()
 }
 
+#[cfg(test)]
 pub(crate) fn retrieval_source_ref_for_kb_chunk(
     user_key: &str,
     namespace: &str,
