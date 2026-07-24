@@ -362,6 +362,25 @@ function workspaceUpdateNotice(
       ),
     };
   }
+  if (status.status === "succeeded") {
+    return {
+      tone: "success",
+      title: copy(
+        lang,
+        status.mode === "ui_only" ? "UI 编译和部署已完成。" : "编译已完成。",
+        status.mode === "ui_only" ? "UI build and deployment completed." : "Build completed.",
+      ),
+      detail: copy(
+        lang,
+        status.mode === "ui_only"
+          ? "页面会自动刷新并使用新版本；进度条已结束。"
+          : "当前构建流程已成功结束。",
+        status.mode === "ui_only"
+          ? "The page will refresh automatically and use the new version. The progress run has ended."
+          : "The current build completed successfully.",
+      ),
+    };
+  }
   if (displayStatus === "up_to_date") {
     return {
       tone: "success",
@@ -386,7 +405,7 @@ export function buildWorkspaceUpdateView(status: WorkspaceUpdateStatus | null | 
     status?.old_commit === status?.remote_commit &&
     (status?.status === "idle" || status?.status === "up_to_date");
   const displayStatus = knownUpToDate ? "up_to_date" : status?.status;
-  const progressVisible = running || Boolean(status?.started_ts);
+  const progressVisible = running;
   const progressPercent = workspaceUpdateProgressPercent(status, running);
   return {
     restarting,

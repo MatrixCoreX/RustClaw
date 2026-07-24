@@ -1,3 +1,13 @@
+const RELEASE_CHECK_SUCCESS_TTL_SECONDS: i64 = 300;
+const RELEASE_CHECK_FAILURE_TTL_SECONDS: i64 = 30;
+const RELEASE_CHECK_TIMEOUT_SECONDS: u64 = 30;
+
+#[derive(Debug, Default, Deserialize)]
+struct WorkspaceUpdateQuery {
+    #[serde(default)]
+    refresh_release: bool,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum WorkspaceUpdateMode {
     Full,
@@ -72,6 +82,7 @@ fn workspace_update_api_error(
 
 async fn get_workspace_update(
     State(state): State<AppState>,
+    Query(query): Query<WorkspaceUpdateQuery>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
     let identity = match require_ui_identity(&state, &headers) {
@@ -96,7 +107,12 @@ async fn get_workspace_update(
     }
 
     let shared = workspace_update_state();
-    let status = refresh_workspace_update_versions(&state.skill_rt.workspace_root, shared).await;
+    let status = refresh_workspace_update_versions(
+        &state.skill_rt.workspace_root,
+        shared,
+        query.refresh_release,
+    )
+    .await;
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -110,15 +126,15 @@ async fn get_workspace_update(
 async fn refresh_workspace_update_versions(
     workspace_root: &Path,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    force_release_refresh: bool,
 ) -> WorkspaceUpdateStatus {
     let snapshot = workspace_update_status_lock(shared.as_ref()).clone();
     if matches!(snapshot.status.as_str(), "running" | "restarting") {
         return snapshot;
     }
-    let release_check_due = snapshot
-        .latest_release_checked_ts
-        .map(|checked| current_unix_ts().saturating_sub(checked) >= 300)
-        .unwrap_or(true);
+    let now = current_unix_ts();
+    let release_check_due =
+        latest_release_check_due(&snapshot, force_release_refresh, now);
 
     let local_commit =
         run_workspace_update_command("git", &["rev-parse", "--short", "HEAD"], workspace_root, 10)
@@ -127,7 +143,7 @@ async fn refresh_workspace_update_versions(
             .filter(|out| out.exit_code == Some(0))
             .and_then(|out| first_output_line(&out.stdout_tail));
 
-    let (fetch_output, latest_release_tag) = tokio::join!(
+    let (fetch_output, latest_release_result) = tokio::join!(
         async {
             run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
                 .await
@@ -135,7 +151,7 @@ async fn refresh_workspace_update_versions(
         },
         async {
             if release_check_due {
-                fetch_latest_release_tag().await
+                Some(fetch_latest_release_tag().await)
             } else {
                 None
             }
@@ -163,11 +179,27 @@ async fn refresh_workspace_update_versions(
     if let Some(remote_commit) = remote_commit.clone() {
         guard.remote_commit = Some(remote_commit);
     }
-    if let Some(latest_release_tag) = latest_release_tag {
-        guard.latest_release_tag = Some(latest_release_tag);
-    }
-    if release_check_due {
+    if let Some(result) = latest_release_result {
         guard.latest_release_checked_ts = Some(current_unix_ts());
+        match result {
+            Ok(latest_release_tag) => {
+                guard.latest_release_tag = Some(latest_release_tag);
+                guard.latest_release_check_status = "available".to_string();
+                guard.latest_release_check_error = None;
+            }
+            Err(error) => {
+                if !error.can_use_cached_tag() {
+                    guard.latest_release_tag = None;
+                }
+                guard.latest_release_check_status = if guard.latest_release_tag.is_some() {
+                    "stale"
+                } else {
+                    "unavailable"
+                }
+                .to_string();
+                guard.latest_release_check_error = Some(error.as_str().to_string());
+            }
+        }
     }
     match (local_commit.as_deref(), remote_commit.as_deref()) {
         (Some(local), Some(remote)) if local == remote => {
@@ -195,6 +227,25 @@ async fn refresh_workspace_update_versions(
         }
     }
     guard.clone()
+}
+
+fn latest_release_check_due(
+    status: &WorkspaceUpdateStatus,
+    force_refresh: bool,
+    now: i64,
+) -> bool {
+    if force_refresh {
+        return true;
+    }
+    let ttl = if status.latest_release_check_error.is_some() {
+        RELEASE_CHECK_FAILURE_TTL_SECONDS
+    } else {
+        RELEASE_CHECK_SUCCESS_TTL_SECONDS
+    };
+    status
+        .latest_release_checked_ts
+        .map(|checked| now.saturating_sub(checked) >= ttl)
+        .unwrap_or(true)
 }
 
 fn release_platform_prefixes() -> Option<(&'static str, &'static str)> {
@@ -235,8 +286,45 @@ fn select_latest_compatible_release_tag(
     })
 }
 
-async fn fetch_latest_release_tag() -> Option<String> {
-    let (release_prefix, asset_prefix) = release_platform_prefixes()?;
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum LatestReleaseLookupError {
+    UnsupportedPlatform,
+    ClientBuildFailed,
+    RequestTimedOut,
+    RequestFailed,
+    HttpStatus,
+    InvalidResponse,
+    CompatibleReleaseNotFound,
+}
+
+impl LatestReleaseLookupError {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::UnsupportedPlatform => "release_platform_unsupported",
+            Self::ClientBuildFailed => "release_lookup_client_build_failed",
+            Self::RequestTimedOut => "release_lookup_timed_out",
+            Self::RequestFailed => "release_lookup_request_failed",
+            Self::HttpStatus => "release_lookup_http_status",
+            Self::InvalidResponse => "release_lookup_invalid_response",
+            Self::CompatibleReleaseNotFound => "compatible_release_not_found",
+        }
+    }
+
+    fn can_use_cached_tag(self) -> bool {
+        matches!(
+            self,
+            Self::ClientBuildFailed
+                | Self::RequestTimedOut
+                | Self::RequestFailed
+                | Self::HttpStatus
+                | Self::InvalidResponse
+        )
+    }
+}
+
+async fn fetch_latest_release_tag() -> Result<String, LatestReleaseLookupError> {
+    let (release_prefix, asset_prefix) =
+        release_platform_prefixes().ok_or(LatestReleaseLookupError::UnsupportedPlatform)?;
     let repo = std::env::var("RUSTCLAW_RELEASE_REPO")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -246,20 +334,31 @@ async fn fetch_latest_release_tag() -> Option<String> {
         repo.trim()
     );
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(RELEASE_CHECK_TIMEOUT_SECONDS))
         .build()
-        .ok()?;
+        .map_err(|_| LatestReleaseLookupError::ClientBuildFailed)?;
     let response = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .header(reqwest::header::USER_AGENT, "RustClaw-version-check")
         .send()
         .await
-        .ok()?
-        .error_for_status()
-        .ok()?;
-    let releases = response.json::<Vec<Value>>().await.ok()?;
+        .map_err(|error| {
+            if error.is_timeout() {
+                LatestReleaseLookupError::RequestTimedOut
+            } else {
+                LatestReleaseLookupError::RequestFailed
+            }
+        })?;
+    if !response.status().is_success() {
+        return Err(LatestReleaseLookupError::HttpStatus);
+    }
+    let releases = response
+        .json::<Vec<Value>>()
+        .await
+        .map_err(|_| LatestReleaseLookupError::InvalidResponse)?;
     select_latest_compatible_release_tag(&releases, release_prefix, asset_prefix)
+        .ok_or(LatestReleaseLookupError::CompatibleReleaseNotFound)
 }
 
 async fn start_workspace_update(
@@ -327,13 +426,7 @@ async fn start_workspace_update_with_mode(
                 Some(guard.clone()),
             );
         }
-        *guard = WorkspaceUpdateStatus {
-            status: "running".to_string(),
-            step: "starting".to_string(),
-            mode: mode.as_str().to_string(),
-            started_ts: Some(current_unix_ts()),
-            ..WorkspaceUpdateStatus::default()
-        };
+        *guard = begin_workspace_update_status(&guard, mode);
         guard.clone()
     };
     {
@@ -358,6 +451,23 @@ async fn start_workspace_update_with_mode(
             error: None,
         }),
     )
+}
+
+fn begin_workspace_update_status(
+    previous: &WorkspaceUpdateStatus,
+    mode: WorkspaceUpdateMode,
+) -> WorkspaceUpdateStatus {
+    WorkspaceUpdateStatus {
+        status: "running".to_string(),
+        step: "starting".to_string(),
+        mode: mode.as_str().to_string(),
+        started_ts: Some(current_unix_ts()),
+        latest_release_tag: previous.latest_release_tag.clone(),
+        latest_release_check_status: previous.latest_release_check_status.clone(),
+        latest_release_check_error: previous.latest_release_check_error.clone(),
+        latest_release_checked_ts: previous.latest_release_checked_ts,
+        ..WorkspaceUpdateStatus::default()
+    }
 }
 
 async fn cancel_workspace_update(

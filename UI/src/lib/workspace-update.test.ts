@@ -46,6 +46,26 @@ test("builds running workspace update view", () => {
   assert.equal(view.notice?.title, "Running full build");
 });
 
+test("shows active stage progress only while a UI-only build is running", () => {
+  const view = buildWorkspaceUpdateView(
+    status({
+      status: "running",
+      step: "building_ui",
+      mode: "ui_only",
+      started_ts: 1,
+    }),
+    "en",
+  );
+
+  assert.equal(view.progressVisible, true);
+  assert.equal(view.progressPercent, 82);
+  assert.equal(view.progressActive, true);
+  assert.equal(
+    view.progressLabel,
+    "Building the UI; it will be published to the current deployment when finished.",
+  );
+});
+
 test("builds release deployment progress view", () => {
   const view = buildWorkspaceUpdateView(status({ status: "running", mode: "release_deploy", step: "deploying_release" }), "en");
   assert.equal(view.progressPercent, 78);
@@ -137,7 +157,7 @@ test("recognizes remote up-to-date status", () => {
   assert.equal(view.progressPercent, 0);
 });
 
-test("keeps progress hidden for version checks and visible for completed builds", () => {
+test("keeps progress hidden after checks and completed UI builds", () => {
   const checked = buildWorkspaceUpdateView(
     status({ status: "up_to_date", step: "already_latest" }),
     "en",
@@ -154,8 +174,10 @@ test("keeps progress hidden for version checks and visible for completed builds"
     }),
     "en",
   );
-  assert.equal(completed.progressVisible, true);
+  assert.equal(completed.progressVisible, false);
   assert.equal(completed.progressPercent, 100);
+  assert.equal(completed.notice?.tone, "success");
+  assert.equal(completed.notice?.title, "UI build and deployment completed.");
 });
 
 test("reloads once after compile modes complete but not after release deployment", () => {
