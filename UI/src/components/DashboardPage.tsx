@@ -122,6 +122,7 @@ export function DashboardPage({
   workspaceUpdateTimeLabel,
 }: DashboardPageProps) {
   const latestReleaseStatus = workspaceUpdateStatus?.latest_release_check_status;
+  const sourceUpdateAvailable = workspaceUpdateStatus?.source_update_available === true;
   const latestReleaseDisplay =
     workspaceUpdateStatus?.latest_release_tag ||
     (latestReleaseStatus === "unavailable"
@@ -246,7 +247,7 @@ export function DashboardPage({
         </div>
 
         {isAdminIdentity ? (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className={sourceUpdateAvailable ? "grid gap-4 lg:grid-cols-2" : "grid gap-4"}>
             <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="rounded-lg bg-emerald-400/10 p-2 text-emerald-200">
@@ -311,7 +312,8 @@ export function DashboardPage({
               </button>
             </div>
 
-            <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:p-5">
+            {sourceUpdateAvailable ? (
+              <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
                   <Cpu className="h-5 w-5" />
@@ -366,7 +368,8 @@ export function DashboardPage({
                   {t("只编译 clawd", "Build clawd")}
                 </button>
               </div>
-            </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -475,7 +478,9 @@ export function DashboardPage({
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-            <p className="text-[11px] tracking-[0.14em] text-white/45">{t("状态", "Status")}</p>
+            <p className="text-[11px] tracking-[0.14em] text-white/45">
+              {t("更新任务状态", "Update task status")}
+            </p>
             <p
               className={`mt-2 text-sm font-semibold ${
                 workspaceUpdateDisplayStatus === "failed"
@@ -499,13 +504,14 @@ export function DashboardPage({
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
             <p className="text-[11px] tracking-[0.14em] text-white/45">{t("本地版本", "Local version")}</p>
             <p className="mt-2 text-sm font-semibold text-white/90">
-              {workspaceUpdateStatus?.old_commit || "--"}
+              {workspaceUpdateStatus?.old_commit || workspaceUpdateStatus?.current_version || "--"}
               {workspaceUpdateStatus?.new_commit && workspaceUpdateStatus.new_commit !== workspaceUpdateStatus.old_commit
                 ? ` -> ${workspaceUpdateStatus.new_commit}`
                 : ""}
             </p>
             <p className="mt-1 text-xs text-white/50">
-              {t("远端最新", "Remote latest")}: {workspaceUpdateStatus?.remote_commit || "--"}
+              {t("远端最新", "Remote latest")}:{" "}
+              {workspaceUpdateStatus?.remote_commit || workspaceUpdateStatus?.latest_release_tag || "--"}
             </p>
           </div>
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">

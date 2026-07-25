@@ -248,6 +248,8 @@ export interface WorkspaceUpdateStatus {
   status: "idle" | "running" | "succeeded" | "failed" | "canceled" | "restarting" | "up_to_date" | string;
   step: string;
   mode?: WorkspaceUpdateMode | string;
+  installation_kind?: "source_checkout" | "release_package" | "standalone" | "unknown" | string;
+  source_update_available?: boolean;
   started_ts?: number | null;
   finished_ts?: number | null;
   old_commit?: string | null;

@@ -27,6 +27,22 @@ impl WorkspaceUpdateMode {
     }
 }
 
+fn workspace_source_update_available(workspace_root: &Path) -> bool {
+    workspace_root.join(".git").exists()
+}
+
+fn workspace_installation_kind(workspace_root: &Path) -> &'static str {
+    if workspace_source_update_available(workspace_root) {
+        "source_checkout"
+    } else if workspace_root.join(".release-tag").is_file()
+        || workspace_root.join("VERSION").is_file()
+    {
+        "release_package"
+    } else {
+        "standalone"
+    }
+}
+
 fn workspace_update_status_lock(
     shared: &Mutex<WorkspaceUpdateStatus>,
 ) -> std::sync::MutexGuard<'_, WorkspaceUpdateStatus> {
@@ -135,19 +151,39 @@ async fn refresh_workspace_update_versions(
     let now = current_unix_ts();
     let release_check_due =
         latest_release_check_due(&snapshot, force_release_refresh, now);
+    let source_update_available = workspace_source_update_available(workspace_root);
+    let installation_kind = workspace_installation_kind(workspace_root);
 
-    let local_commit =
-        run_workspace_update_command("git", &["rev-parse", "--short", "HEAD"], workspace_root, 10)
+    let (git_versions, latest_release_result) = tokio::join!(
+        async {
+            if !source_update_available {
+                return (None, None, None);
+            }
+            let local_commit = run_workspace_update_command(
+                "git",
+                &["rev-parse", "--short", "HEAD"],
+                workspace_root,
+                10,
+            )
             .await
             .ok()
             .filter(|out| out.exit_code == Some(0))
             .and_then(|out| first_output_line(&out.stdout_tail));
-
-    let (fetch_output, latest_release_result) = tokio::join!(
-        async {
-            run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
-                .await
-                .ok()
+            let fetch_output =
+                run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
+                    .await
+                    .ok();
+            let remote_commit = run_workspace_update_command(
+                "git",
+                &["rev-parse", "--short", "@{upstream}"],
+                workspace_root,
+                10,
+            )
+            .await
+            .ok()
+            .filter(|out| out.exit_code == Some(0))
+            .and_then(|out| first_output_line(&out.stdout_tail));
+            (local_commit, remote_commit, fetch_output)
         },
         async {
             if release_check_due {
@@ -157,19 +193,24 @@ async fn refresh_workspace_update_versions(
             }
         }
     );
-
-    let remote_commit = run_workspace_update_command(
-        "git",
-        &["rev-parse", "--short", "@{upstream}"],
-        workspace_root,
-        10,
-    )
-    .await
-    .ok()
-    .filter(|out| out.exit_code == Some(0))
-    .and_then(|out| first_output_line(&out.stdout_tail));
+    let (local_commit, remote_commit, fetch_output) = git_versions;
 
     let mut guard = workspace_update_status_lock(shared.as_ref());
+    guard.installation_kind = installation_kind.to_string();
+    guard.source_update_available = source_update_available;
+    if !source_update_available {
+        guard.old_commit = None;
+        guard.new_commit = None;
+        guard.remote_commit = None;
+        if guard.status == "idle" {
+            guard.step = "idle".to_string();
+            guard.exit_code = None;
+            guard.stdout_tail.clear();
+            guard.stderr_tail.clear();
+            guard.error = None;
+            clear_workspace_update_next_step(&mut guard);
+        }
+    }
     if let Some(local_commit) = local_commit.clone() {
         guard.old_commit = Some(local_commit.clone());
         if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") {
@@ -426,6 +467,18 @@ async fn start_workspace_update_with_mode(
                 Some(guard.clone()),
             );
         }
+        let source_update_available =
+            workspace_source_update_available(&state.skill_rt.workspace_root);
+        guard.installation_kind =
+            workspace_installation_kind(&state.skill_rt.workspace_root).to_string();
+        guard.source_update_available = source_update_available;
+        if mode != WorkspaceUpdateMode::ReleaseDeploy && !source_update_available {
+            return workspace_update_api_error(
+                StatusCode::PRECONDITION_FAILED,
+                "workspace_update_source_checkout_required",
+                Some(guard.clone()),
+            );
+        }
         *guard = begin_workspace_update_status(&guard, mode);
         guard.clone()
     };
@@ -461,6 +514,8 @@ fn begin_workspace_update_status(
         status: "running".to_string(),
         step: "starting".to_string(),
         mode: mode.as_str().to_string(),
+        installation_kind: previous.installation_kind.clone(),
+        source_update_available: previous.source_update_available,
         started_ts: Some(current_unix_ts()),
         latest_release_tag: previous.latest_release_tag.clone(),
         latest_release_check_status: previous.latest_release_check_status.clone(),
