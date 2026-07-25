@@ -21,6 +21,13 @@ export interface DashboardOverviewItem {
   tone: "good" | "neutral" | "warning";
 }
 
+export function areRequiredDashboardStepsComplete(
+  steps: ReadonlyArray<{ required: boolean; status: DashboardStepStatus }>,
+): boolean {
+  const requiredSteps = steps.filter((step) => step.required);
+  return requiredSteps.length > 0 && requiredSteps.every((step) => step.status === "done");
+}
+
 export function countCompletedDashboardSteps(statuses: DashboardStepStatus[]): number {
   return statuses.filter((status) => status === "done").length;
 }

@@ -429,6 +429,7 @@ export function useConsoleProjections({
     () => [
       {
         key: "llm",
+        required: true,
         title: t("先设置大模型", "Set up the LLM"),
         description: t("选择厂商、模型并保存。没有这一步，大多数功能都还不能正常工作。", "Choose a vendor and model, then save it. Most RustClaw features depend on this step."),
         status: llmStepStatus,
@@ -437,6 +438,7 @@ export function useConsoleProjections({
       },
       {
         key: "chat",
+        required: true,
         title: t("发送测试消息", "Send a test message"),
         description: t("先发一条简单消息，确认主模型已经能够正常回复。", "Send a simple message first to confirm the main model can reply normally."),
         status: testMessageStepStatus,
@@ -445,6 +447,7 @@ export function useConsoleProjections({
       },
       {
         key: "wechat",
+        required: false,
         title: t("连接机器人", "Connect the bot"),
         description: t("如果你准备接入微信、Telegram 或飞书，就到通信接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat, Telegram, or Feishu, continue in Communication Setup to finish configuration, start the service, and complete sign-in verification."),
         status: wechatStepStatus,
