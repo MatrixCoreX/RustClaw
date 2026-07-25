@@ -101,11 +101,7 @@ fn apply_create_operation(
             let name = operation.string("name")?;
             validate_sheet_name(name)?;
             if sheets.iter().any(|sheet| sheet.name == name) {
-                return Err(OfficeError::new(
-                    "duplicate_worksheet",
-                    "worksheet names must be unique",
-                    json!({"sheet": name}),
-                ));
+                return Err(duplicate_worksheet(name));
             }
             sheets.push(SheetBuild {
                 name: name.to_string(),
@@ -115,6 +111,23 @@ fn apply_create_operation(
                     .to_string(),
                 ..SheetBuild::default()
             });
+        }
+        "rename_sheet" => {
+            let old_name = operation.string("sheet")?;
+            let new_name = operation.string("new_name")?;
+            validate_sheet_name(new_name)?;
+            if sheets.iter().any(|sheet| sheet.name == new_name) {
+                return Err(duplicate_worksheet(new_name));
+            }
+            if sheets.is_empty() {
+                sheets.push(SheetBuild {
+                    name: new_name.to_string(),
+                    state: "visible".to_string(),
+                    ..SheetBuild::default()
+                });
+            } else {
+                require_sheet_mut(sheets, old_name)?.name = new_name.to_string();
+            }
         }
         "set_cell" => {
             let sheet = operation.string("sheet")?;
@@ -268,6 +281,14 @@ fn apply_create_operation(
         }
     }
     Ok(())
+}
+
+fn duplicate_worksheet(name: &str) -> OfficeError {
+    OfficeError::new(
+        "duplicate_worksheet",
+        "worksheet names must be unique",
+        json!({"sheet": name}),
+    )
 }
 
 pub(super) fn cells_for_range(

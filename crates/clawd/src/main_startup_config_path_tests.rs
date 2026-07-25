@@ -1,4 +1,8 @@
-use super::{resolve_startup_config_path_from, startup_isolation_cleanup_age_seconds};
+use super::{
+    resolve_startup_config_path_from, startup_isolation_cleanup_age_seconds,
+    tokio_worker_stack_bytes, DEFAULT_TOKIO_WORKER_STACK_BYTES, MAX_TOKIO_WORKER_STACK_BYTES,
+    MIN_TOKIO_WORKER_STACK_BYTES,
+};
 
 #[test]
 fn prefers_cli_config_path() {
@@ -22,4 +26,25 @@ fn falls_back_to_env_config_path() {
 fn startup_isolation_cleanup_uses_conservative_minimum_age() {
     assert_eq!(startup_isolation_cleanup_age_seconds(60), 6 * 60 * 60);
     assert_eq!(startup_isolation_cleanup_age_seconds(10_000), 40_000);
+}
+
+#[test]
+fn tokio_worker_stack_uses_portable_bounded_defaults() {
+    assert_eq!(
+        tokio_worker_stack_bytes(None),
+        DEFAULT_TOKIO_WORKER_STACK_BYTES
+    );
+    assert_eq!(
+        tokio_worker_stack_bytes(Some("1024")),
+        MIN_TOKIO_WORKER_STACK_BYTES
+    );
+    assert_eq!(
+        tokio_worker_stack_bytes(Some("134217728")),
+        MAX_TOKIO_WORKER_STACK_BYTES
+    );
+    assert_eq!(tokio_worker_stack_bytes(Some("8388608")), 8 * 1024 * 1024);
+    assert_eq!(
+        tokio_worker_stack_bytes(Some("invalid")),
+        DEFAULT_TOKIO_WORKER_STACK_BYTES
+    );
 }

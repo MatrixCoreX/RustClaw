@@ -234,7 +234,7 @@ fn execute(
         .filter(|value| !value.is_empty())
         .unwrap_or("transcribe");
     if !matches!(action, "transcribe" | "preview_transcribe") {
-        return Err(format!("unsupported audio transcription action: {action}"));
+        return Err(format!("unsupported_action:{action}"));
     }
 
     let audio_input = parse_audio_input(&args, workspace_root)?;

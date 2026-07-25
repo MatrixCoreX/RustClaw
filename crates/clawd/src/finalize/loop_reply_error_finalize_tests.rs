@@ -156,3 +156,55 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     assert!(!reply.text.contains("generic_path_content"));
     assert!(!reply.text.contains("system_basic.inventory_dir"));
 }
+
+#[tokio::test]
+async fn finalize_loop_reply_preserves_resume_failure_journal_evidence() {
+    let state = test_state();
+    let task = claimed_task("task-resume-failure-journal");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.round_no = 1;
+    loop_state.pending_resume_failure_user_error =
+        Some("The requested source was not found.".to_string());
+    loop_state.pending_resume_context = Some(serde_json::json!({
+        "failed_step": {
+            "index": 1,
+            "action": "skill(office_workspace)",
+            "structured_error": {
+                "skill": "office_workspace",
+                "error_kind": "not_found",
+                "extra": {"error_code": "source_unavailable"}
+            }
+        },
+        "remaining_actions": []
+    }));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_1",
+        "office_workspace",
+        "__RC_SKILL_ERROR__:{\"skill\":\"office_workspace\",\"error_kind\":\"not_found\"}",
+    ));
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "Inspect the Office document".to_string(),
+            ..Default::default()
+        });
+
+    let reply = finalize_loop_reply(&state, &task, "Inspect missing.docx", loop_state, None)
+        .await
+        .expect("resume failure should finalize with its journal");
+
+    assert!(reply.should_fail_task);
+    assert!(reply.resume_context.is_some());
+    let journal = reply.task_journal.expect("task journal");
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::ResumeFailure)
+    );
+    assert_eq!(journal.rounds.len(), 1);
+    assert_eq!(journal.step_results.len(), 1);
+    assert_eq!(
+        journal.step_results[0].status,
+        crate::executor::StepExecutionStatus::Error
+    );
+}

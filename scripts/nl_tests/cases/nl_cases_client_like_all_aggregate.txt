@@ -4,7 +4,7 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=111 files_skipped_risky=2 files_skipped_temp=0 rows_deduped=689 rows_emitted=1799 rows_expect_dropped=626 rows_output=2100 rows_padded=301 rows_seen=2177 rows_skipped_excluded_skill=0 rows_skipped_risky=8
+# stats=files_seen=111 files_skipped_risky=3 files_skipped_temp=0 rows_deduped=689 rows_emitted=1799 rows_expect_dropped=626 rows_output=2100 rows_padded=301 rows_seen=2177 rows_skipped_excluded_skill=0 rows_skipped_risky=8
 # target_rows=0 means no row-count padding.
 # Default external publishing-channel exclusions are configured in the aggregate builder.
 # Format: suite|name|tags|prompt|expect=optional substring

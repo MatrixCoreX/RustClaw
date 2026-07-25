@@ -744,6 +744,75 @@ planner_capabilities = [
 }
 
 #[test]
+fn registry_preserves_dot_qualified_runtime_actions() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "office_fixture"
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["word.create"] }, output_path = { type = "string" } } }
+planner_capabilities = [
+  { name = "word.create", action = "word.create", required = ["output_path"], effect = "mutate" },
+]
+"#,
+    )
+    .expect("load dot-qualified action fixture");
+    let mapping = select_planner_capability_mapping(
+        registry.planner_capabilities("office_fixture"),
+        Some("word.create"),
+    )
+    .expect("select dotted action");
+
+    assert_eq!(mapping.name, "word.create");
+    assert_eq!(mapping.action.as_deref(), Some("word.create"));
+    assert!(select_planner_capability_mapping(
+        registry.planner_capabilities("office_fixture"),
+        Some("word_create")
+    )
+    .is_none());
+}
+
+#[test]
+fn office_create_capability_exposes_structured_operation_fields() {
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry =
+        SkillsRegistry::load_from_path(&registry_path).expect("load workspace skill registry");
+    let manifest = registry
+        .manifest("office_workspace")
+        .expect("office workspace manifest");
+    let mapping = registry
+        .planner_exposed_capabilities("office_workspace")
+        .into_iter()
+        .find(|mapping| mapping.name == "word.create")
+        .expect("word.create planner capability");
+    let schema =
+        planner_capability_argument_schema(manifest.input_schema.as_ref(), mapping).unwrap();
+    let operation = &schema["properties"]["operations"];
+
+    assert_eq!(operation["minItems"], 1);
+    assert_eq!(operation["maxItems"], 500);
+    assert_eq!(operation["items"]["additionalProperties"], false);
+    assert_eq!(operation["items"]["properties"]["text"]["type"], "string");
+    assert_eq!(operation["items"]["properties"]["rows"]["type"], "array");
+    assert!(operation["items"]["properties"]["op"]["enum"]
+        .as_array()
+        .is_some_and(|values| values.iter().any(|value| value == "set_header")));
+    let inspect_mapping = registry
+        .planner_exposed_capabilities("office_workspace")
+        .into_iter()
+        .find(|mapping| mapping.name == "spreadsheet.inspect")
+        .expect("spreadsheet.inspect planner capability");
+    let inspect_schema =
+        planner_capability_argument_schema(manifest.input_schema.as_ref(), inspect_mapping)
+            .unwrap();
+    assert_eq!(inspect_schema["properties"]["cursor"]["minLength"], 1);
+    assert_eq!(
+        inspect_schema["properties"]["cursor"]["pattern"],
+        "^office-v1:[0-9]+:[a-f0-9]{16}$"
+    );
+}
+
+#[test]
 fn registry_manifest_infers_and_allows_planner_kind_override() {
     let toml = r#"
 [[skills]]

@@ -637,3 +637,27 @@ fn exact_selector_reads_nested_structured_result_without_domain_rules() {
         Some(r#"["alpha","beta"]"#)
     );
 }
+
+#[test]
+fn explicit_model_observation_is_discovered_without_capability_specific_logic() {
+    let value = json!({
+        "output": {"status": "ok"},
+        "extra": {
+            "package": {"member_count": 400},
+            "model_observation": {
+                "workbook": {
+                    "sheets": [{
+                        "cells": [{"reference": "B4", "formula": "SUM(B2:B3)"}]
+                    }]
+                }
+            }
+        }
+    });
+
+    assert_eq!(
+        super::explicit_model_observation(&value)
+            .and_then(|observation| observation.pointer("/workbook/sheets/0/cells/0/reference"))
+            .and_then(serde_json::Value::as_str),
+        Some("B4")
+    );
+}

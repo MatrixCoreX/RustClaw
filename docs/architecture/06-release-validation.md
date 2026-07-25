@@ -51,3 +51,13 @@ Reusing a development server and its databases requires the explicit
 `--reuse-server` option. Use `--suite` or `--category` to run the smallest
 affected scope; numbered raw `LLM#1..N` request/return fields remain enabled
 unless the caller explicitly disables them.
+
+The release-gate-equivalent subset is generated from machine case metadata,
+not prompt wording. The current generator selects 285 cases covering all 217
+declared categories. Sharded reruns are summarized with
+`summarize_rollout_metrics.py --dedupe-latest-case --expect-case-count 285`;
+the gate records pass rate, LLM/tool-call distribution, latency, checkpoints,
+repairs, provider errors, duplicates, prompt bytes, truncation, and language
+coverage. Media generation remains dry-run, X/Twitter live mutation is
+excluded, and affected image-understanding/audio-input cases are accepted
+separately.

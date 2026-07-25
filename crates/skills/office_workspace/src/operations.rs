@@ -213,6 +213,7 @@ fn allowed_operations(format: OfficeFormat, editing: bool) -> BTreeSet<&'static 
         ],
         (OfficeFormat::Xlsx, false) => &[
             "add_sheet",
+            "rename_sheet",
             "set_cell",
             "set_range",
             "clear_cell",

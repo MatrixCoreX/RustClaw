@@ -10,6 +10,34 @@ fn identity(user_key: &str, role: &str) -> AuthIdentity {
     }
 }
 
+fn debug_entry(mode: &str, request_payload: Option<Value>) -> TaskDebugEntry {
+    TaskDebugEntry {
+        ts: Some(1),
+        task_id: Some("task-teaching".to_string()),
+        parent_task_id: None,
+        child_task_id: None,
+        call_id: Some("call-teaching".to_string()),
+        vendor: Some("fixture".to_string()),
+        provider: Some("fixture".to_string()),
+        provider_type: Some("fixture".to_string()),
+        model: Some("fixture-model".to_string()),
+        model_kind: Some("chat".to_string()),
+        status: Some("ok".to_string()),
+        mode: Some(mode.to_string()),
+        prompt_source: Some("planner".to_string()),
+        prompt_hash: None,
+        prompt_file: None,
+        prompt: None,
+        request_payload,
+        response: None,
+        raw_response: None,
+        clean_response: None,
+        sanitized: Some(false),
+        error: None,
+        usage: None,
+    }
+}
+
 #[test]
 fn teaching_trace_requires_explicit_opt_in_and_exact_owner_or_admin() {
     let owner = identity("owner-key", "user");
@@ -85,6 +113,64 @@ fn teaching_trace_redacts_nested_and_free_text_secrets_without_hiding_prompt_str
     assert!(!encoded.contains("plain-secret"));
     assert!(!encoded.contains("plain-token"));
     assert!(!encoded.contains("tp-1234567890abcdefghijkl"));
+}
+
+#[test]
+fn teaching_trace_reads_current_and_retained_dated_model_logs() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-teaching-log-paths-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("create logs dir");
+    fs::write(root.join("model_io.log.2026-07-23"), "{}\n").expect("old archive");
+    fs::write(root.join("model_io.log.2026-07-24"), "{}\n").expect("new archive");
+    fs::write(root.join("model_io.log"), "{}\n").expect("current log");
+    fs::write(root.join("model_io.log.rotate.tmp"), "{}\n").expect("rotation scratch");
+    fs::write(root.join("model_io.log.not-a-date"), "{}\n").expect("invalid archive");
+
+    let paths = model_io_log_paths(&root).expect("discover model logs");
+    let names = paths
+        .iter()
+        .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "model_io.log.2026-07-23",
+            "model_io.log.2026-07-24",
+            "model_io.log"
+        ]
+    );
+
+    fs::remove_dir_all(root).expect("remove logs dir");
+}
+
+#[test]
+fn teaching_trace_availability_explains_pending_metadata_and_expired_states() {
+    let pending = teaching_trace_availability(&[], Some("running"));
+    assert_eq!(pending["status"], "pending");
+    assert_eq!(pending["reason_code"], "task_still_active");
+
+    let metadata = teaching_trace_availability(&[debug_entry("slim", None)], Some("succeeded"));
+    assert_eq!(metadata["status"], "metadata_only");
+    assert_eq!(metadata["reason_code"], "provider_io_detail_not_recorded");
+
+    let available = teaching_trace_availability(
+        &[debug_entry("verbose", Some(json!({"messages": []})))],
+        Some("succeeded"),
+    );
+    assert_eq!(available["status"], "available");
+
+    let unavailable = teaching_trace_availability(&[], Some("succeeded"));
+    assert_eq!(unavailable["status"], "unavailable");
+    assert_eq!(
+        unavailable["reason_code"],
+        "provider_io_not_recorded_or_expired"
+    );
 }
 
 #[tokio::test]
@@ -226,5 +312,10 @@ async fn teaching_trace_endpoint_allows_exact_owner_and_labels_trace_layers() {
     assert_eq!(
         data["trace_layers"]["rustclaw_decisions"]["classification"],
         "parsed_machine_decisions"
+    );
+    assert_eq!(data["trace_availability"]["status"], "unavailable");
+    assert_eq!(
+        data["trace_availability"]["reason_code"],
+        "provider_io_not_recorded_or_expired"
     );
 }

@@ -39,13 +39,16 @@ fn process_line(line: &str) -> SkillResponse {
     };
     let request_id = request.request_id;
     match execute(&request.args) {
-        Ok(extra) => SkillResponse {
-            request_id,
-            status: "ok".to_string(),
-            text: compact_text(&extra),
-            error_text: None,
-            extra,
-        },
+        Ok(mut extra) => {
+            attach_model_observation(&request.args, &mut extra);
+            SkillResponse {
+                request_id,
+                status: "ok".to_string(),
+                text: compact_text(&extra),
+                error_text: None,
+                extra,
+            }
+        }
         Err(error) => SkillResponse {
             request_id,
             status: "error".to_string(),
@@ -54,6 +57,43 @@ fn process_line(line: &str) -> SkillResponse {
             extra: error.extra(),
         },
     }
+}
+
+fn attach_model_observation(args: &Value, extra: &mut Value) {
+    let Some(extra_object) = extra.as_object_mut() else {
+        return;
+    };
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("office.inspect");
+    let mut observation = serde_json::Map::new();
+    observation.insert("schema_version".to_string(), json!(1));
+    observation.insert("action".to_string(), json!(action));
+    for field in [
+        "format",
+        "source",
+        "cursor",
+        "truncated",
+        "validation",
+        "document_blocks",
+        "tables",
+        "workbook",
+        "presentation",
+        "operation_log",
+        "artifacts",
+        "changed_object_refs",
+        "continuation",
+        "preservation_report",
+        "preview",
+        "render",
+        "status",
+    ] {
+        if let Some(value) = extra_object.get(field) {
+            observation.insert(field.to_string(), value.clone());
+        }
+    }
+    extra_object.insert("model_observation".to_string(), Value::Object(observation));
 }
 
 fn compact_text(extra: &Value) -> String {

@@ -176,6 +176,31 @@ planner_capabilities = [
 }
 
 #[test]
+fn classify_skill_action_effect_matches_dotted_machine_action_tokens() {
+    let state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "office_fixture"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "spreadsheet.read_range", action = "spreadsheet.read_range", effect = "observe" },
+]
+"#,
+        &["office_fixture"],
+    );
+
+    let effect = classify_skill_action_effect(
+        &state,
+        "office_fixture",
+        &json!({"action": "spreadsheet.read_range", "path": "book.xlsx"}),
+    );
+    assert!(effect.observes);
+    assert!(!effect.mutates);
+    assert!(!effect.validates);
+}
+
+#[test]
 fn registry_observe_http_get_with_expectation_becomes_validation() {
     let state = test_state_with_registry(
         r#"

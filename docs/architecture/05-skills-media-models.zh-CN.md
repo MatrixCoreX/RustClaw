@@ -17,11 +17,13 @@ flowchart TD
     C --> E[规范化机器 token 查找]
     D --> F
     E --> F[Skills registry<br/>enabled + kind + runner + policy]
-    F --> G{实现类型}
+    F --> P[PlanVerifier<br/>action policy + capability scope]
+    P --> G{实现类型}
     G -->|builtin| H[进程内 adapter]
     G -->|runner| I[skill-runner 子进程]
     G -->|external| J[External adapter]
-    I --> K[技能二进制<br/>单行 JSON stdin/stdout]
+    I --> Q[受限子进程环境<br/>一次性 vendor token + 协议别名]
+    Q --> K[技能二进制<br/>单行 JSON stdin/stdout]
     H --> L[结构化技能响应]
     J --> L
     K --> L
@@ -33,11 +35,15 @@ flowchart TD
 固定/核心技能参与常规构建；随仓库提供的可选技能位于 `optional_skills/`，只在需要时构建或安装。外部导入技能必须先通过验证和注册，才能进入可用集合。
 
 长尾多媒体能力使用 start、poll、cancel 合同。Provider 工作继续运行时，前台任务可以先返回 checkpoint。
+Preview 是独立的机器 capability；它的 registry policy 禁止网络、凭据访问、外部发布和文件写入。
 
 ```mermaid
 flowchart TD
     A[图片 / 语音 / 视频 / 音乐 capability] --> B[Registry async contract]
-    B --> C[Verifier + provider preflight]
+    B --> P{是否离线 preview?}
+    P -->|是| Q[结构化 dry-run 投影<br/>无 provider / 凭据 / 写入]
+    Q --> F[Artifact refs + observation]
+    P -->|否| C[Verifier + provider preflight]
     C --> D[启动 provider job]
     D --> E{Provider 结果}
     E -->|完成| F[Artifact refs + observation]
@@ -51,6 +57,12 @@ flowchart TD
     H --> L[Cancel capability]
     L --> M[Cancel adapter + terminal projection]
 ```
+
+只有 verifier policy 准入的 provider-backed runner action 才能获得凭据。
+`clawd` 根据当前结构化 provider connection，为每个必需的子进程环境变量分别
+签发一次性 token，并且日志只记录变量名。OpenAI-compatible MiniMax adapter
+可以同时获得 `MINIMAX_API_KEY` 和作为协议别名的 `OPENAI_API_KEY`，但不会
+获得父进程完整环境，也不会复用同一个 token。
 
 模型能力通过 catalog 投影，不能根据模型名称短语猜测。Catalog 明确提供 provider/model 身份、API style、可选模型、输入/输出模态、上下文长度、超时、凭据状态、多媒体理解/生成能力、当前文本 provider 状态，以及 async/dry-run 元数据；UI、CLI 和 runtime readiness 检查直接消费这些机器字段。
 

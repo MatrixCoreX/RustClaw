@@ -175,7 +175,20 @@ fn provider_safe_capability_result_evidence(
 ) -> serde_json::Value {
     const MAX_STRUCTURED_RESULT_CHARS: usize = 8_000;
 
-    let Ok(serialized) = serde_json::to_string(result) else {
+    let explicit_observation = crate::capability_result::explicit_model_observation(&result.data);
+    let evidence_value = explicit_observation
+        .map(|observation| {
+            json!({
+                "schema_version": result.schema_version,
+                "capability": result.capability,
+                "action": result.action,
+                "status": result.status,
+                "effect": result.effect,
+                "model_observation": observation,
+            })
+        })
+        .unwrap_or_else(|| serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
+    let Ok(serialized) = serde_json::to_string(&evidence_value) else {
         return json!({
             "projection": "unavailable",
             "reason_code": "capability_result_serialize_failed",

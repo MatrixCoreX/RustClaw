@@ -61,13 +61,17 @@ flowchart TD
 Teaching mode projects persisted task and provider events. Selecting either
 side of a conversation turn resolves the corresponding `task_id`, then shows
 numbered LLM calls, raw request/response fields, runtime stages, code entry
-points, policy decisions, checkpoints, tools, and child-task events.
+points, policy decisions, checkpoints, tools, and child-task events. Browser
+history stores only the task/message index. Provider detail is reloaded from
+the current model-I/O log and retained seven-day dated archives; a structured
+availability reason distinguishes full detail, metadata-only records, active
+tasks, and detail that was not recorded or has expired.
 
 ```mermaid
 flowchart LR
-    A[Conversation turn] --> B[Persist task_id and message ids]
+    A[Conversation turn] --> B[Persist lightweight task_id<br/>and message-id index]
     B --> C[Task event archive]
-    B --> D[Provider call records<br/>LLM#1..N]
+    B --> D[Current + retained server logs<br/>provider calls LLM#1..N]
     C --> E[Selected-turn teaching view]
     D --> E
     E --> F[Process timeline]

@@ -19,6 +19,17 @@ pub(super) fn answer_verifier_gap_requires_planner_observation(
             .any(|field| field.trim() != "output_format")
 }
 
+pub(super) fn answer_verifier_evidence_replan_summary(
+    reply: &AskReply,
+) -> Option<&crate::task_journal::TaskJournalAnswerVerifierSummary> {
+    if reply_final_status_is_clarify(reply) {
+        return None;
+    }
+    let journal = reply.task_journal.as_ref()?;
+    let summary = journal.answer_verifier_summary.as_ref()?;
+    answer_verifier_gap_requires_planner_observation(summary).then_some(summary)
+}
+
 pub(super) fn prepare_answer_verifier_evidence_replan(
     loop_state: &mut LoopState,
     summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,

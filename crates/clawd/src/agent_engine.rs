@@ -251,6 +251,10 @@ pub(crate) struct LoopState {
     /// A tool/skill returned a structured user-input request. Finalize as clarify and do not
     /// treat the answer as incomplete execution output.
     pub(crate) pending_user_input_required: bool,
+    /// A non-recoverable tool/skill failure that must retain the completed loop
+    /// trace while finalizing into a resumable user-visible failure.
+    pub(crate) pending_resume_failure_user_error: Option<String>,
+    pub(crate) pending_resume_context: Option<Value>,
     /// Provider-independent machine results. Ordinary final language must be
     /// synthesized from these envelopes instead of domain-specific Rust renderers.
     pub(crate) capability_results: Vec<claw_core::capability_result::CapabilityResultEnvelope>,
@@ -292,6 +296,12 @@ pub(crate) struct LoopState {
 impl LoopState {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn take_pending_resume_failure(&mut self) -> Option<(String, Value)> {
+        self.pending_resume_failure_user_error
+            .take()
+            .zip(self.pending_resume_context.take())
     }
 }
 

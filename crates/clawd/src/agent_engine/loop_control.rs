@@ -1537,8 +1537,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_code_mutation_validation_success_guard(&mut reply);
         let route_result = answer_contract.as_ref();
-        suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
-        if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
+        if let Some(verifier) = answer_verifier_evidence_replan_summary(&reply).cloned() {
             let mut verifier_replan_loop_state = pre_finalize_loop_state.clone();
             if prepare_answer_verifier_evidence_replan(&mut verifier_replan_loop_state, &verifier) {
                 info!(
@@ -1551,6 +1550,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 skip_planner_rounds = false;
                 continue;
             }
+        }
+        suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
+        if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
             if let Some(route) = route_result {
                 if try_bounded_answer_verifier_synthesis_retry(
                     state, task, user_text, route, &verifier, &mut reply,

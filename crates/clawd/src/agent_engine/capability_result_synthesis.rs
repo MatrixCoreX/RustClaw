@@ -159,21 +159,27 @@ fn synthesis_result_projection(
 
 fn bounded_result(result: &CapabilityResultEnvelope) -> CapabilityResultEnvelope {
     let mut result = result.clone();
-    result.data = bounded_json(&result.data, 0);
+    result.data = crate::capability_result::explicit_model_observation(&result.data)
+        .map(|observation| {
+            json!({
+                "model_observation": bounded_json(observation, 0, 12),
+            })
+        })
+        .unwrap_or_else(|| bounded_json(&result.data, 0, 6));
     for evidence in &mut result.evidence {
-        evidence.metadata = bounded_json(&evidence.metadata, 0);
+        evidence.metadata = bounded_json(&evidence.metadata, 0, 6);
     }
     for artifact in &mut result.artifacts {
-        artifact.metadata = bounded_json(&artifact.metadata, 0);
+        artifact.metadata = bounded_json(&artifact.metadata, 0, 6);
     }
     if let Some(error) = result.error.as_mut() {
-        error.details = bounded_json(&error.details, 0);
+        error.details = bounded_json(&error.details, 0, 6);
     }
     if let Some(continuation) = result.continuation.as_mut() {
         if continuation.reference.is_some() {
             continuation.reference = Some("opaque_continuation".to_string());
         }
-        continuation.state = bounded_json(&continuation.state, 0);
+        continuation.state = bounded_json(&continuation.state, 0, 6);
     }
     let serialized = serde_json::to_string(&result).unwrap_or_default();
     if serialized.chars().count() <= MAX_RESULT_JSON_CHARS {
@@ -187,8 +193,8 @@ fn bounded_result(result: &CapabilityResultEnvelope) -> CapabilityResultEnvelope
     result
 }
 
-fn bounded_json(value: &Value, depth: usize) -> Value {
-    if depth >= 6 {
+fn bounded_json(value: &Value, depth: usize, max_depth: usize) -> Value {
+    if depth >= max_depth {
         return json!({"truncated": true, "reason": "depth_limit"});
     }
     match value {
@@ -196,14 +202,14 @@ fn bounded_json(value: &Value, depth: usize) -> Value {
             object
                 .iter()
                 .take(48)
-                .map(|(key, value)| (key.clone(), bounded_json(value, depth + 1)))
+                .map(|(key, value)| (key.clone(), bounded_json(value, depth + 1, max_depth)))
                 .collect::<JsonMap<_, _>>(),
         ),
         Value::Array(items) => Value::Array(
             items
                 .iter()
                 .take(64)
-                .map(|value| bounded_json(value, depth + 1))
+                .map(|value| bounded_json(value, depth + 1, max_depth))
                 .collect(),
         ),
         Value::String(text) => Value::String(text.chars().take(8_000).collect()),

@@ -144,6 +144,7 @@ flowchart TD
 - `Task journal event`：executor observation 会投影为稳定的 `tool_started`、`tool_step`、`tool_finished`，以及可选 `coding_checkpoint` / `coding_evidence` 事件，带 step refs、evidence refs、artifact 计数、coding 计数、checkpoint kind、验证命令计数/token、验证状态/失败类别 token、验证风险 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
 - `subagent tool`：planner 授权的 child 工作必须显式。Explorer 保持有界只读；隔离 writer/tester 只能在自己的 task-scoped Git worktree 中工作并返回 patch/evidence refs。父任务会检查冲突、dirty-parent 状态和 precondition hash 后再接纳或拒绝 patch。Child 不得直接写父 worktree，也不得外部发布。
 - `Skill dispatcher`：直接 `run_skill` 和 planner skill call 复用同一调度层。直接 `run_skill` 不让 planner 选择技能，只派发显式的 `payload.skill_name`。Builtin 在进程内运行，external 走 adapter，runner 才启动 `skill-runner` 和具体二进制。
+- `Runner credential bridge`：runner 子进程不会继承父进程的完整环境。只有经过验证且声明凭据访问的 action，`clawd` 才会根据当前结构化 provider connection 分别签发一次性 secret token，注入规范 vendor 变量和必要的协议别名；例如 OpenAI-compatible MiniMax adapter 获得 `MINIMAX_API_KEY` 与独立的 `OPENAI_API_KEY` token。离线 preview action 不会获得这些 token。
 - `Skill process protocol`：runner 技能通过 stdin/stdout 交换单行 JSON；运行时需要判断时，技能应在 `extra` 返回稳定机器字段。
 - `synthesize_answer`：在循环内需要自然语言合成时调度，不是每个任务固定最后再调用一次 LLM。
 - `RepairEnvelope`：verifier、executor、permission、provider 和 checkpoint recovery 路径会把结构化 repair context 暴露给下一轮循环；用户可见 fallback prose 应来自 i18n、finalizer、UI 或模型，不应来自 runtime 模板。
@@ -281,7 +282,7 @@ POST   /v1/memory/settings
 
 ### 追踪与排障
 
-Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板、`clawcli llm-trace` 和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略、`model_catalog_trace`、`model_catalog_trace.readiness` 和 `resume_trace` 放在原始请求/响应细节旁边。教学模式里，当前选中的对话轮次会展示 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、当前模型 readiness 决策、后台续跑/checkpoint 决策，并基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号生成 agent 过程时间线。
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板、`clawcli llm-trace` 和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略、`model_catalog_trace`、`model_catalog_trace.readiness` 和 `resume_trace` 放在原始请求/响应细节旁边。浏览器只保存轻量的 task/轮次索引，不保存原始 provider 请求与返回；刷新后会从服务端当前日志及最近 7 天的按日归档重新加载。接口会明确返回完整详情可用、仅有元数据、任务仍在运行，或因当时未记录/超过保留期而不可用。教学模式里，当前选中的对话轮次会展示 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、当前模型 readiness 决策、后台续跑/checkpoint 决策，并基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号生成 agent 过程时间线。
 
 常用代码和配置入口：
 
@@ -663,7 +664,7 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 复用正在运行的开发服务器。可用 `--suite <name>` 或 `--category <name>` 选择
 最小受影响范围；除非明确关闭，仍会打印带编号的原始 `LLM#1..N` 请求/返回字段。
 
-当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 当前选择 285 行并覆盖全部 223 个声明类别）、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
+当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 当前选择 285 行并覆盖全部 217 个声明类别）、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
 
 面向长尾闭环链路的常用入口：
 
@@ -695,7 +696,7 @@ RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
 - 系统与运维：`system_basic`、`process_basic`、`service_control`、`health_check`、`log_analyze`、`task_control`
 - 文件与开发工具：`run_cmd`、`fs_basic`、`config_basic`、`config_edit`、`config_guard`、`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
 - 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`doc_parse`、`transform`、`web_search_extract`
-- 多模态与媒体生成：`image_generate`（`image.generate` / `image.poll` / `image.cancel`）、`image_edit`、`image_vision`、`audio_transcribe`、`audio_synthesize`（`audio.synthesize` / `audio.poll` / `audio.cancel`）、`video_generate`（`video.generate` / `video.poll` / `video.cancel`）、`music_generate`（`music.generate` / `music.poll` / `music.cancel`）
+- 多模态与媒体生成：`image_generate`（`image.preview_generate` / `image.generate` / `image.poll` / `image.cancel`）、`image_edit`、`image_vision`、`audio_transcribe`（`audio.preview_transcribe` / `audio.transcribe`）、`audio_synthesize`（`audio.preview_synthesize` / `audio.synthesize` / `audio.poll` / `audio.cancel`）、`video_generate`（`video.preview_generate` / `video.generate` / `video.poll` / `video.cancel`）、`music_generate`（`music.preview_generate` / `music.generate` / `music.poll` / `music.cancel`）
 - 工作流与发布类：`schedule`、`extension_manager`、`photo_organize`、`invest_copy`、`x`
 - 业务与知识类：`crypto`、`stock`、`weather`、`map_merchant`、`kb`
 

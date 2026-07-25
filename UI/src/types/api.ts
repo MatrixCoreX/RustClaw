@@ -189,6 +189,12 @@ export interface TaskLlmDebugCall extends TaskLlmDebugEntry {
 export interface TaskLlmDebugResponse {
   task_id: string;
   trace_schema_version?: number | null;
+  trace_availability?: {
+    status?: "available" | "metadata_only" | "pending" | "unavailable" | string | null;
+    reason_code?: string | null;
+    source?: string | null;
+    retention_days?: number | null;
+  } | null;
   access?: {
     opt_in?: boolean | null;
     scope?: string | null;
