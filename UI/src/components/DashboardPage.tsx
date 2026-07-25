@@ -1,16 +1,23 @@
+import { useState } from "react";
 import {
   AlertTriangle,
   BellRing,
+  ChevronUp,
   Cpu,
   Download,
   GitBranch,
   LayoutDashboard,
   Loader2,
   RefreshCw,
+  Settings2,
   X,
 } from "lucide-react";
 
-import type { DashboardOverviewItem, DashboardStepStatus } from "../lib/dashboard-home";
+import {
+  areRequiredDashboardStepsComplete,
+  type DashboardOverviewItem,
+  type DashboardStepStatus,
+} from "../lib/dashboard-home";
 import type { WorkspaceUpdateNotice } from "../lib/workspace-update";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import type {
@@ -26,6 +33,7 @@ type Translate = (zh: string, en: string) => string;
 
 export interface DashboardOnboardingStep {
   key: string;
+  required: boolean;
   title: string;
   description: string;
   status: DashboardStepStatus;
@@ -130,57 +138,86 @@ export function DashboardPage({
     (latestReleaseStatus === "unavailable"
       ? t("暂时无法获取", "Temporarily unavailable")
       : t("正在检查...", "Checking..."));
+  const requiredSetupComplete = areRequiredDashboardStepsComplete(onboardingSteps);
+  const [completedSetupExpanded, setCompletedSetupExpanded] = useState(false);
+  const showOnboarding = !requiredSetupComplete || completedSetupExpanded;
 
   return (
     <>
-      <section className="theme-panel setup-hero p-5 sm:p-6">
-        <div className="max-w-3xl">
-          <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("首次使用", "First run")}</p>
-          <h3 className="mt-2 text-xl font-semibold tracking-tight sm:text-3xl">
-            {t("开始使用 RustClaw", "Start using RustClaw")}
-          </h3>
-          <p className="mt-3 text-sm leading-7 text-white/70 sm:text-base">
-            {t(
-              "请先完成大模型配置和消息测试；如需通过微信使用 RustClaw，再继续完成微信接入。Telegram 仅在你需要时再补充配置。",
-              "Please complete the model setup and a test message first. If you want to use RustClaw through WeChat, continue with the WeChat setup. Add Telegram later only if you need it.",
-            )}
-          </p>
-        </div>
+      {showOnboarding ? (
+        <section className="theme-panel setup-hero p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("首次使用", "First run")}</p>
+              <h3 className="mt-2 text-xl font-semibold tracking-tight sm:text-3xl">
+                {t("开始使用 RustClaw", "Start using RustClaw")}
+              </h3>
+              <p className="mt-3 text-sm leading-7 text-white/70 sm:text-base">
+                {t(
+                  "请先完成大模型配置和消息测试；通信接入是可选项，只在需要时配置。",
+                  "Complete the model setup and a test message first. Communication setup is optional and only needed when you want it.",
+                )}
+              </p>
+            </div>
+            {requiredSetupComplete ? (
+              <button
+                type="button"
+                onClick={() => setCompletedSetupExpanded(false)}
+                className="theme-topbar-btn px-3 py-2 text-sm"
+              >
+                <ChevronUp className="h-4 w-4" />
+                {t("收起", "Collapse")}
+              </button>
+            ) : null}
+          </div>
 
-        <div className="mt-6 grid gap-3 xl:grid-cols-3">
-          {onboardingSteps.map((step, index) => (
-            <button
-              key={step.key}
-              type="button"
-              onClick={() => onSetCurrentPage(step.page)}
-              className="setup-step-card setup-step-card-compact text-left"
-            >
-              <span className="setup-step-index setup-step-index-floating">{index + 1}</span>
-              {step.key !== "chat" ? (
-                <span
-                  className={
-                    step.status === "done"
-                      ? "setup-status setup-step-status setup-status-done"
+          <div className="mt-6 grid gap-3 xl:grid-cols-3">
+            {onboardingSteps.map((step, index) => (
+              <button
+                key={step.key}
+                type="button"
+                onClick={() => onSetCurrentPage(step.page)}
+                className="setup-step-card setup-step-card-compact text-left"
+              >
+                <span className="setup-step-index setup-step-index-floating">{index + 1}</span>
+                {step.key !== "chat" ? (
+                  <span
+                    className={
+                      step.status === "done"
+                        ? "setup-status setup-step-status setup-status-done"
+                        : step.status === "attention"
+                          ? "setup-status setup-step-status setup-status-attention"
+                          : "setup-status setup-step-status setup-status-todo"
+                    }
+                  >
+                    {step.status === "done"
+                      ? t("已完成", "Done")
                       : step.status === "attention"
-                        ? "setup-status setup-step-status setup-status-attention"
-                        : "setup-status setup-step-status setup-status-todo"
-                  }
-                >
-                  {step.status === "done"
-                    ? t("已完成", "Done")
-                    : step.status === "attention"
-                      ? t("待完成", "Needs attention")
-                      : t("未开始", "Not started")}
-                </span>
-              ) : null}
-              <div className="setup-step-card-body">
-                <h4 className="text-base font-semibold text-white">{step.title}</h4>
-                <p className="mt-2 text-sm leading-7 text-white/65">{step.description}</p>
-              </div>
-            </button>
-          ))}
+                        ? t("待完成", "Needs attention")
+                        : t("未开始", "Not started")}
+                  </span>
+                ) : null}
+                <div className="setup-step-card-body">
+                  <h4 className="text-base font-semibold text-white">{step.title}</h4>
+                  <p className="mt-2 text-sm leading-7 text-white/65">{step.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setCompletedSetupExpanded(true)}
+            className="theme-topbar-btn px-3 py-2 text-sm"
+            title={t("重新查看模型、消息测试和通信接入设置", "Review model, message test, and communication settings")}
+          >
+            <Settings2 className="h-4 w-4" />
+            {t("重新配置", "Reconfigure")}
+          </button>
         </div>
-      </section>
+      )}
 
       <section className="theme-panel-soft rounded-[22px] border border-white/10 px-4 py-3 sm:px-5">
         <div className="grid gap-3 md:grid-cols-3">

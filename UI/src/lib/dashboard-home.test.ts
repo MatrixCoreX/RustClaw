@@ -2,10 +2,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  areRequiredDashboardStepsComplete,
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
   getSuggestedDashboardAction,
 } from "./dashboard-home.ts";
+
+test("considers only required onboarding steps when deciding whether setup is complete", () => {
+  assert.equal(
+    areRequiredDashboardStepsComplete([
+      { required: true, status: "done" },
+      { required: true, status: "done" },
+      { required: false, status: "todo" },
+    ]),
+    true,
+  );
+  assert.equal(
+    areRequiredDashboardStepsComplete([
+      { required: true, status: "done" },
+      { required: true, status: "attention" },
+      { required: false, status: "done" },
+    ]),
+    false,
+  );
+  assert.equal(areRequiredDashboardStepsComplete([{ required: false, status: "done" }]), false);
+});
 
 test("suggests models first when the llm is not configured", () => {
   assert.deepEqual(
