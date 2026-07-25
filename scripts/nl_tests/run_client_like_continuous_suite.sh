@@ -1392,7 +1392,13 @@ PY
   print_new_llm_trace "$turn" "$task_id"
   unset CURRENT_LLM_TRACE_RESULT_FILE
 
-  if [[ "$status" != "succeeded" ]]; then
+  local case_tags_l
+  case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]'),"
+  local expected_terminal_failure=0
+  if [[ "$case_tags_l" == *",expect_terminal_failure,"* ]]; then
+    expected_terminal_failure=1
+  fi
+  if [[ "$status" != "succeeded" && ! ( "$expected_terminal_failure" -eq 1 && "$status" == "failed" ) ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
@@ -1400,6 +1406,11 @@ PY
       submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
       return $?
     fi
+    return 1
+  fi
+  if [[ "$expected_terminal_failure" -eq 1 && "$status" != "failed" ]]; then
+    echo "Turn ${turn} did not produce the expected terminal failure: status=${status}" >&2
+    print_log_hints "$task_id" >&2
     return 1
   fi
   if result_has_bad_fallback "$out_file" "$prompt"; then
@@ -1441,8 +1452,6 @@ PY
       return 1
     fi
   fi
-  local case_tags_l
-  case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]'),"
   if [[ -n "$expected_marker" && "$case_tags_l" == *",expect_exact_scalar,"* ]]; then
     local scalar_reason
     if ! scalar_reason="$(assert_reply_scalar_equals "$out_file" "$expected_marker" 2>&1)"; then

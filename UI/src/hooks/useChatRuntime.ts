@@ -256,6 +256,15 @@ export function useChatRuntime({
   };
 
   const selectChatTeachingRun = (runId: string) => {
+    const selected = (activeChatThreadRef.current.teachingRuns ?? []).find(
+      (item) => item.id === runId,
+    );
+    const selectedTaskId = selected?.taskId?.trim();
+    if (selectedTaskId) {
+      teachingTraceAutoLoadKeysRef.current.delete(
+        `${activeChatThreadRef.current.id}:${selectedTaskId}`,
+      );
+    }
     updateActiveChatThread((thread) => {
       const run = (thread.teachingRuns ?? []).find((item) => item.id === runId);
       if (!run) return thread;
@@ -264,7 +273,11 @@ export function useChatRuntime({
         activeTeachingRunId: run.id,
         teachingTaskResult: run.taskResult ?? thread.teachingTaskResult ?? null,
         teachingLlmDebug: run.llmDebug ?? null,
-        teachingLlmDebugError: run.llmDebugError ?? null,
+        teachingLlmDebugError: null,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, run.id, (item) => ({
+          ...item,
+          llmDebugError: null,
+        })),
         updatedAt: Date.now(),
       };
     });
@@ -925,6 +938,7 @@ function persistChatThreadState(state: ChatThreadState) {
           ? compactTaskResultForChatStorage(thread.teachingTaskResult)
           : null,
         teachingLlmDebug: null,
+        teachingLlmDebugError: null,
         activeTeachingRunId: thread.activeTeachingRunId ?? null,
         teachingRuns: (thread.teachingRuns ?? [])
           .slice(-MAX_TEACHING_RUNS_PER_THREAD)
@@ -969,8 +983,7 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
     lastTaskId: typeof record.lastTaskId === "string" ? record.lastTaskId : null,
     teachingTaskResult: normalizeStoredTaskResult(record.teachingTaskResult),
     teachingLlmDebug: null,
-    teachingLlmDebugError:
-      typeof record.teachingLlmDebugError === "string" ? record.teachingLlmDebugError : null,
+    teachingLlmDebugError: null,
     activeTeachingRunId:
       typeof record.activeTeachingRunId === "string" ? record.activeTeachingRunId : null,
     teachingRuns: Array.isArray(record.teachingRuns)
@@ -995,7 +1008,7 @@ function compactTeachingRunForChatStorage(run: ChatTeachingRunRecord): ChatTeach
     completedAt: run.completedAt ?? null,
     taskResult: run.taskResult ? compactTaskResultForChatStorage(run.taskResult) : null,
     llmDebug: null,
-    llmDebugError: run.llmDebugError ?? null,
+    llmDebugError: null,
     callCount: run.callCount ?? debugCallCount(run.llmDebug),
   };
 }
@@ -1035,7 +1048,7 @@ function normalizeStoredTeachingRun(raw: unknown): ChatTeachingRunRecord | null 
     completedAt: typeof record.completedAt === "number" ? record.completedAt : null,
     taskResult: normalizeStoredTaskResult(record.taskResult),
     llmDebug: null,
-    llmDebugError: typeof record.llmDebugError === "string" ? record.llmDebugError : null,
+    llmDebugError: null,
     callCount: typeof record.callCount === "number" ? record.callCount : null,
   };
 }

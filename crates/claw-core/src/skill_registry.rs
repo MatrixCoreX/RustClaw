@@ -313,7 +313,9 @@ pub fn select_planner_capability_mapping<'a>(
     mappings: &'a [PlannerCapabilityMapping],
     action: Option<&str>,
 ) -> Option<&'a PlannerCapabilityMapping> {
-    if let Some(action) = trim_optional_string(action).map(|value| normalize_schema_token(&value)) {
+    if let Some(action) =
+        trim_optional_string(action).map(|value| normalize_planner_capability_name(&value))
+    {
         return mappings
             .iter()
             .find(|mapping| mapping.action.as_deref() == Some(action.as_str()));
@@ -813,6 +815,17 @@ fn normalize_schema_tokens(values: &[String]) -> Vec<String> {
     out
 }
 
+fn normalize_action_tokens(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let token = normalize_planner_capability_name(value);
+        if !token.is_empty() && !out.iter().any(|existing| existing == &token) {
+            out.push(token);
+        }
+    }
+    out
+}
+
 fn normalize_planner_capability_name(value: &str) -> String {
     value
         .trim()
@@ -833,7 +846,7 @@ fn normalize_planner_capabilities(
         out.push(PlannerCapabilityMapping {
             name,
             action: trim_optional_string(mapping.action.as_deref())
-                .map(|value| normalize_schema_token(&value)),
+                .map(|value| normalize_planner_capability_name(&value)),
             description: trim_optional_string(mapping.description.as_deref()),
             semantic_tags: normalize_metadata_tokens(&mapping.semantic_tags),
             effect: mapping.effect,
@@ -1125,7 +1138,7 @@ fn legacy_idempotent_default(entry: &SkillRegistryEntry) -> bool {
 fn normalize_matrix_admission(config: &MatrixAdmissionConfig) -> MatrixAdmissionConfig {
     MatrixAdmissionConfig {
         eligible: config.eligible,
-        declared_actions: normalize_schema_tokens(&config.declared_actions),
+        declared_actions: normalize_action_tokens(&config.declared_actions),
         evidence_sources: normalize_schema_tokens(&config.evidence_sources),
         required_extra_fields: normalize_metadata_lines(&config.required_extra_fields),
         extractor_kind: trim_optional_string(config.extractor_kind.as_deref())
@@ -1369,7 +1382,7 @@ impl SkillsRegistry {
             entry.runtime_skill = trim_optional_string(entry.runtime_skill.as_deref())
                 .map(|value| to_canonical_key(&value));
             entry.runtime_action = trim_optional_string(entry.runtime_action.as_deref())
-                .map(|value| normalize_schema_token(&value));
+                .map(|value| normalize_planner_capability_name(&value));
             entry.runtime_rewrite_arg_keys =
                 normalize_schema_tokens(&entry.runtime_rewrite_arg_keys);
             entry.confirmation_exempt_when =
@@ -1821,7 +1834,7 @@ impl SkillsRegistry {
         let Some(action) = action else {
             return true;
         };
-        let action = normalize_schema_token(action);
+        let action = normalize_planner_capability_name(action);
         admission.declared_actions.is_empty()
             || admission
                 .declared_actions

@@ -2,7 +2,8 @@ use super::super::loop_control_post_write_evidence_guard::{
     enforce_code_mutation_validation_success_guard, enforce_post_write_content_evidence_guard,
 };
 use super::super::{
-    answer_verifier_gap_requires_planner_observation, prepare_answer_verifier_evidence_replan,
+    answer_verifier_evidence_replan_summary, answer_verifier_gap_requires_planner_observation,
+    prepare_answer_verifier_evidence_replan,
 };
 use super::{
     answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
@@ -610,6 +611,66 @@ fn answer_verifier_evidence_gap_requires_planner_observation() {
     };
 
     assert!(answer_verifier_gap_requires_planner_observation(&summary));
+}
+
+#[test]
+fn failed_finalized_reply_keeps_evidence_gap_owned_by_planner() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-verifier-evidence-replan",
+        "ask",
+        "summarize the revised artifact",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.final_failure_attribution = Some("contract_gap".to_string());
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec![
+            "path".to_string(),
+            "content_excerpt".to_string(),
+            "unsupported_claims".to_string(),
+        ],
+        answer_incomplete_reason: "artifact claims lack current observations".to_string(),
+        should_retry: true,
+        retry_instruction: "untrusted model prose".to_string(),
+        confidence: 0.94,
+    });
+    let mut reply =
+        AskReply::non_llm("unsupported artifact summary".to_string()).with_task_journal(journal);
+    reply.should_fail_task = true;
+
+    let summary =
+        answer_verifier_evidence_replan_summary(&reply).expect("planner-owned evidence gap");
+    assert_eq!(
+        summary.missing_evidence_fields,
+        vec!["path", "content_excerpt", "unsupported_claims"]
+    );
+}
+
+#[test]
+fn historical_resume_failure_does_not_hide_current_verifier_evidence_gap() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-verifier-after-recovered-tool-error",
+        "ask",
+        "summarize the artifact after reopening it",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::ResumeFailure);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "current answer needs another observation".to_string(),
+        should_retry: true,
+        retry_instruction: "untrusted model prose".to_string(),
+        confidence: 0.9,
+    });
+    let reply =
+        AskReply::non_llm("candidate answer after recovery".to_string()).with_task_journal(journal);
+
+    let summary =
+        answer_verifier_evidence_replan_summary(&reply).expect("planner-owned evidence gap");
+    assert_eq!(
+        summary.missing_evidence_fields,
+        vec!["content_excerpt", "field_value"]
+    );
 }
 
 #[test]

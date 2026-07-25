@@ -488,3 +488,40 @@ fn execution_evidence_prompt_preserves_exact_capability_machine_facts() {
     );
     assert!(block.contains("[REDACTED]"), "block: {block}");
 }
+
+#[test]
+fn execution_evidence_prefers_explicit_model_observation_over_bulk_metadata() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-provider-safe-model-observation",
+        "ask",
+        "inspect structured content",
+    );
+    journal
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "registry.fixture",
+            Some("inspect".to_string()),
+            json!({
+                "extra": {
+                    "package": {"metadata": "bulk-value-that-is-not-needed"},
+                    "model_observation": {
+                        "workbook": {
+                            "sheets": [{
+                                "cells": [{
+                                    "reference": "B4",
+                                    "formula": "SUM(B2:B3)"
+                                }]
+                            }]
+                        }
+                    }
+                }
+            }),
+        ));
+
+    let block = execution_evidence_prompt_block(&journal);
+    assert!(block.contains("SUM(B2:B3)"), "block: {block}");
+    assert!(
+        !block.contains("bulk-value-that-is-not-needed"),
+        "block: {block}"
+    );
+}

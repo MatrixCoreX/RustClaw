@@ -20,6 +20,7 @@ kind = "runner"
 input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
 planner_capabilities = [
   { name = "batch.read", action = "read", effect = "observe", required = ["path"], idempotent = true },
+  { name = "batch.dotted_read", action = "batch.dotted_read", effect = "observe", required = ["path"], idempotent = true },
   { name = "batch.write", action = "write", effect = "mutate", required = ["path", "content"], idempotent = false, once_per_task = true },
   { name = "batch.validate", action = "validate", effect = "validate", required = ["path"], idempotent = true },
 ]
@@ -48,6 +49,13 @@ fn write(path: &str) -> AgentAction {
     AgentAction::CallCapability {
         capability: "batch.write".to_string(),
         args: serde_json::json!({"path": path, "content": "updated"}),
+    }
+}
+
+fn dotted_read(path: &str) -> AgentAction {
+    AgentAction::CallCapability {
+        capability: "batch.dotted_read".to_string(),
+        args: serde_json::json!({"path": path}),
     }
 }
 
@@ -87,6 +95,17 @@ fn parallel_prefix_contains_only_consecutive_independent_reads() {
         2
     );
     assert_eq!(independent_read_batch_prefix_len(&state, &actions, 1), 0);
+}
+
+#[test]
+fn dotted_registry_actions_remain_parallel_read_candidates() {
+    let state = state_with_batch_registry();
+    let actions = vec![dotted_read("a.txt"), dotted_read("b.txt")];
+
+    assert_eq!(
+        independent_read_batch_prefix_len(&state, &actions, actions.len()),
+        2
+    );
 }
 
 #[test]

@@ -325,10 +325,8 @@ pub(crate) fn validation_satisfies_recipe_profile(
     }
 }
 
-fn normalized_action_arg(args: &Value) -> String {
-    args.get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+fn normalize_action_token(value: &str) -> String {
+    value
         .trim()
         .to_ascii_lowercase()
         .chars()
@@ -340,6 +338,13 @@ fn normalized_action_arg(args: &Value) -> String {
             }
         })
         .collect()
+}
+
+fn normalized_action_arg(args: &Value) -> String {
+    args.get("action")
+        .and_then(Value::as_str)
+        .map(normalize_action_token)
+        .unwrap_or_default()
 }
 
 fn run_cmd_validation_command(args: &Value) -> bool {
@@ -903,21 +908,8 @@ pub(crate) fn classify_skill_action_effect(
     }
     if let Some(effect) = args
         .get("action")
-        .and_then(|value| value.as_str())
-        .map(|value| {
-            value
-                .trim()
-                .to_ascii_lowercase()
-                .chars()
-                .map(|ch| {
-                    if matches!(ch, '-' | ' ' | '.') {
-                        '_'
-                    } else {
-                        ch
-                    }
-                })
-                .collect::<String>()
-        })
+        .and_then(Value::as_str)
+        .map(normalize_action_token)
         .filter(|action| !action.is_empty())
         .and_then(|action| {
             state
@@ -926,7 +918,11 @@ pub(crate) fn classify_skill_action_effect(
                     manifest
                         .planner_capabilities
                         .into_iter()
-                        .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+                        .find(|mapping| {
+                            mapping.action.as_deref().is_some_and(|candidate| {
+                                normalize_action_token(candidate) == action
+                            })
+                        })
                         .and_then(|mapping| mapping.effect)
                 })
         })

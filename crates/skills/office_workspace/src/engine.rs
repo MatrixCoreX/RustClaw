@@ -250,13 +250,14 @@ fn select_spreadsheet_range(
         .iter_mut()
         .find(|sheet| sheet.name == sheet_name)
     else {
-        return Err(OfficeError::new(
+        return Err(OfficeError::replan_argument(
             "worksheet_not_found",
             "requested worksheet does not exist",
             json!({
                 "sheet": sheet_name,
                 "available_sheets": workbook.sheets.iter().map(|sheet| &sheet.name).collect::<Vec<_>>()
             }),
+            "sheet",
         ));
     };
     sheet.cells.retain(|cell| {
@@ -303,10 +304,15 @@ fn apply_page(
             .unwrap_or(0),
     };
     if offset > total {
-        return Err(OfficeError::new(
+        return Err(OfficeError::replan_argument(
             "cursor_out_of_range",
             "Office evidence cursor is beyond the available result",
             json!({"offset": offset, "total": total}),
+            if object.contains_key("cursor") {
+                "cursor"
+            } else {
+                "offset"
+            },
         ));
     }
     let end = offset.saturating_add(limit).min(total);
@@ -410,10 +416,11 @@ fn parse_cursor(cursor: &str, hash: &str) -> OfficeResult<usize> {
         || hash_prefix.is_none()
         || !hash.starts_with(hash_prefix.unwrap_or_default())
     {
-        return Err(OfficeError::new(
+        return Err(OfficeError::replan_argument(
             "invalid_cursor",
             "Office evidence cursor is invalid for this source revision",
             json!({"cursor": cursor}),
+            "cursor",
         ));
     }
     Ok(offset.unwrap_or_default())

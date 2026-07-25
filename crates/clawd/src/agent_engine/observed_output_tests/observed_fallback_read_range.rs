@@ -52,6 +52,44 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
 }
 
 #[test]
+fn explicit_model_observation_preserves_deep_structured_content() {
+    let cells = (1..=9)
+        .map(|index| {
+            serde_json::json!({
+                "reference": format!("A{index}"),
+                "value": index,
+                "displayed_value": index.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let step = ok_step(
+        "step_2",
+        "registry_fixture",
+        &serde_json::json!({
+            "status": "ok",
+            "extra": {
+                "package": {"metadata": "x".repeat(8_000)},
+                "model_observation": {
+                    "action": "inspect",
+                    "workbook": {
+                        "sheets": [{
+                            "name": "Summary",
+                            "cells": cells,
+                        }]
+                    }
+                }
+            }
+        })
+        .to_string(),
+    );
+
+    let entry = observed_step_entry(&step).expect("explicit model observation");
+    assert!(entry.contains("\"reference\":\"A9\""), "entry: {entry}");
+    assert!(!entry.contains("\"package\""), "entry: {entry}");
+    assert!(!entry.contains("depth_limit"), "entry: {entry}");
+}
+
+#[test]
 fn observed_fallback_overlays_bound_observed_data_exactly_once() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [

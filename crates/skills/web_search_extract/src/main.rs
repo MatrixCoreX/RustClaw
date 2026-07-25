@@ -364,7 +364,12 @@ fn optional_string(
     }
     let value = value
         .as_str()
-        .ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be string")))?
+        .ok_or_else(|| {
+            SearchError::new(
+                "INVALID_INPUT",
+                format!("invalid_field_type:{field}:string"),
+            )
+        })?
         .trim();
     if value.is_empty() {
         return Ok(None);
@@ -372,7 +377,7 @@ fn optional_string(
     if value.chars().count() > MAX_OPTION_CHARS {
         return Err(SearchError::new(
             "INVALID_INPUT",
-            format!("{field} exceeds supported length"),
+            format!("field_length_exceeded:{field}:{MAX_OPTION_CHARS}"),
         ));
     }
     Ok(Some(value.to_string()))

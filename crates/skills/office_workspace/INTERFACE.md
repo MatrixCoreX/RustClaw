@@ -82,6 +82,8 @@ source revision. Do not infer IDs from visible text.
 - Sheet lifecycle: `add_sheet(name)`, `copy_sheet(sheet,new_name)`,
   `rename_sheet(sheet,new_name)`, `reorder_sheet(sheet,index)`,
   `hide_sheet(sheet,hidden?)`, `delete_sheet(sheet)`.
+  During create, a leading `rename_sheet` may name the lazy initial worksheet;
+  otherwise create workflows can declare each worksheet with `add_sheet`.
 - Cells/ranges: `set_cell(sheet,cell,value,value_type?,style_id?)`,
   `clear_cell(sheet,cell)`,
   `set_range(sheet,range,values,value_type?,style_id?)`,
@@ -138,6 +140,10 @@ source revision. Do not infer IDs from visible text.
 - `operation_log`, source/output hashes, changed refs, preservation report, validation, and artifacts describe mutation results.
 - `revision_lineage` identifies template/parent and verified output revisions;
   `continuation` provides bounded machine arguments for a later edit turn.
+- `model_observation` is the bounded, task-content-first evidence view consumed
+  by generic planner/finalizer/verifier paths. It carries the action, content
+  structures, cursor, validation, mutation receipt, and artifact fields needed
+  for model reasoning without duplicating package-inventory bulk.
 - `text` is only a compact fallback and must not drive routing, retry, success, or final delivery.
 
 ## Request/Response Examples
@@ -148,7 +154,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"office-read-1","status":"ok","text":"{\"schema_version\":1,\"format\":\"xlsx\"}","error_text":null,"extra":{"schema_version":1,"format":"xlsx","source":{"path":"reports/budget.xlsx","sha256":"...","revision":"sha256:..."},"workbook":{"sheets":[{"name":"Summary","cells":[]}]},"validation":{"valid":true}}}
+{"request_id":"office-read-1","status":"ok","text":"{\"schema_version\":1,\"format\":\"xlsx\"}","error_text":null,"extra":{"schema_version":1,"format":"xlsx","source":{"path":"reports/budget.xlsx","sha256":"...","revision":"sha256:..."},"workbook":{"sheets":[{"name":"Summary","cells":[]}]},"validation":{"valid":true},"model_observation":{"schema_version":1,"action":"spreadsheet.read_range","format":"xlsx","workbook":{"sheets":[{"name":"Summary","cells":[]}]}}}}
 ```
 
 ### Example 2

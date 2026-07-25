@@ -7,6 +7,7 @@ import {
   taskLlmDebugRawFields,
   taskLlmDebugRequestData,
   taskLlmDebugResponseData,
+  taskLlmTraceAvailabilityStatus,
 } from "./task-llm-debug-display";
 
 test("reads teaching trace payloads from entry-wrapped backend calls", () => {
@@ -46,4 +47,45 @@ test("keeps compatibility with flat teaching trace calls", () => {
   assert.equal(taskLlmDebugResponseData(call), "provider_timeout");
   assert.ok(taskLlmDebugCallMetaTokens(call).includes("status=error"));
   assert.ok(taskLlmDebugRawFields(call).includes("prompt"));
+});
+
+test("projects structured teaching trace availability across refresh recovery states", () => {
+  assert.equal(
+    taskLlmTraceAvailabilityStatus({
+      task_id: "task-available",
+      trace_availability: { status: "available" },
+    }),
+    "available",
+  );
+  assert.equal(
+    taskLlmTraceAvailabilityStatus({
+      task_id: "task-metadata",
+      trace_availability: { status: "metadata_only" },
+    }),
+    "metadata_only",
+  );
+  assert.equal(
+    taskLlmTraceAvailabilityStatus({
+      task_id: "task-pending",
+      trace_availability: { status: "pending" },
+    }),
+    "pending",
+  );
+  assert.equal(
+    taskLlmTraceAvailabilityStatus({
+      task_id: "task-expired",
+      trace_availability: {
+        status: "unavailable",
+        reason_code: "provider_io_not_recorded_or_expired",
+      },
+    }),
+    "unavailable",
+  );
+  assert.equal(
+    taskLlmTraceAvailabilityStatus({
+      task_id: "legacy-task",
+      calls: [{ call_index: 1 }],
+    }),
+    "available",
+  );
 });

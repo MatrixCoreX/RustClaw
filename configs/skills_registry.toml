@@ -1330,8 +1330,264 @@ planner_capabilities = [
   { name = "office.render_status", action = "office.render_status", effect = "observe", optional = ["format"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false },
   { name = "office.render", action = "office.render", effect = "mutate", required = ["path", "output_path"], optional = ["format"], risk_level = "medium", preferred = false, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, subprocess = true },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["office.inspect", "office.validate", "office.render_status", "office.render", "word.read", "word.find", "word.preview_create", "word.create", "word.preview_edit", "word.edit", "spreadsheet.inspect", "spreadsheet.read_range", "spreadsheet.preview_create", "spreadsheet.create", "spreadsheet.preview_edit", "spreadsheet.edit", "presentation.read", "presentation.preview_create", "presentation.create", "presentation.preview_edit", "presentation.edit"] }, path = { type = "string" }, source_path = { type = "string" }, source_sha256 = { type = "string", pattern = "^[a-fA-F0-9]{64}$" }, output_path = { type = "string" }, template_path = { type = "string" }, operations = { type = "array", items = { type = "object", required = ["op"], properties = { op = { type = "string" } }, additionalProperties = true } }, query = { type = "string" }, sheet = { type = "string" }, range = { type = "string" }, cursor = { type = "string" }, offset = { type = "integer", minimum = 0 }, limit = { type = "integer", minimum = 1, maximum = 1000 }, overwrite = { type = "boolean" }, in_place = { type = "boolean" }, format = { type = "string" } }, additionalProperties = false }
-output_schema = { type = "object", required = ["schema_version"], properties = { schema_version = { type = "integer" }, format = { type = "string", enum = ["docx", "xlsx", "pptx"] }, source = { type = "object" }, package = { type = "object" }, document_blocks = { type = "array" }, tables = { type = "array" }, workbook = { type = ["object", "null"] }, presentation = { type = ["object", "null"] }, warnings = { type = "array" }, cursor = { type = "object" }, operation_log = { type = "array" }, validation = { type = "object" }, artifacts = { type = "array" } } }
+output_schema = { type = "object", required = ["schema_version"], properties = { schema_version = { type = "integer" }, format = { type = "string", enum = ["docx", "xlsx", "pptx"] }, source = { type = "object" }, package = { type = "object" }, document_blocks = { type = "array" }, tables = { type = "array" }, workbook = { type = ["object", "null"] }, presentation = { type = ["object", "null"] }, warnings = { type = "array" }, cursor = { type = "object" }, operation_log = { type = "array" }, validation = { type = "object" }, artifacts = { type = "array" }, model_observation = { type = "object" } } }
+
+[skills.input_schema]
+type = "object"
+required = ["action"]
+additionalProperties = false
+
+[skills.input_schema.properties.action]
+type = "string"
+enum = ["office.inspect", "office.validate", "office.render_status", "office.render", "word.read", "word.find", "word.preview_create", "word.create", "word.preview_edit", "word.edit", "spreadsheet.inspect", "spreadsheet.read_range", "spreadsheet.preview_create", "spreadsheet.create", "spreadsheet.preview_edit", "spreadsheet.edit", "presentation.read", "presentation.preview_create", "presentation.create", "presentation.preview_edit", "presentation.edit"]
+
+[skills.input_schema.properties.path]
+type = "string"
+
+[skills.input_schema.properties.source_path]
+type = "string"
+
+[skills.input_schema.properties.source_sha256]
+type = "string"
+pattern = "^[a-fA-F0-9]{64}$"
+
+[skills.input_schema.properties.output_path]
+type = "string"
+
+[skills.input_schema.properties.template_path]
+type = "string"
+
+[skills.input_schema.properties.operations]
+type = "array"
+minItems = 1
+maxItems = 500
+description = "Ordered structured Office operations. Populate every field required by the selected op. Word examples: set_header(text), set_footer(text), add_heading(text,level), add_paragraph(text,style), add_table(rows), replace_block(block_id,text). Spreadsheet examples: add_sheet(name), set_range(sheet,range,values,value_type), set_cell(sheet,cell,value,value_type), freeze_panes(sheet,cell), add_table(sheet,range,name), add_chart(sheet,range,title,chart_type). Presentation examples: add_slide(title,body,notes,layout,position), add_table(slide_id,rows), replace_slide_text(slide_id,match,text), add_notes(slide_id,text)."
+
+[skills.input_schema.properties.operations.items]
+type = "object"
+required = ["op"]
+additionalProperties = false
+
+[skills.input_schema.properties.operations.items.properties.op]
+type = "string"
+enum = ["set_properties", "set_section", "set_header", "set_footer", "add_heading", "add_paragraph", "add_list_item", "add_table", "add_image", "add_hyperlink", "add_bookmark", "add_footnote", "add_endnote", "add_comment", "add_page_break", "add_section_break", "replace_block", "delete_block", "set_block_style", "replace_match", "insert_block_before", "insert_block_after", "move_block", "replace_run", "insert_run", "delete_run", "move_run", "table_set_cell", "table_add_row", "table_delete_row", "table_add_column", "table_delete_column", "replace_image", "add_sheet", "copy_sheet", "rename_sheet", "reorder_sheet", "hide_sheet", "delete_sheet", "set_cell", "clear_cell", "set_range", "fill_range", "move_range", "merge_cells", "unmerge_cells", "freeze_panes", "set_auto_filter", "set_column_width", "set_row_height", "add_chart", "add_named_range", "add_data_validation", "add_conditional_format", "add_slide", "duplicate_slide", "move_slide", "hide_slide", "delete_slide", "replace_slide_text", "set_slide_layout", "add_text", "add_notes", "add_shape", "add_link", "set_transition"]
+
+[skills.input_schema.properties.operations.items.properties.id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.text]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.title]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.subject]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.creator]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.orientation]
+type = "string"
+enum = ["portrait", "landscape"]
+
+[skills.input_schema.properties.operations.items.properties.level]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.style]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.rows]
+type = "array"
+
+[skills.input_schema.properties.operations.items.properties.path]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.alt]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.caption]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.width_emu]
+type = "integer"
+minimum = 1
+
+[skills.input_schema.properties.operations.items.properties.height_emu]
+type = "integer"
+minimum = 1
+
+[skills.input_schema.properties.operations.items.properties.url]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.name]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.new_name]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.bookmark_id]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.comment]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.block_id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.target_block_id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.position]
+anyOf = [{ type = "string", enum = ["before", "after"] }, { type = "integer", minimum = 1 }]
+
+[skills.input_schema.properties.operations.items.properties.expected_text]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.run]
+type = "integer"
+minimum = 1
+
+[skills.input_schema.properties.operations.items.properties.index]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.target_index]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.table_id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.media_id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.sheet]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.target_sheet]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.cell]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.target_cell]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.range]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.value]
+type = ["string", "number", "boolean", "null"]
+
+[skills.input_schema.properties.operations.items.properties.values]
+type = "array"
+
+[skills.input_schema.properties.operations.items.properties.value_type]
+type = "string"
+enum = ["text", "string", "number", "boolean", "date", "formula"]
+
+[skills.input_schema.properties.operations.items.properties.style_id]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.hidden]
+type = "boolean"
+
+[skills.input_schema.properties.operations.items.properties.row]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.column]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.operations.items.properties.width]
+type = "number"
+
+[skills.input_schema.properties.operations.items.properties.height]
+type = "number"
+
+[skills.input_schema.properties.operations.items.properties.chart_type]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.reference]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.validation_type]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.formula1]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.formula]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.allow_blank]
+type = "boolean"
+
+[skills.input_schema.properties.operations.items.properties.slide_id]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.body]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.notes]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.layout]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.layout_path]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.match]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.categories]
+type = "array"
+
+[skills.input_schema.properties.operations.items.properties.shape]
+type = "string"
+
+[skills.input_schema.properties.operations.items.properties.transition]
+type = "string"
+enum = ["fade", "push", "wipe"]
+
+[skills.input_schema.properties.query]
+type = "string"
+
+[skills.input_schema.properties.sheet]
+type = "string"
+
+[skills.input_schema.properties.range]
+type = "string"
+
+[skills.input_schema.properties.cursor]
+type = "string"
+minLength = 1
+pattern = "^office-v1:[0-9]+:[a-f0-9]{16}$"
+description = "Opaque cursor returned by an earlier read of the same source revision. Omit this field for the first page; never send an empty string."
+
+[skills.input_schema.properties.offset]
+type = "integer"
+minimum = 0
+
+[skills.input_schema.properties.limit]
+type = "integer"
+minimum = 1
+maximum = 1000
+
+[skills.input_schema.properties.overwrite]
+type = "boolean"
+
+[skills.input_schema.properties.in_place]
+type = "boolean"
+
+[skills.input_schema.properties.format]
+type = "string"
 
 [[skills]]
 name = "transform"

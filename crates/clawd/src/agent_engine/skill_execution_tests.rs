@@ -1418,22 +1418,32 @@ async fn non_recoverable_failure_preserves_resume_context_and_user_error() {
         "skill",
     )
     .await
-    .expect_err("non-recoverable failure should return resume context error");
+    .expect("non-recoverable failure should remain in the loop journal");
 
-    let (user_error, payload) =
-        crate::parse_resume_context_error(&outcome).expect("resume context payload");
+    assert_eq!(outcome.as_deref(), Some("resume_failure"));
+    let user_error = loop_state
+        .pending_resume_failure_user_error
+        .as_deref()
+        .expect("user-visible failure");
+    let payload = loop_state
+        .pending_resume_context
+        .as_ref()
+        .expect("resume context payload");
     assert!(!user_error.trim().is_empty());
     assert!(payload
-        .get("resume_context")
-        .and_then(|v| v.get("remaining_steps"))
+        .get("remaining_steps")
         .and_then(|v| v.as_array())
         .is_some_and(|steps| steps.len() == 1));
     assert!(payload
-        .get("resume_context")
-        .and_then(|v| v.get("failed_step"))
+        .get("failed_step")
         .and_then(|v| v.get("error"))
         .and_then(|v| v.as_str())
         .is_some_and(|value| value.contains("missing field")));
+    assert_eq!(loop_state.executed_step_results.len(), 1);
+    assert_eq!(
+        loop_state.executed_step_results[0].status,
+        crate::executor::StepExecutionStatus::Error
+    );
 }
 
 #[tokio::test]

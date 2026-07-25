@@ -80,6 +80,7 @@ ALLOW_CLARIFY_NAME_TOKENS = (
 RISKY_FILE_NAMES = {
     "nl_cases_sensitive_flows.txt",
     "nl_cases_ops_http_repair.txt",
+    "nl_cases_office_workspace_multilingual_acceptance_20260725.txt",
 }
 
 GENERATED_FILE_NAMES = {

@@ -241,6 +241,9 @@ const MODEL_IO_LOG_MAX_CHARS: usize = 128_000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
 const ISOLATION_STARTUP_CLEANUP_MIN_SECONDS: u64 = 6 * 60 * 60;
+const DEFAULT_TOKIO_WORKER_STACK_BYTES: usize = 4 * 1024 * 1024;
+const MIN_TOKIO_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TOKIO_WORKER_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_AGENT_ID: &str = "main";
 
 /// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
@@ -322,8 +325,26 @@ fn startup_isolation_cleanup_age_seconds(running_no_progress_timeout_seconds: u6
         .max(ISOLATION_STARTUP_CLEANUP_MIN_SECONDS)
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn tokio_worker_stack_bytes(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(MIN_TOKIO_WORKER_STACK_BYTES, MAX_TOKIO_WORKER_STACK_BYTES))
+        .unwrap_or(DEFAULT_TOKIO_WORKER_STACK_BYTES)
+}
+
+fn main() -> anyhow::Result<()> {
+    let worker_stack_bytes = tokio_worker_stack_bytes(
+        std::env::var("RUSTCLAW_TOKIO_WORKER_STACK_BYTES")
+            .ok()
+            .as_deref(),
+    );
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(worker_stack_bytes)
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         // 默认用 info 级别，若设置 RUST_LOG 则以环境变量为准。
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))

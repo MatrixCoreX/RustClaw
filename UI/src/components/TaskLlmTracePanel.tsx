@@ -6,6 +6,7 @@ import {
   taskLlmDebugRawFields,
   taskLlmDebugRequestData,
   taskLlmDebugResponseData,
+  taskLlmTraceAvailabilityStatus,
 } from "../lib/task-llm-debug-display";
 import {
   agentFlowTimelineRows,
@@ -206,6 +207,8 @@ export function TaskLlmTracePanel({
       ? taskLlmDebug.calls
       : taskLlmDebug?.entries ?? [];
   const callCount = taskLlmDebug?.call_count ?? calls.length;
+  const availabilityStatus = taskLlmTraceAvailabilityStatus(taskLlmDebug);
+  const retentionDays = taskLlmDebug?.trace_availability?.retention_days ?? 7;
   const timelineRows = agentFlowTimelineRows(taskLlmDebug);
   const budgetReport = contextBudgetReport(taskResult);
   const compactionRecords = transcriptCompactionRecords(taskResult);
@@ -262,6 +265,31 @@ export function TaskLlmTracePanel({
               </span>
             ) : null}
           </div>
+
+          {availabilityStatus === "metadata_only" ? (
+            <p className="mb-3 border-l-2 border-amber-300/50 bg-amber-400/5 px-3 py-2 text-xs text-amber-50/80">
+              {t(
+                "这次任务只保留了模型调用元数据，运行时当时没有记录完整请求和返回；页面刷新后无法恢复未记录的详情。",
+                "Only model-call metadata was retained for this task. Full requests and responses were not recorded at runtime, so a page refresh cannot restore those missing details.",
+              )}
+            </p>
+          ) : null}
+          {availabilityStatus === "pending" ? (
+            <p className="mb-3 border-l-2 border-sky-300/50 bg-sky-400/5 px-3 py-2 text-xs text-sky-50/80">
+              {t(
+                "任务仍在运行，模型日志可能尚未写完。请稍后重新查询。",
+                "The task is still active and its model log may not be complete yet. Try loading the trace again shortly.",
+              )}
+            </p>
+          ) : null}
+          {availabilityStatus === "unavailable" ? (
+            <p className="mb-3 border-l-2 border-white/25 bg-white/5 px-3 py-2 text-xs text-white/60">
+              {t(
+                `当前日志及最近 ${retentionDays} 天归档中没有找到完整教学记录。该任务可能没有调用模型、当时未记录详情，或记录已超过保留期。`,
+                `No complete teaching trace was found in the current log or the last ${retentionDays} days of archives. The task may not have called a model, full detail may not have been recorded, or the record may have expired.`,
+              )}
+            </p>
+          ) : null}
 
           {taskLlmDebug.flow_summary ? (
             <details className="mb-3 rounded-lg border border-sky-300/15 bg-sky-400/5 p-3" open>

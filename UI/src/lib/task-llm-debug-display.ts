@@ -1,4 +1,15 @@
-import type { TaskLlmDebugCall, TaskLlmDebugEntry } from "../types/api";
+import type {
+  TaskLlmDebugCall,
+  TaskLlmDebugEntry,
+  TaskLlmDebugResponse,
+} from "../types/api";
+
+export type TaskLlmTraceAvailabilityStatus =
+  | "available"
+  | "metadata_only"
+  | "pending"
+  | "unavailable"
+  | "unknown";
 
 function compactMetaValue(value: string | number | null | undefined): string | null {
   if (value == null) return null;
@@ -60,4 +71,20 @@ export function taskLlmDebugRequestData(call: TaskLlmDebugCall): unknown {
 export function taskLlmDebugResponseData(call: TaskLlmDebugCall): unknown {
   const entry = taskLlmDebugCallEntry(call);
   return entry.raw_response ?? entry.clean_response ?? entry.response ?? entry.error;
+}
+
+export function taskLlmTraceAvailabilityStatus(
+  debug: TaskLlmDebugResponse | null | undefined,
+): TaskLlmTraceAvailabilityStatus {
+  const status = debug?.trace_availability?.status?.trim();
+  if (
+    status === "available" ||
+    status === "metadata_only" ||
+    status === "pending" ||
+    status === "unavailable"
+  ) {
+    return status;
+  }
+  const calls = debug?.calls?.length ?? debug?.entries?.length ?? debug?.call_count ?? 0;
+  return calls > 0 ? "available" : "unknown";
 }

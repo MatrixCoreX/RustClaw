@@ -19,11 +19,13 @@ flowchart TD
     C --> E[Canonical machine-token lookup]
     D --> F
     E --> F[Skills registry<br/>enabled + kind + runner + policy]
-    F --> G{Implementation}
+    F --> P[PlanVerifier<br/>action policy + capability scope]
+    P --> G{Implementation}
     G -->|builtin| H[In-process adapter]
     G -->|runner| I[skill-runner subprocess]
     G -->|external| J[External adapter]
-    I --> K[Skill binary<br/>one-line JSON stdin/stdout]
+    I --> Q[Scoped child environment<br/>one-use vendor token + protocol alias]
+    Q --> K[Skill binary<br/>one-line JSON stdin/stdout]
     H --> L[Structured skill response]
     J --> L
     K --> L
@@ -38,11 +40,16 @@ skills must pass validation and registration before they become available.
 
 Long-tail media capabilities use start, poll, and cancel contracts. The
 foreground task can return a checkpoint while provider work continues.
+Preview actions are separate machine capabilities: their registry policy
+forbids network, credential access, external publish, and filesystem writes.
 
 ```mermaid
 flowchart TD
     A[Image / audio / video / music capability] --> B[Registry async contract]
-    B --> C[Verifier + provider preflight]
+    B --> P{Offline preview?}
+    P -->|yes| Q[Structured dry-run projection<br/>no provider / credential / write]
+    Q --> F[Artifact refs + observation]
+    P -->|no| C[Verifier + provider preflight]
     C --> D[Start provider job]
     D --> E{Provider result}
     E -->|complete| F[Artifact refs + observation]
@@ -56,6 +63,13 @@ flowchart TD
     H --> L[Cancel capability]
     L --> M[Cancel adapter + terminal projection]
 ```
+
+Provider-backed runner actions receive credentials only after verifier policy
+admits the action. `clawd` derives the active structured provider connection,
+issues a distinct one-use token for each required child environment variable,
+and logs variable names only. An OpenAI-compatible MiniMax adapter may receive
+both `MINIMAX_API_KEY` and an `OPENAI_API_KEY` protocol alias, but never the
+parent environment or a reused token.
 
 Model capabilities are projected through a catalog rather than inferred from
 model-name phrases. The catalog exposes provider/model identity, API style,

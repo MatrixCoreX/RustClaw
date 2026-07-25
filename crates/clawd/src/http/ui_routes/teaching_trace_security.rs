@@ -154,3 +154,35 @@ fn teaching_trace_layers() -> Value {
         },
     })
 }
+
+fn teaching_trace_availability(entries: &[TaskDebugEntry], task_status: Option<&str>) -> Value {
+    let active_task = task_status.is_some_and(|status| {
+        matches!(
+            status.trim(),
+            "queued" | "running" | "waiting" | "background" | "needs_user"
+        )
+    });
+    let has_provider_detail = entries.iter().any(|entry| {
+        entry.mode.as_deref() == Some("verbose")
+            && (entry.prompt.is_some()
+                || entry.request_payload.is_some()
+                || entry.raw_response.is_some()
+                || entry.clean_response.is_some()
+                || entry.response.is_some())
+    });
+    let (status, reason_code) = if has_provider_detail {
+        ("available", "retained_provider_io_found")
+    } else if !entries.is_empty() {
+        ("metadata_only", "provider_io_detail_not_recorded")
+    } else if active_task {
+        ("pending", "task_still_active")
+    } else {
+        ("unavailable", "provider_io_not_recorded_or_expired")
+    };
+    json!({
+        "status": status,
+        "reason_code": reason_code,
+        "source": "current_and_retained_model_io_logs",
+        "retention_days": crate::providers::MODEL_IO_LOG_KEEP_DAYS,
+    })
+}

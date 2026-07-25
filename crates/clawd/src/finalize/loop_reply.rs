@@ -336,12 +336,6 @@ pub(crate) async fn finalize_loop_reply(
     let effective_agent_run_context =
         effective_agent_run_context_for_finalization(agent_run_context, &loop_state);
     let agent_run_context = effective_agent_run_context.as_ref();
-    // §3.3 Stage 3.2 invariant：进入 LOOP REPLY finalize 子层时，
-    // ask_state 必须处于 Executing 或 Finalizing 之一。Executing 表示
-    // agent loop 刚跑完一轮、本函数即将做最后归约；Finalizing 表示
-    // 主路径已经在 ResumeExecuting 分支预先标记过 finalize 阶段。
-    // 注：测试环境与未启用 §3.1 注册（registry 未 set）时返回 None，
-    // 此时不触发 panic（相当于运行期 noop），release build 完全无开销。
     debug_assert!(
         matches!(
             state.current_ask_state(&task.task_id),
@@ -352,11 +346,17 @@ pub(crate) async fn finalize_loop_reply(
         task.task_id,
     );
 
-    backfill_delivery_from_last_outputs(task, &mut loop_state, agent_run_context);
-
-    if let Some((user_error, resume_context)) =
-        pending_confirmation_resume_payload(state, task, user_text, &mut loop_state).await?
-    {
+    let pending_resume_failure = loop_state.take_pending_resume_failure();
+    if pending_resume_failure.is_none() {
+        backfill_delivery_from_last_outputs(task, &mut loop_state, agent_run_context);
+    }
+    let pending_resume = match pending_resume_failure {
+        Some(payload) => Some(payload),
+        None => {
+            pending_confirmation_resume_payload(state, task, user_text, &mut loop_state).await?
+        }
+    };
+    if let Some((user_error, resume_context)) = pending_resume {
         let delivery_messages = vec![user_error.clone()];
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&user_error, &delivery_messages);

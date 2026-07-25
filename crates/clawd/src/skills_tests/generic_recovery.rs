@@ -1,5 +1,6 @@
 use super::super::{
-    is_recoverable_skill_error, skill_error_machine_observation, structured_skill_error_string,
+    is_recoverable_skill_error, parse_structured_skill_error, skill_error_machine_observation,
+    structured_skill_error_string,
 };
 use serde_json::json;
 
@@ -54,4 +55,27 @@ fn generic_bounded_replan_contract_fails_closed_after_possible_side_effect() {
     );
 
     assert!(!is_recoverable_skill_error("custom_mutator", &encoded));
+}
+
+#[test]
+fn standard_error_code_is_promoted_for_generic_recovery_observation() {
+    let encoded = structured_skill_error_string(
+        "custom_observer",
+        &json!({
+            "status": "error",
+            "error_text": "cursor does not match the source",
+            "extra": {
+                "error_code": "invalid_cursor",
+                "retryable": true,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false,
+                "recovery_action": "replan_arguments",
+                "invalid_argument": "cursor"
+            }
+        }),
+    );
+
+    let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
+    assert_eq!(parsed.error_kind, "invalid_cursor");
+    assert!(is_recoverable_skill_error("custom_observer", &encoded));
 }

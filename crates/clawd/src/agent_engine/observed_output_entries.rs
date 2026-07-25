@@ -1,6 +1,7 @@
 use super::*;
 
 const MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS: usize = 24 * 1024;
+const MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH: usize = 12;
 
 pub(super) fn observed_error_step_body(
     step: &crate::executor::StepExecutionResult,
@@ -33,6 +34,10 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
     .filter(|text| !text.is_empty())?;
     if !step.is_ok() {
         return observed_error_step_body(step, body);
+    }
+    if let Some(observation) = explicit_model_observation_body(body) {
+        let sanitized = crate::visible_text::sanitize_user_visible_text(&observation);
+        return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
         let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
@@ -70,7 +75,14 @@ pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -
         "### {} skill({})\n{}",
         step.step_id,
         step.skill,
-        trim_for_observed_prompt(&output, 1800)
+        trim_for_observed_prompt(
+            &output,
+            if step_has_explicit_model_observation(step) {
+                MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS
+            } else {
+                1800
+            }
+        )
     ))
 }
 
@@ -95,14 +107,25 @@ pub(in crate::agent_engine) fn latest_structured_capability_observation(
 fn generic_capability_observation(
     result: &claw_core::capability_result::CapabilityResultEnvelope,
 ) -> Option<String> {
+    let data = crate::capability_result::explicit_model_observation(&result.data)
+        .map(|observation| {
+            serde_json::json!({
+                "model_observation": compact_capability_observation_value(
+                    observation,
+                    0,
+                    MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH,
+                ),
+            })
+        })
+        .unwrap_or_else(|| compact_capability_observation_value(&result.data, 0, 6));
     let projection = serde_json::json!({
         "schema_version": 1,
         "capability": &result.capability,
         "action": &result.action,
         "status": &result.status,
-        "data": compact_capability_observation_value(&result.data, 0),
+        "data": data,
         "effect": &result.effect,
-        "verification": compact_capability_observation_value(&result.verification, 0),
+        "verification": compact_capability_observation_value(&result.verification, 0, 6),
     });
     let serialized = serde_json::to_string(&projection).ok()?;
     let serialized = if serialized.chars().count() <= MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS {
@@ -131,8 +154,9 @@ fn generic_capability_observation(
 fn compact_capability_observation_value(
     value: &serde_json::Value,
     depth: usize,
+    max_depth: usize,
 ) -> serde_json::Value {
-    if depth >= 6 {
+    if depth >= max_depth {
         return serde_json::json!({"truncated": true, "reason": "depth_limit"});
     }
     match value {
@@ -143,7 +167,7 @@ fn compact_capability_observation_value(
                 .map(|(key, value)| {
                     (
                         key.clone(),
-                        compact_capability_observation_value(value, depth + 1),
+                        compact_capability_observation_value(value, depth + 1, max_depth),
                     )
                 })
                 .collect(),
@@ -152,7 +176,7 @@ fn compact_capability_observation_value(
             items
                 .iter()
                 .take(64)
-                .map(|value| compact_capability_observation_value(value, depth + 1))
+                .map(|value| compact_capability_observation_value(value, depth + 1, max_depth))
                 .collect(),
         ),
         serde_json::Value::String(text) => {
@@ -160,6 +184,26 @@ fn compact_capability_observation_value(
         }
         _ => value.clone(),
     }
+}
+
+fn explicit_model_observation_body(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let observation = crate::capability_result::explicit_model_observation(&value)?;
+    serde_json::to_string(&compact_capability_observation_value(
+        observation,
+        0,
+        MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH,
+    ))
+    .ok()
+}
+
+fn step_has_explicit_model_observation(step: &crate::executor::StepExecutionResult) -> bool {
+    step.output
+        .as_deref()
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .as_ref()
+        .and_then(crate::capability_result::explicit_model_observation)
+        .is_some()
 }
 
 pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(

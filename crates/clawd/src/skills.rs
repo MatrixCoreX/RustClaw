@@ -197,6 +197,8 @@ fn structured_skill_error_string(skill: &str, value: &Value) -> String {
     let extra_object = child_extra_object(value);
     let error_kind = string_field(value, "error_kind")
         .or_else(|| extra_object.and_then(|extra| string_field(extra, "error_kind")))
+        .or_else(|| string_field(value, "error_code"))
+        .or_else(|| extra_object.and_then(|extra| string_field(extra, "error_code")))
         .unwrap_or_else(|| "unknown".to_string());
     let error_text = string_field(value, "error_text")
         .or_else(|| extra_object.and_then(|extra| string_field(extra, "failure_reason")))

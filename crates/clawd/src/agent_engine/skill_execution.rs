@@ -740,7 +740,31 @@ async fn handle_skill_step_failure(
         Some(err),
     )
     .await;
-    Err(resume_err)
+    register_failed_step_output(
+        loop_state,
+        global_step,
+        step_in_round,
+        &format!("skill.{normalized_skill}"),
+        &format!("skill({normalized_skill})"),
+        &error_observation,
+    );
+    register_failed_step_structured_error_fields(
+        loop_state,
+        &format!("skill.{normalized_skill}"),
+        err,
+    );
+    let Some((user_error, resume_payload)) = crate::parse_resume_context_error(&resume_err) else {
+        return Err(resume_err);
+    };
+    loop_state.pending_resume_failure_user_error = Some(user_error);
+    loop_state.pending_resume_context = Some(
+        resume_payload
+            .get("resume_context")
+            .cloned()
+            .unwrap_or(resume_payload),
+    );
+    loop_state.last_stop_signal = Some("resume_failure".to_string());
+    Ok(Some("resume_failure".to_string()))
 }
 
 async fn compose_policy_block_delivery(

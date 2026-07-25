@@ -182,6 +182,28 @@ fn result_data(output: &str, extra: Option<&Value>) -> Value {
     Value::Object(data)
 }
 
+pub(crate) fn explicit_model_observation(value: &Value) -> Option<&Value> {
+    value
+        .get("model_observation")
+        .or_else(|| {
+            value
+                .get("extra")
+                .and_then(|extra| extra.get("model_observation"))
+        })
+        .or_else(|| {
+            value
+                .get("output")
+                .and_then(|output| output.get("model_observation"))
+        })
+        .or_else(|| {
+            value
+                .get("output")
+                .and_then(|output| output.get("extra"))
+                .and_then(|extra| extra.get("model_observation"))
+        })
+        .filter(|observation| observation.is_object() || observation.is_array())
+}
+
 fn redact_for_model(value: Value) -> Value {
     let serialized = value.to_string();
     let redacted = crate::visible_text::sanitize_user_visible_text(&serialized);

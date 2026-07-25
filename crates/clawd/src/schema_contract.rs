@@ -23,6 +23,12 @@ pub(crate) struct RequiredConstraintViolation {
     pub(crate) field: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ValueConstraintViolation {
+    pub(crate) field: String,
+    pub(crate) constraint: String,
+}
+
 pub(crate) fn executable_enum_violations(
     state: &AppState,
     executable: &str,
@@ -156,6 +162,139 @@ pub(crate) fn type_constraint_violations(
     collect_type_constraint_violations(input_schema, args, "", &mut violations);
     violations.sort_by(|left, right| left.field.cmp(&right.field));
     violations
+}
+
+pub(crate) fn executable_value_constraint_violations(
+    state: &AppState,
+    executable: &str,
+    args: &Value,
+) -> Vec<ValueConstraintViolation> {
+    let input_schema = state
+        .mcp_tool(executable)
+        .map(|tool| tool.input_schema)
+        .or_else(|| {
+            state
+                .skill_manifest(executable)
+                .and_then(|manifest| manifest.input_schema)
+        });
+    input_schema
+        .as_ref()
+        .map(|schema| value_constraint_violations(schema, args))
+        .unwrap_or_default()
+}
+
+pub(crate) fn value_constraint_violations(
+    input_schema: &Value,
+    args: &Value,
+) -> Vec<ValueConstraintViolation> {
+    let mut violations = Vec::new();
+    collect_value_constraint_violations(input_schema, args, "", &mut violations);
+    violations.sort_by(|left, right| {
+        left.field
+            .cmp(&right.field)
+            .then_with(|| left.constraint.cmp(&right.constraint))
+    });
+    violations.dedup();
+    violations
+}
+
+fn collect_value_constraint_violations(
+    schema: &Value,
+    value: &Value,
+    path: &str,
+    violations: &mut Vec<ValueConstraintViolation>,
+) {
+    if let Some(text) = value.as_str() {
+        let character_count = text.chars().count() as u64;
+        if schema
+            .get("minLength")
+            .and_then(Value::as_u64)
+            .is_some_and(|minimum| character_count < minimum)
+        {
+            push_value_violation(violations, path, "min_length");
+        }
+        if schema
+            .get("maxLength")
+            .and_then(Value::as_u64)
+            .is_some_and(|maximum| character_count > maximum)
+        {
+            push_value_violation(violations, path, "max_length");
+        }
+        if let Some(pattern) = schema.get("pattern").and_then(Value::as_str) {
+            if regex::Regex::new(pattern).is_ok_and(|regex| !regex.is_match(text)) {
+                push_value_violation(violations, path, "pattern");
+            }
+        }
+    }
+    if let Some(number) = value.as_f64() {
+        if schema
+            .get("minimum")
+            .and_then(Value::as_f64)
+            .is_some_and(|minimum| number < minimum)
+        {
+            push_value_violation(violations, path, "minimum");
+        }
+        if schema
+            .get("maximum")
+            .and_then(Value::as_f64)
+            .is_some_and(|maximum| number > maximum)
+        {
+            push_value_violation(violations, path, "maximum");
+        }
+    }
+    if let Some(array) = value.as_array() {
+        let item_count = array.len() as u64;
+        if schema
+            .get("minItems")
+            .and_then(Value::as_u64)
+            .is_some_and(|minimum| item_count < minimum)
+        {
+            push_value_violation(violations, path, "min_items");
+        }
+        if schema
+            .get("maxItems")
+            .and_then(Value::as_u64)
+            .is_some_and(|maximum| item_count > maximum)
+        {
+            push_value_violation(violations, path, "max_items");
+        }
+    }
+    if let (Some(properties), Some(object)) = (
+        schema.get("properties").and_then(Value::as_object),
+        value.as_object(),
+    ) {
+        for (field, field_value) in object {
+            if let Some(field_schema) = properties.get(field) {
+                collect_value_constraint_violations(
+                    field_schema,
+                    field_value,
+                    &object_field_path(path, field),
+                    violations,
+                );
+            }
+        }
+    }
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            collect_value_constraint_violations(
+                items,
+                item,
+                &array_item_path(path, index),
+                violations,
+            );
+        }
+    }
+}
+
+fn push_value_violation(
+    violations: &mut Vec<ValueConstraintViolation>,
+    path: &str,
+    constraint: &str,
+) {
+    violations.push(ValueConstraintViolation {
+        field: path.to_string(),
+        constraint: constraint.to_string(),
+    });
 }
 
 fn collect_type_constraint_violations(

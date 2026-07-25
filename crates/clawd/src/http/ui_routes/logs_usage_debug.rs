@@ -767,37 +767,61 @@ async fn usage_record_detail(
 
 fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
     let trace_task_ids = task_debug_trace_task_ids(state, task_id)?;
-    let path = state
-        .skill_rt
-        .workspace_root
-        .join("logs")
-        .join("model_io.log");
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
     let mut entries = Vec::new();
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            continue;
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
-            continue;
-        };
-        if entry
-            .task_id
-            .as_deref()
-            .is_some_and(|entry_task_id| trace_task_ids.contains(entry_task_id))
-        {
-            entries.push(entry);
+    let logs_dir = state.skill_rt.workspace_root.join("logs");
+    for path in model_io_log_paths(&logs_dir)? {
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                continue;
+            };
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
+                continue;
+            };
+            if entry
+                .task_id
+                .as_deref()
+                .is_some_and(|entry_task_id| trace_task_ids.contains(entry_task_id))
+            {
+                entries.push(entry);
+            }
         }
     }
     Ok(entries)
+}
+
+fn model_io_log_paths(logs_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    if !logs_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut archives = Vec::new();
+    for entry in std::fs::read_dir(logs_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(date) = name.strip_prefix("model_io.log.") else {
+            continue;
+        };
+        if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
+            archives.push(entry.path());
+        }
+    }
+    archives.sort();
+    let current = logs_dir.join("model_io.log");
+    if current.is_file() {
+        archives.push(current);
+    }
+    Ok(archives)
 }
 
 fn task_debug_trace_task_ids(
@@ -1144,6 +1168,12 @@ async fn task_debug_detail(
         .as_ref()
         .and_then(|(db_status, result_json)| extract_resume_trace_for_debug(db_status, result_json));
     let model_catalog_trace = build_model_catalog_trace_for_debug(&state, &entries);
+    let trace_availability = teaching_trace_availability(
+        &entries,
+        task_result_json
+            .as_ref()
+            .map(|(db_status, _)| db_status.as_str()),
+    );
     let mut runtime_decisions = json!({
         "memory_trace": memory_trace,
         "model_catalog_trace": model_catalog_trace,
@@ -1168,6 +1198,7 @@ async fn task_debug_detail(
                 },
                 "trace_layers": teaching_trace_layers(),
                 "call_count": calls.len(),
+                "trace_availability": trace_availability,
                 "flow_summary": flow_summary,
                 "calls": calls,
                 "entries": entries,

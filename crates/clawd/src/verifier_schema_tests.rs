@@ -98,6 +98,59 @@ fn undeclared_registry_argument_is_a_blocking_model_error() {
 }
 
 #[test]
+fn invalid_office_cursor_pattern_is_a_blocking_model_error() {
+    let state = tests::test_state();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skill registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    let task = tests::test_task();
+    let plan = tests::plan_result(vec![PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "office_workspace".to_string(),
+        args: json!({
+            "action": "spreadsheet.inspect",
+            "path": "tmp/report.xlsx",
+            "cursor": "first"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::InvalidArgumentValue
+            && issue.detail == "error_code=invalid_argument_value field=cursor constraint=pattern"
+    }));
+}
+
+#[test]
 fn virtual_count_entries_runtime_arguments_are_declared() {
     let state = tests::test_state();
     let task = tests::test_task();

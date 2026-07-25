@@ -1,6 +1,9 @@
 use serde_json::json;
 
-use super::{enum_constraint_violations, type_constraint_violations, unknown_argument_violations};
+use super::{
+    enum_constraint_violations, type_constraint_violations, unknown_argument_violations,
+    value_constraint_violations,
+};
 
 #[test]
 fn enum_constraints_accept_exact_machine_values() {
@@ -177,5 +180,37 @@ fn nested_object_and_array_constraints_report_stable_paths() {
     assert_eq!(
         unknown_argument_violations(&schema, &args)[0].field,
         "children[0].task"
+    );
+}
+
+#[test]
+fn value_constraints_cover_strings_numbers_and_array_sizes() {
+    let schema = json!({
+        "properties": {
+            "cursor": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 32,
+                "pattern": "^office-v1:"
+            },
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "operations": {"type": "array", "minItems": 1, "maxItems": 2}
+        }
+    });
+    let violations = value_constraint_violations(
+        &schema,
+        &json!({"cursor": "first", "limit": 0, "operations": []}),
+    );
+
+    assert_eq!(
+        violations
+            .iter()
+            .map(|violation| (violation.field.as_str(), violation.constraint.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("cursor", "pattern"),
+            ("limit", "minimum"),
+            ("operations", "min_items")
+        ]
     );
 }

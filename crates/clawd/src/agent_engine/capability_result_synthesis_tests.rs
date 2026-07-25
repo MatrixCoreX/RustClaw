@@ -736,3 +736,35 @@ fn oversized_result_is_bounded_without_changing_machine_identity() {
     assert_eq!(bounded.action, result.action);
     assert!(bounded.data.to_string().chars().count() < MAX_RESULT_JSON_CHARS);
 }
+
+#[test]
+fn explicit_model_observation_keeps_deep_evidence_and_drops_bulk_metadata() {
+    let result = CapabilityResultEnvelope::ok(
+        "registry.fixture",
+        Some("inspect".to_string()),
+        json!({
+            "extra": {
+                "package": {"metadata": "x".repeat(20_000)},
+                "model_observation": {
+                    "workbook": {
+                        "sheets": [{
+                            "cells": [{
+                                "reference": "B4",
+                                "formula": "SUM(B2:B3)"
+                            }]
+                        }]
+                    }
+                }
+            }
+        }),
+    );
+
+    let bounded = bounded_result(&result);
+    assert_eq!(
+        bounded
+            .data
+            .pointer("/model_observation/workbook/sheets/0/cells/0/formula"),
+        Some(&json!("SUM(B2:B3)"))
+    );
+    assert!(bounded.data.pointer("/extra/package").is_none());
+}

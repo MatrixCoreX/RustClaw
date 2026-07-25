@@ -69,12 +69,12 @@ use output_path_facts::*;
 mod output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
 pub(super) use output_entries::latest_structured_capability_observation;
-#[cfg(test)]
-use output_entries::recent_generated_output_from_user_request;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
     observed_output_entries,
 };
+#[cfg(test)]
+use output_entries::{observed_step_entry, recent_generated_output_from_user_request};
 
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;

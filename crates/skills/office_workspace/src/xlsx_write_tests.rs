@@ -59,6 +59,47 @@ fn creates_typed_multisheet_workbook_with_formula_boundary() {
 }
 
 #[test]
+fn create_can_rename_the_lazy_initial_sheet() {
+    let operations = normalize_operations(
+        Some(&json!([
+            {"op":"rename_sheet","sheet":"Sheet1","new_name":"Summary"},
+            {"op":"set_cell","sheet":"Summary","cell":"A1","value":"ready"},
+            {"op":"add_sheet","name":"Details"}
+        ])),
+        OfficeFormat::Xlsx,
+        false,
+    )
+    .expect("operations");
+
+    let result = create_xlsx(&operations).expect("create");
+    let path = temp_path("xlsx");
+    publish_package(
+        &result.members,
+        &path,
+        OfficeFormat::Xlsx,
+        false,
+        None,
+        None,
+    )
+    .expect("publish");
+    let package = OfficePackage::open(&path, Some(OfficeFormat::Xlsx)).expect("package");
+    let workbook = read_workbook(&package).expect("read");
+    assert_eq!(
+        workbook
+            .sheets
+            .iter()
+            .map(|sheet| sheet.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Summary", "Details"]
+    );
+    assert_eq!(
+        workbook.sheets[0].cells[0].displayed_value.as_deref(),
+        Some("ready")
+    );
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
 fn creates_standard_comments_images_and_sheet_rules() {
     let image = temp_path("png");
     std::fs::write(

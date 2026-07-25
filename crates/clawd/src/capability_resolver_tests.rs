@@ -107,6 +107,33 @@ fn package_detection_resolves_through_registry_contract() {
 }
 
 #[test]
+fn office_capability_preserves_registry_action_namespace() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "word.create",
+        json!({
+            "output_path": "tmp/report.docx",
+            "operations": [{"op": "add_paragraph", "text": "fixture"}],
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected office workspace tool action");
+    };
+
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("word.create")
+    );
+    assert_eq!(tool, "office_workspace");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("word.create")
+    );
+    assert!(crate::schema_contract::executable_enum_violations(&state, &tool, &args).is_empty());
+}
+
+#[test]
 fn config_key_listing_resolves_through_registry_contract() {
     let state = state_with_workspace_registry();
     let (action, _record) = resolve_capability_action_with_record_for_state(
