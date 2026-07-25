@@ -187,6 +187,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: |
           set -euo pipefail
-          ./scripts/cleanup-platform-releases.sh "ubuntu-x86_64-"
+          ./scripts/cleanup-platform-releases.sh \
+            "ubuntu-x86_64-" \
+            --keep-tag "${RELEASE_TAG}"
