@@ -545,6 +545,7 @@ for relative in \
   README.md \
   README.zh-CN.md \
   USAGE.md \
+  VERSION \
   rustclaw \
   install-rustclaw-cmd.sh \
   build-ui-nginx.sh \

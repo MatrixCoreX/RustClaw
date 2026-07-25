@@ -3,6 +3,18 @@
 rustclaw_version_from_root() {
   local root_dir="${1:-}"
   local cargo_toml="${root_dir%/}/Cargo.toml"
+  local version_file="${root_dir%/}/VERSION"
+  local candidate=""
+
+  candidate="${RUSTCLAW_VERSION:-}"
+  if [[ -z "$candidate" && -f "$version_file" ]]; then
+    candidate="$(head -n 1 "$version_file" | tr -d '\r\n')"
+  fi
+  if [[ -n "$candidate" && "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
   if [[ -z "$root_dir" || ! -f "$cargo_toml" ]]; then
     printf '%s\n' "unknown"
     return 0

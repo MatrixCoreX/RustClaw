@@ -13,6 +13,7 @@ mkdir -p \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
 printf 'new release readme\n' > "$PACKAGE_DIR/README.md"
+printf '9.8.7\n' > "$PACKAGE_DIR/VERSION"
 printf 'new-default = true\n' > "$PACKAGE_DIR/configs/new-default.toml"
 printf 'release-channel = true\n' > "$PACKAGE_DIR/configs/channels/release.toml"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
@@ -104,6 +105,7 @@ grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
 grep -Fxq 'local-secret = "preserve"' "$RUNTIME/configs/config.toml"
 grep -Fxq 'new-default = true' "$RUNTIME/configs/new-default.toml"
 grep -Fxq 'new release readme' "$RUNTIME/README.md"
+grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 cmp /bin/true "$RUNTIME/target/release/clawd"
 find "$RUNTIME/.release-backups" -name files.tar.gz -type f | grep -q .
 ROLLBACK_MARKER_BEFORE="$(cat "$RUNTIME/.release-rollback")"
@@ -207,6 +209,7 @@ fi
 cmp /bin/true "$RUNTIME/target/release/clawd"
 grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
 grep -Fxq 'new release readme' "$RUNTIME/README.md"
+grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 [[ ! -e "$RUNTIME/build-ui-nginx.sh" ]]
 [[ "$(cat "$RUNTIME/.release-rollback")" == "$ROLLBACK_MARKER_BEFORE" ]]
 
