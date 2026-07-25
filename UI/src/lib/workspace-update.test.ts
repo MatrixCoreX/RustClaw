@@ -29,8 +29,13 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");
+  assert.equal(formatWorkspaceUpdateStatus("idle", undefined, "zh"), "待更新");
   assert.equal(formatWorkspaceUpdateApiError("workspace_update_already_running", "en"), "An update is already running.");
   assert.equal(formatWorkspaceUpdateApiError("workspace_update_admin_required", "zh"), "只有管理员可以执行这个操作。");
+  assert.equal(
+    formatWorkspaceUpdateApiError("workspace_update_source_checkout_required", "en"),
+    "This installation uses a Release package and can only be updated through Releases.",
+  );
   assert.equal(formatWorkspaceUpdateApiError("custom_code", "en"), "custom_code");
 });
 

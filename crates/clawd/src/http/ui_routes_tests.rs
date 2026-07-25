@@ -1123,6 +1123,53 @@ fn workspace_update_release_check_retries_failures_and_honors_forced_refresh() {
     assert!(latest_release_check_due(&status, false, 1_030));
 }
 
+#[tokio::test]
+async fn workspace_update_release_install_skips_git_and_reports_installation_kind() {
+    let root = temp_workspace_root();
+    std::fs::write(root.join(".release-tag"), "ubuntu-x86_64-test\n")
+        .expect("write release marker");
+    let shared = Arc::new(Mutex::new(WorkspaceUpdateStatus {
+        latest_release_checked_ts: Some(current_unix_ts()),
+        stderr_tail: "fatal: not a git repository".to_string(),
+        ..WorkspaceUpdateStatus::default()
+    }));
+
+    let status = refresh_workspace_update_versions(&root, shared, false).await;
+
+    assert_eq!(status.installation_kind, "release_package");
+    assert!(!status.source_update_available);
+    assert!(status.stderr_tail.is_empty());
+    assert!(status.stdout_tail.is_empty());
+    assert_eq!(status.old_commit, None);
+    assert_eq!(status.remote_commit, None);
+    std::fs::remove_dir_all(root).expect("remove test workspace");
+}
+
+#[test]
+fn workspace_update_source_checkout_detection_supports_git_files_and_directories() {
+    let directory_root = temp_workspace_root();
+    std::fs::create_dir(directory_root.join(".git")).expect("create git directory");
+    assert!(workspace_source_update_available(&directory_root));
+    assert_eq!(
+        workspace_installation_kind(&directory_root),
+        "source_checkout"
+    );
+    std::fs::remove_dir_all(directory_root).expect("remove git directory workspace");
+
+    let worktree_root = temp_workspace_root();
+    std::fs::write(
+        worktree_root.join(".git"),
+        "gitdir: ../repo/.git/worktrees/test\n",
+    )
+    .expect("write git file");
+    assert!(workspace_source_update_available(&worktree_root));
+    assert_eq!(
+        workspace_installation_kind(&worktree_root),
+        "source_checkout"
+    );
+    std::fs::remove_dir_all(worktree_root).expect("remove git file workspace");
+}
+
 #[test]
 fn workspace_update_start_preserves_release_lookup_state() {
     let previous = WorkspaceUpdateStatus {

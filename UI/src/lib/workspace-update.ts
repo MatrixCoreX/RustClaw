@@ -68,7 +68,7 @@ export function formatWorkspaceUpdateStatus(
   if (status === "succeeded") return copy(lang, "已完成", "Completed");
   if (status === "failed") return copy(lang, "失败", "Failed");
   if (status === "canceled") return copy(lang, "已停止", "Stopped");
-  return copy(lang, "未运行", "Idle");
+  return copy(lang, "待更新", "Ready");
 }
 
 export function formatWorkspaceUpdateApiError(error: string | null | undefined, lang: UiLanguage): string {
@@ -77,6 +77,11 @@ export function formatWorkspaceUpdateApiError(error: string | null | undefined, 
     workspace_update_admin_required: copy(lang, "只有管理员可以执行这个操作。", "Only an admin can perform this action."),
     workspace_update_already_running: copy(lang, "更新已经在进行中。", "An update is already running."),
     workspace_update_not_running: copy(lang, "当前没有正在运行的更新。", "No update is currently running."),
+    workspace_update_source_checkout_required: copy(
+      lang,
+      "当前使用 Release 包安装，只能通过 Release 更新。",
+      "This installation uses a Release package and can only be updated through Releases.",
+    ),
   };
   return code ? labels[code] || code : copy(lang, "未知错误", "Unknown error");
 }
