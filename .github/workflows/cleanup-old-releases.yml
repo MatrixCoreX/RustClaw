@@ -7,6 +7,7 @@ on:
       - "release-cleanup-*"
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -15,6 +16,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cancel orphaned platform Release runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/cancel-orphaned-platform-release-runs.sh
 
       - name: Keep only the newest release for each platform
         shell: bash
