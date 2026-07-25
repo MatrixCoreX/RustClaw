@@ -1108,6 +1108,20 @@ fn workspace_update_release_selector_requires_matching_platform_asset() {
 }
 
 #[test]
+fn workspace_update_release_platform_rejects_macos_and_unknown_architectures() {
+    assert_eq!(
+        release_platform_prefixes_for("linux", "x86_64"),
+        Some(("ubuntu-x86_64-", "RustClaw-ubuntu-x86_64-"))
+    );
+    assert_eq!(
+        release_platform_prefixes_for("linux", "aarch64"),
+        Some(("pi-aarch64-", "RustClaw-pi-aarch64-"))
+    );
+    assert_eq!(release_platform_prefixes_for("macos", "aarch64"), None);
+    assert_eq!(release_platform_prefixes_for("linux", "riscv64"), None);
+}
+
+#[test]
 fn workspace_update_release_check_retries_failures_and_honors_forced_refresh() {
     let mut status = WorkspaceUpdateStatus {
         latest_release_checked_ts: Some(1_000),
@@ -1209,6 +1223,22 @@ fn workspace_update_source_checkout_mode_preserves_installation_state() {
 }
 
 #[test]
+fn workspace_update_release_package_mode_preserves_source_state_until_activation() {
+    let previous = WorkspaceUpdateStatus {
+        installation_kind: "source_checkout".to_string(),
+        source_update_available: true,
+        ..WorkspaceUpdateStatus::default()
+    };
+
+    let started = begin_workspace_update_status(&previous, WorkspaceUpdateMode::ReleasePackage);
+
+    assert_eq!(started.status, "running");
+    assert_eq!(started.mode, "release_package");
+    assert_eq!(started.installation_kind, "source_checkout");
+    assert!(started.source_update_available);
+}
+
+#[test]
 fn workspace_update_release_lookup_errors_control_cached_tag_reuse() {
     assert!(LatestReleaseLookupError::RequestTimedOut.can_use_cached_tag());
     assert!(LatestReleaseLookupError::HttpStatus.can_use_cached_tag());
@@ -1228,6 +1258,9 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(script.contains("release_checksum=verified"));
     assert!(script.contains("\"$ROOT_DIR/build-ui-nginx.sh\" --copy-if-configured"));
     assert!(script.contains("rollback_deployment"));
+    assert!(script.contains("--package-mode"));
+    assert!(script.contains("release_package_status=enabled"));
+    assert!(script.contains("PACKAGE_MODE_ORIGINAL_MOVED"));
     assert!(script.contains("NEW_CONFIG_PATHS_FILE"));
     assert!(!script.contains("rm -rf data"));
     assert!(!script.contains("cp -a \"$PACKAGE_DIR/target/release/.\""));
