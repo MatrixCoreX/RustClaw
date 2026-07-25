@@ -668,6 +668,7 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
 - the dashboard checks source and compatible GitHub Release versions when an admin opens it; it shows the running package version and latest platform-specific Release tag
+- packaged Release installations check and show only Release updates: they do not run Git commands or show source-build controls. An admin can explicitly choose Switch to source mode, which clones and validates the complete repository, migrates persistent runtime state, and enables Git pull/build controls only after a successful restart
 - the dashboard system-information section shows OS/version, architecture,
   memory, RustClaw storage, deployment type, and uptime without exposing host
   paths or environment values; missing Linux/macOS facts remain partial data

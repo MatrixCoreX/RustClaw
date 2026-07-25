@@ -14,6 +14,7 @@ enum WorkspaceUpdateMode {
     UiOnly,
     ClawdOnly,
     ReleaseDeploy,
+    SourceCheckout,
 }
 
 impl WorkspaceUpdateMode {
@@ -23,6 +24,7 @@ impl WorkspaceUpdateMode {
             Self::UiOnly => "ui_only",
             Self::ClawdOnly => "clawd_only",
             Self::ReleaseDeploy => "release_deploy",
+            Self::SourceCheckout => "source_checkout",
         }
     }
 }
@@ -430,6 +432,13 @@ async fn start_workspace_update_release_deploy(
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleaseDeploy).await
 }
 
+async fn start_workspace_update_source_checkout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::SourceCheckout).await
+}
+
 async fn start_workspace_update_with_mode(
     state: AppState,
     headers: HeaderMap,
@@ -472,12 +481,26 @@ async fn start_workspace_update_with_mode(
         guard.installation_kind =
             workspace_installation_kind(&state.skill_rt.workspace_root).to_string();
         guard.source_update_available = source_update_available;
-        if mode != WorkspaceUpdateMode::ReleaseDeploy && !source_update_available {
-            return workspace_update_api_error(
-                StatusCode::PRECONDITION_FAILED,
-                "workspace_update_source_checkout_required",
-                Some(guard.clone()),
-            );
+        match mode {
+            WorkspaceUpdateMode::Full
+            | WorkspaceUpdateMode::UiOnly
+            | WorkspaceUpdateMode::ClawdOnly
+                if !source_update_available =>
+            {
+                return workspace_update_api_error(
+                    StatusCode::PRECONDITION_FAILED,
+                    "workspace_update_source_checkout_required",
+                    Some(guard.clone()),
+                );
+            }
+            WorkspaceUpdateMode::SourceCheckout if source_update_available => {
+                return workspace_update_api_error(
+                    StatusCode::CONFLICT,
+                    "workspace_update_source_checkout_already_enabled",
+                    Some(guard.clone()),
+                );
+            }
+            _ => {}
         }
         *guard = begin_workspace_update_status(&guard, mode);
         guard.clone()
@@ -601,6 +624,10 @@ async fn run_workspace_update_job(
         }
         WorkspaceUpdateMode::ReleaseDeploy => {
             run_workspace_update_release_deploy_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::SourceCheckout => {
+            run_workspace_update_source_checkout_job(workspace_root, shared, control).await;
             return;
         }
     }
@@ -1135,6 +1162,91 @@ async fn run_workspace_update_release_deploy_job(
                 &shared,
                 err,
                 "workspace_update.release_deploy_restart_failed",
+            );
+        }
+    }
+}
+
+async fn run_workspace_update_source_checkout_job(
+    workspace_root: PathBuf,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    set_workspace_update_step(&shared, "cloning_source_checkout");
+    reset_workspace_update_build_logs(&shared);
+    {
+        let mut guard = workspace_update_status_lock(shared.as_ref());
+        set_workspace_update_next_step(
+            &mut guard,
+            "workspace_update.source_checkout_cloning",
+        );
+    }
+    match run_workspace_update_command_streaming(
+        "bash",
+        &[
+            "./scripts/switch-to-source-checkout.sh",
+            "--root",
+            ".",
+        ],
+        &workspace_root,
+        shared.clone(),
+        control.clone(),
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = workspace_update_status_lock(shared.as_ref());
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+            guard.installation_kind = "source_checkout".to_string();
+            guard.source_update_available = true;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "source_checkout_migration_failed",
+                "workspace_update.source_checkout_failed",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "workspace_update.source_checkout_failed",
+            );
+            return;
+        }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "restarting_clawd");
+    match schedule_workspace_update_clawd_restart(&workspace_root) {
+        Ok(()) => {
+            let mut guard = workspace_update_status_lock(shared.as_ref());
+            guard.status = "restarting".to_string();
+            guard.step = "source_checkout_restart_scheduled".to_string();
+            guard.finished_ts = Some(current_unix_ts());
+            guard.error = None;
+            set_workspace_update_next_step(
+                &mut guard,
+                "workspace_update.source_checkout_restart_scheduled",
+            );
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "workspace_update.source_checkout_restart_failed",
             );
         }
     }

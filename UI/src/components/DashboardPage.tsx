@@ -3,6 +3,7 @@ import {
   BellRing,
   Cpu,
   Download,
+  GitBranch,
   LayoutDashboard,
   Loader2,
   RefreshCw,
@@ -123,6 +124,7 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const latestReleaseStatus = workspaceUpdateStatus?.latest_release_check_status;
   const sourceUpdateAvailable = workspaceUpdateStatus?.source_update_available === true;
+  const canEnableSourceCheckout = workspaceUpdateStatus?.installation_kind === "release_package";
   const latestReleaseDisplay =
     workspaceUpdateStatus?.latest_release_tag ||
     (latestReleaseStatus === "unavailable"
@@ -310,64 +312,87 @@ export function DashboardPage({
                   ? t("更新中", "Updating")
                   : t("更新", "Update")}
               </button>
+              {canEnableSourceCheckout ? (
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("source_checkout")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                  className="theme-secondary-btn mt-2 px-3 py-2 text-sm"
+                  title={t(
+                    "获取完整 Git 源码并切换到可拉取、可编译的开发模式",
+                    "Fetch the complete Git source and switch to pull-and-build development mode",
+                  )}
+                >
+                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "source_checkout" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <GitBranch className="h-4 w-4" />
+                  )}
+                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "source_checkout"
+                    ? t("切换中", "Switching")
+                    : t("切换到源码模式", "Switch to source mode")}
+                </button>
+              ) : null}
             </div>
 
             {sourceUpdateAvailable ? (
               <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:p-5">
-              <div className="flex items-start gap-3">
-                <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
-                  <Cpu className="h-5 w-5" />
-                </span>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">
-                    {t("拉取源码并编译", "Pull Source and Compile")}
-                  </h4>
-                  <p className="mt-2 text-sm leading-6 text-white/65">
-                    {t(
-                      "用于开发或排障，可完整拉取并编译，也可只编译 UI 或 clawd。",
-                      "For development or troubleshooting. Pull and build everything, or build only the UI or clawd.",
-                    )}
-                  </p>
+                <div className="flex items-start gap-3">
+                  <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
+                    <Cpu className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">
+                      {t("拉取源码并编译", "Pull Source and Compile")}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-white/65">
+                      {t(
+                        "用于开发或排障，可完整拉取并编译，也可只编译 UI 或 clawd。",
+                        "For development or troubleshooting. Pull and build everything, or build only the UI or clawd.",
+                      )}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  {t(
-                    "自己编译存在风险：耗时较长，会占用较多 CPU、内存和磁盘；依赖、网络或本地源码冲突都可能导致失败，低配置设备可能暂时无法响应。",
-                    "Compiling locally carries risk: it can take a long time and consume significant CPU, memory, and disk. Dependencies, network issues, or local source conflicts can fail the build, and low-resource devices may become temporarily unresponsive.",
-                  )}
-                </span>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void onStartWorkspaceUpdate("full")}
-                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  {workspaceUpdateHasRemoteDiff ? t("拉取并编译", "Pull and Build") : t("完整编译", "Build All")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onStartWorkspaceUpdate("ui_only")}
-                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                  {t("只编译 UI", "Build UI")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onStartWorkspaceUpdate("clawd_only")}
-                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                >
-                  <Cpu className="h-4 w-4" />
-                  {t("只编译 clawd", "Build clawd")}
-                </button>
-              </div>
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    {t(
+                      "自己编译存在风险：耗时较长，会占用较多 CPU、内存和磁盘；依赖、网络或本地源码冲突都可能导致失败，低配置设备可能暂时无法响应。",
+                      "Compiling locally carries risk: it can take a long time and consume significant CPU, memory, and disk. Dependencies, network issues, or local source conflicts can fail the build, and low-resource devices may become temporarily unresponsive.",
+                    )}
+                  </span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void onStartWorkspaceUpdate("full")}
+                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                    className="theme-secondary-btn px-3 py-2 text-sm"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    {workspaceUpdateHasRemoteDiff
+                      ? t("拉取并编译", "Pull and Build")
+                      : t("完整编译", "Build All")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onStartWorkspaceUpdate("ui_only")}
+                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                    className="theme-secondary-btn px-3 py-2 text-sm"
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    {t("只编译 UI", "Build UI")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onStartWorkspaceUpdate("clawd_only")}
+                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                    className="theme-secondary-btn px-3 py-2 text-sm"
+                  >
+                    <Cpu className="h-4 w-4" />
+                    {t("只编译 clawd", "Build clawd")}
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>

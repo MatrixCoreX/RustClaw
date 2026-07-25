@@ -27,6 +27,7 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStep("building_clawd", "zh"), "正在编译 clawd");
   assert.equal(formatWorkspaceUpdateStep("custom_step", "en"), "custom_step");
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
+  assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");
   assert.equal(formatWorkspaceUpdateStatus("idle", undefined, "zh"), "待更新");
@@ -78,6 +79,22 @@ test("builds release deployment progress view", () => {
   assert.equal(view.notice?.detail, "Release deployment is running. Logs will keep refreshing below.");
 });
 
+test("builds source checkout migration progress view", () => {
+  const view = buildWorkspaceUpdateView(
+    status({
+      status: "running",
+      mode: "source_checkout",
+      step: "cloning_source_checkout",
+      next_step_key: "workspace_update.source_checkout_cloning",
+    }),
+    "en",
+  );
+  assert.equal(view.progressPercent, 45);
+  assert.match(view.progressLabel, /Validating source/);
+  assert.equal(view.notice?.title, "Fetching complete source");
+  assert.match(view.notice?.detail ?? "", /current Release installation remains unchanged/);
+});
+
 test("builds failed and canceled notices", () => {
   const failed = buildWorkspaceUpdateView(status({ status: "failed", error: "compile_failed", mode: "ui_only" }), "en");
   assert.equal(failed.notice?.tone, "error");
@@ -87,6 +104,18 @@ test("builds failed and canceled notices", () => {
   const canceled = buildWorkspaceUpdateView(status({ status: "canceled" }), "zh");
   assert.equal(canceled.notice?.tone, "info");
   assert.equal(canceled.notice?.title, "编译已停止。");
+
+  const sourceFailed = buildWorkspaceUpdateView(
+    status({
+      status: "failed",
+      mode: "source_checkout",
+      error: "source_checkout_migration_failed",
+      next_step_key: "workspace_update.source_checkout_failed",
+    }),
+    "zh",
+  );
+  assert.equal(sourceFailed.notice?.title, "源码模式切换失败");
+  assert.match(sourceFailed.notice?.detail ?? "", /Release 安装保持不变/);
 });
 
 test("formats workspace update next-step keys and legacy fallback", () => {
@@ -196,7 +225,7 @@ test("reloads once after compile modes complete but not after release deployment
 
 test("formats log preview and timestamps", () => {
   const view = buildWorkspaceUpdateView(status({ stdout_tail: "ok", stderr_tail: "warn" }), "en");
-  assert.equal(view.logPreview, "Build output\nok\n\nBuild log (stderr, not necessarily errors)\nwarn");
+  assert.equal(view.logPreview, "Operation output\nok\n\nOperation log (stderr, not necessarily errors)\nwarn");
   assert.equal(formatWorkspaceUpdateTime(null, "en"), "--");
   assert.match(formatWorkspaceUpdateTime(1782197321, "en"), /2026|6|23/);
 });

@@ -43,12 +43,14 @@ export function formatWorkspaceUpdateStep(step: string | null | undefined, lang:
     building_clawd: copy(lang, "正在编译 clawd", "Building clawd"),
     downloading_release: copy(lang, "正在下载 Release 包", "Downloading Release package"),
     deploying_release: copy(lang, "正在部署 Release 包", "Deploying Release package"),
+    cloning_source_checkout: copy(lang, "正在获取完整源码", "Fetching complete source"),
     cancel_requested: copy(lang, "正在停止编译", "Stopping build"),
     canceled: copy(lang, "已停止", "Stopped"),
     restarting_clawd: copy(lang, "正在安排重启", "Scheduling restart"),
     restart_scheduled: copy(lang, "已安排重启", "Restart scheduled"),
     clawd_restart_scheduled: copy(lang, "clawd 已安排重启", "clawd restart scheduled"),
     release_restart_scheduled: copy(lang, "Release 已部署，正在重启", "Release deployed, restarting"),
+    source_checkout_restart_scheduled: copy(lang, "源码模式已启用，正在重启", "Source mode enabled, restarting"),
   };
   return labels[step || ""] || step || "--";
 }
@@ -61,6 +63,7 @@ export function formatWorkspaceUpdateStatus(
   if (status === "running") {
     if (mode === "ui_only" || mode === "clawd_only") return copy(lang, "编译中", "Building");
     if (mode === "release_deploy") return copy(lang, "部署中", "Deploying");
+    if (mode === "source_checkout") return copy(lang, "切换中", "Switching");
     return copy(lang, "更新中", "Updating");
   }
   if (status === "restarting") return copy(lang, "重启中", "Restarting");
@@ -81,6 +84,11 @@ export function formatWorkspaceUpdateApiError(error: string | null | undefined, 
       lang,
       "当前使用 Release 包安装，只能通过 Release 更新。",
       "This installation uses a Release package and can only be updated through Releases.",
+    ),
+    workspace_update_source_checkout_already_enabled: copy(
+      lang,
+      "当前已经是源码模式。",
+      "Source mode is already enabled.",
     ),
   };
   return code ? labels[code] || code : copy(lang, "未知错误", "Unknown error");
@@ -209,6 +217,26 @@ export function formatWorkspaceUpdateNextStep(
       "Release 包已部署，但自动重启失败。请在服务器上手动重启 clawd。",
       "The Release package was deployed, but automatic restart failed. Restart clawd manually on the server.",
     ),
+    "workspace_update.source_checkout_cloning": copy(
+      lang,
+      "正在克隆并验证完整源码，现有 Release 安装在验证成功前不会改变。",
+      "Cloning and validating the complete source tree. The current Release installation remains unchanged until validation succeeds.",
+    ),
+    "workspace_update.source_checkout_failed": copy(
+      lang,
+      "源码模式切换失败；当前 Release 安装保持不变。请检查网络、Git 和目录写入权限后重试。",
+      "Switching to source mode failed. The current Release installation was left unchanged. Check network, Git, and directory permissions, then retry.",
+    ),
+    "workspace_update.source_checkout_restart_scheduled": copy(
+      lang,
+      "源码模式已启用，RustClaw 正在重启；恢复后会显示 Git 拉取与编译功能。",
+      "Source mode is enabled and RustClaw is restarting. Git pull and build controls will appear after recovery.",
+    ),
+    "workspace_update.source_checkout_restart_failed": copy(
+      lang,
+      "源码模式已启用，但自动重启失败。请在服务器上手动重启 RustClaw。",
+      "Source mode was enabled, but automatic restart failed. Restart RustClaw manually on the server.",
+    ),
     "workspace_update.canceled": copy(
       lang,
       "编译已停止；可以修复问题后重新编译。",
@@ -253,6 +281,7 @@ function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | u
     building_clawd: 82,
     downloading_release: 35,
     deploying_release: 78,
+    cloning_source_checkout: 45,
     cancel_requested: 92,
     restarting_clawd: 96,
   };
@@ -275,6 +304,13 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
   if (running && status?.mode === "release_deploy") {
     return copy(lang, "Release 包部署中，完成后会保留配置并重启 clawd。", "Deploying the Release package; configs will be preserved and clawd will restart.");
   }
+  if (running && status?.mode === "source_checkout") {
+    return copy(
+      lang,
+      "正在验证源码并迁移本地运行状态，成功后会重启并启用 Git 拉取与编译。",
+      "Validating source and migrating local runtime state. RustClaw will restart with Git pull and build controls when complete.",
+    );
+  }
   return formatWorkspaceUpdateStep(status?.step, lang);
 }
 
@@ -282,9 +318,9 @@ function workspaceUpdateLogPreview(status: WorkspaceUpdateStatus | null | undefi
   const stdoutPreview = status?.stdout_tail?.trim() || "";
   const stderrPreview = status?.stderr_tail?.trim() || "";
   return [
-    stdoutPreview ? `${copy(lang, "构建输出", "Build output")}\n${stdoutPreview}` : "",
+    stdoutPreview ? `${copy(lang, "操作输出", "Operation output")}\n${stdoutPreview}` : "",
     stderrPreview
-      ? `${copy(lang, "构建日志（stderr，不一定是错误）", "Build log (stderr, not necessarily errors)")}\n${stderrPreview}`
+      ? `${copy(lang, "运行日志（stderr，不一定是错误）", "Operation log (stderr, not necessarily errors)")}\n${stderrPreview}`
       : "",
   ]
     .filter(Boolean)
@@ -296,15 +332,23 @@ function workspaceUpdateErrorNotice(
   lang: UiLanguage,
 ): { title: string; detail: string } {
   const error = status.error?.trim() || "";
+  const title =
+    error === "source_checkout_migration_failed"
+      ? copy(lang, "源码模式切换失败", "Source-mode migration failed")
+      : error || copy(lang, "更新失败", "Update failed");
   return {
-    title: error || copy(lang, "更新失败", "Update failed"),
+    title,
     detail: copy(
       lang,
       status.mode === "release_deploy"
         ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
+        : status.mode === "source_checkout"
+          ? "请查看下方日志摘要；当前 Release 安装仍然保留，可修复网络、Git 或写入权限后重试。"
         : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
       status.mode === "release_deploy"
         ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
+        : status.mode === "source_checkout"
+          ? "Check the log summary below. The current Release installation is still preserved; fix network, Git, or write permissions and retry."
         : "Check the log summary below, then fix Git, network, or build issues and retry.",
     ),
   };
@@ -342,8 +386,16 @@ function workspaceUpdateNotice(
       tone: "success",
       title: copy(
         lang,
-        status.mode === "release_deploy" ? "Release 包已部署，RustClaw 正在重启。" : "构建已完成，RustClaw 正在重启。",
-        status.mode === "release_deploy" ? "Release package deployed and RustClaw is restarting." : "Build completed and RustClaw is restarting.",
+        status.mode === "release_deploy"
+          ? "Release 包已部署，RustClaw 正在重启。"
+          : status.mode === "source_checkout"
+            ? "源码模式已启用，RustClaw 正在重启。"
+            : "构建已完成，RustClaw 正在重启。",
+        status.mode === "release_deploy"
+          ? "Release package deployed and RustClaw is restarting."
+          : status.mode === "source_checkout"
+            ? "Source mode is enabled and RustClaw is restarting."
+            : "Build completed and RustClaw is restarting.",
       ),
       detail: nextStep ?? copy(
         lang,
@@ -360,9 +412,13 @@ function workspaceUpdateNotice(
         lang,
         status.mode === "release_deploy"
           ? "Release 部署正在进行，日志会在下方持续刷新。"
+          : status.mode === "source_checkout"
+            ? "正在安全切换到源码模式，操作日志会在下方持续刷新。"
           : "更新流程正在进行，编译日志会在下方持续刷新。",
         status.mode === "release_deploy"
           ? "Release deployment is running. Logs will keep refreshing below."
+          : status.mode === "source_checkout"
+            ? "The safe source-mode migration is running. Operation logs will keep refreshing below."
           : "The update is running. Build logs will keep refreshing below.",
       ),
     };
