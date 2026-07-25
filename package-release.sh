@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/scripts/version_info.sh"
 cd "$SCRIPT_DIR"
 
 EXPLICIT_RELEASE_BIN_DIR="${RUSTCLAW_RELEASE_BIN_DIR:-}"
@@ -133,6 +135,12 @@ copy_if_exists "start-all-bin.sh"
 copy_if_exists "component_start"
 copy_if_exists "stop-rustclaw.sh"
 copy_if_exists "deploy-github-release.sh"
+RUSTCLAW_PACKAGE_VERSION="$(rustclaw_version_from_root "$SCRIPT_DIR")"
+if [[ "$RUSTCLAW_PACKAGE_VERSION" == "unknown" ]]; then
+  echo "Unable to resolve RustClaw package version."
+  exit 1
+fi
+printf '%s\n' "$RUSTCLAW_PACKAGE_VERSION" > "$STAGE_PROJECT_DIR/VERSION"
 
 if [[ -d "$SCRIPT_DIR/UI/dist" ]]; then
   mkdir -p "$STAGE_PROJECT_DIR/UI"
