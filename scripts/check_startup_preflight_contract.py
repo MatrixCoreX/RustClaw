@@ -25,6 +25,11 @@ def build_fixture(root: Path) -> Path:
     script = root / "start-all-bin.sh"
     shutil.copy2(START_SCRIPT, script)
     script.chmod(0o755)
+    write(
+        root / "component_start/common.sh",
+        (ROOT / "component_start/common.sh").read_text(encoding="utf-8"),
+        executable=True,
+    )
 
     write(
         root / "scripts/version_info.sh",
@@ -127,6 +132,70 @@ def main() -> int:
                 "WhatsApp Web preflight completed"
             )
             return 1
+
+    with tempfile.TemporaryDirectory(prefix="rustclaw-process-identity-") as raw:
+        root = Path(raw)
+        script = build_fixture(root)
+        write(
+            root / "configs/channels/telegram.toml",
+            "[telegram_bot]\nenabled = false\n",
+        )
+        write(
+            root / "target/release/clawd",
+            "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n",
+            executable=True,
+        )
+        decoy = subprocess.Popen(
+            [
+                "bash",
+                "-c",
+                "sleep 30",
+                f"mentions-but-is-not-{root / 'target/release/clawd'}",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        started_pid = 0
+        try:
+            env = os.environ.copy()
+            env["HOME"] = str(root / "home")
+            env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+            result = subprocess.run(
+                ["bash", str(script), "release"],
+                cwd=root,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=20,
+                check=False,
+            )
+            pid_path = root / ".pids/clawd.pid"
+            if pid_path.exists():
+                started_pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if result.returncode != 0 or started_pid <= 0:
+                print(
+                    "STARTUP_PREFLIGHT_CONTRACT failed: exact process identity "
+                    "case did not start clawd"
+                )
+                return 1
+            if "clawd is already running" in result.stdout:
+                print(
+                    "STARTUP_PREFLIGHT_CONTRACT failed: an unrelated command "
+                    "argument caused a clawd false positive"
+                )
+                return 1
+        finally:
+            if started_pid > 0:
+                try:
+                    os.kill(started_pid, 15)
+                except ProcessLookupError:
+                    pass
+            decoy.terminate()
+            try:
+                decoy.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                decoy.kill()
 
     print("STARTUP_PREFLIGHT_CONTRACT ok")
     return 0

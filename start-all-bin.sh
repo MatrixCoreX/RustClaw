@@ -6,6 +6,8 @@ cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
 print_rustclaw_version "$SCRIPT_DIR"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/component_start/common.sh"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
@@ -26,6 +28,7 @@ fi
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
+COMPONENT_PID_DIR="$PID_DIR"
 
 # Usage:
 #   ./start-all-bin.sh [release]
@@ -129,13 +132,13 @@ if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
 fi
 
 start_clawd() {
-  if pgrep -f 'target/release/clawd|cargo run -p clawd' >/dev/null 2>&1; then
+  if component_pid_is_running "clawd" "$CLAWD_BIN"; then
     echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
     return 0
   fi
   nohup "$CLAWD_BIN" >"$LOG_DIR/clawd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/clawd.pid"
+  component_write_pid_file "clawd" "$pid"
   echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -154,13 +157,13 @@ start_webd() {
     echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
     return 1
   fi
-  if pgrep -f 'target/release/webd|cargo run -p webd' >/dev/null 2>&1; then
+  if component_pid_is_running "webd" "$WEBD_BIN"; then
     echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
     return 0
   fi
   nohup "$WEBD_BIN" >"$LOG_DIR/webd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/webd.pid"
+  component_write_pid_file "webd" "$pid"
   echo "Starting webd, PID=$pid, log: $LOG_DIR/webd.log" # zh: webd 启动中，PID=$pid, 日志: $LOG_DIR/webd.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -174,13 +177,13 @@ start_telegramd() {
     echo "telegram_bot.enabled=false, skipping telegramd startup." # zh: telegram_bot.enabled=false，跳过 telegramd 启动。
     return 0
   fi
-  if pgrep -f 'target/release/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
+  if component_pid_is_running "telegramd" "$TELEGRAMD_BIN"; then
     echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
     return 0
   fi
   nohup "$TELEGRAMD_BIN" >"$LOG_DIR/telegramd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/telegramd.pid"
+  component_write_pid_file "telegramd" "$pid"
   echo "Starting telegramd binary, PID=$pid, log: $LOG_DIR/telegramd.log" # zh: telegramd 二进制启动中，PID=$pid, 日志: $LOG_DIR/telegramd.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -199,13 +202,13 @@ start_whatsapp_webd() {
     echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
     return 1
   fi
-  if pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
+  if component_pid_is_running "whatsapp_webd" "$WHATSAPP_WEBD_BIN"; then
     echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
     return 0
   fi
   nohup "$WHATSAPP_WEBD_BIN" >"$LOG_DIR/whatsapp_webd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/whatsapp_webd.pid"
+  component_write_pid_file "whatsapp_webd" "$pid"
   echo "Starting whatsapp_webd, PID=$pid, log: $LOG_DIR/whatsapp_webd.log" # zh: whatsapp_webd 启动中，PID=$pid, 日志: $LOG_DIR/whatsapp_webd.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -224,13 +227,13 @@ start_whatsappd() {
     echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
     return 1
   fi
-  if pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
+  if component_pid_is_running "whatsappd" "$WHATSAPPD_BIN"; then
     echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
     return 0
   fi
   nohup "$WHATSAPPD_BIN" >"$LOG_DIR/whatsappd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/whatsappd.pid"
+  component_write_pid_file "whatsappd" "$pid"
   echo "Starting whatsappd binary, PID=$pid, log: $LOG_DIR/whatsappd.log" # zh: whatsappd 二进制启动中，PID=$pid, 日志: $LOG_DIR/whatsappd.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -248,14 +251,14 @@ start_feishud() {
     echo "Binary not found or not executable: $FEISHUD_BIN" # zh: 二进制不存在或不可执行：$FEISHUD_BIN
     return 0
   fi
-  if pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1; then
+  if component_pid_is_running "feishud" "$FEISHUD_BIN"; then
     echo "feishud is already running, skipping startup." # zh: feishud 已在运行，跳过启动。
     return 0
   fi
   export FEISHU_CONFIG_PATH="${FEISHU_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/feishu.toml}"
   nohup "$FEISHUD_BIN" >"$LOG_DIR/feishud.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/feishud.pid"
+  component_write_pid_file "feishud" "$pid"
   echo "Starting feishud binary, PID=$pid, log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动中，PID=$pid, 日志: $LOG_DIR/feishud.log
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -273,14 +276,14 @@ start_wechatd() {
     echo "Binary not found or not executable: $WECHATD_BIN"
     return 0
   fi
-  if pgrep -f 'target/release/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
+  if component_pid_is_running "wechatd" "$WECHATD_BIN"; then
     echo "wechatd is already running, skipping startup."
     return 0
   fi
   export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
   nohup "$WECHATD_BIN" >"$LOG_DIR/wechatd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/wechatd.pid"
+  component_write_pid_file "wechatd" "$pid"
   echo "Starting wechatd binary, PID=$pid, log: $LOG_DIR/wechatd.log"
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -294,14 +297,14 @@ start_larkd() {
     echo "lark.enabled=false, skipping larkd startup."
     return 0
   fi
-  if pgrep -f 'target/release/larkd|cargo run -p larkd' >/dev/null 2>&1; then
+  if component_pid_is_running "larkd" "$LARKD_BIN"; then
     echo "larkd is already running, skipping startup."
     return 0
   fi
   export LARK_CONFIG_PATH="${LARK_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/lark.toml}"
   nohup "$LARKD_BIN" >"$LOG_DIR/larkd.log" 2>&1 &
   local pid=$!
-  echo "$pid" >"$PID_DIR/larkd.pid"
+  component_write_pid_file "larkd" "$pid"
   echo "Starting larkd binary, PID=$pid, log: $LOG_DIR/larkd.log"
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
