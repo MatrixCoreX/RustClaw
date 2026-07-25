@@ -1136,45 +1136,31 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     Err(last_error)
 }
 
-pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTask>) -> String {
-    let providers = task
-        .map(|task| state.task_llm_providers(task))
-        .unwrap_or_else(|| state.core.llm_providers.clone());
-    if let Some(p) = providers
-        .iter()
-        .find(|p| p.config.provider_type == "openai_compat")
-    {
-        // §P4.4 E3.a: 走 broker 优先 / config 兜底的统一通路，让 forge 给
-        // skill-runner 子进程的 OPENAI_API_KEY 与 builtin chat 的 LLM 调用
-        // 拿到同一份凭据，避免 broker 装上后两条路径漂移。
-        return p.api_key().to_string();
-    }
-    String::new()
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectedLlmConnection {
+    pub(crate) vendor: String,
+    pub(crate) provider_type: String,
+    pub(crate) base_url: String,
+    pub(crate) model: String,
+    pub(crate) api_key: String,
 }
 
-pub(crate) fn selected_openai_base_url(state: &AppState, task: Option<&ClaimedTask>) -> String {
+pub(crate) fn selected_llm_connection(
+    state: &AppState,
+    task: Option<&ClaimedTask>,
+) -> Option<SelectedLlmConnection> {
     let providers = task
         .map(|task| state.task_llm_providers(task))
         .unwrap_or_else(|| state.core.llm_providers.clone());
-    if let Some(p) = providers
-        .iter()
-        .find(|p| p.config.provider_type == "openai_compat")
-    {
-        return p.config.base_url.clone();
-    }
-    "https://api.openai.com/v1".to_string()
-}
-
-pub(crate) fn selected_openai_model(state: &AppState, task: Option<&ClaimedTask>) -> String {
-    let providers = task
-        .map(|task| state.task_llm_providers(task))
-        .unwrap_or_else(|| state.core.llm_providers.clone());
-    providers
-        .iter()
-        .find(|p| p.config.provider_type == "openai_compat")
-        .map(|p| p.config.model.clone())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "gpt-4o-mini".to_string())
+    providers.first().map(|provider| SelectedLlmConnection {
+        vendor: crate::llm_vendor_name(provider).to_string(),
+        provider_type: provider.config.provider_type.clone(),
+        base_url: provider.config.base_url.clone(),
+        model: provider.config.model.clone(),
+        // Keep the same broker-first/config-fallback source used by normal
+        // model calls. The runner converts this into scoped child tokens.
+        api_key: provider.api_key().to_string(),
+    })
 }
 
 #[cfg(test)]

@@ -64,6 +64,35 @@ fn local_clawd_base_url_has_stable_missing_config_fallback() {
     );
 }
 
+#[test]
+fn selected_provider_credentials_include_vendor_and_protocol_aliases() {
+    assert_eq!(
+        selected_provider_api_key_env_names("minimax", "openai_compat"),
+        vec!["MINIMAX_API_KEY", "OPENAI_API_KEY"]
+    );
+    assert_eq!(
+        selected_provider_api_key_env_names("mimo", "openai_compat"),
+        vec!["MIMO_API_KEY", "OPENAI_API_KEY"]
+    );
+    assert_eq!(
+        selected_provider_api_key_env_names("openai", "openai_compat"),
+        vec!["OPENAI_API_KEY"]
+    );
+    assert_eq!(
+        selected_provider_api_key_env_names("anthropic", "anthropic_claude"),
+        vec!["ANTHROPIC_API_KEY"]
+    );
+    assert_eq!(
+        selected_provider_api_key_env_names("google", "google_gemini"),
+        vec!["GOOGLE_API_KEY"]
+    );
+    assert_eq!(
+        selected_provider_api_key_env_names("custom", "openai_compat"),
+        vec!["OPENAI_API_KEY"]
+    );
+    assert!(selected_provider_api_key_env_names("fixture", "fixture_replay").is_empty());
+}
+
 fn preview_mapping() -> PlannerCapabilityMapping {
     toml::from_str(
         r#"

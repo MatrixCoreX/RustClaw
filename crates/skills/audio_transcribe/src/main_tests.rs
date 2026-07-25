@@ -87,3 +87,45 @@ fn select_vendor_keeps_explicit_minimax_request() {
 fn sanitize_oss_name_keeps_safe_chars() {
     assert_eq!(sanitize_oss_filename("a b/c?.wav"), "a_b_c_.wav");
 }
+
+#[test]
+fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
+    let root =
+        std::env::temp_dir().join(format!("rustclaw-audio-transcribe-preview-{}", unix_ts()));
+    let cfg = RootConfig {
+        audio_transcribe: AudioTranscribeConfig {
+            default_vendor: Some("minimax".to_string()),
+            default_model: Some("speech-01".to_string()),
+            providers: AudioProviderOverrides {
+                minimax: Some(vendor_cfg("https://api.minimaxi.com/v1", "")),
+                ..AudioProviderOverrides::default()
+            },
+            ..AudioTranscribeConfig::default()
+        },
+        ..RootConfig::default()
+    };
+
+    let (text, extra) = execute(
+        &cfg,
+        &root,
+        json!({
+            "action": "preview_transcribe",
+            "file": "document/media_dry_run/audio_check.mp3"
+        }),
+    )
+    .expect("preview must not require the input file or provider credentials");
+
+    assert_eq!(text, "AUDIO_TRANSCRIBE_PREVIEW");
+    assert_eq!(extra["action"], "preview_transcribe");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["provider_call"], false);
+    assert_eq!(extra["filesystem_write"], false);
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "speech-01");
+    assert_eq!(
+        extra["input_path"],
+        "document/media_dry_run/audio_check.mp3"
+    );
+    assert_eq!(extra["input_exists"], false);
+}
