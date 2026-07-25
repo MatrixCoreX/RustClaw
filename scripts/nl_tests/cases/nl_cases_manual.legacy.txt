@@ -16,7 +16,7 @@ chat|chat_translate_simple||把这句话翻成英文：现在服务已经恢复�
 act|act_whoami_only||只输出当前用户名，不要解释
 act|act_hostname_only||只输出当前机器 hostname
 act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
-act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+act|act_find_service_file||检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
 act|act_read_agents_head||读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
 act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值

@@ -123,6 +123,8 @@ copy_if_exists "scripts"
 copy_if_exists "pi_app"
 copy_if_exists "services/wa-web-bridge"
 copy_if_exists "README.md"
+copy_if_exists "README.zh-CN.md"
+copy_if_exists "USAGE.md"
 copy_if_exists "rustclaw"
 copy_if_exists "install-rustclaw-cmd.sh"
 copy_if_exists "build-ui-nginx.sh"
@@ -142,23 +144,6 @@ mkdir -p "$STAGE_PROJECT_DIR/target/release"
 for bin in "${REQUIRED_BINS[@]}"; do
   cp -R "$(resolve_release_bin "$bin")" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
-
-# zh: 发布包内只生成英文 USAGE.txt，避免运行时/交付物混用多语言输出。
-echo "[4.5/6] Add usage note (ready to run)..."
-cat > "$STAGE_PROJECT_DIR/USAGE.txt" <<'USAGE_EN'
-RustClaw runtime package — ready to run
-
-1) Extract the archive and cd into this directory.
-2) Before first run, configure channels (e.g. Telegram/WhatsApp) and models under configs/.
-3) Start with one of:
-   - ./start-all.sh <vendor> <model> release [channels]
-     e.g. ./start-all.sh openai gpt-4o release telegram
-   - ./rustclaw -start release all --quick
-   - Backend only: ./start-all-bin.sh release
-4) Stop: ./stop-rustclaw.sh
-5) Data and logs: data/ (database), logs/ (runtime logs).
-6) Raspberry Pi small screen (optional): see pi_app/ scripts and README; or ./install-rustclaw-cmd.sh --pi-app for desktop shortcut and autostart.
-USAGE_EN
 
 echo "[5/6] Apply sanitized config as configs/config.toml..."
 cp -R "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"

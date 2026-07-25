@@ -2,21 +2,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
-source "$SCRIPT_DIR/scripts/version_info.sh"
-print_rustclaw_version "$SCRIPT_DIR"
-
-# Enable colored log tags on interactive terminals unless overridden.
-if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-  export RUSTCLAW_LOG_COLOR=1
-fi
+source "$SCRIPT_DIR/component_start/common.sh"
+component_start_init "$SCRIPT_DIR" release "./component_start/start-future-adapters.sh"
 
 python3 - <<'PY'
+import os
 import tomllib
 from pathlib import Path
 
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+cfg = tomllib.loads(Path(os.environ["RUSTCLAW_CONFIG_PATH"]).read_text(encoding="utf-8"))
 adapters = cfg.get("adapters", {})
 enabled = []
 for name, conf in adapters.items():

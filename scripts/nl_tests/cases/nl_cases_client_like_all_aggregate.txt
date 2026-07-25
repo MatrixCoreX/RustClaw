@@ -60,7 +60,7 @@ file|cases_write_and_deliver_hello|write_and_deliver,client_like,aggregate,side_
 # source: scripts/nl_tests/cases/_p2_smoke/cases_v2.txt
 file|cases_v2_write_and_deliver_hello|write_and_deliver,client_like,aggregate,side_effect|写一个 hello world shell 脚本，保存成 document/hello_from_p2_smoke_v2.sh，然后把文件发给我
 # source: scripts/nl_tests/cases/nl_case_act_find_service_file_only.txt
-single|nl_case_act_find_service_file_only_0001|single,client_like,aggregate|检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+single|nl_case_act_find_service_file_only_0001|single,client_like,aggregate|检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 # source: scripts/nl_tests/cases/nl_case_act_git_status_brief_only.txt
 single|nl_case_act_git_status_brief_only_0001|single,client_like,aggregate|看看这个仓库现在有没有未提交改动，用一句话告诉我
 # source: scripts/nl_tests/cases/nl_case_act_list_logs_only.txt
@@ -1693,7 +1693,7 @@ continuous|nl_cases_task_updates_single_language_task_updates_en_table_refinemen
 chat_act|nl_cases_text_match_run_cmd_uname_with_result_tail_en|client_like,aggregate|please run uname -a and tell me the result
 act|nl_cases_text_match_fs_readme_head_summary_semantic|client_like,aggregate|看看 README.md 开头讲了什么，读前 20 行后用三句话总结
 act|nl_cases_text_match_fs_hidden_files_bool_semantic|client_like,aggregate|帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
-chat_act|nl_cases_text_match_fs_service_semantic_explain|client_like,aggregate|检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+chat_act|nl_cases_text_match_fs_service_semantic_explain|client_like,aggregate|检查仓库里有没有 scripts/install-systemd-service.sh；如果有，给路径并顺手解释它是干什么的
 chat_act|nl_cases_text_match_fs_compare_readmes_semantic|client_like,aggregate|比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
 chat_act|nl_cases_text_match_followup_count_scripts_items_semantic|client_like,aggregate|统计 scripts 目录下有多少个直接子项，只输出数字
 file|nl_cases_text_match_file_write_and_deliver_semantic_cn|client_like,aggregate,side_effect|写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
@@ -1707,7 +1707,7 @@ chat_act|nl_cases_text_match_semantic_pwd_natural_cn|natural,semantic,cn,client_
 act|nl_cases_text_match_semantic_readme_head_natural_cn|natural,semantic,cn,client_like,aggregate|帮我瞄一眼 README 开头，别逐行复述，直接用三句话概括重点
 act|nl_cases_text_match_semantic_hidden_files_natural_cn|natural,semantic,cn,client_like,aggregate|这个目录里有没有那种点开头的隐藏文件？有的话随便举两个例子
 act|nl_cases_text_match_semantic_package_name_natural_cn|natural,semantic,cn,client_like,aggregate|去 package.json 里把项目名找出来，只把 name 的值回给我
-chat_act|nl_cases_text_match_semantic_service_explain_natural_cn|natural,semantic,cn,client_like,aggregate|帮我看看仓库里有没有 rustclaw.service 这个文件；如果有，把路径给我，再顺带说一句它大概率是干嘛的
+chat_act|nl_cases_text_match_semantic_service_explain_natural_cn|natural,semantic,cn,client_like,aggregate|帮我看看仓库里有没有 scripts/install-systemd-service.sh 这个文件；如果有，把路径给我，再顺带说一句它大概率是干嘛的
 chat_act|nl_cases_text_match_semantic_compare_readmes_natural_cn|natural,semantic,cn,client_like,aggregate|你帮我比一下 README.md 和 README.zh-CN.md 哪个更大，再简单解释一下为什么会这样
 chat_act|nl_cases_text_match_semantic_username_only_natural_cn|natural,semantic,cn,client_like,aggregate|不用展开，我只想知道当前用户名，直接回结果
 chat_act|nl_cases_text_match_semantic_hostname_only_natural_cn|natural,semantic,cn,client_like,aggregate|只告诉我这台机器的 hostname，别补别的
@@ -1952,7 +1952,7 @@ file|cases_write_and_deliver_hello_repeat02|write_and_deliver,client_like,aggreg
 # source: scripts/nl_tests/cases/_p2_smoke/cases_v2.txt
 file|cases_v2_write_and_deliver_hello_repeat02|write_and_deliver,client_like,aggregate,side_effect|写一个 hello world shell 脚本，保存成 document/hello_from_p2_smoke_v2.sh，然后把文件发给我
 # source: scripts/nl_tests/cases/nl_case_act_find_service_file_only.txt
-single|nl_case_act_find_service_file_only_0001_repeat02|single,client_like,aggregate|检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+single|nl_case_act_find_service_file_only_0001_repeat02|single,client_like,aggregate|检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 # source: scripts/nl_tests/cases/nl_case_act_git_status_brief_only.txt
 single|nl_case_act_git_status_brief_only_0001_repeat02|single,client_like,aggregate|看看这个仓库现在有没有未提交改动，用一句话告诉我
 # source: scripts/nl_tests/cases/nl_case_act_list_logs_only.txt

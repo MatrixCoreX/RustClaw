@@ -58,7 +58,7 @@ file|cases_write_and_deliver_hello|write_and_deliver,client_like,aggregate,side_
 # source: scripts/nl_tests/cases/_p2_smoke/cases_v2.txt
 file|cases_v2_write_and_deliver_hello|write_and_deliver,client_like,aggregate,side_effect|写一个 hello world shell 脚本，保存成 document/hello_from_p2_smoke_v2.sh，然后把文件发给我
 # source: scripts/nl_tests/cases/nl_case_act_find_service_file_only.txt
-single|nl_case_act_find_service_file_only_0001|single,client_like,aggregate|检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+single|nl_case_act_find_service_file_only_0001|single,client_like,aggregate|检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 # source: scripts/nl_tests/cases/nl_case_act_git_status_brief_only.txt
 single|nl_case_act_git_status_brief_only_0001|single,client_like,aggregate|看看这个仓库现在有没有未提交改动，用一句话告诉我
 # source: scripts/nl_tests/cases/nl_case_act_list_logs_only.txt

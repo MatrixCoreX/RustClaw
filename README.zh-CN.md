@@ -381,167 +381,30 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 
 ## 快速开始
 
-### 1. 前置条件
+完整的安装、配置、构建、systemd、云服务器、树莓派、更新和排障步骤统一维护在 [USAGE.md](USAGE.md)。本 README 只保留项目与架构总览，避免维护第二套操作说明。
+
+普通用户优先下载与平台匹配的 GitHub Release 包；开发者再使用源码构建。
 
 ```bash
-rustup default stable
-python3 --version
-```
+# 安装本地命令入口，不配置 nginx
+bash install-rustclaw-cmd.sh --user --no-deploy-ui
 
-必须有 `python3`。如果你要构建或部署前端 UI，还需要 `npm`。
-
-### 2. 安装启动命令
-
-推荐方式：
-
-```bash
-# 本地安装：只安装启动器，不配置 nginx
-bash install-rustclaw-cmd.sh --user
-
-# 从源码构建后再安装
-bash install-rustclaw-cmd.sh --build --user
-
-# 仅云服务器：显式把 UI 部署到 nginx
-bash install-rustclaw-cmd.sh --build --user --deploy-ui-nginx
-```
-
-说明：
-
-- `install-rustclaw-cmd.sh` 会安装 `rustclaw` 启动器
-- 如果仓库里已经构建出 `clawcli`，安装脚本也会一并安装它
-- 本地默认安装不会安装、配置或重载 nginx；使用 `--with-ui` 启动时由 `clawd` 直接托管 `UI/dist`
-- 云服务器需要 nginx 时显式传 `--deploy-ui-nginx [path]`；`--no-deploy-ui` 仅保留为兼容空操作
-- 支持 `--target <triple>`、`--dir <path>`、`--deploy-ui-nginx [path]`、`--pi-app`；其中 `--pi-app` 只会在树莓派上配置小屏桌面程序和登录自启动，普通电脑会自动跳过
-- 如果未传 `--build`，脚本会优先复用现有二进制；找不到时才提示你构建或同步 `release-bin`
-
-安装后检查：
-
-```bash
-command -v rustclaw
-rustclaw -h
-rustclaw -status
-```
-
-### 3. 配置运行时和通道
-
-主配置：
-
-- `configs/config.toml`
-- `configs/skills_registry.toml`
-
-常见拆分配置：
-
-- `configs/image.toml`
-- `configs/audio.toml`
-- `configs/crypto.toml`
-- `configs/memory.toml`
-
-当前实际存在的通道配置文件：
-
-- `configs/channels/telegram.toml`
-- `configs/channels/wechat.toml`
-- `configs/channels/feishu.toml`
-- `configs/channels/lark.toml`
-- `configs/channels/whatsapp.toml`
-- `configs/channels/whatsapp-web.toml`
-- `configs/channels/whatsapp-cloud.toml`
-- `configs/channels/webd.toml`
-
-### 4. 从源码构建
-
-```bash
-# 完整 release 构建：先同步技能文档，再构建工作区，并在未跳过时执行 UI 构建/部署脚本
-./build-all.sh
-
-# 跳过 UI 构建
-./build-all.sh no-ui
-
-# 清理后重建
-./build-all.sh clean
-
-# 指定主 target
-./build-all.sh --target aarch64-unknown-linux-gnu
-
-# 树莓派交叉编译：默认 64 位 Raspberry Pi OS
-./cross-build-pi.sh
-
-# 32 位 Raspberry Pi OS
-./cross-build-pi.sh --target pi32
-
-# 一次构建多个 target
-./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
-```
-
-`build-all.sh` 的当前行为：
-
-- 开始前先执行 `scripts/sync_skill_docs.py`
-- 默认构建 `release`，并自动发现工作区里的二进制目标后校验产物是否齐全
-- 若存在 `UI/` 且未传 `no-ui`，会调用 `build-ui-nginx.sh`；该脚本默认只构建 `UI/dist`，除非显式要求部署，否则不会修改 nginx
-- `--target host` 输出到 `target/release`，交叉编译输出到 `target/<triple>/release`
-- `cross-build-pi.sh` 会先准备 Raspberry Pi 目标的 linker / `cc` / bindgen 参数，再调用现有构建流程；默认跳过 UI 构建，避免交叉编译时被前端构建阻塞
-
-如果你只想临时本地编译某个 Rust 目标，仍然可以直接用 `cargo build --workspace --release`，但它不会覆盖 `build-all.sh` 里的同步、UI 构建和产物校验逻辑。
-
-### 5. 启动 RustClaw
-
-使用启动器的示例：
-
-```bash
-# 最简启动：等价于 release + channels=all + quick 模式
+# 最简启动
 rustclaw start -q
 
-# 指定厂商/模型启动
-rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
-
-# 启动时要求检查并带上 UI
-rustclaw -start release all --with-ui
-```
-
-当前启动链路与脚本语义：
-
-- `rustclaw -start ...` 最终调用的是 `start-all.sh`
-- `start-all.sh` 当前按 `configs/channels/*.toml` 里的 `enabled` 开关决定启动哪些服务
-- 如果传了 `telegram | whatsapp_web | both | whatsapp_cloud | all`，脚本会把 Telegram / WhatsApp 相关通道的 `enabled` 值写回配置文件
-- 这里的 `all` 是启动器里的快捷通道组合，不等于强制打开 `webd`、`wechat`、`feishu`、`lark` 等所有通道；这些仍以各自配置文件里的 `enabled` 为准
-- `--with-ui` 要求 `UI/dist` 已存在且没有过期，并由 `clawd` 在 API 监听地址直接提供页面，通常可打开 `http://127.0.0.1:8787/`；不需要 nginx
-- `start-all.sh` 不再在启动阶段自动执行 `sync_skill_docs.py`
-
-脚本方式依然可用：
-
-```bash
-./start-all.sh
-./stop-rustclaw.sh
-```
-
-如果你想按服务精细控制，也可以直接用单服务脚本：
-
-```bash
-./component_start/start-clawd.sh
-./component_start/start-telegramd.sh
-./component_start/start-wechatd.sh
-./component_start/start-feishud.sh
-./component_start/start-larkd.sh
-./component_start/start-whatsappd.sh
-./component_start/start-whatsapp-webd.sh
-./component_start/start-wa-web-bridge.sh
-./component_start/start-clawd-ui.sh
-```
-
-单独启动 `clawd` 时：
-
-- `./component_start/start-clawd.sh` 会检查 `target/release/clawd` 和 `target/release/skill-runner`
-- 如果 `configs/config.toml` 里还没有 `selected_vendor` / `selected_model`，会在首次启动时要求交互选择
-- 若当前厂商的 `api_key` 为空或还是 `REPLACE_ME...`，也会要求在终端里补齐后再启动
-
-### 6. 日常运维命令
-
-```bash
+# 状态、健康和日志
 rustclaw -status
-rustclaw -logs clawd 200 --follow
 rustclaw -health
-rustclaw -stop
-rustclaw -key list
+rustclaw -logs clawd 200 --follow
 ```
+
+关键原则：
+
+- 本地部署由 RustClaw 直接提供 UI，不需要 nginx。
+- 云服务器使用域名/TLS 时，再显式部署 UI 到 nginx。
+- Linux systemd unit 由 `scripts/install-systemd-service.sh` 根据实际用户和路径生成；仓库不保存写死主机路径的 unit。
+- 树莓派优先使用预编译 aarch64 Release 包，避免低内存设备重复完整编译。
+- 密钥放在仓库外的环境文件中，不提交到 Git。
 
 ## 身份与访问控制
 

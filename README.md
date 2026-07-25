@@ -442,175 +442,30 @@ The [full documentation index](docs/README.md) links every engineering document 
 
 ## Quick Start
 
-### 1. Prerequisites
+The complete installation, configuration, build, systemd, cloud, Raspberry Pi, update, and troubleshooting runbook is maintained in [USAGE.md](USAGE.md). This README keeps the product and architecture overview instead of duplicating operational instructions.
+
+Most users should download the GitHub Release package matching their platform. Build from source only for development or unsupported platforms.
 
 ```bash
-rustup default stable
-python3 --version
-```
+# Install local command entrypoints without nginx
+bash install-rustclaw-cmd.sh --user --no-deploy-ui
 
-`python3` is required. `npm` is needed when you want to build or deploy the UI.
-
-### 2. Install the launcher
-
-Recommended path:
-
-```bash
-# Local install: install the launcher without nginx
-bash install-rustclaw-cmd.sh --user
-
-# Build from source first, then install
-bash install-rustclaw-cmd.sh --build --user
-
-# Cloud/server only: explicitly deploy the UI through nginx
-bash install-rustclaw-cmd.sh --build --user --deploy-ui-nginx
-```
-
-Notes:
-
-- `install-rustclaw-cmd.sh` installs the `rustclaw` launcher
-- if `clawcli` was built, it is installed too
-- local/default installation does not install, configure, or reload nginx; `clawd` serves `UI/dist` directly when started with `--with-ui`
-- cloud/server deployments opt in to nginx with `--deploy-ui-nginx [path]`; `--no-deploy-ui` remains a compatibility no-op
-- it also supports `--target <triple>`, `--dir <path>`, `--deploy-ui-nginx [path]`, and `--pi-app`; `--pi-app` only configures the small-screen desktop app on Raspberry Pi and is skipped on regular computers
-- without `--build`, the script prefers existing binaries and only asks you to build/sync `release-bin` when they are missing
-
-Verify:
-
-```bash
-command -v rustclaw
-rustclaw -h
-rustclaw -status
-```
-
-### 3. Configure runtime and channels
-
-Main runtime config:
-
-- `configs/config.toml`
-- `configs/skills_registry.toml`
-
-Split configs commonly edited:
-
-- `configs/image.toml`
-- `configs/audio.toml`
-- `configs/crypto.toml`
-- `configs/memory.toml`
-
-Current channel config files:
-
-- `configs/channels/telegram.toml`
-- `configs/channels/wechat.toml`
-- `configs/channels/feishu.toml`
-- `configs/channels/lark.toml`
-- `configs/channels/whatsapp.toml`
-- `configs/channels/whatsapp-web.toml`
-- `configs/channels/whatsapp-cloud.toml`
-- `configs/channels/webd.toml`
-
-### 4. Build from source
-
-```bash
-# Full release build: sync skill docs, build the workspace, and run the UI build/deploy script unless skipped
-./build-all.sh
-
-# Skip UI build
-./build-all.sh no-ui
-
-# Clean then rebuild
-./build-all.sh clean
-
-# Check Rust, Clang/libclang, protoc, Node.js, and npm updates without upgrading installed tools
-./build-all.sh --check-toolchains
-
-# Update installed build toolchains first, validate minimum versions, then build
-./build-all.sh --update-toolchains
-
-# Set the primary target
-./build-all.sh --target aarch64-unknown-linux-gnu
-
-# Raspberry Pi cross-build: defaults to 64-bit Raspberry Pi OS
-./cross-build-pi.sh
-
-# 32-bit Raspberry Pi OS
-./cross-build-pi.sh --target pi32
-
-# Build multiple targets in one run
-./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
-```
-
-Current `build-all.sh` behavior:
-
-- validates minimum compiler/tool versions on every build; normal builds only install missing prerequisites and do not update an existing host toolchain
-- supports opt-in update discovery with `--check-toolchains` and opt-in pre-build upgrades with `--update-toolchains` through rustup plus the host package manager (`brew`, `apt`, `dnf`, `yum`, `zypper`, `pacman`, or `apk`)
-- runs `scripts/sync_skill_docs.py` before the build starts
-- always builds `release`, auto-discovers workspace binaries, and verifies that the expected outputs exist
-- calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`; the script now builds `UI/dist` only and never changes nginx unless deployment is explicitly requested
-- writes host outputs to `target/release` and cross-target outputs to `target/<triple>/release`
-- `cross-build-pi.sh` prepares the Raspberry Pi linker / `cc` / bindgen environment before calling the existing build flow; it skips UI builds by default unless you pass `--with-ui`
-
-You can still use plain `cargo build --workspace --release` for ad hoc local builds, but it does not include the repo-level sync, UI build, or output verification done by `build-all.sh`.
-
-### 5. Start RustClaw
-
-Examples with the launcher:
-
-```bash
-# Smallest startup path: release + channels=all + quick mode
+# Smallest startup path
 rustclaw start -q
 
-# Start with an explicit vendor/model
-rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
-
-# Start and require UI assets
-rustclaw -start release all --with-ui
-```
-
-Current startup behavior:
-
-- `rustclaw -start ...` ultimately calls `start-all.sh`
-- `start-all.sh` starts services based on the `enabled` flags in `configs/channels/*.toml`
-- when you pass `telegram | whatsapp_web | both | whatsapp_cloud | all`, the script writes the related Telegram / WhatsApp channel `enabled` values back into config files
-- `all` here is a launcher preset, not "force-enable every daemon"; channels such as `webd`, `wechat`, `feishu`, and `lark` still follow their own config files
-- `--with-ui` requires a valid `UI/dist` build and lets `clawd` serve it directly on the configured API listener, normally `http://127.0.0.1:8787/`; it does not require nginx
-- `start-all.sh` no longer runs `sync_skill_docs.py` during startup
-
-Equivalent script-based flow is still available:
-
-```bash
-./start-all.sh
-./stop-rustclaw.sh
-```
-
-Single-service scripts are also available when you want finer control:
-
-```bash
-./component_start/start-clawd.sh
-./component_start/start-telegramd.sh
-./component_start/start-wechatd.sh
-./component_start/start-feishud.sh
-./component_start/start-larkd.sh
-./component_start/start-whatsappd.sh
-./component_start/start-whatsapp-webd.sh
-./component_start/start-wa-web-bridge.sh
-./component_start/start-clawd-ui.sh
-```
-
-When starting `clawd` alone:
-
-- `./component_start/start-clawd.sh` checks for both `target/release/clawd` and `target/release/skill-runner`
-- on first startup, if `selected_vendor` / `selected_model` are empty in `configs/config.toml`, it prompts for an interactive selection
-- if the current vendor `api_key` is empty or still uses a `REPLACE_ME...` placeholder, it asks for the key before launch
-
-### 6. Daily operations
-
-```bash
+# Status, health, and logs
 rustclaw -status
-rustclaw -logs clawd 200 --follow
 rustclaw -health
-rustclaw -stop
-rustclaw -key list
+rustclaw -logs clawd 200 --follow
 ```
+
+Operational rules:
+
+- Local deployments serve the UI directly and do not need nginx.
+- Cloud deployments opt in to nginx only when a domain or TLS reverse proxy is needed.
+- Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; the repository does not keep a host-specific unit.
+- Raspberry Pi users should prefer the prebuilt aarch64 Release package to avoid repeated full builds on low-memory hardware.
+- Keep credentials in an environment file outside the repository and never commit them.
 
 ## Identity and Access
 

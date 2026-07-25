@@ -15,7 +15,7 @@ chat_act|run_cmd_whoami_scalar||执行 whoami，只输出结果，不要解释
 act|fs_readme_head_summary_semantic||看看 README.md 开头讲了什么，读前 20 行后用三句话总结
 act|fs_hidden_files_bool_semantic||帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
 act|fs_package_name_scalar_semantic||去 package.json 里找 name，只把值给我
-chat_act|fs_service_semantic_explain||检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+chat_act|fs_service_semantic_explain||检查仓库里有没有 scripts/install-systemd-service.sh；如果有，给路径并顺手解释它是干什么的
 chat_act|fs_compare_readmes_semantic||比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
 
 chat_act|followup_extract_username_semantic||只输出当前用户名，不要解释

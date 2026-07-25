@@ -45,6 +45,7 @@ WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
 WECHATD_BIN="$SCRIPT_DIR/target/$PROFILE/wechatd"
 FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
+LARKD_BIN="$SCRIPT_DIR/target/$PROFILE/larkd"
 WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
 
@@ -82,10 +83,11 @@ require_binary() {
 
 WEBD_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/webd.toml" "webd" "0")"
 TELEGRAM_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/telegram.toml" "telegram_bot" "1")"
-WHATSAPP_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp.toml" "whatsapp" "0")"
-WHATSAPP_WEB_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp.toml" "whatsapp_web" "0")"
+WHATSAPP_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp-cloud.toml" "whatsapp" "0")"
+WHATSAPP_WEB_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp-web.toml" "whatsapp_web" "0")"
 WECHAT_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/wechat.toml" "wechat" "0")"
 FEISHU_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/feishu.toml" "feishu" "0")"
+LARK_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/lark.toml" "lark" "0")"
 
 preflight_failed=0
 require_binary "$CLAWD_BIN" "clawd" || preflight_failed=1
@@ -108,6 +110,9 @@ fi
 if [[ "$FEISHU_ENABLED" == "1" ]]; then
   require_binary "$FEISHUD_BIN" "feishud" || preflight_failed=1
 fi
+if [[ "$LARK_ENABLED" == "1" ]]; then
+  require_binary "$LARKD_BIN" "larkd" || preflight_failed=1
+fi
 if [[ "$preflight_failed" -ne 0 ]]; then
   echo "Startup preflight failed; existing RustClaw processes were left unchanged." >&2
   echo "Run: ./build-all.sh $PROFILE" >&2
@@ -117,7 +122,10 @@ fi
 # Stop managed RustClaw processes only after every enabled component passes
 # preflight. A partial build must never take a healthy deployment offline.
 if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
-  "$SCRIPT_DIR/stop-rustclaw.sh" || true
+  if ! "$SCRIPT_DIR/stop-rustclaw.sh"; then
+    echo "Startup aborted because existing RustClaw processes could not be stopped cleanly." >&2
+    exit 1
+  fi
 fi
 
 start_clawd() {
@@ -281,6 +289,27 @@ start_wechatd() {
   fi
 }
 
+start_larkd() {
+  if [[ "$LARK_ENABLED" != "1" ]]; then
+    echo "lark.enabled=false, skipping larkd startup."
+    return 0
+  fi
+  if pgrep -f 'target/release/larkd|cargo run -p larkd' >/dev/null 2>&1; then
+    echo "larkd is already running, skipping startup."
+    return 0
+  fi
+  export LARK_CONFIG_PATH="${LARK_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/lark.toml}"
+  nohup "$LARKD_BIN" >"$LOG_DIR/larkd.log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$PID_DIR/larkd.pid"
+  echo "Starting larkd binary, PID=$pid, log: $LOG_DIR/larkd.log"
+  sleep 2
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Failed to start larkd binary. Check log: $LOG_DIR/larkd.log"
+    return 1
+  fi
+}
+
 start_future_adapters_placeholder() {
   "$SCRIPT_DIR/component_start/start-future-adapters.sh" || true
 }
@@ -297,5 +326,6 @@ start_whatsapp_webd
 start_whatsappd
 start_wechatd
 start_feishud
+start_larkd
 
 echo "One-click binary startup command executed (profile: $PROFILE)." # zh: 一键启动已编译二进制命令已执行（profile: $PROFILE）。

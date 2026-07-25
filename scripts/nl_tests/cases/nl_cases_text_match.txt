@@ -7,7 +7,7 @@ chat_act|run_cmd_uname_with_result_tail_en||please run uname -a and tell me the 
 act|fs_readme_head_summary_semantic||看看 README.md 开头讲了什么，读前 20 行后用三句话总结
 act|fs_hidden_files_bool_semantic||帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
 act|fs_package_name_scalar_semantic||去 package.json 里找 name，只把值给我
-chat_act|fs_service_semantic_explain||检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+chat_act|fs_service_semantic_explain||检查仓库里有没有 scripts/install-systemd-service.sh；如果有，给路径并顺手解释它是干什么的
 chat_act|fs_compare_readmes_semantic||比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
 chat_act|followup_extract_username_semantic||只输出当前用户名，不要解释
 chat_act|followup_extract_hostname_semantic||只输出当前机器 hostname，不要解释
@@ -26,7 +26,7 @@ chat_act|semantic_pwd_natural_cn|natural,semantic,cn|我只是想确认下当前
 act|semantic_readme_head_natural_cn|natural,semantic,cn|帮我瞄一眼 README 开头，别逐行复述，直接用三句话概括重点
 act|semantic_hidden_files_natural_cn|natural,semantic,cn|这个目录里有没有那种点开头的隐藏文件？有的话随便举两个例子
 act|semantic_package_name_natural_cn|natural,semantic,cn|去 package.json 里把项目名找出来，只把 name 的值回给我
-chat_act|semantic_service_explain_natural_cn|natural,semantic,cn|帮我看看仓库里有没有 rustclaw.service 这个文件；如果有，把路径给我，再顺带说一句它大概率是干嘛的
+chat_act|semantic_service_explain_natural_cn|natural,semantic,cn|帮我看看仓库里有没有 scripts/install-systemd-service.sh 这个文件；如果有，把路径给我，再顺带说一句它大概率是干嘛的
 chat_act|semantic_compare_readmes_natural_cn|natural,semantic,cn|你帮我比一下 README.md 和 README.zh-CN.md 哪个更大，再简单解释一下为什么会这样
 chat_act|semantic_username_only_natural_cn|natural,semantic,cn|不用展开，我只想知道当前用户名，直接回结果
 chat_act|semantic_hostname_only_natural_cn|natural,semantic,cn|只告诉我这台机器的 hostname，别补别的

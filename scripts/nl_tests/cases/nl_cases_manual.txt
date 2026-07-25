@@ -31,7 +31,7 @@ act|act_hidden_files||看一下当前目录有没有隐藏文件，只回答有�
 act|act_read_readme_head||扫一眼 README 前 20 行，再提炼成 3 句话
 act|act_show_cargo_package_name||读取 crates/clawd/Cargo.toml 的 package.name，只输出值|expect=clawd
 act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
-act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
+act|act_find_service_file||检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径|expect=scripts/install-systemd-service.sh
 act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
 act|act_read_agents_head||读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
 act|act_show_package_json_name||读取 UI/package.json 里的 name 字段，只输出值

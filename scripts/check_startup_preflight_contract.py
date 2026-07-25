@@ -42,9 +42,10 @@ def build_fixture(root: Path) -> Path:
         root / "configs/channels/telegram.toml",
         "[telegram_bot]\nenabled = true\n",
     )
+    write(root / "configs/channels/whatsapp-cloud.toml", "[whatsapp]\nenabled = false\n")
     write(
-        root / "configs/channels/whatsapp.toml",
-        "[whatsapp]\nenabled = false\n[whatsapp_web]\nenabled = false\n",
+        root / "configs/channels/whatsapp-web.toml",
+        "[whatsapp_web]\nenabled = false\n",
     )
     write(root / "configs/channels/wechat.toml", "[wechat]\nenabled = false\n")
     write(root / "configs/channels/feishu.toml", "[feishu]\nenabled = false\n")
@@ -88,6 +89,43 @@ def main() -> int:
         missing = [token for token in required if token not in result.stdout]
         if missing:
             print(f"STARTUP_PREFLIGHT_CONTRACT failed: missing_output={missing}")
+            return 1
+
+    with tempfile.TemporaryDirectory(prefix="rustclaw-whatsapp-preflight-") as raw:
+        root = Path(raw)
+        script = build_fixture(root)
+        write(
+            root / "configs/channels/telegram.toml",
+            "[telegram_bot]\nenabled = false\n",
+        )
+        write(
+            root / "configs/channels/whatsapp-web.toml",
+            "[whatsapp_web]\nenabled = true\n",
+        )
+        env = os.environ.copy()
+        env["HOME"] = str(root / "home")
+        env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        result = subprocess.run(
+            ["bash", str(script), "release"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode == 0 or "whatsapp_webd" not in result.stdout:
+            print(
+                "STARTUP_PREFLIGHT_CONTRACT failed: split WhatsApp Web config "
+                "did not require whatsapp_webd"
+            )
+            return 1
+        if (root / "stop-called").exists():
+            print(
+                "STARTUP_PREFLIGHT_CONTRACT failed: stop ran before "
+                "WhatsApp Web preflight completed"
+            )
             return 1
 
     print("STARTUP_PREFLIGHT_CONTRACT ok")
