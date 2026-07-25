@@ -44,6 +44,27 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
     ))
 }
 
+fn selected_provider_api_key_env_names(vendor: &str, provider_type: &str) -> Vec<&'static str> {
+    let mut names = match vendor.trim().to_ascii_lowercase().as_str() {
+        "openai" => vec!["OPENAI_API_KEY"],
+        "google" | "gemini" => vec!["GOOGLE_API_KEY"],
+        "anthropic" | "claude" => vec!["ANTHROPIC_API_KEY"],
+        "grok" | "xai" => vec!["GROK_API_KEY"],
+        "deepseek" => vec!["DEEPSEEK_API_KEY"],
+        "qwen" => vec!["QWEN_API_KEY"],
+        "minimax" => vec!["MINIMAX_API_KEY"],
+        "mimo" | "xiaomi" => vec!["MIMO_API_KEY"],
+        "custom" => Vec::new(),
+        _ => Vec::new(),
+    };
+    if provider_type.trim().eq_ignore_ascii_case("openai_compat")
+        && !names.contains(&"OPENAI_API_KEY")
+    {
+        names.push("OPENAI_API_KEY");
+    }
+    names
+}
+
 fn local_clawd_base_url_from_config(config_path: &Path) -> String {
     let parsed = std::fs::read_to_string(config_path)
         .ok()
@@ -212,11 +233,9 @@ pub(crate) async fn run_skill_with_runner_once(
     };
 
     let secret_token_ttl = Duration::from_secs(300);
-    let selected_openai_model = if skill_uses_llm {
-        Some(crate::llm_gateway::selected_openai_model(state, Some(task)))
-    } else {
-        None
-    };
+    let selected_llm_connection = skill_uses_llm
+        .then(|| crate::llm_gateway::selected_llm_connection(state, Some(task)))
+        .flatten();
     let internal_llm_token = if skill_uses_llm {
         let internal_llm_context = json!({
             "task_id": task.task_id.clone(),
@@ -244,10 +263,19 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         None
     };
-    let selected_openai_api_key = skill_uses_llm
-        .then(|| crate::llm_gateway::selected_openai_api_key(state, Some(task)))
-        .filter(|value| !value.trim().is_empty());
-    let secret_token_scope = if secret_envs.is_empty() && selected_openai_api_key.is_none() {
+    let selected_provider_api_key = selected_llm_connection
+        .as_ref()
+        .map(|connection| connection.api_key.trim())
+        .filter(|value| !value.is_empty());
+    let selected_provider_env_names = selected_llm_connection
+        .as_ref()
+        .map(|connection| {
+            selected_provider_api_key_env_names(&connection.vendor, &connection.provider_type)
+        })
+        .unwrap_or_default();
+    let secret_token_scope = if secret_envs.is_empty()
+        && (selected_provider_api_key.is_none() || selected_provider_env_names.is_empty())
+    {
         None
     } else {
         Some(
@@ -278,31 +306,28 @@ pub(crate) async fn run_skill_with_runner_once(
         },
         None => Vec::new(),
     };
-    let openai_api_key_token = match (
-        secret_token_scope.as_ref(),
-        selected_openai_api_key.as_deref(),
-    ) {
-        (Some(scope), Some(api_key)) => {
+    let mut selected_provider_key_tokens = Vec::new();
+    if let (Some(scope), Some(api_key)) = (secret_token_scope.as_ref(), selected_provider_api_key) {
+        for env_name in &selected_provider_env_names {
             match scope.issue_value(
                 &claw_core::secrets::SecretValue::new(api_key),
                 secret_token_ttl,
             ) {
-                Ok(token) => Some(token),
+                Ok(token) => selected_provider_key_tokens.push((*env_name, token)),
                 Err(err) => {
                     tracing::error!(
                         skill = canonical_skill_name,
-                        secret_kind = "openai_api_key",
+                        credential_env = *env_name,
                         error = %err,
                         "secret_token_issue_failed"
                     );
                     return Err(format!(
-                        "secret_token_issue_failed; skill={canonical_skill_name}; secret_kind=openai_api_key"
+                        "secret_token_issue_failed; skill={canonical_skill_name}; secret_kind=selected_provider"
                     ));
                 }
             }
         }
-        _ => None,
-    };
+    }
     let additional_writable_paths = secret_token_scope
         .as_ref()
         .map(|scope| vec![scope.store_dir().to_path_buf()])
@@ -384,17 +409,34 @@ pub(crate) async fn run_skill_with_runner_once(
             "RUSTCLAW_INTERNAL_LLM_URL",
             format!("{}/v1/internal/llm/text", local_clawd_base_url),
         )
-        .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token)
-        .env(
-            "OPENAI_BASE_URL",
-            crate::llm_gateway::selected_openai_base_url(state, Some(task)),
+        .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token);
+    }
+    if let Some(connection) = &selected_llm_connection {
+        cmd.env("OPENAI_BASE_URL", &connection.base_url)
+            .env("OPENAI_MODEL", &connection.model)
+            .env("RUSTCLAW_SELECTED_LLM_VENDOR", &connection.vendor)
+            .env(
+                "RUSTCLAW_SELECTED_LLM_PROVIDER_TYPE",
+                &connection.provider_type,
+            );
+    }
+    if !selected_provider_key_tokens.is_empty() {
+        tracing::info!(
+            skill = canonical_skill_name,
+            vendor = selected_llm_connection
+                .as_ref()
+                .map(|connection| connection.vendor.as_str())
+                .unwrap_or("unknown"),
+            provider_type = selected_llm_connection
+                .as_ref()
+                .map(|connection| connection.provider_type.as_str())
+                .unwrap_or("unknown"),
+            credential_envs = ?selected_provider_env_names,
+            "skill_dispatch_selected_provider_credentials"
         );
     }
-    if let Some(model) = &selected_openai_model {
-        cmd.env("OPENAI_MODEL", model);
-    }
-    if let Some(token) = &openai_api_key_token {
-        cmd.env("OPENAI_API_KEY", token);
+    for (env_name, token) in &selected_provider_key_tokens {
+        cmd.env(env_name, token);
     }
     for (env_name, token) in &tokenized_secret_envs {
         cmd.env(env_name, token);

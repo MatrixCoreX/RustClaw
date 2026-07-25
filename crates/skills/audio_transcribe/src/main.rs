@@ -7,7 +7,7 @@ use claw_core::prompt_layers;
 use hmac::{Hmac, Mac};
 use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha1::Sha1;
 use toml::Value as TomlValue;
 
@@ -226,7 +226,30 @@ fn execute(
     workspace_root: &Path,
     args: Value,
 ) -> Result<(String, Value), String> {
+    let args_obj = args.as_object();
+    let action = args_obj
+        .and_then(|obj| obj.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("transcribe");
+    if !matches!(action, "transcribe" | "preview_transcribe") {
+        return Err(format!("unsupported audio transcription action: {action}"));
+    }
+
     let audio_input = parse_audio_input(&args, workspace_root)?;
+    let (vendor, vendor_name, provider_cfg, model) = resolve_transcription_target(cfg, args_obj)?;
+    if action == "preview_transcribe" {
+        return Ok(preview_transcription(
+            cfg,
+            &args,
+            &audio_input,
+            vendor,
+            vendor_name,
+            &model,
+        ));
+    }
+
     let max_input_bytes = cfg
         .audio_transcribe
         .max_input_bytes
@@ -242,19 +265,10 @@ fn execute(
         }
     }
 
-    let args_obj = args.as_object();
     let transcribe_hint = args_obj
         .and_then(|v| v.get("transcribe_hint"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let requested_vendor = args_obj
-        .and_then(|v| v.get("vendor"))
-        .and_then(|v| v.as_str());
-    let vendor = select_vendor(
-        requested_vendor,
-        cfg.audio_transcribe.default_vendor.as_deref(),
-        cfg.llm.selected_vendor.as_deref(),
-    );
     let transcribe_prompt_template = load_prompt_template_for_vendor(
         workspace_root,
         prompt_vendor_name_for_vendor(vendor),
@@ -262,19 +276,7 @@ fn execute(
         DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE,
     );
     let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
-    let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     let auth_token = provider_auth_token(vendor_name, provider_cfg)?;
-    let requested_model = args_obj
-        .and_then(|v| v.get("model"))
-        .and_then(|v| v.as_str());
-    let model = requested_model
-        .or(first_model_candidate(
-            cfg.audio_transcribe.default_model.as_deref(),
-            vendor_models(&cfg.audio_transcribe, vendor),
-            cfg.audio_transcribe.models.as_ref(),
-        ))
-        .unwrap_or(&provider_cfg.model)
-        .to_string();
     let timeout_seconds = cfg
         .audio_transcribe
         .timeout_seconds
@@ -309,6 +311,101 @@ fn execute(
         "latency_ms": 0
     });
     Ok((text, extra))
+}
+
+fn resolve_transcription_target<'a>(
+    cfg: &'a RootConfig,
+    args_obj: Option<&Map<String, Value>>,
+) -> Result<(VendorKind, &'static str, &'a VendorConfig, String), String> {
+    let requested_vendor = args_obj
+        .and_then(|obj| obj.get("vendor"))
+        .and_then(Value::as_str);
+    let vendor = select_vendor(
+        requested_vendor,
+        cfg.audio_transcribe.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    );
+    let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
+    let requested_model = args_obj
+        .and_then(|obj| obj.get("model"))
+        .and_then(Value::as_str);
+    let model = requested_model
+        .or(first_model_candidate(
+            cfg.audio_transcribe.default_model.as_deref(),
+            vendor_models(&cfg.audio_transcribe, vendor),
+            cfg.audio_transcribe.models.as_ref(),
+        ))
+        .unwrap_or(&provider_cfg.model)
+        .to_string();
+    Ok((vendor, vendor_name, provider_cfg, model))
+}
+
+fn preview_transcription(
+    cfg: &RootConfig,
+    args: &Value,
+    audio_input: &AudioInput,
+    vendor: VendorKind,
+    vendor_name: &str,
+    model: &str,
+) -> (String, Value) {
+    let input_path = requested_audio_source(args).unwrap_or_else(|| match audio_input {
+        AudioInput::LocalPath(path) => path.to_string_lossy().to_string(),
+        AudioInput::Url(url) => url.clone(),
+    });
+    let (input_kind, resolved_input_path, input_exists) = match audio_input {
+        AudioInput::LocalPath(path) => (
+            "local_path",
+            path.to_string_lossy().to_string(),
+            Value::Bool(path.exists()),
+        ),
+        AudioInput::Url(url) => ("url", url.clone(), Value::Null),
+    };
+    let model_kind = planned_model_kind(&cfg.audio_transcribe, vendor, model);
+    (
+        "AUDIO_TRANSCRIBE_PREVIEW".to_string(),
+        json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "action": "preview_transcribe",
+            "status": "dry_run",
+            "dry_run": true,
+            "provider_call": false,
+            "filesystem_write": false,
+            "provider": vendor_name,
+            "model": model,
+            "model_kind": model_kind,
+            "input_kind": input_kind,
+            "input_path": input_path,
+            "resolved_input_path": resolved_input_path,
+            "input_exists": input_exists,
+            "message_key": "skill.audio_transcribe.preview",
+        }),
+    )
+}
+
+fn planned_model_kind(
+    cfg: &AudioTranscribeConfig,
+    vendor: VendorKind,
+    model: &str,
+) -> &'static str {
+    match vendor {
+        VendorKind::Google => "native",
+        VendorKind::OpenAI => "compat",
+        VendorKind::Qwen
+            if should_use_qwen_native_asr(
+                cfg,
+                model,
+                resolve_adapter_mode(cfg, vendor),
+                cfg.allow_compat_adapters,
+            ) =>
+        {
+            "native"
+        }
+        _ => match resolve_adapter_mode(cfg, vendor) {
+            AdapterMode::Native => "native",
+            AdapterMode::Auto | AdapterMode::Compat => "compat",
+        },
+    }
 }
 
 fn transcribe_by_vendor(
@@ -420,6 +517,7 @@ fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, 
             .and_then(|v| v.get("url"))
             .and_then(|v| v.as_str())
             .or_else(|| obj.get("audio_url").and_then(|v| v.as_str()))
+            .or_else(|| obj.get("url").and_then(|v| v.as_str()))
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
@@ -431,6 +529,8 @@ fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, 
             .and_then(|v| v.as_str())
             .or_else(|| obj.get("audio_path").and_then(|v| v.as_str()))
             .or_else(|| obj.get("path").and_then(|v| v.as_str()))
+            .or_else(|| obj.get("file").and_then(|v| v.as_str()))
+            .or_else(|| obj.get("audio").and_then(|v| v.as_str()))
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
@@ -447,6 +547,32 @@ fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, 
         "audio input is required (args.audio.path / args.path / args.audio.url / args.audio_url)"
             .to_string(),
     )
+}
+
+fn requested_audio_source(args: &Value) -> Option<String> {
+    if let Some(obj) = args.as_object() {
+        return obj
+            .get("audio")
+            .and_then(|value| {
+                value
+                    .get("url")
+                    .or_else(|| value.get("path"))
+                    .and_then(Value::as_str)
+                    .or_else(|| value.as_str())
+            })
+            .or_else(|| obj.get("audio_url").and_then(Value::as_str))
+            .or_else(|| obj.get("url").and_then(Value::as_str))
+            .or_else(|| obj.get("audio_path").and_then(Value::as_str))
+            .or_else(|| obj.get("path").and_then(Value::as_str))
+            .or_else(|| obj.get("file").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+    }
+    args.as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn require_local_audio(audio_input: &AudioInput) -> Result<&Path, String> {

@@ -443,6 +443,82 @@ fn registry_capability_shape_consistency_is_clean() {
     }
 }
 
+#[test]
+fn provider_backed_media_actions_keep_required_runtime_capabilities() {
+    let live_actions = [
+        ("image_vision", "describe", false),
+        ("image_vision", "analyze", false),
+        ("image_vision", "extract", false),
+        ("image_vision", "compare", false),
+        ("image_vision", "screenshot_summary", false),
+        ("image_generate", "generate", true),
+        ("image_generate", "poll", true),
+        ("image_generate", "cancel", false),
+        ("image_edit", "edit", true),
+        ("image_edit", "outpaint", true),
+        ("image_edit", "restyle", true),
+        ("audio_transcribe", "transcribe", false),
+        ("audio_synthesize", "synthesize", true),
+        ("audio_synthesize", "poll", true),
+        ("audio_synthesize", "cancel", false),
+        ("video_generate", "generate", true),
+        ("video_generate", "poll", true),
+        ("video_generate", "cancel", false),
+        ("music_generate", "generate", true),
+        ("music_generate", "poll", true),
+        ("music_generate", "cancel", false),
+    ];
+    let offline_previews = [
+        ("image_generate", "preview_generate"),
+        ("audio_transcribe", "preview_transcribe"),
+        ("audio_synthesize", "preview_synthesize"),
+        ("video_generate", "preview_generate"),
+        ("music_generate", "preview_generate"),
+    ];
+
+    for path in [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ] {
+        let registry = SkillsRegistry::load_from_path(&path).expect("load registry");
+        for (skill, action, writes_files) in live_actions {
+            let mapping = registry
+                .planner_capabilities(skill)
+                .iter()
+                .find(|mapping| mapping.action.as_deref() == Some(action))
+                .unwrap_or_else(|| panic!("{}: missing {skill}.{action}", path.display()));
+            assert_eq!(
+                mapping.network_access,
+                Some(true),
+                "{}: {skill}.{action} must retain network access",
+                path.display()
+            );
+            assert_eq!(
+                mapping.credential_access,
+                Some(true),
+                "{}: {skill}.{action} must retain provider credentials",
+                path.display()
+            );
+            assert_eq!(
+                mapping.filesystem_write,
+                Some(writes_files),
+                "{}: {skill}.{action} filesystem policy drift",
+                path.display()
+            );
+        }
+        for (skill, action) in offline_previews {
+            let mapping = registry
+                .planner_capabilities(skill)
+                .iter()
+                .find(|mapping| mapping.action.as_deref() == Some(action))
+                .unwrap_or_else(|| panic!("{}: missing {skill}.{action}", path.display()));
+            assert_eq!(mapping.network_access, Some(false));
+            assert_eq!(mapping.credential_access, Some(false));
+            assert_eq!(mapping.filesystem_write, Some(false));
+        }
+    }
+}
+
 /// §P4.1 主体：示范技能 image_generate 必须按 schema 声明 capabilities。
 ///
 /// 本测试同时承担两个守底职责：
@@ -503,7 +579,8 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("write_file", &["fs.write"]),
     ];
     let docker_expected_with_caps: &[(&str, &[&str])] = &[
-        // Docker 模板保持专用 image_edit / image_vision secret 声明。
+        // Docker 与主配置都通过 provider-neutral 主模型桥注入 image_edit /
+        // image_vision 凭据；只有 image_generate 保留独立生成凭据。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
         ("audio_transcribe", &["fs.read", "llm", "net"]),
         ("browser_web", &["fs.write", "net"]),
@@ -517,15 +594,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("fs_basic", &["fs.read", "fs.write"]),
         ("fs_search", &["fs.read"]),
         ("http_basic", &["net"]),
-        (
-            "image_edit",
-            &[
-                "fs.write",
-                "llm",
-                "net",
-                "secrets.image_edit_minimax_api_key",
-            ],
-        ),
+        ("image_edit", &["fs.write", "llm", "net"]),
         (
             "image_generate",
             &[
@@ -535,10 +604,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
                 "secrets.image_generation_minimax_api_key",
             ],
         ),
-        (
-            "image_vision",
-            &["llm", "net", "secrets.image_vision_minimax_api_key"],
-        ),
+        ("image_vision", &["llm", "net"]),
         ("invest_copy", &["llm"]),
         ("kb", &["fs.read", "fs.write"]),
         ("list_dir", &["fs.read"]),
@@ -820,19 +886,14 @@ fn provision_secret_envs_matches_manifest_expectation() {
     }
 
     // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）。
-    // 主配置中 image_edit / image_vision 可复用全局 provider key，因此不在
-    // manifest 声明专用 secrets capability；Docker 模板仍声明专用 secret。
+    // image_edit / image_vision 通过 provider-neutral 主模型桥获取短期凭据，
+    // 因此两份 manifest 都不再声明 vendor 专属 secret。
     let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
     ]);
-    let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
-        ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
-        // §E1.d：image_edit / image_vision 同样默认 default_vendor=minimax。
-        // 新启用别的 vendor 段时，同步加对应 ENV_VAR_NAME。
-        ("image_edit", vec!["IMAGE_EDIT_MINIMAX_API_KEY"]),
-        ("image_vision", vec!["IMAGE_VISION_MINIMAX_API_KEY"]),
-    ]);
+    let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> =
+        HashMap::from([("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"])]);
 
     let registry_paths = [
         workspace_root().join("configs/skills_registry.toml"),
