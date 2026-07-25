@@ -3,15 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
-source "${SCRIPT_DIR}/scripts/shell_compat.sh"
-# shellcheck source=/dev/null
-source "${SCRIPT_DIR}/scripts/version_info.sh"
-cd "$SCRIPT_DIR"
-print_rustclaw_version "$SCRIPT_DIR"
-
-if [[ -f "$HOME/.cargo/env" ]]; then
-  . "$HOME/.cargo/env"
-fi
+source "$SCRIPT_DIR/component_start/common.sh"
+component_start_init "$SCRIPT_DIR" "${1:-}" "./component_start/start-clawd.sh"
+PROFILE="$COMPONENT_PROFILE"
 
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/clawd.log"
@@ -29,41 +23,22 @@ if [[ -t 1 ]]; then
   echo "Logging to: $LOG_FILE" # zh: 日志输出到：$LOG_FILE
 fi
 
-PROFILE="${1:-${RUSTCLAW_START_PROFILE:-release}}"
-case "$PROFILE" in
-  release)
-    ;;
-  *)
-    echo "Usage: ./component_start/start-clawd.sh [release]" # zh: 用法：./component_start/start-clawd.sh [release]
-    exit 1
-    ;;
-esac
-
 # Ensure clawd binary exists.
-CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
-if [[ ! -x "$CLAWD_BIN" ]]; then
-  echo "clawd binary missing: $CLAWD_BIN"
-  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p clawd --release"
-  exit 1
-fi
+CLAWD_BIN="$(component_require_binary clawd)"
 
 # Ensure skill-runner binary exists before starting clawd.
-SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
-if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
-  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p skill-runner --release"
-  exit 1
-fi
+SKILL_RUNNER_ABS="$(component_require_binary skill-runner)"
 
 # First startup policy:
 # - if llm.selected_vendor/selected_model is empty, MUST select interactively and persist
 # - if both not empty, start directly with default settings
 CURRENT_SELECTION="$(
 python3 - <<'PY'
+import os
 import tomllib
 from pathlib import Path
 
-cfg_path = Path("configs/config.toml")
+cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
 cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 vendor = str(llm.get("selected_vendor", "") or "")
@@ -85,10 +60,11 @@ if [[ "$NEED_FIRST_SELECT" == "1" ]]; then
   echo "First startup: select provider and model..." # zh: 首次启动：请选择模型厂商与模型...
   PROVIDER_ROWS="$(
       python3 - <<'PY'
+import os
 import tomllib
 from pathlib import Path
 
-cfg_path = Path("configs/config.toml")
+cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
 cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 vendors = ["openai", "google", "anthropic", "grok", "deepseek", "qwen", "minimax", "mimo", "custom"]
@@ -138,11 +114,12 @@ PY
   echo "Selected: ${CHOSEN_VENDOR} | ${CHOSEN_MODEL}" # zh: 已选择: ${CHOSEN_VENDOR} | ${CHOSEN_MODEL}
 
   python3 - "$CHOSEN_VENDOR" "$CHOSEN_MODEL" <<'PY'
+import os
 import re
 import sys
 from pathlib import Path
 
-cfg_path = Path("configs/config.toml")
+cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
 text = cfg_path.read_text(encoding="utf-8")
 vendor = sys.argv[1]
 model = sys.argv[2]
@@ -181,7 +158,7 @@ import tomllib
 from pathlib import Path
 
 vendor = os.environ.get("RUSTCLAW_ACTIVE_VENDOR", "")
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+cfg = tomllib.loads(Path(os.environ["RUSTCLAW_CONFIG_PATH"]).read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 section = llm.get(vendor, {})
 if isinstance(section, dict):
@@ -218,7 +195,7 @@ api_key = os.environ.get("RUSTCLAW_INPUT_API_KEY", "")
 if not vendor or not api_key:
     raise SystemExit(0)
 
-cfg_path = Path("configs/config.toml")
+cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
 text = cfg_path.read_text(encoding="utf-8")
 
 section_pat = rf"(?ms)^(\[llm\.{re.escape(vendor)}\]\n)(.*?)(?=^\[|\Z)"
@@ -239,4 +216,4 @@ PY
   fi
 fi
 
-exec "$CLAWD_BIN"
+component_exec_binary clawd "$CLAWD_BIN"

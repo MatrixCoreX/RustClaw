@@ -13,14 +13,14 @@
 # Format: suite|name|tags|prompt|expect=<substring>
 
 # ---------- act ----------
-act|act_find_service_file_a||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
+act|act_find_service_file_a||检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径|expect=scripts/install-systemd-service.sh
 act|act_git_status_brief_singleton||看看这个仓库现在有没有未提交改动，用一句话告诉我
 act|act_list_logs_singleton||列出 logs 目录下的前 10 个文件名，不要读内容
 act|act_log_analyze_brief_singleton||读取 logs/clawd.run.log 最后 10 行，挑最值得注意的一行告诉我
 act|act_service_status_brief_singleton||帮我检查 telegramd 现在是不是在运行，顺手简短解释状态
 act|act_disk_usage_one_sentence||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
 act|act_explicit_command_raw_pwd||执行命令 pwd，直接回复执行结果，不要解释|expect=/
-act|act_find_service_exists_with_path||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
+act|act_find_service_exists_with_path||检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径|expect=scripts/install-systemd-service.sh
 act|act_health_check_brief_singleton||帮我做一次基础健康检查，只列最重要的结论
 act|act_http_local_health_brief_singleton||请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 act|act_fuzzy_top3|expect_max_lines:3|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd，最多输出前 3 个路径

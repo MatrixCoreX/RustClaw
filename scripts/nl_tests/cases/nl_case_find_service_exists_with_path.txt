@@ -6,4 +6,4 @@
 #     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
 # This stub file may be removed in a future cleanup.
 #
-检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径

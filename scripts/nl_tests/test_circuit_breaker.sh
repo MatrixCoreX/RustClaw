@@ -169,7 +169,7 @@ PROBE_PROMPTS=(
   "只输出当前用户名，不要解释"
   "只输出当前机器 hostname"
   "把当前仓库顶层目录列出来，简单分组就行"
-  "看看仓库里有没有 rustclaw.service，只回答有或没有"
+  "看看仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有"
   "读取 Cargo.toml 的 package.name，只输出值"
   "列出 logs 目录下的前 10 个文件名"
   "看看当前 git 分支叫什么，只给我分支名"

@@ -9,7 +9,7 @@ chat|plain_chat_no_execution_en||do not run anything, just tell me a very short 
 act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释
 act|act_hidden_files||检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
 act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
-act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+act|act_find_service_file||检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
 act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值
 act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值

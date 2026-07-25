@@ -92,7 +92,7 @@ context_chain|followup_logs_last_tail_shape|先列出 logs 目录下前 5 个文
 # Symptom: user-visible answer was correct, but the case took ~90s and spent ~57.6s inside `single_plan_execution_prompt`
 # for a trivially bounded existence check that already had an auto-resolved concrete path.
 # Evidence: scripts/nl_suite_logs/skill_batch_single_turn/20260420_205400/summary.jsonl
-manual|act_find_service_file_batch|perf_slow,planner_heavy|检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+manual|act_find_service_file_batch|perf_slow,planner_heavy|检查仓库里有没有 scripts/install-systemd-service.sh，只回答有或没有，并给出路径
 
 # Fixed on 2026-04-21.
 # Original symptom: after turn2 correctly delivered `clawd.log`, turn3 `不是这个，发上一个`
