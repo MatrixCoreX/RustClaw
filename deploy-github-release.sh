@@ -10,14 +10,18 @@ REQUESTED_TAG=""
 RESTART_MODE="auto"
 CHECK_ONLY=0
 FORCE=0
+PACKAGE_MODE=0
 KEEP_BACKUPS=2
 SYSTEMD_UNIT="${RUSTCLAW_SYSTEMD_UNIT:-rustclaw.service}"
 
 WORK_DIR=""
 LOCK_DIR=""
 BACKUP_DIR=""
+PACKAGE_STAGE_DIR=""
 DEPLOY_STARTED=0
 DEPLOY_COMMITTED=0
+PACKAGE_MODE_ORIGINAL_MOVED=0
+PACKAGE_MODE_COMMITTED=0
 RESTART_ATTEMPTED=0
 RUNTIME_WAS_ACTIVE=0
 MANAGED_PATHS_FILE=""
@@ -47,6 +51,9 @@ Options:
       Print the installed and newest compatible release without downloading.
   --force
       Reinstall even when the selected release is already installed.
+  --package-mode
+      Atomically replace a source checkout with the verified Release package.
+      Persistent runtime state is preserved and the source tree is backed up.
   --keep-backups N
       Number of successful deployment backups to retain. Default: 2.
   -h, --help
@@ -123,6 +130,11 @@ while [[ $# -gt 0 ]]; do
       FORCE=1
       shift
       ;;
+    --package-mode)
+      PACKAGE_MODE=1
+      FORCE=1
+      shift
+      ;;
     --keep-backups)
       require_value "$1" "${2:-}"
       KEEP_BACKUPS="$2"
@@ -158,6 +170,12 @@ print(Path(sys.argv[1]).expanduser().resolve())
 PY
 )"
 mkdir -p "$ROOT_DIR"
+ROOT_PARENT="$(dirname "$ROOT_DIR")"
+ROOT_NAME="$(basename "$ROOT_DIR")"
+if [[ "$PACKAGE_MODE" -eq 1 && ! -e "$ROOT_DIR/.git" ]]; then
+  printf 'release_package_status=already_enabled\n'
+  exit 0
+fi
 
 detect_platform() {
   local os arch
@@ -263,7 +281,11 @@ elif runtime_pid_is_active; then
 fi
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-release-deploy.XXXXXX")"
-LOCK_DIR="$ROOT_DIR/.release-deploy.lock"
+if [[ "$PACKAGE_MODE" -eq 1 ]]; then
+  LOCK_DIR="$ROOT_PARENT/.${ROOT_NAME}-release-mode.lock"
+else
+  LOCK_DIR="$ROOT_DIR/.release-deploy.lock"
+fi
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
   case "$lock_pid" in
@@ -333,12 +355,28 @@ rollback_deployment() {
   set -e
 }
 
+rollback_package_mode() {
+  [[ "$PACKAGE_MODE_ORIGINAL_MOVED" -eq 1 && "$PACKAGE_MODE_COMMITTED" -eq 0 ]] || return 0
+  printf 'release_package_rollback=%s\n' "${BACKUP_DIR:-unavailable}" >&2
+  set +e
+  rm -rf "$ROOT_DIR"
+  if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+    mv "$BACKUP_DIR" "$ROOT_DIR"
+  fi
+  set -e
+}
+
 cleanup() {
   local status=$?
   if [[ "$status" -ne 0 ]]; then
-    rollback_deployment
+    if [[ "$PACKAGE_MODE" -eq 1 ]]; then
+      rollback_package_mode
+    else
+      rollback_deployment
+    fi
   fi
   [[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"
+  [[ -z "$PACKAGE_STAGE_DIR" ]] || rm -rf "$PACKAGE_STAGE_DIR"
   if [[ -n "$LOCK_DIR" && -d "$LOCK_DIR" ]]; then
     lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
     if [[ "$lock_pid" == "$$" ]]; then
@@ -518,6 +556,120 @@ machine = int.from_bytes(binary[18:20], byteorder=byteorder)
 if machine != expected:
     raise SystemExit(f"release ELF architecture mismatch: expected={expected} actual={machine}")
 PY
+
+if [[ "$PACKAGE_MODE" -eq 1 ]]; then
+  PACKAGE_STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-release-stage.XXXXXX")"
+  STAGED_ROOT="$PACKAGE_STAGE_DIR/runtime"
+  cp -a "$PACKAGE_DIR" "$STAGED_ROOT"
+
+  merge_runtime_directory() {
+    local relative="$1"
+    local source="$ROOT_DIR/$relative"
+    local target="$STAGED_ROOT/$relative"
+    [[ -d "$source" ]] || return 0
+    mkdir -p "$target"
+    cp -a "$source/." "$target/"
+  }
+
+  printf 'release_package_step=preserving_runtime_state\n'
+  for relative in \
+    configs \
+    data \
+    logs \
+    .pids \
+    .rustclaw \
+    run \
+    skills_output \
+    external_skills \
+    optional_skills \
+    .release-backups \
+    image/download; do
+    merge_runtime_directory "$relative"
+  done
+
+  mkdir -p "$STAGED_ROOT/target/release"
+  if [[ -d "$ROOT_DIR/target/release" ]]; then
+    while IFS= read -r runtime_binary; do
+      binary_name="$(basename "$runtime_binary")"
+      if [[ ! -e "$STAGED_ROOT/target/release/$binary_name" ]]; then
+        cp -a "$runtime_binary" "$STAGED_ROOT/target/release/$binary_name"
+      fi
+    done < <(find "$ROOT_DIR/target/release" -mindepth 1 -maxdepth 1 -type f | LC_ALL=C sort)
+  fi
+
+  for runtime_file in \
+    "$ROOT_DIR"/.env \
+    "$ROOT_DIR"/.env.local \
+    "$ROOT_DIR"/.env.*.local \
+    "$ROOT_DIR"/*.env \
+    "$ROOT_DIR"/runtime_env*.sh \
+    "$ROOT_DIR"/pi_app/.rustclaw_small_screen_*; do
+    [[ -f "$runtime_file" ]] || continue
+    relative="${runtime_file#"$ROOT_DIR/"}"
+    mkdir -p "$(dirname "$STAGED_ROOT/$relative")"
+    cp -a "$runtime_file" "$STAGED_ROOT/$relative"
+  done
+
+  [[ -x "$STAGED_ROOT/target/release/clawd" ]] ||
+    die "release_package_staged_clawd_missing"
+  [[ -f "$STAGED_ROOT/configs/config.toml" ]] ||
+    die "release_package_staged_config_missing"
+  [[ ! -e "$STAGED_ROOT/.git" ]] ||
+    die "release_package_staged_git_metadata_present"
+
+  BACKUP_ROOT="$ROOT_PARENT/.${ROOT_NAME}-release-mode-backups"
+  TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  BACKUP_DIR="$BACKUP_ROOT/source-${TIMESTAMP}-$$"
+  mkdir -p "$BACKUP_ROOT"
+  chmod 700 "$BACKUP_ROOT"
+  printf '%s\n' "$TAG" > "$STAGED_ROOT/.release-tag"
+  printf '%s\n' "$BACKUP_DIR" > "$STAGED_ROOT/.release-rollback"
+
+  printf 'release_package_step=activating\n'
+  mv "$ROOT_DIR" "$BACKUP_DIR"
+  PACKAGE_MODE_ORIGINAL_MOVED=1
+  if ! mv "$STAGED_ROOT" "$ROOT_DIR"; then
+    mv "$BACKUP_DIR" "$ROOT_DIR" || true
+    PACKAGE_MODE_ORIGINAL_MOVED=0
+    die "release_package_activation_failed"
+  fi
+
+  if [[ -x "$ROOT_DIR/build-ui-nginx.sh" && -f "$ROOT_DIR/UI/dist/index.html" ]]; then
+    "$ROOT_DIR/build-ui-nginx.sh" --copy-if-configured
+  fi
+
+  if [[ "$RESTART_MODE" == "none" ]]; then
+    printf 'runtime_restart=deferred\n'
+  elif [[ "$RUNTIME_WAS_ACTIVE" -eq 1 || "$RESTART_MODE" == "always" ]]; then
+    restart_runtime
+  else
+    printf 'runtime_restart=skipped_inactive\n'
+  fi
+
+  PACKAGE_MODE_COMMITTED=1
+  printf 'deployed_release_tag=%s\n' "$TAG"
+  printf 'release_package_backup=%s\n' "$BACKUP_DIR"
+
+  python3 - "$BACKUP_ROOT" "$KEEP_BACKUPS" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+root = Path(sys.argv[1])
+keep = int(sys.argv[2])
+backups = sorted(
+    (path for path in root.iterdir() if path.is_dir() and path.name.startswith("source-")),
+    key=lambda path: path.stat().st_mtime,
+    reverse=True,
+)
+for path in backups[keep:]:
+    shutil.rmtree(path)
+PY
+
+  printf 'release_package_status=enabled\n'
+  printf 'release_update_status=deployed\n'
+  exit 0
+fi
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="$ROOT_DIR/.release-backups/${INSTALLED_TAG:-unversioned}-${TIMESTAMP}"

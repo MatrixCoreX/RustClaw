@@ -152,6 +152,17 @@ export function useSystemRuntime({
         endpoint: "/v1/admin/workspace-update/deploy-release",
         started: t("Release 包部署已开始，下面会自动刷新进度。", "Release package deployment started. Progress will refresh automatically."),
       },
+      release_package: {
+        confirm: t(
+          "切换后会下载并校验最新 Release 包，保留配置、数据、日志、任务状态及已安装技能，再把完整源码目录移到回滚备份。完成后将不再显示 Git 拉取和本机编译功能。确认切换回 Release 模式吗？",
+          "This downloads and verifies the latest Release package, preserves configuration, data, logs, task state, and installed skills, then moves the complete source tree to a rollback backup. Git pull and local build controls will no longer be shown. Switch back to Release mode?",
+        ),
+        endpoint: "/v1/admin/workspace-update/enable-release-package",
+        started: t(
+          "正在安全切换回 Release 模式，下面会自动刷新进度。",
+          "Safely switching back to Release mode. Progress will refresh automatically.",
+        ),
+      },
       source_checkout: {
         confirm: t(
           "切换后会克隆完整源码，保留现有配置、数据、日志和运行二进制，并把当前 Release 安装留作回滚备份。以后将显示 Git 拉取与本机编译功能，更新成本和维护风险也会提高。确认切换吗？",
@@ -194,11 +205,15 @@ export function useSystemRuntime({
       t(
         workspaceUpdateStatus?.mode === "release_deploy"
           ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
+          : workspaceUpdateStatus?.mode === "release_package"
+            ? "停止切换 Release 模式？如果尚未完成原子切换，当前源码目录会保持不变。"
           : workspaceUpdateStatus?.mode === "source_checkout"
             ? "停止切换源码模式？如果尚未完成原子切换，当前 Release 安装会保持不变。"
-          : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
+            : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
         workspaceUpdateStatus?.mode === "release_deploy"
           ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
+          : workspaceUpdateStatus?.mode === "release_package"
+            ? "Stop switching to Release mode? The current source checkout remains unchanged if the atomic switch has not completed."
           : workspaceUpdateStatus?.mode === "source_checkout"
             ? "Stop switching to source mode? The current Release installation remains unchanged if the atomic switch has not completed."
           : "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",

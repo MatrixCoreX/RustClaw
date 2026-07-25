@@ -242,7 +242,13 @@ export interface SubmitTaskResponse {
   task_id: string;
 }
 
-export type WorkspaceUpdateMode = "full" | "ui_only" | "clawd_only" | "release_deploy" | "source_checkout";
+export type WorkspaceUpdateMode =
+  | "full"
+  | "ui_only"
+  | "clawd_only"
+  | "release_deploy"
+  | "release_package"
+  | "source_checkout";
 
 export interface WorkspaceUpdateStatus {
   status: "idle" | "running" | "succeeded" | "failed" | "canceled" | "restarting" | "up_to_date" | string;

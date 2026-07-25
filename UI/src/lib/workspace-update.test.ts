@@ -27,6 +27,7 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStep("building_clawd", "zh"), "正在编译 clawd");
   assert.equal(formatWorkspaceUpdateStep("custom_step", "en"), "custom_step");
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
+  assert.equal(formatWorkspaceUpdateStatus("running", "release_package", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");
@@ -36,6 +37,14 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(
     formatWorkspaceUpdateApiError("workspace_update_source_checkout_required", "en"),
     "This installation uses a Release package and can only be updated through Releases.",
+  );
+  assert.equal(
+    formatWorkspaceUpdateApiError("workspace_update_release_package_already_enabled", "en"),
+    "Release mode is already enabled.",
+  );
+  assert.equal(
+    formatWorkspaceUpdateApiError("workspace_update_release_platform_unsupported", "zh"),
+    "当前系统或架构没有可用的预编译 Release 包，请继续使用源码模式。",
   );
   assert.equal(formatWorkspaceUpdateApiError("custom_code", "en"), "custom_code");
 });
@@ -93,6 +102,33 @@ test("builds source checkout migration progress view", () => {
   assert.match(view.progressLabel, /Validating source/);
   assert.equal(view.notice?.title, "Fetching complete source");
   assert.match(view.notice?.detail ?? "", /current Release installation remains unchanged/);
+});
+
+test("builds release package migration progress and failure views", () => {
+  const running = buildWorkspaceUpdateView(
+    status({
+      status: "running",
+      mode: "release_package",
+      step: "downloading_release",
+      next_step_key: "workspace_update.release_package_downloading",
+    }),
+    "en",
+  );
+  assert.equal(running.progressPercent, 35);
+  assert.match(running.progressLabel, /source tree will be backed up/);
+  assert.match(running.notice?.detail ?? "", /source checkout remains unchanged/);
+
+  const failed = buildWorkspaceUpdateView(
+    status({
+      status: "failed",
+      mode: "release_package",
+      error: "release_package_migration_failed",
+      next_step_key: "workspace_update.release_package_failed",
+    }),
+    "zh",
+  );
+  assert.equal(failed.notice?.title, "Release 模式切换失败");
+  assert.match(failed.notice?.detail ?? "", /当前源码目录保持不变/);
 });
 
 test("builds failed and canceled notices", () => {
@@ -219,6 +255,7 @@ test("reloads once after compile modes complete but not after release deployment
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "full", "up_to_date"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "clawd_only", "idle"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_deploy", "up_to_date"), false);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_package", "up_to_date"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(false, "ui_only", "succeeded"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "ui_only", "failed"), false);
 });

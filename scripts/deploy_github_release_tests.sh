@@ -213,4 +213,60 @@ grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 [[ ! -e "$RUNTIME/build-ui-nginx.sh" ]]
 [[ "$(cat "$RUNTIME/.release-rollback")" == "$ROLLBACK_MARKER_BEFORE" ]]
 
+SOURCE_RUNTIME="$TMP_ROOT/source-runtime"
+mkdir -p \
+  "$SOURCE_RUNTIME/.git" \
+  "$SOURCE_RUNTIME/configs" \
+  "$SOURCE_RUNTIME/data" \
+  "$SOURCE_RUNTIME/logs" \
+  "$SOURCE_RUNTIME/.pids" \
+  "$SOURCE_RUNTIME/.rustclaw" \
+  "$SOURCE_RUNTIME/run" \
+  "$SOURCE_RUNTIME/external_skills/local" \
+  "$SOURCE_RUNTIME/optional_skills/local" \
+  "$SOURCE_RUNTIME/target/release"
+printf 'source-only\n' > "$SOURCE_RUNTIME/Cargo.toml"
+printf 'local-secret = "preserve"\n' > "$SOURCE_RUNTIME/configs/config.toml"
+printf 'runtime-state\n' > "$SOURCE_RUNTIME/data/state.db"
+printf 'checkpoint\n' > "$SOURCE_RUNTIME/.rustclaw/checkpoint"
+printf 'external\n' > "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
+printf 'optional\n' > "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
+printf '#!/usr/bin/env bash\n' > "$SOURCE_RUNTIME/target/release/optional-skill"
+chmod +x "$SOURCE_RUNTIME/target/release/optional-skill"
+
+PACKAGE_MODE_OUTPUT="$(
+  RUSTCLAW_RELEASES_JSON_FILE="$RELEASES_JSON" \
+    "$DEPLOY_SCRIPT" \
+      --root "$SOURCE_RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --package-mode \
+      --no-restart \
+      --keep-backups 1
+)"
+grep -Fq 'release_package_status=enabled' <<< "$PACKAGE_MODE_OUTPUT"
+grep -Fq 'release_update_status=deployed' <<< "$PACKAGE_MODE_OUTPUT"
+test ! -e "$SOURCE_RUNTIME/.git"
+test ! -e "$SOURCE_RUNTIME/Cargo.toml"
+grep -Fxq 'ubuntu-x86_64-test' "$SOURCE_RUNTIME/.release-tag"
+grep -Fxq 'local-secret = "preserve"' "$SOURCE_RUNTIME/configs/config.toml"
+grep -Fxq 'runtime-state' "$SOURCE_RUNTIME/data/state.db"
+grep -Fxq 'checkpoint' "$SOURCE_RUNTIME/.rustclaw/checkpoint"
+grep -Fxq 'external' "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
+grep -Fxq 'optional' "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
+test -x "$SOURCE_RUNTIME/target/release/optional-skill"
+cmp /bin/true "$SOURCE_RUNTIME/target/release/clawd"
+SOURCE_BACKUP="$(find "$TMP_ROOT/.source-runtime-release-mode-backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+test -d "$SOURCE_BACKUP/.git"
+grep -Fxq 'source-only' "$SOURCE_BACKUP/Cargo.toml"
+test ! -e "$TMP_ROOT/.source-runtime-release-mode.lock"
+
+ALREADY_PACKAGE_OUTPUT="$(
+  "$DEPLOY_SCRIPT" \
+    --root "$SOURCE_RUNTIME" \
+    --platform ubuntu-x86_64 \
+    --package-mode \
+    --no-restart
+)"
+grep -Fq 'release_package_status=already_enabled' <<< "$ALREADY_PACKAGE_OUTPUT"
+
 echo "DEPLOY_GITHUB_RELEASE_TESTS ok"

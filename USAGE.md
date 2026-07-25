@@ -360,10 +360,17 @@ Release 更新卡片中选择“切换到源码模式”。该操作会先把完
 目录并重启。迁移成功后 UI 才显示 Git 拉取和本机编译功能；原 Release 目录会保留为一个
 回滚备份。不要在 Release 运行目录中手工执行 `git init`。
 
+源码模式也可以在 Release 更新卡片中选择“切换回 Release 模式”。该操作与普通
+Release 更新不同：系统会先下载、校验并构造完整的预编译运行目录，保留配置、数据、
+日志、任务状态、外部/按需技能及已安装额外二进制，再原子替换运行目录。原源码目录
+（包括未提交修改和 `.git`）会移到限量回滚备份，成功重启后 UI 不再显示 Git 拉取和
+本机编译入口。
+
 命令行执行同一迁移：
 
 ```bash
 ./scripts/switch-to-source-checkout.sh
+./deploy-github-release.sh --package-mode
 ```
 
 更新后检查：

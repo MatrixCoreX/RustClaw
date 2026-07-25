@@ -8,6 +8,7 @@ import {
   GitBranch,
   LayoutDashboard,
   Loader2,
+  PackageCheck,
   RefreshCw,
   Settings2,
   X,
@@ -133,6 +134,7 @@ export function DashboardPage({
   const latestReleaseStatus = workspaceUpdateStatus?.latest_release_check_status;
   const sourceUpdateAvailable = workspaceUpdateStatus?.source_update_available === true;
   const canEnableSourceCheckout = workspaceUpdateStatus?.installation_kind === "release_package";
+  const canEnableReleasePackage = workspaceUpdateStatus?.installation_kind === "source_checkout";
   const latestReleaseDisplay =
     workspaceUpdateStatus?.latest_release_tag ||
     (latestReleaseStatus === "unavailable"
@@ -368,6 +370,27 @@ export function DashboardPage({
                   {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "source_checkout"
                     ? t("切换中", "Switching")
                     : t("切换到源码模式", "Switch to source mode")}
+                </button>
+              ) : null}
+              {canEnableReleasePackage ? (
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("release_package")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                  className="theme-secondary-btn mt-2 px-3 py-2 text-sm"
+                  title={t(
+                    "使用预编译包替换源码工作区，并把当前源码完整保留为回滚备份",
+                    "Replace the source workspace with a prebuilt package while retaining the complete source tree as a rollback backup",
+                  )}
+                >
+                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_package" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PackageCheck className="h-4 w-4" />
+                  )}
+                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_package"
+                    ? t("切换中", "Switching")
+                    : t("切换回 Release 模式", "Switch back to Release mode")}
                 </button>
               ) : null}
             </div>
