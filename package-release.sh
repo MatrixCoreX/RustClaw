@@ -132,6 +132,7 @@ copy_if_exists "start-all.sh"
 copy_if_exists "start-all-bin.sh"
 copy_if_exists "component_start"
 copy_if_exists "stop-rustclaw.sh"
+copy_if_exists "deploy-github-release.sh"
 
 if [[ -d "$SCRIPT_DIR/UI/dist" ]]; then
   mkdir -p "$STAGE_PROJECT_DIR/UI"

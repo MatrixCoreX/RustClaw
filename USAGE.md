@@ -333,6 +333,21 @@ cd pi_app
 UI 首页会检查与当前平台匹配的最新 Release。Release 更新会保留本地配置、数据、
 日志和 `.pids` 目录，再部署新二进制与 UI。
 
+也可以在服务器或本地运行目录中直接部署与当前 Linux 平台匹配的最新 Release：
+
+```bash
+./deploy-github-release.sh
+```
+
+脚本会选择 Ubuntu x86_64 或树莓派 aarch64 资产，强制校验配套 SHA256 文件，
+保留本地配置和运行数据，为被替换的程序文件建立回滚备份，并在原服务处于运行状态时
+自动重启。仅检查可用版本或由其他进程安排重启时：
+
+```bash
+./deploy-github-release.sh --check-only
+./deploy-github-release.sh --no-restart
+```
+
 源码更新和 Release 更新是两条不同路径：
 
 - 普通用户：优先 Release 更新
