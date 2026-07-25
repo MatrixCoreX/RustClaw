@@ -1193,6 +1193,22 @@ fn workspace_update_start_preserves_release_lookup_state() {
 }
 
 #[test]
+fn workspace_update_source_checkout_mode_preserves_installation_state() {
+    let previous = WorkspaceUpdateStatus {
+        installation_kind: "release_package".to_string(),
+        source_update_available: false,
+        ..WorkspaceUpdateStatus::default()
+    };
+
+    let started = begin_workspace_update_status(&previous, WorkspaceUpdateMode::SourceCheckout);
+
+    assert_eq!(started.status, "running");
+    assert_eq!(started.mode, "source_checkout");
+    assert_eq!(started.installation_kind, "release_package");
+    assert!(!started.source_update_available);
+}
+
+#[test]
 fn workspace_update_release_lookup_errors_control_cached_tag_reuse() {
     assert!(LatestReleaseLookupError::RequestTimedOut.can_use_cached_tag());
     assert!(LatestReleaseLookupError::HttpStatus.can_use_cached_tag());
@@ -1216,6 +1232,10 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(!script.contains("rm -rf data"));
     assert!(!script.contains("cp -a \"$PACKAGE_DIR/target/release/.\""));
     assert!(!script.contains("build-ui-nginx.sh --deploy-if-configured"));
+    let source_checkout_script = include_str!("../../../../scripts/switch-to-source-checkout.sh");
+    assert!(source_checkout_script.contains("git clone --quiet --single-branch"));
+    assert!(source_checkout_script.contains("source_checkout_status=enabled"));
+    assert!(source_checkout_script.contains("mv \"$ROOT_DIR\" \"$BACKUP_DIR\""));
 }
 
 #[test]

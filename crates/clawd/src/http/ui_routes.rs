@@ -237,6 +237,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(start_workspace_update_release_deploy),
         )
         .route(
+            "/admin/workspace-update/enable-source",
+            post(start_workspace_update_source_checkout),
+        )
+        .route(
             "/admin/workspace-update/cancel",
             post(cancel_workspace_update),
         )

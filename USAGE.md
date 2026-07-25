@@ -353,6 +353,19 @@ UI 首页会检查与当前平台匹配的最新 Release。Release 更新会保�
 - 普通用户：优先 Release 更新
 - 开发者：使用 Git 拉取并重新构建
 
+Release 包安装没有 `.git` 和完整构建源码，因此 UI 默认只显示 Release 更新，不会
+执行 Git 状态检查，也不会显示源码编译按钮。需要在同一设备上继续开发时，管理员可在
+Release 更新卡片中选择“切换到源码模式”。该操作会先把完整仓库克隆到临时目录并验证，
+再保留 `configs`、`data`、`logs`、`.pids`、外部技能和现有运行二进制，原子替换运行
+目录并重启。迁移成功后 UI 才显示 Git 拉取和本机编译功能；原 Release 目录会保留为一个
+回滚备份。不要在 Release 运行目录中手工执行 `git init`。
+
+命令行执行同一迁移：
+
+```bash
+./scripts/switch-to-source-checkout.sh
+```
+
 更新后检查：
 
 ```bash
