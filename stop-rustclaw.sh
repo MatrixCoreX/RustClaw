@@ -29,11 +29,31 @@ process_is_running() {
   [[ -n "$state" && "$state" != Z* ]]
 }
 
+process_executable_matches() {
+  local pid="$1"
+  local expected_command="$2"
+  local executable_path=""
+
+  # Linux exposes the executable independently from argv. Prefer it because
+  # older launchers may have used a workspace-relative argv[0].
+  if [[ "$(uname -s)" == "Linux" && -L "/proc/$pid/exe" ]]; then
+    executable_path="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+    executable_path="${executable_path% (deleted)}"
+    [[ -n "$executable_path" && "$executable_path" == "$expected_command" ]]
+    return
+  fi
+
+  return 1
+}
+
 process_matches() {
   local pid="$1"
   local expected_command="$2"
   local cmdline_file="/proc/$pid/cmdline"
   local argument=""
+  if process_executable_matches "$pid" "$expected_command"; then
+    return 0
+  fi
   if [[ -r "$cmdline_file" ]]; then
     while IFS= read -r -d '' argument; do
       if [[ "$argument" == "$expected_command" ]]; then

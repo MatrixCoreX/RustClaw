@@ -197,6 +197,52 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 decoy.kill()
 
+    if Path("/proc/self/exe").is_symlink():
+        with tempfile.TemporaryDirectory(prefix="rustclaw-relative-process-") as raw:
+            root = Path(raw)
+            script = build_fixture(root)
+            write(
+                root / "configs/channels/telegram.toml",
+                "[telegram_bot]\nenabled = false\n",
+            )
+            shutil.copy2(shutil.which("sh") or "/bin/sh", root / "target/release/clawd")
+            (root / "target/release/clawd").chmod(0o755)
+            relative_clawd = subprocess.Popen(
+                ["target/release/clawd", "-c", "sleep 30"],
+                cwd=root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                pid_path = root / ".pids/clawd.pid"
+                pid_path.parent.mkdir(parents=True, exist_ok=True)
+                pid_path.write_text(f"{relative_clawd.pid}\n", encoding="utf-8")
+                env = os.environ.copy()
+                env["HOME"] = str(root / "home")
+                env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+                result = subprocess.run(
+                    ["bash", str(script), "release"],
+                    cwd=root,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=20,
+                    check=False,
+                )
+                if result.returncode != 0 or "clawd is already running" not in result.stdout:
+                    print(
+                        "STARTUP_PREFLIGHT_CONTRACT failed: workspace-relative "
+                        "clawd process was not recognized"
+                    )
+                    return 1
+            finally:
+                relative_clawd.terminate()
+                try:
+                    relative_clawd.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    relative_clawd.kill()
+
     print("STARTUP_PREFLIGHT_CONTRACT ok")
     return 0
 
