@@ -58,6 +58,63 @@ fn state_with_registry_toml(toml: &str) -> crate::AppState {
 }
 
 #[test]
+fn map_optional_coordinates_remain_nullable_in_registry_schema() {
+    let state = state_with_workspace_registry();
+    let registry = state.get_skills_registry().expect("skills registry");
+    let manifest = registry.manifest("map_merchant").expect("map manifest");
+    let schema = manifest.input_schema.expect("map input schema");
+
+    for field in ["latitude", "longitude"] {
+        let property = &schema["properties"][field];
+        let variants = property["anyOf"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{field} should use a nullable union"));
+        assert!(
+            variants
+                .iter()
+                .any(|variant| variant["type"].as_str() == Some("number")),
+            "{field} should accept numbers"
+        );
+        assert!(
+            variants
+                .iter()
+                .any(|variant| variant["type"].as_str() == Some("null")),
+            "{field} should accept null"
+        );
+        let description = property["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{field} should explain absence semantics"));
+        assert!(description.contains("never invent a placeholder coordinate"));
+    }
+}
+
+#[test]
+fn photo_grouping_schema_uses_machine_array_tokens() {
+    let state = state_with_workspace_registry();
+    let registry = state.get_skills_registry().expect("skills registry");
+    let manifest = registry
+        .manifest("photo_organize")
+        .expect("photo organize manifest");
+    let schema = manifest.input_schema.expect("photo input schema");
+    let group_by = &schema["properties"]["group_by"];
+
+    assert_eq!(group_by["type"], "array");
+    assert_eq!(group_by["uniqueItems"], true);
+    assert_eq!(
+        group_by["items"]["enum"],
+        json!([
+            "brand",
+            "model",
+            "lens",
+            "focal_length",
+            "year",
+            "year_month",
+            "date"
+        ])
+    );
+}
+
+#[test]
 fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
     let mut candidates = vec![
         ResolverCandidate {
@@ -297,6 +354,11 @@ fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() 
         json!({
             "root": "docs",
             "query": "release",
+            "multiline": true,
+            "context_before": 2,
+            "context_after": 1,
+            "max_file_bytes": 1048576,
+            "max_scan_bytes": 8388608,
             "max_results": 8,
         }),
     );
@@ -310,7 +372,45 @@ fn filesystem_grep_resolver_preserves_planner_query_without_semantic_contract() 
     );
     assert_eq!(args.get("root").and_then(Value::as_str), Some("docs"));
     assert_eq!(args.get("query").and_then(Value::as_str), Some("release"));
+    assert_eq!(args.get("multiline").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("context_before").and_then(Value::as_u64), Some(2));
+    assert_eq!(args.get("context_after").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        args.get("max_file_bytes").and_then(Value::as_u64),
+        Some(1_048_576)
+    );
+    assert_eq!(
+        args.get("max_scan_bytes").and_then(Value::as_u64),
+        Some(8_388_608)
+    );
     assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(8));
+}
+
+#[test]
+fn filesystem_find_images_resolves_to_bounded_virtual_action() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.find_images",
+        json!({
+            "root": "assets",
+            "exts": ["png", "jpg"],
+            "max_results": 20,
+            "cursor": 5,
+            "max_dirs": 8
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected filesystem tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(args["action"], "find_images");
+    assert_eq!(args["root"], "assets");
+    assert_eq!(args["exts"], json!(["png", "jpg"]));
+    assert_eq!(args["max_results"], 20);
+    assert_eq!(args["cursor"], 5);
+    assert_eq!(args["max_dirs"], 8);
+    assert_eq!(record.capability_ref, "filesystem.find_images");
 }
 
 #[test]
@@ -885,6 +985,85 @@ fn filesystem_apply_patch_alias_resolves_to_canonical_workspace_patch() {
 }
 
 #[test]
+fn workspace_replace_text_resolves_with_exact_machine_arguments() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "workspace.replace_text",
+        json!({
+            "path": "src/lib.rs",
+            "old_text": "old_value",
+            "new_text": "new_value",
+            "expected_occurrences": 1,
+            "expected_sha256": "sha256:abcd",
+        }),
+    );
+
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected fs_basic tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("replace_text")
+    );
+    assert_eq!(
+        args.get("expected_occurrences").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(record.capability_ref, "workspace.replace_text");
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+}
+
+#[test]
+fn local_git_mutations_resolve_from_registry_while_remote_push_is_absent() {
+    let state = state_with_workspace_registry();
+    for (capability, action_name, input) in [
+        (
+            "git.stage",
+            "stage",
+            json!({"paths": ["src/lib.rs", "docs/说明 file.md"]}),
+        ),
+        (
+            "git.commit",
+            "commit",
+            json!({"message": "record local changes"}),
+        ),
+        (
+            "git.create_branch",
+            "create_branch",
+            json!({"branch_name": "feature/local"}),
+        ),
+        (
+            "git.checkout_branch",
+            "checkout_branch",
+            json!({"branch_name": "feature/local"}),
+        ),
+    ] {
+        let (resolved, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, input);
+        let Some(AgentAction::CallTool { tool, args }) = resolved else {
+            panic!("expected registry tool action for {capability}");
+        };
+        assert_eq!(tool, "git_basic");
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(action_name)
+        );
+        assert_eq!(record.source, "registry");
+        assert_eq!(record.capability_ref, capability);
+    }
+
+    let (push, record) =
+        resolve_capability_action_with_record_for_state(&state, "git.push", json!({}));
+    assert!(push.is_none());
+    assert_eq!(record.reason_code, "capability_unavailable");
+}
+
+#[test]
 fn workspace_registry_requires_explicit_bare_capability_action() {
     let state = state_with_workspace_registry();
     let (action, record) =
@@ -918,6 +1097,80 @@ fn registry_resolves_crypto_positions_capability() {
     );
     assert_eq!(record.source, "registry");
     assert_eq!(record.capability_ref, "crypto.positions");
+}
+
+#[test]
+fn registry_does_not_expose_crypto_trading_or_order_actions_to_planner() {
+    let state = state_with_workspace_registry();
+    for capability in [
+        "crypto.trade_preview",
+        "crypto.trade_submit",
+        "crypto.order_status",
+        "crypto.cancel_order",
+        "crypto.cancel_all_orders",
+        "crypto.open_orders",
+        "crypto.trade_history",
+    ] {
+        let (action, record) = resolve_capability_action_with_record_for_state(
+            &state,
+            capability,
+            json!({"action": capability.trim_start_matches("crypto.")}),
+        );
+        assert!(action.is_none(), "{capability} must stay direct/admin-only");
+        assert_eq!(record.reason_code, "capability_unavailable", "{capability}");
+        assert_eq!(record.source, "none", "{capability}");
+        assert_eq!(record.capability_ref, capability);
+        assert!(record.resolved_ref.is_none(), "{capability}");
+    }
+}
+
+#[test]
+fn crypto_registry_separates_read_capability_policy_from_complete_runner_risk() {
+    let state = state_with_workspace_registry();
+    let manifest = state.skill_manifest("crypto").expect("crypto manifest");
+    assert_eq!(
+        manifest.risk_level,
+        Some(claw_core::skill_registry::SkillRiskLevel::High)
+    );
+    assert_eq!(manifest.requires_confirmation, Some(true));
+    assert_eq!(manifest.side_effect, Some(true));
+
+    for action in ["quote", "multi_quote", "positions"] {
+        assert!(
+            !state.skill_invocation_requires_confirmation_policy(
+                "crypto",
+                Some(&json!({"action": action}))
+            ),
+            "{action} should remain a read-only planner path"
+        );
+    }
+    for action in ["trade_submit", "cancel_order", "cancel_all_orders"] {
+        assert!(
+            state.skill_invocation_requires_confirmation_policy(
+                "crypto",
+                Some(&json!({"action": action}))
+            ),
+            "{action} must inherit complete-runner confirmation policy"
+        );
+    }
+
+    let registry = state.get_skills_registry().expect("skills registry");
+    for capability in ["crypto.quote", "crypto.multi_quote"] {
+        let mapping = registry
+            .planner_capabilities("crypto")
+            .iter()
+            .find(|mapping| mapping.name == capability)
+            .unwrap_or_else(|| panic!("missing {capability}"));
+        assert_eq!(mapping.network_access, Some(true), "{capability}");
+        assert_eq!(mapping.credential_access, Some(false), "{capability}");
+    }
+    let positions = registry
+        .planner_capabilities("crypto")
+        .iter()
+        .find(|mapping| mapping.name == "crypto.positions")
+        .expect("crypto.positions");
+    assert_eq!(positions.network_access, Some(true));
+    assert_eq!(positions.credential_access, Some(true));
 }
 
 #[test]

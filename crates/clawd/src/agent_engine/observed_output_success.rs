@@ -18,6 +18,28 @@ where
         .rposition(|step| step.is_ok() && predicate(step))
 }
 
+pub(crate) fn later_successful_respond_supersedes_matching_output<F>(
+    loop_state: &LoopState,
+    matches_output: F,
+) -> bool
+where
+    F: Fn(&str) -> bool,
+{
+    let latest_matching = loop_state
+        .executed_step_results
+        .iter()
+        .rposition(|step| step.output.as_deref().is_some_and(&matches_output));
+    let latest_respond = loop_state.executed_step_results.iter().rposition(|step| {
+        step.is_ok()
+            && step.skill == "respond"
+            && step
+                .output
+                .as_deref()
+                .is_some_and(|output| !matches_output(output))
+    });
+    matches!((latest_matching, latest_respond), (Some(output), Some(respond)) if respond > output)
+}
+
 #[cfg(test)]
 fn latest_successful_step_output<F>(loop_state: &LoopState, predicate: F) -> Option<String>
 where

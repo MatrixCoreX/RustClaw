@@ -522,12 +522,18 @@ fn native_respond_projects_matching_machine_fields_without_model_path_guessing()
 #[test]
 fn native_respond_rejects_unobserved_or_invalid_field_references() {
     let mut failed_loop_state = LoopState::default();
-    let mut failed = CapabilityResultEnvelope::ok(
+    let failed = crate::capability_result::failed_execution_envelope(
         "image.preview_generate",
-        Some("preview_generate".to_string()),
-        json!({"extra": {"provider": "minimax"}}),
+        "step_1",
+        &json!({"action": "preview_generate"}),
+        &crate::skills::structured_skill_error_from_parts(
+            "image_edit",
+            "provider_rejected",
+            "provider rejected request",
+            None,
+            Some(json!({"provider": "minimax", "status": "error"})),
+        ),
     );
-    failed.status = claw_core::capability_result::CapabilityResultStatus::Error;
     failed_loop_state.capability_results.push(failed);
 
     let observed_turn = |path: &str| {
@@ -551,12 +557,12 @@ fn native_respond_rejects_unobserved_or_invalid_field_references() {
 
     assert_eq!(
         actions_from_native_turn_with_groups(
-            &observed_turn("provider"),
+            &observed_turn("data.extra.provider"),
             &callable_capabilities(),
             &BTreeMap::new(),
             Some(&failed_loop_state),
         )
-        .expect_err("failed observations cannot authorize projection"),
+        .expect_err("failed result data cannot authorize projection"),
         "native_respond_observed_capability_result_missing"
     );
     assert_eq!(
@@ -578,6 +584,69 @@ fn native_respond_rejects_unobserved_or_invalid_field_references() {
         )
         .expect_err("natural-language source reference rejected"),
         "native_respond_observed_path_invalid"
+    );
+}
+
+#[test]
+fn native_respond_projects_structured_fields_from_failed_capability_observation() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(crate::capability_result::failed_execution_envelope(
+            "x.draft_preview",
+            "step_2",
+            &json!({"action": "post"}),
+            &crate::skills::structured_skill_error_from_parts(
+                "x",
+                "invalid_input",
+                "conflicting flags",
+                None,
+                Some(json!({
+                    "status": "error",
+                    "published": false,
+                    "would_execute": false,
+                    "external_call_count": 0
+                })),
+            ),
+        ));
+    let native_turn = turn(
+        vec![respond_call(json!({
+            "shape": "observed_object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [],
+            "observed_fields": [
+                {"name": "error_kind", "capability": "x.draft_preview", "path": "error.code"},
+                {"name": "status", "capability": "x.draft_preview", "path": "status"},
+                {"name": "published", "capability": "x.draft_preview", "path": "error.details.structured_error.extra.published"},
+                {"name": "would_execute", "capability": "x.draft_preview", "path": "error.details.structured_error.extra.would_execute"},
+                {"name": "external_call_count", "capability": "x.draft_preview", "path": "error.details.structured_error.extra.external_call_count"}
+            ],
+            "exact_field_count": 5
+        }))],
+        "",
+    );
+
+    let actions = actions_from_native_turn_with_groups(
+        &native_turn,
+        &["x.draft_preview".to_string()],
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect("structured failure projection");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(content).expect("projected failure object"),
+        json!({
+            "error_kind": "invalid_input",
+            "status": "error",
+            "published": false,
+            "would_execute": false,
+            "external_call_count": 0
+        })
     );
 }
 
@@ -1373,6 +1442,8 @@ fn native_unknown_tool_retry_preserves_current_exact_tool_catalog() {
         "native_plan_unknown_tool",
         &malformed,
         &request,
+        &[],
+        &[],
         &tool_map,
         &BTreeMap::from([(capability.to_string(), schema)]),
         Some(&LoopState::default()),
@@ -1395,6 +1466,74 @@ fn native_unknown_tool_retry_preserves_current_exact_tool_catalog() {
     );
     assert!(observation["protocol_observation"]["tool_name"].is_null());
     assert_eq!(repaired.tools, request.tools);
+    assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
+}
+
+#[test]
+fn native_unknown_tool_for_loadable_capability_retries_through_exact_group_loader() {
+    let capability = "process.ps".to_string();
+    let group = crate::capability_map::PlannerNativeCapabilityGroup {
+        skill_name: "process_basic".to_string(),
+        tool_name: "call_process_basic".to_string(),
+        description: "runtime_capability_group_v1; semantic_tags=process".to_string(),
+        capability_names: vec![capability.clone()],
+        capability_argument_schemas: BTreeMap::from([(
+            capability.clone(),
+            json!({
+                "type": "object",
+                "properties": {"filter": {"type": "string"}},
+                "additionalProperties": false
+            }),
+        )]),
+    };
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        None,
+        std::slice::from_ref(&capability),
+        &BTreeMap::new(),
+        std::slice::from_ref(&group),
+        &[],
+        &["process_basic".to_string()],
+    );
+    let malformed = turn(
+        vec![ModelToolCall {
+            id: "unloaded-process-tool".to_string(),
+            name: native_capability_leaf_tool_name(&capability),
+            arguments: json!({"filter": "clawd"}),
+        }],
+        "",
+    );
+
+    let signal = native_contract_repair_signal_for_turn(
+        "native_plan_unknown_tool",
+        &malformed,
+        &request,
+        std::slice::from_ref(&group),
+        &["process_basic".to_string()],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        Some(&LoopState::default()),
+        &[],
+    );
+    let observation: Value = serde_json::from_str(&signal).expect("repair observation");
+    let repaired = native_contract_retry_request(&request, &signal);
+
+    assert_eq!(
+        observation["protocol_observation"]["tool_name"],
+        "load_capability_groups"
+    );
+    assert_eq!(
+        observation["protocol_observation"]["suggested_capability_groups"],
+        json!(["process_basic"])
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]["groups"]
+            ["allowed_exact_tokens"],
+        json!(["process_basic"])
+    );
+    assert_eq!(repaired.tools.len(), 1);
+    assert_eq!(repaired.tools[0].name, "load_capability_groups");
     assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
 }
 
@@ -1474,6 +1613,47 @@ fn native_object_response_schema_and_repair_explain_serialized_json_values() {
         assert_eq!(constraint["json_null"], "string_literal_null");
         assert_eq!(constraint["schema_level_null"], "rejected");
         assert_eq!(constraint["malformed_json"], "rejected");
+    }
+}
+
+#[test]
+fn native_observed_path_schema_and_repair_explain_array_segments() {
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        Some(90),
+        &callable_capabilities(),
+        &BTreeMap::new(),
+        &[],
+        &[],
+        &[],
+    );
+    let respond = request
+        .tools
+        .iter()
+        .find(|tool| tool.name == "respond")
+        .expect("respond tool");
+    let path_description = respond.input_schema["properties"]["observed_fields"]["items"]
+        ["properties"]["path"]["description"]
+        .as_str()
+        .expect("observed path description");
+    assert!(path_description.contains("array_index=decimal_path_segment"));
+    assert!(path_description.contains("data.extra.items.0.name"));
+    assert!(path_description.contains("error.details.structured_error.extra.error_kind"));
+
+    for error_code in [
+        "native_respond_observed_path_invalid",
+        "native_respond_observed_path_missing",
+    ] {
+        let signal = native_contract_repair_signal(error_code);
+        let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+        let constraint =
+            &observation["protocol_observation"]["argument_constraints"]["observed_fields[].path"];
+        assert_eq!(constraint["selector"], "machine_dotted_json_path");
+        assert_eq!(constraint["success_roots"][0], "data");
+        assert_eq!(constraint["failure_roots"][0], "status");
+        assert_eq!(constraint["array_index"], "decimal_path_segment");
+        assert_eq!(constraint["bracket_notation"], "rejected");
     }
 }
 
@@ -1576,6 +1756,8 @@ fn native_contract_repair_reports_direct_leaf_required_fields() {
         "native_plan_required_args_missing",
         &malformed,
         &request,
+        &[],
+        &[],
         &tool_map,
         &BTreeMap::from([(
             "filesystem.read_text_range".to_string(),

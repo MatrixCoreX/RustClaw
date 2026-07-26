@@ -1,12 +1,67 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { hasUnsavedLlmDraftChanges, llmVendorSupportsApiFormat } from "./llm-config.ts";
+import {
+  hasUnsavedLlmDraftChanges,
+  isLlmConfigured,
+  llmVendorSupportsApiFormat,
+} from "./llm-config.ts";
 
 test("detects vendors with configurable api format", () => {
   assert.equal(llmVendorSupportsApiFormat("minimax"), true);
   assert.equal(llmVendorSupportsApiFormat("mimo"), true);
   assert.equal(llmVendorSupportsApiFormat("openai"), false);
+});
+
+test("treats an active runtime provider as configured when credentials are external", () => {
+  assert.equal(
+    isLlmConfigured({
+      selectedVendor: "minimax",
+      selectedModel: "MiniMax-M3",
+      vendors: [
+        {
+          name: "minimax",
+          api_key_configured: false,
+        },
+      ],
+      runtime: {
+        vendor: "minimax",
+        model: "MiniMax-M3",
+      },
+    }),
+    true,
+  );
+});
+
+test("requires a configured saved vendor when no runtime provider is active", () => {
+  assert.equal(
+    isLlmConfigured({
+      selectedVendor: "minimax",
+      selectedModel: "MiniMax-M3",
+      vendors: [
+        {
+          name: "minimax",
+          api_key_configured: true,
+        },
+      ],
+      runtime: null,
+    }),
+    true,
+  );
+  assert.equal(
+    isLlmConfigured({
+      selectedVendor: "minimax",
+      selectedModel: "MiniMax-M3",
+      vendors: [
+        {
+          name: "minimax",
+          api_key_configured: false,
+        },
+      ],
+      runtime: null,
+    }),
+    false,
+  );
 });
 
 test("marks api key edits as unsaved for the current vendor", () => {

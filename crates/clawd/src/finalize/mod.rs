@@ -35,7 +35,7 @@ pub(crate) use helpers::*;
 // 任务级编排：DB write / memory / 通知 / journal merge
 pub(crate) use task::{
     answer_verifier_retry_answer_has_required_machine_evidence, finalize_ask_direct_success,
-    finalize_ask_result, retry_loop_answer_after_verifier, run_direct_classifier_reply,
+    finalize_ask_result, retry_answer_after_verifier, run_direct_classifier_reply,
 };
 
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===
@@ -44,5 +44,6 @@ pub(crate) use loop_reply::{
     deterministic_matrix_observed_shape_answer,
     exact_observation_machine_field_delivery_satisfies_request,
     exact_observation_machine_field_projection_from_journal, finalize_loop_reply,
+    looks_like_structured_machine_output, message_is_non_answer_separator,
     record_strict_capability_projection_issue, strict_capability_projection_ready,
 };

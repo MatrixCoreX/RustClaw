@@ -11,6 +11,11 @@ from pathlib import Path
 PERSISTED_SKILLS = {
     "crypto": {"kind": "sqlite", "schema_version": 1, "migration_owner": "crypto"},
     "kb": {"kind": "sqlite", "schema_version": 1, "migration_owner": "kb"},
+    "rss_fetch": {
+        "kind": "sqlite",
+        "schema_version": 1,
+        "migration_owner": "rss_fetch",
+    },
 }
 REGISTRY_PATHS = (
     Path("configs/skills_registry.toml"),
@@ -156,6 +161,9 @@ def check_runtime_boundaries(root: Path, findings: list[str]) -> None:
     kb_main = read_text(root, Path("crates/skills/kb/src/main.rs"), findings)
     if "skill_storage" not in kb_main:
         findings.append("kb_missing_skill_storage_context")
+    rss_main = read_text(root, Path("crates/skills/rss_fetch/src/main.rs"), findings)
+    if "skill_storage" not in rss_main:
+        findings.append("rss_fetch_missing_skill_storage_context")
     resolver = read_text(
         root, Path("crates/clawd/src/skill_storage/resolver.rs"), findings
     )
@@ -181,12 +189,16 @@ def write_fixture(root: Path) -> None:
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "kb" }\n'
+            '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
+            'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),
         "docker/config/skills_registry.toml": (
             '[[skills]]\nname = "crypto"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "kb" }\n'
+            '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
+            'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),
         "migrations/004_key_auth.sql": "-- auth only\n",
         "crates/clawd/src/repo/auth.rs": "// auth only\n",
@@ -202,6 +214,9 @@ def write_fixture(root: Path) -> None:
             'fn validate_skill_name() {} // data/skills state.db\n'
         ),
         "crates/skills/kb/src/main.rs": "fn main() { let _ = skill_storage; }\n",
+        "crates/skills/rss_fetch/src/main.rs": (
+            "fn main() { let _ = skill_storage; }\n"
+        ),
     }
     for relative, text in files.items():
         path = root / relative

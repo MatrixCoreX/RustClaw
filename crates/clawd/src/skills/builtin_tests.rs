@@ -1,4 +1,4 @@
-use super::{execute_builtin_skill, parse_run_cmd_suggestion_payload};
+use super::execute_builtin_skill;
 use crate::{
     runtime::state::AppState, AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
@@ -1240,43 +1240,17 @@ async fn run_safe_command_detaches_background_http_server() {
         .status();
 }
 
-#[test]
-fn run_cmd_suggestion_schema_drift() {
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../prompts/schemas/run_cmd_suggestion.schema.json"
-    ))
-    .expect("schema json");
-    let properties = schema
-        .get("properties")
-        .and_then(|v| v.as_object())
-        .expect("properties");
-    for field in ["command", "confidence", "reason"] {
-        assert!(properties.contains_key(field), "missing property {field}");
-    }
-    let required = schema
-        .get("required")
-        .and_then(|v| v.as_array())
-        .expect("required");
-    for field in ["command", "confidence", "reason"] {
-        assert!(
-            required.iter().any(|v| v.as_str() == Some(field)),
-            "missing required field {field}"
-        );
-    }
-}
-
-#[test]
-fn run_cmd_suggestion_schema_rejects_missing_reason() {
-    let err = parse_run_cmd_suggestion_payload(r#"{"command":"pwd","confidence":0.92}"#)
-        .expect_err("schema should reject missing reason");
-    assert!(err.contains("missing required field `reason`"));
-}
-
-#[test]
-fn run_cmd_suggestion_schema_rejects_extra_property() {
-    let err = parse_run_cmd_suggestion_payload(
-        r#"{"command":"pwd","confidence":0.92,"reason":"show cwd","extra":true}"#,
+#[tokio::test]
+async fn run_cmd_rejects_removed_nl2cmd_request_text_path() {
+    let temp = TempDirGuard::new("run_cmd_rejects_request_text");
+    let state = test_state(temp.path.clone());
+    let error = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({"request_text": "print the current directory"}),
     )
-    .expect_err("schema should reject unexpected property");
-    assert!(err.contains("unexpected property `extra`"));
+    .await
+    .expect_err("run_cmd must require an explicit structured command");
+
+    assert_eq!(error, "unexpected arg key: request_text");
 }

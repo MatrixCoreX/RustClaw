@@ -288,6 +288,82 @@ fn observed_tool_evidence_retry_ignores_failed_tool_step() {
 }
 
 #[test]
+fn presentation_only_retry_uses_successful_evidence_after_recovered_failure() {
+    let mut route = route_result();
+    route.requires_content_evidence = false;
+    route.delivery_required = false;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_1",
+            "fs_basic",
+            crate::executor::StepExecutionStatus::Error,
+            None,
+            Some(r#"{"error_kind":"invalid_input"}"#.to_string()),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "office_workspace",
+            r#"{"sheet":"Summary","range":"A1:B2","values":[["Item","Amount"],["API",75]]}"#,
+        ));
+    let verifier = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "presentation mismatch".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed evidence".to_string(),
+        confidence: 0.93,
+    };
+
+    assert!(answer_verifier_retry_applicable(
+        &route, &journal, &verifier,
+    ));
+}
+
+#[test]
+fn evidence_gap_does_not_ignore_failed_tool_step() {
+    let mut route = route_result();
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_1",
+            "fs_basic",
+            crate::executor::StepExecutionStatus::Error,
+            None,
+            Some(r#"{"error_kind":"invalid_input"}"#.to_string()),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "office_workspace",
+            r#"{"sheet":"Summary","range":"A1:B2"}"#,
+        ));
+    let verifier = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["field_value".to_string()],
+        answer_incomplete_reason: "observed value is missing".to_string(),
+        should_retry: true,
+        retry_instruction: "collect missing evidence".to_string(),
+        confidence: 0.93,
+    };
+
+    assert!(!answer_verifier_retry_applicable(
+        &route, &journal, &verifier,
+    ));
+}
+
+#[test]
 fn existing_file_delivery_token_answer_canonicalizes_workspace_relative_path() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

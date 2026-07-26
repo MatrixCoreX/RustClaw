@@ -13,14 +13,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::Sha1;
 mod i18n;
+mod preview_response;
 mod providers;
 
 use i18n::*;
+use preview_response::build_preview_response;
 use providers::*;
 
 const IMAGE_REFERENCE_RESOLVER_SCHEMA_RAW: &str =
     include_str!("../../../../prompts/schemas/image_reference_resolver.schema.json");
 const SKILL_NAME: &str = "image_edit";
+const UNSUPPORTED_ACTION: &str = "unsupported_action";
 
 static IMAGE_REFERENCE_RESOLVER_SCHEMA: OnceLock<Value> = OnceLock::new();
 
@@ -566,9 +569,9 @@ fn execute(
         .to_ascii_lowercase();
     if !matches!(
         action.as_str(),
-        "edit" | "outpaint" | "restyle" | "add_remove"
+        "edit" | "preview_edit" | "outpaint" | "restyle" | "add_remove"
     ) {
-        return Err("unsupported action; use edit|outpaint|restyle|add_remove".to_string());
+        return Err([UNSUPPORTED_ACTION, action.as_str()].join(": "));
     }
     let instruction = obj
         .get("instruction")
@@ -637,6 +640,30 @@ fn execute(
         .and_then(|v| v.as_u64())
         .unwrap_or(1)
         .clamp(1, 2);
+
+    if action == "preview_edit" {
+        let vendor = *providers
+            .first()
+            .ok_or_else(|| "no vendor configured".to_string())?;
+        let model = requested_model
+            .or(first_model_candidate(
+                cfg.image_edit.default_model.as_deref(),
+                vendor_models(&cfg.image_edit, vendor),
+                cfg.image_edit.models.as_ref(),
+            ))
+            .unwrap_or("default");
+        return Ok(build_preview_response(
+            &output_path,
+            vendor_name(vendor),
+            model,
+            &instruction,
+            &image_source,
+            mask.is_some(),
+            size,
+            quality,
+            n,
+        ));
+    }
 
     let mut provider_errors: Vec<String> = Vec::new();
     for vendor in providers {

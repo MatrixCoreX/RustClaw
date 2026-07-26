@@ -60,6 +60,46 @@ export interface TaskQueryResponse {
   lifecycle?: TaskLifecycleProjection | null;
 }
 
+export interface ConversationHistoryTurn {
+  schema_version: number;
+  conversation_id: string;
+  external_chat_id?: string | null;
+  conversation_title?: string | null;
+  task_id: string;
+  status: TaskQueryResponse["status"];
+  user_text?: string | null;
+  assistant_text?: string | null;
+  error_text?: string | null;
+  attachment_count: number;
+  attachment_kinds: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ConversationTitleUpdate {
+  schema_version: number;
+  status: "ok";
+  conversation_id: string;
+  title: string;
+  updated_at: number;
+}
+
+export interface ConversationArchiveUpdate {
+  schema_version: number;
+  status: "ok";
+  conversation_id: string;
+  archived_at: number;
+}
+
+export interface ConversationHistoryPage {
+  schema_version: number;
+  status: "ok";
+  turns: ConversationHistoryTurn[];
+  next_cursor?: string | null;
+  truncated: boolean;
+  content_sha256: string;
+}
+
 export type TaskApprovalDecision = "approve_once" | "always_for_scope" | "deny";
 
 export interface ApprovalScopeGrantView {

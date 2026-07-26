@@ -91,3 +91,80 @@ fn model_io_rotation_does_not_drop_concurrent_appends() {
     assert_eq!(indexes.last().copied(), Some(200));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
+
+#[test]
+fn model_io_cross_process_append_child() {
+    let Ok(path) = std::env::var("RUSTCLAW_MODEL_IO_TEST_CHILD_PATH") else {
+        return;
+    };
+    let writer =
+        std::env::var("RUSTCLAW_MODEL_IO_TEST_CHILD_WRITER").expect("child writer identifier");
+    let payload = "x".repeat(32 * 1024);
+    for logical_call_index in 1..=40_u64 {
+        let line = json!({
+            "ts": now_ts_u64(),
+            "writer": writer,
+            "logical_call_index": logical_call_index,
+            "payload": payload,
+        })
+        .to_string();
+        append_model_io_line(Path::new(&path), &line).expect("cross-process append");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn model_io_lock_preserves_cross_process_jsonl_during_rotation() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-model-io-process-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp root");
+    let path = root.join("model_io.log");
+    let test_name = "providers::output::tests::model_io_cross_process_append_child";
+    let mut children = (1..=3)
+        .map(|writer| {
+            std::process::Command::new(std::env::current_exe().expect("current test binary"))
+                .args(["--exact", test_name, "--nocapture"])
+                .env("RUSTCLAW_MODEL_IO_TEST_CHILD_PATH", &path)
+                .env("RUSTCLAW_MODEL_IO_TEST_CHILD_WRITER", writer.to_string())
+                .spawn()
+                .expect("spawn model io writer")
+        })
+        .collect::<Vec<_>>();
+    while children
+        .iter_mut()
+        .any(|child| child.try_wait().expect("poll model io writer").is_none())
+    {
+        rotate_model_io_log_daily(&path, MODEL_IO_LOG_KEEP_DAYS).expect("rotate model io log");
+        std::thread::yield_now();
+    }
+    for child in &mut children {
+        assert!(child.wait().expect("wait model io writer").success());
+    }
+
+    let raw = std::fs::read_to_string(&path).expect("read model io log");
+    let records = raw
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("valid complete JSONL record"))
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 120);
+    let identities = records
+        .iter()
+        .map(|record| {
+            (
+                record.get("writer").and_then(Value::as_str).unwrap(),
+                record
+                    .get("logical_call_index")
+                    .and_then(Value::as_u64)
+                    .unwrap(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(identities.len(), 120);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}

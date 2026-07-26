@@ -43,11 +43,29 @@ fn draft_missing_person_returns_machine_error_extra() {
 
 #[test]
 fn list_investors_uses_machine_header() {
-    let resp = list_investors("req-list".to_string(), &[], &json!({}));
+    let persona = PersonaToml {
+        slug: "sample".to_string(),
+        aliases: vec!["sample".to_string()],
+        display_name_zh: "样例投资者".to_string(),
+        display_name_en: "Sample Investor".to_string(),
+        one_liner_zh: "关注事实和风险".to_string(),
+        facets_zh: Vec::new(),
+        prefer_zh: Vec::new(),
+    };
+    let resp = list_investors("req-list".to_string(), &[persona], &json!({"locale":"en"}));
 
     assert_eq!(resp.status, "ok");
-    assert_eq!(resp.text, "personas count=0");
-    assert_eq!(resp.extra.unwrap()["action"], "list_investors");
+    assert!(resp.text.starts_with("personas count=1\n"));
+    let extra = resp.extra.expect("list extra");
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "ok");
+    assert_eq!(extra["message_key"], "skill.invest_copy.investors_ready");
+    assert_eq!(extra["action"], "list_investors");
+    assert_eq!(extra["count"], 1);
+    assert_eq!(extra["personas"][0]["slug"], "sample");
+    assert_eq!(extra["personas"][0]["display_name"], "Sample Investor");
+    assert_eq!(extra["personas"][0]["one_liner"], "关注事实和风险");
 }
 
 #[test]

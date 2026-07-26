@@ -68,6 +68,68 @@ fn clawcli_admin_requires_explicit_yolo_request() {
 }
 
 #[test]
+fn restrictive_client_modes_are_server_stamped_and_cannot_loosen_policy() {
+    let user = identity("user");
+    let state = AppState::test_default_with_fixture_provider();
+    for (requested, expected_mode, expected_approval, expected_sandbox) in [
+        (
+            "safe",
+            TaskExecutionMode::Safe,
+            ToolApprovalPolicy::Always,
+            ToolSandboxMode::ReadOnly,
+        ),
+        (
+            "ask",
+            TaskExecutionMode::Ask,
+            ToolApprovalPolicy::OnRequest,
+            ToolSandboxMode::WorkspaceWrite,
+        ),
+    ] {
+        let mut payload = json!({"text": "task"});
+        stamp_authenticated_submission_policy(
+            &mut payload,
+            Some(&user),
+            Some("clawcli"),
+            Some(requested),
+        )
+        .expect("restrictive mode");
+        assert_eq!(payload[POLICY_PAYLOAD_FIELD]["mode"], requested);
+        assert_eq!(
+            payload[POLICY_PAYLOAD_FIELD]["authority"],
+            "server_validated_client_preference"
+        );
+        let task = claimed_task(&user.user_key, payload);
+        let effective = effective_policy_for_task(&state, &task);
+        assert_eq!(effective.mode, expected_mode);
+        assert_eq!(effective.approval_policy, expected_approval);
+        assert_eq!(effective.sandbox_mode, expected_sandbox);
+        assert!(execution_policy_authorization_error(&state, &task).is_none());
+    }
+}
+
+#[test]
+fn forged_restrictive_policy_falls_back_to_configured_policy() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = claimed_task(
+        "rk-user",
+        json!({
+            POLICY_PAYLOAD_FIELD: {
+                "schema_version": 1,
+                "mode": "safe",
+                "authority": "client",
+                "derivation": "explicit_restrictive_client_mode"
+            }
+        }),
+    );
+    let effective = effective_policy_for_task(&state, &task);
+    assert_eq!(effective.mode, TaskExecutionMode::Configured);
+    assert_eq!(
+        execution_policy_authorization_error(&state, &task),
+        Some("task_execution_policy_invalid")
+    );
+}
+
+#[test]
 fn non_clawcli_admin_defaults_to_yolo() {
     let admin = identity("admin");
     for origin in [None, Some("ui"), Some("telegram"), Some("whatsapp")] {

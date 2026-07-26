@@ -82,3 +82,26 @@ fn parse_sina_hq_returns_structured_quote_extra() {
         .and_then(Value::as_f64)
         .is_some_and(|value| value > 1.9 && value < 2.1));
 }
+
+#[test]
+fn preview_quote_normalizes_code_without_external_calls() {
+    let args = json!({"action": "preview_quote", "code": "600519"});
+    let (text, extra) = execute(args, &RuntimeConfig::default()).unwrap();
+
+    assert!(text.contains("message_key=skill.stock.quote_preview_ready"));
+    assert_eq!(extra["action"], "preview_quote");
+    assert_eq!(extra["normalized_code"], "SH600519");
+    assert_eq!(extra["resolution_mode"], "direct_code");
+    assert_eq!(extra["would_execute"], false);
+    assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn preview_quote_keeps_name_resolution_deferred() {
+    let args = json!({"action": "preview_quote", "name": "Example Holdings"});
+    let (_, extra) = execute(args, &RuntimeConfig::default()).unwrap();
+
+    assert!(extra["normalized_code"].is_null());
+    assert_eq!(extra["resolution_mode"], "configured_alias_or_model");
+    assert_eq!(extra["external_call_count"], 0);
+}

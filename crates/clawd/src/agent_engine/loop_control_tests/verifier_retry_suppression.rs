@@ -1,5 +1,5 @@
 use super::super::loop_control_post_write_evidence_guard::{
-    enforce_code_mutation_validation_success_guard, enforce_post_write_content_evidence_guard,
+    enforce_post_write_content_evidence_guard, enforce_workspace_mutation_validation_success_guard,
 };
 use super::super::{
     answer_verifier_evidence_replan_summary, answer_verifier_gap_requires_planner_observation,
@@ -129,7 +129,9 @@ fn code_mutation_validation_failure_creates_retry_gap() {
     )
     .with_task_journal(journal);
 
-    assert!(enforce_code_mutation_validation_success_guard(&mut reply));
+    assert!(enforce_workspace_mutation_validation_success_guard(
+        &mut reply
+    ));
     let summary = reply
         .task_journal
         .as_ref()
@@ -141,6 +143,163 @@ fn code_mutation_validation_failure_creates_retry_gap() {
         "post_write_validation_failed"
     );
     assert!(summary.should_retry);
+}
+
+#[test]
+fn text_workspace_mutation_validation_failure_creates_retry_gap() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-text-validation-failed", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"replace_text","path":"/workspace/exact.txt","resolved_path":"/workspace/exact.txt"},"text":"replacement applied"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_2",
+            "run_cmd",
+            StepExecutionStatus::Error,
+            None,
+            Some(
+                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"AssertionError"}}"#
+                    .to_string(),
+            ),
+        ));
+    let mut reply = AskReply::non_llm(
+        r#"{"changed_path":"exact.txt","verification_status":"failed"}"#.to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(enforce_workspace_mutation_validation_success_guard(
+        &mut reply
+    ));
+    let summary = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .expect("workspace validation failure gap");
+    assert_eq!(summary.missing_evidence_fields, vec!["validation_success"]);
+    assert_eq!(
+        summary.answer_incomplete_reason,
+        "post_write_validation_failed"
+    );
+    let retry_instruction: serde_json::Value =
+        serde_json::from_str(&summary.retry_instruction).expect("structured retry instruction");
+    assert_eq!(
+        retry_instruction
+            .pointer("/repair_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("post_write_validation")
+    );
+    assert_eq!(
+        retry_instruction
+            .pointer("/required_actions/3")
+            .and_then(serde_json::Value::as_str),
+        Some("complete_remaining_actions")
+    );
+}
+
+#[test]
+fn repaired_code_validation_uses_the_latest_validation_result() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-code-validation-repaired",
+        "ask",
+        "prompt",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"},"text":"written 120 bytes"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_2",
+            "run_cmd",
+            StepExecutionStatus::Error,
+            None,
+            Some("test failed".to_string()),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "fs_basic",
+            r#"{"extra":{"action":"replace_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"},"text":"replacement applied"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_4",
+            "run_cmd",
+            "Ran 3 tests\nOK",
+        ));
+    let mut reply = AskReply::non_llm(
+        r#"{"changed_files":["calc_core.py"],"test_status":"passed"}"#.to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(!enforce_workspace_mutation_validation_success_guard(
+        &mut reply
+    ));
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
+}
+
+#[test]
+fn latest_failed_code_validation_still_creates_retry_gap() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-code-validation-latest-failed",
+        "ask",
+        "prompt",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"replace_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"},"text":"replacement applied"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "run_cmd",
+            "Ran 3 tests\nOK",
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_3",
+            "run_cmd",
+            StepExecutionStatus::Error,
+            None,
+            Some("test failed".to_string()),
+        ));
+    let mut reply = AskReply::non_llm(
+        r#"{"changed_files":["calc_core.py"],"test_status":"failed"}"#.to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(enforce_workspace_mutation_validation_success_guard(
+        &mut reply
+    ));
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.answer_verifier_summary.as_ref())
+            .map(|summary| summary.answer_incomplete_reason.as_str()),
+        Some("post_write_validation_failed")
+    );
 }
 
 #[test]
@@ -170,7 +329,9 @@ fn code_mutation_unresolved_test_status_creates_retry_gap() {
     )
     .with_task_journal(journal);
 
-    assert!(enforce_code_mutation_validation_success_guard(&mut reply));
+    assert!(enforce_workspace_mutation_validation_success_guard(
+        &mut reply
+    ));
     let summary = reply
         .task_journal
         .as_ref()

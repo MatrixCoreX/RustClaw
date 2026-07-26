@@ -18,9 +18,9 @@ mod builtin_schedule;
 mod builtin_workspace_mutation;
 #[path = "builtin_workspace_patch.rs"]
 mod builtin_workspace_patch;
+#[path = "builtin_workspace_replace.rs"]
+mod builtin_workspace_replace;
 use builtin_child_task_patch::execute_child_task_patch;
-#[cfg(test)]
-use builtin_run_cmd::parse_run_cmd_suggestion_payload;
 #[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
@@ -28,8 +28,7 @@ use builtin_run_cmd::{
     command_has_shell_background_operator, looks_detached_background_command,
     prepare_durable_pty_command, run_cmd_checkpoint_claim_markers,
     run_cmd_claims_runtime_checkpoint_without_async_start, run_safe_command_detailed,
-    start_async_command, suggest_command_for_run_cmd, suggested_command_from_args,
-    RunSafeCommandError,
+    start_async_command, RunSafeCommandError,
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
 use builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
@@ -114,8 +113,6 @@ pub(crate) async fn execute_builtin_skill_for_task(
     args: &Value,
 ) -> Result<String, String> {
     if skill_name != "schedule" {
-        // Phase 1.2: 带着 task 走 `_with_task`，这样 run_cmd 的 NL2CMD 路径
-        // 能走完整的 LLM gateway（provider fallback / audit / model_io 日志）。
         return execute_builtin_skill_with_task(state, Some(task), skill_name, args).await;
     }
     let map = ensure_args_object(args)?;
@@ -461,10 +458,6 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "action",
                     "command",
                     "cwd",
-                    "request_text",
-                    "suggested_params",
-                    "suggest_once",
-                    "llm_suggest_once",
                     "timeout_seconds",
                     "idle_timeout_seconds",
                     "max_output_bytes",
@@ -575,38 +568,11 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 cwd,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            let request_text = optional_string(map, "request_text")
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string);
-            let _suggest_once = map
-                .get("suggest_once")
-                .and_then(|v| v.as_bool())
-                .or_else(|| map.get("llm_suggest_once").and_then(|v| v.as_bool()))
-                .unwrap_or(true);
-            let mut command = optional_string(map, "command")
+            let command = optional_string(map, "command")
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
-                .or_else(|| suggested_command_from_args(map))
-                .unwrap_or_default();
-            if command.trim().is_empty() {
-                if let Some(ref natural_request) = request_text {
-                    command = suggest_command_for_run_cmd(
-                        state,
-                        task,
-                        natural_request,
-                        &cwd_path,
-                        None,
-                        None,
-                    )
-                    .await?;
-                } else {
-                    return Err(
-                        "command must be string (or provide request_text for NL2CMD)".to_string(),
-                    );
-                }
-            }
+                .ok_or_else(|| "run_cmd.command_required".to_string())?;
             let sanitized_command = crate::bootstrap::sanitize_command_before_execute(
                 &state.policy.command_intent,
                 &command,

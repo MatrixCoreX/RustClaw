@@ -68,6 +68,21 @@ pub(crate) fn plan_agent_loop_context_compaction_with_provider_window(
     bundle: &TaskContextBundle,
     provider_context_window_tokens: Option<usize>,
 ) -> Option<ContextCompactionPlan> {
+    plan_context_compaction(bundle, provider_context_window_tokens, false)
+}
+
+pub(crate) fn force_agent_loop_context_compaction_plan(
+    bundle: &TaskContextBundle,
+    provider_context_window_tokens: Option<usize>,
+) -> Option<ContextCompactionPlan> {
+    plan_context_compaction(bundle, provider_context_window_tokens, true)
+}
+
+fn plan_context_compaction(
+    bundle: &TaskContextBundle,
+    provider_context_window_tokens: Option<usize>,
+    force: bool,
+) -> Option<ContextCompactionPlan> {
     let view = bundle.execution_view.as_ref()?;
     let slots = context_budget_slots(view);
     let before_char_count = slots
@@ -107,6 +122,9 @@ pub(crate) fn plan_agent_loop_context_compaction_with_provider_window(
         .is_some_and(|threshold| before_token_estimate >= threshold)
     {
         trigger_codes.push("provider_context_window_pressure");
+    }
+    if force {
+        trigger_codes.push("explicit_conversation_compaction");
     }
     if trigger_codes.is_empty() {
         return None;

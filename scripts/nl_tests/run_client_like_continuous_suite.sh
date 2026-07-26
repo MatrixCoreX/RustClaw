@@ -1270,9 +1270,46 @@ path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
 PY
 }
 
+monotonic_millis() {
+  python3 - <<'PY'
+import time
+
+print(time.monotonic_ns() // 1_000_000)
+PY
+}
+
 materialize_case_prompt() {
   local prompt="${1:-}"
   printf '%s' "${prompt//__RUSTCLAW_TEST_BASE_URL__/${BASE_URL}}"
+}
+
+reset_case_fixture_files() {
+  local case_tags="${1:-}"
+  python3 - "$ROOT_DIR" "$case_tags" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+tags = sys.argv[2]
+for token in (part for part in re.split(r"[,;\s]+", tags) if part):
+    prefix = "reset_fixture_file:"
+    if not token.startswith(prefix):
+        continue
+    relative = Path(token[len(prefix):])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise SystemExit(f"unsafe reset_fixture_file path: {relative}")
+    target = (root / relative).resolve()
+    try:
+        within_tmp = target.relative_to(root / "tmp")
+    except ValueError as error:
+        raise SystemExit(f"reset_fixture_file must stay under tmp/: {relative}") from error
+    if not within_tmp.parts or not within_tmp.parts[0].startswith("nl_"):
+        raise SystemExit(f"reset_fixture_file must use a tmp/nl_* fixture root: {relative}")
+    if target.is_dir():
+        raise SystemExit(f"reset_fixture_file target is a directory: {relative}")
+    target.unlink(missing_ok=True)
+PY
 }
 
 submit_turn() {
@@ -1288,7 +1325,7 @@ submit_turn() {
   local submit_retry_sleep_seconds="${SUBMIT_RETRY_SLEEP_SECONDS:-30}"
   local infra_retry_count="${7:-0}"
   local max_infra_retries="${LLM_INFRA_TURN_RETRIES_VALUE:-0}"
-  local overall_started_ms="${8:-$(date +%s%3N)}"
+  local overall_started_ms="${8:-$(monotonic_millis)}"
 
   [[ "$max_submit_attempts" =~ ^[0-9]+$ ]] || max_submit_attempts=1
   [[ "$submit_retry_sleep_seconds" =~ ^[0-9]+$ ]] || submit_retry_sleep_seconds=30
@@ -1363,7 +1400,7 @@ PY
     esac
   fi
   local turn_finished_ms
-  turn_finished_ms="$(date +%s%3N)"
+  turn_finished_ms="$(monotonic_millis)"
   annotate_turn_harness_metrics "$out_file" "$((turn_finished_ms - overall_started_ms))"
   status="$(extract_json_field "$out_file" status)"
   text="$(extract_json_field "$out_file" text)"
@@ -1867,6 +1904,11 @@ for group_user_id, group_chat_id in conversation_keys:
         "SELECT COUNT(*) FROM tasks WHERE chat_id = ? AND user_id = ?",
         (group_chat_id, group_user_id),
     )
+    current_run_tasks_count = sum(
+        1
+        for row in rows
+        if row["chat_id"] == group_chat_id and row["user_id"] == group_user_id
+    )
     memories_count = count(
         "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ?",
         (group_chat_id, group_user_id),
@@ -1887,7 +1929,7 @@ for group_user_id, group_chat_id in conversation_keys:
         "SELECT COUNT(*) FROM user_preferences WHERE chat_id = ? AND user_id = ?",
         (group_chat_id, group_user_id),
     )
-    require_group_memory = require_test_id_memory or tasks_count > 1
+    require_group_memory = require_test_id_memory or current_run_tasks_count > 1
     if require_group_memory and memories_count <= 0:
         raise SystemExit(f"expected memories for effective_chat_id={group_chat_id}")
     if require_group_memory and conversation_states_count <= 0:
@@ -2301,6 +2343,7 @@ if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 || -n "${CASE_JSONL_VALUE:-}" ]]; then
     if [[ "$case_tags" == *"skill:make_dir"* && "$case_name" == *"builtin_make_dir_smoke"* ]]; then
       rmdir "${ROOT_DIR}/document/nl_skill_tmp" 2>/dev/null || true
     fi
+    reset_case_fixture_files "$case_tags"
     echo "[CASE ${case_index}] name=${case_name} group=${case_group_key} external_chat_id=${case_external_chat_id}"
     if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}" "${case_tags:-}" "$case_external_chat_id"; then
       quality_guard_arg=""

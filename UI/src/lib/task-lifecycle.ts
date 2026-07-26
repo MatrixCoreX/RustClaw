@@ -413,3 +413,16 @@ export function canResumeTaskControl(
   if (lifecycle?.can_poll === false) return false;
   return lifecycle?.resume_due === true || Boolean(lifecycle?.resume_directive || lifecycle?.checkpoint_id);
 }
+
+export function shouldTrackTaskLive(
+  dbStatus: string,
+  executionState: string | null | undefined,
+  lifecycle: TaskLifecycleProjection | null | undefined,
+): boolean {
+  const status = dbStatus.trim();
+  if (["succeeded", "failed", "cancelled", "canceled", "timeout"].includes(status)) return false;
+  const projectedState = stateToken(lifecycle, status);
+  if (projectedState === "needs_user") return false;
+  if (["needs_confirmation", "blocked"].includes(executionState?.trim() ?? "")) return false;
+  return true;
+}

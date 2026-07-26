@@ -1,7 +1,7 @@
 use crate::agent_engine::LoopState;
 use crate::AppState;
 
-pub(super) fn looks_like_structured_machine_output(answer: &str) -> bool {
+pub(crate) fn looks_like_structured_machine_output(answer: &str) -> bool {
     let trimmed = answer.trim();
     serde_json::from_str::<serde_json::Value>(trimmed)
         .map(|value| value.is_object() || value.is_array())

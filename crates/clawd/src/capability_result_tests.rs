@@ -541,6 +541,48 @@ fn prose_failure_is_data_not_a_routing_signal() {
 }
 
 #[test]
+fn structured_skill_failure_preserves_redacted_machine_fields_for_projection() {
+    let encoded = crate::skills::structured_skill_error_from_parts(
+        "x",
+        "invalid_input",
+        "conflicting dry-run flags",
+        None,
+        Some(json!({
+            "status": "error",
+            "published": false,
+            "external_call_count": 0,
+            "api_key": "must-not-leak"
+        })),
+    );
+    let envelope = super::failed_execution_envelope(
+        "x.draft_preview",
+        "step_2",
+        &json!({"action": "post"}),
+        &encoded,
+    );
+
+    assert_eq!(envelope.status, CapabilityResultStatus::Error);
+    assert_eq!(envelope.error.as_ref().unwrap().code, "invalid_input");
+    assert_eq!(
+        super::selected_result_machine_value(
+            &envelope,
+            "error.details.structured_error.extra.external_call_count"
+        ),
+        Some(json!(0))
+    );
+    assert_eq!(
+        super::selected_result_machine_value(&envelope, "status"),
+        Some(json!("error"))
+    );
+    assert!(!envelope
+        .error
+        .unwrap()
+        .details
+        .to_string()
+        .contains("must-not-leak"));
+}
+
+#[test]
 fn signed_artifact_url_is_redacted_before_model_synthesis() {
     let envelope = super::successful_execution_envelope(
         "document_generate",
@@ -635,6 +677,36 @@ fn exact_selector_reads_nested_structured_result_without_domain_rules() {
     assert_eq!(
         super::selected_exact_machine_result(&[envelope], "metrics.labels").as_deref(),
         Some(r#"["alpha","beta"]"#)
+    );
+}
+
+#[test]
+fn exact_selector_reads_array_items_with_numeric_path_segments() {
+    let envelope = super::successful_execution_envelope(
+        "registry.fixture",
+        "step_11",
+        &json!({"action": "inspect"}),
+        "untrusted fallback",
+        Some(&json!({
+            "categories": [{
+                "category": "general",
+                "active_count": 5
+            }]
+        })),
+    );
+
+    assert_eq!(
+        super::selected_exact_machine_result(
+            &[envelope.clone()],
+            "data.extra.categories.0.category"
+        )
+        .as_deref(),
+        Some("general")
+    );
+    assert_eq!(
+        super::selected_exact_machine_result(&[envelope], "data.extra.categories.0.active_count")
+            .as_deref(),
+        Some("5")
     );
 }
 

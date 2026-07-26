@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -17,11 +18,13 @@ use axum::Json;
 use axum::Router;
 use claw_core::config::AppConfig;
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+mod session_store;
 
 #[derive(Clone)]
 struct AppState {
@@ -32,12 +35,14 @@ struct AppState {
     max_incoming_body_bytes: usize,
     cookie_name: String,
     session_ttl_secs: u64,
+    session_store_path: PathBuf,
     sessions: Arc<Mutex<HashMap<String, SessionEntry>>>,
     login_failure_limit: u32,
     login_lockout_secs: u64,
     login_attempts: Arc<Mutex<HashMap<LoginAttemptKey, LoginAttemptEntry>>>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct SessionEntry {
     user_key: String,
     expires_unix: u64,
@@ -105,7 +110,16 @@ async fn main() -> anyhow::Result<()> {
         anyhow::bail!("[webd].upstream is empty");
     }
 
-    let sessions = Arc::new(Mutex::new(HashMap::<String, SessionEntry>::new()));
+    let session_store_path = PathBuf::from(config.webd.session_store_path.trim());
+    let restored_sessions = match session_store::load_sessions(&session_store_path, now_unix_secs())
+    {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            warn!(error = %error, "webd_session_store_load_failed");
+            HashMap::new()
+        }
+    };
+    let sessions = Arc::new(Mutex::new(restored_sessions));
     let login_attempts = Arc::new(Mutex::new(
         HashMap::<LoginAttemptKey, LoginAttemptEntry>::new(),
     ));
@@ -117,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         max_incoming_body_bytes: config.webd.max_incoming_body_bytes.max(1),
         cookie_name: config.webd.session_cookie_name.clone(),
         session_ttl_secs: config.webd.session_ttl_seconds.max(60),
+        session_store_path,
         sessions,
         login_failure_limit: config.webd.login_failure_limit.max(1),
         login_lockout_secs: config.webd.login_lockout_seconds.max(1),
@@ -169,6 +184,7 @@ async fn webd_login(
     Json(body): Json<WebdLoginBody>,
 ) -> impl IntoResponse {
     let origin = cors_allow_origin_from_headers(&headers);
+    let secure_cookie = request_uses_https(&headers, client_addr, state.forward_x_forwarded);
     let attempt_key = LoginAttemptKey {
         client_ip: login_client_ip(&headers, client_addr, state.forward_x_forwarded),
         username: body.username.trim().to_lowercase(),
@@ -195,12 +211,9 @@ async fn webd_login(
         Ok(r) => r,
         Err(e) => {
             error!("webd login upstream error: {}", e);
-            return with_cors(
-                (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({ "ok": false, "error": format!("upstream: {}", e) })),
-                )
-                    .into_response(),
+            return webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_login_upstream_unavailable",
                 origin.as_ref(),
             );
         }
@@ -209,25 +222,21 @@ async fn webd_login(
     let text = match res.text().await {
         Ok(t) => t,
         Err(e) => {
-            return with_cors(
-                (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({ "ok": false, "error": format!("read body: {}", e) })),
-                )
-                    .into_response(),
+            error!(error = %e, "webd_login_upstream_body_read_failed");
+            return webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_login_upstream_body_read_failed",
                 origin.as_ref(),
             );
         }
     };
     let val: Value = match serde_json::from_str(&text) {
         Ok(v) => v,
-        Err(_) => {
-            return with_cors(
-                (
-                    status,
-                    Json(json!({ "ok": false, "error": "invalid JSON from clawd", "raw": text })),
-                )
-                    .into_response(),
+        Err(error) => {
+            error!(error = %error, "webd_login_upstream_response_invalid");
+            return webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_login_upstream_response_invalid",
                 origin.as_ref(),
             );
         }
@@ -255,7 +264,15 @@ async fn webd_login(
             .and_then(|v| v.as_str())
             .unwrap_or("login_failed");
         return with_cors(
-            (status, Json(json!({ "ok": false, "error": err }))).into_response(),
+            (
+                status,
+                Json(json!({
+                    "ok": false,
+                    "error": err,
+                    "error_code": err,
+                })),
+            )
+                .into_response(),
             origin.as_ref(),
         );
     }
@@ -266,12 +283,10 @@ async fn webd_login(
     {
         Some(k) => k.to_string(),
         None => {
-            return with_cors(
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "ok": false, "error": "missing user_key in clawd response" })),
-                )
-                    .into_response(),
+            error!("webd_login_upstream_user_key_missing");
+            return webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_login_upstream_response_invalid",
                 origin.as_ref(),
             );
         }
@@ -288,10 +303,13 @@ async fn webd_login(
                 expires_unix: expires,
             },
         );
+        persist_session_snapshot(&state, &guard);
     }
-    let cookie = format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
-        state.cookie_name, sid, state.session_ttl_secs
+    let cookie = session_cookie_value(
+        &state.cookie_name,
+        &sid,
+        state.session_ttl_secs,
+        secure_cookie,
     );
     let mut res = Json(json!({
         "ok": true,
@@ -395,16 +413,20 @@ fn login_locked_response(retry_after: u64, origin: Option<&HeaderValue>) -> Resp
     with_cors(response, origin)
 }
 
-async fn webd_logout(State(state): State<AppState>, req: Request) -> impl IntoResponse {
+async fn webd_logout(
+    State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> impl IntoResponse {
     let origin = cors_allow_origin_from_headers(req.headers());
+    let secure_cookie = request_uses_https(req.headers(), client_addr, state.forward_x_forwarded);
     if let Some(sid) = extract_session_id(req.headers(), &state.cookie_name) {
         let mut guard = state.sessions.lock().expect("sessions mutex");
-        guard.remove(&sid);
+        if guard.remove(&sid).is_some() {
+            persist_session_snapshot(&state, &guard);
+        }
     }
-    let clear = format!(
-        "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-        state.cookie_name
-    );
+    let clear = session_cookie_value(&state.cookie_name, "", 0, secure_cookie);
     let mut res = Json(json!({
         "ok": true,
         "data": { "logged_in": false }
@@ -467,13 +489,23 @@ fn session_user_key(state: &AppState, headers: &HeaderMap) -> Option<String> {
     let sid = extract_session_id(headers, &state.cookie_name)?;
     let mut guard = state.sessions.lock().expect("sessions mutex");
     let now = now_unix_secs();
+    let before = guard.len();
     guard.retain(|_, v| v.expires_unix > now);
+    if guard.len() != before {
+        persist_session_snapshot(state, &guard);
+    }
     let entry = guard.get(&sid)?;
     if entry.expires_unix <= now {
         guard.remove(&sid);
         return None;
     }
     Some(entry.user_key.clone())
+}
+
+fn persist_session_snapshot(state: &AppState, sessions: &HashMap<String, SessionEntry>) {
+    if let Err(error) = session_store::persist_sessions(&state.session_store_path, sessions) {
+        warn!(error = %error, "webd_session_store_update_failed");
+    }
 }
 
 async fn proxy_handler(
@@ -508,7 +540,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             error!("invalid [webd].upstream: {}", msg);
             return plain_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "invalid webd upstream URL",
+                "webd_upstream_config_invalid",
                 origin.as_ref(),
             );
         }
@@ -529,7 +561,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             error!("request body over limit or read error: {}", e);
             return plain_error(
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "request body too large for webd proxy",
+                "webd_request_body_too_large",
                 origin.as_ref(),
             );
         }
@@ -551,7 +583,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             error!("upstream request failed (url={}): {}", full_url, e);
             return plain_error(
                 StatusCode::BAD_GATEWAY,
-                &format!("upstream request failed: {}", e),
+                "webd_upstream_unavailable",
                 origin.as_ref(),
             );
         }
@@ -574,7 +606,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             error!("build response failed: {}", e);
             plain_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "proxy response build failed",
+                "webd_proxy_response_failed",
                 origin.as_ref(),
             )
         }
@@ -594,12 +626,75 @@ fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: 
         .is_some_and(|task_id| !task_id.is_empty() && !task_id.contains('/'))
 }
 
-fn plain_error(status: StatusCode, msg: &str, origin: Option<&HeaderValue>) -> Response {
-    with_cors((status, msg.to_string()).into_response(), origin)
+fn plain_error(status: StatusCode, error_code: &str, origin: Option<&HeaderValue>) -> Response {
+    webd_error_response(status, error_code, origin)
 }
 
 fn cors_allow_origin_from_headers(headers: &HeaderMap) -> Option<HeaderValue> {
-    headers.get(header::ORIGIN).cloned()
+    let origin = headers.get(header::ORIGIN)?;
+    let origin_text = origin.to_str().ok()?.trim();
+    let host_text = headers.get(header::HOST)?.to_str().ok()?.trim();
+    let origin_url = reqwest::Url::parse(origin_text).ok()?;
+    if !matches!(origin_url.scheme(), "http" | "https") {
+        return None;
+    }
+    let request_url = reqwest::Url::parse(&format!("http://{host_text}")).ok()?;
+    if origin_url.host_str()? != request_url.host_str()? {
+        return None;
+    }
+    Some(origin.clone())
+}
+
+fn webd_error_response(
+    status: StatusCode,
+    error_code: &str,
+    origin: Option<&HeaderValue>,
+) -> Response {
+    with_cors(
+        (
+            status,
+            Json(json!({
+                "ok": false,
+                "data": {
+                    "owner_layer": "webd",
+                    "error_code": error_code,
+                    "status_code": error_code,
+                },
+                "error": error_code,
+            })),
+        )
+            .into_response(),
+        origin,
+    )
+}
+
+fn session_cookie_value(name: &str, value: &str, max_age: u64, secure: bool) -> String {
+    format!(
+        "{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        if secure { "; Secure" } else { "" }
+    )
+}
+
+fn request_uses_https(
+    headers: &HeaderMap,
+    client_addr: SocketAddr,
+    trust_forwarded_from_loopback: bool,
+) -> bool {
+    if trust_forwarded_from_loopback && client_addr.ip().is_loopback() {
+        if headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("https"))
+        {
+            return true;
+        }
+    }
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| reqwest::Url::parse(value.trim()).ok())
+        .is_some_and(|url| url.scheme() == "https")
 }
 
 fn with_cors(mut response: Response, origin: Option<&HeaderValue>) -> Response {
@@ -613,7 +708,7 @@ fn with_cors(mut response: Response, origin: Option<&HeaderValue>) -> Response {
         );
         response
             .headers_mut()
-            .insert(header::VARY, HeaderValue::from_static("Origin"));
+            .append(header::VARY, HeaderValue::from_static("Origin"));
     }
     response
 }
@@ -698,8 +793,12 @@ fn build_outgoing_headers(
 
     if forward_x {
         let ip = client_addr.ip().to_string();
-        let merged = if let Some(existing) = incoming.get("x-forwarded-for") {
-            format!("{}, {}", existing.to_str().unwrap_or(""), ip)
+        let trusted_proxy = client_addr.ip().is_loopback();
+        let merged = if trusted_proxy {
+            incoming.get("x-forwarded-for").map_or_else(
+                || ip.clone(),
+                |existing| format!("{}, {}", existing.to_str().unwrap_or(""), ip),
+            )
         } else {
             ip
         };
@@ -709,7 +808,18 @@ fn build_outgoing_headers(
             }
         }
         if let Ok(name) = HeaderName::from_bytes(b"x-forwarded-proto") {
-            out.insert(name, HeaderValue::from_static("http"));
+            let proto = if trusted_proxy
+                && incoming
+                    .get("x-forwarded-proto")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.split(',').next())
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case("https"))
+            {
+                "https"
+            } else {
+                "http"
+            };
+            out.insert(name, HeaderValue::from_static(proto));
         }
     }
 

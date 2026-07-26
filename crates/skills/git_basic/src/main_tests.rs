@@ -474,6 +474,46 @@ fn execute_rejects_option_like_revision_tokens() {
     .expect_err("option-like revision must fail");
 
     assert_eq!(error.code, "git_revision_invalid");
+
+    let range_error = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "show",
+            "repo": "repository",
+            "target": "HEAD~1..HEAD"
+        }),
+    )
+    .expect_err("multi-object revision range must fail");
+
+    assert_eq!(range_error.code, "git_revision_not_found");
+}
+
+#[test]
+fn show_accepts_git_revision_file_object_syntax() {
+    let fixture = TestRepository::new();
+    let content = "# RustClaw\n";
+    let blob_revision = fixture.commit_file("README.md", content, "first");
+    let expected_blob = git_stdout(
+        &fixture.repository,
+        &["rev-parse", "--verify", "HEAD:README.md"],
+    );
+
+    let (text, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "show",
+            "repo": "repository",
+            "target": "HEAD:README.md"
+        }),
+    )
+    .expect("resolve and show a file object");
+
+    assert!(text.contains(content));
+    assert_ne!(expected_blob, blob_revision);
+    assert_eq!(
+        extra.get("revision").and_then(|value| value.as_str()),
+        Some(expected_blob.as_str())
+    );
 }
 
 #[test]

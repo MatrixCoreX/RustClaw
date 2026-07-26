@@ -451,6 +451,9 @@ pub(super) fn lookup_array_item_key_path<'a>(
     if segments.len() < 2 {
         return None;
     }
+    if let Some(found) = lookup_rooted_array_item_key_path(value, &segments) {
+        return Some(found);
+    }
     let selector_value = segments[0].trim();
     if selector_value.is_empty() || selector_value.contains('[') || selector_value.contains(']') {
         return None;
@@ -483,6 +486,56 @@ pub(super) fn lookup_array_item_key_path<'a>(
         match_strategy: "array_item_key_path",
         match_count: matches.len(),
     })
+}
+
+fn lookup_rooted_array_item_key_path<'a>(
+    value: &'a Value,
+    segments: &[&str],
+) -> Option<FieldLookup<'a>> {
+    if segments.len() < 3 {
+        return None;
+    }
+
+    for selector_index in 1..segments.len() - 1 {
+        let array_path = segments[..selector_index].join(".");
+        let Some(items) = lookup_field_value(value, &array_path).and_then(Value::as_array) else {
+            continue;
+        };
+        let Some(selector_value) = bare_field_key_selector(segments[selector_index]) else {
+            continue;
+        };
+        let nested_field_path = segments[selector_index + 1..].join(".");
+        let mut matches = items
+            .iter()
+            .filter_map(|item| {
+                let (selector_key, nested_value) =
+                    array_item_key_path_match(item, selector_value, &nested_field_path)?;
+                Some((
+                    format!("{array_path}[{selector_key}={selector_value}].{nested_field_path}"),
+                    nested_value,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        if matches.len() == 1 {
+            let (resolved_field_path, found) = matches.remove(0);
+            return Some(FieldLookup {
+                value: Some(found),
+                resolved_field_path: Some(resolved_field_path),
+                match_strategy: "rooted_array_item_key_path",
+                match_count: 1,
+            });
+        }
+        if !matches.is_empty() {
+            return Some(FieldLookup {
+                value: None,
+                resolved_field_path: None,
+                match_strategy: "rooted_array_item_key_path",
+                match_count: matches.len(),
+            });
+        }
+    }
+    None
 }
 
 pub(super) fn lookup_array_item_identity<'a>(

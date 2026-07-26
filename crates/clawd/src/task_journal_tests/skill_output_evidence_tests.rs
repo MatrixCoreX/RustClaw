@@ -645,6 +645,9 @@ fn json_wrapped_read_range_excerpt_samples_tail_line_evidence() {
 fn json_observed_evidence_prioritizes_health_check_process_counts() {
     let output = json!({
         "clawd_health_port_open": true,
+        "clawd_visible": true,
+        "db_available": true,
+        "overall_status": "healthy",
         "clawd_log": {"exists": true, "keyword_error_count": 43, "modified_ts": 1779824680, "size_bytes": 1046356},
         "clawd_process_count": 1,
         "log_dir": "/home/guagua/rustclaw/logs",
@@ -703,6 +706,9 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
             && item.get("excerpt").and_then(Value::as_str) == Some("156546629632")
     }));
     for (field, expected) in [
+        ("extra.clawd_visible", "true"),
+        ("extra.db_available", "true"),
+        ("extra.overall_status", "healthy"),
         ("extra.system_health.hostname", "ThinkPad-X1"),
         ("extra.system_health.kernel_release", "6.17.0-29-generic"),
         ("extra.system_health.os_family", "linux"),
@@ -1010,7 +1016,9 @@ fn health_check_fields_count_as_generic_field_value_evidence() {
         step_id: "step_1".to_string(),
         skill: "health_check".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(r#"{"clawd_health_port_open":true,"clawd_process_count":1}"#.to_string()),
+        output: Some(
+            r#"{"clawd_health_port_open":true,"clawd_process_count":1,"clawd_visible":true,"db_available":true,"overall_status":"healthy"}"#.to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,

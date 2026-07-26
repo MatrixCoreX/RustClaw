@@ -12,6 +12,7 @@ PROFILE="release"
 AUTO_BUILD=0
 RAW=0
 ARGS_JSON=""
+CONTEXT_JSON="${CONTEXT_JSON:-null}"
 USER_ID="${USER_ID:-1}"
 CHAT_ID="${CHAT_ID:-1}"
 
@@ -23,6 +24,7 @@ Usage:
 Options:
   --profile release         Runner profile (default: release)
   --args '<json>'           Args JSON passed to skill (default: wrapper preset)
+  --context '<json>'        Structured runner context (default: null)
   --user-id N               Request user_id (default: 1)
   --chat-id N               Request chat_id (default: 1)
   --auto-build              Auto build missing runner/skill binary
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ARGS_JSON="${2:-}"
       shift 2
       ;;
+    --context)
+      CONTEXT_JSON="${2:-}"
+      shift 2
+      ;;
     --user-id)
       USER_ID="${2:-1}"
       shift 2
@@ -136,6 +142,10 @@ echo "$ARGS_JSON" | jq -e . >/dev/null 2>&1 || {
   echo "--args is not valid JSON: $ARGS_JSON"
   exit 2
 }
+echo "$CONTEXT_JSON" | jq -e '. == null or type == "object"' >/dev/null 2>&1 || {
+  echo "--context must be a JSON object or null"
+  exit 2
+}
 
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
 
@@ -163,6 +173,7 @@ req="$(
     --arg rid "$request_id" \
     --arg skill "$SKILL_NAME" \
     --argjson args "$ARGS_JSON" \
+    --argjson context "$CONTEXT_JSON" \
     --argjson uid "$USER_ID" \
     --argjson cid "$CHAT_ID" \
     '{
@@ -171,7 +182,7 @@ req="$(
       chat_id: $cid,
       skill_name: $skill,
       args: $args,
-      context: null
+      context: $context
     }'
 )"
 

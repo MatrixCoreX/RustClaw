@@ -215,7 +215,7 @@ fn latest_broad_structured_read_range(
         .find_map(|value| broad_structured_read_range_from_value(&value))
 }
 
-pub(super) fn message_is_non_answer_separator(message: &str) -> bool {
+pub(crate) fn message_is_non_answer_separator(message: &str) -> bool {
     crate::finalize::is_non_answer_separator_message(message)
 }
 

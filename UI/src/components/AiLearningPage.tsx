@@ -13,16 +13,23 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  Blocks,
   BookOpenCheck,
+  BrainCircuit,
   ChevronLeft,
   ChevronRight,
+  Code2,
+  Compass,
   LoaderCircle,
   Maximize2,
   Minimize2,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
+  Workflow,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
@@ -30,9 +37,10 @@ import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
 import {
   classifyLearningLink,
-  insertAfterFirstDiagramChapter,
+  orderLearningPagesByStage,
   parseReadmeLearningPages,
   parseStandaloneLearningDocument,
+  type AiLearningPage as LearningPage,
 } from "../lib/ai-learning";
 import {
   fitDiagramScale,
@@ -66,6 +74,132 @@ const ARCHITECTURE_DOCUMENTS = {
   en: architectureDocuments("en"),
   zh: architectureDocuments("zh"),
 } satisfies Record<UiLanguage, string[]>;
+
+const LEARNING_STAGE_ORDER = [
+  "foundations",
+  "agent-runtime",
+  "context-memory",
+  "safety-operations",
+  "capabilities-artifacts",
+  "development-release",
+] as const;
+
+const ARCHITECTURE_STAGE_IDS = [
+  "agent-runtime",
+  "safety-operations",
+  "context-memory",
+  "development-release",
+  "capabilities-artifacts",
+  "development-release",
+  "capabilities-artifacts",
+  "capabilities-artifacts",
+] as const;
+
+interface LearningStageDefinition {
+  id: string;
+  title: string;
+  level: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+interface IndexedLearningPage {
+  index: number;
+  page: LearningPage;
+}
+
+interface LearningChapter {
+  id: string;
+  title: string;
+  pages: IndexedLearningPage[];
+}
+
+interface LearningStage extends LearningStageDefinition {
+  chapters: LearningChapter[];
+  pages: IndexedLearningPage[];
+}
+
+function stageDefinitions(t: Translate): LearningStageDefinition[] {
+  return [
+    {
+      id: "foundations",
+      title: t("认识 RustClaw", "Meet RustClaw"),
+      level: t("入门", "Start"),
+      description: t(
+        "先建立产品边界和整体认识，知道 RustClaw 能做什么，以及各部分如何协作。",
+        "Build a clear product-level mental model before moving into runtime details.",
+      ),
+      icon: Compass,
+    },
+    {
+      id: "agent-runtime",
+      title: t("Agent 核心", "Agent Core"),
+      level: t("核心", "Core"),
+      description: t(
+        "沿着一次请求理解 planner、capability、工具调用、验证和最终回复之间的关系。",
+        "Follow one request through planning, capabilities, tool execution, verification, and response synthesis.",
+      ),
+      icon: Workflow,
+    },
+    {
+      id: "context-memory",
+      title: t("上下文与记忆", "Context & Memory"),
+      level: t("进阶", "Deeper"),
+      description: t(
+        "理解任务状态、上下文预算、知识召回、记忆写入以及后台续跑。",
+        "Understand task state, context budgets, retrieval, memory writes, and background resume.",
+      ),
+      icon: BrainCircuit,
+    },
+    {
+      id: "safety-operations",
+      title: t("安全与运行", "Safety & Operations"),
+      level: t("实践", "Operate"),
+      description: t(
+        "掌握身份、权限、沙箱、部署入口和 UI/API 边界，安全地运行系统。",
+        "Learn identity, permissions, sandboxing, deployment entry points, and UI/API boundaries.",
+      ),
+      icon: ShieldCheck,
+    },
+    {
+      id: "capabilities-artifacts",
+      title: t("能力与工件", "Capabilities & Artifacts"),
+      level: t("扩展", "Extend"),
+      description: t(
+        "了解技能、模型、多媒体、Office 工件和技能独立存储如何接入 Agent Loop。",
+        "See how skills, models, media, Office artifacts, and skill-owned storage join the agent loop.",
+      ),
+      icon: Blocks,
+    },
+    {
+      id: "development-release",
+      title: t("开发与发布", "Build & Release"),
+      level: t("维护", "Maintain"),
+      description: t(
+        "面向开发和维护，覆盖代码观测、回归验证、目录边界与发布门禁。",
+        "For maintainers: coding observability, regression checks, repository boundaries, and release gates.",
+      ),
+      icon: Code2,
+    },
+  ];
+}
+
+function groupLearningChapters(pages: IndexedLearningPage[]): LearningChapter[] {
+  const chapters: LearningChapter[] = [];
+  pages.forEach((entry) => {
+    const current = chapters[chapters.length - 1];
+    if (!current || current.id !== entry.page.chapterId) {
+      chapters.push({
+        id: entry.page.chapterId,
+        title: entry.page.chapterTitle,
+        pages: [entry],
+      });
+    } else {
+      current.pages.push(entry);
+    }
+  });
+  return chapters;
+}
 
 function currentMermaidTheme(): "dark" | "neutral" {
   return document.documentElement.dataset.theme === "light" ? "neutral" : "dark";
@@ -365,31 +499,31 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         id: `architecture-guide-${index + 1}`,
         chapterId: "architecture-guide",
         chapterTitle,
+        stageId: ARCHITECTURE_STAGE_IDS[index] ?? "development-release",
         markdown,
       }));
-    return insertAfterFirstDiagramChapter(readmePages, architecturePages);
+    return orderLearningPagesByStage(
+      [...readmePages, ...architecturePages],
+      [...LEARNING_STAGE_ORDER],
+    );
   }, [lang]);
-  const chapters = useMemo(() => {
-    const grouped: Array<{
-      id: string;
-      title: string;
-      pages: Array<{ index: number; page: (typeof pages)[number] }>;
-    }> = [];
-    pages.forEach((item, index) => {
-      const current = grouped[grouped.length - 1];
-      if (!current || current.id !== item.chapterId) {
-        grouped.push({
-          id: item.chapterId,
-          title: item.chapterTitle,
-          pages: [{ index, page: item }],
-        });
-      } else {
-        current.pages.push({ index, page: item });
-      }
-    });
-    return grouped;
-  }, [pages]);
+  const stages = useMemo<LearningStage[]>(() => {
+    const definitions = stageDefinitions(t);
+    return definitions
+      .map((definition) => {
+        const stagePages = pages
+          .map((page, index) => ({ index, page }))
+          .filter(({ page }) => page.stageId === definition.id);
+        return {
+          ...definition,
+          pages: stagePages,
+          chapters: groupLearningChapters(stagePages),
+        };
+      })
+      .filter((stage) => stage.pages.length > 0);
+  }, [pages, t]);
   const [pageIndex, setPageIndex] = useState(0);
+  const stageNavRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setPageIndex((index) => Math.min(index, Math.max(0, pages.length - 1)));
@@ -400,6 +534,20 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
   }, [pageIndex]);
 
   const page = pages[pageIndex];
+
+  useEffect(() => {
+    const stageId = page?.stageId;
+    const scroller = stageNavRef.current;
+    if (!stageId || !scroller) return;
+    const activeButton = scroller.querySelector<HTMLElement>(
+      `[data-learning-stage="${stageId}"]`,
+    );
+    if (!activeButton) return;
+    const targetLeft =
+      activeButton.offsetLeft - (scroller.clientWidth - activeButton.clientWidth) / 2;
+    scroller.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+  }, [page?.stageId]);
+
   const markdownComponents = useMemo<Components>(
     () => ({
       pre: ({ children }) => {
@@ -427,24 +575,27 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
     [lang],
   );
 
-  if (!page) return null;
-  const chapterIndex = chapters.findIndex((chapter) => chapter.id === page.chapterId);
+  if (!page || stages.length === 0) return null;
+  const stageIndex = stages.findIndex((stage) => stage.id === page.stageId);
+  const activeStage = stages[Math.max(0, stageIndex)] ?? stages[0];
+  const previousPage = pages[pageIndex - 1];
+  const nextPage = pages[pageIndex + 1];
 
   return (
-    <section className="overflow-hidden rounded-lg border border-white/10 bg-[var(--theme-card)]">
-      <header className="border-b border-white/10 px-4 py-5 sm:px-6">
+    <section className="overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card)]">
+      <header className="border-b border-[var(--theme-border)] px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-orange-400/25 bg-orange-400/10 text-orange-200">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card-strong)] text-[var(--theme-icon-accent-color)]">
               <BookOpenCheck className="h-5 w-5" />
             </span>
             <div>
               <p className="theme-kicker text-[10px] uppercase">{t("AI 学习", "AI Learning")}</p>
               <h2 className="mt-1 text-lg font-semibold text-[var(--theme-text-strong)]">
-                {t("理解 RustClaw 的设计与运行流程", "Understand RustClaw design and runtime flows")}
+                {t("从使用到架构，分阶段理解 RustClaw", "Learn RustClaw from everyday use to architecture")}
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
-                {t("内容与仓库文档保持同步，并按主题拆成连续页面；流程图支持缩放、拖动和全屏查看。", "Content stays synchronized with the repository documentation and is organized as a continuous learning sequence with zoomable, pannable, full-screen diagrams.")}
+                {t("先建立整体认识，再逐步进入 Agent、记忆、安全、技能和开发细节。内容与仓库文档同步，流程图支持缩放、拖动和全屏查看。", "Start with the product view, then move through the agent, memory, safety, capabilities, and development layers. Content stays synchronized with repository docs, with zoomable and pannable diagrams.")}
               </p>
             </div>
           </div>
@@ -476,8 +627,43 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         </div>
       </header>
 
-      <div className="grid min-h-[65vh] lg:grid-cols-[230px_minmax(0,1fr)]">
-        <aside className="border-b border-white/10 p-3 lg:border-b-0 lg:border-r">
+      <nav
+        ref={stageNavRef}
+        className="theme-scrollbar overflow-x-auto border-b border-[var(--theme-border)] px-3 py-3 sm:px-5"
+        aria-label={t("学习路线", "Learning path")}
+      >
+        <div className="grid min-w-[780px] grid-cols-6 overflow-hidden rounded-md border border-[var(--theme-border)]">
+          {stages.map((stage, index) => {
+            const StageIcon = stage.icon;
+            const isActive = stage.id === activeStage.id;
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                data-learning-stage={stage.id}
+                className={`min-w-0 border-r border-[var(--theme-border)] px-3 py-3 text-left transition last:border-r-0 ${
+                  isActive
+                    ? "bg-orange-400/12 text-[var(--theme-text-strong)]"
+                    : "bg-[var(--theme-card-strong)] text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"
+                }`}
+                onClick={() => setPageIndex(stage.pages[0].index)}
+                aria-current={isActive ? "step" : undefined}
+              >
+                <span className="flex items-center gap-2">
+                  <StageIcon className={`h-4 w-4 shrink-0 ${isActive ? "text-[var(--theme-icon-accent-color)]" : "text-[var(--theme-text-faint)]"}`} />
+                  <span className="text-[10px] uppercase text-[var(--theme-text-faint)]">
+                    {index + 1}. {stage.level}
+                  </span>
+                </span>
+                <span className="mt-1 block truncate text-xs font-medium">{stage.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      <div className="grid min-h-[65vh] lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="border-b border-[var(--theme-border)] p-3 lg:border-b-0 lg:border-r">
           <label className="mb-2 block px-2 text-[10px] uppercase text-[var(--theme-text-faint)]" htmlFor="ai-learning-page">
             {t("学习目录", "Learning contents")}
           </label>
@@ -487,68 +673,116 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             value={pageIndex}
             onChange={(event) => setPageIndex(Number(event.target.value))}
           >
-            {chapters.map((chapter) => (
-              <optgroup key={chapter.id} label={chapter.title}>
-                {chapter.pages.map(({ index, page: item }) => (
+            {stages.map((stage) => (
+              <optgroup key={stage.id} label={`${stage.level} · ${stage.title}`}>
+                {stage.pages.map(({ index, page: item }) => (
                   <option key={item.id} value={index}>
-                    {index + 1}. {item.kind === "chapter" && chapter.pages.length > 1
-                      ? t("主题概览", "Topic overview")
-                      : item.title}
+                    {index + 1}. {item.title}
                   </option>
                 ))}
               </optgroup>
             ))}
           </select>
           <nav
-            className="theme-scrollbar hidden max-h-[calc(100vh-10rem)] space-y-3 overflow-y-auto pr-1 lg:block"
+            className="theme-scrollbar hidden max-h-[calc(100vh-10rem)] space-y-2 overflow-y-auto pr-1 lg:block"
             aria-label={t("学习主题", "Learning topics")}
           >
-            {chapters.map((chapter) => (
-              <section key={chapter.id}>
-                {chapter.pages.length > 1 && (
-                  <p className="px-3 pb-1 text-[11px] font-medium leading-5 text-[var(--theme-text-soft)]">
-                    {chapter.title}
-                  </p>
-                )}
-                <div className="space-y-1">
-                  {chapter.pages.map(({ index, page: item }) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setPageIndex(index)}
-                      className={`w-full rounded-md px-3 py-2 text-left text-sm leading-5 transition ${index === pageIndex ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]" : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"}`}
-                      aria-current={index === pageIndex ? "page" : undefined}
-                    >
-                      <span className="mr-2 font-mono text-[10px] text-[var(--theme-text-faint)]">
-                        {String(index + 1).padStart(2, "0")}
+            {stages.map((stage, index) => {
+              const StageIcon = stage.icon;
+              const isActive = stage.id === activeStage.id;
+              return (
+                <section key={stage.id}>
+                  <button
+                    type="button"
+                    className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition ${
+                      isActive
+                        ? "bg-white/5 text-[var(--theme-text-strong)]"
+                        : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"
+                    }`}
+                    onClick={() => setPageIndex(stage.pages[0].index)}
+                    aria-expanded={isActive}
+                  >
+                    <StageIcon className={`h-4 w-4 shrink-0 ${isActive ? "text-[var(--theme-icon-accent-color)]" : "text-[var(--theme-text-faint)]"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[10px] uppercase text-[var(--theme-text-faint)]">
+                        {index + 1}. {stage.level}
                       </span>
-                      {item.kind === "chapter" && chapter.pages.length > 1
-                        ? t("主题概览", "Topic overview")
-                        : item.title}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
+                      <span className="block truncate text-xs font-medium">{stage.title}</span>
+                    </span>
+                    <span className="font-mono text-[10px] text-[var(--theme-text-faint)]">{stage.pages.length}</span>
+                    <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition ${isActive ? "rotate-90" : ""}`} />
+                  </button>
+                  {isActive && (
+                    <div className="ml-4 mt-1 space-y-3 border-l border-[var(--theme-border)] pl-3">
+                      {stage.chapters.map((chapter) => (
+                        <div key={chapter.id}>
+                          {(stage.chapters.length > 1 || chapter.pages.length > 1) && (
+                            <p className="px-2 pb-1 text-[10px] font-medium leading-5 text-[var(--theme-text-faint)]">
+                              {chapter.title}
+                            </p>
+                          )}
+                          <div className="space-y-1">
+                            {chapter.pages.map(({ index: itemIndex, page: item }) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => setPageIndex(itemIndex)}
+                                className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5 transition ${
+                                  itemIndex === pageIndex
+                                    ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]"
+                                    : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"
+                                }`}
+                                aria-current={itemIndex === pageIndex ? "page" : undefined}
+                              >
+                                <span className="mt-px w-5 shrink-0 font-mono text-[9px] text-[var(--theme-text-faint)]">
+                                  {String(itemIndex + 1).padStart(2, "0")}
+                                </span>
+                                <span>{item.title}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
           </nav>
         </aside>
 
         <main className="min-w-0 px-4 py-5 sm:px-7 sm:py-7">
-          <div className="mb-5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-text-faint)]">
-            <span>{t("主题", "Topic")} {chapterIndex + 1} / {chapters.length}</span>
-            <span aria-hidden="true">/</span>
-            <span>{t("内容页", "Page")} {pageIndex + 1} / {pages.length}</span>
-            {page.diagramCount > 0 && (
-              <>
-                <span aria-hidden="true">/</span>
-                <span>{page.diagramCount} {t("张流程图", "diagrams")}</span>
-              </>
-            )}
+          <div className="mb-7 border-b border-[var(--theme-border)] pb-5">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase text-[var(--theme-text-faint)]">
+              <span>{activeStage.level}</span>
+              <span aria-hidden="true">/</span>
+              <span>{t("阶段", "Stage")} {stageIndex + 1} / {stages.length}</span>
+              <span aria-hidden="true">/</span>
+              <span>{t("内容", "Page")} {pageIndex + 1} / {pages.length}</span>
+              {page.diagramCount > 0 && (
+                <>
+                  <span aria-hidden="true">/</span>
+                  <span>{page.diagramCount} {t("张流程图", "diagrams")}</span>
+                </>
+              )}
+            </div>
+            <h3 className="mt-2 text-base font-semibold text-[var(--theme-text-strong)]">
+              {activeStage.title}
+            </h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
+              {activeStage.description}
+            </p>
+            <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/8" aria-hidden="true">
+              <div
+                className="h-full bg-[var(--theme-icon-accent-color)] transition-[width]"
+                style={{ width: `${((stageIndex + 1) / stages.length) * 100}%` }}
+              />
+            </div>
           </div>
-          <article className="learning-markdown mx-auto max-w-5xl">
+          <article className="learning-markdown mx-auto max-w-4xl">
             <ReactMarkdown components={markdownComponents}>{page.markdown}</ReactMarkdown>
           </article>
-          <footer className="mt-10 flex items-center justify-between gap-3 border-t border-white/10 pt-5">
+          <footer className="mt-10 flex items-center justify-between gap-3 border-t border-[var(--theme-border)] pt-5">
             <button
               type="button"
               className="theme-secondary-btn !px-3 disabled:opacity-35"
@@ -556,7 +790,10 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
             >
               <ChevronLeft className="h-4 w-4" />
-              {t("上一页", "Previous page")}
+              <span className="min-w-0 text-left">
+                <span className="block text-[10px] text-[var(--theme-text-faint)]">{t("上一页", "Previous")}</span>
+                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{previousPage?.title ?? t("已到开头", "Start")}</span>
+              </span>
             </button>
             <button
               type="button"
@@ -564,7 +801,10 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               disabled={pageIndex >= pages.length - 1}
               onClick={() => setPageIndex((index) => Math.min(pages.length - 1, index + 1))}
             >
-              {t("下一页", "Next page")}
+              <span className="min-w-0 text-right">
+                <span className="block text-[10px] text-[var(--theme-text-faint)]">{t("下一页", "Next")}</span>
+                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{nextPage?.title ?? t("已完成", "Complete")}</span>
+              </span>
               <ChevronRight className="h-4 w-4" />
             </button>
           </footer>

@@ -362,6 +362,13 @@ pub(super) async fn plan_round_actions(
                     if repair_reason_codes.len() >= MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS {
                         return Err(error_code);
                     }
+                    crate::assistant_presentation::abort_active_answer(
+                        state,
+                        task,
+                        &error_code,
+                        "assistant.output.contract_retry",
+                        true,
+                    );
                     warn!(
                         "native_plan_contract_retry task_id={} round={} attempt={} error_code={}",
                         task.task_id,
@@ -373,6 +380,8 @@ pub(super) async fn plan_round_actions(
                         &error_code,
                         &native_turn,
                         &native_request,
+                        &all_native_capability_groups,
+                        &loadable_capability_group_names,
                         &native_capability_group_map,
                         &native_capability_argument_schemas,
                         Some(loop_state),
@@ -655,7 +664,7 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, object for model-authored exact named fields, or observed_object to copy selected JSON fields from successful capability results without re-serializing their values. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
+        description: "Submit the final user-visible response after required observations. This tool formats answers; it does not execute or simulate runtime capabilities. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, object for model-authored exact named fields, or observed_object to copy selected JSON fields from current-loop success data or structured failure fields without re-serializing their values. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [
@@ -710,7 +719,7 @@ fn native_planner_request(
                 },
                 "observed_fields": {
                     "type": "array",
-                    "description": "schema:successful_capability_result_field_references_v1; value_source=runtime_copy; model_value_copy=forbidden",
+                    "description": "schema:current_loop_capability_result_field_references_v2; value_source=runtime_copy; success_roots=data; failure_roots=status,error; model_value_copy=forbidden",
                     "items": {
                         "type": "object",
                         "required": ["name", "capability", "path"],
@@ -724,13 +733,13 @@ fn native_planner_request(
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
-                                "description": "source=current_loop_success; selector=exact_capability_token"
+                                "description": "source=current_loop_outcome; selector=exact_capability_token"
                             },
                             "path": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
-                                "description": "selector=machine_dotted_json_path; roots=data,data.extra,data.output"
+                                "description": "selector=machine_dotted_json_path; success_roots=data,data.extra,data.output; failure_roots=status,error.code,error.message_key,error.retryable,error.details; array_index=decimal_path_segment; examples=data.extra.items.0.name,error.details.structured_error.extra.error_kind; bracket_notation=unsupported"
                             }
                         },
                         "additionalProperties": false
@@ -937,13 +946,15 @@ fn native_capability_tool_map(
 
 #[cfg(test)]
 fn native_contract_repair_signal(error_code: &str) -> String {
-    native_contract_repair_signal_with_context(error_code, None, None, &[])
+    native_contract_repair_signal_with_context(error_code, None, None, &[], &[])
 }
 
 fn native_contract_repair_signal_for_turn(
     error_code: &str,
     turn: &ModelTurnResponse,
     request: &ModelTurnRequest,
+    all_native_capability_groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
+    loadable_capability_group_names: &[String],
     native_capability_groups: &BTreeMap<String, BTreeSet<String>>,
     capability_argument_schemas: &BTreeMap<String, Value>,
     loop_state: Option<&LoopState>,
@@ -986,11 +997,32 @@ fn native_contract_repair_signal_for_turn(
     } else {
         Vec::new()
     };
+    let suggested_capability_groups = if error_code == "native_plan_unknown_tool" {
+        failed_call
+            .map(|call| {
+                all_native_capability_groups
+                    .iter()
+                    .filter(|group| {
+                        loadable_capability_group_names.contains(&group.skill_name)
+                            && group.capability_names.iter().any(|capability| {
+                                native_group_leaf_tool_name(group, capability) == call.name
+                                    || native_capability_leaf_tool_name(capability) == call.name
+                            })
+                    })
+                    .map(|group| group.skill_name.clone())
+                    .take(super::capability_discovery::MAX_GROUPS_PER_LOAD)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     native_contract_repair_signal_with_context(
         error_code,
         failed_call,
         expected_schema,
         &available_tool_names,
+        &suggested_capability_groups,
     )
 }
 
@@ -1023,11 +1055,13 @@ fn native_contract_repair_signal_with_context(
     failed_call: Option<&ModelToolCall>,
     expected_schema: Option<Value>,
     available_tool_names: &[String],
+    suggested_capability_groups: &[String],
 ) -> String {
     let respond_contract_error = error_code.starts_with("native_respond_")
         || error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
     let unknown_tool_error = error_code == "native_plan_unknown_tool";
+    let unknown_load_recovery = unknown_tool_error && !suggested_capability_groups.is_empty();
     let (default_tool_name, mut required_argument_fields, next_action) = if respond_contract_error {
         (
             NATIVE_RESPOND_TOOL,
@@ -1052,11 +1086,19 @@ fn native_contract_repair_signal_with_context(
             "retry_native_capability_group_load",
         )
     } else if unknown_tool_error {
-        (
-            NATIVE_CALL_CAPABILITY_TOOL,
-            Vec::new(),
-            "retry_with_available_native_tool",
-        )
+        if unknown_load_recovery {
+            (
+                super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL,
+                vec!["groups".to_string()],
+                "load_explicitly_requested_capability_group",
+            )
+        } else {
+            (
+                NATIVE_CALL_CAPABILITY_TOOL,
+                Vec::new(),
+                "retry_with_available_native_tool",
+            )
+        }
     } else {
         (
             NATIVE_CALL_CAPABILITY_TOOL,
@@ -1067,7 +1109,7 @@ fn native_contract_repair_signal_with_context(
     let exact_failed_tool = failed_call.is_some() && expected_schema.is_some();
     let failed_tool_name = failed_call.map(|call| call.name.as_str());
     let tool_name = if unknown_tool_error {
-        None
+        unknown_load_recovery.then_some(default_tool_name)
     } else {
         Some(failed_tool_name.unwrap_or(default_tool_name))
     };
@@ -1127,6 +1169,22 @@ fn native_contract_repair_signal_with_context(
             }),
         );
     }
+    if matches!(
+        error_code,
+        "native_respond_observed_path_invalid" | "native_respond_observed_path_missing"
+    ) {
+        argument_constraints.insert(
+            "observed_fields[].path".to_string(),
+            json!({
+                "selector": "machine_dotted_json_path",
+                "success_roots": ["data", "data.extra", "data.output"],
+                "failure_roots": ["status", "error.code", "error.message_key", "error.retryable", "error.details"],
+                "array_index": "decimal_path_segment",
+                "examples": ["data.extra.items.0.name", "error.details.structured_error.extra.error_kind"],
+                "bracket_notation": "rejected"
+            }),
+        );
+    }
     if error_code == "native_plan_args_not_object" {
         argument_constraints.insert(
             "args".to_string(),
@@ -1135,6 +1193,17 @@ fn native_contract_repair_signal_with_context(
                 "encoding": "json_object",
                 "empty_object": {},
                 "string_value": "rejected"
+            }),
+        );
+    }
+    if unknown_load_recovery {
+        argument_constraints.insert(
+            "groups".to_string(),
+            json!({
+                "type": "array",
+                "allowed_exact_tokens": suggested_capability_groups,
+                "minItems": 1,
+                "maxItems": super::capability_discovery::MAX_GROUPS_PER_LOAD
             }),
         );
     }
@@ -1162,6 +1231,7 @@ fn native_contract_repair_signal_with_context(
             "failed_tool_name": failed_tool_name,
             "exact_failed_tool": exact_failed_tool,
             "available_tool_names": available_tool_names,
+            "suggested_capability_groups": suggested_capability_groups,
             "required_argument_fields": required_argument_fields,
             "argument_constraints": Value::Object(argument_constraints),
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
@@ -1210,7 +1280,14 @@ fn native_contract_retry_request(
                 .and_then(Value::as_bool)
         })
         .unwrap_or(false);
-    if error_code == "native_plan_unknown_tool" {
+    if error_code == "native_plan_unknown_tool"
+        && repair_tool_name.as_deref()
+            == Some(super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL)
+    {
+        request.tools.retain(|tool| {
+            tool.name == super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL
+        });
+    } else if error_code == "native_plan_unknown_tool" {
         let available_tool_names = repair_observation
             .as_ref()
             .and_then(|value| {
@@ -1642,14 +1719,13 @@ fn action_from_native_respond_call(
                     .iter()
                     .rev()
                     .find(|result| {
-                        result.status == claw_core::capability_result::CapabilityResultStatus::Ok
-                            && result.capability == capability
+                        result.capability == capability
+                            && observed_projection_path_allowed(result.status, path)
                     })
                     .ok_or_else(|| {
                         "native_respond_observed_capability_result_missing".to_string()
                     })?;
-                let value = crate::capability_result::selected_result_value(result, path)
-                    .cloned()
+                let value = crate::capability_result::selected_result_machine_value(result, path)
                     .ok_or_else(|| "native_respond_observed_path_missing".to_string())?;
                 if object.insert(name.to_string(), value).is_some() {
                     return Err("native_respond_object_field_duplicate".to_string());
@@ -1673,43 +1749,29 @@ fn project_exact_object_from_observations(
     let Some(loop_state) = loop_state else {
         return None;
     };
-    object
+    loop_state
+        .capability_results
         .iter()
-        .map(|(name, expected)| {
-            loop_state
-                .capability_results
-                .iter()
-                .rev()
-                .filter(|result| {
-                    result.status == claw_core::capability_result::CapabilityResultStatus::Ok
-                })
-                .find_map(|result| observed_named_value(&result.data, name, expected, 0))
-                .cloned()
-                .map(|value| (name.clone(), value))
+        .rev()
+        .find_map(|result| {
+            crate::capability_result::exact_object_projection_from_result(result, object)
         })
-        .collect::<Option<Map<String, Value>>>()
-        .map(Value::Object)
 }
 
-fn observed_named_value<'a>(
-    current: &'a Value,
-    field_name: &str,
-    expected: &Value,
-    depth: usize,
-) -> Option<&'a Value> {
-    if depth > 12 {
-        return None;
-    }
-    let Some(object) = current.as_object() else {
-        return None;
-    };
-    object.iter().find_map(|(name, value)| {
-        if name == field_name && value == expected {
-            Some(value)
-        } else {
-            observed_named_value(value, field_name, expected, depth + 1)
+fn observed_projection_path_allowed(
+    status: claw_core::capability_result::CapabilityResultStatus,
+    path: &str,
+) -> bool {
+    match status {
+        claw_core::capability_result::CapabilityResultStatus::Ok => {
+            path == "data" || path.starts_with("data.")
         }
-    })
+        claw_core::capability_result::CapabilityResultStatus::Error => {
+            path == "status" || path.starts_with("error.")
+        }
+        claw_core::capability_result::CapabilityResultStatus::Waiting
+        | claw_core::capability_result::CapabilityResultStatus::NeedsUser => false,
+    }
 }
 
 fn machine_response_field_name(value: Option<&Value>) -> Result<&str, String> {

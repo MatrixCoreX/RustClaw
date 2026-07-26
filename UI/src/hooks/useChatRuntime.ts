@@ -8,6 +8,16 @@ import {
   fileToChatAttachment,
   formatVisionResultText,
 } from "../lib/chat-attachments";
+import {
+  AssistantPresentationReducer,
+  decodeAssistantPresentationEvent,
+} from "../lib/assistant-presentation";
+import {
+  conversationHistoryStorageKey,
+  projectConversationHistory,
+  verifyConversationHistoryPage,
+  type ServerChatThreadProjection,
+} from "../lib/chat-history";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
 import {
@@ -24,6 +34,9 @@ import type {
   ChannelName,
   ChatMessage,
   SubmitTaskResponse,
+  ConversationArchiveUpdate,
+  ConversationHistoryPage,
+  ConversationTitleUpdate,
   TaskLlmDebugResponse,
   TaskQueryResponse,
 } from "../types/api";
@@ -97,7 +110,7 @@ interface ChatThreadState {
   threads: ChatThreadRecord[];
 }
 
-const CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
+const LEGACY_CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
 const MAX_CHAT_THREADS = 30;
 const MAX_PERSISTED_MESSAGES_PER_THREAD = 120;
 const MAX_TEACHING_RUNS_PER_THREAD = 80;
@@ -110,6 +123,7 @@ export interface UseChatRuntimeParams {
   interactionChannel: ChannelName;
   activeUserKey: string;
   activeIdentityIds: Record<string, unknown>;
+  conversationHistoryScope: string;
   interactionExternalUserId: string;
   interactionExternalChatId: string;
   fetchTaskById: (id: string) => Promise<TaskQueryResponse>;
@@ -125,6 +139,7 @@ export function useChatRuntime({
   interactionChannel,
   activeUserKey,
   activeIdentityIds,
+  conversationHistoryScope,
   interactionExternalUserId,
   interactionExternalChatId,
   fetchTaskById,
@@ -132,7 +147,7 @@ export function useChatRuntime({
   onTaskResult,
 }: UseChatRuntimeParams) {
   const [chatThreadState, setChatThreadState] = useState<ChatThreadState>(() =>
-    loadChatThreadState(t),
+    emptyChatThreadState(t),
   );
   const activeChatThread =
     chatThreadState.threads.find((thread) => thread.id === chatThreadState.activeThreadId) ??
@@ -158,6 +173,7 @@ export function useChatRuntime({
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
+  const [chatWorking, setChatWorking] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
   const [chatAudioInputDevices, setChatAudioInputDevices] = useState<
@@ -177,6 +193,8 @@ export function useChatRuntime({
   const chatTeachingModeValueRef = useRef(false);
   const chatAudioInputDeviceIdRef = useRef(chatAudioInputDeviceId);
   const activeChatThreadRef = useRef(activeChatThread);
+  const apiFetchRef = useRef(apiFetch);
+  const conversationHistoryScopeRef = useRef("");
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
   const voiceSendOnStopRef = useRef(false);
   const voiceStopRequestedRef = useRef(false);
@@ -188,10 +206,67 @@ export function useChatRuntime({
   chatTeachingModeValueRef.current = chatTeachingMode;
   chatAudioInputDeviceIdRef.current = chatAudioInputDeviceId;
   activeChatThreadRef.current = activeChatThread;
+  apiFetchRef.current = apiFetch;
 
   useEffect(() => {
-    persistChatThreadState(chatThreadState);
-  }, [chatThreadState]);
+    const scope = conversationHistoryScope.trim();
+    if (!scope || conversationHistoryScopeRef.current !== scope) return;
+    persistChatThreadState(chatThreadState, scope);
+  }, [chatThreadState, conversationHistoryScope]);
+
+  useEffect(() => {
+    const scope = conversationHistoryScope.trim();
+    if (!scope) {
+      if (conversationHistoryScopeRef.current) {
+        conversationHistoryScopeRef.current = "";
+        setChatThreadState(emptyChatThreadState(t));
+      }
+      return;
+    }
+    if (conversationHistoryScopeRef.current !== scope) {
+      conversationHistoryScopeRef.current = scope;
+      setChatThreadState(loadChatThreadState(t, scope));
+      window.localStorage.removeItem(LEGACY_CHAT_THREAD_STORAGE_KEY);
+    }
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const pages: ConversationHistoryPage[] = [];
+        let cursor: string | null = null;
+        for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+          const query = new URLSearchParams({ limit: "200" });
+          if (cursor) query.set("cursor", cursor);
+          const response = await apiFetchRef.current(
+            `/v1/tasks/conversation-history?${query}`,
+          );
+          const body = (await response.json()) as ApiResponse<ConversationHistoryPage>;
+          if (!response.ok || !body.ok || !body.data) {
+            throw new Error(body.error || `conversation_history_http_${response.status}`);
+          }
+          await verifyConversationHistoryPage(body.data);
+          pages.push(body.data);
+          cursor = body.data.truncated ? body.data.next_cursor?.trim() || null : null;
+          if (!cursor) break;
+        }
+        if (cancelled) return;
+        const restored = projectConversationHistory(pages, t);
+        setChatThreadState((current) =>
+          mergeServerConversationHistory(current, restored, t),
+        );
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            "conversation_history_restore_failed",
+            error instanceof Error ? error.message : "unknown",
+          );
+        }
+      }
+    };
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationHistoryScope, lang]);
 
   useEffect(() => {
     if (!chatVoiceRecordingSupported || !navigator.mediaDevices?.enumerateDevices) return;
@@ -304,7 +379,7 @@ export function useChatRuntime({
     setChatError(null);
   };
 
-  const deleteChatThread = (threadId: string) => {
+  const removeChatThreadLocally = (threadId: string) => {
     setChatThreadState((prev) => {
       if (prev.threads.length <= 1) {
         const replacement = createChatThread(t);
@@ -323,21 +398,142 @@ export function useChatRuntime({
     setChatTeachingLlmDebugLoading(false);
   };
 
-  const clearChatMessages = () => {
-    updateActiveChatThread((thread) => ({
-      ...thread,
-      messages: [clearedChatMessage(t)],
-      input: "",
-      updatedAt: Date.now(),
-      lastTaskId: null,
-      teachingTaskResult: null,
-      teachingLlmDebug: null,
-      teachingLlmDebugError: null,
-      activeTeachingRunId: null,
-      teachingRuns: [],
-    }));
-    chatInputValueRef.current = "";
-    setChatTeachingLlmDebugLoading(false);
+  const archiveChatThreadOnServer = async (thread: ChatThreadRecord) => {
+    if (!threadHasServerHistory(thread)) return;
+    const response = await apiFetch(
+      `/v1/tasks/conversations/${encodeURIComponent(thread.id)}`,
+      { method: "DELETE" },
+    );
+    const body = (await response.json()) as ApiResponse<ConversationArchiveUpdate>;
+    if (
+      !response.ok ||
+      !body.ok ||
+      !body.data ||
+      body.data.status !== "ok" ||
+      body.data.conversation_id !== thread.id
+    ) {
+      throw new Error(body.error || `conversation_archive_http_${response.status}`);
+    }
+  };
+
+  const deleteChatThread = async (threadId: string): Promise<boolean> => {
+    const thread = chatThreadState.threads.find((candidate) => candidate.id === threadId);
+    if (!thread) return false;
+    if (
+      !window.confirm(
+        t(
+          "删除这个任务及其对话记录？任务执行证据会安全保留，但不会再显示在对话列表中。",
+          "Remove this task and its conversation history? Execution evidence will be retained safely but hidden from the conversation list.",
+        ),
+      )
+    ) {
+      return false;
+    }
+    try {
+      await archiveChatThreadOnServer(thread);
+      removeChatThreadLocally(threadId);
+      setChatError(null);
+      return true;
+    } catch {
+      setChatError(
+        t(
+          "任务记录删除失败，请检查连接后重试。",
+          "The task history could not be removed. Check the connection and try again.",
+        ),
+      );
+      return false;
+    }
+  };
+
+  const renameChatThread = async (threadId: string, rawTitle: string): Promise<boolean> => {
+    const title = rawTitle.trim();
+    if (!title || Array.from(title).length > 120) {
+      setChatError(
+        t(
+          "任务名称需要填写，并且不能超过 120 个字符。",
+          "Enter a task name of no more than 120 characters.",
+        ),
+      );
+      return false;
+    }
+    try {
+      const thread = chatThreadState.threads.find((candidate) => candidate.id === threadId);
+      let persistedTitle = title;
+      if (thread && threadHasServerHistory(thread)) {
+        const response = await apiFetch(
+          `/v1/tasks/conversations/${encodeURIComponent(threadId)}/title`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title }),
+          },
+        );
+        const body = (await response.json()) as ApiResponse<ConversationTitleUpdate>;
+        if (
+          !response.ok ||
+          !body.ok ||
+          !body.data ||
+          body.data.status !== "ok" ||
+          body.data.conversation_id !== threadId
+        ) {
+          throw new Error(body.error || `conversation_title_http_${response.status}`);
+        }
+        persistedTitle = body.data.title;
+      }
+      updateChatThreadById(threadId, (thread) => ({
+        ...thread,
+        title: persistedTitle,
+        updatedAt: Date.now(),
+      }));
+      setChatError(null);
+      return true;
+    } catch {
+      setChatError(
+        t(
+          "任务名称保存失败，请检查连接后重试。",
+          "The task name could not be saved. Check the connection and try again.",
+        ),
+      );
+      return false;
+    }
+  };
+
+  const clearChatMessages = async (): Promise<boolean> => {
+    const thread = activeChatThreadRef.current;
+    if (
+      !window.confirm(
+        t(
+          "清空当前对话并开始一个新任务？任务执行证据会安全保留。",
+          "Clear this conversation and start a new task? Execution evidence will be retained safely.",
+        ),
+      )
+    ) {
+      return false;
+    }
+    try {
+      await archiveChatThreadOnServer(thread);
+      const replacement = createChatThread(t);
+      setChatThreadState((prev) => ({
+        activeThreadId: replacement.id,
+        threads: prev.threads
+          .map((item) => (item.id === thread.id ? replacement : item))
+          .slice(0, MAX_CHAT_THREADS),
+      }));
+      chatInputValueRef.current = "";
+      chatAttachmentsValueRef.current = [];
+      setChatAttachments([]);
+      setChatTeachingLlmDebugLoading(false);
+      setChatError(null);
+      return true;
+    } catch {
+      setChatError(
+        t(
+          "当前对话清空失败，请检查连接后重试。",
+          "The conversation could not be cleared. Check the connection and try again.",
+        ),
+      );
+      return false;
+    }
   };
 
   const fetchChatTeachingLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
@@ -623,6 +819,7 @@ export function useChatRuntime({
     const teachingRunId = `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     chatSendingValueRef.current = true;
     setChatSending(true);
+    setChatWorking(true);
     setChatError(null);
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -697,6 +894,7 @@ export function useChatRuntime({
         ...(effectiveExternalChatId ? { external_chat_id: effectiveExternalChatId } : {}),
         payload: {
           text: requestText,
+          conversation_id: threadAtSubmit.id,
           ...(audioOnly ? { source: "voice" } : {}),
           ...(adapterName ? { adapter: adapterName } : {}),
           ...(attached.length > 0
@@ -770,8 +968,48 @@ export function useChatRuntime({
         updatedAt: Date.now(),
       }));
 
-      await followTaskEventStream(apiFetch, submittedTaskId, () => {});
+      const presentation = new AssistantPresentationReducer();
+      let streamedAssistantMessageId: string | null = null;
+      let completedPresentationText: string | null = null;
+      await followTaskEventStream(apiFetch, submittedTaskId, async (event) => {
+        const decoded = decodeAssistantPresentationEvent(event);
+        if (!decoded) {
+          if (event.event_kind === "task_final") setChatWorking(false);
+          return;
+        }
+        const stream = await presentation.apply(decoded);
+        if (decoded.kind === "assistant_output_aborted") {
+          setChatWorking(true);
+        }
+        if (!stream || (!stream.content && stream.status === "streaming")) return;
+        setChatWorking(false);
+        if (stream.status === "completed") completedPresentationText = stream.content;
+        streamedAssistantMessageId ??= `a-${submittedTaskId}`;
+        const streamedMessage: ChatMessage = {
+          id: streamedAssistantMessageId,
+          role: "assistant",
+          text: stream.content,
+          ts: Date.now(),
+        };
+        updateChatThreadById(submitThreadId, (thread) => ({
+          ...thread,
+          messages: upsertThreadMessage(thread.messages, streamedMessage),
+          teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+            ...run,
+            assistantMessageId: streamedMessage.id,
+            assistantText: streamedMessage.text,
+          })),
+          updatedAt: Date.now(),
+        }));
+      });
       const finalResult = await fetchTaskById(submittedTaskId);
+      const finalTaskText = extractTaskText(finalResult);
+      if (
+        completedPresentationText !== null &&
+        completedPresentationText !== finalTaskText
+      ) {
+        setChatError("assistant_presentation_final_mismatch");
+      }
       onTaskResult(submittedTaskId, finalResult);
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
@@ -791,14 +1029,14 @@ export function useChatRuntime({
       }
 
       const assistantMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
+        id: streamedAssistantMessageId ?? `a-${Date.now()}`,
         role: "assistant",
-        text: attachedImages.length > 0 ? formatVisionResultText(extractTaskText(finalResult)) : extractTaskText(finalResult),
+        text: attachedImages.length > 0 ? formatVisionResultText(finalTaskText) : finalTaskText,
         ts: Date.now(),
       };
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
-        messages: appendThreadMessages(thread.messages, assistantMsg),
+        messages: upsertThreadMessage(thread.messages, assistantMsg),
         teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
           ...run,
           assistantMessageId: assistantMsg.id,
@@ -840,6 +1078,7 @@ export function useChatRuntime({
     } finally {
       chatSendingValueRef.current = false;
       setChatSending(false);
+      setChatWorking(false);
     }
   };
 
@@ -870,6 +1109,7 @@ export function useChatRuntime({
     chatTeachingRuns,
     activeChatTeachingRunId,
     chatSending,
+    chatWorking,
     chatRecording,
     chatVoiceRecordingSupported,
     chatAudioInputDevices,
@@ -892,19 +1132,33 @@ export function useChatRuntime({
     activeChatThreadId: chatThreadState.activeThreadId,
     createNewChatThread,
     selectChatThread,
+    renameChatThread,
     deleteChatThread,
   };
 }
 
-function loadChatThreadState(t: Translate): ChatThreadState {
+function threadHasServerHistory(thread: ChatThreadRecord): boolean {
+  return (
+    Boolean(thread.lastTaskId) ||
+    (thread.teachingRuns ?? []).some((run) => Boolean(run.taskId))
+  );
+}
+
+function emptyChatThreadState(t: Translate): ChatThreadState {
   const fallback = createChatThread(t);
+  return { activeThreadId: fallback.id, threads: [fallback] };
+}
+
+function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
+  const fallback = emptyChatThreadState(t);
   if (typeof window === "undefined") {
-    return { activeThreadId: fallback.id, threads: [fallback] };
+    return fallback;
   }
   try {
-    const raw = window.localStorage.getItem(CHAT_THREAD_STORAGE_KEY);
+    const storageKey = conversationHistoryStorageKey(scope);
+    const raw = storageKey ? window.localStorage.getItem(storageKey) : null;
     if (!raw) {
-      return { activeThreadId: fallback.id, threads: [fallback] };
+      return fallback;
     }
     const parsed = JSON.parse(raw) as Partial<ChatThreadState>;
     const threads = Array.isArray(parsed.threads)
@@ -914,7 +1168,7 @@ function loadChatThreadState(t: Translate): ChatThreadState {
           .slice(0, MAX_CHAT_THREADS)
       : [];
     if (threads.length === 0) {
-      return { activeThreadId: fallback.id, threads: [fallback] };
+      return fallback;
     }
     const activeThreadId =
       typeof parsed.activeThreadId === "string" &&
@@ -923,13 +1177,15 @@ function loadChatThreadState(t: Translate): ChatThreadState {
         : threads[0].id;
     return { activeThreadId, threads };
   } catch {
-    return { activeThreadId: fallback.id, threads: [fallback] };
+    return fallback;
   }
 }
 
-function persistChatThreadState(state: ChatThreadState) {
+function persistChatThreadState(state: ChatThreadState, scope: string) {
   if (typeof window === "undefined") return;
   try {
+    const storageKey = conversationHistoryStorageKey(scope);
+    if (!storageKey) return;
     const payload: ChatThreadState = {
       activeThreadId: state.activeThreadId,
       threads: state.threads.slice(0, MAX_CHAT_THREADS).map((thread) => ({
@@ -948,10 +1204,74 @@ function persistChatThreadState(state: ChatThreadState) {
           .map(stripAttachmentPayloadsFromMessage),
       })),
     };
-    window.localStorage.setItem(CHAT_THREAD_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(storageKey, JSON.stringify(payload));
   } catch {
     // Local history is a convenience cache; quota/private-mode failures must not block chat.
   }
+}
+
+function mergeServerConversationHistory(
+  current: ChatThreadState,
+  restored: ServerChatThreadProjection[],
+  t: Translate,
+): ChatThreadState {
+  const existingById = new Map(current.threads.map((thread) => [thread.id, thread]));
+  const serverThreads = restored.slice(0, MAX_CHAT_THREADS).map((thread) => {
+    const existing = existingById.get(thread.id);
+    const existingRunsByTask = new Map(
+      (existing?.teachingRuns ?? [])
+        .filter((run) => run.taskId)
+        .map((run) => [run.taskId as string, run]),
+    );
+    const teachingRuns = thread.teachingRuns.map((run) => {
+      const local = existingRunsByTask.get(run.taskId);
+      return {
+        ...run,
+        llmDebug: local?.llmDebug ?? null,
+        llmDebugError: local?.llmDebugError ?? null,
+        callCount: local?.callCount ?? debugCallCount(local?.llmDebug),
+      };
+    });
+    const latestRun = teachingRuns[teachingRuns.length - 1] ?? null;
+    const activeTeachingRunId =
+      existing?.activeTeachingRunId &&
+      teachingRuns.some((run) => run.id === existing.activeTeachingRunId)
+        ? existing.activeTeachingRunId
+        : latestRun?.id ?? null;
+    return {
+      id: thread.id,
+      title: thread.title || t("未命名任务", "Untitled task"),
+      messages: thread.messages.slice(-MAX_PERSISTED_MESSAGES_PER_THREAD),
+      input: existing?.input ?? "",
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      teachingMode: existing?.teachingMode ?? false,
+      externalChatId: thread.externalChatId,
+      lastTaskId: thread.lastTaskId,
+      teachingTaskResult: latestRun?.taskResult ?? null,
+      teachingLlmDebug: null,
+      teachingLlmDebugError: null,
+      activeTeachingRunId,
+      teachingRuns,
+    } satisfies ChatThreadRecord;
+  });
+  const localDrafts = current.threads.filter(
+    (thread) =>
+      !restored.some((candidate) => candidate.id === thread.id) &&
+      !thread.lastTaskId &&
+      !(thread.teachingRuns ?? []).some((run) => run.taskId),
+  );
+  const threads = [...localDrafts, ...serverThreads]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, MAX_CHAT_THREADS);
+  if (threads.length === 0) {
+    const fallback = createChatThread(t);
+    return { activeThreadId: fallback.id, threads: [fallback] };
+  }
+  const activeThreadId = threads.some((thread) => thread.id === current.activeThreadId)
+    ? current.activeThreadId
+    : threads[0].id;
+  return { activeThreadId, threads };
 }
 
 function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord | null {
@@ -1262,6 +1582,14 @@ function titleForThreadAfterUserMessage(
 
 function appendThreadMessages(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
   return [...messages, message].slice(-MAX_PERSISTED_MESSAGES_PER_THREAD);
+}
+
+function upsertThreadMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  const index = messages.findIndex((item) => item.id === message.id);
+  if (index < 0) return appendThreadMessages(messages, message);
+  const next = [...messages];
+  next[index] = message;
+  return next;
 }
 
 function canUseDirectVoiceRecording(): boolean {

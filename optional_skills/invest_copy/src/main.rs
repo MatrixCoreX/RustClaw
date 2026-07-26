@@ -240,6 +240,7 @@ fn list_investors(request_id: String, personas: &[PersonaToml], args: &Value) ->
         .and_then(Value::as_str);
     let en = is_en(locale);
     let mut lines = vec![format!("personas count={}", personas.len())];
+    let mut structured_personas = Vec::with_capacity(personas.len());
     for p in personas {
         let name = if en && !p.display_name_en.is_empty() {
             p.display_name_en.as_str()
@@ -250,13 +251,26 @@ fn list_investors(request_id: String, personas: &[PersonaToml], args: &Value) ->
             "slug={} display_name={} one_liner={}",
             p.slug, name, p.one_liner_zh
         ));
+        structured_personas.push(json!({
+            "slug": p.slug,
+            "display_name": name,
+            "one_liner": p.one_liner_zh,
+        }));
     }
     let text = lines.join("\n");
     SkillResp {
         request_id,
         status: "ok",
         text,
-        extra: Some(json!({ "action": "list_investors", "count": personas.len() })),
+        extra: Some(json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "ok",
+            "message_key": "skill.invest_copy.investors_ready",
+            "action": "list_investors",
+            "count": personas.len(),
+            "personas": structured_personas,
+        })),
         error_text: None,
     }
 }

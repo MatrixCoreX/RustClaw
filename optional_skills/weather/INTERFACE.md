@@ -9,8 +9,10 @@
 - `city/location/place/q` 传给上游地理编码接口时应优先使用**英文城市名**（如 `Nanjing`、`Beijing`）；若用户给的是中文地名，规划侧应先尝试转换为英文并**直接调用**，同时把用户原始地名写入 `display_location`，用于最终 `extra.location` 和多语言回复。只有当英文名无法可靠确定，或预计上游地理编码仍可能找不到该城市时，才应先向用户确认，不要猜测。
 - 文案语言由 `configs/weather.toml` 的 `[weather].language`、`args.locale` / `args.lang`、`context.locale` / `context.language` 决定（见下）。
 - 多日预报若请求天数超过接口上限（当前 16 天），会**钳制**为上限天数，并在成功响应的 `extra` 中返回 `forecast_days_requested`、`forecast_days_applied`、`forecast_days_capped`。
+- `preview_query` 可在不调用地理编码或天气接口时检查地点、坐标和预报天数，并返回规范化请求。
 
 ## Actions
+- `preview_query`：provider-free 请求预览；不调用 Open-Meteo。
 - `query`（默认）：根据城市名或经纬度查询；是否多日由参数 `days` / `forecast_days` 决定。
 
 ## Parameter Contract
@@ -22,6 +24,8 @@
 | all | `days` 或 `forecast_days` | 否 | number | - | 不提供：仅返回**当前**天气。提供且 ≥1：返回**未来 N 天**的每日预报；若 N 大于接口上限则按上限返回，并在 `extra` 标明。二者同时出现时以 `days` 为准。 |
 | all | `locale` 或 `lang` | 否 | string | 见配置 | 输出语言标签，如 `zh-CN`、`en-US`（优先级高于 `configs/weather.toml`，低于无此字段时由 `context` 覆盖）。 |
 | all | `action` | no | string | `query` | 固定为 query（可省略）。 |
+
+- Preview `extra`: `action=preview_query`, mode, anchor, coordinates, geocode requirement, normalized days, `provider=open_meteo`, `would_execute=false`, and `external_call_count=0`.
 
 \* 必须提供「城市/地名」或「latitude + longitude」其一。
 

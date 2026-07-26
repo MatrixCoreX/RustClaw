@@ -1,5 +1,6 @@
 use super::*;
 use crate::finalize::loop_reply::successful_content_observation_should_precede_status_summary;
+use serde_json::json;
 
 #[test]
 fn deterministic_observed_execution_status_answer_reports_mixed_results() {
@@ -582,6 +583,168 @@ fn model_failure_delivery_is_not_replaced_by_generic_status() {
         "第 1 步 `run_cmd` 成功。第 2 步 `run_cmd` 失败：Command failed with exit code 127。"
     );
     assert!(finalizer_summary.is_none());
+}
+
+#[test]
+fn terminal_respond_after_structured_skill_failure_is_not_replaced_by_generic_status() {
+    let state = test_state();
+    let task = claimed_task("task-terminal-response-after-skill-failure");
+    let mut route = free_route_result();
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    let ctx = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let answer = "Supply latitude and longitude, or one place field, to continue.".to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "load_capability_groups",
+        r#"{"status":"ok"}"#,
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "map_merchant",
+        r#"__RC_SKILL_ERROR__:{"error_kind":"missing_anchor","error_text":"code=missing_anchor","extra":{"error_code":"missing_anchor","required_any":[["latitude","longitude"],["place"]]},"skill":"map_merchant"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", &answer));
+    let mut finalizer_summary = None;
+
+    assert!(delivery_is_content_answer_candidate(
+        Some(&ctx),
+        &loop_state,
+        &loop_state.delivery_messages,
+    ));
+    assert!(
+        !replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "Validate the request and report the missing structured anchor.",
+            &mut loop_state,
+            &mut finalizer_summary,
+        )
+    );
+    assert_eq!(loop_state.delivery_messages, vec![answer]);
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.completion_ok),
+        Some(true)
+    );
+}
+
+#[test]
+fn grounded_structured_failure_response_is_not_replaced_by_generic_status() {
+    let state = test_state();
+    let task = claimed_task("task-terminal-structured-response-after-skill-failure");
+    let answer = json!({
+        "error_kind": "invalid_input",
+        "status": "error",
+        "published": false,
+        "would_execute": false,
+        "external_call_count": 0
+    })
+    .to_string();
+    let encoded = crate::skills::structured_skill_error_from_parts(
+        "x",
+        "invalid_input",
+        "conflicting flags",
+        None,
+        Some(json!({
+            "status": "error",
+            "published": false,
+            "would_execute": false,
+            "external_call_count": 0
+        })),
+    );
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "load_capability_groups",
+        r#"{"status":"ok"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(err_step_result("step_2", "x", &encoded));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", &answer));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::failed_execution_envelope(
+            "x.draft_preview",
+            "step_2",
+            &json!({"action": "post"}),
+            &encoded,
+        ));
+    let mut finalizer_summary = None;
+
+    assert!(
+        !replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "Return the exact structured failure fields.",
+            &mut loop_state,
+            &mut finalizer_summary,
+        )
+    );
+    assert_eq!(loop_state.delivery_messages, vec![answer]);
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.completion_ok),
+        Some(true)
+    );
+}
+
+#[test]
+fn ungrounded_structured_failure_response_is_replaced_by_generic_status() {
+    let state = test_state();
+    let task = claimed_task("task-ungrounded-structured-response-after-skill-failure");
+    let answer = json!({"status": "error", "published": true}).to_string();
+    let encoded = crate::skills::structured_skill_error_from_parts(
+        "x",
+        "invalid_input",
+        "conflicting flags",
+        None,
+        Some(json!({"status": "error", "published": false})),
+    );
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", "ok"));
+    loop_state
+        .executed_step_results
+        .push(err_step_result("step_2", "x", &encoded));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", &answer));
+    loop_state
+        .capability_results
+        .push(crate::capability_result::failed_execution_envelope(
+            "x.draft_preview",
+            "step_2",
+            &json!({"action": "post"}),
+            &encoded,
+        ));
+    let mut finalizer_summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "Return the exact structured failure fields.",
+            &mut loop_state,
+            &mut finalizer_summary,
+        )
+    );
+    assert_ne!(loop_state.delivery_messages, vec![answer]);
+    assert!(loop_state.delivery_messages[0].contains("reason_code=observed_execution_status"));
 }
 
 #[test]

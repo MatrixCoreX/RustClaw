@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn preview_query_normalizes_forecast_without_external_calls() {
+    let cat = TextCatalog {
+        current: default_embedded_strings(),
+    };
+    let args = json!({
+        "action": "preview_query",
+        "city": "Nanjing",
+        "display_location": "Nanjing",
+        "days": 30
+    });
+
+    let (_, extra) = execute(&args, &cat, "en-US").unwrap();
+
+    assert_eq!(extra["action"], "preview_query");
+    assert_eq!(extra["mode"], "daily");
+    assert_eq!(extra["forecast_days_requested"], 30);
+    assert_eq!(extra["forecast_days_applied"], MAX_FORECAST_DAYS);
+    assert_eq!(extra["forecast_days_capped"], true);
+    assert_eq!(extra["geocode_required"], true);
+    assert_eq!(extra["would_execute"], false);
+    assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn preview_query_rejects_invalid_coordinates_before_external_calls() {
+    let cat = TextCatalog {
+        current: default_embedded_strings(),
+    };
+    let args = json!({
+        "action": "preview_query",
+        "latitude": 91.0,
+        "longitude": 0.0
+    });
+
+    assert_eq!(
+        execute(&args, &cat, "en-US").unwrap_err(),
+        "code=invalid_coordinates"
+    );
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 

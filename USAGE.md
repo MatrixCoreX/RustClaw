@@ -215,6 +215,43 @@ rustclaw -stop
 ./stop-rustclaw.sh
 ```
 
+### 7.1 在终端中连续使用 Agent
+
+启动或恢复最近一次 CLI 会话：
+
+```bash
+clawcli chat
+```
+
+新建会话或恢复指定会话：
+
+```bash
+clawcli chat --new
+clawcli chat --conversation-id CONVERSATION_ID
+```
+
+启动时附加文件或图片：
+
+```bash
+clawcli chat --file README.md --image path/to/image.png
+```
+
+会话内可用 `/model`、`/permissions`、`/compact`、`/diff`、`/file`、
+`/image`、`/attachments`、`/goal`、`/resume` 和 `/resume-task` 等显式
+命令；运行 `/help` 查看当前完整列表。`@path` 也是显式文件引用语法，不会按
+自然语言短语猜测路径。附件限制为最多 10 个、单文件 20 MiB、总计 60 MiB，
+且只能引用当前 workspace 内通过符号链接与敏感文件检查的文件。
+
+脚本消费事件时使用严格 JSONL：
+
+```bash
+printf 'inspect the workspace\n/exit\n' | clawcli chat --jsonl
+```
+
+JSONL 模式的 stdout 每行都是独立、带版本的 JSON 对象，不包含 ANSI 或动画。
+模型与权限请求仍由服务端校验；只有管理员密钥显式使用全局 `--yolo` 时，
+`clawcli` 才请求无确认、`danger_full` 的执行策略。
+
 ## 8. Linux systemd 服务
 
 仓库不保存写死用户或安装路径的 `rustclaw.service`。Linux/systemd 主机应使用

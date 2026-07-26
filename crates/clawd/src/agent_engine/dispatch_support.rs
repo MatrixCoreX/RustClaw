@@ -1052,6 +1052,10 @@ pub(super) async fn dispatch_round_action(
     ended_with_user_visible_output: &mut bool,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
+    let requested_capability = match action {
+        AgentAction::CallCapability { capability, .. } => Some(capability.as_str()),
+        _ => None,
+    };
     let resolved_from_call_capability = matches!(action, AgentAction::CallCapability { .. });
     let resolved_capability_action =
         if let AgentAction::CallCapability { capability, args } = action {
@@ -1071,7 +1075,8 @@ pub(super) async fn dispatch_round_action(
     let action = resolved_capability_action.as_ref().unwrap_or(action);
     match action {
         AgentAction::CallTool { tool, args } => {
-            handle_call_tool_action(
+            let capability_result_count = loop_state.capability_results.len();
+            let result = handle_call_tool_action(
                 state,
                 task,
                 goal,
@@ -1095,10 +1100,17 @@ pub(super) async fn dispatch_round_action(
                     "call_tool_legacy"
                 },
             )
-            .await
+            .await;
+            preserve_requested_capability_result_identity(
+                loop_state,
+                capability_result_count,
+                requested_capability,
+            );
+            result
         }
         AgentAction::CallSkill { skill, args } => {
-            handle_call_skill_action(
+            let capability_result_count = loop_state.capability_results.len();
+            let result = handle_call_skill_action(
                 state,
                 task,
                 goal,
@@ -1122,7 +1134,13 @@ pub(super) async fn dispatch_round_action(
                     "call_skill"
                 },
             )
-            .await
+            .await;
+            preserve_requested_capability_result_identity(
+                loop_state,
+                capability_result_count,
+                requested_capability,
+            );
+            result
         }
         AgentAction::CallCapability { capability, args } => {
             Err(unresolved_capability_error(state, capability, args))
@@ -1185,4 +1203,26 @@ pub(super) async fn dispatch_round_action(
             Ok(ActionLoopDecision::NextAction)
         }
     }
+}
+
+fn preserve_requested_capability_result_identity(
+    loop_state: &mut LoopState,
+    previous_result_count: usize,
+    requested_capability: Option<&str>,
+) {
+    let Some(requested_capability) = requested_capability else {
+        return;
+    };
+    let Some(result) = loop_state
+        .capability_results
+        .get_mut(previous_result_count..)
+        .and_then(|results| results.last_mut())
+    else {
+        return;
+    };
+    result.capability = requested_capability.to_string();
+    super::attempt_ledger::preserve_latest_attempt_capability_identity(
+        loop_state,
+        requested_capability,
+    );
 }

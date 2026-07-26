@@ -5,6 +5,7 @@ pub(crate) mod child_patch;
 pub(crate) mod child_task_control;
 pub(crate) mod child_task_graph;
 pub(crate) mod child_tasks;
+pub(crate) mod conversation_history;
 pub(crate) mod crypto_storage;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
@@ -38,8 +39,8 @@ pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
     check_submit_task_limits, insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,
     resolve_submit_task_context, stable_i64_from_key, submit_task_audit_detail,
-    task_count_by_status, task_kind_name, SubmitTaskAccessError, SubmitTaskContextError,
-    SubmitTaskLimitError,
+    task_count_by_status, task_count_by_status_for_user, task_kind_name, SubmitTaskAccessError,
+    SubmitTaskContextError, SubmitTaskLimitError,
 };
 pub(crate) use task_admin::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
@@ -80,7 +81,8 @@ pub(crate) use tasks::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
     is_task_claim_active, is_task_claim_active_or_pending_ask_success_projection,
-    list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    list_active_tasks_for_user_internal, list_active_tasks_internal,
+    list_all_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,

@@ -432,6 +432,50 @@ planner_kind = "tool"
 }
 
 #[test]
+fn extract_field_resolves_rooted_array_item_key_path_for_toml() {
+    let root = temp_root("extract_field_rooted_array_item_key");
+    let target = root.join("skills_registry.toml");
+    std::fs::write(
+        &target,
+        r#"
+[[skills]]
+name = "read_file"
+prompt_file = "prompts/skills/read_file.md"
+
+[[skills]]
+name = "fs_basic"
+prompt_file = "prompts/skills/fs_basic.md"
+"#,
+    )
+    .expect("write toml");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("format".to_string(), json!("toml"));
+    obj.insert(
+        "field_path".to_string(),
+        json!("skills.fs_basic.prompt_file"),
+    );
+
+    let out = extract_field(&root, &obj, true).expect("extract field");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        value.get("value_text").and_then(Value::as_str),
+        Some("prompts/skills/fs_basic.md")
+    );
+    assert_eq!(
+        value.get("resolved_field_path").and_then(Value::as_str),
+        Some("skills[name=fs_basic].prompt_file")
+    );
+    assert_eq!(
+        value.get("match_strategy").and_then(Value::as_str),
+        Some("rooted_array_item_key_path")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn extract_field_resolves_array_item_identity_for_toml() {
     let root = temp_root("extract_field_array_item_identity");
     let target = root.join("skills_registry.toml");
@@ -1164,6 +1208,36 @@ fn read_range_reports_binary_input_as_structured_machine_error() {
     assert_eq!(extra["binary"], true);
     assert_eq!(extra["detected_encoding"], "binary_or_unsupported");
     assert_eq!(extra["detection"], "nul_byte");
+    assert_eq!(extra["handoff"]["detected_kind"], "binary");
+    assert_eq!(extra["handoff"]["capability_ref"], "filesystem.stat_paths");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_hands_images_and_pdf_to_canonical_capabilities() {
+    let root = temp_root("read_range_handoff");
+    std::fs::create_dir_all(&root).expect("create root");
+    let image = root.join("screen.data");
+    let pdf = root.join("manual.data");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\n\0payload").expect("write image");
+    std::fs::write(&pdf, b"%PDF-1.7\n\xff\0payload").expect("write pdf");
+
+    let mut image_args = Map::new();
+    image_args.insert("path".to_string(), json!(image.display().to_string()));
+    let image_error = read_range(&root, &image_args, true).expect_err("image is not text");
+    let image_handoff = &image_error.extra.expect("image error details")["handoff"];
+    assert_eq!(image_handoff["detected_kind"], "image");
+    assert_eq!(image_handoff["mime_type"], "image/png");
+    assert_eq!(image_handoff["capability_ref"], "image_vision.describe");
+
+    let mut pdf_args = Map::new();
+    pdf_args.insert("path".to_string(), json!(pdf.display().to_string()));
+    let pdf_error = read_range(&root, &pdf_args, true).expect_err("pdf is not text");
+    let pdf_handoff = &pdf_error.extra.expect("pdf error details")["handoff"];
+    assert_eq!(pdf_handoff["detected_kind"], "pdf");
+    assert_eq!(pdf_handoff["mime_type"], "application/pdf");
+    assert_eq!(pdf_handoff["capability_ref"], "document.parse");
+
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1181,7 +1255,8 @@ fn read_range_reports_oversized_input_without_allocating_it() {
     assert_eq!(err.kind, "file_too_large");
     let extra = err.extra.expect("structured error");
     assert_eq!(extra["error_code"], "read_range_scan_limit_exceeded");
-    assert_eq!(extra["requires_artifact_read"], true);
+    assert_eq!(extra["requires_handoff"], true);
+    assert_eq!(extra["handoff"]["capability_ref"], "document.parse");
     assert_eq!(extra["max_scan_bytes"], MAX_READ_RANGE_SCAN_BYTES);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1705,5 +1780,22 @@ fn validate_structured_reports_parse_failure_as_structured_output() {
         .get("error_text")
         .and_then(Value::as_str)
         .is_some_and(|text| text.contains("toml parse failed")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn unsupported_action_uses_machine_fields_instead_of_fixed_user_copy() {
+    let root = temp_root("unsupported_action");
+    let error = execute_action(&root, json!({"action": "not_registered"}), false)
+        .expect_err("unknown action must fail");
+
+    assert_eq!(error.kind, "unsupported_action");
+    assert_eq!(error.message, "unsupported_action=not_registered");
+    let details = error.extra.expect("structured error details");
+    assert_eq!(details["error_code"], "unsupported_action");
+    assert_eq!(details["received_action"], "not_registered");
+    assert!(details["allowed_actions"]
+        .as_array()
+        .is_some_and(|actions| actions.iter().any(|action| action == "runtime_status")));
     let _ = std::fs::remove_dir_all(root);
 }

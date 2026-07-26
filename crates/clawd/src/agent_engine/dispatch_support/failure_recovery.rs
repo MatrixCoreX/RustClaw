@@ -215,6 +215,10 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
                 | "precondition_path_not_in_patch"
                 | "invalid_precondition_hash"
                 | "patch_precondition_failed"
+                | "replacement_target_not_found"
+                | "replacement_target_ambiguous"
+                | "replacement_precondition_failed"
+                | "invalid_expected_occurrences"
         )
     })
 }
@@ -266,6 +270,9 @@ pub(crate) fn classify_skill_failure_recovery(
     }
     if crate::skills::is_crypto_account_access_error(normalized_skill, err) {
         return Some("recoverable_failure_finalize");
+    }
+    if crate::skills::structured_skill_error_requests_replan(err) {
+        return Some("recoverable_failure_continue_round");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
         && run_cmd_error_is_observable(normalized_skill, err)

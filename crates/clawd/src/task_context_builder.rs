@@ -14,7 +14,8 @@ mod compaction;
 mod summary;
 
 pub(crate) use compaction::{
-    apply_agent_loop_context_compaction, hydrate_agent_loop_context_compaction_plan,
+    apply_agent_loop_context_compaction, force_agent_loop_context_compaction_plan,
+    hydrate_agent_loop_context_compaction_plan,
     plan_agent_loop_context_compaction_with_provider_window, ContextCompactionPlan,
 };
 

@@ -39,6 +39,24 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         "task_event_archive_replay_failed",
         '"replay_mode": "archive_recovery"',
     ),
+    "crates/clawd/src/llm_gateway_model_turn.rs": (
+        "NativePresentationObserver::new",
+        "presentation_observer.observe(&event)",
+    ),
+    "crates/clawd/src/assistant_presentation_stream.rs": (
+        'call.name.as_deref() != Some("respond")',
+        'arguments.get("shape").and_then(Value::as_str) != Some("free_text")',
+        "sanitize_user_visible_text(content)",
+    ),
+    "crates/clawd/src/assistant_presentation.rs": (
+        '"assistant_output_started"',
+        '"assistant_output_delta"',
+        '"assistant_output_completed"',
+        '"assistant_output_aborted"',
+        '"assistant_output_replaced"',
+        "sanitize_user_visible_text(answer_text)",
+        "content_sha256",
+    ),
     "crates/clawcli/src/replay.rs": (
         "read_task_event_snapshot",
         "replay_bundle_json_with_archived_events",
@@ -56,6 +74,10 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
     "crates/clawcli/src/replay_tests.rs": (
         "replay_bundle_prefers_versioned_archived_events",
     ),
+    "crates/clawd/src/assistant_presentation_stream_tests.rs": (
+        "observer_never_publishes_private_text_or_non_respond_tool_arguments",
+        "parser_never_treats_non_free_text_or_malformed_arguments_as_terminal_text",
+    ),
 }
 
 FORBIDDEN_TOKENS: dict[str, tuple[str, ...]] = {
@@ -67,6 +89,10 @@ FORBIDDEN_TOKENS: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/task_event_transport.rs": (
         '"replay_mode": "retained_suffix"',
+    ),
+    "crates/clawd/src/llm_gateway_model_turn.rs": (
+        '"assistant_output_delta"',
+        "publish_claimed_payload",
     ),
 }
 
@@ -126,6 +152,11 @@ def run_self_test() -> None:
         '\n"replay_mode": "retained_suffix"'
     )
     assert any("forbidden_token" in item for item in scan_texts(regressed))
+    raw_publish = dict(good)
+    raw_publish["crates/clawd/src/llm_gateway_model_turn.rs"] += (
+        '\n"assistant_output_delta"'
+    )
+    assert any("assistant_output_delta" in item for item in scan_texts(raw_publish))
     print("TASK_EVENT_ARCHIVE_CONTRACT_SELF_TEST ok")
 
 

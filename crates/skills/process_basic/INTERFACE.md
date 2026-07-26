@@ -7,7 +7,11 @@
 - `process_basic` provides process inspection and targeted process control operations.
 - It supports listing processes/ports, killing a PID, and tailing logs.
 - Use `port_list` for local listening-port checks, including requests that ask whether a runtime such as `clawd` is listening on a specific port.
-- If a runtime status request asks for service-or-process evidence, use `ps` or `port_list` with a concrete process/filter/query/name value such as `clawd` so the final answer can cite structured `running`, `status`, `match_count`, `listeners`, and `ports` fields.
+- Use `ps` or `port_list` for process/listener evidence with a concrete
+  process/filter/query/name value such as `clawd`. When the request asks for
+  service-manager state or `manager_type`, use the dedicated
+  `service_control.status` capability; process evidence may supplement that
+  result but does not replace service-manager evidence.
 - `port_list` chooses OS-native probes first: Linux uses `ss` with `lsof`/`netstat` fallback; macOS uses `lsof` with `netstat` fallback. The successful response includes `extra.platform` and `extra.command_tool`.
 - A wildcard/all-interface bind proves local bind scope only. It does not prove
   Internet/public reachability, firewall policy, NAT exposure, authentication,

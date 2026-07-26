@@ -89,13 +89,18 @@ check_ok_extra() {
   local skill="$1"
   local args_json="$2"
   local extra_expr="${3:-.extra != null}"
+  local context_json="${4:-}"
   local wrapper="$ROOT_DIR/scripts/skill_calls/call_${skill}.sh"
   local stdout_log="$LOG_DIR/${skill}.stdout.log"
   local stderr_log="$LOG_DIR/${skill}.stderr.log"
+  local command=(bash "$wrapper" --profile "$PROFILE" --raw --args "$args_json")
+  if [[ -n "$context_json" ]]; then
+    command+=(--context "$context_json")
+  fi
 
   echo "== $skill =="
   set +e
-  bash "$wrapper" --profile "$PROFILE" --raw --args "$args_json" >"$stdout_log" 2>"$stderr_log"
+  "${command[@]}" >"$stdout_log" 2>"$stderr_log"
   local rc=$?
   set -e
 
@@ -204,7 +209,11 @@ check_ok_extra "archive_basic" '{"action":"pack","source":"scripts/skill_calls",
 check_ok_extra "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"PRAGMA schema_version;"}' '.extra != null and .extra.action == "sqlite_query" and (.extra | has("db_path")) and (.extra | has("sql")) and (.extra.result | has("columns")) and (.extra.result | has("rows"))'
 check_ok_extra "config_guard" '{"path":"configs/config.toml"}' '.extra != null and .extra.action == "scan" and (.extra | has("path")) and (.extra | has("risk_count")) and (.extra | has("risks"))'
 if start_http_contract_server; then
-  check_ok_extra "http_basic" '{"action":"get","url":"http://127.0.0.1:18087/index.json","timeout_seconds":5}' '.extra != null and .extra.action == "get" and .extra.status_code == 200 and (.extra | has("url")) and (.extra | has("body_preview"))'
+  CLAWD_BASE_URL="http://127.0.0.1:18087" check_ok_extra \
+    "http_basic" \
+    '{"action":"get","url":"http://127.0.0.1:18087/index.json","timeout_seconds":5}' \
+    '.extra != null and .extra.action == "get" and .extra.status_code == 200 and (.extra | has("url")) and (.extra | has("body_preview"))' \
+    '{"user_key":"base-skill-contract"}'
   kill "$HTTP_SERVER_PID" >/dev/null 2>&1 || true
   HTTP_SERVER_PID=""
 else

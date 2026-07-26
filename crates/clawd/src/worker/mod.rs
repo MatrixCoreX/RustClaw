@@ -12,6 +12,7 @@ mod ask_runtime;
 mod async_poll_executor;
 mod channels;
 mod child_task_execution_scope;
+pub(crate) mod conversation_compaction;
 mod locator;
 mod resume_replay_executor;
 pub(crate) mod run_capability;
@@ -477,6 +478,10 @@ pub(crate) async fn process_ask_task(
 ) -> anyhow::Result<()> {
     if run_capability::is_direct_capability_payload(payload) {
         return run_capability::process_run_capability_task(state, task, payload).await;
+    }
+    if conversation_compaction::is_conversation_compaction_payload(payload) {
+        return conversation_compaction::process_conversation_compaction_task(state, task, payload)
+            .await;
     }
     crate::log_ask_transition(
         state,

@@ -65,6 +65,7 @@ docker/config/channels/telegram.toml
 .env.*.local
 *.env
 runtime_env*.sh
+configs/*.toml.lock
 
 # =============================================================================
 # Per-session probes / scratch test sets that shouldn't bake into the repo.

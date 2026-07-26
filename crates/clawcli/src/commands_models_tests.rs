@@ -1,6 +1,6 @@
 use super::{
     filter_catalog_response, model_catalog_text_lines, model_readiness_json,
-    model_readiness_text_lines,
+    model_readiness_text_lines, resolve_model_override_from_catalog,
 };
 
 fn model_catalog_fixture() -> serde_json::Value {
@@ -162,4 +162,20 @@ fn models_readiness_marks_missing_selected_entry_not_ready() {
     assert!(lines[0].contains("matched_entry_count=0"));
     assert!(lines[0].contains("credential_state=null"));
     assert!(lines[0].contains("ready=0"));
+}
+
+#[test]
+fn chat_model_override_is_catalog_validated_and_provider_scoped() {
+    let body = model_catalog_fixture();
+    let selected =
+        resolve_model_override_from_catalog(&body, "MiniMax-M3").expect("configured model");
+    assert_eq!(selected.provider, "minimax");
+    assert_eq!(selected.model, "MiniMax-M3");
+
+    let explicit =
+        resolve_model_override_from_catalog(&body, "minimax/MiniMax-M3").expect("scoped model");
+    assert_eq!(explicit, selected);
+
+    assert!(resolve_model_override_from_catalog(&body, "qwen-max-latest").is_err());
+    assert!(resolve_model_override_from_catalog(&body, "unknown-model").is_err());
 }

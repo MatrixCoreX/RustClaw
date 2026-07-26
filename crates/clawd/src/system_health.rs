@@ -251,22 +251,76 @@ fn collect_matching_pids(
 #[path = "system_health_tests.rs"]
 mod tests;
 pub(crate) fn oldest_running_task_age_seconds(state: &AppState) -> anyhow::Result<u64> {
+    oldest_running_task_age_seconds_scoped(state, None)
+}
+
+pub(crate) fn active_running_task_count(state: &AppState) -> anyhow::Result<usize> {
+    active_running_task_count_scoped(state, None)
+}
+
+pub(crate) fn active_running_task_count_for_user(
+    state: &AppState,
+    user_id: i64,
+) -> anyhow::Result<usize> {
+    active_running_task_count_scoped(state, Some(user_id))
+}
+
+pub(crate) fn oldest_running_task_age_seconds_for_user(
+    state: &AppState,
+    user_id: i64,
+) -> anyhow::Result<u64> {
+    oldest_running_task_age_seconds_scoped(state, Some(user_id))
+}
+
+fn active_running_task_count_scoped(
+    state: &AppState,
+    user_id: Option<i64>,
+) -> anyhow::Result<usize> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let now = crate::now_ts_u64() as i64;
+
+    let count: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM tasks
+         WHERE status = 'running'
+           AND COALESCE(lease_owner, '') <> ''
+           AND lease_expires_at >= ?1
+           AND (?2 IS NULL OR user_id = ?2)",
+        rusqlite::params![now, user_id],
+        |row| row.get(0),
+    )?;
+    Ok(count.max(0) as usize)
+}
+
+fn oldest_running_task_age_seconds_scoped(
+    state: &AppState,
+    user_id: Option<i64>,
+) -> anyhow::Result<u64> {
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
+    let now = crate::now_ts_u64() as i64;
     let min_created_at: Option<i64> = db
         .query_row(
-            "SELECT MIN(CAST(created_at AS INTEGER)) FROM tasks WHERE status = 'running'",
-            [],
+            "SELECT MIN(CAST(created_at AS INTEGER))
+             FROM tasks
+             WHERE status = 'running'
+               AND COALESCE(lease_owner, '') <> ''
+               AND lease_expires_at >= ?1
+               AND (?2 IS NULL OR user_id = ?2)",
+            rusqlite::params![now, user_id],
             |row| row.get(0),
         )
         .optional()?;
 
     if let Some(created_ts) = min_created_at {
-        let now = crate::now_ts_u64() as i64;
         let age = now.saturating_sub(created_ts).max(0) as u64;
         Ok(age)
     } else {

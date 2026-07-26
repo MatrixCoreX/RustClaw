@@ -243,6 +243,74 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     relative_clawd.kill()
 
+    with tempfile.TemporaryDirectory(prefix="rustclaw-channel-isolation-") as raw:
+        root = Path(raw)
+        script = build_fixture(root)
+        write(root / "configs/channels/webd.toml", "[webd]\nenabled = true\n")
+        write(
+            root / "target/release/clawd",
+            "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n",
+            executable=True,
+        )
+        write(
+            root / "target/release/webd",
+            "#!/usr/bin/env bash\nexit 1\n",
+            executable=True,
+        )
+        write(
+            root / "target/release/telegramd",
+            "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n",
+            executable=True,
+        )
+        env = os.environ.copy()
+        env["HOME"] = str(root / "home")
+        env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        result = subprocess.run(
+            ["bash", str(script), "release"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=20,
+            check=False,
+        )
+        started_pids: list[int] = []
+        try:
+            for component in ("clawd", "telegramd"):
+                pid_path = root / f".pids/{component}.pid"
+                if pid_path.exists():
+                    started_pids.append(int(pid_path.read_text(encoding="utf-8").strip()))
+            if result.returncode == 0:
+                print("STARTUP_PREFLIGHT_CONTRACT failed: channel failure was hidden")
+                return 1
+            telegram_pid_path = root / ".pids/telegramd.pid"
+            if not telegram_pid_path.exists():
+                print(
+                    "STARTUP_PREFLIGHT_CONTRACT failed: a webd failure blocked "
+                    "the remaining telegramd startup"
+                )
+                return 1
+            telegram_pid = int(telegram_pid_path.read_text(encoding="utf-8").strip())
+            os.kill(telegram_pid, 0)
+            required = (
+                "continuing with remaining components: webd",
+                "Startup completed with failed components: webd",
+            )
+            missing = [token for token in required if token not in result.stdout]
+            if missing:
+                print(
+                    "STARTUP_PREFLIGHT_CONTRACT failed: channel isolation "
+                    f"output missing={missing}"
+                )
+                return 1
+        finally:
+            for pid in started_pids:
+                try:
+                    os.kill(pid, 15)
+                except ProcessLookupError:
+                    pass
+
     print("STARTUP_PREFLIGHT_CONTRACT ok")
     return 0
 

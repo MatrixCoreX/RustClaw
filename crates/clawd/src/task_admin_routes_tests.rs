@@ -4,9 +4,9 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::{
-    goal_by_task_id, list_approval_scope_grants, resume_task_by_id, retry_child_task_by_id,
-    revoke_approval_scope_grant, GoalByTaskIdRequest, ResumeTaskByIdRequest,
-    RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest,
+    goal_by_task_id, list_active_tasks, list_approval_scope_grants, resume_task_by_id,
+    retry_child_task_by_id, revoke_approval_scope_grant, ActiveTasksRequest, GoalByTaskIdRequest,
+    ResumeTaskByIdRequest, RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -87,6 +87,39 @@ fn stored_payload(state: &crate::AppState, task_id: &str) -> Value {
         )
         .expect("select payload");
     serde_json::from_str(&raw).expect("payload json")
+}
+
+#[tokio::test]
+async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
+    let state = state_with_goal_task("admin-task", json!({"text": "admin work"}));
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+         ) VALUES (
+            'other-task', 99, 9, 'other-key', 'ui', 'ask', ?1,
+            'running', NULL, NULL, '2', '2'
+         )",
+        rusqlite::params![json!({"text": "other work"}).to_string()],
+    )
+    .expect("insert other owner task");
+    drop(db);
+
+    let (status, Json(response)) = list_active_tasks(
+        State(state),
+        auth_headers(),
+        Json(ActiveTasksRequest {
+            user_id: 0,
+            chat_id: 0,
+            exclude_task_id: None,
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = response.data.expect("active tasks response");
+    assert_eq!(data["count"], 2);
 }
 
 fn insert_child_task(

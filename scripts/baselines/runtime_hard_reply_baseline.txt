@@ -629,7 +629,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed af
 crates/clawd/src/http/ui_routes/workspace_update.rs	git restore conflict files failed: {}	"git restore conflict files failed: {}",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse failed	"git rev-parse failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse upstream failed	"git rev-parse upstream failed",
-crates/clawd/src/http/ui_routes/workspace_update.rs	no release asset found for prefix {release_prefix}	raise SystemExit(f"no release asset found for prefix {release_prefix}")
 crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
 crates/clawd/src/http/ui_routes/workspace_update.rs	systemctl not found for systemd-managed restart	.ok_or_else(|| "systemctl not found for systemd-managed restart".to_string())?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	systemd-run failed to schedule restart for {service_unit}	"systemd-run failed to schedule restart for {service_unit}"
@@ -946,7 +945,6 @@ crates/clawd/src/skills.rs	假装 registry 没加载	/// - 直接调本函数等
 crates/clawd/src/skills.rs	双来源真相	/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
 crates/clawd/src/skills.rs	哪些 skill 是 builtin（in-process）	/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
 crates/clawd/src/skills.rs	清空 + 白名单注入	/// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
-crates/clawd/src/skills/builtin.rs	command must be string (or provide request_text for NL2CMD)	"command must be string (or provide request_text for NL2CMD)".to_string(),
 crates/clawd/src/skills/builtin.rs	content too large: {} bytes	format!("content too large: {} bytes", content.len()),
 crates/clawd/src/skills/builtin.rs	directory locator matched multiple candidates: {}	"directory locator matched multiple candidates: {}",
 crates/clawd/src/skills/builtin.rs	directory not found under system root and project root: {path}	format!("directory not found under system root and project root: {path}"),
@@ -1032,12 +1030,8 @@ crates/clawd/src/task_journal_evidence_coverage.rs	all llm providers in circuit_
 crates/clawd/src/task_journal_evidence_registry.rs	evidence extractor registry contains all built-in extractor specs	.expect("evidence extractor registry contains all built-in extractor specs")
 crates/clawd/src/ui_attachments.rs	ui_attachment_create_dir_failed: {err}	.map_err(|err| format!("ui_attachment_create_dir_failed: {err}"))?;
 crates/clawd/src/ui_attachments.rs	ui_attachment_write_failed: {err}	.map_err(|err| format!("ui_attachment_write_failed: {err}"))?;
-crates/clawd/src/verifier.rs	both primary and fallback steps are present in the same plan	"both primary and fallback steps are present in the same plan".to_string(),
 crates/clawd/src/verifier.rs	capability `{}` was not resolved to an executable tool or skill	"capability `{}` was not resolved to an executable tool or skill",
 crates/clawd/src/verifier.rs	depends_on references missing step `{dep}`	detail: format!("depends_on references missing step `{dep}`"),
-crates/clawd/src/verifier.rs	group `{group}` skill `{normalized_skill}` conflict: {detail}	detail: format!("group `{group}` skill `{normalized_skill}` conflict: {detail}"),
-crates/clawd/src/verifier.rs	multiple fallback steps are present in the same group	"multiple fallback steps are present in the same group".to_string(),
-crates/clawd/src/verifier.rs	multiple primary steps are present in the same group	"multiple primary steps are present in the same group".to_string(),
 crates/clawd/src/verifier.rs	planner step skill `{}` could not be converted to a contract action reference	"planner step skill `{}` could not be converted to a contract action reference",
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` args must be an object	detail: format!("skill `{normalized_skill}` args must be an object"),
 crates/clawd/src/verifier.rs	skill `{normalized_skill}` has unresolved template placeholder in args	"skill `{normalized_skill}` has unresolved template placeholder in args"
@@ -1428,7 +1422,6 @@ crates/skills/fs_search/src/workspace_traversal.rs	workspace resolution failed: 
 crates/skills/git_basic/src/main.rs	args must be object	"args must be object".to_string(),
 crates/skills/git_basic/src/main.rs	current directory is not a git repository. Please use git_basic in a git repo.	"current directory is not a git repository. Please use git_basic in a git repo."
 crates/skills/git_basic/src/main.rs	run git failed: {error}	"run git failed: {error}".to_string(),
-crates/skills/git_basic/src/main.rs	unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev	"unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev".to_string(),
 crates/skills/health_check/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/health_check/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/http_basic/src/main.rs	URL host is required	.ok_or_else(|| HttpBasicError::new("url_host_missing", "URL host is required"))?;
@@ -1980,16 +1973,11 @@ crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.",
 crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.",
 crates/skills/rss_fetch/src/main.rs	Topic: {topic}.	"Topic: {topic}.".to_string(),
 crates/skills/rss_fetch/src/main.rs	args must be object	.ok_or_else(|| SkillFailure::invalid_input("args must be object"))?;
-crates/skills/rss_fetch/src/main.rs	build http client failed: {err}	.map_err(|err| format!("build http client failed: {err}"))?;
 crates/skills/rss_fetch/src/main.rs	feed_urls entries must be strings	.ok_or_else(|| "feed_urls entries must be strings".to_string())?
 crates/skills/rss_fetch/src/main.rs	fetch requires a non-empty url or feed_url	return Err("fetch requires a non-empty url or feed_url".to_string());
 crates/skills/rss_fetch/src/main.rs	fetch requires at least one non-empty http(s) URL in feed_urls	"fetch requires at least one non-empty http(s) URL in feed_urls".to_string(),
 crates/skills/rss_fetch/src/main.rs	fetch requires url, feed_url, or feed_urls	Err("fetch requires url, feed_url, or feed_urls".to_string())
-crates/skills/rss_fetch/src/main.rs	http request failed: {err}	.map_err(|err| format!("http request failed: {err}"))?;
 crates/skills/rss_fetch/src/main.rs	no feed items available: all {} source(s) failed or returned no items	"no feed items available: all {} source(s) failed or returned no items",
-crates/skills/rss_fetch/src/main.rs	read response body failed: {err}	.map_err(|err| format!("read response body failed: {err}"))
-crates/skills/rss_fetch/src/main.rs	rss_fetch save_config failed: {}\n	.write_fmt(format_args!("rss_fetch save_config failed: {}\\n", e));
-crates/skills/rss_fetch/src/main.rs	unsupported action; use fetch|latest|news	"unsupported action; use fetch|latest|news",
 crates/skills/rss_fetch/src/main.rs	url and feed_url must be strings	.ok_or_else(|| "url and feed_url must be strings".to_string())?
 crates/skills/rss_fetch/src/main.rs	{icon} {label} · {count} items	"{icon} {label} · {count} items",
 crates/skills/rss_fetch/src/main.rs	{icon} {label} · {count} items	"{icon} {label} · {count} items".to_string(),
@@ -2141,7 +2129,6 @@ crates/skills/web_search_extract/src/main.rs	SERPAPI_API_KEY missing for serpapi
 crates/skills/web_search_extract/src/main.rs	action must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "action must be string"))
 crates/skills/web_search_extract/src/main.rs	args must be object	.ok_or_else(|| SearchError::new("INVALID_INPUT", "args must be object"))?;
 crates/skills/web_search_extract/src/main.rs	backend exceeds supported length	"backend exceeds supported length",
-crates/skills/web_search_extract/src/main.rs	backend must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "backend must be string"))
 crates/skills/web_search_extract/src/main.rs	backend redirect limit exceeded	return attempt.error("backend redirect limit exceeded");
 crates/skills/web_search_extract/src/main.rs	backend redirect target blocked	attempt.error("backend redirect target blocked")
 crates/skills/web_search_extract/src/main.rs	bing non-success response	.context("bing non-success response")?;
@@ -2167,7 +2154,6 @@ crates/skills/web_search_extract/src/main.rs	{field} is outside the supported ra
 crates/skills/web_search_extract/src/main.rs	{field} items must be strings	SearchError::new("INVALID_INPUT", format!("{field} items must be strings"))
 crates/skills/web_search_extract/src/main.rs	{field} must be array	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be array")))?;
 crates/skills/web_search_extract/src/main.rs	{field} must be integer	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be integer")))?;
-crates/skills/web_search_extract/src/main.rs	{field} must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be string")))
 crates/telegramd/src/binding_voice.rs	bind telegram identity failed: {}	"bind telegram identity failed: {}",
 crates/telegramd/src/binding_voice.rs	decode direct classifier response failed	.context("decode direct classifier response failed")?;
 crates/telegramd/src/binding_voice.rs	direct classifier http {status}: {body}	return Err(anyhow!("direct classifier http {status}: {body}"));

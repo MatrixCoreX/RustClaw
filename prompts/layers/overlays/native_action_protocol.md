@@ -41,10 +41,10 @@ Protocol rules:
   and objects use their normal JSON encoding. Never retry a rejected unquoted
   string unchanged.
 - Use `shape=observed_object` when every requested value already exists under
-  the same named machine field in one or more successful current-loop
-  capability results; this is required rather than optional, especially for
-  nested arrays or objects. Put only the output `name`, exact observed
-  `capability`, and language-neutral dotted result `path` in
+  a current-loop capability result. Success fields use `data.*`; structured
+  failure fields use only `status` or `error.*`. This is required rather than
+  optional, especially for nested arrays or objects. Put only the output
+  `name`, exact observed `capability`, and language-neutral dotted result `path` in
   `observed_fields`; keep `fields` empty and set `exact_field_count` to the
   observed-field length. The runtime copies the JSON values directly. Do not
   re-serialize or summarize those values into `value_json`.
@@ -89,8 +89,9 @@ Protocol rules:
   synthesize from it and do not repeat the delegated work in the parent or
   launch an equivalent child again.
 - Use `agent.subagent_batch` only when the task needs two or more bounded
-  read-only children. Pass `children` as objects with non-empty `role` and
-  `objective`; do not mix batch and top-level single-child forms.
+  read-only children. Pass `children` as closed objects with non-empty `role`,
+  `objective`, `context_refs`, and `allowed_capabilities`; do not mix batch and
+  top-level single-child forms or provide child findings.
   Use `agent.subagent_persistent` only for independently resumable child work;
   its trusted role, isolation, permission, and parent-admission policy remain
   runtime-owned.

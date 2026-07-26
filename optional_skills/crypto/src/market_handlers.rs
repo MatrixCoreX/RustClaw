@@ -343,6 +343,56 @@ pub(super) fn handle_normalize_symbol(
     ))
 }
 
+pub(super) fn handle_preview_quote_request(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let raw_symbols = if let Some(values) = obj.get("symbols").and_then(Value::as_array) {
+        values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        obj.get("symbol")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_default()
+    };
+    if raw_symbols.is_empty() {
+        return Err(tr("crypto.err.symbol_required"));
+    }
+    if raw_symbols.len() > 20 {
+        return Err("code=too_many_symbols maximum=20".to_string());
+    }
+    let normalized_symbols = raw_symbols
+        .iter()
+        .map(|symbol| normalize_symbol(symbol))
+        .collect::<Vec<_>>();
+    let text = format!(
+        "message_key=skill.crypto.quote_preview_ready symbols={}",
+        normalized_symbols.len()
+    );
+    Ok((
+        text,
+        json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "ok",
+            "message_key": "skill.crypto.quote_preview_ready",
+            "action": "preview_quote_request",
+            "requested_symbols": raw_symbols,
+            "normalized_symbols": normalized_symbols,
+            "providers": ["binance", "okx", "gateio", "coinbase", "kraken", "coingecko"],
+            "would_execute": false,
+            "external_call_count": 0,
+        }),
+    ))
+}
+
 pub(super) fn handle_healthcheck(
     client: &Client,
     cfg: &RootConfig,

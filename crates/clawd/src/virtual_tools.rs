@@ -26,6 +26,9 @@ pub(crate) fn canonicalize_legacy_tool_call(
         "write_file" => canonicalize_standalone_fs_call("fs_basic", "write_text", args),
         "make_dir" => canonicalize_standalone_fs_call("fs_basic", "make_dir", args),
         "remove_file" => canonicalize_standalone_fs_call("fs_basic", "remove_path", args),
+        "find_images" | "images" | "image_search" => {
+            canonicalize_standalone_fs_call("fs_basic", "find_images", args)
+        }
         _ => None,
     }
 }
@@ -66,6 +69,7 @@ fn canonicalize_system_basic_call(args: Value) -> Option<VirtualToolCanonicalCal
         "extract_field" => ("config_basic", "read_field"),
         "extract_fields" => ("config_basic", "read_fields"),
         "structured_keys" => ("config_basic", "list_keys"),
+        "summarize_structured" => ("config_basic", "summarize_structure"),
         "validate_structured" => ("config_basic", "validate"),
         _ => return None,
     };
@@ -130,6 +134,16 @@ fn canonicalize_fs_search_call(args: Value) -> Option<VirtualToolCanonicalCall> 
             promote_grep_pattern_to_query_if_missing(&mut obj);
             drop_redundant_grep_filename_filters(&mut obj);
             obj.insert("action".to_string(), Value::String("grep_text".to_string()));
+            Some(VirtualToolCanonicalCall {
+                tool: "fs_basic".to_string(),
+                args: Value::Object(obj),
+            })
+        }
+        "find_images" | "images" | "image_search" => {
+            obj.insert(
+                "action".to_string(),
+                Value::String("find_images".to_string()),
+            );
             Some(VirtualToolCanonicalCall {
                 tool: "fs_basic".to_string(),
                 args: Value::Object(obj),
@@ -342,6 +356,18 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             }
             Ok(rewrite_to("fs_search", obj))
         }
+        "find_images" => {
+            move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
+            move_value_alias_if_missing(&mut obj, "max_results", &["limit"]);
+            obj.insert(
+                "action".to_string(),
+                Value::String("find_images".to_string()),
+            );
+            for key in ["path", "dir", "directory", "limit"] {
+                obj.remove(key);
+            }
+            Ok(rewrite_to("fs_search", obj))
+        }
         "grep_text" => {
             move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
             move_value_alias_if_missing(&mut obj, "query", &["text", "keyword"]);
@@ -404,7 +430,13 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             obj.remove("action");
             Ok(rewrite_to("remove_file", obj))
         }
-        "apply_patch" | "diff" | "rewind" | "review_child_patch" | "apply_child_patch"
+        "preview_replace_text"
+        | "replace_text"
+        | "apply_patch"
+        | "diff"
+        | "rewind"
+        | "review_child_patch"
+        | "apply_child_patch"
         | "reject_child_patch" => Ok(rewrite_to("workspace_patch", obj)),
         _ => Err(format!("unsupported_fs_basic_action:{action}")),
     }
@@ -440,6 +472,14 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
             );
             Ok(rewrite_to("system_basic", obj))
         }
+        "summarize_structure" => {
+            move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
+            obj.insert(
+                "action".to_string(),
+                Value::String("summarize_structured".to_string()),
+            );
+            Ok(rewrite_to("system_basic", obj))
+        }
         "validate" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
             if obj.get("validation_profile").and_then(Value::as_str)
@@ -468,10 +508,7 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
             );
             Ok(rewrite_to("config_edit", obj))
         }
-        _ => Err(format!(
-            "unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
-            action
-        )),
+        _ => Err(format!("unsupported_config_basic_action:{action}")),
     }
 }
 
@@ -499,6 +536,8 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
             ("search", "find_entries"),
             ("grep", "grep_text"),
             ("search_text", "grep_text"),
+            ("images", "find_images"),
+            ("image_search", "find_images"),
             ("compare", "compare_paths"),
             ("write_file", "write_text"),
             ("append", "append_text"),

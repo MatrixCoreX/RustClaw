@@ -17,6 +17,7 @@
 
 ## Actions
 - `edit`
+- `preview_edit`
 - `outpaint`
 - `restyle`
 - `add_remove`
@@ -27,9 +28,7 @@
 
 ## Config Entry Points
 - Default edit provider/model: `configs/image.toml` -> `[image_edit].default_vendor` / `default_model`.
-- Current default: `minimax` + `image-01`.
-- Preferred dedicated keys: `IMAGE_EDIT_<VENDOR>_API_KEY` or `[image_edit.providers.<vendor>].api_key`.
-- If a provider override exists but its dedicated key is empty, the skill may reuse the same vendor's global key (for example `MINIMAX_API_KEY`) from `[llm.<vendor>]` / environment.
+- Preferred keys: `IMAGE_EDIT_<VENDOR>_API_KEY` or `[image_edit.providers.<vendor>].api_key`; a missing dedicated key may reuse the same vendor's global key.
 - MiniMax uses the native `/image_generation` reference-image adapter with `subject_reference`; this adapter requires `image.url` input.
 
 ## Parameter Contract
@@ -49,14 +48,16 @@
 | all | `model` | no | string | impl default | Backend model selector. |
 | all | `timeout_seconds` | no | integer | impl/config default | Per-request timeout, clamped by implementation. |
 | all | `_memory` | no | object | - | Optional injected memory blob; **`_memory.context`** is passed into the image-reference resolver prompt when multiple `recent_image_paths` exist. |
+| preview_edit | `instruction` | yes | string | - | Edit instruction used only for the structured preview. |
+| preview_edit | `image` / `images` | conditional | string/object/array | context fallback | Source reference is validated and projected without reading image bytes. |
+| preview_edit | `output_path` | no | string(path) | auto | Planned output path; no file or directory is created. |
 
 ## Success `extra` (`status=ok`)
 - `provider`: resolved backend provider name
 - `model`: resolved model name
 - `model_kind`: adapter/runtime mode chosen by implementation
-- `latency_ms`: reserved latency field
 - `action`: final normalized action actually executed
-- `outputs`: machine-readable output summary, currently `[{\"type\":\"image_file\",\"path\":\"...\"}]`
+- `outputs`: generated files; for `preview_edit`, it is empty while `dry_run`, `would_mutate`, `planned_outputs`, and `output_path` describe the plan.
 
 ## Recovery & clarification (skill-side)
 1. If `image` (or `images` with paths) is already set → use it; normalize as today.

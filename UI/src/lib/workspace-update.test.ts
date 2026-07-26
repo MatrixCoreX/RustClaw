@@ -158,12 +158,11 @@ test("formats workspace update next-step keys and legacy fallback", () => {
   assert.equal(
     formatWorkspaceUpdateNextStep(
       status({
-        next_step_key: "workspace_update.conflicts_overwritten_retrying_pull",
-        next_step_args: { count: 3 },
+        next_step_key: "workspace_update.config_saved_retrying_pull",
       }),
       "en",
     ),
-    "Only 3 conflicting path(s) were overwritten. Other local changes and extra files were left unchanged; pulling remote again.",
+    "The current runtime configuration is saved in memory while source is pulled, and will be restored automatically afterward.",
   );
   assert.equal(
     formatWorkspaceUpdateNextStep(

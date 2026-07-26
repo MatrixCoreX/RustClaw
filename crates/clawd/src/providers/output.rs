@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use chrono::{Local, TimeZone};
+use fs2::FileExt;
 use serde_json::{json, Value};
 use tracing::warn;
 
@@ -242,11 +243,26 @@ fn append_model_io_line(file_path: &Path, line: &str) -> std::io::Result<()> {
     if let Some(parent) = file_path.parent() {
         create_dir_all(parent)?;
     }
+    let _file_guard = acquire_model_io_file_lock(file_path)?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(file_path)?;
-    writeln!(file, "{line}")
+    let mut record = Vec::with_capacity(line.len() + 1);
+    record.extend_from_slice(line.as_bytes());
+    record.push(b'\n');
+    file.write_all(&record)
+}
+
+fn acquire_model_io_file_lock(file_path: &Path) -> std::io::Result<std::fs::File> {
+    let lock_path = file_path.with_extension("log.lock");
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    FileExt::lock_exclusive(&lock)?;
+    Ok(lock)
 }
 
 #[cfg(test)]
@@ -267,6 +283,10 @@ pub(crate) fn rotate_model_io_log_daily(file_path: &Path, keep_days: u64) -> any
     let _guard = MODEL_IO_LOG_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(parent) = file_path.parent() {
+        create_dir_all(parent)?;
+    }
+    let _file_guard = acquire_model_io_file_lock(file_path)?;
     if !file_path.exists() {
         // 文件不存在，仍然要做一次旧归档清理。
         cleanup_model_io_log_archives(file_path, keep_days)?;

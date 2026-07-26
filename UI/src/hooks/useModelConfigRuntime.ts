@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   hasUnsavedLlmDraftChanges,
+  isLlmConfigured,
   llmVendorSupportsApiFormat,
 } from "../lib/llm-config";
 import {
@@ -95,16 +96,15 @@ export function useModelConfigRuntime({
     return llmConfigData.restart_required || runtimeVendor !== savedVendor || runtimeModel !== savedModel;
   }, [llmConfigData]);
 
-  const savedLlmVendorInfo = useMemo(
-    () => llmConfigData?.vendors.find((vendor) => vendor.name === llmConfigData.selected_vendor) ?? null,
-    [llmConfigData],
-  );
-
   const llmConfigured = useMemo(() => {
-    if (!llmConfigData?.selected_vendor || !llmConfigData.selected_model) return false;
-    if (!savedLlmVendorInfo) return false;
-    return savedLlmVendorInfo.api_key_configured;
-  }, [llmConfigData, savedLlmVendorInfo]);
+    if (!llmConfigData) return false;
+    return isLlmConfigured({
+      selectedVendor: llmConfigData.selected_vendor,
+      selectedModel: llmConfigData.selected_model,
+      vendors: llmConfigData.vendors,
+      runtime: llmConfigData.runtime,
+    });
+  }, [llmConfigData]);
 
   const llmStepStatus = useMemo<"done" | "attention" | "todo">(() => {
     if (!llmConfigured) return "todo";

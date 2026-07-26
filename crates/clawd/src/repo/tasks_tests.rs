@@ -4,7 +4,8 @@ use uuid::Uuid;
 use super::{
     claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    list_active_tasks_for_user_internal, list_active_tasks_internal,
+    list_all_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
@@ -1118,6 +1119,42 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["claim_attempt"], 3);
     assert_eq!(lifecycle["attempt_id"], 3);
     assert_eq!(lifecycle["claimed_at"], 2200);
+}
+
+#[test]
+fn active_task_scopes_cover_exact_chat_user_and_system_views() {
+    let state = state_with_tasks_table();
+    insert_task(&state, "task-scope-a", "running", None, 100);
+    insert_task(&state, "task-scope-b", "queued", None, 101);
+    insert_task(&state, "task-scope-c", "running", None, 102);
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET chat_id = 8 WHERE task_id = 'task-scope-b'",
+        [],
+    )
+    .expect("move second task to another chat");
+    db.execute(
+        "UPDATE tasks
+         SET user_id = 99, chat_id = 9, user_key = 'other-key'
+         WHERE task_id = 'task-scope-c'",
+        [],
+    )
+    .expect("move third task to another owner");
+    drop(db);
+
+    let exact = list_active_tasks_internal(&state, 42, 7, None).expect("exact scope");
+    let user = list_active_tasks_for_user_internal(&state, 42, None).expect("user scope");
+    let system = list_all_active_tasks_internal(&state, None).expect("system scope");
+
+    assert_eq!(
+        exact
+            .iter()
+            .map(|task| task.task_id.as_str())
+            .collect::<Vec<_>>(),
+        ["task-scope-a"]
+    );
+    assert_eq!(user.len(), 2);
+    assert_eq!(system.len(), 3);
 }
 
 #[test]

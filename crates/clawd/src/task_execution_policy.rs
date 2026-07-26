@@ -9,11 +9,15 @@ pub(crate) const CLIENT_ORIGIN_HEADER: &str = "x-rustclaw-client";
 pub(crate) const EXECUTION_MODE_HEADER: &str = "x-rustclaw-execution-mode";
 pub(crate) const POLICY_PAYLOAD_FIELD: &str = "_rustclaw_execution_policy";
 const CLAWCLI_ORIGIN: &str = "clawcli";
+const SAFE_MODE: &str = "safe";
+const ASK_MODE: &str = "ask";
 const YOLO_MODE: &str = "yolo";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskExecutionMode {
     Configured,
+    Safe,
+    Ask,
     Yolo,
 }
 
@@ -21,6 +25,8 @@ impl TaskExecutionMode {
     pub(crate) fn as_token(self) -> &'static str {
         match self {
             Self::Configured => "configured",
+            Self::Safe => SAFE_MODE,
+            Self::Ask => ASK_MODE,
             Self::Yolo => YOLO_MODE,
         }
     }
@@ -109,7 +115,7 @@ pub(crate) fn stamp_authenticated_submission_policy(
         .map(|value| value.to_ascii_lowercase());
     if requested_mode
         .as_deref()
-        .is_some_and(|value| value != YOLO_MODE)
+        .is_some_and(|value| !matches!(value, SAFE_MODE | ASK_MODE | YOLO_MODE))
     {
         return Err(SubmissionPolicyError::UnsupportedExecutionMode);
     }
@@ -120,6 +126,28 @@ pub(crate) fn stamp_authenticated_submission_policy(
     let clawcli = client_origin
         .map(str::trim)
         .is_some_and(|origin| origin.eq_ignore_ascii_case(CLAWCLI_ORIGIN));
+    if matches!(requested_mode.as_deref(), Some(SAFE_MODE | ASK_MODE)) {
+        if !payload.is_object() {
+            return Err(SubmissionPolicyError::PayloadObjectRequired);
+        }
+        let mode = requested_mode.as_deref().unwrap_or(ASK_MODE);
+        let configured = configured_policy_values(mode);
+        if let Some(object) = payload.as_object_mut() {
+            object.insert(
+                POLICY_PAYLOAD_FIELD.to_string(),
+                json!({
+                    "schema_version": 1,
+                    "mode": mode,
+                    "authority": "server_validated_client_preference",
+                    "actor_role": identity.map(|identity| identity.role.as_str()),
+                    "derivation": "explicit_restrictive_client_mode",
+                    "approval_policy": configured.0.as_token(),
+                    "sandbox_mode": configured.1.as_token(),
+                }),
+            );
+        }
+        return Ok(());
+    }
     if !admin || (clawcli && requested_mode.as_deref() != Some(YOLO_MODE)) {
         return Ok(());
     }
@@ -160,19 +188,49 @@ pub(crate) fn effective_policy_for_task(
     let Some(policy) = payload.get(POLICY_PAYLOAD_FIELD) else {
         return configured();
     };
-    if !valid_yolo_stamp(policy) || !task_has_current_admin_identity(state, task) {
-        return configured();
-    }
-    TaskExecutionPolicy {
-        mode: TaskExecutionMode::Yolo,
-        approval_policy: ToolApprovalPolicy::Never,
-        sandbox_mode: ToolSandboxMode::DangerFull,
-        derivation: match policy.get("derivation").and_then(Value::as_str) {
-            Some("clawcli_explicit_admin") => "clawcli_explicit_admin",
-            Some("admin_channel_default") => "admin_channel_default",
-            _ => "authenticated_admin_stamp",
-        },
-        actor_role: Some("admin"),
+    match policy.get("mode").and_then(Value::as_str) {
+        Some(SAFE_MODE) if valid_restrictive_stamp(policy, SAFE_MODE) => {
+            let configured = configured();
+            TaskExecutionPolicy {
+                mode: TaskExecutionMode::Safe,
+                approval_policy: stricter_approval(
+                    configured.approval_policy,
+                    ToolApprovalPolicy::Always,
+                ),
+                sandbox_mode: ToolSandboxMode::ReadOnly,
+                derivation: "explicit_restrictive_client_mode",
+                actor_role: Some("authenticated_client"),
+            }
+        }
+        Some(ASK_MODE) if valid_restrictive_stamp(policy, ASK_MODE) => {
+            let configured = configured();
+            TaskExecutionPolicy {
+                mode: TaskExecutionMode::Ask,
+                approval_policy: stricter_approval(
+                    configured.approval_policy,
+                    ToolApprovalPolicy::OnRequest,
+                ),
+                sandbox_mode: configured.sandbox_mode,
+                derivation: "explicit_restrictive_client_mode",
+                actor_role: Some("authenticated_client"),
+            }
+        }
+        Some(YOLO_MODE)
+            if valid_yolo_stamp(policy) && task_has_current_admin_identity(state, task) =>
+        {
+            TaskExecutionPolicy {
+                mode: TaskExecutionMode::Yolo,
+                approval_policy: ToolApprovalPolicy::Never,
+                sandbox_mode: ToolSandboxMode::DangerFull,
+                derivation: match policy.get("derivation").and_then(Value::as_str) {
+                    Some("clawcli_explicit_admin") => "clawcli_explicit_admin",
+                    Some("admin_channel_default") => "admin_channel_default",
+                    _ => "authenticated_admin_stamp",
+                },
+                actor_role: Some("admin"),
+            }
+        }
+        _ => configured(),
     }
 }
 
@@ -182,6 +240,13 @@ pub(crate) fn execution_policy_authorization_error(
 ) -> Option<&'static str> {
     let payload = serde_json::from_str::<Value>(&task.payload_json).ok()?;
     let policy = payload.get(POLICY_PAYLOAD_FIELD)?;
+    if matches!(
+        policy.get("mode").and_then(Value::as_str),
+        Some(SAFE_MODE | ASK_MODE)
+    ) {
+        return (!valid_restrictive_stamp(policy, policy.get("mode").and_then(Value::as_str)?))
+            .then_some("task_execution_policy_invalid");
+    }
     if !valid_yolo_stamp(policy) {
         return Some("task_execution_policy_invalid");
     }
@@ -203,8 +268,22 @@ pub(crate) fn configured_policy(state: &AppState) -> TaskExecutionPolicy {
 
 pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> Option<Value> {
     let policy = effective_policy_for_task(state, task);
-    if policy.mode != TaskExecutionMode::Yolo {
+    if policy.mode == TaskExecutionMode::Configured {
         return None;
+    }
+    if matches!(
+        policy.mode,
+        TaskExecutionMode::Safe | TaskExecutionMode::Ask
+    ) {
+        return Some(json!({
+            "schema_version": 1,
+            "mode": policy.mode.as_token(),
+            "authority": "server_validated_client_preference",
+            "actor_role": policy.actor_role,
+            "derivation": "inherited_restrictive_parent_task",
+            "approval_policy": policy.approval_policy.as_token(),
+            "sandbox_mode": policy.sandbox_mode.as_token(),
+        }));
     }
     Some(json!({
         "schema_version": 1,
@@ -218,15 +297,44 @@ pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> 
 }
 
 pub(crate) fn stamped_execution_mode(payload: &Value) -> &'static str {
-    if payload
+    match payload
         .get(POLICY_PAYLOAD_FIELD)
         .and_then(|policy| policy.get("mode"))
         .and_then(Value::as_str)
-        == Some(YOLO_MODE)
     {
-        YOLO_MODE
+        Some(SAFE_MODE) => SAFE_MODE,
+        Some(ASK_MODE) => ASK_MODE,
+        Some(YOLO_MODE) => YOLO_MODE,
+        _ => "configured",
+    }
+}
+
+fn configured_policy_values(mode: &str) -> (ToolApprovalPolicy, ToolSandboxMode) {
+    match mode {
+        SAFE_MODE => (ToolApprovalPolicy::Always, ToolSandboxMode::ReadOnly),
+        _ => (
+            ToolApprovalPolicy::OnRequest,
+            ToolSandboxMode::WorkspaceWrite,
+        ),
+    }
+}
+
+fn stricter_approval(
+    configured: ToolApprovalPolicy,
+    requested: ToolApprovalPolicy,
+) -> ToolApprovalPolicy {
+    fn rank(policy: ToolApprovalPolicy) -> u8 {
+        match policy {
+            ToolApprovalPolicy::Never => 0,
+            ToolApprovalPolicy::OnRisk => 1,
+            ToolApprovalPolicy::OnRequest => 2,
+            ToolApprovalPolicy::Always => 3,
+        }
+    }
+    if rank(configured) >= rank(requested) {
+        configured
     } else {
-        "configured"
+        requested
     }
 }
 
@@ -250,6 +358,23 @@ fn valid_yolo_stamp(policy: &Value) -> bool {
             == Some(ToolApprovalPolicy::Never.as_token())
         && policy.get("sandbox_mode").and_then(Value::as_str)
             == Some(ToolSandboxMode::DangerFull.as_token())
+}
+
+fn valid_restrictive_stamp(policy: &Value, mode: &str) -> bool {
+    policy.get("schema_version").and_then(Value::as_u64) == Some(1)
+        && matches!(mode, SAFE_MODE | ASK_MODE)
+        && policy.get("mode").and_then(Value::as_str) == Some(mode)
+        && policy.get("authority").and_then(Value::as_str)
+            == Some("server_validated_client_preference")
+        && policy
+            .get("derivation")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                matches!(
+                    value,
+                    "explicit_restrictive_client_mode" | "inherited_restrictive_parent_task"
+                )
+            })
 }
 
 #[cfg(test)]

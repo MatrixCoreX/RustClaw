@@ -227,8 +227,18 @@ fn batch_subagent_capability_verifies_structured_children() {
         "agent.subagent_batch",
         json!({
             "children": [
-                {"role": "review", "objective": "inspect_runtime_boundary"},
-                {"role": "test", "objective": "inspect_test_boundary"}
+                {
+                    "role": "review",
+                    "objective": "inspect_runtime_boundary",
+                    "context_refs": ["AGENTS.md"],
+                    "allowed_capabilities": ["filesystem.read_text_range"]
+                },
+                {
+                    "role": "test",
+                    "objective": "inspect_test_boundary",
+                    "context_refs": ["crates/clawd/src/verifier.rs"],
+                    "allowed_capabilities": ["filesystem.read_text_range"]
+                }
             ]
         }),
     );
@@ -290,5 +300,119 @@ fn batch_subagent_capability_rejects_child_without_objective() {
                 .missing_fields
                 .iter()
                 .any(|field| field == "objective")
+    }));
+}
+
+#[test]
+fn subagent_contract_rejects_parent_findings_and_runtime_policy() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent_batch",
+        json!({
+            "children": [{
+                "role": "review",
+                "objective": "inspect_runtime_boundary",
+                "context_refs": ["AGENTS.md"],
+                "allowed_capabilities": ["filesystem.read_text_range"],
+                "findings": [{"code": "parent_injected"}],
+                "permission_profile": "local_worktree"
+            }]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    let detail = result
+        .issues
+        .iter()
+        .map(|issue| issue.detail.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(detail.contains("children[0].findings"), "{detail}");
+    assert!(
+        detail.contains("children[0].permission_profile"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn persistent_subagent_contract_rejects_open_nested_shapes() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "agent.subagent_persistent",
+        json!({
+            "children": [{
+                "node_id": "reviewer",
+                "role": "review",
+                "objective": "inspect_runtime_boundary",
+                "context_refs": ["AGENTS.md"],
+                "allowed_capabilities": ["filesystem.read_text_range"],
+                "budget": {"max_rounds": 13, "unbounded": true},
+                "result_contract": {
+                    "output_format": "machine_json",
+                    "free_form": true
+                },
+                "depends_on": [{"required": true}]
+            }]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    let details = result
+        .issues
+        .iter()
+        .map(|issue| issue.detail.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        details.contains("children[0].budget.max_rounds"),
+        "{details}"
+    );
+    assert!(
+        details.contains("children[0].budget.unbounded"),
+        "{details}"
+    );
+    assert!(
+        details.contains("children[0].result_contract.free_form"),
+        "{details}"
+    );
+    assert!(result.issues.iter().any(|issue| {
+        issue
+            .missing_fields
+            .iter()
+            .any(|field| field == "children[0].depends_on[0].node_id")
     }));
 }

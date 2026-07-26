@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 
 use rusqlite::types::ValueRef;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -46,6 +46,15 @@ impl SkillError {
     fn with_extra(mut self, extra: Value) -> Self {
         self.extra = Some(extra);
         self
+    }
+}
+
+fn machine_error_text(kind: &str, detail: &str) -> String {
+    let detail = detail.trim();
+    if detail.is_empty() {
+        kind.to_string()
+    } else {
+        [kind, detail].join(": ")
     }
 }
 
@@ -143,15 +152,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
 
     let root = workspace_root();
     let db = resolve_path(&root, db_path)?;
-    let conn = Connection::open(&db).map_err(|err| {
-        SkillError::new("sqlite_open_failed", format!("open sqlite failed: {err}")).with_extra(
-            json!({
-                "error_kind": "sqlite_open_failed",
-                "action": action,
-                "db_path": db.display().to_string(),
-            }),
-        )
-    })?;
+    let conn = open_connection(&db, action)?;
     let db_path_text = db.display().to_string();
 
     match action {
@@ -265,6 +266,50 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             "allowed_actions": ["sqlite_query", "sqlite_execute", "schema_version", "user_version", "list_tables"],
         }))),
     }
+}
+
+fn open_connection(db: &Path, action: &str) -> Result<Connection, SkillError> {
+    let read_only = action != "sqlite_execute";
+    if read_only {
+        let metadata = std::fs::metadata(db).map_err(|err| {
+            let kind = if err.kind() == std::io::ErrorKind::NotFound {
+                "path_not_found"
+            } else {
+                "path_metadata_failed"
+            };
+            SkillError::new(kind, machine_error_text(kind, &err.to_string())).with_extra(json!({
+                "error_kind": kind,
+                "action": action,
+                "db_path": db.display().to_string(),
+            }))
+        })?;
+        if !metadata.is_file() {
+            let kind = "not_regular_file";
+            return Err(
+                SkillError::new(kind, machine_error_text(kind, &db.display().to_string()))
+                    .with_extra(json!({
+                        "error_kind": "not_regular_file",
+                        "action": action,
+                        "db_path": db.display().to_string(),
+                    })),
+            );
+        }
+    }
+
+    let connection = if read_only {
+        Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    } else {
+        Connection::open(db)
+    };
+    connection.map_err(|err| {
+        SkillError::new("sqlite_open_failed", format!("open sqlite failed: {err}")).with_extra(
+            json!({
+                "error_kind": "sqlite_open_failed",
+                "action": action,
+                "db_path": db.display().to_string(),
+            }),
+        )
+    })
 }
 
 fn table_names_from_query_payload(payload: &Value) -> Vec<String> {

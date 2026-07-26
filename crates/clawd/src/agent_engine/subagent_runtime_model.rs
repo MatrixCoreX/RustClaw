@@ -1,4 +1,6 @@
+use futures_util::future::join_all;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 use super::{AppState, LoopState};
 use crate::child_task_contract::{
@@ -16,6 +18,18 @@ pub(super) async fn maybe_run_model_assisted_subagent(
     step_in_round: usize,
     args: &Value,
 ) {
+    if args.get("children").and_then(Value::as_array).is_some() {
+        maybe_run_model_assisted_subagent_batch(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            args,
+        )
+        .await;
+        return;
+    }
     let Some(child_input) = child_loop_input(loop_state, global_step, step_in_round, args) else {
         return;
     };
@@ -28,6 +42,108 @@ pub(super) async fn maybe_run_model_assisted_subagent(
         .await
         .unwrap_or_else(|err| child_loop_error_result("subagent_child_loop_failed", &err));
     apply_model_assisted_child_result(loop_state, global_step, step_in_round, child_result);
+}
+
+async fn maybe_run_model_assisted_subagent_batch(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+) {
+    if args.get("dry_run").and_then(Value::as_bool) == Some(true) {
+        return;
+    }
+    let Some(children) = args.get("children").and_then(Value::as_array) else {
+        return;
+    };
+    let config = super::load_subagent_runtime_config(state);
+    let requested_parallel = args
+        .get("max_parallel")
+        .and_then(Value::as_u64)
+        .unwrap_or(config.max_parallel_readonly)
+        .clamp(1, config.max_parallel_readonly) as usize;
+    let default_timeout_ms = config.default_timeout_ms;
+    let parallel_batch_id = latest_subagent_observation(loop_state, global_step, step_in_round)
+        .and_then(|value| value.get("parallel_batch_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("subagent-batch")
+        .to_string();
+    let futures = children
+        .iter()
+        .enumerate()
+        .filter_map(|(index, child)| {
+            let role = child.get("role")?.as_str()?.trim();
+            let objective = child.get("objective")?.as_str()?.trim();
+            let context_refs = child.get("context_refs")?.as_array()?;
+            let allowed_capabilities = child.get("allowed_capabilities")?.as_array()?;
+            if config.resolve_role(role).is_none()
+                || objective.is_empty()
+                || context_refs.is_empty()
+                || allowed_capabilities.is_empty()
+            {
+                return None;
+            }
+            Some((index, child.clone(), role.to_string()))
+        })
+        .take(requested_parallel)
+        .map(|(index, child, role)| {
+            let child_run_id = format!(
+                "{}:{}:{}",
+                parallel_batch_id,
+                index + 1,
+                super::normalize_machine_token(&role)
+            );
+            async move {
+                let timeout_ms = child
+                    .pointer("/budget/timeout_ms")
+                    .and_then(Value::as_u64)
+                    .or(default_timeout_ms)
+                    .unwrap_or(120_000)
+                    .clamp(1_000, 3_600_000);
+                let child_input = json!({
+                    "schema_version": 1,
+                    "role": role,
+                    "objective": child.get("objective"),
+                    "runtime_policy": {
+                        "write_enabled": false,
+                        "external_publish_enabled": false,
+                        "tool_permission_profile": "read_only",
+                    },
+                    "context_refs": child.get("context_refs"),
+                    "allowed_capabilities": child.get("allowed_capabilities"),
+                    "budget": child.get("budget").cloned().unwrap_or_else(|| json!({})),
+                    "timeout_policy": {
+                        "policy": "bounded",
+                        "timeout_ms": timeout_ms,
+                    },
+                    "result_contract": child
+                        .get("result_contract")
+                        .cloned()
+                        .unwrap_or_else(|| json!({"output_format": "machine_json"})),
+                });
+                let result = run_readonly_child_agent_loop(state, task, &child_input, timeout_ms)
+                    .await
+                    .unwrap_or_else(|err| {
+                        child_loop_error_result("subagent_child_loop_failed", &err)
+                    });
+                (
+                    child_run_id,
+                    child
+                        .get("required")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
+                    result,
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+    if futures.is_empty() {
+        return;
+    }
+    let results = join_all(futures).await;
+    apply_model_assisted_batch_results(loop_state, global_step, step_in_round, results);
 }
 
 fn child_loop_input(
@@ -367,40 +483,34 @@ fn parse_child_loop_result(raw: &str, role: &str, context_refs: &Value) -> Value
     let Some(parsed) = parsed else {
         return child_loop_error_result("subagent_child_json_parse_failed", raw);
     };
-    if is_child_result_object(&parsed) {
-        return parse_child_model_result(&parsed.to_string());
+    let result = parse_child_model_result(&parsed.to_string());
+    if result.get("status").and_then(Value::as_str) == Some("failed")
+        && result.get("role").is_none()
+    {
+        let mut result = result;
+        if let Some(object) = result.as_object_mut() {
+            object.insert("role".to_string(), json!(role));
+            object.insert(
+                "input_evidence_ref_count".to_string(),
+                json!(context_refs.as_array().map_or(0, Vec::len)),
+            );
+        }
+        return result;
     }
-    let evidence_refs = context_refs
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("ref").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    json!({
-        "schema_version": 1,
-        "owner_layer": "subagent_model_child",
-        "output_format": "machine_json",
-        "status": "completed",
-        "role": role,
-        "findings": [parsed.clone()],
-        "evidence_refs": evidence_refs,
-        "confidence": 0.5,
-        "result": parsed,
-    })
+    result
 }
 
 fn parse_child_model_result(raw: &str) -> Value {
     let parsed = serde_json::from_str::<Value>(raw.trim())
         .ok()
-        .filter(is_child_result_object)
+        .filter(Value::is_object)
         .or_else(|| extract_child_result_object(raw));
-    let mut value = parsed.unwrap_or_else(|| {
-        json!({
-            "status": "failed",
-            "error_code": "subagent_child_json_parse_failed",
-            "raw_response_excerpt": bounded_error(raw),
-        })
-    });
+    let Some(mut value) = parsed else {
+        return child_loop_error_result("subagent_child_json_parse_failed", raw);
+    };
+    if !valid_child_model_result(&value) {
+        return child_loop_error_result("subagent_child_result_contract_invalid", "");
+    }
     normalize_child_model_result(&mut value);
     value
 }
@@ -409,12 +519,40 @@ fn extract_child_result_object(raw: &str) -> Option<Value> {
     json_object_candidates(raw)
         .into_iter()
         .filter_map(|candidate| serde_json::from_str::<Value>(&candidate).ok())
-        .filter(is_child_result_object)
+        .filter(valid_child_model_result)
         .max_by_key(child_result_object_score)
 }
 
-fn is_child_result_object(value: &Value) -> bool {
-    child_result_object_score(value) >= 4
+fn valid_child_model_result(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || object.get("owner_layer").and_then(Value::as_str) != Some("subagent_model_child")
+        || object.get("output_format").and_then(Value::as_str) != Some("machine_json")
+        || !matches!(
+            object.get("status").and_then(Value::as_str),
+            Some("completed" | "needs_more_evidence" | "failed")
+        )
+        || !object
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        || !object
+            .get("findings")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().all(Value::is_object))
+        || !object
+            .get("evidence_refs")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().all(Value::is_string))
+    {
+        return false;
+    }
+    object
+        .get("confidence")
+        .and_then(Value::as_f64)
+        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
 }
 
 fn child_result_object_score(value: &Value) -> usize {
@@ -520,26 +658,184 @@ fn child_loop_error_result(error_code: &str, err: &str) -> Value {
 }
 
 fn normalize_child_model_result(value: &mut Value) {
-    if !value.is_object() {
-        *value = json!({
-            "status": "failed",
-            "error_code": "subagent_child_non_object_result",
-        });
-    }
     let Some(object) = value.as_object_mut() else {
         return;
     };
-    object.entry("schema_version").or_insert_with(|| json!(1));
-    object
-        .entry("owner_layer")
-        .or_insert_with(|| json!("subagent_model_child"));
-    object
-        .entry("output_format")
-        .or_insert_with(|| json!("machine_json"));
-    object.entry("status").or_insert_with(|| json!("completed"));
-    object.entry("findings").or_insert_with(|| json!([]));
-    object.entry("evidence_refs").or_insert_with(|| json!([]));
-    object.entry("confidence").or_insert_with(|| json!(0.0));
+    object.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "schema_version"
+                | "owner_layer"
+                | "output_format"
+                | "status"
+                | "role"
+                | "findings"
+                | "finding_refs"
+                | "evidence_refs"
+                | "artifact_refs"
+                | "confidence"
+                | "error_code"
+                | "message_key"
+        )
+    });
+}
+
+pub(super) fn apply_model_assisted_batch_results(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    results: Vec<(String, bool, Value)>,
+) -> bool {
+    let Some(observation) = loop_state
+        .task_observations
+        .iter_mut()
+        .rev()
+        .find(|observation| {
+            observation
+                .get("owner_layer")
+                .and_then(Value::as_str)
+                .is_some_and(|owner| owner == "subagent_runtime")
+                && observation
+                    .get("global_step")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|step| step as usize == global_step)
+                && observation
+                    .get("step_in_round")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|step| step as usize == step_in_round)
+        })
+    else {
+        return false;
+    };
+    let Some(object) = observation.as_object_mut() else {
+        return false;
+    };
+    let replacements = results
+        .into_iter()
+        .map(|(child_run_id, required, result)| {
+            let status = result
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("failed");
+            let completed = status == "completed";
+            let findings = result.get("findings").cloned().unwrap_or_else(|| json!([]));
+            let evidence_refs = result
+                .get("evidence_refs")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            (
+                child_run_id.clone(),
+                json!({
+                    "schema_version": 1,
+                    "output_format": "machine_json",
+                    "child_run_id": child_run_id,
+                    "status": status,
+                    "result_status": status,
+                    "outcome_code": if completed {
+                        "subagent_inline_readonly_completed"
+                    } else {
+                        "subagent_inline_readonly_failed"
+                    },
+                    "role": result.get("role"),
+                    "required": required,
+                    "findings": findings,
+                    "finding_count": findings.as_array().map_or(0, Vec::len),
+                    "evidence_refs": evidence_refs,
+                    "model_result": result,
+                    "model_assisted": true,
+                    "write_enabled": false,
+                    "external_publish_enabled": false,
+                    "failure_isolated": !required || completed,
+                }),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let prior = object
+        .get("child_results")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let child_results = prior
+        .into_iter()
+        .map(|item| {
+            item.get("child_run_id")
+                .and_then(Value::as_str)
+                .and_then(|child_run_id| replacements.get(child_run_id))
+                .cloned()
+                .unwrap_or(item)
+        })
+        .collect::<Vec<_>>();
+    let required_failed_count = child_results
+        .iter()
+        .filter(|result| {
+            result.get("required").and_then(Value::as_bool) == Some(true)
+                && result.get("status").and_then(Value::as_str) != Some("completed")
+        })
+        .count();
+    let optional_failed_count = child_results
+        .iter()
+        .filter(|result| {
+            result.get("required").and_then(Value::as_bool) != Some(true)
+                && result.get("status").and_then(Value::as_str) != Some("completed")
+        })
+        .count();
+    let completed_count = child_results
+        .iter()
+        .filter(|result| result.get("status").and_then(Value::as_str) == Some("completed"))
+        .count();
+    let evidence_refs = child_results
+        .iter()
+        .flat_map(|result| {
+            result
+                .get("evidence_refs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    let finding_refs = child_results
+        .iter()
+        .filter(|result| {
+            result
+                .get("findings")
+                .and_then(Value::as_array)
+                .is_some_and(|findings| !findings.is_empty())
+        })
+        .filter_map(|result| result.get("child_run_id").and_then(Value::as_str))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let status = if required_failed_count > 0 {
+        "failed_required_child"
+    } else if optional_failed_count > 0 {
+        "partial"
+    } else {
+        "completed"
+    };
+    object.insert("model_assisted".to_string(), json!(true));
+    object.insert("status".to_string(), json!(status));
+    object.insert("result_status".to_string(), json!(status));
+    object.insert(
+        "delegated_terminal_evidence".to_string(),
+        json!(required_failed_count == 0),
+    );
+    object.insert("child_results".to_string(), json!(child_results));
+    if let Some(aggregation) = object.get_mut("aggregation").and_then(Value::as_object_mut) {
+        aggregation.insert("status".to_string(), json!(status));
+        aggregation.insert("completed_count".to_string(), json!(completed_count));
+        aggregation.insert(
+            "required_failed_count".to_string(),
+            json!(required_failed_count),
+        );
+        aggregation.insert(
+            "optional_failed_count".to_string(),
+            json!(optional_failed_count),
+        );
+        aggregation.insert("evidence_refs".to_string(), json!(evidence_refs));
+        aggregation.insert("finding_refs".to_string(), json!(finding_refs));
+    }
+    true
 }
 
 pub(super) fn apply_model_assisted_child_result(

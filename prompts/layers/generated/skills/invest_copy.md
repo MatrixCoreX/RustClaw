@@ -71,7 +71,7 @@ Request:
 Response（节选）：
 
 ```json
-{"request_id":"i2","status":"ok","text":"…","extra":{"action":"list_investors","count":8},"error_text":null}
+{"request_id":"i2","status":"ok","text":"…","extra":{"schema_version":1,"source_skill":"invest_copy","status":"ok","message_key":"skill.invest_copy.investors_ready","action":"list_investors","count":8,"personas":[{"slug":"warren_buffett","display_name":"沃伦·巴菲特（风格灵感）","one_liner":"侧重能力圈、护城河、安全边际与长期从事简单易懂的好生意。"}]},"error_text":null}
 ```
 
 ### Example 3：错误（数据过短）

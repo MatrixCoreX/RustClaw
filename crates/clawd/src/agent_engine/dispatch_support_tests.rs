@@ -3,9 +3,9 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    classify_skill_failure_recovery, strip_internal_execution_args,
-    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
-    synthesize_bounded_read_range_direct_answer,
+    classify_skill_failure_recovery, preserve_requested_capability_result_identity,
+    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
+    synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -34,6 +34,92 @@ mod scalar_config_fallback;
 mod synthesize_failure_replan;
 #[path = "dispatch_support_tests/text_protocol_boundary.rs"]
 mod text_protocol_boundary;
+
+#[test]
+fn resolved_result_keeps_planner_capability_identity() {
+    let mut loop_state = LoopState::default();
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut loop_state,
+        "image_generate",
+        "action=preview_generate",
+        StepExecutionStatus::Ok,
+        "capability_result_observation={\"capability\":\"image_generate\",\"data\":{\"extra\":{\"dry_run\":true}}}",
+        None,
+        "completed_with_observation",
+    );
+    loop_state
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "image_generate",
+            Some("preview_generate".to_string()),
+            serde_json::json!({"extra": {"dry_run": true}}),
+        ));
+
+    preserve_requested_capability_result_identity(
+        &mut loop_state,
+        0,
+        Some("image.preview_generate"),
+    );
+
+    assert_eq!(
+        loop_state.capability_results[0].capability,
+        "image.preview_generate"
+    );
+    assert_eq!(
+        loop_state.attempt_ledger_entries[0].action_ref,
+        "image.preview_generate"
+    );
+    assert_eq!(
+        loop_state.attempt_ledger_entries[0].tool_or_skill,
+        "image.preview_generate"
+    );
+    assert!(loop_state.attempt_ledger_entries[0]
+        .observed_output
+        .contains("\"capability\":\"image.preview_generate\""));
+}
+
+#[test]
+fn native_skill_result_keeps_runtime_skill_identity() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "image_generate",
+            Some("preview_generate".to_string()),
+            serde_json::json!({"extra": {"dry_run": true}}),
+        ));
+
+    preserve_requested_capability_result_identity(&mut loop_state, 0, None);
+
+    assert_eq!(
+        loop_state.capability_results[0].capability,
+        "image_generate"
+    );
+}
+
+#[test]
+fn capability_identity_rewrite_does_not_touch_previous_result() {
+    let mut loop_state = LoopState::default();
+    loop_state
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "filesystem.read",
+            Some("read".to_string()),
+            serde_json::json!({"output": "old"}),
+        ));
+    let previous_result_count = loop_state.capability_results.len();
+
+    preserve_requested_capability_result_identity(
+        &mut loop_state,
+        previous_result_count,
+        Some("image.preview_generate"),
+    );
+
+    assert_eq!(
+        loop_state.capability_results[0].capability,
+        "filesystem.read"
+    );
+}
 
 fn test_state_with_registry() -> AppState {
     test_state_with_registry_excluding(&[])
@@ -611,6 +697,54 @@ fn planner_protocol_failure_replans_next_round() {
 }
 
 #[test]
+fn structured_pre_dispatch_replan_stops_the_current_action_batch() {
+    let state = test_state_with_registry();
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "workspace.apply_child_patch".to_string(),
+            args: serde_json::json!({
+                "child_task_id": "missing-child",
+                "patch_ref": "not-a-patch-ref"
+            }),
+        },
+        AgentAction::CallCapability {
+            capability: "task_control.resume".to_string(),
+            args: serde_json::json!({"task_id": "unrelated-task"}),
+        },
+    ];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "workspace_patch",
+            "error_kind": "child_patch_task_not_found",
+            "error_text": "workspace.child_patch.child_patch_task_not_found",
+            "extra": {
+                "retryable": true,
+                "side_effect_applied": false,
+                "failure_phase": "pre_dispatch",
+                "recovery_action": "replan_arguments"
+            }
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "fs_basic",
+            actions.first().map(|action| match action {
+                AgentAction::CallCapability { args, .. } => args,
+                _ => unreachable!(),
+            }),
+            &err,
+        ),
+        Some("recoverable_failure_continue_round")
+    );
+}
+
+#[test]
 fn workspace_patch_context_mismatch_replans_next_round() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallSkill {
@@ -645,6 +779,46 @@ fn workspace_patch_context_mismatch_replans_next_round() {
         ),
         Some("recoverable_failure_continue_round")
     );
+}
+
+#[test]
+fn workspace_exact_replace_machine_mismatches_replan_next_round() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "workspace_patch".to_string(),
+        args: serde_json::json!({
+            "action": "replace_text",
+            "path": "src/lib.rs",
+            "old_text": "old",
+            "new_text": "new"
+        }),
+    }];
+    let args = actions.first().map(|action| match action {
+        AgentAction::CallSkill { args, .. } => args,
+        _ => unreachable!(),
+    });
+
+    for error_kind in [
+        "replacement_target_not_found",
+        "replacement_target_ambiguous",
+        "replacement_precondition_failed",
+        "invalid_expected_occurrences",
+    ] {
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "workspace_patch",
+                "error_kind": error_kind,
+                "error_text": "structured exact-replacement mismatch",
+                "extra": {"error_code": error_kind}
+            })
+        );
+        assert_eq!(
+            classify_skill_failure_recovery(&state, &actions, 0, 4, "workspace_patch", args, &err,),
+            Some("recoverable_failure_continue_round"),
+            "error_kind={error_kind}"
+        );
+    }
 }
 
 #[test]

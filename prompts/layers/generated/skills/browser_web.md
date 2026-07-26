@@ -73,26 +73,20 @@ Outer failures use `status=error` and preserve the helper's machine
 `extra.error_code`, `extra.retryable`, and structured `extra.details`.
 Representative codes:
 
-- `INVALID_INPUT`
-- `INVALID_ACTION`
-- `URL_INVALID`
-- `URL_SCHEME_BLOCKED`
-- `URL_CREDENTIALS_BLOCKED`
-- `DOMAIN_BLOCKED`
-- `DOMAIN_NOT_ALLOWED`
-- `DNS_RESOLUTION_FAILED`
-- `PRIVATE_NETWORK_BLOCKED`
-- `WORKSPACE_PATH_OUTSIDE`
-- `DEPENDENCY_MISSING`
-- `NAV_TIMEOUT`
-- `BOT_BLOCKED`
-- `SELECTOR_MISS`
-- `BROWSER_OPERATION_FAILED`
-- `RESPONSE_TOO_LARGE`
-- `CONTENT_TYPE_BLOCKED`
+- Input/policy: `INVALID_INPUT`, `INVALID_ACTION`, `URL_INVALID`,
+  `URL_SCHEME_BLOCKED`, `URL_CREDENTIALS_BLOCKED`, `DOMAIN_BLOCKED`,
+  `DOMAIN_NOT_ALLOWED`, `PRIVATE_NETWORK_BLOCKED`, `WORKSPACE_PATH_OUTSIDE`
+- Runtime/network: `DEPENDENCY_MISSING`, `DNS_RESOLUTION_FAILED`, `NAV_TIMEOUT`,
+  `BROWSER_OPERATION_FAILED`, `RESPONSE_TOO_LARGE`
+- Response: `BOT_BLOCKED`, `AUTH_REQUIRED`, `ACCESS_BLOCKED`, `RATE_LIMITED`,
+  `HTTP_STATUS_ERROR`, `CONTENT_TYPE_BLOCKED`, `SELECTOR_MISS`,
+  `ALL_PAGES_FAILED`
 
-Challenge detection uses HTTP status or DOM challenge signals. It does not
-classify errors by matching natural-language exception or page text.
+HTTP failures are classified from response status; challenge detection uses
+DOM structure. Binary document media types are rejected with a structured
+handoff hint for download/document parsing. Error classification never matches
+natural-language exception or page text. Failed pages are not emitted as
+citations or source references.
 
 ## Request/Response Examples (from interface)
 ### Example 1: rendered page evidence

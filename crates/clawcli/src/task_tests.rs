@@ -1,7 +1,7 @@
 use super::{
     async_final_result_value, capability_task_payload, result_text_from_result_json,
     resume_task_payload, submit_ask, threaded_ask_payload, TaskResumeRequest, TaskStatusView,
-    TaskSubmissionOptions,
+    TaskSubmissionOptions, ThreadAskContext,
 };
 
 fn capture_submit_headers(options: TaskSubmissionOptions) -> String {
@@ -51,9 +51,25 @@ fn task_submission_headers_keep_yolo_explicit() {
     assert!(safe.contains("x-rustclaw-client: clawcli"));
     assert!(!safe.contains("x-rustclaw-execution-mode:"));
 
-    let yolo = capture_submit_headers(TaskSubmissionOptions { yolo: true }).to_ascii_lowercase();
+    let yolo = capture_submit_headers(TaskSubmissionOptions {
+        yolo: true,
+        permission_mode: None,
+    })
+    .to_ascii_lowercase();
     assert!(yolo.contains("x-rustclaw-client: clawcli"));
     assert!(yolo.contains("x-rustclaw-execution-mode: yolo"));
+
+    for mode in [
+        crate::chat_session::PermissionMode::Safe,
+        crate::chat_session::PermissionMode::Ask,
+    ] {
+        let captured = capture_submit_headers(TaskSubmissionOptions {
+            yolo: false,
+            permission_mode: Some(mode),
+        })
+        .to_ascii_lowercase();
+        assert!(captured.contains(&format!("x-rustclaw-execution-mode: {}", mode.as_token())));
+    }
 }
 
 #[test]
@@ -248,17 +264,50 @@ fn resume_payload_only_carries_explicit_approval_grant() {
 }
 
 #[test]
-fn threaded_ask_payload_binds_thread_and_only_adds_resume_for_followups() {
-    let first = threaded_ask_payload("inspect", "thread-1", "session-1", None);
-    assert_eq!(first["thread_id"], "thread-1");
+fn threaded_ask_payload_binds_conversation_and_safe_session_context() {
+    let first = threaded_ask_payload(
+        "inspect",
+        ThreadAskContext {
+            conversation_id: "conversation-1",
+            session_id: "session-1",
+            resume_task_id: None,
+            model_override: None,
+            compacted_context_ref: None,
+            goal_ref: None,
+            attachments: &[],
+        },
+    );
+    assert_eq!(first["conversation_id"], "conversation-1");
+    assert_eq!(first["thread_id"], "conversation-1");
     assert_eq!(first["session_id"], "session-1");
     assert_eq!(first["source"], "clawcli_chat");
     assert!(first.get("resume_task_id").is_none());
     assert!(first.get("resume_trigger").is_none());
 
-    let followup = threaded_ask_payload("continue", "thread-1", "session-1", Some("task-previous"));
+    let model = crate::chat_session::ModelOverride {
+        provider: "minimax".to_string(),
+        model: "MiniMax-M3".to_string(),
+    };
+    let attachments = [serde_json::json!({"name": "a.txt"})];
+    let followup = threaded_ask_payload(
+        "continue",
+        ThreadAskContext {
+            conversation_id: "conversation-1",
+            session_id: "session-1",
+            resume_task_id: Some("task-previous"),
+            model_override: Some(&model),
+            compacted_context_ref: Some("context:1"),
+            goal_ref: Some("goal:1"),
+            attachments: &attachments,
+        },
+    );
     assert_eq!(followup["resume_task_id"], "task-previous");
     assert_eq!(followup["resume_trigger"], "user_followup");
+    assert_eq!(followup["model_selection"]["provider"], "minimax");
+    assert_eq!(followup["model_selection"]["model"], "MiniMax-M3");
+    assert_eq!(followup["compacted_context_ref"], "context:1");
+    assert_eq!(followup["goal_ref"], "goal:1");
+    assert_eq!(followup["attachments"][0]["name"], "a.txt");
 }
 
 #[test]

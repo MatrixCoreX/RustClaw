@@ -6,6 +6,7 @@
 
 RustClaw 是一个以 `clawd` 为核心的本地 Rust Agent Runtime。它把多通道接入、任务执行、技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
 
+<!-- ai-learning-stage: foundations -->
 ## 项目概览
 
 RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”的场景，而不是只给命令行使用者。
@@ -19,9 +20,10 @@ RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”�
 - 本地浏览器控制台位于 `UI/`，其中包含独立的 NNI 设备签名页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 
+<!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop 架构
 
-RustClaw 主自然语言路径默认使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 只负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。它不会调用语义路由模型，也不会提前决定普通请求该回复、澄清还是执行。每个普通 `ask` 都进入 agent loop，由 planner 做语义决策，并可回复、调用能力、按证据合成、修复、继续、checkpoint 或停止。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，不解析用户语言短语。旧 intent normalizer、contract-repair judge、pre-agent 语义路由开关和 route-selected rollback 路径已经物理删除。
+RustClaw 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由 planner 决定回复、澄清或执行，并可调用能力、按证据合成、修复、继续、checkpoint 或停止。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，不解析用户语言短语。
 
 ### 请求与 Agent Loop 流程
 
@@ -41,6 +43,7 @@ flowchart TD
     H --> J[Agent loop<br/>普通语义权威]
     J --> L{循环轮次}
     L --> N[Planner LLM<br/>回复 / 澄清 / call_capability / 合成]
+    N -.-> PS[已识别的 respond/free_text 字节<br/>用户可见输出策略 + 公开呈现事件]
     N --> O
     O --> P[PlanVerifier<br/>permission_decision + 风险 + 效果 + 契约]
     P --> Q{已验证步骤}
@@ -80,6 +83,7 @@ flowchart TD
     Z --> AA[通道交付]
     Z --> AB[Journal + 会话更新]
     AB --> AD[Task event stream<br/>状态迁移 + checkpoint + 工具生命周期 + coding checkpoint/evidence]
+    PS --> AD
     ASP --> AA
     ASP --> AB
     ASP --> AD
@@ -126,7 +130,7 @@ flowchart TD
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、工具/coding/provider/hook/subagent 事件、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。Provider/context 投影保留 `prompt_truncation_count`、`prompt_bytes_before_max` 等机器指标。CLI 与 UI 直接渲染预算 profile/decision、continuation index、累计模型/工具/token/成本/耗时、soft-slice 状态、checkpoint、验证和 team 进度等机器字段，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、`assistant_output_started|delta|completed|aborted|replaced`、工具/coding/provider/hook/subagent 事件、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。原始 provider delta 始终留在私有边界；只有通过公开输出策略的 `respond/free_text` 字节才成为呈现事件。Provider/context 投影保留 `prompt_truncation_count`、`prompt_bytes_before_max` 等机器指标。CLI 与 UI 直接渲染预算、续跑、goal/checkpoint、验证、child graph、team 和安全的助手输出进度，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -152,7 +156,7 @@ flowchart TD
 
 ### 权限平面与命令策略
 
-权限平面是结构化执行边界，不是第二套语义路由器。来自 `configs/skills_registry.toml` 的 registry metadata、面向非能力输出形态的 bundled evidence policy，以及 verifier 状态会投影到 `permission_decision`，让 UI/API/finalizer 能解释发生了什么，而不需要 runtime 写死自然语言回复。普通 registry capability family 由 planner `call_capability` 和 resolver metadata 选择，不由历史 route marker 或兼容 hint 选择。
+权限平面是结构化执行边界。来自 `configs/skills_registry.toml` 的 registry metadata、面向非能力输出形态的 bundled evidence policy，以及 verifier 状态会投影到 `permission_decision`，让 UI/API/finalizer 能解释发生了什么，而不需要 runtime 写死自然语言回复。普通 registry capability family 由 planner `call_capability` 和 resolver metadata 选择。
 
 - `risk_level`、`requires_confirmation`、`once_per_task`、`idempotent`、`dedup_scope` 优先来自 registry 与 planner capability metadata。
 - `action_effect` 从结构化 skill/action 参数和 contract metadata 派生，不从用户语言短语里判断。
@@ -200,12 +204,13 @@ RustClaw 的原则是：自然语言理解交给 LLM，运行时只消费结构�
 - JSON/TOML/YAML 字段路径、文件扩展名、工具结构化输出、exit code、error kind、risk/effect metadata
 - `permission_decision` 与 `command_policy` 机器字段
 
-运行时不要为了某个中文、英文或其他语言样例通过而新增短语表、固定问法分支或 `prompt.contains(...)`。如果新的自然语言表达没有被理解，应优先改 registry capability metadata、`INTERFACE.md`、生成技能提示词、planner schema 或必要的 vendor prompt patch，让 LLM 在不同语言下输出同一套结构化 action。天气、网页、图片、照片、发布、包管理、Docker、RSS、行情等普通技能必须走 registry capability metadata。历史 route/semantic 字段只允许由隔离的旧日志读取器展示，不得选择 capability、修改 contract 或决定最终答案形态。本地门禁是：
+运行时不要为了某个中文、英文或其他语言样例通过而新增短语表、固定问法分支或 `prompt.contains(...)`。如果新的自然语言表达没有被理解，应优先改 registry capability metadata、`INTERFACE.md`、生成技能提示词、planner schema 或必要的 vendor prompt patch，让 LLM 在不同语言下输出同一套结构化 action。天气、网页、图片、照片、发布、包管理、Docker、RSS、行情等普通技能必须走 registry capability metadata。本地门禁是：
 
 ```bash
 python3 scripts/check_no_nl_hardmatch.py
 ```
 
+<!-- ai-learning-stage: context-memory -->
 ## 记忆系统
 
 RustClaw 记忆分为短期对话记录、结构化用户偏好、长期事实卡和检索索引。目标是让记忆能帮助当前任务，同时避免旧助手输出变成新的隐藏指令。
@@ -304,7 +309,7 @@ Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use 
 - 前台 HTTP/通道等待时间默认较短。调用方停止等待后应继续轮询同一个 `task_id`，不要重新创建重复任务，也不要把后台任务误判为失败。
 - `task_lifecycle` 是机器可读的状态投影。查询 API 暴露 `state`、`db_status`、`can_poll`、`can_cancel`、`checkpoint_id`、`resume_due`、`resume_wait_seconds` 和 heartbeat 字段，供 UI 渲染。
 - 状态来源：`crates/clawd/src/task_lifecycle.rs` 负责生命周期投影，`repo::get_task_query_record()` 会把该投影挂到 `GET /v1/tasks/{task_id}`。UI、CLI 和通道应渲染这些结构化字段，不从 `text` 或 `error_text` 推断状态。
-- `clawcli get` 和 `clawcli watch` 渲染 lifecycle 机器字段；`clawcli cancel-task <task_id>` 使用直接 task-id 取消 API，`clawcli cancel-index` 只保留给 active-list index 兼容。
+- `clawcli get` 和 `clawcli watch` 渲染 lifecycle 机器字段；`clawcli cancel-task <task_id>` 按 task ID 取消，`clawcli cancel-index` 按 active-list 中选定的序号取消。
 - `clawcli resume-task <task_id>` 会把已有 checkpoint 标记为到期恢复；`clawcli pause-task <task_id> --pause-seconds N` 只延迟已有 waiting/background checkpoint，不会重启没有 checkpoint 的任务。
 - `clawcli submit --detach` 快速返回 `task_id`；`clawcli submit --wait` 轮询到终态；`--json` 保持 submit/watch 输出适合脚本消费。
 - `clawcli --yolo submit|exec|code|chat|run-skill ...` 为新任务请求 `approval_policy=never` 与 `sandbox_mode=danger_full`，后端只接受当前仍启用的管理员密钥。这是高风险模式：会取消本地确认和进程沙箱隔离，但 registry、schema、外部发布、取消、预算、脱敏与审计控制仍然有效。
@@ -341,7 +346,7 @@ clawcli goal clear task-123
 - 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
 - async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；当 provider 或 dry-run adapter 支持时，poll 和 cancel 也应作为结构化 capability 暴露。后续由 worker recovery 通过 `poll_async_job` 继续轮询。
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
-- seeded resume 会恢复持久化的 `TaskBudgetSlice`、累计模型/工具/token/成本/耗时、continuation index、observations、artifact refs、repair 状态和已完成 side-effect fingerprints，再重新进入 agent loop。健康任务只要持续产生结构化进度，就可以跨越旧 4-round/12-tool 数值；真正停止由重复/停滞、取消、policy 或管理员硬上限决定。
+- seeded resume 会恢复持久化的 `TaskBudgetSlice`、累计模型/工具/token/成本/耗时、continuation index、observations、artifact refs、repair 状态和已完成 side-effect fingerprints，再重新进入 agent loop。健康任务只要持续产生结构化进度就可以继续；真正停止由重复/停滞、取消、policy 或管理员硬上限决定。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
 - Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；foreground 与 resume-executor 的每次写入都由 task row 的精确 `(lease_owner, claim_attempt)` 隔离。heartbeat 只能续租当前 claim，checkpoint recovery 会推进 generation，旧 worker 不能再发布 claimed process event 或覆盖终态结果。
 
@@ -365,6 +370,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。
 <!-- ai-learning-exclude:end -->
 
+<!-- ai-learning-stage: safety-operations -->
 ## 主要组件
 
 - `crates/clawd`：核心运行时、HTTP API、任务队列、路由、记忆、鉴权、调度
@@ -427,13 +433,15 @@ rustclaw -key disable rk-xxxx
 
 ## UI、API 与 `webd`
 
-主 API 仍由 `clawd` 提供；部署方式按环境拆分：
+主 API 由 `clawd` 提供；部署方式按环境拆分：
 
 - 本地机器：`clawd` 同时提供 `UI/dist` 和 `/v1`，不需要 nginx
 - 云服务器：可由 nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
 - `webd` 在启用时提供密码登录和会话桥接；本地直连 UI 可以使用 RustClaw key
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
 - 导航栏中的 `AI 学习` 页面直接读取随 UI 打包的 README，按一级主题分页，并把 Mermaid 流程图渲染为可缩放、可全屏查看的图形；切换 UI 语言时会选择对应语言的 README。
+- Agent 页面使用服务端会话历史。每个任务都能从操作菜单修改自定义名称，刷新页面或重启后仍会保留。
+- 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
 
 在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
 
@@ -443,9 +451,12 @@ rustclaw -key disable rk-xxxx
 - `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、RustClaw 数据卷存储、运行时长和机器可读的缺失字段
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/conversation-history`
+- `PUT /v1/tasks/conversations/{conversation_id}/title`
+- `POST /v1/tasks/active`
 - `POST /v1/tasks/cancel`
 - `POST /v1/tasks/cancel-by-task-id`
-- `POST /v1/tasks/cancel-one`：按 active-list index 取消的兼容接口
+- `POST /v1/tasks/cancel-one`：按 active-list index 取消
 - `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
@@ -475,21 +486,25 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；它的 `--self-test` 会覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`，之后 gate 才信任配置派生的元数据。`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
 
-Agent parity gate 会传递 `CHINESE_PROVIDER_ENV_FILE` 或默认的 `../runtime_env_filled.sh` 给中文 provider catalog 与 smoke preflight，并且只记录 env-file 状态/来源和无密钥凭据元数据，不记录 env-file 路径或密钥值。它的 `gate_summary.env` 会把 gate artifact 位置记录为可搬移的 `out_dir_ref`，而不是本机绝对 `out_dir` 路径；wrapped run log 也会打印 `run_dir_ref` / `run_log_ref` / artifact refs，而不是本机绝对路径。中文 provider smoke metadata，包括 `case_coverage.json`，只记录可搬移路径引用，例如 repo-relative 路径、`out_dir/...` 或 `external_path`；validator 会拒绝 `case_file`、`output_file`、`run_dir` 中的本机绝对路径。它会先运行 `scripts/check_no_runtime_hard_reply.py --self-test` 再运行 baseline 扫描，写入 `runtime_hard_reply_baseline.txt`，并记录 `runtime_hard_reply_baseline=1`；该 artifact 必须包含 `RUNTIME_HARD_REPLY_ALL_SCAN` 和 `new=0`，防止新增生产 Rust 句子型回复悄悄变成固定用户回复模板。它也会运行 `scripts/check_no_policy_boundary_hard_reply.py --self-test`，写入 `policy_boundary_hard_reply.txt`，并记录 `policy_boundary_hard_reply=1`；该 artifact 必须包含 `POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok` 和 `POLICY_BOUNDARY_HARD_REPLY_CHECK ok`，防止 UserResponseContract、policy boundary、最终回复和确定性恢复合同重新堆固定 prose 回复规则。它还会运行 `scripts/check_repair_no_user_text_fields.py --self-test`，写入 `repair_no_user_text_fields.txt`，并记录 `repair_no_user_text_fields=1`；该 artifact 必须包含 `REPAIR_USER_TEXT_FIELD_CHECK ok`，保证 loop repair、answer verifier、recovery 和确定性 resume 路径继续使用 `extra`、`status_code`、`message_key`、`RepairEnvelope` 和结构化 evidence 等机器字段，而不是把用户可见 `text/error_text` 当协议读取。它还会运行 `scripts/check_policy_decision_tokens.py --self-test`，写入 `policy_decision_tokens.txt`，并记录 `policy_decision_tokens=1`；该 artifact 必须包含 `POLICY_DECISION_TOKEN_SELF_TEST ok` 和 `POLICY_DECISION_TOKEN_CHECK ok`，保证 permission、确认和后台等待决策继续集中由 `PolicyDecision` 机器 token 枚举生成，而不是散落 JSON 字符串。它还会运行 `scripts/check_registry_policy_contracts.py --self-test`、`scripts/check_skill_registry_aliases.py --self-test` 和 `scripts/check_long_tail_skill_contracts.py --self-test`，写入 `registry_policy_contracts.txt`、`skill_registry_aliases.txt` 和 `long_tail_skill_contracts.txt`；这些 artifact 记录 `registry_policy_contracts=1`、`skill_registry_aliases=1` 和 `long_tail_skill_contracts=1`，保证 planner capability policy 元数据、语言无关 registry alias、async/dry-run/poll/cancel 长尾合同继续作为 release-gated 机器事实。它会运行 `scripts/check_no_agent_mode_payload.py` 并写入 `no_agent_mode_payload.txt`，防止旧 channel/UI agent-mode 布尔开关重新成为关闭默认 agent loop 的隐形入口。它还会先对 route-authority legacy-key guard、legacy route boundary guard、pre-planner removal guard、NL hard-match scanner 和 historical hardcoded-language scanner 运行 self-test，再运行主检查，并写入 `agent_loop_static_contracts.txt`，确保旧 pre-route 语义路由和固定自然语言捷径不会回到生产路径，同时在 artifact 被信任前证明这些守卫的拒绝路径有效。它还会先运行 `scripts/check_evidence_extractor_contracts.py --self-test` 再运行主检查，并写入 `evidence_extractor_contracts.txt`，要求结构化 extractor 声明稳定机器 evidence 字段，拒绝新增未登记的严格 `text_legacy` evidence 路径，并在 artifact 被信任前证明这些拒绝路径有效。
+Agent parity gate 会把中文 provider catalog、smoke preflight、结构化 evidence、permission token、registry policy、长尾 async 合同、NL hard-match 和固定回复检查统一写成可搬移 artifact。`gate_summary.env`、wrapped run log 和 `case_coverage.json` 只记录 repo-relative、`out_dir/...` 或 `external_path` 引用，不记录密钥、env-file 路径或本机绝对路径。关键结果包括 `runtime_hard_reply_baseline.txt` 的 `new=0`、`repair_no_user_text_fields.txt` 的 `REPAIR_USER_TEXT_FIELD_CHECK ok`、`policy_decision_tokens.txt` 的 `POLICY_DECISION_TOKEN_CHECK ok`，以及 `agent_loop_static_contracts.txt` 的全部 front door、planner authority、多语言和机器合同检查。
 
-Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --self-test`，写入 `agent_loop_guard_final_scope.txt`，并记录 `agent_loop_guard_final_scope=1`；该 artifact 必须包含 `AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok` 和 `AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0`，保证 answer-verifier evidence 与 registry idempotency 边界保持终态 `all` scope，而不是隐藏的旧 route 选择式回滚开关。
+Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --self-test`，写入 `agent_loop_guard_final_scope.txt`，并记录 `agent_loop_guard_final_scope=1`；该 artifact 必须包含 `AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok` 和 `AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0`，保证 answer-verifier evidence 与 registry idempotency 边界使用当前 `all` scope。
 
 `agent_loop_static_contracts.txt` 还会包含 frontdoor boundary dispatch 守卫：`scripts/check_frontdoor_boundary_dispatch.py --self-test` 和主检查必须输出 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` 与 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`，确保 ask front door 只保留 schedule/resume/边界准备入口，不重新决定普通请求该直答、澄清还是执行。
 
+同一门禁还会写入 `policy_boundary_hard_reply.txt`、`registry_policy_contracts.txt`、`skill_registry_aliases.txt`、`long_tail_skill_contracts.txt`、`no_agent_mode_payload.txt` 和 `evidence_extractor_contracts.txt`。其中 evidence extractor 必须同时通过 `check_evidence_extractor_contracts.py --self-test`；这些 artifact 与 `runtime_hard_reply_baseline.txt`、`repair_no_user_text_fields.txt`、`policy_decision_tokens.txt`、`agent_loop_guard_final_scope.txt` 共同证明当前 runtime 只消费机器合同，不靠固定用户文案做路由、repair 或最终回复。
+
+Wrapped gate 的路径只记录可搬移的 `out_dir_ref`、`run_dir_ref` 和 `run_log_ref`。`suite_artifact_contract.json` 必须验证嵌套 gate 并记录 `agent_parity_gate_contract.checked=true`；生成报告时使用 `--validate-contract-report-content` 和 `--require-contract-report-content-checked`，并记录 `contract_report_content_checked=true`。`gate_summary.env` 中的 `live_metrics=0|1` 表示是否真的提供了 live run：`metrics=1` 只表示指标门禁启用，只有 `live_metrics=1` 才表示 live rollout metrics 已生成且通过内容检查。`runner_path_ref_contract.json` 和 `llm_raw_trace_runner_contract.txt` 继续验证可搬移路径以及编号后的 `LLM#1..N` 原始请求/返回字段。
+
 同一 gate 还会写入 `planner_runtime_boundary_contracts.txt` 并记录 `planner_runtime_boundary_contracts=1`。该 artifact 必须包含 `PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`、`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`、`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`、`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`、`FINALIZER_ARCHITECTURE_SELF_TEST ok`、`FINALIZER_ARCHITECTURE_CHECK findings=0`、`zero_domain_hits=0` 和 `registry_dependencies=0`，把 planner-owned runtime、loop-only repair、机器 route marker 和 zero-domain finalizer 纳入 release gate。
 
-同一 gate 还会写入 `agent_architecture_boundary_contracts.txt` 并记录 `agent_architecture_boundary_contracts=1`。该 artifact 必须包含 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`、`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`、`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`、`FINALIZER_BOUNDARY_CHECK ok` 和 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`，保证 machine-only boundary schema、planner、resolver、finalizer 和 evidence-policy facade 不会悄悄退回旧的前置语义路由或静态兼容路径；`PLANNER_RUNTIME_BOUNDARY_CHECK findings=0` 另行证明已删除的 intent-normalizer 与 contract-repair prompt/schema/helper 没有回归。
+同一 gate 还会写入 `agent_architecture_boundary_contracts.txt` 并记录 `agent_architecture_boundary_contracts=1`。该 artifact 必须包含 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`、`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`、`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`、`FINALIZER_BOUNDARY_CHECK ok`、`EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0` 和 `PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`，验证当前 machine-only boundary schema、planner authority、registry resolver、finalizer 与 evidence-policy facade。
 
-同一 gate 还会写入 `deterministic_boundary_inventory_contracts.txt` 并记录 `deterministic_boundary_inventory_contracts=1`。该 artifact 必须包含 `ANSWER_VERIFIER_BOUNDARY_CHECK ok`、`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`、`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`、`REPAIR_BOUNDARY_INVENTORY_CHECK ok` 和 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`，保证 answer verifier、observed-output、确定性 branch inventory 和 repair inventory 不会继续膨胀成隐藏路由器、固定 prose 渲染器或未登记兼容路径。
+同一 gate 还会写入 `deterministic_boundary_inventory_contracts.txt` 并记录 `deterministic_boundary_inventory_contracts=1`。该 artifact 必须包含 `ANSWER_VERIFIER_BOUNDARY_CHECK ok`、`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`、`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`、`REPAIR_BOUNDARY_INVENTORY_CHECK ok` 和 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`，验证 answer verifier、observed-output、确定性 branch inventory 和 repair inventory 都保持结构化且职责有界。
 
 同一 gate 还会写入 `maintainability_skill_contracts.txt` 并记录 `maintainability_skill_contracts=1`。该 artifact 必须包含 `LONG_FILE_CHECK ok`、`OK: all ... registry skills have a generated layered prompt body` 和 `REGISTRY_PARITY mode=all ... differences=0`，保证长文件上限、生成式分层 skill prompt 和主 registry/docker registry 元数据一致性都作为 release gate 证据。
 
-同一 gate 还会写入 `agent_parity_gate_inventory_contracts.txt` 并记录 `agent_parity_gate_inventory_contracts=1`。该 artifact 必须包含 `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok`、`AGENT_PARITY_GATE_INVENTORY_CHECK ok`、`NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` 与 `NL_TEST_CHECKER_INVENTORY_CHECK ok`，保证 top-level `scripts/check_*.py` 和 nested `scripts/nl_tests/check_*.py` 守卫要么进入 release runner，要么因 live-run-only 兼容原因显式豁免。
+同一 gate 还会写入 `agent_parity_gate_inventory_contracts.txt` 并记录 `agent_parity_gate_inventory_contracts=1`。该 artifact 必须包含 `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok`、`AGENT_PARITY_GATE_INVENTORY_CHECK ok`、`NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` 与 `NL_TEST_CHECKER_INVENTORY_CHECK ok`，保证 top-level `scripts/check_*.py` 和 nested `scripts/nl_tests/check_*.py` 守卫都由 release runner 或明确的 live-run scope 管理。
 
 同一 gate 也会写入 `task_lifecycle_contracts.txt` 并记录 `task_lifecycle_contracts=1`。该 artifact 来自 `scripts/check_task_lifecycle_contracts.py --self-test` 和主检查，必须包含 `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` 与 `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`。它把后台执行、checkpoint/resume、resume executor lease、seeded agent-loop resume、async poll/cancel projection 以及 CLI/UI task lifecycle 展示都固定在机器字段上，而不是本地化 `text/error_text`。
 
@@ -511,6 +526,7 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 
 同一个 raw LLM trace artifact 现在会同时运行 `print_llm_raw_trace.py --self-test`、`check_llm_raw_trace_runner_contract.py --self-test` 和 checker 主检查。`llm_raw_trace_runner_contract.txt` 必须包含 `LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok` 与 `LLM_RAW_TRACE_RUNNER_CONTRACT ok`，证明原始字段打印 helper 和 runner wiring checker 都通过后，才信任 NL/live NL 的 `LLM#1..N` trace 输出。
 
+<!-- ai-learning-stage: development-release -->
 ## NL 回归快捷入口
 
 代码还在快速推进时，优先跑最小受影响 NL 集；阶段收口或 release gate 时再扩大覆盖：
@@ -518,8 +534,8 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 1. 静态 compact 覆盖：`python3 scripts/nl_tests/check_compact_coverage.py --report`，只检查源控 case 覆盖基础技能、route/lifecycle 分类和媒体 dry-run，不调用 provider。
 2. 受影响小集合：针对本次修改路径挑 10-30 条。
 3. 典型聚合集：一个阶段完成后跑压缩代表性覆盖。
-4. Canary：改变默认 authority 或删除旧 gate 前跑 500 条 client-like。
-5. Safe aggregate：先跑 compact 等价覆盖；只有高风险删除 gate 或发布硬化才跑完整 2100+。
+4. Canary：高风险 runtime 边界变更使用 500 条 client-like。
+5. Safe aggregate：先跑 compact 等价覆盖；受影响范围确有需要时，再用完整 2100+ 做发布硬化。
 
 实际 NL 建议通过 `bash scripts/nl_tests/run_all_nl_with_server.sh` 运行。该入口
 默认使用随机 loopback 端口、隔离的 task/audit 数据库和不会向外发送消息的
@@ -527,7 +543,7 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 复用正在运行的开发服务器。可用 `--suite <name>` 或 `--category <name>` 选择
 最小受影响范围；除非明确关闭，仍会打印带编号的原始 `LLM#1..N` 请求/返回字段。
 
-当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 当前选择 285 行并覆盖全部 217 个声明类别）、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；planner/output-contract 清理应通过 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
+当前 release 验收组合使用受影响范围的 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 选择维护中的代表性集合）、loop-boundary/replay 无 unexplained mismatch，以及 planner/runtime/repair 静态门禁。Planner/output-contract 改动运行 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 改动运行 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
 
 面向长尾闭环链路的常用入口：
 
@@ -553,6 +569,7 @@ UI 相关说明：
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
 
+<!-- ai-learning-stage: capabilities-artifacts -->
 ## 技能体系
 
 RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
@@ -616,6 +633,7 @@ timeout_seconds = 120
 
 空 `api_key` 只允许本机 `custom` provider（`localhost`、`127.0.0.1`、`::1`）。如果是远端 custom provider，仍然必须配置真实 key。
 
+<!-- ai-learning-stage: development-release -->
 ## 目录说明
 
 - `configs/`：运行时、通道、模型、记忆、技能配置
@@ -653,9 +671,11 @@ Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_ap
 - 各类回归和辅助脚本主要集中在 `scripts/`
 - 如果要跑本地 `ops_closed_loop` 闭环回归，执行 `bash scripts/regression_ops_closed_loop.sh`
 
+<!-- ai-learning-exclude:start -->
 ## 许可证
 
 本项目使用非商用、源码可见许可。
 
 - 英文法律文本：`LICENSE`
 - 中文参考翻译：`LICENSE.zh-CN.md`
+<!-- ai-learning-exclude:end -->

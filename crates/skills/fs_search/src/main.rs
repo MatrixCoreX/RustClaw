@@ -1,13 +1,17 @@
-use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod grep_search;
+mod image_search;
 mod result_pagination;
 mod workspace_traversal;
 
+use grep_search::{find_matches, GrepOptions, MAX_CONTEXT_LINES};
+use image_search::{collect_images, default_image_extensions, directory_counts, ImageEntry};
 use result_pagination::{cursor_from_args, paginate};
 use workspace_traversal::{
     path_kind, resolve_path, to_rel, walk_collect, walk_collect_dirs, walk_collect_nodes,
@@ -17,6 +21,10 @@ use workspace_traversal::{
 const SKILL_NAME: &str = "fs_search";
 const MAX_RESULT_SNAPSHOT_ITEMS: usize = 100_000;
 const MAX_GREP_SNAPSHOT_MATCHES: usize = 20_000;
+const DEFAULT_GREP_MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_GREP_MAX_SCAN_BYTES: usize = 64 * 1024 * 1024;
+const MAX_GREP_FILE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_GREP_SCAN_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -373,48 +381,49 @@ fn normalize_target_kind(value: &str) -> &str {
     }
 }
 
-fn line_matches_query(line: &str, query: &str, case_insensitive: bool) -> bool {
-    if case_insensitive {
-        let line_folded = line.to_lowercase();
-        let query_folded = query.to_lowercase();
-        return line_folded.contains(&query_folded)
-            || ordered_wildcard_query_matches(&line_folded, &query_folded);
+fn entry_sort_mode(obj: &serde_json::Map<String, Value>) -> Result<&str, String> {
+    let mode = obj.get("sort_by").and_then(Value::as_str).unwrap_or("name");
+    match mode {
+        "name" | "name_desc" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc" => Ok(mode),
+        _ => Err("sort_by_unsupported".to_string()),
     }
-    line.contains(query) || ordered_wildcard_query_matches(line, query)
 }
 
-fn ordered_wildcard_query_matches(line: &str, query: &str) -> bool {
-    if !query.contains(".*") {
-        return false;
-    }
-    let parts = query
-        .split(".*")
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return false;
-    }
-    let mut rest = line;
-    for part in parts {
-        let Some(idx) = rest.find(part) else {
-            return false;
-        };
-        rest = &rest[idx + part.len()..];
-    }
-    true
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut out = String::new();
-    for (idx, ch) in text.chars().enumerate() {
-        if idx >= max_chars {
-            out.push_str("...");
-            return out;
+fn sort_entry_results(results: &mut [String], root: &Path, mode: &str) {
+    match mode {
+        "name_desc" => results.sort_by(|left, right| right.cmp(left)),
+        "mtime_desc" | "mtime_asc" => {
+            let modified = |path: &str| {
+                std::fs::metadata(root.join(path))
+                    .and_then(|metadata| metadata.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+            };
+            results.sort_by(|left, right| {
+                let time_order = if mode == "mtime_desc" {
+                    modified(right).cmp(&modified(left))
+                } else {
+                    modified(left).cmp(&modified(right))
+                };
+                time_order.then_with(|| left.cmp(right))
+            });
         }
-        out.push(ch);
+        "size_desc" | "size_asc" => {
+            let size = |path: &str| {
+                std::fs::metadata(root.join(path))
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0)
+            };
+            results.sort_by(|left, right| {
+                let size_order = if mode == "size_desc" {
+                    size(right).cmp(&size(left))
+                } else {
+                    size(left).cmp(&size(right))
+                };
+                size_order.then_with(|| left.cmp(right))
+            });
+        }
+        _ => results.sort(),
     }
-    out
 }
 
 fn main() -> anyhow::Result<()> {
@@ -436,7 +445,7 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
+                    extra: Some(error_extra(execution_error_kind(&err))),
                     error_text: Some(err),
                 },
             },
@@ -463,6 +472,13 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn execution_error_kind(error: &str) -> &str {
+    match error {
+        "multiline_query_invalid" | "query_empty" | "sort_by_unsupported" => error,
+        _ => "execution_failed",
+    }
 }
 
 fn execute(args: Value) -> Result<Value, String> {
@@ -508,6 +524,7 @@ fn execute(args: Value) -> Result<Value, String> {
         "find_name" => {
             let pattern_norms = name_patterns_from_args(obj)?;
             let exact_name = exact_name_match_requested(obj);
+            let sort_by = entry_sort_mode(obj)?;
             let target_kind = obj
                 .get("target_kind")
                 .and_then(|v| v.as_str())
@@ -546,7 +563,7 @@ fn execute(args: Value) -> Result<Value, String> {
             };
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
             results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
-            results.sort();
+            sort_entry_results(&mut results, &root, sort_by);
             results.dedup();
             let page = paginate(
                 &results,
@@ -555,11 +572,15 @@ fn execute(args: Value) -> Result<Value, String> {
                 stats.limit_reached || result_limit_reached,
             );
             Ok(json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "ok",
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "patterns": pattern_norms,
                 "exact": exact_name,
+                "sort_by": sort_by,
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
@@ -571,6 +592,7 @@ fn execute(args: Value) -> Result<Value, String> {
             }))
         }
         "find_ext" => {
+            let sort_by = entry_sort_mode(obj)?;
             let exts = extension_values_from_args(
                 obj,
                 &[
@@ -606,7 +628,7 @@ fn execute(args: Value) -> Result<Value, String> {
             })?;
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
             results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
-            results.sort();
+            sort_entry_results(&mut results, &root, sort_by);
             results.dedup();
             let page = paginate(
                 &results,
@@ -616,12 +638,16 @@ fn execute(args: Value) -> Result<Value, String> {
             );
             let ext = exts.first().cloned().unwrap_or_default();
             Ok(json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "ok",
                 "action": "find_ext",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "ext": ext,
                 "exts": exts,
                 "patterns": pattern_norms,
+                "sort_by": sort_by,
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
@@ -637,15 +663,43 @@ fn execute(args: Value) -> Result<Value, String> {
                 .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "query is required".to_string())?;
+            if query.is_empty() {
+                return Err("query_empty".to_string());
+            }
             let case_insensitive =
                 bool_arg(obj, "case_insensitive") || bool_arg(obj, "ignore_case");
+            let multiline = bool_arg(obj, "multiline");
             let pattern_norms = optional_file_patterns_from_args(obj);
+            let context_before = obj
+                .get("context_before")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(MAX_CONTEXT_LINES as u64) as usize;
+            let context_after = obj
+                .get("context_after")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(MAX_CONTEXT_LINES as u64) as usize;
             let max_line_chars = obj
                 .get("max_line_chars")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(240)
                 .clamp(40, 2000) as usize;
+            let max_file_bytes = obj
+                .get("max_file_bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or(DEFAULT_GREP_MAX_FILE_BYTES as u64)
+                .clamp(1, MAX_GREP_FILE_BYTES as u64) as usize;
+            let max_scan_bytes = obj
+                .get("max_scan_bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or(DEFAULT_GREP_MAX_SCAN_BYTES as u64)
+                .clamp(1, MAX_GREP_SCAN_BYTES as u64) as usize;
             let mut matches = Vec::new();
+            let mut scanned_bytes = 0usize;
+            let mut skipped_large_files = 0usize;
+            let mut skipped_non_utf8_files = 0usize;
+            let mut scan_byte_limit_reached = false;
             let stats = walk_collect(&search_root, scan_limits, &mut |p| {
                 if !pattern_norms.is_empty() {
                     let name = p
@@ -658,23 +712,47 @@ fn execute(args: Value) -> Result<Value, String> {
                         return false;
                     }
                 }
-                if let Ok(text) = std::fs::read_to_string(p) {
+                let file_bytes = std::fs::metadata(p)
+                    .map(|metadata| metadata.len().min(usize::MAX as u64) as usize)
+                    .unwrap_or(0);
+                if file_bytes > max_file_bytes {
+                    skipped_large_files = skipped_large_files.saturating_add(1);
+                    return false;
+                }
+                if scanned_bytes.saturating_add(file_bytes) > max_scan_bytes {
+                    scan_byte_limit_reached = true;
+                    return true;
+                }
+                if let Ok(bytes) = std::fs::read(p) {
+                    scanned_bytes = scanned_bytes.saturating_add(bytes.len());
+                    let Ok(text) = String::from_utf8(bytes) else {
+                        skipped_non_utf8_files = skipped_non_utf8_files.saturating_add(1);
+                        return false;
+                    };
                     let rel = to_rel(&root, p);
-                    let mut file_matched = false;
-                    for (idx, line) in text.lines().enumerate() {
-                        if line_matches_query(line, query, case_insensitive) {
-                            if !file_matched {
-                                results.push(rel.clone());
-                                file_matched = true;
-                            }
-                            matches.push(json!({
-                                "path": rel.clone(),
-                                "line": idx + 1,
-                                "text": truncate_chars(line.trim(), max_line_chars),
-                            }));
-                            if matches.len() > MAX_GREP_SNAPSHOT_MATCHES {
-                                return true;
-                            }
+                    let options = GrepOptions {
+                        query,
+                        case_insensitive,
+                        multiline,
+                        context_before,
+                        context_after,
+                        max_line_chars,
+                    };
+                    let file_matches = match find_matches(&text, options) {
+                        Ok(file_matches) => file_matches,
+                        Err(_) => return false,
+                    };
+                    if !file_matches.is_empty() {
+                        results.push(rel.clone());
+                    }
+                    for matched in file_matches {
+                        let mut value = serde_json::to_value(matched).unwrap_or_default();
+                        if let Some(object) = value.as_object_mut() {
+                            object.insert("path".to_string(), Value::String(rel.clone()));
+                        }
+                        matches.push(value);
+                        if matches.len() > MAX_GREP_SNAPSHOT_MATCHES {
+                            return true;
                         }
                     }
                 }
@@ -696,7 +774,10 @@ fn execute(args: Value) -> Result<Value, String> {
             });
             results.sort();
             results.dedup();
-            let content_scan_truncated = stats.limit_reached || match_limit_reached;
+            let content_scan_truncated = stats.limit_reached
+                || match_limit_reached
+                || scan_byte_limit_reached
+                || skipped_large_files > 0;
             let (name_patterns, name_results, name_scan_truncated) = if results.is_empty() {
                 grep_text_name_fallback_matches(
                     &root,
@@ -736,11 +817,17 @@ fn execute(args: Value) -> Result<Value, String> {
                 match_page.snapshot_sha256
             };
             Ok(json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "ok",
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "query": query,
                 "case_insensitive": case_insensitive,
+                "multiline": multiline,
+                "context_before": context_before,
+                "context_after": context_after,
                 "patterns": pattern_norms,
                 "count": page_result_paths.len(),
                 "total_file_count": results.len(),
@@ -752,6 +839,12 @@ fn execute(args: Value) -> Result<Value, String> {
                 "name_count": name_page.returned_count,
                 "total_name_count": name_page.total_count,
                 "name_results": name_page.items,
+                "scanned_bytes": scanned_bytes,
+                "max_file_bytes": max_file_bytes,
+                "max_scan_bytes": max_scan_bytes,
+                "scan_byte_limit_reached": scan_byte_limit_reached,
+                "skipped_large_files": skipped_large_files,
+                "skipped_non_utf8_files": skipped_non_utf8_files,
                 "result_limit": max_results,
                 "truncated": truncated,
                 "snapshot_sha256": snapshot_sha256,
@@ -759,18 +852,11 @@ fn execute(args: Value) -> Result<Value, String> {
             }))
         }
         "find_images" | "images" | "image_search" => {
-            let mut files = Vec::new();
-            let mut dir_counts: HashMap<String, usize> = HashMap::new();
-            let max_files = obj
-                .get("max_files")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(20000)
-                .min(200000) as usize;
             let max_dirs = obj
                 .get("max_dirs")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(200)
-                .min(2000) as usize;
+                .clamp(1, 2000) as usize;
             let exts: Vec<String> = obj
                 .get("exts")
                 .and_then(|v| v.as_array())
@@ -782,49 +868,45 @@ fn execute(args: Value) -> Result<Value, String> {
                         .collect::<Vec<_>>()
                 })
                 .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| {
-                    vec![
-                        "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "svg", "ico",
-                        "heic", "heif",
-                    ]
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect()
-                });
-
-            walk_collect(&search_root, scan_limits, &mut |p| {
-                let ext = p
-                    .extension()
-                    .map(|s| s.to_string_lossy().to_ascii_lowercase())
-                    .unwrap_or_default();
-                if exts.iter().any(|e| e == &ext) {
-                    files.push(to_rel(&root, p));
-                    let rel = to_rel(&root, p);
-                    let dir = std::path::Path::new(&rel)
-                        .parent()
-                        .map(|d| d.to_string_lossy().to_string())
-                        .unwrap_or_else(|| ".".to_string());
-                    *dir_counts.entry(dir).or_insert(0) += 1;
-                }
-                files.len() >= max_files
-            })?;
-
-            let mut dir_items: Vec<(String, usize)> = dir_counts.into_iter().collect();
-            dir_items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-            if dir_items.len() > max_dirs {
-                dir_items.truncate(max_dirs);
-            }
-            let directories_by_count: Vec<Value> = dir_items
-                .into_iter()
-                .map(|(dir, count)| json!({"dir": dir, "count": count}))
-                .collect();
+                .unwrap_or_else(default_image_extensions);
+            let snapshot = collect_images(
+                &root,
+                &search_root,
+                scan_limits,
+                &exts,
+                MAX_RESULT_SNAPSHOT_ITEMS,
+            )?;
+            let page = paginate(
+                &snapshot.entries,
+                cursor,
+                max_results,
+                snapshot.scan_truncated,
+            );
+            let results = page
+                .items
+                .iter()
+                .map(|entry: &ImageEntry| entry.path.clone())
+                .collect::<Vec<_>>();
+            let (directories_by_count, directories_truncated) =
+                directory_counts(&snapshot.entries, max_dirs);
             return Ok(json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "ok",
                 "action": "find_images",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
-                "count": files.len(),
-                "results": files,
+                "extensions": exts,
+                "count": page.returned_count,
+                "returned_count": page.returned_count,
+                "total_count": page.total_count,
+                "results": results,
+                "images": page.items,
                 "directories_by_count": directories_by_count,
+                "directories_truncated": directories_truncated,
+                "truncated": page.has_more,
+                "snapshot_sha256": page.snapshot_sha256,
+                "page": page.metadata,
             }));
         }
         _ => {

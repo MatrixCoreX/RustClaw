@@ -419,6 +419,11 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     if fs_basic_action(args).as_deref() == Some("apply_patch") {
         return workspace_patch_can_run_autonomously(state, args);
     }
+    if fs_basic_action(args).as_deref() == Some("replace_text") {
+        return path_args(args)
+            .into_iter()
+            .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root));
+    }
     if !matches!(
         fs_basic_action(args).as_deref(),
         Some("make_dir" | "write_text" | "append_text")

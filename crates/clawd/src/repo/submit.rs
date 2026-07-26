@@ -83,6 +83,22 @@ pub(crate) fn submit_task_audit_detail(
 }
 
 pub(crate) fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Result<usize> {
+    task_count_by_status_scoped(state, status, None)
+}
+
+pub(crate) fn task_count_by_status_for_user(
+    state: &AppState,
+    status: &str,
+    user_id: i64,
+) -> anyhow::Result<usize> {
+    task_count_by_status_scoped(state, status, Some(user_id))
+}
+
+fn task_count_by_status_scoped(
+    state: &AppState,
+    status: &str,
+    user_id: Option<i64>,
+) -> anyhow::Result<usize> {
     let db = state
         .core
         .db
@@ -90,8 +106,11 @@ pub(crate) fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Re
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let count: i64 = db.query_row(
-        "SELECT COUNT(1) FROM tasks WHERE status = ?1",
-        params![status],
+        "SELECT COUNT(1)
+         FROM tasks
+         WHERE status = ?1
+           AND (?2 IS NULL OR user_id = ?2)",
+        params![status, user_id],
         |row| row.get(0),
     )?;
 

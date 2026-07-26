@@ -1,17 +1,26 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs::OpenOptions;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use reqwest::blocking::Client;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+mod source_discovery;
+mod storage;
+
+use source_discovery::{
+    discover_sources, fetch_public_feed_xml, promote_sources, refresh_candidates, source_health,
+    CandidateSourceEntry, RssDiscoveryConfig,
+};
 
 const SKILL_NAME: &str = "rss_fetch";
 
 /// 单个 active source 的失败状态（持久化在 config 的 source_entries 中）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct SourceStateEntry {
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SourceStateEntry {
     url: String,
     #[serde(default)]
     failure_count: u32,
@@ -22,8 +31,8 @@ struct SourceStateEntry {
 }
 
 /// 废弃区的一条记录。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DeprecatedEntry {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DeprecatedEntry {
     url: String,
     category: String,
     reason: String,
@@ -33,7 +42,7 @@ struct DeprecatedEntry {
     deprecated_at: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 struct DeprecatedSection {
     #[serde(default)]
     sources: Vec<DeprecatedEntry>,
@@ -43,6 +52,23 @@ struct DeprecatedSection {
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<SkillContext>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SkillContext {
+    #[serde(default)]
+    skill_storage: Option<SkillStorageContext>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillStorageContext {
+    schema_version: u32,
+    skill_name: String,
+    storage_kind: String,
+    database_path: String,
+    database_busy_timeout_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,6 +100,44 @@ struct SkillOutput {
 struct SkillFailure {
     error_text: String,
     extra: Value,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RssRuntime {
+    storage_database_path: PathBuf,
+    storage_busy_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RssMachineState {
+    #[serde(default)]
+    source_states: BTreeMap<String, Vec<SourceStateEntry>>,
+    #[serde(default)]
+    candidates: BTreeMap<String, Vec<CandidateSourceEntry>>,
+    #[serde(default)]
+    deprecated: Vec<DeprecatedEntry>,
+}
+
+impl RssMachineState {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.source_states.values().all(Vec::is_empty)
+            && self.candidates.values().all(Vec::is_empty)
+            && self.deprecated.is_empty()
+    }
+
+    pub(crate) fn entry_count(&self) -> usize {
+        self.source_states.values().map(Vec::len).sum::<usize>()
+            + self.candidates.values().map(Vec::len).sum::<usize>()
+            + self.deprecated.len()
+    }
+}
+
+#[derive(Debug)]
+struct PersistenceError {
+    error_kind: &'static str,
+    failure_phase: &'static str,
+    cause_code: String,
+    side_effect_applied: bool,
 }
 
 impl SkillFailure {
@@ -132,13 +196,13 @@ impl std::fmt::Display for SkillFailure {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 struct RootConfig {
     #[serde(default)]
     rss: RssConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 struct RssConfig {
     #[serde(default)]
     default_category: Option<String>,
@@ -151,12 +215,16 @@ struct RssConfig {
     deprecate_after_failures: Option<u32>,
     #[serde(default)]
     categories: HashMap<String, RssCategoryConfig>,
+    /// Model-proposed source discovery is validated deterministically and kept
+    /// in a candidate pool until an explicitly confirmed promotion.
+    #[serde(default)]
+    discovery: Option<RssDiscoveryConfig>,
     /// 废弃的 RSS 地址列表；默认抓取时不参与。
     #[serde(default)]
     deprecated: Option<DeprecatedSection>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 struct RssCategoryConfig {
     /// 当前语义：全量抓取该列表中的所有源；无 primary/secondary/fallback 分层。
     #[serde(default)]
@@ -164,6 +232,9 @@ struct RssCategoryConfig {
     /// 每个 source 的失败计数与最近错误（持久化）；达到阈值后从 sources 移入 deprecated。
     #[serde(default)]
     source_entries: Option<Vec<SourceStateEntry>>,
+    /// Validated discovery candidates that are not active fetch sources yet.
+    #[serde(default)]
+    candidate_entries: Option<Vec<CandidateSourceEntry>>,
     /// 兼容旧配置：若未配置 sources，则使用 primary + secondary + fallback 合并为全量列表。
     #[serde(default)]
     primary: Vec<String>,
@@ -285,37 +356,11 @@ impl TextCatalog {
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut cfg = load_root_config();
     for line in stdin.lock().lines() {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => {
-                let config_before = config_snapshot(&cfg);
-                let result = execute(&mut cfg, req.args);
-                if config_changed(config_before.as_deref(), &cfg) {
-                    if let Err(e) = save_config(&cfg) {
-                        let _ = std::io::stderr()
-                            .write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
-                    }
-                }
-                match result {
-                    Ok(output) => Resp {
-                        request_id: req.request_id,
-                        status: "ok".to_string(),
-                        text: output.text,
-                        extra: output.extra,
-                        error_text: None,
-                    },
-                    Err(err) => Resp {
-                        request_id: req.request_id,
-                        status: "error".to_string(),
-                        text: String::new(),
-                        extra: Some(err.extra),
-                        error_text: Some(err.error_text),
-                    },
-                }
-            }
+            Ok(req) => process_request(req),
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -330,6 +375,123 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn process_request(req: Req) -> Resp {
+    let runtime = match runtime_from_request(&req) {
+        Ok(runtime) => runtime,
+        Err(failure) => {
+            return response_from_execution(req.request_id, Err(failure), None);
+        }
+    };
+    let mut cfg = load_root_config();
+    let config_on_disk = cfg.clone();
+    let legacy_state = machine_state_from_config(&cfg);
+    let loaded = match storage::initialize_and_load(&runtime, &legacy_state) {
+        Ok(loaded) => loaded,
+        Err(cause_code) => {
+            return response_from_execution(
+                req.request_id,
+                Err(SkillFailure::execution_failed("skill_storage_failed")),
+                Some(PersistenceError {
+                    error_kind: "skill_storage_failed",
+                    failure_phase: "storage_persistence",
+                    cause_code,
+                    side_effect_applied: false,
+                }),
+            );
+        }
+    };
+    if loaded.cleanup_legacy_config {
+        let cleaned = operator_config(&cfg);
+        if let Err(cause_code) = save_config(&cleaned, &config_on_disk) {
+            return response_from_execution(
+                req.request_id,
+                Err(SkillFailure::execution_failed("config_persist_failed")),
+                Some(PersistenceError {
+                    error_kind: "config_persist_failed",
+                    failure_phase: "config_persistence",
+                    cause_code,
+                    side_effect_applied: true,
+                }),
+            );
+        }
+        cfg = cleaned;
+    }
+    apply_machine_state(&mut cfg, &loaded.state);
+    let expected_operator_config = operator_config(&cfg);
+    let expected_machine_state = machine_state_from_config(&cfg);
+
+    let result = execute(&mut cfg, req.args);
+    let updated_operator_config = operator_config(&cfg);
+    let updated_machine_state = machine_state_from_config(&cfg);
+    let mut side_effect_applied = false;
+
+    if updated_operator_config != expected_operator_config {
+        if let Err(cause_code) = save_config(&updated_operator_config, &expected_operator_config) {
+            return response_from_execution(
+                req.request_id,
+                result,
+                Some(PersistenceError {
+                    error_kind: "config_persist_failed",
+                    failure_phase: "config_persistence",
+                    cause_code,
+                    side_effect_applied: false,
+                }),
+            );
+        }
+        side_effect_applied = true;
+    }
+    if updated_machine_state != expected_machine_state {
+        if let Err(cause_code) =
+            storage::save_if_unchanged(&runtime, &expected_machine_state, &updated_machine_state)
+        {
+            return response_from_execution(
+                req.request_id,
+                result,
+                Some(PersistenceError {
+                    error_kind: "skill_storage_failed",
+                    failure_phase: "storage_persistence",
+                    cause_code,
+                    side_effect_applied,
+                }),
+            );
+        }
+    }
+    response_from_execution(req.request_id, result, None)
+}
+
+fn response_from_execution(
+    request_id: String,
+    result: Result<SkillOutput, SkillFailure>,
+    persist_error: Option<PersistenceError>,
+) -> Resp {
+    match (result, persist_error) {
+        (_, Some(error)) => {
+            let failure = persistence_failure(&error);
+            Resp {
+                request_id,
+                status: "error".to_string(),
+                text: String::new(),
+                extra: Some(failure.extra),
+                error_text: Some(failure.error_text),
+            }
+        }
+        (Ok(output), None) => Resp {
+            request_id,
+            status: "ok".to_string(),
+            text: output.text,
+            extra: output.extra,
+            error_text: None,
+        },
+        (Err(err), None) => Resp {
+            request_id,
+            status: "error".to_string(),
+            text: String::new(),
+            extra: Some(err.extra),
+            error_text: Some(err.error_text),
+        },
+    }
+}
+
 fn error_extra(error_kind: &str) -> Value {
     json!({
         "schema_version": 1,
@@ -341,81 +503,136 @@ fn error_extra(error_kind: &str) -> Value {
     })
 }
 
+fn persistence_failure(error: &PersistenceError) -> SkillFailure {
+    SkillFailure {
+        error_text: error.error_kind.to_string(),
+        extra: json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "error",
+            "error_kind": error.error_kind,
+            "error_code": error.error_kind,
+            "message_key": format!("skill.rss_fetch.{}", error.error_kind),
+            "retryable": true,
+            "failure_phase": error.failure_phase,
+            "side_effect_applied": error.side_effect_applied,
+            "cause_code": error.cause_code,
+        }),
+    }
+}
+
+fn runtime_from_request(req: &Req) -> Result<RssRuntime, SkillFailure> {
+    let storage = req
+        .context
+        .as_ref()
+        .and_then(|context| context.skill_storage.as_ref())
+        .ok_or_else(|| storage_contract_failure("skill_storage_required"))?;
+    if storage.schema_version != 1
+        || storage.skill_name != SKILL_NAME
+        || storage.storage_kind != "sqlite"
+    {
+        return Err(storage_contract_failure("skill_storage_invalid"));
+    }
+    let storage_database_path = PathBuf::from(&storage.database_path);
+    if !storage_database_path.is_absolute()
+        || storage_database_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            != Some("state.db")
+    {
+        return Err(storage_contract_failure("skill_storage_invalid"));
+    }
+    Ok(RssRuntime {
+        storage_database_path,
+        storage_busy_timeout_ms: storage.database_busy_timeout_ms.max(1),
+    })
+}
+
+fn storage_contract_failure(error_kind: &str) -> SkillFailure {
+    SkillFailure {
+        error_text: error_kind.to_string(),
+        extra: json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "error",
+            "error_kind": error_kind,
+            "error_code": error_kind,
+            "message_key": format!("skill.rss_fetch.{error_kind}"),
+            "retryable": false,
+            "failure_phase": "storage_contract",
+            "side_effect_applied": false,
+        }),
+    }
+}
+
+fn machine_state_from_config(cfg: &RootConfig) -> RssMachineState {
+    let mut state = RssMachineState::default();
+    for (category, category_config) in &cfg.rss.categories {
+        if let Some(entries) = category_config.source_entries.as_ref() {
+            if !entries.is_empty() {
+                state
+                    .source_states
+                    .insert(category.clone(), entries.clone());
+            }
+        }
+        if let Some(entries) = category_config.candidate_entries.as_ref() {
+            if !entries.is_empty() {
+                state.candidates.insert(category.clone(), entries.clone());
+            }
+        }
+    }
+    state.deprecated = cfg
+        .rss
+        .deprecated
+        .as_ref()
+        .map(|section| section.sources.clone())
+        .unwrap_or_default();
+    state
+}
+
+fn apply_machine_state(cfg: &mut RootConfig, state: &RssMachineState) {
+    for (category, category_config) in &mut cfg.rss.categories {
+        category_config.source_entries = state
+            .source_states
+            .get(category)
+            .filter(|entries| !entries.is_empty())
+            .cloned();
+        category_config.candidate_entries = state
+            .candidates
+            .get(category)
+            .filter(|entries| !entries.is_empty())
+            .cloned();
+    }
+    cfg.rss.deprecated = (!state.deprecated.is_empty()).then(|| DeprecatedSection {
+        sources: state.deprecated.clone(),
+    });
+}
+
+fn operator_config(cfg: &RootConfig) -> RootConfig {
+    let mut operator = cfg.clone();
+    for category in operator.rss.categories.values_mut() {
+        category.source_entries = None;
+        category.candidate_entries = None;
+    }
+    operator.rss.deprecated = None;
+    operator
+}
+
+#[cfg(test)]
 fn config_snapshot(cfg: &RootConfig) -> Option<String> {
     toml::to_string(cfg).ok()
 }
 
+#[cfg(test)]
 fn config_changed(before: Option<&str>, cfg: &RootConfig) -> bool {
     before != config_snapshot(cfg).as_deref()
 }
 
-/// Legacy / mistaken `action` names from older callers or schedules; normalized before dispatch.
-/// Canonical actions remain `fetch`, `latest`, `news` (see INTERFACE.md).
-fn normalize_rss_legacy_actions(args: &mut serde_json::Map<String, Value>) -> Result<(), String> {
-    let action_raw = match args.get("action").and_then(|v| v.as_str()) {
-        Some(s) => s.trim().to_ascii_lowercase(),
-        None => return Ok(()),
-    };
-    if action_raw.is_empty() {
-        return Ok(());
-    }
-    match action_raw.as_str() {
-        "fetch_crypto_news" => {
-            args.insert("action".to_string(), Value::String("latest".to_string()));
-            if !args.contains_key("category") {
-                args.insert("category".to_string(), Value::String("crypto".to_string()));
-            }
-            Ok(())
-        }
-        "fetch_tech_news" => {
-            args.insert("action".to_string(), Value::String("latest".to_string()));
-            if !args.contains_key("category") {
-                args.insert("category".to_string(), Value::String("tech".to_string()));
-            }
-            Ok(())
-        }
-        "fetch_news" => {
-            args.insert("action".to_string(), Value::String("latest".to_string()));
-            Ok(())
-        }
-        "fetch_feed" => {
-            if direct_feed_selector_present(args) {
-                args.insert("action".to_string(), Value::String("fetch".to_string()));
-            } else {
-                return Err(
-                    "fetch_feed requires url, feed_url, or feed_urls (direct feed only); use action=latest or action=news for category feeds"
-                        .to_string(),
-                );
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
-}
-
-/// True if args carry a non-empty direct URL selector (same intent as `fetch`).
-fn direct_feed_selector_present(obj: &serde_json::Map<String, Value>) -> bool {
-    if let Some(v) = obj.get("url").or_else(|| obj.get("feed_url")) {
-        if let Some(s) = v.as_str() {
-            if !s.trim().is_empty() {
-                return true;
-            }
-        }
-    }
-    if let Some(arr) = obj.get("feed_urls").and_then(|v| v.as_array()) {
-        return arr
-            .iter()
-            .any(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()));
-    }
-    false
-}
-
 fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, SkillFailure> {
-    let mut obj = args
+    let obj = args
         .as_object()
         .cloned()
         .ok_or_else(|| SkillFailure::invalid_input("args must be object"))?;
-    normalize_rss_legacy_actions(&mut obj).map_err(SkillFailure::invalid_input)?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -426,9 +643,11 @@ fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, SkillFailur
     match action.as_str() {
         "fetch" => fetch_direct_feeds(&obj).map_err(SkillFailure::invalid_input),
         "latest" | "news" => fetch_layered_news(cfg, &obj),
-        _ => Err(SkillFailure::invalid_input(
-            "unsupported action; use fetch|latest|news",
-        )),
+        "source_health" => source_health(cfg, &obj),
+        "discover_sources" => discover_sources(cfg, &obj),
+        "refresh_candidates" => refresh_candidates(cfg, &obj),
+        "promote_sources" => promote_sources(cfg, &obj),
+        _ => Err(SkillFailure::invalid_input("rss_fetch.unsupported_action")),
     }
 }
 
@@ -536,9 +755,13 @@ fn fetch_single_feed(
         .unwrap_or(15)
         .clamp(3, 60);
     let topic = news_topic_token(None, obj, None);
-    let xml = fetch_feed_xml(url, timeout_seconds)?;
+    let xml = fetch_public_feed_xml(url, timeout_seconds)?;
+    let parsed_items = parse_feed_items(&xml, limit);
+    if parsed_items.is_empty() {
+        return Err("no_parseable_feed_items".to_string());
+    }
     let text = render_feed(&xml, limit);
-    let items = parse_feed_items(&xml, limit)
+    let items = parsed_items
         .into_iter()
         .map(|mut item| {
             item.source = url.to_string();
@@ -679,8 +902,30 @@ fn fetch_layered_news(
 
     for (url, state) in &urls_with_state {
         let mut state = state.clone();
-        match fetch_feed_xml(url, timeout_seconds) {
+        match fetch_public_feed_xml(url, timeout_seconds) {
             Ok(xml) => {
+                let parsed = parse_feed_items(&xml, per_feed_limit);
+                if parsed.is_empty() {
+                    failed_count += 1;
+                    if !is_explicit {
+                        state.failure_count += 1;
+                        state.last_error = "no_parseable_feed_items".to_string();
+                        state.last_failed_at = now_iso_secs();
+                        if state.failure_count >= threshold {
+                            to_deprecate.push(DeprecatedEntry {
+                                url: url.clone(),
+                                category: category.clone(),
+                                reason: "consecutive_fetch_failures".to_string(),
+                                failure_count: state.failure_count,
+                                last_error: state.last_error.clone(),
+                                deprecated_at: state.last_failed_at.clone(),
+                            });
+                        } else {
+                            state_updates.insert(url.clone(), state);
+                        }
+                    }
+                    continue;
+                }
                 success_count += 1;
                 state.failure_count = 0;
                 state.last_error.clear();
@@ -688,7 +933,7 @@ fn fetch_layered_news(
                 if !is_explicit {
                     state_updates.insert(url.clone(), state);
                 }
-                for mut item in parse_feed_items(&xml, per_feed_limit) {
+                for mut item in parsed {
                     item.source = url.clone();
                     item.layer = "feed".to_string();
                     items.push(item);
@@ -929,25 +1174,6 @@ fn sort_feed_items_by_date(items: &mut [FeedItem]) {
             (false, false) => b.date.trim().cmp(a.date.trim()),
         }
     });
-}
-
-fn fetch_feed_xml(url: &str, timeout_seconds: u64) -> Result<String, String> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(timeout_seconds))
-        .build()
-        .map_err(|err| format!("build http client failed: {err}"))?;
-
-    let resp = client
-        .get(url)
-        .header("User-Agent", "RustClaw-RSS-Fetch/1.0")
-        .send()
-        .map_err(|err| format!("http request failed: {err}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("http status is {}", resp.status()));
-    }
-    resp.text()
-        .map_err(|err| format!("read response body failed: {err}"))
 }
 
 fn render_feed(xml: &str, limit: usize) -> String {
@@ -1265,8 +1491,7 @@ fn format_feed_output(feed_title: String, feed_link: String, items: Vec<FeedItem
 }
 
 fn is_safe_feed_url(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    lower.starts_with("http://") || lower.starts_with("https://")
+    source_discovery::validate_public_url_syntax(url).is_ok()
 }
 
 fn extract_first_block<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
@@ -1460,11 +1685,69 @@ fn load_root_config() -> RootConfig {
     RootConfig::default()
 }
 
-fn save_config(cfg: &RootConfig) -> Result<(), String> {
+fn save_config(cfg: &RootConfig, expected_config: &RootConfig) -> Result<(), String> {
     let path = workspace_root().join("configs/rss.toml");
+    save_config_if_unchanged_at(&path, cfg, expected_config)
+}
+
+fn save_config_if_unchanged_at(
+    path: &Path,
+    cfg: &RootConfig,
+    expected_config: &RootConfig,
+) -> Result<(), String> {
+    let lock_path = path.with_extension("toml.lock");
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|_| "config_lock_open_failed".to_string())?;
+    lock.lock_exclusive()
+        .map_err(|_| "config_lock_failed".to_string())?;
+
+    let current_config = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| toml::from_str::<RootConfig>(&raw).ok());
+    if current_config.as_ref() != Some(expected_config) {
+        return Err("config_write_conflict".to_string());
+    }
+
+    save_config_atomically_at(path, cfg)
+}
+
+fn save_config_atomically_at(path: &Path, cfg: &RootConfig) -> Result<(), String> {
     let s = toml::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(&path, s).map_err(|e| e.to_string())?;
-    Ok(())
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("rss.toml");
+    let temporary =
+        path.with_file_name(format!(".{file_name}.tmp.{}.{}", std::process::id(), nonce));
+    let write_result = (|| {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|_| "config_temp_create_failed".to_string())?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            std::fs::set_permissions(&temporary, metadata.permissions())
+                .map_err(|_| "config_temp_permissions_failed".to_string())?;
+        }
+        file.write_all(s.as_bytes())
+            .map_err(|_| "config_temp_write_failed".to_string())?;
+        file.sync_all()
+            .map_err(|_| "config_temp_sync_failed".to_string())?;
+        drop(file);
+        std::fs::rename(&temporary, path).map_err(|_| "config_atomic_replace_failed".to_string())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    write_result
 }
 
 fn workspace_root() -> PathBuf {

@@ -596,6 +596,7 @@ name = "clawcli"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap 4.6.0",
  "clap_complete",
  "ctrlc",
@@ -604,6 +605,8 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "sha2",
+ "shell-words",
  "toml 0.8.23",
  "uuid",
 ]
@@ -619,6 +622,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "claw-core",
+ "fs2",
  "futures-util",
  "hmac",
  "libc",
@@ -1147,6 +1151,7 @@ dependencies = [
  "claw-core",
  "open-lark",
  "reqwest 0.12.28",
+ "rustls 0.23.37",
  "serde",
  "serde_json",
  "sha2",
@@ -1218,9 +1223,20 @@ name = "fs-search-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2085,6 +2101,7 @@ dependencies = [
  "claw-core",
  "open-lark",
  "reqwest 0.12.28",
+ "rustls 0.23.37",
  "serde",
  "serde_json",
  "sha2",
@@ -3319,9 +3336,12 @@ name = "rss-fetch-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "fs2",
  "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "toml 0.8.23",
 ]
 

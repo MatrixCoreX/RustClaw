@@ -476,16 +476,60 @@ function sanitizeExtractedText(raw) {
 
     const filtered = lines.filter((line) => {
         if (line.length > 2000 && !line.includes(' ')) return false;
-        if (/^\s*[.#][\w-]+\s*\{/.test(line)) return false;
-        if (/^(const|let|var|function)\s+[\w$]+/.test(line)) return false;
-        if (/=>\s*\{?/.test(line) && line.length < 140) return false;
-        if (/^\s*@media\b/.test(line)) return false;
         if (/^\s*<\/?(script|style)/i.test(line)) return false;
-        if (/;\s*$/.test(line) && /[{}()=]/.test(line) && line.length < 220) return false;
         return true;
     });
 
     return normalizeWhitespace(filtered.join('\n'));
+}
+
+function normalizeContentType(value) {
+    return normalizeWhitespace(value).split(';', 1)[0].toLowerCase();
+}
+
+function isReadableDocumentContentType(value) {
+    const contentType = normalizeContentType(value);
+    return contentType === ''
+        || contentType.startsWith('text/')
+        || contentType === 'application/json'
+        || contentType === 'application/ld+json'
+        || contentType === 'application/xml'
+        || contentType.endsWith('+xml');
+}
+
+function classifyNavigationFailure(responseStatus, challengeSignals = []) {
+    if (Array.isArray(challengeSignals) && challengeSignals.length > 0) {
+        return new SkillError('BOT_BLOCKED', 'structured_challenge_signal');
+    }
+    if (!Number.isInteger(responseStatus) || (responseStatus >= 200 && responseStatus < 300)) {
+        return null;
+    }
+    if (responseStatus === 401) {
+        return new SkillError('AUTH_REQUIRED', 'auth_required');
+    }
+    if (responseStatus === 403) {
+        return new SkillError('ACCESS_BLOCKED', 'access_blocked');
+    }
+    if (responseStatus === 429) {
+        return new SkillError('RATE_LIMITED', 'rate_limited');
+    }
+    return new SkillError('HTTP_STATUS_ERROR', 'http_status_error');
+}
+
+function isRetryableFailure(error) {
+    const classified = classifyError(error);
+    if (new Set([
+        'BROWSER_OPERATION_FAILED',
+        'DNS_RESOLUTION_FAILED',
+        'NAV_TIMEOUT',
+        'RATE_LIMITED',
+        'RESPONSE_READ_FAILED',
+    ]).has(classified.code)) {
+        return true;
+    }
+    const status = classified.meta && Number(classified.meta.response_status);
+    return classified.code === 'HTTP_STATUS_ERROR'
+        && (status === 408 || status === 425 || status >= 500);
 }
 
 function buildWaitOrder(preferred) {
@@ -586,10 +630,13 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
         try {
             const response = await page.goto(url, { waitUntil, timeout: PAGE_TIMEOUT_MS });
             const responseStatus = response ? response.status() : null;
+            const responseHeaders = response ? response.headers() : {};
+            const contentType = responseHeaders['content-type'] || '';
             trace.push({
                 wait_until: waitUntil,
                 status: 'ok',
                 status_code: responseStatus,
+                content_type: normalizeContentType(contentType) || null,
                 final_url: page.url(),
                 latency_ms: Date.now() - started,
             });
@@ -599,6 +646,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
                 attempts: trace.length,
                 trace,
                 responseStatus,
+                contentType,
                 finalUrl: page.url(),
             };
         } catch (err) {
@@ -805,22 +853,46 @@ async function extractPage(page, url, waitUntil, options = {}) {
             if (!root) return '';
             const clone = root.cloneNode(true);
             removeNoise(clone);
+            clone.querySelectorAll(
+                'address, article, blockquote, br, dd, div, dl, dt, figcaption, figure, '
+                + 'h1, h2, h3, h4, h5, h6, header, hr, li, main, ol, p, pre, section, table, ul'
+            ).forEach((element) => element.appendChild(document.createTextNode('\n')));
             return clone.innerText || '';
         };
 
         const bodyText = collectText(document.body);
         let bestSelector = null;
         let bestText = '';
+        let bestScore = -1;
         const selectorDiagnostics = [];
 
         for (const selector of selectors) {
-            const node = document.querySelector(selector);
-            const candidate = collectText(node);
-            const chars = norm(candidate).length;
-            selectorDiagnostics.push({ selector, chars });
-            if (chars > norm(bestText).length) {
-                bestSelector = selector;
-                bestText = candidate;
+            const nodes = Array.from(document.querySelectorAll(selector)).slice(0, 24);
+            for (let index = 0; index < nodes.length; index += 1) {
+                const node = nodes[index];
+                const candidate = collectText(node);
+                const chars = norm(candidate).length;
+                const paragraphs = node.querySelectorAll('p, pre, blockquote').length;
+                const headings = node.querySelectorAll('h1, h2, h3, [role="heading"]').length;
+                const linkChars = Array.from(node.querySelectorAll('a'))
+                    .reduce((total, link) => total + norm(link.innerText || '').length, 0);
+                const linkDensity = chars > 0 ? Math.min(1, linkChars / chars) : 1;
+                const score = chars + (paragraphs * 80) + (headings * 40)
+                    - Math.round(chars * linkDensity * 0.7);
+                selectorDiagnostics.push({
+                    selector,
+                    index,
+                    chars,
+                    paragraphs,
+                    headings,
+                    link_density: Number(linkDensity.toFixed(3)),
+                    score,
+                });
+                if (score > bestScore) {
+                    bestSelector = `${selector}[${index}]`;
+                    bestText = candidate;
+                    bestScore = score;
+                }
             }
         }
 
@@ -878,6 +950,81 @@ async function extractPage(page, url, waitUntil, options = {}) {
             .map((selector) => ({ selector, count: document.querySelectorAll(selector).length }))
             .filter((entry) => entry.count > 0);
 
+        const absoluteUrl = (value) => {
+            try {
+                const parsed = new URL(value || '', document.baseURI);
+                return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : '';
+            } catch {
+                return '';
+            }
+        };
+        const firstAttribute = (selectorsAndAttributes) => {
+            for (const [selector, attribute] of selectorsAndAttributes) {
+                const value = document.querySelector(selector)?.getAttribute(attribute) || '';
+                if (norm(value)) return norm(value);
+            }
+            return '';
+        };
+        const canonicalUrl = absoluteUrl(firstAttribute([
+            ['link[rel~="canonical"]', 'href'],
+            ['meta[property="og:url"]', 'content'],
+        ]));
+        let structuredPublishedAt = '';
+        let structuredAuthor = '';
+        let visitedStructuredNodes = 0;
+        const inspectStructuredNode = (node) => {
+            if (!node || visitedStructuredNodes >= 200) return;
+            visitedStructuredNodes += 1;
+            if (Array.isArray(node)) {
+                node.slice(0, 50).forEach(inspectStructuredNode);
+                return;
+            }
+            if (typeof node !== 'object') return;
+            if (!structuredPublishedAt && typeof node.datePublished === 'string') {
+                structuredPublishedAt = norm(node.datePublished);
+            }
+            if (!structuredAuthor && node.author) {
+                const authors = Array.isArray(node.author) ? node.author : [node.author];
+                structuredAuthor = norm(authors.map((author) => (
+                    typeof author === 'string' ? author : author && author.name
+                )).filter(Boolean).join(', '));
+            }
+            Object.values(node).slice(0, 50).forEach(inspectStructuredNode);
+        };
+        Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+            .slice(0, 20)
+            .forEach((script) => {
+                try {
+                    inspectStructuredNode(JSON.parse((script.textContent || '').slice(0, 200000)));
+                } catch {
+                    // Invalid JSON-LD is ignored as untrusted page metadata.
+                }
+            });
+        const publishedAt = firstAttribute([
+            ['meta[property="article:published_time"]', 'content'],
+            ['meta[name="date"]', 'content'],
+            ['time[datetime]', 'datetime'],
+        ]) || structuredPublishedAt;
+        const author = firstAttribute([
+            ['meta[name="author"]', 'content'],
+            ['meta[property="article:author"]', 'content'],
+        ]) || structuredAuthor;
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, [role="heading"]'))
+            .slice(0, 40)
+            .map((node) => ({
+                level: /^H[1-6]$/.test(node.tagName) ? Number(node.tagName.slice(1)) : null,
+                text: norm(node.innerText || '').slice(0, 300),
+            }))
+            .filter((entry) => entry.text);
+        const seenLinks = new Set();
+        const links = Array.from(document.querySelectorAll('a[href]'))
+            .map((node) => ({
+                url: absoluteUrl(node.getAttribute('href') || ''),
+                text: norm(node.innerText || '').slice(0, 300),
+            }))
+            .filter((entry) => entry.url && !seenLinks.has(entry.url) && seenLinks.add(entry.url))
+            .slice(0, 100);
+
         return {
             title,
             text: useMain ? bestText : bodyText,
@@ -885,6 +1032,15 @@ async function extractPage(page, url, waitUntil, options = {}) {
             fallback_text: fallbackText,
             image_candidates: imageCandidates,
             challenge_signals: challengeSignals,
+            metadata: {
+                canonical_url: canonicalUrl || null,
+                description: fallbackDescription || null,
+                language: norm(document.documentElement.lang || '') || null,
+                published_at: publishedAt || null,
+                author: author || null,
+                headings,
+                links,
+            },
             extraction_trace: {
                 used_main: useMain,
                 best_selector: bestSelector,
@@ -915,15 +1071,28 @@ async function extractPage(page, url, waitUntil, options = {}) {
         finalTitle = parseDomain(finalUrl || url);
     }
 
-    if (
-        [401, 403, 429].includes(nav.responseStatus)
-        || (extracted.challenge_signals || []).length > 0
-    ) {
-        throw new SkillError('BOT_BLOCKED', 'structured_challenge_signal', {
+    const navigationFailure = classifyNavigationFailure(
+        nav.responseStatus,
+        extracted.challenge_signals || [],
+    );
+    if (navigationFailure) {
+        throw new SkillError(navigationFailure.code, navigationFailure.message, {
             nav_trace: nav.trace,
             final_url: finalUrl,
             response_status: nav.responseStatus,
+            content_type: normalizeContentType(nav.contentType) || null,
             challenge_signals: extracted.challenge_signals || [],
+            partial_title: finalTitle,
+        });
+    }
+    if (!isReadableDocumentContentType(nav.contentType)) {
+        throw new SkillError('CONTENT_TYPE_BLOCKED', 'content_type_blocked', {
+            nav_trace: nav.trace,
+            final_url: finalUrl,
+            response_status: nav.responseStatus,
+            content_type: normalizeContentType(nav.contentType),
+            recommended_capabilities: ['http.download', 'document.parse'],
+            partial_title: finalTitle,
         });
     }
 
@@ -955,13 +1124,20 @@ async function extractPage(page, url, waitUntil, options = {}) {
         text: finalText,
         content_excerpt: buildExcerpt(finalText),
         source: parseDomain(finalUrl || url),
-        published_at: null,
+        canonical_url: extracted.metadata?.canonical_url || null,
+        description: extracted.metadata?.description || null,
+        language: extracted.metadata?.language || null,
+        published_at: extracted.metadata?.published_at || null,
+        author: extracted.metadata?.author || null,
+        headings: extracted.metadata?.headings || [],
+        links: extracted.metadata?.links || [],
         fetch_method: 'browser',
         extracted_at: new Date().toISOString(),
         nav_wait_until: nav.waitUntil,
         nav_attempts: nav.attempts,
         nav_attempt_trace: nav.trace,
         response_status: nav.responseStatus,
+        content_type: normalizeContentType(nav.contentType) || null,
         latency_ms: Date.now() - pageStart,
         extraction_trace: extracted.extraction_trace,
         text_truncated: textTruncated,
@@ -1210,10 +1386,13 @@ async function openExtract(input) {
         await browser.close().catch(() => {});
     }
 
-    const successCount = items.filter((item) => item.fetch_method === 'browser').length;
+    const successfulItems = items.filter((item) => item.fetch_method === 'browser');
+    const successCount = successfulItems.length;
     const failureCount = items.length - successCount;
-    const citations = items.filter((item) => item.final_url || item.url).map((item) => item.final_url || item.url);
-    const sourceRefs = items
+    const citations = successfulItems
+        .filter((item) => item.final_url || item.url)
+        .map((item) => item.final_url || item.url);
+    const sourceRefs = successfulItems
         .filter((item) => item.final_url || item.url)
         .map((item, index) => ({
             url: item.final_url || item.url,
@@ -1223,7 +1402,8 @@ async function openExtract(input) {
             content_sha256: item.content_sha256 || null,
         }));
 
-    return {
+    const result = {
+        status: successCount === 0 ? 'error' : (failureCount > 0 ? 'partial' : 'ok'),
         items,
         summary: 'browser_extract_result_set',
         success_count: successCount,
@@ -1247,6 +1427,10 @@ async function openExtract(input) {
             chunks_path: capture.files.chunks,
         } : null,
     };
+    if (successCount === 0) {
+        throw new SkillError('ALL_PAGES_FAILED', 'all_pages_failed', result);
+    }
+    return result;
 }
 
 function partialExtractionItem(url, err, executablePath, runtimeCheck) {
@@ -1271,6 +1455,7 @@ function partialExtractionItem(url, err, executablePath, runtimeCheck) {
             extracted_at: new Date().toISOString(),
             error_code: classified.code,
             error: classified.message,
+            retryable: isRetryableFailure(classified),
             diagnostics: meta,
             content_sha256: text ? sha256Hex(text) : null,
             trust: {
@@ -1285,20 +1470,12 @@ function partialExtractionItem(url, err, executablePath, runtimeCheck) {
     };
 }
 
-function isRetryableErrorCode(code) {
-    return new Set([
-        'BROWSER_OPERATION_FAILED',
-        'DNS_RESOLUTION_FAILED',
-        'NAV_TIMEOUT',
-    ]).has(code);
-}
-
 function writeFailure(error, details = null) {
     const classified = classifyError(error);
     process.stderr.write(`${JSON.stringify({
         error_code: classified.code,
         error_text: classified.message,
-        retryable: isRetryableErrorCode(classified.code),
+        retryable: isRetryableFailure(classified),
         details: details || classified.meta || null,
     })}\n`);
 }
@@ -1372,8 +1549,12 @@ if (require.main === module) {
 module.exports = {
     SkillError,
     classifyError,
+    classifyNavigationFailure,
+    isReadableDocumentContentType,
+    isRetryableFailure,
     isPrivateIp,
     partialExtractionItem,
     resolvedAddressAllowed,
+    sanitizeExtractedText,
     validateNetworkUrl,
 };

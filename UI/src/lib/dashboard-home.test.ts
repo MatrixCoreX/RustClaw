@@ -28,6 +28,17 @@ test("considers only required onboarding steps when deciding whether setup is co
   assert.equal(areRequiredDashboardStepsComplete([{ required: false, status: "done" }]), false);
 });
 
+test("allows the first-run panel to collapse after model setup", () => {
+  assert.equal(
+    areRequiredDashboardStepsComplete([
+      { required: true, status: "done" },
+      { required: false, status: "attention" },
+      { required: false, status: "todo" },
+    ]),
+    true,
+  );
+});
+
 test("suggests models first when the llm is not configured", () => {
   assert.deepEqual(
     getSuggestedDashboardAction({

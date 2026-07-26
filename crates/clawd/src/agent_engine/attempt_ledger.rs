@@ -288,6 +288,45 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
     Some(Value::Array(entries))
 }
 
+pub(super) fn preserve_latest_attempt_capability_identity(
+    loop_state: &mut LoopState,
+    requested_capability: &str,
+) {
+    let requested_capability = requested_capability.trim();
+    if requested_capability.is_empty() {
+        return;
+    }
+    let Some(entry) = loop_state.attempt_ledger_entries.last_mut() else {
+        return;
+    };
+    entry.action_ref = requested_capability.to_string();
+    entry.tool_or_skill = requested_capability.to_string();
+    entry.args_fingerprint = args_fingerprint(requested_capability, &entry.args_summary);
+    entry.forbidden_repeat_signature =
+        forbidden_repeat_signature(requested_capability, &entry.args_fingerprint);
+    entry.observed_output =
+        rewrite_capability_result_identity(entry.observed_output.as_str(), requested_capability);
+}
+
+fn rewrite_capability_result_identity(raw: &str, requested_capability: &str) -> String {
+    let Some(payload) = raw.strip_prefix("capability_result_observation=") else {
+        return raw.to_string();
+    };
+    let Ok(mut value) = serde_json::from_str::<Value>(payload) else {
+        return raw.to_string();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return raw.to_string();
+    };
+    object.insert(
+        "capability".to_string(),
+        Value::String(requested_capability.to_string()),
+    );
+    serde_json::to_string(&value)
+        .map(|payload| format!("capability_result_observation={payload}"))
+        .unwrap_or_else(|_| raw.to_string())
+}
+
 fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
     json!({
         "attempt_id": entry.attempt_id,

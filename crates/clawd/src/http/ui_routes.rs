@@ -18,6 +18,7 @@ use tokio::process::Command;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::super::{
+    active_running_task_count, active_running_task_count_for_user,
     attach_pending_channel_bind_session_install_flow, bind_channel_identity,
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
@@ -27,12 +28,14 @@ use super::super::{
     has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds,
-    reload_skill_views, reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
-    update_auth_key_by_id, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
-    verify_webd_password_login, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
-    whatsappd_process_stats, ApiResponse, AppState, FactoryResetDbResult, HealthResponse,
-    LlmProviderRuntime, LocalInteractionContext, PendingChannelBindSession,
+    oldest_running_task_age_seconds_for_user, reload_skill_views,
+    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
+    resolve_channel_binding_identity, task_count_by_status, task_count_by_status_for_user,
+    telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
+    upsert_webd_login_account, verify_webd_password_login, wa_webd_process_stats,
+    webd_process_stats, wechatd_process_stats, whatsappd_process_stats, ApiResponse, AppState,
+    FactoryResetDbResult, HealthResponse, LlmProviderRuntime, LocalInteractionContext,
+    PendingChannelBindSession,
 };
 use crate::ClaimedTask;
 use claw_core::types::{
@@ -46,6 +49,9 @@ use claw_core::{
     prompt_layers,
     skill_registry::{PlannerCapabilityKind, SkillKind},
 };
+
+mod workspace_update_config_snapshot;
+use workspace_update_config_snapshot::*;
 
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
 const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
@@ -378,3 +384,7 @@ mod crypto_credentials_tests;
 #[cfg(test)]
 #[path = "ui_routes/host_system_tests.rs"]
 mod host_system_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/auth_contract_tests.rs"]
+mod auth_contract_tests;

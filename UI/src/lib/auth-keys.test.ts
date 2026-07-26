@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copyAuthKeyValue, maskStoredKey, writeTextToClipboard } from "./auth-keys.ts";
+import {
+  copyAuthKeyValue,
+  formatAuthenticationError,
+  maskStoredKey,
+  responseIndicatesExpiredAuthentication,
+  writeTextToClipboard,
+} from "./auth-keys.ts";
 
 test("copies plaintext key directly when it is already available", async () => {
   const writes: string[] = [];
@@ -109,4 +115,45 @@ test("falls back to execCommand copy when clipboard api is unavailable", async (
 test("masks stored auth keys for display", () => {
   assert.equal(maskStoredKey("abcdef123456", 4), "abcd********");
   assert.equal(maskStoredKey("  "), "");
+});
+
+test("invalidates only structured authentication failures", async () => {
+  assert.equal(
+    await responseIndicatesExpiredAuthentication(
+      Response.json({ ok: false, data: { error_code: "auth_key_invalid" } }, { status: 401 }),
+    ),
+    true,
+  );
+  assert.equal(
+    await responseIndicatesExpiredAuthentication(
+      Response.json({ ok: false, error: "task_owner_mismatch" }, { status: 401 }),
+    ),
+    false,
+  );
+  assert.equal(
+    await responseIndicatesExpiredAuthentication(
+      Response.json({ ok: false, error: "auth_key_invalid" }, { status: 403 }),
+    ),
+    false,
+  );
+});
+
+test("localizes stable authentication codes without matching natural-language errors", () => {
+  const t = (zh: string, _en: string) => zh;
+  assert.equal(
+    formatAuthenticationError("auth_key_invalid", 401, t),
+    "访问凭证无效或已停用，请重新登录。",
+  );
+  assert.equal(
+    formatAuthenticationError("auth_key_required", 401, t),
+    "请先登录。",
+  );
+  assert.equal(
+    formatAuthenticationError("upstream_unavailable", 503, t),
+    "upstream_unavailable",
+  );
+  assert.equal(
+    formatAuthenticationError("webd_login_upstream_unavailable", 502, t),
+    "登录服务暂时无法连接核心服务，请稍后重试。",
+  );
 });

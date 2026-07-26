@@ -16,13 +16,7 @@ pub(super) const SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED: &str =
 const MAX_SCHEDULE_ERROR_CHARS: usize = 512;
 
 pub(super) fn persistent_child_task_requested(args: &Value) -> bool {
-    args.get("persistent_child_task")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || machine_mode_field(args, "action").is_some_and(persistent_child_task_mode_token)
-        || machine_mode_field(args, "execution_mode").is_some_and(persistent_child_task_mode_token)
-        || machine_mode_field(args, "child_task_mode").is_some_and(persistent_child_task_mode_token)
-        || machine_mode_field(args, "scheduler_mode").is_some_and(persistent_child_task_mode_token)
+    args.get("action").and_then(Value::as_str) == Some("persistent_child_task")
 }
 
 pub(super) fn record_persistent_child_task_from_args(
@@ -74,24 +68,6 @@ pub(super) fn record_persistent_child_task_from_args(
         enqueue,
     );
     Ok(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING)
-}
-
-fn machine_mode_field<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn persistent_child_task_mode_token(token: &str) -> bool {
-    matches!(
-        token.trim(),
-        "persistent"
-            | "persistent_child_task"
-            | "queued_child_task"
-            | "background_child_task"
-            | "child_task_queue"
-    )
 }
 
 fn persistent_child_specs(
@@ -158,16 +134,12 @@ fn persistent_child_spec(
         .or_else(|| top_level_args.and_then(|value| value.get("result_contract").cloned()))
         .unwrap_or_else(|| json!({"output_format": "machine_json"}));
     let node_id = persistent_node_id(args, index)?;
-    let dependencies = persistent_scope_value(args, top_level_args, "dependencies")
-        .or_else(|| persistent_scope_value(args, top_level_args, "depends_on"))
-        .unwrap_or_else(|| json!([]));
-    let owned_paths = persistent_scope_value(args, top_level_args, "owned_paths")
-        .or_else(|| persistent_scope_value(args, top_level_args, "path_ownership"))
-        .unwrap_or_else(|| json!([]));
-    let model_policy = persistent_scope_value(args, top_level_args, "model_policy")
-        .unwrap_or_else(|| role_kind.model_policy.clone());
-    let mut tool_policy = persistent_scope_value(args, top_level_args, "tool_policy")
-        .unwrap_or_else(|| role_kind.tool_policy.clone());
+    let dependencies =
+        persistent_scope_value(args, top_level_args, "depends_on").unwrap_or_else(|| json!([]));
+    let owned_paths =
+        persistent_scope_value(args, top_level_args, "owned_paths").unwrap_or_else(|| json!([]));
+    let model_policy = role_kind.model_policy.clone();
+    let mut tool_policy = role_kind.tool_policy.clone();
     let Some(tool_policy_object) = tool_policy.as_object_mut() else {
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
     };
@@ -207,7 +179,6 @@ fn persistent_child_spec(
 fn persistent_node_id(args: &Value, index: usize) -> Result<String, &'static str> {
     let candidate = args
         .get("node_id")
-        .or_else(|| args.get("child_ref"))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -262,8 +233,6 @@ fn resolve_persistent_dependency_refs(specs: &mut [ChildTaskSpec]) -> Result<(),
                 Value::Object(object) => {
                     let reference = object
                         .get("node_id")
-                        .or_else(|| object.get("child_ref"))
-                        .or_else(|| object.get("child_task_id"))
                         .and_then(Value::as_str)
                         .map(str::trim)
                         .ok_or(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?;
@@ -271,7 +240,6 @@ fn resolve_persistent_dependency_refs(specs: &mut [ChildTaskSpec]) -> Result<(),
                         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
                     };
                     object.remove("node_id");
-                    object.remove("child_ref");
                     object.insert("child_task_id".to_string(), json!(child_task_id));
                 }
                 _ => return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED),
@@ -282,20 +250,11 @@ fn resolve_persistent_dependency_refs(specs: &mut [ChildTaskSpec]) -> Result<(),
 }
 
 fn persistent_permission_profile(
-    args: &Value,
-    top_level_args: Option<&Value>,
+    _args: &Value,
+    _top_level_args: Option<&Value>,
     role: &SubagentRoleDefinition,
 ) -> Result<ChildTaskPermissionProfile, &'static str> {
-    let token = args
-        .get("permission_profile")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            args.pointer("/runtime_policy/tool_permission_profile")?
-                .as_str()
-        })
-        .or_else(|| top_level_args?.get("permission_profile")?.as_str())
-        .unwrap_or(&role.default_permission_profile)
-        .trim();
+    let token = role.default_permission_profile.trim();
     if !role.allows_permission_profile(token) {
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
     }

@@ -82,7 +82,14 @@ pub(super) fn system_basic_structured_doc_value(
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     matches!(
         value.get("action").and_then(|v| v.as_str()),
-        Some("extract_field" | "extract_fields" | "read_field" | "read_fields" | "structured_keys")
+        Some(
+            "extract_field"
+                | "extract_fields"
+                | "read_field"
+                | "read_fields"
+                | "structured_keys"
+                | "summarize_structured"
+        )
     )
     .then_some(value)
 }
@@ -125,6 +132,7 @@ pub(super) fn system_basic_structured_doc_observed_body(skill: &str, body: &str)
         )
         .or_else(|| Some(body.to_string())),
         Some("structured_keys") => Some(body.to_string()),
+        Some("summarize_structured") => Some(body.to_string()),
         _ => None,
     }
 }

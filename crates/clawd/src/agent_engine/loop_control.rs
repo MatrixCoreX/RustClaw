@@ -107,6 +107,7 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         return false;
     };
     let verifier_out = answer_verifier_summary_to_out(verifier);
+    crate::assistant_presentation::abort_for_verifier_retry(state, task);
     let retried_answer = if let Some(candidate) = verifier_out.exact_user_literal_retry_candidate()
     {
         info!(
@@ -115,7 +116,7 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         );
         candidate
     } else {
-        let Some(candidate) = crate::finalize::retry_loop_answer_after_verifier(
+        let Some(candidate) = crate::finalize::retry_answer_after_verifier(
             state,
             task,
             user_text,
@@ -737,6 +738,7 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
                 | "mcp_capabilities_loaded"
                 | "replan_from_verifier_signal"
                 | "post_write_validation_reserve"
+                | "repeat_failed_action"
                 | "repeat_action_limit"
                 | "repeat_completed_action"
                 | "structured_observation_already_ready"
@@ -1059,9 +1061,11 @@ async fn run_agent_round(
             );
         }
     }
-    if let Some(outcome) =
-        recover_plan_verifier_rejection(loop_state, &prepared_round.verify_result)
-    {
+    if let Some(outcome) = recover_plan_verifier_rejection(
+        loop_state,
+        &prepared_round.plan_result,
+        &prepared_round.verify_result,
+    ) {
         info!(
             "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
             task.task_id,
@@ -1508,7 +1512,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         let answer_contract = answer_contract_for_reply(user_text, &reply);
         prefer_terminal_model_answer_for_verifier_candidate(&mut reply, answer_contract.as_ref());
         enforce_post_write_content_evidence_guard(&mut reply);
-        enforce_code_mutation_validation_success_guard(&mut reply);
+        enforce_workspace_mutation_validation_success_guard(&mut reply);
         let mut pre_verifier_recovery_loop_state = pre_finalize_loop_state.clone();
         if try_run_post_write_validation_reserve_recovery(
             state,
@@ -1535,7 +1539,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         )
         .await;
         enforce_post_write_content_evidence_guard(&mut reply);
-        enforce_code_mutation_validation_success_guard(&mut reply);
+        enforce_workspace_mutation_validation_success_guard(&mut reply);
         let route_result = answer_contract.as_ref();
         if let Some(verifier) = answer_verifier_evidence_replan_summary(&reply).cloned() {
             let mut verifier_replan_loop_state = pre_finalize_loop_state.clone();

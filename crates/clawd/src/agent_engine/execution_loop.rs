@@ -229,6 +229,48 @@ fn check_repeat_action_guard(
         );
         return Some("repeat_action_limit".to_string());
     }
+    if let Some(failure_count) = loop_state.failed_action_fingerprints.get(fingerprint) {
+        if !repeatable_observation {
+            if let Some(attribution) = super::registry_idempotency_guard_attribution(
+                state,
+                policy,
+                action,
+                fingerprint,
+                "registry_idempotency_repeat_failed_action",
+                Some(*failure_count),
+                None,
+            ) {
+                loop_state.rollout_attribution.push(attribution);
+            }
+            loop_state.output_vars.insert(
+                "agent_loop.repeat_failed_action".to_string(),
+                json!({
+                    "status_code": "repeat_failed_action_blocked",
+                    "failure_count": failure_count,
+                    "forbidden_action_fingerprint": fingerprint,
+                    "recovery_options": [
+                        "change_action_or_arguments",
+                        "respond_from_structured_failure"
+                    ]
+                })
+                .to_string(),
+            );
+            loop_state.history_compact.push(format!(
+                "round={} step={} repeat_failed_action_blocked fingerprint={}",
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_agent_trace(fingerprint)
+            ));
+            info!(
+                "executor_result_error task_id={} round={} step={} type=guard error=repeat_failed_action_blocked action={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_log(fingerprint)
+            );
+            return Some("repeat_failed_action".to_string());
+        }
+    }
     if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
         if repeatable_observation {
             return None;

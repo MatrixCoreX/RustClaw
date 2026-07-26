@@ -57,8 +57,8 @@ read_enabled() {
   local section="$2"
   local default_value="$3"
   python3 - "$config_path" "$section" "$default_value" <<'PY'
+import re
 import sys
-import tomllib
 from pathlib import Path
 
 path = Path(sys.argv[1])
@@ -67,9 +67,26 @@ default = sys.argv[3] == "1"
 if not path.exists():
     print("1" if default else "0")
     raise SystemExit(0)
-cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-value = cfg.get(section, {})
-enabled = value.get("enabled", default) if isinstance(value, dict) else default
+
+# Startup only needs one boolean from a known table. Keep this parser limited
+# to that contract so Python 3.10 hosts do not require the Python 3.11 tomllib
+# module or an extra tomli package before RustClaw can start.
+current_section = ""
+enabled = default
+for raw_line in path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.split("#", 1)[0].strip()
+    if not line:
+        continue
+    table = re.fullmatch(r"\[\s*([^\]]+?)\s*\]", line)
+    if table:
+        current_section = table.group(1).strip()
+        continue
+    if current_section != section:
+        continue
+    value = re.fullmatch(r"enabled\s*=\s*(true|false)", line, re.IGNORECASE)
+    if value:
+        enabled = value.group(1).lower() == "true"
+        break
 print("1" if bool(enabled) else "0")
 PY
 }
@@ -317,18 +334,38 @@ start_future_adapters_placeholder() {
   "$SCRIPT_DIR/component_start/start-future-adapters.sh" || true
 }
 
+STARTUP_FAILURES=()
+
+start_optional_component() {
+  local component="$1"
+  shift
+  if "$@"; then
+    return 0
+  fi
+  STARTUP_FAILURES+=("$component")
+  echo "Component startup failed; continuing with remaining components: $component" >&2
+  return 0
+}
+
 start_clawd
-start_webd
+start_optional_component "webd" start_webd
 if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" == "1" ]]; then
   echo "RUSTCLAW_SKIP_TELEGRAMD=1, skipping telegramd startup."
 else
-  start_telegramd
+  start_optional_component "telegramd" start_telegramd
 fi
 start_future_adapters_placeholder
-start_whatsapp_webd
-start_whatsappd
-start_wechatd
-start_feishud
-start_larkd
+start_optional_component "whatsapp_webd" start_whatsapp_webd
+start_optional_component "whatsappd" start_whatsappd
+start_optional_component "wechatd" start_wechatd
+start_optional_component "feishud" start_feishud
+start_optional_component "larkd" start_larkd
+
+if [[ "${#STARTUP_FAILURES[@]}" -gt 0 ]]; then
+  printf 'Startup completed with failed components:' >&2
+  printf ' %s' "${STARTUP_FAILURES[@]}" >&2
+  printf '\n' >&2
+  exit 1
+fi
 
 echo "One-click binary startup command executed (profile: $PROFILE)." # zh: 一键启动已编译二进制命令已执行（profile: $PROFILE）。

@@ -315,7 +315,19 @@ fn encode_result(value: Value) -> Result<String, String> {
 }
 
 fn child_patch_repo_error(error: &anyhow::Error) -> String {
-    child_patch_error(&machine_error_code(error), Value::Null)
+    let error_code = machine_error_code(error);
+    if error_code == "child_patch_task_not_found" {
+        return child_patch_error_with_recovery(
+            &error_code,
+            json!({
+            "retryable": true,
+            "side_effect_applied": false,
+            "failure_phase": "pre_dispatch",
+            "recovery_action": "replan_arguments",
+            }),
+        );
+    }
+    child_patch_error(&error_code, Value::Null)
 }
 
 fn child_patch_runtime_error(error: &anyhow::Error) -> String {
@@ -338,17 +350,36 @@ fn machine_error_code(error: &anyhow::Error) -> String {
 }
 
 fn child_patch_error(error_code: &str, details: Value) -> String {
+    child_patch_error_with_extra(error_code, details, None)
+}
+
+fn child_patch_error_with_recovery(error_code: &str, recovery: Value) -> String {
+    child_patch_error_with_extra(error_code, Value::Null, Some(recovery))
+}
+
+fn child_patch_error_with_extra(
+    error_code: &str,
+    details: Value,
+    recovery: Option<Value>,
+) -> String {
+    let mut extra = json!({
+        "error_code": error_code,
+        "message_key": format!("workspace.child_patch.{error_code}"),
+        "details": details,
+    });
+    if let (Some(extra), Some(recovery)) = (
+        extra.as_object_mut(),
+        recovery.and_then(|value| value.as_object().cloned()),
+    ) {
+        extra.extend(recovery);
+    }
     super::builtin_error(
         "workspace_patch",
         error_code,
         format!("workspace.child_patch.{error_code}"),
         None,
         None,
-        Some(json!({
-            "error_code": error_code,
-            "message_key": format!("workspace.child_patch.{error_code}"),
-            "details": details,
-        })),
+        Some(extra),
     )
 }
 

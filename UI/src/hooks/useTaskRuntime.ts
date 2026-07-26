@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { followTaskEventStream } from "../lib/task-event-stream";
+import { shouldTrackTaskLive } from "../lib/task-lifecycle";
 import { appendLiveTaskEvent } from "../lib/task-result";
 import type {
   ActiveTaskItem,
@@ -21,10 +22,6 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type TaskSubmitKind = "ask" | "run_skill";
 
 const TERMINAL_TASK_STATUSES = ["succeeded", "failed", "canceled", "timeout"];
-
-function isTerminalTaskStatus(status: string): boolean {
-  return TERMINAL_TASK_STATUSES.includes(status);
-}
 
 function isTaskQueryStatus(status: string): status is TaskQueryResponse["status"] {
   return ["queued", "running", ...TERMINAL_TASK_STATUSES].includes(status);
@@ -112,7 +109,8 @@ export function useTaskRuntime({
   };
 
   const fetchActiveTasks = async (silent = false): Promise<ActiveTaskItem[]> => {
-    if (interactionUserId == null || interactionChatId == null) {
+    const keyAuthenticated = Boolean(activeUserKey.trim());
+    if (!keyAuthenticated && (interactionUserId == null || interactionChatId == null)) {
       if (!silent) {
         setActiveTasksError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
       }
@@ -127,8 +125,8 @@ export function useTaskRuntime({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: interactionUserId,
-          chat_id: interactionChatId,
+          user_id: interactionUserId ?? 0,
+          chat_id: interactionChatId ?? 0,
         }),
       });
       const body = (await res.json()) as ApiResponse<ActiveTasksResponse>;
@@ -213,7 +211,11 @@ export function useTaskRuntime({
 
   const recordTaskResult = (submittedTaskId: string, finalResult: TaskQueryResponse) => {
     setTaskResult(finalResult);
-    setTrackingTaskId(isTerminalTaskStatus(finalResult.status) ? null : submittedTaskId);
+    setTrackingTaskId(
+      shouldTrackTaskLive(finalResult.status, finalResult.execution_state, finalResult.lifecycle)
+        ? submittedTaskId
+        : null,
+    );
   };
 
   const setResumeDraftValue = (resumeTaskId: string, value: string) => {
@@ -604,7 +606,9 @@ export function useTaskRuntime({
         const result = await fetchTaskById(trackingTaskId);
         setTaskResult(result);
         setTaskError(null);
-        if (isTerminalTaskStatus(result.status)) setTrackingTaskId(null);
+        if (!shouldTrackTaskLive(result.status, result.execution_state, result.lifecycle)) {
+          setTrackingTaskId(null);
+        }
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -617,7 +621,12 @@ export function useTaskRuntime({
   useEffect(() => {
     if (!uiAuthReady) return;
     if (currentPage !== "tasks") return;
-    if (interactionUserId == null || interactionChatId == null) return;
+    if (
+      !activeUserKey.trim() &&
+      (interactionUserId == null || interactionChatId == null)
+    ) {
+      return;
+    }
     void fetchActiveTasks(true);
     void fetchApprovalScopeGrants(true);
     const interval = window.setInterval(() => {
@@ -625,7 +634,14 @@ export function useTaskRuntime({
     }, 5000);
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, interactionUserId, interactionChatId]);
+  }, [
+    currentPage,
+    apiBase,
+    uiAuthReady,
+    activeUserKey,
+    interactionUserId,
+    interactionChatId,
+  ]);
 
   return {
     taskId,

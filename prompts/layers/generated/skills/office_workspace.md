@@ -8,10 +8,10 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- Inspect, validate, create, preview changes to, and edit DOCX, XLSX, and PPTX artifacts through structured operations.
+- Inspect and validate DOCX/XLSX/PPTX package structure, integrity evidence, relationships, stable object identifiers, and source revisions, or create, preview, and edit those artifacts through structured operations. `office.inspect` remains authoritative when the requested path is missing or unreadable so the skill returns its structured Office failure contract.
 - Office files are treated as untrusted ZIP/XML packages. Macros, formulas, field codes, links, embedded objects, and external relationships are never executed.
 - Reads are bounded and cursor-paged. Writes are copy-on-write and transactional unless an approved in-place operation explicitly requests otherwise.
-- Use `doc_parse` for general PDF/HTML/Markdown/text extraction. Use this skill when Office structure, ranges, creation, editing, package validation, or artifact revisions matter.
+- Use `doc_parse` for general PDF/HTML/Markdown/text extraction and content-only DOCX extraction where package structure and revisions do not matter. Use the matching Office read/inspect capability for exact Word blocks, workbook ranges, slide objects, package validation, revisions, creation, or editing.
 
 ## Config Entry Points (from interface)
 - `WORKSPACE_ROOT`: base directory for relative input and output paths.

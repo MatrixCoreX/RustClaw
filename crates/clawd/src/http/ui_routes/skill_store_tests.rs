@@ -8,7 +8,8 @@ use tower::ServiceExt;
 
 use super::{
     begin_skill_store_mutation, build_ui_router, imported_skill_machine_alias,
-    remove_skill_registry_block, render_skill_store_config, write_runtime_config_to_paths,
+    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
+    write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -108,6 +109,26 @@ fn value_array_contains(value: &Value, expected: &str) -> bool {
     value
         .as_array()
         .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(expected)))
+}
+
+async fn set_managed_skill_enabled(router: axum::Router, skill_name: &str, enabled: bool) -> Value {
+    let (status, current) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/config", None).await;
+    assert_eq!(status, StatusCode::OK, "read config for {skill_name}");
+    let mut switches = current["data"]["skill_switches"]
+        .as_object()
+        .expect("skill switches object")
+        .clone();
+    switches.insert(skill_name.to_string(), Value::Bool(enabled));
+    let (status, updated) = call_skill_store_api(
+        router,
+        Method::POST,
+        "/v1/skills/config",
+        Some(serde_json::json!({"skill_switches": switches})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "update config for {skill_name}");
+    updated
 }
 
 fn register_external_skill_fixture(state: &AppState, workspace: &Path, skill_name: &str) {
@@ -520,6 +541,255 @@ async fn skill_store_requires_explicit_choice_before_deleting_private_data() {
             .expect("crypto private data state"),
         "empty"
     );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
+    let (state, workspace) = isolated_skill_store_state();
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+    let registry = state.get_skills_registry().expect("skills registry");
+    let mut inventory = registry
+        .all_names()
+        .into_iter()
+        .filter(|name| {
+            registry
+                .get(name)
+                .is_some_and(|entry| entry.install_mode.as_deref() == Some("on_demand"))
+        })
+        .collect::<Vec<_>>();
+    inventory.sort_unstable();
+    assert!(!inventory.is_empty(), "on-demand inventory");
+
+    if let Ok(requested) = std::env::var("RUSTCLAW_SKILL_STORE_TEST_SKILL") {
+        let requested = requested.trim();
+        assert!(
+            inventory.iter().any(|name| name == requested),
+            "requested on-demand skill is absent: {requested}"
+        );
+        inventory.retain(|name| name == requested);
+    }
+
+    let (status, initial) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let catalog_names = store_item_names(&initial)
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let registry_names = registry
+        .all_names()
+        .into_iter()
+        .filter(|name| {
+            registry
+                .get(name)
+                .is_some_and(|entry| entry.install_mode.as_deref() == Some("on_demand"))
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(catalog_names, registry_names);
+
+    let unrelated_config = workspace.join("configs/lifecycle-unrelated.toml");
+    std::fs::write(&unrelated_config, "owner = \"unrelated\"\n")
+        .expect("write unrelated config sentinel");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+
+    for skill_name in inventory {
+        let entry = registry.get(&skill_name).expect("on-demand registry entry");
+        assert!(
+            !entry.planner_capabilities.is_empty(),
+            "planner capabilities missing for {skill_name}"
+        );
+        let prompt_rel = claw_core::prompt_layers::canonical_skill_prompt_body_rel_path(
+            entry.prompt_file.trim(),
+        )
+        .expect("canonical generated skill prompt");
+        let prompt = std::fs::read_to_string(repository.join(prompt_rel))
+            .unwrap_or_else(|error| panic!("read generated prompt for {skill_name}: {error}"));
+        assert!(
+            !prompt.trim().is_empty(),
+            "generated prompt is empty for {skill_name}"
+        );
+
+        let item = store_item(&initial, &skill_name);
+        let config_files = item["config_files"]
+            .as_array()
+            .expect("declared config files")
+            .iter()
+            .map(|value| value.as_str().expect("config path").to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            !config_files.is_empty(),
+            "config path missing for {skill_name}"
+        );
+        let config_sentinel = format!("owner = \"{skill_name}\"\n");
+        for relative in &config_files {
+            let path = workspace.join(relative);
+            std::fs::create_dir_all(path.parent().expect("config parent"))
+                .expect("create config parent");
+            std::fs::write(path, &config_sentinel).expect("write skill config sentinel");
+        }
+        if skill_name == "crypto" {
+            crate::repo::upsert_exchange_credential_for_user_key(
+                &state,
+                STORE_TEST_KEY,
+                "okx",
+                "api-key",
+                "api-secret",
+                None,
+            )
+            .expect("seed isolated crypto private data");
+        }
+
+        let spec = skill_store_install_spec(&state, &skill_name)
+            .expect("read install spec")
+            .expect("runner install spec");
+        let (status, installed) = call_skill_store_api(
+            router.clone(),
+            Method::POST,
+            "/v1/skills/store/install",
+            Some(serde_json::json!({"skill_name": skill_name})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "install {skill_name}");
+        assert_eq!(installed["data"]["installed"], true, "install {skill_name}");
+        assert_eq!(installed["data"]["compiled"], true, "compile {skill_name}");
+        let binary = workspace.join("target/release").join(&spec.binary);
+        let binary_before = std::fs::read(&binary).expect("read installed runner");
+        assert!(state.get_skills_list().contains(&skill_name));
+
+        for candidate in registry_names.iter() {
+            let candidate_spec = skill_store_install_spec(&state, candidate)
+                .expect("candidate install spec")
+                .expect("candidate runner spec");
+            assert_eq!(
+                workspace
+                    .join("target/release")
+                    .join(candidate_spec.binary)
+                    .is_file(),
+                candidate == &skill_name,
+                "only the selected runner may exist while installing {skill_name}"
+            );
+        }
+
+        let disabled = set_managed_skill_enabled(router.clone(), &skill_name, false).await;
+        assert_eq!(disabled["data"]["skill_switches"][&skill_name], false);
+        assert_eq!(disabled["data"]["restart_required"], true);
+        reload_skill_views(&state).expect("apply disabled skill state after restart");
+        assert!(!state.get_skills_list().contains(&skill_name));
+        assert_eq!(
+            std::fs::read(&binary).expect("read disabled runner"),
+            binary_before,
+            "disable must not recompile {skill_name}"
+        );
+        let enabled = set_managed_skill_enabled(router.clone(), &skill_name, true).await;
+        assert_eq!(enabled["data"]["skill_switches"][&skill_name], true);
+        assert_eq!(enabled["data"]["restart_required"], true);
+        reload_skill_views(&state).expect("apply enabled skill state after restart");
+        assert!(state.get_skills_list().contains(&skill_name));
+        assert_eq!(
+            std::fs::read(&binary).expect("read re-enabled runner"),
+            binary_before,
+            "re-enable must not recompile {skill_name}"
+        );
+
+        let (status, preserved) = call_skill_store_api(
+            router.clone(),
+            Method::POST,
+            "/v1/skills/store/remove",
+            Some(serde_json::json!({
+                "skill_name": skill_name,
+                "preserve_config": true,
+                "preserve_data": true
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "preserve uninstall {skill_name}");
+        assert_eq!(preserved["data"]["installed"], false);
+        assert_eq!(preserved["data"]["config_preserved"], true);
+        assert_eq!(preserved["data"]["data_preserved"], true);
+        assert!(!binary.exists());
+        for relative in &config_files {
+            assert_eq!(
+                std::fs::read_to_string(workspace.join(relative)).expect("retained config"),
+                config_sentinel
+            );
+        }
+        if skill_name == "crypto" {
+            assert_eq!(
+                state
+                    .core
+                    .skill_storage
+                    .data_state(&skill_name)
+                    .expect("retained private data"),
+                "present"
+            );
+        }
+
+        let (status, reinstalled) = call_skill_store_api(
+            router.clone(),
+            Method::POST,
+            "/v1/skills/store/install",
+            Some(serde_json::json!({"skill_name": skill_name})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "reinstall {skill_name}");
+        assert_eq!(reinstalled["data"]["installed"], true);
+        for relative in &config_files {
+            assert!(value_array_contains(
+                &reinstalled["data"]["reused_config_files"],
+                relative
+            ));
+        }
+
+        let (status, deleted) = call_skill_store_api(
+            router.clone(),
+            Method::POST,
+            "/v1/skills/store/remove",
+            Some(serde_json::json!({
+                "skill_name": skill_name,
+                "preserve_config": false,
+                "preserve_data": false
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "destructive uninstall {skill_name}");
+        assert_eq!(deleted["data"]["installed"], false);
+        assert_eq!(deleted["data"]["config_preserved"], false);
+        assert_eq!(deleted["data"]["data_preserved"], false);
+        for relative in &config_files {
+            assert!(!workspace.join(relative).exists(), "delete {relative}");
+        }
+        if entry.storage.is_some() {
+            assert!(deleted["data"]["deleted_private_data"].is_object());
+            assert_eq!(
+                state
+                    .core
+                    .skill_storage
+                    .data_state(&skill_name)
+                    .expect("deleted private data"),
+                "empty"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(&unrelated_config).expect("unrelated config survives"),
+            "owner = \"unrelated\"\n"
+        );
+        let (status, refreshed) =
+            call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(store_item(&refreshed, &skill_name)["installed"], false);
+        assert!(refreshed["data"]["active_operation"].is_null());
+        println!(
+            "SKILL_STORE_LIFECYCLE_OK skill={} external_call_count=0",
+            skill_name
+        );
+    }
+
     let _ = std::fs::remove_dir_all(workspace);
 }
 

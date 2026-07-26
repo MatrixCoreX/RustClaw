@@ -23,6 +23,8 @@ DEFAULT_ROOTS = (
     REPO_ROOT / "configs",
     REPO_ROOT / "docker" / "config",
 )
+REMOVED_RUN_CMD_SCHEMA = REPO_ROOT / "prompts" / "schemas" / "run_cmd_suggestion.schema.json"
+RUN_CMD_SOURCE = REPO_ROOT / "crates" / "clawd" / "src" / "skills" / "builtin_run_cmd.rs"
 
 NL_MATCH_CONFIG_FIELDS = {
     "assistant_ack_skip",
@@ -502,6 +504,37 @@ def scan_repo(roots: tuple[Path, ...]) -> list[Finding]:
     return findings
 
 
+def scan_removed_run_cmd_semantic_input(
+    source_text: str, schema_exists: bool
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(source_text.splitlines(), start=1):
+        if "request_text" not in line:
+            continue
+        findings.append(
+            Finding(
+                path=rel(RUN_CMD_SOURCE),
+                line=line_no,
+                function="<contract>",
+                kind="removed_run_cmd_semantic_input_restored",
+                snippet=line.strip(),
+                literal="request_text",
+            )
+        )
+    if schema_exists:
+        findings.append(
+            Finding(
+                path=rel(REMOVED_RUN_CMD_SCHEMA),
+                line=1,
+                function="<contract>",
+                kind="removed_run_cmd_semantic_schema_restored",
+                snippet="obsolete NL-to-command schema exists",
+                literal="run_cmd_suggestion.schema.json",
+            )
+        )
+    return findings
+
+
 def print_report(findings: list[Finding]) -> int:
     unknown = [item for item in findings if item.known is None]
     known = [item for item in findings if item.known is not None]
@@ -636,6 +669,14 @@ def run_self_test() -> int:
         assert len(config_findings) == 1, config_findings
         assert len(config_json_findings) == 1, config_json_findings
         assert len(config_yaml_findings) == 1, config_yaml_findings
+        assert not scan_removed_run_cmd_semantic_input("argv command", False)
+        restored = scan_removed_run_cmd_semantic_input(
+            'args.get("request_text")', True
+        )
+        assert {item.kind for item in restored} == {
+            "removed_run_cmd_semantic_input_restored",
+            "removed_run_cmd_semantic_schema_restored",
+        }
     print("SELF_TEST_OK")
     return 0
 
@@ -656,7 +697,15 @@ def main(argv: list[str]) -> int:
     if args.self_test:
         return run_self_test()
     roots = tuple((REPO_ROOT / path).resolve() for path in args.paths) if args.paths else DEFAULT_ROOTS
-    return print_report(scan_repo(roots))
+    findings = scan_repo(roots)
+    if not args.paths:
+        source_text = RUN_CMD_SOURCE.read_text(encoding="utf-8")
+        findings.extend(
+            scan_removed_run_cmd_semantic_input(
+                source_text, REMOVED_RUN_CMD_SCHEMA.exists()
+            )
+        )
+    return print_report(findings)
 
 
 if __name__ == "__main__":

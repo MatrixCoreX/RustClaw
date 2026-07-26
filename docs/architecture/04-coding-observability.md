@@ -61,20 +61,24 @@ flowchart TD
 Teaching mode projects persisted task and provider events. Selecting either
 side of a conversation turn resolves the corresponding `task_id`, then shows
 numbered LLM calls, raw request/response fields, runtime stages, code entry
-points, policy decisions, checkpoints, tools, and child-task events. Browser
-history stores only the task/message index. Provider detail is reloaded from
-the current model-I/O log and retained seven-day dated archives; a structured
-availability reason distinguishes full detail, metadata-only records, active
-tasks, and detail that was not recorded or has expired.
+points, policy decisions, checkpoints, tools, and child-task events. Durable
+ask tasks and their `conversation_id` are the conversation-history authority;
+browser storage is only a draft/preference cache. Provider detail is reloaded
+from the current model-I/O log and retained seven-day dated archives; a
+structured availability reason distinguishes full detail, metadata-only
+records, active tasks, and detail that was not recorded or has expired.
 
 ```mermaid
 flowchart LR
-    A[Conversation turn] --> B[Persist lightweight task_id<br/>and message-id index]
-    B --> C[Task event archive]
-    B --> D[Current + retained server logs<br/>provider calls LLM#1..N]
-    C --> E[Selected-turn teaching view]
-    D --> E
-    E --> F[Process timeline]
-    E --> G[Raw model request and response]
-    E --> H[Policy, budget, resume, tool,<br/>coding, and subagent evidence]
+    A[Conversation turn] --> B[Durable ask task<br/>conversation_id + bounded result]
+    B --> C[Owner-filtered conversation-history API<br/>cursor + page digest]
+    B --> D[Task event archive]
+    B --> E[Current + retained server logs<br/>provider calls LLM#1..N]
+    C --> F[Reloaded message and teaching-task index]
+    D --> G[Selected-turn teaching view]
+    E --> G
+    F --> G
+    G --> H[Process timeline]
+    G --> I[Raw model request and response]
+    G --> J[Policy, budget, resume, tool,<br/>coding, and subagent evidence]
 ```

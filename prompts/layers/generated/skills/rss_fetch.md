@@ -15,33 +15,30 @@
 - **`latest`** and **`news`** use **category mode**: all **active** sources for the category (from config) are fetched by default. Same merge/dedupe/sort behavior; `news` is an alias of `latest` (default category for `news` when omitted follows config / `general` as documented below).
 - **Category semantics**: A category uses a single list of sources; all listed sources are fetched by default (no primary/fallback tiers). Single-source failure is skipped; only when all sources fail (or return no items) does the skill return an error.
 - **Topic semantics**: `extra.items[].topic` is a stable machine token from `args.topic` / `args.topic_token` or `[rss.categories.<name>].topic`. The skill must not classify titles with language keyword lists; if no machine topic is configured, use `other`.
-- **Deprecated sources**: Default fetch uses only active sources. Sources that consecutively fail (e.g. `deprecate_after_failures = 3` in config) are moved into `[rss.deprecated]` and no longer fetched; success on a source resets its failure count. Deprecated sources are not used for `latest`/`news` unless restored in config.
+- **Deprecated sources**: Default fetch uses only active sources. Sources that consecutively fail (e.g. `deprecate_after_failures = 3` in config) are removed from the operator-owned active list and recorded in `rss_fetch` private state; success on a source resets its failure count.
+- **Discovery ownership**: The model may propose evidence-backed `url` + `discovered_from` pairs, but deterministic public-network/feed validation stores them only as candidates; the skill never calls an LLM.
+- **Candidate lifecycle**: `candidate` becomes `eligible` after repeated `refresh_candidates` success, `quarantined` after repeated failure, and active only through confirmed `promote_sources`. Trigger model discovery only when scheduled/user-requested `source_health` returns `needs_discovery=true`.
 
 ## Config Entry Points (from interface)
 - Main RSS config: `configs/rss.toml`.
 - Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.
 - Defaults: `rss.default_category`, `rss.default_limit`, and `rss.timeout_seconds`.
 - Optional category topic token: `[rss.categories.<name>].topic`, a lowercase machine token such as `macro_market`, `tech_ecosystem`, or `other`.
+- Discovery policy: `[rss.discovery]` controls enablement, minimum active sources, required validation successes, candidate-pool size, and quarantine threshold.
+- Private machine state: the registry declares `storage = { kind = "sqlite", schema_version = 1, migration_owner = "rss_fetch" }`; `skill-runner` supplies `context.skill_storage`, which resolves to this skill's own `data/skills/rss_fetch/state.db`.
+- `configs/rss.toml` contains only operator-owned policy and active sources. Candidate records, validation evidence, source failure/health counters, and deprecation history must not be stored there.
 
 ## Actions (from interface)
 - `fetch` — direct RSS/Atom URL(s) only; requires `url` or `feed_url` or `feed_urls`.
 - `latest` — category-based; uses configured sources for `category` (or default category).
 - `news` — same pipeline as `latest` (alias); default `category` when omitted is typically `general` per config.
-
-### Backward-compatible action aliases (skill-internal only)
-The schedule / `run_skill` persistence layer does **not** rewrite these; normalization happens inside this skill before dispatch.
-
-| Alias | Normalized behavior |
-|---|---|
-| `fetch_crypto_news` | `action=latest`; if `category` omitted, set `category=crypto`. |
-| `fetch_tech_news` | `action=latest`; if `category` omitted, set `category=tech`. |
-| `fetch_news` | `action=latest` (category from args or defaults). |
-| `fetch_feed` | If `url` / `feed_url` / non-empty `feed_urls` present → `action=fetch` (direct feed). If no URL selector → **error** (do not fall back to category/latest). |
+- `source_health` / `discover_sources` — inspect lifecycle counts, or validate and store evidence-backed proposals without activating them.
+- `refresh_candidates` / `promote_sources` — revalidate candidate state, or activate eligible sources with `confirm=true` plus high-risk runtime approval.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| all | `action` | no* | string | `latest` | One of `fetch`, `latest`, or `news`. If omitted, behavior is **`latest`** (category mode), not `fetch`. |
+| all | `action` | no* | string | `latest` | One of `fetch`, `latest`, `news`, `source_health`, `discover_sources`, `refresh_candidates`, or `promote_sources`. If omitted, behavior is **`latest`**. |
 | `fetch` | `url` or `feed_url` or `feed_urls` | yes | string/array | - | **At least one** http(s) feed URL. `feed_urls`: JSON array of strings; empty or all-invalid → error. |
 | `fetch` | `limit` | no | number | impl default | Per-feed item cap (single URL). |
 | `fetch` | `timeout_seconds` | no | number | impl default | Request timeout override. |
@@ -55,13 +52,23 @@ The schedule / `run_skill` persistence layer does **not** rewrite these; normali
 | `news` | `limit` | no | number | impl default | Same as `latest`. |
 | `news` | `timeout_seconds` | no | number | impl default | Same as `latest`. |
 | `news` | `topic` / `topic_token` | no | string | category config / `other` | Same topic-token rule as `latest`. |
+| `source_health` | `category` | no | string | all categories | Configured category token; omission returns all category health records. |
+| discovery mutations | `category` | yes* | string | config default | Existing category token for `discover_sources`, `refresh_candidates`, or `promote_sources`. |
+| `discover_sources` | `candidates` | yes | array<object> | - | Maximum 10 objects per call. Each requires a proposed feed `url` and a public `discovered_from` evidence URL. |
+| `discover_sources` | `timeout_seconds` | no | number | 15 | Per-candidate deterministic validation timeout, clamped to 3–60 seconds. |
+| `refresh_candidates` | `urls` | no | array<string> | all non-promoted candidates | Optional candidate subset. |
+| `promote_sources` | `urls` | yes | array<string> | - | Eligible candidate URLs to revalidate and activate. |
+| `promote_sources` | `confirm` | yes | boolean | `false` | Must be exactly `true`; runtime high-risk confirmation still applies. |
 
 ## Error Contract (from interface)
 - Unknown or unconfigured `category` (no entry under `[rss.categories]` or no active sources) returns readable `error_text` plus machine fields in `extra`: `error_kind=category_not_configured`, `failure_phase=pre_dispatch`, `side_effect_applied=false`, `recovery_action=replan_arguments`, `invalid_argument=category`, `rejected_value`, `default_category`, and sorted `available_categories`. Runtime recovery must consume these fields, not parse `error_text`.
-- `action` unsupported (after alias normalization).
-- **`fetch_feed`** without a direct URL selector → error; use `latest`/`news` for category feeds.
+- `action` outside the canonical action set returns `rss_fetch.unsupported_action`.
 - **`fetch`** without `url`/`feed_url`/non-empty valid `feed_urls`, or with non-http(s) URLs → clear `error_text` (e.g. `fetch requires url, feed_url, or feed_urls`).
 - Empty/invalid URL values for `fetch`.
+- URLs with credentials, localhost/private/reserved IPs, private DNS results, unsafe redirects, excessive redirects, or bodies over 4 MiB are rejected by stable machine error codes.
+- HTTP success without at least one parseable RSS/Atom item is a source failure (`no_parseable_feed_items`), not a successful health check.
+- Discovery errors use machine `error_kind` and per-candidate `error_code`; runtime/agent recovery must not parse `error_text`.
+- Operator-config conflicts/failures return `error_kind=config_persist_failed`; private-state failures return `error_kind=skill_storage_failed`. Both include `failure_phase`, truthful `side_effect_applied`, and a stable `cause_code`.
 - For `latest`/`news`: only when **all** configured sources for the category fail or return no items does the skill return an error. Partial success returns the successfully fetched items plus a summary (e.g. sources_ok / sources_failed / items).
 
 ## Request/Response Examples (from interface)
@@ -83,6 +90,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-2","status":"ok","text":"...","extra":{"schema_version":1,"action":"fetch","mode":"direct","source_count":1,"item_count":10,"field_value":{"source_count":1,"item_count":10,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/item","source_host":"example.com","layer":"feed","topic":"other"}]},"error_text":null}
+```
+
+### Example 3 (evidence-backed discovery)
+Request:
+```json
+{"request_id":"demo-3","args":{"action":"discover_sources","category":"general","candidates":[{"url":"https://publisher.example/feed.xml","discovered_from":"https://publisher.example/news"}]}}
+```
+Response:
+```json
+{"request_id":"demo-3","status":"ok","text":"candidates_valid=1 candidates_rejected=0","extra":{"schema_version":1,"action":"discover_sources","category":"general","accepted_count":1,"results":[{"url":"https://publisher.example/feed.xml","status":"candidate","success_count":1,"required_successes":3,"error_code":null}],"promotion_requires_confirmation":true},"error_text":null}
 ```
 
 ## Output Contract

@@ -105,10 +105,19 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         let event_task = task.clone();
         let event_provider = provider_name.clone();
         let event_index = model_event_index.clone();
+        let presentation_observer = Arc::new(
+            crate::assistant_presentation_stream::NativePresentationObserver::new(
+                state.clone(),
+                task.clone(),
+                provider_name.clone(),
+                logical_call_index,
+            ),
+        );
         let event_sink: crate::providers::client::ModelTurnEventSink =
             Arc::new(move |event: ModelTurnEvent| {
                 let index = event_index.fetch_add(1, Ordering::Relaxed) + 1;
                 publish_model_turn_event(&event_state, &event_task, &event_provider, index, &event);
+                presentation_observer.observe(&event);
             });
         match crate::providers::call_model_turn_with_retry(
             provider.clone(),

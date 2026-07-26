@@ -65,10 +65,10 @@ use compare_paths_metadata::replace_final_delivery_with_compare_paths_required_m
 
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
+pub(crate) use structured_observation::message_is_non_answer_separator;
 use structured_observation::{
     deterministic_structured_container_summary_answer,
     discard_non_answer_separator_delivery_for_broad_structured_read,
-    message_is_non_answer_separator,
 };
 
 #[path = "loop_reply_execution_status.rs"]
@@ -100,10 +100,10 @@ use execution_summary::{
 
 #[path = "loop_reply_exact_observation.rs"]
 mod exact_observation;
+pub(crate) use exact_observation::looks_like_structured_machine_output;
 use exact_observation::{
     direct_exact_observation_output_projection,
-    exact_observation_output_needs_structural_projection, looks_like_structured_machine_output,
-    output_contract_requests_exact_delivery,
+    exact_observation_output_needs_structural_projection, output_contract_requests_exact_delivery,
 };
 pub(crate) use exact_observation::{
     exact_observation_machine_field_delivery_satisfies_request,
@@ -240,7 +240,7 @@ use exact_contract::{prefer_observed_answer_for_exact_contract, route_prefers_ob
 
 #[path = "loop_reply_language_closeout.rs"]
 mod language_closeout;
-pub(crate) use language_closeout::planned_delivery_is_publishable_model_language_answer;
+pub(crate) use crate::assistant_delivery_policy::planned_delivery_is_publishable_model_language_answer;
 use language_closeout::{
     execution_recipe_budget_exhausted_message, final_reply_language_hint,
     route_allows_model_language_final_answer, route_resolved_intent,

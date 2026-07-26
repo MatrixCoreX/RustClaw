@@ -1,15 +1,83 @@
 use super::*;
+use std::path::Path;
+
+#[test]
+fn preview_recommendation_uses_no_external_provider() {
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+    let req = Req {
+        request_id: "preview-map".to_string(),
+        args: json!({
+            "action": "preview_recommend",
+            "provider": "amap",
+            "latitude": 31.2304,
+            "longitude": 121.4737,
+            "keyword": "coffee",
+            "top_k": 3
+        }),
+        context: None,
+    };
+
+    let (_, extra) = execute(&req, &cfg).unwrap();
+
+    assert_eq!(extra["action"], "preview_recommend");
+    assert_eq!(extra["provider_id"], "amap");
+    assert_eq!(extra["anchor"]["source"], "coordinates");
+    assert_eq!(extra["query"]["top_k"], 3);
+    assert_eq!(extra["would_execute"], false);
+    assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn preview_recommendation_rejects_partial_coordinates() {
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+    let req = Req {
+        request_id: "preview-map-invalid".to_string(),
+        args: json!({
+            "action": "preview_recommend",
+            "latitude": 31.2304,
+            "keyword": "coffee"
+        }),
+        context: None,
+    };
+
+    assert_eq!(
+        execute(&req, &cfg).unwrap_err(),
+        "code=incomplete_coordinates required=latitude+longitude"
+    );
+}
 
 #[test]
 fn error_extra_exposes_machine_contract() {
-    let extra = error_extra("execution_failed");
+    let extra = error_extra(
+        "code=missing_anchor required_any=latitude_longitude,city,district,address,place",
+    );
 
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "execution_failed");
-    assert_eq!(extra["message_key"], "skill.map_merchant.execution_failed");
+    assert_eq!(extra["error_kind"], "missing_anchor");
+    assert_eq!(extra["error_code"], "missing_anchor");
+    assert_eq!(extra["message_key"], "skill.map_merchant.missing_anchor");
     assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["recovery_action"], "request_missing_argument");
+    assert_eq!(extra["required_any"][0], json!(["latitude", "longitude"]));
+}
+
+#[test]
+fn search_keyword_deduplicates_identical_machine_arguments() {
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+
+    assert_eq!(
+        build_search_keyword(
+            Some("coffee".to_string()),
+            Some("coffee".to_string()),
+            None,
+            &cfg,
+        ),
+        "coffee"
+    );
 }
 
 #[test]

@@ -434,6 +434,21 @@ pub(super) fn apply_model_assisted_child_result_for_test(
 }
 
 #[cfg(test)]
+pub(super) fn apply_model_assisted_batch_results_for_test(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    results: Vec<(String, bool, Value)>,
+) -> bool {
+    subagent_runtime_model::apply_model_assisted_batch_results(
+        loop_state,
+        global_step,
+        step_in_round,
+        results,
+    )
+}
+
+#[cfg(test)]
 pub(super) fn parse_child_model_result_for_test(raw: &str) -> Value {
     subagent_runtime_model::parse_child_model_result_for_test(raw)
 }

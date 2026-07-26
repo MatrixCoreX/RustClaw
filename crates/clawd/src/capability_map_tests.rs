@@ -139,6 +139,46 @@ fn real_config_capability_hints_keep_leaf_semantics_distinct() {
 }
 
 #[test]
+fn real_registry_keeps_document_content_and_office_structure_semantics_distinct() {
+    let registry_toml = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read registry");
+    let doc_parse = registry_entry_from(&registry_toml, "doc_parse");
+    let office = registry_entry_from(&registry_toml, "office_workspace");
+
+    assert!(doc_parse
+        .description
+        .as_deref()
+        .is_some_and(|description| description.contains("not for OOXML package integrity")));
+    assert!(!doc_parse
+        .semantic_tags
+        .iter()
+        .any(|tag| tag == "ooxml_structural_inspection"));
+    assert!(office
+        .semantic_tags
+        .iter()
+        .any(|tag| tag == "ooxml_structural_inspection"));
+
+    let doc_hint = doc_parse
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.name == "doc_parse")
+        .map(planner_capability_hint)
+        .expect("doc_parse planner capability");
+    let office_hint = office
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.name == "office.inspect")
+        .map(planner_capability_hint)
+        .expect("office.inspect planner capability");
+    assert!(doc_hint.contains("document_content_extraction"));
+    assert!(doc_hint.contains("use office.inspect instead"));
+    assert!(office_hint.contains("ooxml_structural_inspection"));
+    assert!(office_hint.contains("input is unavailable"));
+}
+
+#[test]
 fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
@@ -167,6 +207,10 @@ fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
         .capability_argument_schemas
         .get("config.list_keys")
         .expect("list_keys schema");
+    let summarize = config
+        .capability_argument_schemas
+        .get("config.summarize_structure")
+        .expect("summarize_structure schema");
 
     assert_eq!(
         read_fields["properties"]["field_paths"]["anyOf"][1]["minItems"],
@@ -178,6 +222,11 @@ fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
     );
     assert!(list_keys["properties"].get("field_path").is_some());
     assert!(list_keys["properties"].get("format").is_some());
+    assert!(summarize["properties"].get("field_path").is_some());
+    assert_eq!(
+        summarize["properties"]["max_paths"]["maximum"],
+        serde_json::json!(1000)
+    );
 }
 
 #[test]
@@ -215,13 +264,22 @@ fn native_capability_groups_expose_distinct_registry_tools() {
     assert_eq!(doc_parse.tool_name, "call_doc_parse");
     assert!(doc_parse.description.contains("document_summary"));
     assert_ne!(doc_parse.tool_name, filesystem.tool_name);
-    assert_eq!(filesystem.capability_names.len(), 18);
+    assert_eq!(filesystem.capability_names.len(), 21);
     assert!(filesystem
         .capability_names
         .contains(&"filesystem.read_text_range".to_string()));
     assert!(filesystem
         .capability_names
         .contains(&"filesystem.count_entries".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"filesystem.find_images".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"workspace.preview_replace_text".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"workspace.replace_text".to_string()));
     assert!(!filesystem
         .capability_names
         .contains(&"fs.count_entries".to_string()));
@@ -268,7 +326,7 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
             .iter()
             .map(|group| group.capability_names.len())
             .sum::<usize>(),
-        71
+        78
     );
     assert_eq!(loadable.len(), 28);
     assert_eq!(full.len(), initial.len() + loadable.len());

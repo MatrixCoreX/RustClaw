@@ -1,4 +1,7 @@
-use super::super::loop_control_post_write_evidence_guard::post_write_validation_reserve_actions;
+use super::super::loop_control_post_write_evidence_guard::{
+    post_write_validation_reserve_actions, restore_terminal_publication_after_reserve,
+    take_terminal_publication_for_reserve,
+};
 use super::ok_step;
 use crate::{
     agent_engine::{AgentRunContext, LoopState},
@@ -7,7 +10,30 @@ use crate::{
 use serde_json::json;
 
 #[test]
-fn post_write_validation_reserve_uses_latest_plan_observe_validate_actions_only() {
+fn validation_reserve_preserves_the_terminal_model_candidate() {
+    let mut loop_state = LoopState::new();
+    loop_state.delivery_messages = vec!["candidate".to_string()];
+    loop_state.last_user_visible_respond = Some("candidate".to_string());
+    loop_state.last_publishable_synthesis_output = Some("synthesis".to_string());
+
+    let deferred = take_terminal_publication_for_reserve(&mut loop_state);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert!(loop_state.last_publishable_synthesis_output.is_none());
+
+    restore_terminal_publication_after_reserve(&mut loop_state, deferred);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("candidate")
+    );
+    assert_eq!(
+        loop_state.last_publishable_synthesis_output.as_deref(),
+        Some("synthesis")
+    );
+}
+
+#[test]
+fn post_write_validation_reserve_adds_missing_readbacks_before_latest_validation() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-post-write-validation-reserve",
@@ -100,7 +126,7 @@ fn post_write_validation_reserve_uses_latest_plan_observe_validate_actions_only(
 
     let actions =
         post_write_validation_reserve_actions(&state, &reply, &loop_state, 8, "prompt", None);
-    assert_eq!(actions.len(), 2);
+    assert_eq!(actions.len(), 3);
     match &actions[0] {
         AgentAction::CallTool { tool, args } => {
             assert_eq!(tool, "fs_basic");
@@ -116,6 +142,20 @@ fn post_write_validation_reserve_uses_latest_plan_observe_validate_actions_only(
         other => panic!("unexpected readback action: {other:?}"),
     }
     match &actions[1] {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(|value| value.as_str()),
+                Some("read_text_range")
+            );
+            assert_eq!(
+                args.get("path").and_then(|value| value.as_str()),
+                Some("/workspace/test_calc_core.py")
+            );
+        }
+        other => panic!("unexpected test readback action: {other:?}"),
+    }
+    match &actions[2] {
         AgentAction::CallSkill { skill, args } => {
             assert_eq!(skill, "run_cmd");
             assert_eq!(
@@ -124,6 +164,110 @@ fn post_write_validation_reserve_uses_latest_plan_observe_validate_actions_only(
             );
         }
         other => panic!("unexpected validation action: {other:?}"),
+    }
+}
+
+#[test]
+fn post_write_validation_reserve_reads_test_again_after_late_rewrite() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-post-write-late-test-rewrite",
+        "ask",
+        "prompt",
+    );
+    for (step_id, output) in [
+        (
+            "step_1",
+            r#"{"extra":{"action":"write_text","resolved_path":"/workspace/calc_core.py"}}"#,
+        ),
+        (
+            "step_2",
+            r#"{"extra":{"action":"write_text","resolved_path":"/workspace/test_calc_core.py"}}"#,
+        ),
+        (
+            "step_3",
+            r#"{"extra":{"action":"read_text_range","resolved_path":"/workspace/calc_core.py","excerpt":"1|def mul(a,b): return a*b"}}"#,
+        ),
+        (
+            "step_4",
+            r#"{"extra":{"action":"read_text_range","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
+        ),
+        (
+            "step_5",
+            r#"{"extra":{"action":"write_text","resolved_path":"/workspace/test_calc_core.py"}}"#,
+        ),
+    ] {
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                step_id, "fs_basic", output,
+            ));
+    }
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_6",
+            "run_cmd",
+            "ALL_TESTS_PASSED",
+        ));
+    let reply =
+        AskReply::non_llm(r#"{"changed_files":["calc_core.py","test_calc_core.py"]}"#.to_string())
+            .with_task_journal(journal);
+
+    let mut loop_state = LoopState::new();
+    loop_state.output_vars.insert(
+        "agent_loop.run_cmd_commands".to_string(),
+        serde_json::json!(["python3 test_calc_core.py"]).to_string(),
+    );
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 6,
+            goal: "validate rewritten tests".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(super::plan_result_with_raw_and_steps(
+                "late test rewrite fixture",
+                vec![
+                    crate::PlanStep {
+                        step_id: "validate_tests".to_string(),
+                        action_type: "call_capability".to_string(),
+                        skill: "system.run_command".to_string(),
+                        args: json!({
+                            "command": "python3 test_calc_core.py",
+                            "cwd": "/workspace"
+                        }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "finish".to_string(),
+                        action_type: "synthesize_answer".to_string(),
+                        skill: "synthesize_answer".to_string(),
+                        args: json!({"evidence_refs": ["last_output"]}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                ],
+            )),
+            verify_result: None,
+        });
+
+    let actions =
+        post_write_validation_reserve_actions(&state, &reply, &loop_state, 8, "prompt", None);
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(|value| value.as_str()),
+                Some("read_text_range")
+            );
+            assert_eq!(
+                args.get("path").and_then(|value| value.as_str()),
+                Some("/workspace/test_calc_core.py")
+            );
+        }
+        other => panic!("unexpected late-rewrite readback action: {other:?}"),
     }
 }
 

@@ -223,6 +223,57 @@ async fn finalize_loop_reply_prefers_subagent_machine_envelope_over_later_prose(
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_prefers_later_terminal_respond_over_failed_subagent_envelope() {
+    let state = test_state();
+    let task = claimed_task("task-terminal-respond-over-failed-subagent");
+    let mut route = free_route_result();
+    route.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        output_contract: Some(route),
+        ..Default::default()
+    };
+    let envelope = serde_json::json!({
+        "schema_version": 1,
+        "output_format": "machine_json",
+        "owner_layer": "subagent_runtime",
+        "status": "failed",
+        "failure_isolated": true,
+        "child_model_result": {
+            "schema_version": 1,
+            "output_format": "machine_json",
+            "owner_layer": "subagent_model_child",
+            "status": "failed"
+        }
+    })
+    .to_string();
+    let answer = "The requested range was read successfully from the parent loop.";
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "subagent", &envelope));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", answer));
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    loop_state.delivery_messages.push(answer.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "read the requested range",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("later terminal respond should remain authoritative");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(reply.text.trim(), answer);
+    assert_eq!(reply.messages, vec![answer.to_string()]);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_projects_subagent_child_model_result_from_runtime_envelope() {
     let state = test_state();
     let task = claimed_task("task-subagent-child-model-result-projection");

@@ -130,7 +130,7 @@ fn authorize_task_admin_request(
             Ok(None) => {
                 return Err(super::api_err::<serde_json::Value>(
                     StatusCode::UNAUTHORIZED,
-                    "Invalid user_key",
+                    "auth_key_invalid",
                 ));
             }
             Err(err) => {
@@ -164,7 +164,7 @@ fn require_task_admin_identity(
     else {
         return Err(super::api_err::<serde_json::Value>(
             StatusCode::UNAUTHORIZED,
-            "task_admin_key_required",
+            "auth_key_required",
         ));
     };
     let normalized_key = crate::normalize_user_key(raw_key);
@@ -172,7 +172,7 @@ fn require_task_admin_identity(
         Ok(Some(identity)) => Ok((identity, normalized_key)),
         Ok(None) => Err(super::api_err::<serde_json::Value>(
             StatusCode::UNAUTHORIZED,
-            "invalid_user_key",
+            "auth_key_invalid",
         )),
         Err(err) => {
             error!("Resolve task admin identity failed: {}", err);
@@ -189,7 +189,7 @@ fn task_admin_target_matches_identity(
     identity: &AuthIdentity,
     normalized_key: &str,
 ) -> bool {
-    if target.user_id == identity.user_id {
+    if identity.role == "admin" || target.user_id == identity.user_id {
         return true;
     }
     target
@@ -242,16 +242,38 @@ pub(super) async fn list_active_tasks(
     headers: HeaderMap,
     Json(req): Json<ActiveTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
-        Ok(user_id) => user_id,
-        Err(resp) => return resp,
+    let provided_key = headers
+        .get("x-rustclaw-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let tasks = if provided_key.is_some() {
+        let (identity, _) = match require_task_admin_identity(&state, &headers) {
+            Ok(identity) => identity,
+            Err(response) => return response,
+        };
+        if identity.role == "admin" {
+            crate::list_all_active_tasks_internal(&state, req.exclude_task_id.as_deref())
+        } else {
+            crate::list_active_tasks_for_user_internal(
+                &state,
+                identity.user_id,
+                req.exclude_task_id.as_deref(),
+            )
+        }
+    } else {
+        let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
+            Ok(user_id) => user_id,
+            Err(resp) => return resp,
+        };
+        crate::list_active_tasks_internal(
+            &state,
+            effective_user_id,
+            req.chat_id,
+            req.exclude_task_id.as_deref(),
+        )
     };
-    match crate::list_active_tasks_internal(
-        &state,
-        effective_user_id,
-        req.chat_id,
-        req.exclude_task_id.as_deref(),
-    ) {
+    match tasks {
         Ok(tasks) => super::api_ok(json!({
             "count": tasks.len(),
             "tasks": tasks,

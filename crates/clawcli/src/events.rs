@@ -164,6 +164,7 @@ pub(crate) fn live_task_event_output_line(
     if mode == LiveEventOutputMode::Quiet {
         return Ok(None);
     }
+    crate::assistant_presentation::decode(raw_event)?;
     let event = task_event_line(raw_event);
     if !filters.is_empty() && !event.as_ref().is_some_and(|event| filters.matches(event)) {
         return Ok(None);
@@ -450,6 +451,11 @@ pub(crate) fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine
         "failure_policy",
         "trust_status",
         "content_sha256",
+        "stream_id",
+        "attempt_id",
+        "sequence",
+        "content_offset_bytes",
+        "total_content_bytes",
         "duration_ms",
         "attempts",
         "output_truncated",

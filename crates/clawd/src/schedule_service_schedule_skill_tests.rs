@@ -398,21 +398,20 @@ fn validate_schedule_run_skill_alias_resolved_to_canonical() {
     );
 }
 
-/// Schedule does not rewrite `rss_fetch` args; `fetch_feed` is handled inside the skill.
 #[test]
-fn validate_schedule_run_skill_rss_fetch_fetch_feed_passes_through() {
+fn validate_schedule_run_skill_rss_fetch_canonical_args_pass_through() {
     let reg = test_registry();
     let payload = json!({
         "skill_name": "rss_fetch",
-        "args": { "action": "fetch_feed", "category": "tech" }
+        "args": {
+            "action": "fetch",
+            "url": "https://example.com/feed.xml",
+            "topic_token": "technology"
+        }
     });
     let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
     let args = out.get("args").and_then(|v| v.as_object()).unwrap();
-    assert_eq!(
-        args.get("action").and_then(|v| v.as_str()),
-        Some("fetch_feed")
-    );
-    assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("tech"));
+    assert_eq!(args, payload["args"].as_object().unwrap());
 }
 
 #[test]
@@ -460,22 +459,6 @@ fn validate_schedule_run_skill_valid_rss_fetch_kept() {
 }
 
 #[test]
-fn validate_schedule_run_skill_rss_fetch_legacy_action_not_rewritten() {
-    let reg = test_registry();
-    let payload = json!({
-        "skill_name": "rss_fetch",
-        "args": { "action": "fetch_crypto_news" }
-    });
-    let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-    let args = out.get("args").and_then(|v| v.as_object()).unwrap();
-    assert_eq!(
-        args.get("action").and_then(|v| v.as_str()),
-        Some("fetch_crypto_news")
-    );
-    assert!(!args.contains_key("category"));
-}
-
-#[test]
 fn validate_schedule_run_skill_rss_fetch_unknown_action_passes_through() {
     let reg = test_registry();
     let payload = json!({
@@ -510,19 +493,6 @@ fn validate_schedule_run_skill_crypto_action_passes_through_unvalidated() {
         args.get("action").and_then(|v| v.as_str()),
         Some("totally_bogus_crypto_action_xyz")
     );
-}
-
-/// Production must not embed rss_fetch legacy action normalization (skill owns aliases).
-#[test]
-fn schedule_production_has_no_rss_legacy_action_strings_in_validation() {
-    const SRC: &str = include_str!("schedule_service.rs");
-    let prod = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
-    for needle in ["fetch_crypto_news", "fetch_tech_news", "fetch_news"] {
-        assert!(
-                !prod.contains(needle),
-                "schedule layer must not embed rss legacy alias `{needle}` (handled in rss_fetch skill)"
-            );
-    }
 }
 
 /// Generic `run_skill` validation must not rewrite args (no per-skill merge paths or symbol subprocesses).

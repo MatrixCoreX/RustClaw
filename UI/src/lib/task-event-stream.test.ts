@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { followTaskEventStream, TaskSseParser } from "./task-event-stream.ts";
+import { followTaskEventStream, taskEventClosesLiveStream, TaskSseParser } from "./task-event-stream.ts";
 
 const events: Array<{ seq?: number; event_kind: string }> = [];
 const parser = new TaskSseParser((event) => events.push(event));
@@ -68,3 +68,55 @@ assert.deepEqual(
 assert.equal(requestCount, 2);
 assert.equal(requestPaths[0], "/v1/tasks/task-reconnect/events?cursor=0");
 assert.equal(requestPaths[1], "/v1/tasks/task-reconnect/events?cursor=1");
+
+const handlerOrder: string[] = [];
+await followTaskEventStream(
+  async () =>
+    new Response(
+      encoder.encode(
+        [
+          'data: {"schema_version":1,"seq":1,"task_id":"task-ordered","event_kind":"tool_started"}',
+          "",
+          'data: {"schema_version":1,"seq":2,"task_id":"task-ordered","event_kind":"task_final"}',
+          "",
+        ].join("\n"),
+      ),
+      { status: 200 },
+    ),
+  "task-ordered",
+  async (event) => {
+    if (event.seq === 1) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+    }
+    handlerOrder.push(`${event.seq}:${event.event_kind}`);
+  },
+);
+assert.deepEqual(handlerOrder, ["1:tool_started", "2:task_final"]);
+
+assert.equal(
+  taskEventClosesLiveStream({
+    schema_version: 1,
+    task_id: "task-needs-user",
+    event_kind: "task_state",
+    payload: { execution_state: "needs_confirmation", lifecycle: { state: "needs_user" } },
+  }),
+  true,
+);
+assert.equal(
+  taskEventClosesLiveStream({
+    schema_version: 1,
+    task_id: "task-background",
+    event_kind: "task_state",
+    payload: { execution_state: "background", lifecycle: { state: "background" } },
+  }),
+  false,
+);
+assert.equal(
+  taskEventClosesLiveStream({
+    schema_version: 1,
+    task_id: "task-blocked",
+    event_kind: "task_state",
+    payload: { execution_state: "blocked", lifecycle: { state: "blocked" } },
+  }),
+  true,
+);

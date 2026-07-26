@@ -1,10 +1,28 @@
 import type { TaskEventEnvelope } from "../types/api";
+import { decodeAssistantPresentationEvent } from "./assistant-presentation";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 export type TaskEventHandler = (event: TaskEventEnvelope) => void | Promise<void>;
 
 const RECONNECT_DELAY_MS = 350;
+
+export function taskEventClosesLiveStream(event: TaskEventEnvelope): boolean {
+  if (event.event_kind === "task_final") return true;
+  if (event.event_kind !== "task_state") return false;
+  const executionState = typeof event.payload?.execution_state === "string" ? event.payload.execution_state : "";
+  const lifecycle = event.payload?.lifecycle;
+  const lifecycleState =
+    lifecycle && typeof lifecycle === "object" && "state" in lifecycle && typeof lifecycle.state === "string"
+      ? lifecycle.state
+      : "";
+  return (
+    executionState === "needs_confirmation" ||
+    executionState === "blocked" ||
+    lifecycleState === "needs_user" ||
+    lifecycleState === "blocked"
+  );
+}
 
 export class TaskSseParser {
   private buffer = "";
@@ -50,6 +68,7 @@ export class TaskSseParser {
     if (!value || typeof value !== "object" || typeof value.event_kind !== "string") {
       throw new Error("task_event_schema_invalid");
     }
+    decodeAssistantPresentationEvent(value);
     this.onEvent(value);
   }
 }
@@ -86,13 +105,13 @@ export async function followTaskEventStream(
       throw new Error("task_event_stream_body_missing");
     }
 
-    const pendingHandlers: Promise<void>[] = [];
+    let handlerChain = Promise.resolve();
     const parser = new TaskSseParser((event) => {
       if (typeof event.seq === "number" && event.seq > cursor) {
         cursor = event.seq;
       }
-      terminal = event.event_kind === "task_final";
-      pendingHandlers.push(Promise.resolve(onEvent(event)));
+      terminal = taskEventClosesLiveStream(event);
+      handlerChain = handlerChain.then(() => onEvent(event));
     });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -118,7 +137,7 @@ export async function followTaskEventStream(
     } finally {
       reader.releaseLock();
     }
-    await Promise.all(pendingHandlers);
+    await handlerChain;
     if (!terminal && !signal?.aborted) {
       await abortableDelay(RECONNECT_DELAY_MS, signal);
     }

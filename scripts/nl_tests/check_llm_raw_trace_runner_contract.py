@@ -169,6 +169,8 @@ def check_runner(root: Path, contract: RunnerContract) -> list[str]:
                 source,
                 [
                     "annotate_turn_harness_metrics()",
+                    "monotonic_millis()",
+                    "time.monotonic_ns()",
                     'payload["harness_metrics"]',
                     '"wall_time_ms"',
                     "overall_started_ms",
@@ -177,6 +179,10 @@ def check_runner(root: Path, contract: RunnerContract) -> list[str]:
                 f"{contract.path}: harness wall time",
             )
         )
+        if "date +%s%3N" in source:
+            failures.append(
+                f"{contract.path}: wall time must not depend on non-portable date nanosecond width"
+            )
     return failures
 
 

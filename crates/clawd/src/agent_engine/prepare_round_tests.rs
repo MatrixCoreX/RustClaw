@@ -1,7 +1,8 @@
 use super::{
-    planner_user_text, production_verify_mode, verifier_confirmation_gate_requires_checkpoint,
-    verifier_gate_missing_slots, verifier_gate_needs_clarification,
-    verifier_gate_requires_immediate_response, verifier_gate_should_stop_round,
+    execution_action_for_verified_step, planner_user_text, production_verify_mode,
+    verifier_confirmation_gate_requires_checkpoint, verifier_gate_missing_slots,
+    verifier_gate_needs_clarification, verifier_gate_requires_immediate_response,
+    verifier_gate_should_stop_round,
 };
 
 #[test]
@@ -24,6 +25,79 @@ fn production_agent_loop_always_enforces_plan_verification() {
         production_verify_mode(),
         crate::verifier::VerifyMode::Enforce
     );
+}
+
+#[test]
+fn verified_capability_execution_restores_planner_action_identity() {
+    let original_plan = crate::PlanResult {
+        goal: "preview an image".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "s1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "image.preview_generate".to_string(),
+            args: serde_json::json!({"prompt": "status card"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Native,
+        raw_plan_text: String::new(),
+    };
+    let verified_step = crate::PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "image_generate".to_string(),
+        args: serde_json::json!({
+            "action": "preview_generate",
+            "prompt": "status card"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+
+    let action = execution_action_for_verified_step(&original_plan, &verified_step, Some(0))
+        .expect("restored action");
+
+    assert!(matches!(
+        action,
+        crate::AgentAction::CallCapability { capability, args }
+            if capability == "image.preview_generate"
+                && args == serde_json::json!({"prompt": "status card"})
+    ));
+}
+
+#[test]
+fn rewritten_execution_step_keeps_verifier_action() {
+    let original_plan = crate::PlanResult {
+        goal: String::new(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: Vec::new(),
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Repair,
+        raw_plan_text: String::new(),
+    };
+    let rewritten_step = crate::PlanStep {
+        step_id: "s1__validate".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({"command": "cargo test"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+
+    let action = execution_action_for_verified_step(&original_plan, &rewritten_step, None)
+        .expect("rewritten action");
+
+    assert!(matches!(
+        action,
+        crate::AgentAction::CallTool { tool, args }
+            if tool == "run_cmd" && args == serde_json::json!({"command": "cargo test"})
+    ));
 }
 
 fn verify_result_with_issue(

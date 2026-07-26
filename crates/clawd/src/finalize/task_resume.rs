@@ -198,10 +198,15 @@ pub(super) fn answer_verifier_retry_applicable(
     let direct_answer_without_tool_observation = !route_result.requires_content_evidence
         && !route_result.delivery_required
         && journal.step_results.is_empty();
+    let presentation_only_gap_with_observed_evidence = !route_result.delivery_required
+        && verifier.missing_evidence_fields.as_slice() == ["output_format"]
+        && journal_has_successful_non_terminal_step(journal);
     let observed_tool_evidence = !route_result.delivery_required
         && journal_has_successful_non_terminal_step(journal)
         && !journal_has_failed_non_terminal_step(journal);
-    direct_answer_without_tool_observation || observed_tool_evidence
+    direct_answer_without_tool_observation
+        || presentation_only_gap_with_observed_evidence
+        || observed_tool_evidence
 }
 
 pub(crate) fn answer_verifier_retry_answer_has_required_machine_evidence(
@@ -436,7 +441,7 @@ pub(super) fn bounded_answer_retry_prompt(
     )
 }
 
-pub(super) async fn retry_answer_after_verifier(
+pub(crate) async fn retry_answer_after_verifier(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,

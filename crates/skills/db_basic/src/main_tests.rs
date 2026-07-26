@@ -32,6 +32,7 @@ fn temp_db_path(name: &str) -> String {
 #[test]
 fn sqlite_query_rejects_mutating_sql_with_structured_kind() {
     let db_path = temp_db_path("unsafe-sql");
+    Connection::open(&db_path).expect("create sqlite fixture");
     let err = execute(json!({
         "action": "sqlite_query",
         "db_path": db_path,
@@ -80,6 +81,7 @@ fn missing_sql_reports_invalid_input() {
 #[test]
 fn schema_version_action_runs_pragma_without_sql_arg() {
     let db_path = temp_db_path("schema-version");
+    Connection::open(&db_path).expect("create sqlite fixture");
     let (text, extra) = execute(json!({
         "action": "schema_version",
         "db_path": db_path,
@@ -106,6 +108,44 @@ fn schema_version_action_runs_pragma_without_sql_arg() {
             .and_then(Value::as_i64),
         Some(0)
     );
+}
+
+#[test]
+fn readonly_action_does_not_create_a_missing_database() {
+    let db_path = temp_db_path("readonly-missing");
+    let err = execute(json!({
+        "action": "list_tables",
+        "db_path": db_path,
+    }))
+    .expect_err("read-only actions must not create missing databases");
+
+    assert_eq!(err.kind, "path_not_found");
+    assert_eq!(
+        err.extra
+            .as_ref()
+            .and_then(|value| value.get("db_path"))
+            .and_then(Value::as_str),
+        Some(db_path.as_str())
+    );
+    assert!(!Path::new(&db_path).exists());
+}
+
+#[test]
+fn readonly_action_rejects_a_directory_path() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-db-basic-directory-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).expect("create directory fixture");
+
+    let err = execute(json!({
+        "action": "schema_version",
+        "db_path": root,
+    }))
+    .expect_err("read-only actions require a regular database file");
+
+    assert_eq!(err.kind, "not_regular_file");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

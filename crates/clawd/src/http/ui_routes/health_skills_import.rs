@@ -2,19 +2,38 @@ async fn health(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<HealthResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    let system_scope = identity.role == "admin";
+    let queue_length = if system_scope {
+        task_count_by_status(&state, "queued")
+    } else {
+        task_count_by_status_for_user(&state, "queued", identity.user_id)
     }
-    let queue_length = task_count_by_status(&state, "queued").unwrap_or_default();
-    let running_length = task_count_by_status(&state, "running").unwrap_or_default();
-    let running_oldest_age_seconds = oldest_running_task_age_seconds(&state).unwrap_or(0);
+    .unwrap_or_default();
+    let running_length = if system_scope {
+        active_running_task_count(&state)
+    } else {
+        active_running_task_count_for_user(&state, identity.user_id)
+    }
+    .unwrap_or_default();
+    let running_oldest_age_seconds = if system_scope {
+        oldest_running_task_age_seconds(&state)
+    } else {
+        oldest_running_task_age_seconds_for_user(&state, identity.user_id)
+    }
+    .unwrap_or(0);
     let legacy_telegramd_stats = telegramd_process_stats();
     let channel_gateway_stats = channel_gateway_process_stats();
     let whatsappd_stats = whatsappd_process_stats();

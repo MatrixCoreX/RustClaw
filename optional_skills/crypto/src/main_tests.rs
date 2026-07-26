@@ -34,6 +34,28 @@ fn normalize_symbol_ok() {
 }
 
 #[test]
+fn preview_quote_request_normalizes_symbols_without_external_calls() {
+    let args = json!({
+        "action": "preview_quote_request",
+        "symbols": ["btc/usdt", "eth"]
+    });
+
+    let (_, extra) = execute(&RootConfig::default(), args, None).unwrap();
+
+    assert_eq!(extra["action"], "preview_quote_request");
+    assert_eq!(extra["normalized_symbols"], json!(["BTCUSDT", "ETHUSDT"]));
+    assert_eq!(extra["would_execute"], false);
+    assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn preview_quote_request_requires_a_symbol() {
+    let args = json!({"action": "preview_quote_request"});
+
+    assert!(execute(&RootConfig::default(), args, None).is_err());
+}
+
+#[test]
 fn okx_inst_id_convert_ok() {
     assert_eq!(to_okx_inst_id("BTCUSDT"), "BTC-USDT");
     assert_eq!(to_okx_inst_id("ethusd"), "ETH-USD");

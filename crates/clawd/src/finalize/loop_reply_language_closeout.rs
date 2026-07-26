@@ -1,8 +1,6 @@
 use crate::agent_engine::AgentRunContext;
 use crate::{AppState, ClaimedTask};
 
-use super::{looks_like_structured_machine_output, message_is_non_answer_separator};
-
 pub(super) fn final_reply_language_hint(
     state: &AppState,
     task: &ClaimedTask,
@@ -81,14 +79,4 @@ pub(super) fn route_allows_model_language_final_answer(
 ) -> bool {
     crate::evidence_policy::final_answer_shape_for_output_contract(route)
         .is_some_and(|shape| shape.allows_model_language())
-}
-
-pub(crate) fn planned_delivery_is_publishable_model_language_answer(delivery: &str) -> bool {
-    let delivery = delivery.trim();
-    !delivery.is_empty()
-        && crate::finalize::parse_delivery_token(delivery).is_none()
-        && !crate::finalize::looks_like_planner_artifact(delivery)
-        && !crate::finalize::looks_like_internal_trace_artifact(delivery)
-        && !looks_like_structured_machine_output(delivery)
-        && !message_is_non_answer_separator(delivery)
 }
