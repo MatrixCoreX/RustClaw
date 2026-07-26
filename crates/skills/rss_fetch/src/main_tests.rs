@@ -12,6 +12,135 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["retryable"], false);
 }
 
+fn successful_test_output() -> Result<SkillOutput, SkillFailure> {
+    Ok(SkillOutput {
+        text: "ok".to_string(),
+        extra: Some(json!({"schema_version": 1})),
+    })
+}
+
+#[test]
+fn persistence_conflict_cannot_return_success_at_response_boundary() {
+    let response = response_from_execution(
+        "persist-conflict".to_string(),
+        successful_test_output(),
+        Some(PersistenceError {
+            error_kind: "config_persist_failed",
+            failure_phase: "config_persistence",
+            cause_code: "config_write_conflict".to_string(),
+            side_effect_applied: false,
+        }),
+    );
+
+    assert_eq!(response.status, "error");
+    assert!(response.text.is_empty());
+    assert_eq!(
+        response.error_text.as_deref(),
+        Some("config_persist_failed")
+    );
+    let extra = response.extra.expect("structured persistence failure");
+    assert_eq!(extra["error_code"], "config_persist_failed");
+    assert_eq!(extra["cause_code"], "config_write_conflict");
+    assert_eq!(extra["side_effect_applied"], false);
+}
+
+#[test]
+fn lock_creation_failure_cannot_return_success_at_response_boundary() {
+    let root = persistence_test_path("missing-parent");
+    let path = root.join("missing").join("rss.toml");
+    let config = make_cfg_with_sources("general", vec!["https://example.com/feed".into()]);
+    let cause = save_config_if_unchanged_at(&path, &config, &config)
+        .expect_err("missing parent must prevent lock creation");
+    let response = response_from_execution(
+        "lock-failure".to_string(),
+        successful_test_output(),
+        Some(PersistenceError {
+            error_kind: "config_persist_failed",
+            failure_phase: "config_persistence",
+            cause_code: cause,
+            side_effect_applied: false,
+        }),
+    );
+
+    assert_eq!(response.status, "error");
+    let extra = response.extra.expect("structured persistence failure");
+    assert_eq!(extra["cause_code"], "config_lock_open_failed");
+}
+
+#[test]
+fn atomic_replace_failure_cannot_return_success_at_response_boundary() {
+    let path = persistence_test_path("replace-target-directory");
+    std::fs::create_dir_all(&path).expect("create directory at config target");
+    let config = make_cfg_with_sources("general", vec!["https://example.com/feed".into()]);
+    let cause = save_config_atomically_at(&path, &config)
+        .expect_err("a config file cannot atomically replace a directory");
+    let response = response_from_execution(
+        "replace-failure".to_string(),
+        successful_test_output(),
+        Some(PersistenceError {
+            error_kind: "config_persist_failed",
+            failure_phase: "config_persistence",
+            cause_code: cause,
+            side_effect_applied: false,
+        }),
+    );
+
+    assert_eq!(response.status, "error");
+    let extra = response.extra.expect("structured persistence failure");
+    assert_eq!(extra["cause_code"], "config_atomic_replace_failed");
+    let _ = std::fs::remove_dir_all(path);
+}
+
+#[test]
+fn request_without_skill_storage_descriptor_fails_structurally() {
+    let request = Req {
+        request_id: "missing-storage".to_string(),
+        args: json!({"action": "source_health"}),
+        context: None,
+    };
+    let failure = runtime_from_request(&request).expect_err("storage descriptor is mandatory");
+
+    assert_eq!(failure.error_text, "skill_storage_required");
+    assert_eq!(failure.extra["error_code"], "skill_storage_required");
+    assert_eq!(failure.extra["failure_phase"], "storage_contract");
+    assert_eq!(failure.extra["side_effect_applied"], false);
+}
+
+#[test]
+fn operator_config_strips_machine_owned_fields() {
+    let mut config = make_cfg_with_sources("general", vec!["https://example.com/feed".to_string()]);
+    config
+        .rss
+        .categories
+        .get_mut("general")
+        .expect("general category")
+        .source_entries = Some(vec![SourceStateEntry {
+        url: "https://example.com/feed".to_string(),
+        failure_count: 2,
+        last_error: "timeout".to_string(),
+        last_failed_at: "1".to_string(),
+    }]);
+    config.rss.deprecated = Some(DeprecatedSection {
+        sources: vec![DeprecatedEntry {
+            url: "https://old.example.com/feed".to_string(),
+            category: "general".to_string(),
+            reason: "consecutive_fetch_failures".to_string(),
+            failure_count: 3,
+            last_error: "timeout".to_string(),
+            deprecated_at: "2".to_string(),
+        }],
+    });
+
+    let operator = operator_config(&config);
+
+    assert!(operator.rss.deprecated.is_none());
+    assert!(operator.rss.categories["general"].source_entries.is_none());
+    assert_eq!(
+        operator.rss.categories["general"].sources.as_deref(),
+        Some(&["https://example.com/feed".to_string()][..])
+    );
+}
+
 #[test]
 fn unknown_category_returns_bounded_machine_replan_contract_without_state_change() {
     let mut cfg = make_cfg_with_sources("general", vec!["https://example.com/feed".to_string()]);
@@ -48,6 +177,7 @@ fn make_cfg_with_sources(category: &str, sources: Vec<String>) -> RootConfig {
             timeout_seconds: Some(20),
             deprecate_after_failures: Some(3),
             categories,
+            discovery: None,
             deprecated: None,
         },
     }
@@ -63,6 +193,7 @@ fn make_cfg_legacy_only(
     let cat = RssCategoryConfig {
         sources: None,
         source_entries: None,
+        candidate_entries: None,
         primary,
         secondary,
         fallback,
@@ -78,6 +209,7 @@ fn make_cfg_legacy_only(
             timeout_seconds: Some(20),
             deprecate_after_failures: None,
             categories,
+            discovery: None,
             deprecated: None,
         },
     }
@@ -202,132 +334,25 @@ fn all_sources_fail_returns_err() {
 }
 
 #[test]
-fn legacy_fetch_crypto_news_matches_latest_crypto_category() {
-    let mut cfg_a = make_cfg_with_sources(
-        "crypto",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let a = serde_json::json!({
-        "action": "fetch_crypto_news",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let ra = execute(
-        &mut cfg_a,
-        serde_json::Value::Object(a.as_object().unwrap().clone()),
-    );
-    let mut cfg_b = make_cfg_with_sources(
-        "crypto",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let b = serde_json::json!({
-        "action": "latest",
-        "category": "crypto",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let rb = execute(
-        &mut cfg_b,
-        serde_json::Value::Object(b.as_object().unwrap().clone()),
-    );
-    assert_eq!(ra.is_err(), rb.is_err());
-    let ea = ra.unwrap_err();
-    let eb = rb.unwrap_err();
-    assert!(ea.contains("no feed items") || ea.contains("failed") || ea.contains("all"));
-    assert!(eb.contains("no feed items") || eb.contains("failed") || eb.contains("all"));
-}
-
-#[test]
-fn legacy_fetch_tech_news_sets_tech_category() {
-    let mut cfg_a = make_cfg_with_sources(
-        "tech",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let a = serde_json::json!({
-        "action": "fetch_tech_news",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let ra = execute(
-        &mut cfg_a,
-        serde_json::Value::Object(a.as_object().unwrap().clone()),
-    );
-    let mut cfg_b = make_cfg_with_sources(
-        "tech",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let b = serde_json::json!({
-        "action": "latest",
-        "category": "tech",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let rb = execute(
-        &mut cfg_b,
-        serde_json::Value::Object(b.as_object().unwrap().clone()),
-    );
-    assert_eq!(ra.is_err(), rb.is_err());
-}
-
-#[test]
-fn legacy_fetch_news_matches_latest_same_category() {
-    let mut cfg_a = make_cfg_with_sources(
-        "general",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let a = serde_json::json!({
-        "action": "fetch_news",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let ra = execute(
-        &mut cfg_a,
-        serde_json::Value::Object(a.as_object().unwrap().clone()),
-    );
-    let mut cfg_b = make_cfg_with_sources(
-        "general",
-        vec!["https://nonexistent.invalid.example/feed".to_string()],
-    );
-    let b = serde_json::json!({
-        "action": "latest",
-        "category": "general",
-        "timeout_seconds": 1,
-        "limit": 3
-    });
-    let rb = execute(
-        &mut cfg_b,
-        serde_json::Value::Object(b.as_object().unwrap().clone()),
-    );
-    assert_eq!(ra.is_err(), rb.is_err());
-}
-
-#[test]
-fn legacy_fetch_feed_without_url_errors() {
-    let mut cfg = make_cfg_with_sources("g", vec!["https://example.com/f".to_string()]);
-    let args = serde_json::json!({ "action": "fetch_feed" });
-    let r = execute(&mut cfg, args);
-    assert!(r.is_err());
-    assert!(r.unwrap_err().contains("fetch_feed"));
-}
-
-#[test]
-fn legacy_fetch_feed_with_url_uses_direct_fetch_path() {
-    let mut cfg = make_cfg_with_sources("unused", vec![]);
-    let args = serde_json::json!({
-        "action": "fetch_feed",
-        "url": "https://nonexistent.invalid.example/feed.xml",
-        "timeout_seconds": 1
-    });
-    let r = execute(
-        &mut cfg,
-        serde_json::Value::Object(args.as_object().unwrap().clone()),
-    );
-    assert!(r.is_err());
-    let err = r.unwrap_err();
-    assert!(
-        !err.contains("unsupported action"),
-        "should normalize to fetch, not reject action: {err}"
-    );
+fn removed_legacy_actions_are_rejected_by_machine_code() {
+    for action in [
+        "fetch_crypto_news",
+        "fetch_tech_news",
+        "fetch_news",
+        "fetch_feed",
+    ] {
+        let mut cfg = make_cfg_with_sources("general", vec![]);
+        let failure = execute(
+            &mut cfg,
+            serde_json::json!({
+                "action": action,
+                "url": "https://example.com/feed.xml"
+            }),
+        )
+        .expect_err("removed legacy action must not be normalized");
+        assert_eq!(failure.error_text, "rss_fetch.unsupported_action");
+        assert_eq!(failure.extra["error_kind"], "invalid_input");
+    }
 }
 
 #[test]
@@ -700,4 +725,73 @@ fn news_topic_token_prefers_machine_config_and_rejects_sentence_values() {
         news_topic_token(Some(&cfg), &args, Some("tech")),
         "tech_ecosystem"
     );
+}
+
+fn persistence_test_path(label: &str) -> std::path::PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "rustclaw-rss-persistence-{}-{}-{nonce}",
+        std::process::id(),
+        label
+    ));
+    std::fs::create_dir_all(&directory).expect("create persistence test directory");
+    directory.join("rss.toml")
+}
+
+#[test]
+fn config_persistence_replaces_atomically_and_remains_parseable() {
+    let path = persistence_test_path("atomic");
+    let mut original = RootConfig::default();
+    original.rss.default_category = Some("general".to_string());
+    save_config_atomically_at(&path, &original).expect("write original config");
+    let expected = original.clone();
+
+    let mut updated = original.clone();
+    updated.rss.default_limit = Some(12);
+    save_config_if_unchanged_at(&path, &updated, &expected).expect("atomic update");
+
+    let raw = std::fs::read_to_string(&path).expect("read persisted config");
+    let parsed: RootConfig = toml::from_str(&raw).expect("parse persisted config");
+    assert_eq!(parsed.rss.default_limit, Some(12));
+    let leaked_temporary = std::fs::read_dir(path.parent().unwrap())
+        .expect("list persistence directory")
+        .flatten()
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".rss.toml.tmp.")
+        });
+    assert!(!leaked_temporary);
+
+    std::fs::remove_dir_all(path.parent().unwrap()).expect("remove test directory");
+}
+
+#[test]
+fn config_persistence_rejects_stale_snapshot_without_overwrite() {
+    let path = persistence_test_path("conflict");
+    let mut original = RootConfig::default();
+    original.rss.default_limit = Some(10);
+    save_config_atomically_at(&path, &original).expect("write original config");
+    let stale_config = original.clone();
+
+    let mut external = original.clone();
+    external.rss.default_limit = Some(20);
+    save_config_atomically_at(&path, &external).expect("simulate concurrent update");
+
+    let mut stale_update = original;
+    stale_update.rss.default_limit = Some(30);
+    assert_eq!(
+        save_config_if_unchanged_at(&path, &stale_update, &stale_config).unwrap_err(),
+        "config_write_conflict"
+    );
+    let persisted: RootConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read config"))
+            .expect("parse config");
+    assert_eq!(persisted.rss.default_limit, Some(20));
+
+    std::fs::remove_dir_all(path.parent().unwrap()).expect("remove test directory");
 }

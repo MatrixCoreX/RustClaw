@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { sleep } from "../lib/display-format";
+import { formatSystemActionError } from "../lib/system-actions";
 import {
   formatWorkspaceUpdateApiError,
   shouldReloadAfterWorkspaceBuild,
@@ -122,8 +123,8 @@ export function useSystemRuntime({
     const modeConfig: Record<WorkspaceUpdateMode, { confirm: string; endpoint: string; started: string }> = {
       full: {
         confirm: t(
-          "系统会先正常拉取远端版本；如果拉取被本地冲突文件阻挡，只覆盖这些冲突文件，其他本地改动和额外文件保持不动。随后会完整编译并重启 clawd。确认现在开始吗？",
-          "The system will pull the remote version first. If local conflicting files block the pull, only those conflict files will be overwritten; other local changes and extra files are left untouched. It will then run a full build and restart clawd. Start now?",
+          "系统会先检查本地改动：如果只有 configs 目录存在冲突，会临时保存配置、拉取后再恢复；如果源码有本地改动，会停止更新且不会覆盖文件。检查通过后才会拉取、完整编译并重启 clawd。确认现在开始吗？",
+          "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls, builds everything, and restarts clawd. Start now?",
         ),
         endpoint: "/v1/admin/workspace-update",
         started: t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."),
@@ -251,7 +252,7 @@ export function useSystemRuntime({
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `system restart failed (${res.status})`);
+        throw new Error(formatSystemActionError(body, res.status, t));
       }
       restartAccepted = true;
       setSystemRestartMessage(
@@ -327,7 +328,7 @@ export function useSystemRuntime({
       const res = await apiFetch(`/v1/pi-app/restart`, { method: "POST" });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `Pi App restart failed (${res.status})`);
+        throw new Error(formatSystemActionError(body, res.status, t));
       }
       setPiAppRestartMessage(t("已发起 Pi App 小程序重启。", "Pi App restart requested."));
     } catch (err) {

@@ -27,6 +27,27 @@ fn cursor_rejects_non_numeric_header() {
 #[test]
 fn terminal_detection_uses_machine_event_kind() {
     assert!(event_is_terminal(&json!({"event_kind":"task_final"})));
+    assert!(event_is_terminal(&json!({
+        "event_kind":"task_state",
+        "payload":{
+            "execution_state":"needs_confirmation",
+            "lifecycle":{"state":"needs_user"}
+        }
+    })));
+    assert!(event_is_terminal(&json!({
+        "event_kind":"task_state",
+        "payload":{
+            "execution_state":"blocked",
+            "lifecycle":{"state":"blocked"}
+        }
+    })));
+    assert!(!event_is_terminal(&json!({
+        "event_kind":"task_state",
+        "payload":{
+            "execution_state":"background",
+            "lifecycle":{"state":"background"}
+        }
+    })));
     assert!(!event_is_terminal(&json!({
         "event_kind":"tool_finished",
         "payload":{"text":"task_final"}

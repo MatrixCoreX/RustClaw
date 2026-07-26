@@ -5,7 +5,7 @@
 
 ## Capability Summary
 - `health_check` runs baseline diagnostics and status checks for environment/runtime health.
-- It now returns both RustClaw runtime fields and a structured `system_health` block for the host OS.
+- It returns RustClaw runtime fields, runtime-owned `overall_status` / `clawd_visible` / `db_available` probes, and a structured `system_health` host block; the skill never receives the main database path.
 - `system_health.os_family` explicitly distinguishes `linux` and `macos` so downstream logic can branch cleanly.
 - It is read-only and should not perform mutating operations.
 - For RustClaw or `clawd` runtime self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
@@ -31,7 +31,7 @@
 - RustClaw runtime fields remain top-level for compatibility:
   - `clawd_process_count`
   - `telegramd_process_count`
-  - `clawd_health_port_open`
+  - `clawd_health_port_open`, `clawd_visible`, `db_available`, `overall_status`, `runtime_probe`
   - `clawd_log`
   - `nni_log`
   - `nni_server_log`
@@ -50,7 +50,7 @@
   - `workspace_root`: string path; evidence role `path`.
   - `log_dir`: string path; evidence role `path`.
   - `clawd_process_count`, `telegramd_process_count`: integer counts; evidence role `count`.
-  - `clawd_health_port_open`: boolean; evidence role `status`.
+  - `clawd_health_port_open`, `clawd_visible`, `db_available`, `overall_status`, and `runtime_probe`: runtime/health machine evidence; evidence roles `status` and `field_value`.
   - `clawd_log`, `nni_log`, `nni_server_log`, `telegramd_log`: object or scalar log observations; evidence role `field_value`.
   - `system_health`: object containing OS, CPU, uptime, load, memory, disk, and warning fields; evidence roles `field_value`, `count`, and `status`.
 - Sensitive fields: log observations can include user data. Provider-facing traces should prefer warnings, counts, selected keys, excerpts, or hashes.
@@ -64,5 +64,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"workspace_root\":\"/workspace\",\"log_dir\":\"/workspace/logs\",\"clawd_process_count\":1,\"system_health\":{\"os_family\":\"linux\",\"service_manager\":\"systemd\",\"warnings\":[]}}","extra":{"workspace_root":"/workspace","log_dir":"/workspace/logs","clawd_process_count":1,"system_health":{"os_family":"linux","service_manager":"systemd","warnings":[]}},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"workspace_root\":\"/workspace\",\"clawd_process_count\":1,\"system_health\":{\"os_family\":\"linux\"}}","extra":{"workspace_root":"/workspace","clawd_process_count":1,"clawd_visible":true,"db_available":true,"overall_status":"healthy","system_health":{"os_family":"linux"}},"error_text":null}
 ```

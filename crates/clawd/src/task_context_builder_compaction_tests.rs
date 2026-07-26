@@ -1,4 +1,5 @@
 use super::{
+    force_agent_loop_context_compaction_plan,
     plan_agent_loop_context_compaction_with_provider_window, ExecutionContextBudgetTier,
     ExecutionContextView, PlannerContextView, TaskContextBundle, TaskContextRawSources,
 };
@@ -56,6 +57,18 @@ fn bounded_context_does_not_trigger_compaction() {
         plan_agent_loop_context_compaction_with_provider_window(&context_bundle(1_000), None)
             .is_none()
     );
+}
+
+#[test]
+fn explicit_conversation_compaction_forces_a_bounded_plan() {
+    let bundle = context_bundle(1_000);
+    assert!(plan_agent_loop_context_compaction_with_provider_window(&bundle, None).is_none());
+    let plan =
+        force_agent_loop_context_compaction_plan(&bundle, None).expect("forced compaction plan");
+    assert!(plan
+        .trigger_codes
+        .contains(&"explicit_conversation_compaction"));
+    assert!(plan.before_char_count >= 1_000);
 }
 
 #[test]

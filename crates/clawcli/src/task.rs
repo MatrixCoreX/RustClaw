@@ -2,12 +2,24 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde_json::{json, Value};
 
+use crate::chat_session::{ModelOverride, PermissionMode};
 use crate::client;
 use crate::events::{task_event_lines, TaskEventLine};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct TaskSubmissionOptions {
     pub(crate) yolo: bool,
+    pub(crate) permission_mode: Option<PermissionMode>,
+}
+
+pub(crate) struct ThreadAskContext<'a> {
+    pub(crate) conversation_id: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) resume_task_id: Option<&'a str>,
+    pub(crate) model_override: Option<&'a ModelOverride>,
+    pub(crate) compacted_context_ref: Option<&'a str>,
+    pub(crate) goal_ref: Option<&'a str>,
+    pub(crate) attachments: &'a [Value],
 }
 
 pub(crate) struct TaskStatusView {
@@ -221,38 +233,70 @@ pub(crate) fn submit_thread_ask(
     base_url: &str,
     key: &str,
     text: &str,
-    thread_id: &str,
+    context: ThreadAskContext<'_>,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
+    submit_ask_with_payload(base_url, key, threaded_ask_payload(text, context), options)
+}
+
+pub(crate) fn submit_conversation_compaction(
+    base_url: &str,
+    key: &str,
+    conversation_id: &str,
     session_id: &str,
     resume_task_id: Option<&str>,
     options: TaskSubmissionOptions,
 ) -> Result<String> {
-    submit_ask_with_payload(
-        base_url,
-        key,
-        threaded_ask_payload(text, thread_id, session_id, resume_task_id),
-        options,
-    )
+    let mut payload = json!({
+        "entrypoint": "compact_conversation",
+        "source": "clawcli_machine",
+        "conversation_id": conversation_id,
+        "thread_id": conversation_id,
+        "session_id": session_id,
+    });
+    if let Some(task_id) = resume_task_id {
+        payload["resume_task_id"] = json!(task_id);
+    }
+    submit_ask_with_payload(base_url, key, payload, options)
 }
 
-pub(super) fn threaded_ask_payload(
-    text: &str,
-    thread_id: &str,
-    session_id: &str,
-    resume_task_id: Option<&str>,
-) -> Value {
+pub(super) fn threaded_ask_payload(text: &str, context: ThreadAskContext<'_>) -> Value {
     let mut payload = json!({
         "text": text,
         "source": "clawcli_chat",
-        "thread_id": thread_id,
-        "session_id": session_id,
+        "conversation_id": context.conversation_id,
+        "thread_id": context.conversation_id,
+        "session_id": context.session_id,
     });
-    if let Some(resume_task_id) = resume_task_id
+    let object = payload.as_object_mut().expect("thread payload object");
+    if let Some(resume_task_id) = context
+        .resume_task_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        let object = payload.as_object_mut().expect("thread payload object");
         object.insert("resume_task_id".to_string(), json!(resume_task_id));
         object.insert("resume_trigger".to_string(), json!("user_followup"));
+    }
+    if let Some(selection) = context.model_override {
+        object.insert(
+            "model_selection".to_string(),
+            json!({
+                "provider": selection.provider,
+                "model": selection.model,
+            }),
+        );
+    }
+    if let Some(reference) = context.compacted_context_ref {
+        object.insert("compacted_context_ref".to_string(), json!(reference));
+    }
+    if let Some(reference) = context.goal_ref {
+        object.insert("goal_ref".to_string(), json!(reference));
+    }
+    if !context.attachments.is_empty() {
+        object.insert(
+            "attachments".to_string(),
+            Value::Array(context.attachments.to_vec()),
+        );
     }
     payload
 }
@@ -338,10 +382,14 @@ fn submit_task_with_kind_payload(
         .header("x-rustclaw-client", "clawcli")
         .header("content-type", "application/json")
         .json(&body);
-    let request = if options.yolo {
-        request.header("x-rustclaw-execution-mode", "yolo")
+    let requested_mode = if options.yolo {
+        Some("yolo")
     } else {
-        request
+        options.permission_mode.map(PermissionMode::as_token)
+    };
+    let request = match requested_mode {
+        Some(mode) => request.header("x-rustclaw-execution-mode", mode),
+        None => request,
     };
     let resp = request.send().context("submit task failed")?;
     let status = resp.status();

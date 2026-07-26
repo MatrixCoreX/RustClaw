@@ -6,6 +6,7 @@ Chinese version: `README.zh-CN.md`
 
 RustClaw is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
 
+<!-- ai-learning-stage: foundations -->
 ## Overview
 
 RustClaw is built for daily use and administration from messaging apps or a browser instead of a terminal-first workflow.
@@ -21,9 +22,10 @@ Current repository highlights:
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
   Seatbelt process isolation selected through a machine-configured backend
 
+<!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. Before the first planner call, the front door only materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. It does not call a semantic router or decide whether an ordinary request should respond, clarify, or execute. Every ordinary `ask` enters the agent loop, which owns those semantic decisions. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; compatibility providers can still use the validated fallback plan protocol. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. The old intent normalizer, contract-repair judge, pre-agent semantic route switch, and route-selected rollback path have been physically removed.
+RustClaw's main natural-language path uses a Codex / Claude style agent loop. Before the first planner call, the front door materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. Every ordinary `ask` then enters the agent loop, which decides whether to answer, clarify, or execute. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; providers using the structured plan protocol express equivalent verified steps. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching.
 
 ### Request and Agent Loop Flow
 
@@ -42,7 +44,8 @@ flowchart TD
     G --> H[Ask context bundle<br/>memory provenance + recent execution + goal/journal refs]
     H --> J[Agent loop<br/>ordinary semantic authority]
     J --> L{Loop round}
-    L --> N[Planner LLM<br/>native call_capability / respond<br/>validated fallback plan when required]
+    L --> N[Planner LLM<br/>native call_capability / respond<br/>validated structured plan when required]
+    N -.-> PS[Recognized respond/free_text bytes<br/>public-output policy + presentation events]
     N --> O
     O --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
     P --> Q{Verified step}
@@ -82,6 +85,7 @@ flowchart TD
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
     AB --> AD[Task event stream<br/>goal + context + transition + checkpoint + tool/coding/team events]
+    PS --> AD
     ASP --> AA
     ASP --> AB
     ASP --> AD
@@ -117,7 +121,7 @@ Quick facts for direct skill tasks:
 Operationally: use `kind=ask` when the user gave a natural-language request and RustClaw should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants RustClaw to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
 
 - `Planner-owned front door`: materializes text/audio/attachments and builds `TurnBoundaryEnvelope` from task identity, explicit API fields, structured locator facts, and safety/budget profiles. It performs no semantic LLM call and contains no ordinary respond/clarify/execute branch.
-- `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. Native turns choose `call_capability` or structured `respond`; validated fallback providers may express the equivalent tool, skill, synthesis, clarification, repair, checkpoint, or stop steps through the fallback plan protocol.
+- `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. Native turns choose `call_capability` or structured `respond`; structured-plan turns may express equivalent tool, skill, synthesis, clarification, repair, checkpoint, or stop steps.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Side-effect outbox`: non-idempotent mutations from both planner-owned execution and explicit `kind=run_skill` persist `intent_recorded` and `attempt_started` before invocation. A deterministic key derived from task plus canonical action fingerprint enters runner context, external HTTP `Idempotency-Key`, or supported local-adapter environment. Receipt, verification, reconciliation, and commit transitions are fenced by the exact worker claim. Receipt-bearing states suppress original-action replay; ambiguous timeout/crash state checkpoints as `mutation_reconciliation` and accepts only a fingerprint-bound structured `applied|not_applied|still_unknown` resume constraint.
@@ -129,7 +133,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `subagent_graph`, `subagent_node`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including the budget profile/decision, continuation index, cumulative model/tool/token/cost/elapsed counters, soft-slice state, goal and checkpoint fields, hook fields, coding verification fields, and persisted child-graph progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `assistant_output_started|delta|completed|aborted|replaced`, tool/coding/provider/hook/subagent events, `agent_team_started`, `subagent_finished`, `agent_team_aggregated`, and `task_final`. Raw provider deltas remain private; only recognized `respond/free_text` bytes that pass public-output policy become presentation events. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including budget, continuation, goal/checkpoint, verification, child-graph, team, and safe assistant-output progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, and Capability Flow
 
@@ -155,7 +159,7 @@ Detailed flow: [Agent loop and planning](docs/architecture/01-agent-loop.md).
 
 ### Permission Plane and Command Policy
 
-The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by historical route markers or compatibility hints.
+The permission plane is a structured execution boundary. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata.
 
 - `risk_level`, `requires_confirmation`, `once_per_task`, `idempotent`, and `dedup_scope` come from registry and planner capability metadata where available.
 - `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
@@ -215,8 +219,9 @@ Runtime code should consume stable contracts such as:
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
 - `permission_decision` and `command_policy` machine fields
 
-Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update registry capability metadata, `INTERFACE.md`, generated skill prompts, planner schema, or a necessary vendor prompt patch so the LLM emits the same structured action in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata. Historical route/semantic fields may be rendered only by isolated legacy-log readers; they cannot select a capability, modify a contract, or decide final answer shape. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
+Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update registry capability metadata, `INTERFACE.md`, generated skill prompts, planner schema, or a necessary vendor prompt patch so the LLM emits the same structured action in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote flow through registry capability metadata. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
 
+<!-- ai-learning-stage: context-memory -->
 ## Memory System
 
 RustClaw memory is split into short-term conversation records, structured user preferences, long-term fact cards, and retrieval indexes. The design goal is to make memory useful without letting old assistant output become a hidden instruction for a new task.
@@ -241,7 +246,7 @@ The main persisted memory stores are:
 - `conversation_states`: active per-chat state such as alias bindings, active task anchors, and follow-up state. This is session state, not durable knowledge.
 - `user_preferences`: structured user preferences such as response language, response style, response format, and agent display name.
 - `memory_facts`: durable fact cards with `fact_key`, `fact_value`, `fact_text`, source refs, confidence, status, expiry, and conflict-group metadata.
-- `long_term_memories`: legacy / fallback summary rows used only where the current memory use policy allows summary recall.
+- `long_term_memories`: supplemental summary rows used only where the current memory policy allows summary recall.
 - `memory_retrieval_index`: hybrid retrieval index over short-term records, preferences, fact cards, and knowledge snapshots.
 
 `configs/memory.toml` controls budgets, retention, long-term refresh intervals, write filters, preference extraction, retrieval limits, and embedding/index behavior. Defaults are conservative: short acknowledgement messages can be filtered, assistant replies are marked, and LLM-written preferences must pass confidence and runtime validation before they are stored.
@@ -256,7 +261,7 @@ After an `ask` task finalizes, RustClaw can persist:
 
 Preference and fact writes go through a structured memory intent contract. The model is asked to emit `memory_actions` such as `upsert`, `delete`, `expire`, or `noop`; runtime code then validates action enum, kind, scope, confidence, source evidence, TTL, and safety fields before anything is stored. The runtime does not decide durable preference writes by matching a single natural-language phrase.
 
-Long-term summary refresh still exists as a fallback summary path, but durable knowledge is stored as fact cards first. A fact card keeps `fact_key`, `fact_value`, human-readable `fact_text`, `source_ref`, `source_memory_ids_json`, `reason`, `confidence`, `expires_at_ts`, `conflict_group`, and `status`. New active facts in the same conflict group supersede older facts, and expired or deleted facts are removed from retrieval.
+Long-term summary refresh provides supplemental recall, while durable knowledge is stored as fact cards. A fact card keeps `fact_key`, `fact_value`, human-readable `fact_text`, `source_ref`, `source_memory_ids_json`, `reason`, `confidence`, `expires_at_ts`, `conflict_group`, and `status`. New active facts in the same conflict group supersede older facts, and expired or deleted facts are removed from retrieval.
 
 Memory writes are intentionally after-answer work. The user-visible response is saved first; then background memory refresh can run when configured. This prevents memory extraction latency from blocking normal replies and makes memory write failures non-fatal to the already completed task.
 
@@ -264,7 +269,7 @@ Memory writes are intentionally after-answer work. The user-visible response is 
 
 Memory recall is built as structured context and then filtered by the current consumer's memory use policy:
 
-- planner: can use unfinished goals, preferences, relevant facts, and knowledge docs, but excludes fallback long-term summaries, assistant results, similar triggers, and raw recent snippets
+- planner: can use unfinished goals, preferences, relevant facts, and knowledge docs, but excludes supplemental summaries, assistant results, similar triggers, and raw recent snippets
 - chat: uses stable preferences and facts; bounded recent context is allowed only when current session state makes it relevant
 - skill: `_memory` is cropped by the skill registry `memory_policy`; skills without a policy get a safe default scoped profile
 
@@ -363,7 +368,7 @@ Important lifecycle details:
 - Foreground HTTP/channel waits are short by design. A caller that stops waiting should keep polling the same `task_id`; it should not create a duplicate task or treat the background task as failed.
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
 - Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
-- `clawcli get`, `clawcli watch`, and `clawcli wait <task_id> --until terminal|completed|background|needs-user` render or wait on lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
+- `clawcli get`, `clawcli watch`, and `clawcli wait <task_id> --until terminal|completed|background|needs-user` render or wait on lifecycle machine fields; `clawcli cancel-task <task_id>` cancels by task ID, while `clawcli cancel-index` cancels the selected entry from the active-task list.
 - `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli continue <task_id> [message]` is a shorter structured resume entrypoint; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
 - `clawcli --yolo submit|exec|code|chat|run-skill ...` requests `approval_policy=never` and `sandbox_mode=danger_full` for newly submitted tasks. The backend accepts it only for a currently enabled admin key. This is a high-risk mode: it removes local approval prompts and process sandbox isolation, while registry, schema, external-publish, cancellation, budget, redaction, and audit controls remain active.
@@ -402,7 +407,7 @@ CLI lifecycle and its persisted teaching evidence are documented in [Task state 
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
-- Seeded resume restores the persisted `TaskBudgetSlice`, cumulative model/tool/token/cost/elapsed counters, continuation index, observations, artifact refs, repair state, and completed side-effect fingerprints before re-entering the agent loop. A healthy task may cross the former 4-round/12-tool values when structured progress continues; only repeat/stagnation, cancellation, policy, or administrator hard ceilings stop it.
+- Seeded resume restores the persisted `TaskBudgetSlice`, cumulative model/tool/token/cost/elapsed counters, continuation index, observations, artifact refs, repair state, and completed side-effect fingerprints before re-entering the agent loop. A healthy task continues while it produces structured progress; repeat/stagnation, cancellation, policy, or administrator hard ceilings stop it.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
 
@@ -426,6 +431,7 @@ Use the [architecture index](docs/architecture/README.md) for language selection
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.
 <!-- ai-learning-exclude:end -->
 
+<!-- ai-learning-stage: safety-operations -->
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
@@ -488,13 +494,15 @@ rustclaw -key disable rk-xxxx
 
 ## UI, API, and `webd`
 
-The main API still comes from `clawd`. Deployment is split by environment:
+The main API is provided by `clawd`. Deployment is split by environment:
 
 - local workstation: `clawd` serves both `UI/dist` and `/v1` directly, without nginx
 - cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`
 - `webd` provides password-login/session bridging when enabled; direct local UI can use a RustClaw key
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - The `AI Learning` navigation page reads this bundled README, organizes top-level topics into pages, and renders Mermaid flows with zoom and full-screen controls; switching the UI language selects the matching README.
+- The Agent page keeps server-backed conversation history. Each task has a custom name available from its action menu, and the saved name remains available after refresh or restart.
+- Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
 
 In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
 
@@ -506,9 +514,12 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
   RustClaw data-volume storage, uptime, and machine-readable unavailable fields
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/conversation-history`
+- `PUT /v1/tasks/conversations/{conversation_id}/title`
+- `POST /v1/tasks/active`
 - `POST /v1/tasks/cancel`
 - `POST /v1/tasks/cancel-by-task-id`
-- `POST /v1/tasks/cancel-one`: compatibility endpoint that cancels by active-list index
+- `POST /v1/tasks/cancel-one`: cancels by active-list index
 - `POST /v1/services/{service}/{action}`: browser-console service start/stop/restart; failures return machine fields such as `error_code`, `status_code`, `message_key`, `service`, and `action`
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
@@ -519,7 +530,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/skills/store/remove`: removes an optional skill from runtime and planner visibility while retaining its bundled or imported package for reinstallation; always-on core and tool skills reject this action
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
-- NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` keeps only current NNI state and legacy record fallback.
+- NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` stores the current NNI state.
 - The standalone `nni_server` writes runtime events to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) instead of `clawd.log`; enable `NNI_SERVER_LOG_STDOUT=1` only when an external supervisor intentionally captures those logs.
 
 Quick example:
@@ -534,6 +545,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
+<!-- ai-learning-stage: development-release -->
 ## NL Regression Shortcuts
 
 Use the smallest affected NL set while code is still moving, then widen coverage only at phase or release gates:
@@ -542,8 +554,8 @@ Use the smallest affected NL set while code is still moving, then widen coverage
    The compact gate also requires Codex-style agent parity tags for coding, continuous development, shell/git/config/DB/web/KB, async, permission, subagent, memory, multilingual behavior, and failure recovery.
 2. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
 3. Typical aggregate: compressed representative coverage after a phase batch.
-4. Canary: 500 client-like cases before changing default authority or deleting old gates.
-5. Safe aggregate: compact equivalent coverage first, then full 2100+ coverage only for high-risk deletion gates or release hardening.
+4. Canary: 500 client-like cases for high-risk runtime boundary changes.
+5. Safe aggregate: compact equivalent coverage first, then full 2100+ coverage for release hardening when the affected surface justifies it.
 
 Live NL runs should use `bash scripts/nl_tests/run_all_nl_with_server.sh`.
 It creates a random loopback listener, isolated task/audit databases, and a
@@ -552,12 +564,12 @@ the run. Reusing a development server is opt-in with `--reuse-server`. Use
 `--suite <name>` or `--category <name>` for a focused scope; numbered raw
 `LLM#1..N` request/return fields stay enabled unless explicitly disabled.
 
-Current `configs/agent_guard.toml` defaults keep verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. The old route-authority rollback/debug keys are no longer runtime configuration. If route boundary behavior changes, run the route-authority guard script and update replay/README flow descriptions instead of reintroducing semantic route switches.
+Current `configs/agent_guard.toml` keeps verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. When a runtime boundary changes, run the boundary guards and update replay and README flow descriptions together.
 
 The agent parity gate writes portable release evidence rather than trusting a
 single successful command. `agent_loop_static_contracts.txt` contains the
-self-tested legacy-route, pre-planner, NL hard-match, historical hardcoded
-language, and frontdoor boundary guards. In particular,
+self-tested planner-authority, NL hard-match, hardcoded-language, and front
+door boundary guards. In particular,
 `scripts/check_frontdoor_boundary_dispatch.py --self-test` and its main check
 must produce `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`, proving that the
 ask front door only prepares the turn boundary and does not decide whether an
@@ -648,7 +660,7 @@ check and must contain `CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` and
 `selected_entry_status`, readiness/capability flags, and missing-selection
 behavior on secret-free machine contracts.
 
-Before physically deleting remaining compatibility code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 285 rows covering all 217 declared categories), loop-boundary/replay review with no unexplained mismatch, and the planner/runtime/repair/static guards. The subset generator treats the shared compact contract, release behavior tags, machine capability/action-family tags, and suite breadth as mandatory; source filenames and undeclared incidental tags do not become release contracts. Contract repair cleanup must pass `python3 scripts/check_contract_repair_loop_observation_boundary.py`, which keeps worker contract repair as loop-observation output instead of a pre-planner route mutator. Planner/output-contract cleanup must also pass `python3 scripts/check_planner_runtime_boundary.py`, `python3 scripts/check_route_reason_marker_facade.py`, and `python3 scripts/check_finalizer_architecture.py`; repair cleanup must pass `python3 scripts/check_repair_boundary_inventory_coverage.py` plus `python3 scripts/check_repair_no_user_text_fields.py`. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.
+Current release acceptance combines compact live NL for the affected class, release-gate equivalent coverage (`scripts/nl_tests/build_release_gate_subset.py --check` selects the maintained representative set), loop-boundary/replay review with no unexplained mismatch, and planner/runtime/repair/static guards. The subset generator treats shared compact contracts, release behavior tags, machine capability/action-family tags, and suite breadth as mandatory. Planner and output-contract work runs `python3 scripts/check_planner_runtime_boundary.py`, `python3 scripts/check_route_reason_marker_facade.py`, and `python3 scripts/check_finalizer_architecture.py`; repair work runs `python3 scripts/check_repair_boundary_inventory_coverage.py` and `python3 scripts/check_repair_no_user_text_fields.py`.
 
 Focused long-tail closed-loop entries:
 
@@ -679,6 +691,7 @@ UI notes:
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
+<!-- ai-learning-stage: capabilities-artifacts -->
 ## Skills
 
 RustClaw currently ships a broad skill set. Representative groups:
@@ -757,6 +770,7 @@ timeout_seconds = 120
 
 The empty `api_key` is accepted only for loopback `custom` providers (`localhost`, `127.0.0.1`, `::1`). Remote custom providers still require a real key.
 
+<!-- ai-learning-stage: development-release -->
 ## Directory Guide
 
 - `configs/`: runtime, channel, model, memory, and skill configuration
@@ -794,9 +808,11 @@ The Pi App also carries the NNI device-signing helper used by the backend and br
 - many helper and regression scripts live in `scripts/`
 - for the local `ops_closed_loop` regression stack, run `bash scripts/regression_ops_closed_loop.sh`
 
+<!-- ai-learning-exclude:start -->
 ## License
 
 This project uses a non-commercial source-available license.
 
 - English legal text: `LICENSE`
 - Chinese reference translation: `LICENSE.zh-CN.md`
+<!-- ai-learning-exclude:end -->

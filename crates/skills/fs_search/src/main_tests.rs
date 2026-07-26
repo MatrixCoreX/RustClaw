@@ -439,10 +439,70 @@ fn grep_text_returns_matching_lines_for_known_file_root() {
         .and_then(Value::as_array)
         .expect("matches array");
     assert_eq!(matches[0].get("line").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        matches[0].get("start_byte").and_then(Value::as_u64),
+        Some(18)
+    );
     assert!(matches[0]
         .get("text")
         .and_then(Value::as_str)
         .is_some_and(|text| text.contains("step_type") && text.contains("run_cmd")));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn grep_text_returns_bounded_context_and_multiline_provenance() {
+    let root = unique_temp_dir("grep-context-multiline");
+    std::fs::create_dir_all(&root).expect("create root");
+    let file = root.join("sample.rs");
+    std::fs::write(&file, "before\nlet value = 1;\nfinish(value);\nafter\n").expect("write sample");
+
+    let out = execute(json!({
+        "action": "grep_text",
+        "query": "let value.*finish(value)",
+        "root": file.to_string_lossy().to_string(),
+        "multiline": true,
+        "context_before": 1,
+        "context_after": 1,
+        "max_results": 10
+    }))
+    .expect("multiline grep");
+
+    assert_eq!(out["schema_version"], 1);
+    assert_eq!(out["multiline"], true);
+    assert_eq!(out["total_match_count"], 1);
+    let matched = &out["matches"][0];
+    assert_eq!(matched["line"], 2);
+    assert_eq!(matched["end_line"], 3);
+    assert_eq!(matched["context_before"][0]["text"], "before");
+    assert_eq!(matched["context_after"][0]["text"], "after");
+    assert!(matched["end_byte"].as_u64() > matched["start_byte"].as_u64());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn grep_text_enforces_file_and_total_byte_budgets() {
+    let root = unique_temp_dir("grep-byte-budgets");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(root.join("a-large.txt"), "needle\npadding\n").expect("write large fixture");
+    std::fs::write(root.join("b-next.txt"), "needle\n").expect("write next fixture");
+
+    let out = execute(json!({
+        "action": "grep_text",
+        "query": "needle",
+        "root": root.to_string_lossy().to_string(),
+        "max_file_bytes": 8,
+        "max_scan_bytes": 8,
+        "max_results": 10
+    }))
+    .expect("bounded grep");
+
+    assert_eq!(out["total_match_count"], 1);
+    assert_eq!(out["skipped_large_files"], 1);
+    assert_eq!(out["scanned_bytes"], 7);
+    assert_eq!(out["page"]["scan_truncated"], true);
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -477,6 +537,56 @@ fn grep_text_can_match_case_insensitively() {
         .get("text")
         .and_then(Value::as_str)
         .is_some_and(|text| text.contains("Release Checklist")));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_sorts_by_mtime_with_path_tie_breaking() {
+    let root = unique_temp_dir("find-name-mtime");
+    std::fs::create_dir_all(&root).expect("create root");
+    let older = root.join("match-a.txt");
+    let newer = root.join("match-b.txt");
+    std::fs::write(&older, "older\n").expect("write older");
+    let old_time = std::fs::metadata(&older)
+        .and_then(|metadata| metadata.modified())
+        .expect("older mtime");
+    for attempt in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&newer, format!("newer-{attempt}\n")).expect("write newer");
+        let new_time = std::fs::metadata(&newer)
+            .and_then(|metadata| metadata.modified())
+            .expect("newer mtime");
+        if new_time > old_time {
+            break;
+        }
+    }
+
+    let descending = execute(json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy().to_string(),
+        "sort_by": "mtime_desc",
+        "max_results": 10
+    }))
+    .expect("mtime descending");
+    let ascending = execute(json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy().to_string(),
+        "sort_by": "mtime_asc",
+        "max_results": 10
+    }))
+    .expect("mtime ascending");
+
+    assert!(descending["results"][0]
+        .as_str()
+        .is_some_and(|path| path.ends_with("match-b.txt")));
+    assert!(ascending["results"][0]
+        .as_str()
+        .is_some_and(|path| path.ends_with("match-a.txt")));
+    assert_eq!(descending["sort_by"], "mtime_desc");
+    assert_eq!(ascending["sort_by"], "mtime_asc");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -670,6 +780,47 @@ fn find_name_returns_stable_cursor_pages_and_snapshot_hash() {
     assert_eq!(second["page"]["cursor"], 2);
     assert_eq!(second["page"]["previous_cursor"], 0);
     assert_eq!(second["page"]["has_more"], false);
+    assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
+    assert_ne!(first["results"], second["results"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_images_returns_stable_pages_and_bounded_metadata() {
+    let root = unique_temp_dir("find-images-pages");
+    std::fs::create_dir_all(root.join("a")).expect("create a");
+    std::fs::create_dir_all(root.join("b")).expect("create b");
+    let mut png = vec![0; 24];
+    png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    png[16..20].copy_from_slice(&320u32.to_be_bytes());
+    png[20..24].copy_from_slice(&200u32.to_be_bytes());
+    std::fs::write(root.join("a/one.png"), &png).expect("write one");
+    std::fs::write(root.join("a/two.png"), &png).expect("write two");
+    std::fs::write(root.join("b/three.png"), &png).expect("write three");
+    std::fs::write(root.join("ignored.txt"), "not an image").expect("write ignored");
+
+    let args = json!({
+        "action": "find_images",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 2,
+        "max_dirs": 1
+    });
+    let first = execute(args.clone()).expect("first image page");
+    let mut second_args = args;
+    second_args["cursor"] = first["page"]["next_cursor"].clone();
+    let second = execute(second_args).expect("second image page");
+
+    assert_eq!(first["schema_version"], 1);
+    assert_eq!(first["count"], 2);
+    assert_eq!(first["total_count"], 3);
+    assert_eq!(first["images"][0]["mime_type"], "image/png");
+    assert_eq!(first["images"][0]["width"], 320);
+    assert_eq!(first["images"][0]["height"], 200);
+    assert_eq!(first["directories_by_count"][0]["count"], 2);
+    assert_eq!(first["directories_truncated"], true);
+    assert_eq!(first["page"]["has_more"], true);
+    assert_eq!(second["count"], 1);
     assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
     assert_ne!(first["results"], second["results"]);
 

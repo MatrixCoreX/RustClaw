@@ -88,7 +88,6 @@ pub(crate) enum PromptSchemaId {
     LongTermSummary,
     ContextCompaction,
     MemoryIntent,
-    RunCmdSuggestion,
 }
 
 impl PromptSchemaId {
@@ -103,7 +102,6 @@ impl PromptSchemaId {
             Self::LongTermSummary => "long_term_summary",
             Self::ContextCompaction => "context_compaction",
             Self::MemoryIntent => "memory_intent",
-            Self::RunCmdSuggestion => "run_cmd_suggestion",
         }
     }
 
@@ -121,7 +119,6 @@ impl PromptSchemaId {
         static LONG_TERM_SUMMARY: OnceLock<Value> = OnceLock::new();
         static CONTEXT_COMPACTION: OnceLock<Value> = OnceLock::new();
         static MEMORY_INTENT: OnceLock<Value> = OnceLock::new();
-        static RUN_CMD_SUGGESTION: OnceLock<Value> = OnceLock::new();
 
         match self {
             Self::AnswerVerifier => ANSWER_VERIFIER.get_or_init(|| {
@@ -169,11 +166,6 @@ impl PromptSchemaId {
             Self::MemoryIntent => MEMORY_INTENT.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/memory_intent.schema.json"
-                ))
-            }),
-            Self::RunCmdSuggestion => RUN_CMD_SUGGESTION.get_or_init(|| {
-                parse_schema(include_str!(
-                    "../../../prompts/schemas/run_cmd_suggestion.schema.json"
                 ))
             }),
         }
@@ -964,18 +956,6 @@ fn normalize_run_cmd_call(
     }
     preserve_run_cmd_execution_args(&mut args, raw_args);
     preserve_run_cmd_execution_args(&mut args, Some(obj));
-    if let Some(request_text) = value_for("request_text", &[]) {
-        args.insert("request_text".to_string(), request_text);
-    }
-    if let Some(suggested_params) = value_for("suggested_params", &[]) {
-        args.insert("suggested_params".to_string(), suggested_params);
-    }
-    if let Some(suggest_once) = value_for("suggest_once", &[]) {
-        args.insert("suggest_once".to_string(), suggest_once);
-    }
-    if let Some(llm_suggest_once) = value_for("llm_suggest_once", &[]) {
-        args.insert("llm_suggest_once".to_string(), llm_suggest_once);
-    }
     preserve_internal_execution_args(&mut args, raw_args);
     preserve_internal_execution_args(&mut args, Some(obj));
     complete_run_cmd_async_start_contract(&mut args);

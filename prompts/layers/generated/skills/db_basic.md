@@ -10,6 +10,8 @@
 ## Capability Summary (from interface)
 - `db_basic` provides basic SQLite query/execute capabilities plus structured catalog helper actions.
 - Read operations and mutating operations are separated by action and confirmation rules.
+- Read-only actions require an existing regular database file and open it
+  through SQLite read-only flags; observation never creates a database.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -38,8 +40,11 @@
 ## Error Contract (from interface)
 - Missing action/sql/confirm fields as required.
 - `sqlite_query` with non-read-only SQL should be rejected.
+- Missing/non-file read targets return structured `path_not_found`,
+  `path_metadata_failed`, or `not_regular_file` errors before SQLite opens the
+  path.
 - SQL/runtime errors should return explicit database error text.
-- Error responses include structured `error_kind` and mirror the same value in `extra.error_kind` when extra context exists. Current kinds include `invalid_input`, `path_outside_workspace`, `sqlite_open_failed`, `unsafe_sql`, `confirmation_required`, `sqlite_query_failed`, `sqlite_execute_failed`, and `unsupported_action`.
+- Error responses include structured `error_kind` and mirror the same value in `extra.error_kind` when extra context exists. Current kinds include `invalid_input`, `path_outside_workspace`, `path_not_found`, `path_metadata_failed`, `not_regular_file`, `sqlite_open_failed`, `unsafe_sql`, `confirmation_required`, `sqlite_query_failed`, `sqlite_execute_failed`, and `unsupported_action`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `db_path`, implementation `sql`, and parsed `result`.
 
 ## Structured Evidence Contract (from interface)

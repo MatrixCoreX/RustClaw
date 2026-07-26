@@ -12,7 +12,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Search text content under a bounded root.
 - Compare explicit paths.
 - Write or append text, create directories, or remove files/directories when confirmation permits.
-- Apply/review/revert structured workspace patches with exact-context and checkpoint protection.
+- Preview/apply exact replacements or structured patches with unique-match, hash, context, and checkpoint protection.
 - Review and decide isolated child-task patches through parent-owned machine actions.
 
 ## Actions
@@ -23,11 +23,14 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - `read_artifact_range`
 - `find_entries`
 - `grep_text`
+- `find_images`
 - `compare_paths`
 - `write_text`
 - `append_text`
 - `make_dir`
 - `remove_path`
+- `preview_replace_text`
+- `replace_text`
 - `apply_patch`
 - `diff`
 - `rewind`
@@ -61,15 +64,22 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `find_entries` | `pattern` | conditional | string/string[] | - | Name/basename pattern for name search. |
 | `find_entries` | `ext` | conditional | string/string[] | - | Extension selector for extension search. |
 | `find_entries` | `target_kind` | no | string | `any` | `any|file|dir`. |
+| `find_entries` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`; ties use path order. |
 | `grep_text` | `query` | yes | string | - | Text query. |
 | `grep_text` | `root` | no | string(path) | workspace | Search root or known file path. |
 | `grep_text` | `pattern` | no | string/string[] | - | Optional filename filter. |
+| `grep_text` | `multiline` | no | boolean | `false` | Enable bounded literal matching across lines; literal `.*` remains an ordered wildcard, not arbitrary regex. |
+| `grep_text` | `context_before` / `context_after` | no | integer | `0` | Structured surrounding lines, each capped at 20. |
+| `grep_text` | `max_file_bytes` / `max_scan_bytes` | no | integer | bounded defaults | Per-file and aggregate content-read budgets. |
+| `find_images` | `root`, `exts`, `max_results`, `cursor`, `max_dirs` | no | bounded fields | workspace/defaults | Return paged image paths plus MIME, size, mtime, and dimensions where available. |
 | `compare_paths` | `left_path`, `right_path` | yes | string(path) | - | Two explicit paths to compare. |
 | `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. Requires confirmation. |
 | `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |
+| `preview_replace_text` | `path`, `old_text`, `new_text` | yes | strings | - | Validate one exact occurrence and return bounded diff/hash evidence without writing. Optional `expected_sha256` and `preserve_line_endings`. |
+| `replace_text` | `path`, `old_text`, `new_text` | yes | strings | - | Atomically replace one exact occurrence in a UTF-8 text file. Returns checkpoint and hash evidence. Optional `expected_sha256`; `expected_occurrences` may only be `1`. Requires confirmation. |
 | `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a Git-compatible unified diff. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
 | `diff` | `checkpoint_id` / `paths` | no | string / string[] | current workspace | Return a checkpoint patch or a bounded current Git diff as machine evidence. |
 | `rewind` | `checkpoint_id` | yes | string | - | Restore a patch checkpoint only when target hashes still match the recorded post-patch state. Requires confirmation. |
@@ -85,13 +95,14 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - File-name inventory is a file-only listing: prefer `filesystem.list_file_names` / `fs_basic.list_dir` with `files_only=true`, `dirs_only=false`, and `names_only=true`. Directory/folder-name inventory is directory-only with `dirs_only=true`, `files_only=false`. Use mixed file+directory inventory only for untyped entries/items/names.
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
-- Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
+- Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned structured line/byte provenance and bounded context rather than the full file excerpt.
+- Image-file discovery uses `find_images`; image understanding uses the handoff capability returned by a rejected text read or `image_vision.describe`.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
 - Truncated tool/skill output: follow its `range_handles` with `artifact.read_range`; never route a runtime artifact through unrestricted file reads or guess byte offsets.
 - Last non-empty line of a known file: use `read_text_range` with `mode="last_non_empty"` and answer from observed `line_text`; do not replace this read-only operation with a shell pipeline.
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
-- Existing source edits: prefer `apply_patch` over whole-file `write_text`; keep whole-file writes for explicit small replacements or new files.
+- Existing source edits: prefer `replace_text` for one known unique fragment and `apply_patch` for multi-hunk/multi-file changes; resolve missing/ambiguous/stale machine facts from current content, never from user-language reinterpretation.
 - Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
 - Child patch decisions: call `review_child_patch` before `apply_child_patch`; use only observed `child_task_id` and `patch_ref` machine fields. Children never apply or merge directly into the primary workspace.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.

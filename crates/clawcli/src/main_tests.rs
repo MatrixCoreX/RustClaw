@@ -122,19 +122,33 @@ fn clawcli_exposes_coding_workflow_command_surface() {
 }
 
 #[test]
-fn clawcli_parses_persisted_chat_thread_options() {
-    match Cli::try_parse_from(["clawcli", "chat", "--thread-id", "thread_01", "--jsonl"])
-        .expect("parse chat thread options")
-        .cmd
+fn clawcli_parses_persisted_chat_conversation_and_attachment_options() {
+    match Cli::try_parse_from([
+        "clawcli",
+        "chat",
+        "--conversation-id",
+        "conversation_01",
+        "--jsonl",
+        "--file",
+        "docs/input.md",
+        "--image",
+        "assets/frame.png",
+    ])
+    .expect("parse chat conversation options")
+    .cmd
     {
         Some(Command::Chat {
-            new_thread,
-            thread_id,
+            new_conversation,
+            conversation_id,
             jsonl,
+            files,
+            images,
         }) => {
-            assert!(!new_thread);
-            assert_eq!(thread_id.as_deref(), Some("thread_01"));
+            assert!(!new_conversation);
+            assert_eq!(conversation_id.as_deref(), Some("conversation_01"));
             assert!(jsonl);
+            assert_eq!(files, [std::path::PathBuf::from("docs/input.md")]);
+            assert_eq!(images, [std::path::PathBuf::from("assets/frame.png")]);
         }
         _ => panic!("expected chat command"),
     }
@@ -144,12 +158,22 @@ fn clawcli_parses_persisted_chat_thread_options() {
             .expect("parse new chat thread")
             .cmd,
         Some(Command::Chat {
-            new_thread: true,
-            thread_id: None,
+            new_conversation: true,
+            conversation_id: None,
             jsonl: false,
+            ref files,
+            ref images,
         })
+        if files.is_empty() && images.is_empty()
     ));
-    assert!(Cli::try_parse_from(["clawcli", "chat", "--new", "--thread-id", "thread_01"]).is_err());
+    assert!(Cli::try_parse_from([
+        "clawcli",
+        "chat",
+        "--new",
+        "--conversation-id",
+        "conversation_01"
+    ])
+    .is_err());
 }
 
 #[test]

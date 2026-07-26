@@ -29,6 +29,26 @@ fn verify_result(kinds: &[crate::verifier::VerifyIssueKind]) -> crate::verifier:
     }
 }
 
+fn plan_result(args: serde_json::Value) -> crate::PlanResult {
+    crate::PlanResult {
+        goal: "validate structured input".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "fixture.preview".to_string(),
+            args,
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Native,
+        raw_plan_text: String::new(),
+    }
+}
+
 fn run_cmd_confirmation_verify_result(literal_user_command: bool) -> crate::verifier::VerifyResult {
     let mut args = serde_json::json!({
         "command": "python3 -c 'open(\"src/lib.rs\",\"w\").write(\"ok\")'"
@@ -70,6 +90,7 @@ fn invalid_planner_arguments_enter_bounded_replan() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
+        &plan_result(serde_json::json!({"latitude": 91})),
         &verify_result(&[crate::verifier::VerifyIssueKind::InvalidArgumentValue]),
     )
     .expect("invalid planner argument should be repairable");
@@ -102,7 +123,11 @@ fn informational_verifier_issue_does_not_block_argument_replan() {
     ]);
 
     assert!(plan_verifier_rejection_is_repairable(&verify_result));
-    let signal = planner_repair_signal(&verify_result).expect("machine repair signal");
+    let signal = planner_repair_signal(
+        &plan_result(serde_json::json!({"value": "invalid"})),
+        &verify_result,
+    )
+    .expect("machine repair signal");
     let issues = signal["issues"].as_array().expect("issue array");
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0]["verify_issue_kind"], "InvalidArgumentValue");
@@ -120,6 +145,7 @@ fn permission_denial_never_enters_planner_repair() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
+        &plan_result(serde_json::json!({"value": "invalid"})),
         &verify_result(&[crate::verifier::VerifyIssueKind::SandboxPolicyDenied]),
     );
 
@@ -132,6 +158,7 @@ fn missing_planner_argument_enters_bounded_replan() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
+        &plan_result(serde_json::json!({})),
         &verify_result(&[crate::verifier::VerifyIssueKind::MissingRequiredArg]),
     )
     .expect("planner-generated missing argument should be repairable");
@@ -152,6 +179,7 @@ fn explicit_boundary_clarification_never_enters_planner_repair() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
+        &plan_result(serde_json::json!({})),
         &verify_result(&[crate::verifier::VerifyIssueKind::BoundaryClarifyRequired]),
     );
 
@@ -164,6 +192,7 @@ fn mixed_repairable_and_policy_issues_do_not_bypass_policy() {
     let mut loop_state = LoopState::default();
     let outcome = recover_plan_verifier_rejection(
         &mut loop_state,
+        &plan_result(serde_json::json!({"value": "invalid"})),
         &verify_result(&[
             crate::verifier::VerifyIssueKind::InvalidArgumentValue,
             crate::verifier::VerifyIssueKind::SandboxPolicyDenied,
@@ -172,6 +201,60 @@ fn mixed_repairable_and_policy_issues_do_not_bypass_policy() {
 
     assert!(outcome.is_none());
     assert!(loop_state.history_compact.is_empty());
+}
+
+#[test]
+fn repeated_identical_rejection_counts_as_no_progress_without_storing_raw_args() {
+    let mut loop_state = LoopState::default();
+    let plan = plan_result(serde_json::json!({"token": "sensitive-test-value"}));
+    let verify_result = verify_result(&[crate::verifier::VerifyIssueKind::InvalidArgumentValue]);
+
+    let first = recover_plan_verifier_rejection(&mut loop_state, &plan, &verify_result)
+        .expect("first rejection should permit repair");
+    let second = recover_plan_verifier_rejection(&mut loop_state, &plan, &verify_result)
+        .expect("repeated rejection should produce a bounded signal");
+
+    assert!(!first.no_progress);
+    assert!(second.no_progress);
+    assert_eq!(
+        second.next_goal_hint.as_deref(),
+        Some("do_not_repeat_rejected_plan")
+    );
+    let signal: serde_json::Value =
+        serde_json::from_str(loop_state.last_output.as_deref().expect("repeat signal"))
+            .expect("valid repeat signal");
+    assert_eq!(signal["status_code"], "plan_verifier_replan_repeated");
+    assert_eq!(signal["repeat_count"], 2);
+    assert!(loop_state
+        .output_vars
+        .values()
+        .all(|value| !value.contains("sensitive-test-value")));
+}
+
+#[test]
+fn materially_changed_rejected_arguments_receive_a_fresh_replan_attempt() {
+    let mut loop_state = LoopState::default();
+    let verify_result = verify_result(&[crate::verifier::VerifyIssueKind::InvalidArgumentValue]);
+
+    let first = recover_plan_verifier_rejection(
+        &mut loop_state,
+        &plan_result(serde_json::json!({"latitude": 91})),
+        &verify_result,
+    )
+    .expect("first rejection");
+    let changed = recover_plan_verifier_rejection(
+        &mut loop_state,
+        &plan_result(serde_json::json!({"latitude": 90})),
+        &verify_result,
+    )
+    .expect("changed rejection");
+
+    assert!(!first.no_progress);
+    assert!(!changed.no_progress);
+    assert_eq!(
+        changed.next_goal_hint.as_deref(),
+        Some("replan_from_verifier_signal")
+    );
 }
 
 #[test]

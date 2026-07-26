@@ -170,7 +170,8 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
         .and_then(AgentRunContext::output_contract)
         .cloned()
         .unwrap_or_default();
-    let Some(rendered) = crate::finalize::retry_loop_answer_after_verifier(
+    crate::assistant_presentation::abort_for_verifier_retry(state, task);
+    let Some(rendered) = crate::finalize::retry_answer_after_verifier(
         state,
         task,
         user_text,

@@ -60,6 +60,33 @@ fn legacy_system_basic_validate_structured_canonicalizes_to_config_basic_validat
 }
 
 #[test]
+fn config_basic_structure_summary_rewrites_without_exposing_raw_values() {
+    let rewrite = rewrite_virtual_tool_call(
+        "config_basic",
+        json!({
+            "action": "summarize_structure",
+            "path": "configs/config.toml",
+            "field_path": "skills.skill_switches"
+        }),
+    )
+    .expect("rewrite result")
+    .expect("virtual rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("summarize_structured")
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("field_path")
+            .and_then(|v| v.as_str()),
+        Some("skills.skill_switches")
+    );
+}
+
+#[test]
 fn legacy_fs_search_find_ext_canonicalizes_to_fs_basic_find_entries() {
     let canonical = canonicalize_legacy_tool_call(
         "fs_search",
@@ -667,6 +694,7 @@ fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
             "action": "find_entries",
             "root": "crates",
             "pattern": "*.rs",
+            "sort_by": "mtime_desc",
             "max_results": 25,
             "cursor": 50,
             "max_depth": 12,
@@ -677,6 +705,7 @@ fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
     .expect("find rewrite");
     assert_eq!(find.runtime_tool, "fs_search");
     assert_eq!(find.runtime_args["cursor"], 50);
+    assert_eq!(find.runtime_args["sort_by"], "mtime_desc");
     assert_eq!(find.runtime_args["max_depth"], 12);
     assert_eq!(find.runtime_args["max_files"], 40000);
 
@@ -686,6 +715,11 @@ fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
             "action": "grep_text",
             "root": "crates",
             "query": "CapabilityResolver",
+            "multiline": true,
+            "context_before": 2,
+            "context_after": 3,
+            "max_file_bytes": 1048576,
+            "max_scan_bytes": 8388608,
             "max_results": 10,
             "cursor": 20,
             "max_line_chars": 320
@@ -696,6 +730,36 @@ fn fs_basic_search_pagination_args_reach_runtime_backing_skill() {
     assert_eq!(grep.runtime_tool, "fs_search");
     assert_eq!(grep.runtime_args["cursor"], 20);
     assert_eq!(grep.runtime_args["max_line_chars"], 320);
+    assert_eq!(grep.runtime_args["multiline"], true);
+    assert_eq!(grep.runtime_args["context_before"], 2);
+    assert_eq!(grep.runtime_args["context_after"], 3);
+    assert_eq!(grep.runtime_args["max_file_bytes"], 1048576);
+    assert_eq!(grep.runtime_args["max_scan_bytes"], 8388608);
+}
+
+#[test]
+fn fs_basic_find_images_reaches_bounded_runtime_action() {
+    let rewrite = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "find_images",
+            "root": "assets",
+            "exts": ["png", "jpg"],
+            "max_results": 25,
+            "cursor": 50,
+            "max_dirs": 8
+        }),
+    )
+    .unwrap()
+    .expect("image search rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "fs_search");
+    assert_eq!(rewrite.runtime_args["action"], "find_images");
+    assert_eq!(rewrite.runtime_args["root"], "assets");
+    assert_eq!(rewrite.runtime_args["exts"], json!(["png", "jpg"]));
+    assert_eq!(rewrite.runtime_args["max_results"], 25);
+    assert_eq!(rewrite.runtime_args["cursor"], 50);
+    assert_eq!(rewrite.runtime_args["max_dirs"], 8);
 }
 
 #[test]
@@ -979,6 +1043,8 @@ fn fs_basic_write_text_write_mode_alias_rewrites_to_write_file_mode() {
 #[test]
 fn fs_basic_patch_actions_rewrite_to_workspace_patch() {
     for action in [
+        "preview_replace_text",
+        "replace_text",
         "apply_patch",
         "diff",
         "rewind",

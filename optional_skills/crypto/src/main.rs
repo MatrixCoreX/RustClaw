@@ -681,6 +681,9 @@ fn execute(
         return Err(tr_with("crypto.err.action_blocked", &[("action", &action)]));
     }
     ensure_action_exchange_credentials(&cfg, &action, obj)?;
+    if action == "preview_quote_request" {
+        return handle_preview_quote_request(obj);
+    }
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -697,6 +700,7 @@ fn execute(
         })?;
 
     match action.as_str() {
+        "preview_quote_request" => unreachable!("preview_action_after_return"),
         "quote" => handle_quote(&client, &cfg, obj),
         "multi_quote" => handle_multi_quote(&client, &cfg, obj),
         "get_book_ticker" | "book_ticker" => handle_book_ticker(&client, &cfg, obj),

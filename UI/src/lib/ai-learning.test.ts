@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   classifyLearningLink,
-  insertAfterFirstDiagramChapter,
+  orderLearningPagesByStage,
   parseReadmeLearningPages,
   parseStandaloneLearningDocument,
 } from "./ai-learning";
@@ -132,39 +132,58 @@ Details.
   assert.match(page.markdown, /## Planning/);
 });
 
-test("inserts standalone documents after the first diagram chapter", () => {
-  const pages = parseReadmeLearningPages(`## Overview
+test("inherits stable learning stages without exposing metadata in content", () => {
+  const pages = parseReadmeLearningPages(`<!-- ai-learning-stage: foundations -->
+## Overview
 
 Intro.
 
+<!-- ai-learning-stage: runtime -->
 ## Runtime
 
-### Main flow
-
-\`\`\`mermaid
-flowchart LR
-  A --> B
-\`\`\`
-
-### Boundary
+### Planning
 
 Details.
 
-## Setup
+### Execution
+
+More details.
+`);
+
+  assert.deepEqual(
+    pages.map((page) => [page.title, page.stageId]),
+    [
+      ["Overview", "foundations"],
+      ["Planning", "runtime"],
+      ["Execution", "runtime"],
+    ],
+  );
+  pages.forEach((page) => {
+    assert.doesNotMatch(page.markdown, /ai-learning-stage/);
+  });
+});
+
+test("orders stages without changing page order within each stage", () => {
+  const pages = parseReadmeLearningPages(`<!-- ai-learning-stage: development -->
+## Tests
+
+Details.
+
+<!-- ai-learning-stage: foundations -->
+## Overview
+
+Intro.
+
+<!-- ai-learning-stage: development -->
+## Release
 
 Steps.
 `);
-  const inserted = parseStandaloneLearningDocument({
-    id: "architecture-security",
-    chapterId: "architecture-guide",
-    chapterTitle: "Architecture Guide",
-    markdown: "# Security\n\nDetails.",
-  });
 
-  const result = insertAfterFirstDiagramChapter(pages, [inserted]);
+  const ordered = orderLearningPagesByStage(pages, ["foundations", "development"]);
 
   assert.deepEqual(
-    result.map((page) => page.id),
-    ["overview", "runtime--main-flow", "runtime--boundary", "architecture-security", "setup"],
+    ordered.map((page) => page.title),
+    ["Overview", "Tests", "Release"],
   );
 });

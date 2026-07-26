@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::routing::{delete, get, get_service, post};
+use axum::routing::{delete, get, get_service, post, put};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
 use claw_core::types::{
@@ -28,6 +28,9 @@ mod answer_verifier;
 mod app_helpers;
 mod approval_grant;
 mod ask_flow;
+mod assistant_delivery_policy;
+mod assistant_presentation;
+mod assistant_presentation_stream;
 mod async_job_contract;
 mod bootstrap;
 mod capability_map;
@@ -38,6 +41,9 @@ mod child_task_contract;
 mod clarify_state;
 mod contract_matrix;
 mod conversation_state;
+#[cfg(test)]
+#[path = "http/cors_tests.rs"]
+mod cors_tests;
 mod db_init;
 mod delivery_utils;
 mod evidence_policy;
@@ -96,6 +102,7 @@ mod task_event_transport;
 mod task_execution_policy;
 mod task_journal;
 mod task_lifecycle;
+mod task_model_selection;
 mod token_estimator;
 mod turn_boundary_envelope;
 mod turn_context;
@@ -164,12 +171,13 @@ pub(crate) use repo::{
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
-    insert_audit_log, insert_submitted_task, is_user_allowed, list_active_tasks_internal,
-    list_auth_keys, mark_pending_channel_bind_session_detected,
-    mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
-    maybe_find_submit_task_dedup, normalize_user_key, reset_channel_binding_state_for_user_key,
-    resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
-    stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
+    insert_audit_log, insert_submitted_task, is_user_allowed, list_active_tasks_for_user_internal,
+    list_active_tasks_internal, list_all_active_tasks_internal, list_auth_keys,
+    mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
+    mark_pending_channel_bind_session_failed, maybe_find_submit_task_dedup, normalize_user_key,
+    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
+    resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
+    submit_task_audit_detail, task_count_by_status, task_count_by_status_for_user, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
     upsert_webd_login_account, verify_webd_password_login, FactoryResetDbResult,
     PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
@@ -188,8 +196,9 @@ pub(crate) use runtime::{
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
-    channel_gateway_process_stats, current_rss_bytes, daemon_process_pids_by_name,
-    feishud_process_stats, larkd_process_stats, oldest_running_task_age_seconds,
+    active_running_task_count, active_running_task_count_for_user, channel_gateway_process_stats,
+    current_rss_bytes, daemon_process_pids_by_name, feishud_process_stats, larkd_process_stats,
+    oldest_running_task_age_seconds, oldest_running_task_age_seconds_for_user,
     telegramd_process_stats, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
     whatsappd_process_stats,
 };
@@ -271,6 +280,24 @@ fn api_ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
             error: None,
         }),
     )
+}
+
+fn api_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderName::from_static("last-event-id"),
+            axum::http::HeaderName::from_static("x-rustclaw-key"),
+            axum::http::HeaderName::from_static("x-rustclaw-client"),
+        ])
 }
 
 fn resolve_startup_config_path_from<I>(
@@ -846,6 +873,18 @@ async fn run() -> anyhow::Result<()> {
         .route("/memory/:memory_id/expire", post(expire_memory_handler))
         .route("/memory/clear", post(clear_memory_handler))
         .route("/memory/settings", post(update_memory_settings_handler))
+        .route(
+            "/tasks/conversation-history",
+            get(http::conversation_history::list_conversation_history),
+        )
+        .route(
+            "/tasks/conversations/:conversation_id/title",
+            put(http::conversation_history::update_conversation_title),
+        )
+        .route(
+            "/tasks/conversations/:conversation_id",
+            delete(http::conversation_history::archive_conversation),
+        )
         .route("/tasks/:task_id", get(get_task))
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/automation-runs", post(list_automation_runs))
@@ -885,22 +924,7 @@ async fn run() -> anyhow::Result<()> {
     let app = Router::new()
         .nest("/v1", api)
         .fallback_service(ui_service)
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([
-                    axum::http::Method::GET,
-                    axum::http::Method::POST,
-                    axum::http::Method::PUT,
-                    axum::http::Method::DELETE,
-                    axum::http::Method::OPTIONS,
-                ])
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::HeaderName::from_static("last-event-id"),
-                    axum::http::HeaderName::from_static("x-rustclaw-key"),
-                ]),
-        );
+        .layer(api_cors_layer());
 
     let listener = tokio::net::TcpListener::bind(&config.server.listen).await?;
     info!("clawd listening on {}", config.server.listen);
@@ -963,6 +987,19 @@ async fn submit_task(
     headers: HeaderMap,
     Json(mut req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
+    if worker::conversation_compaction::is_conversation_compaction_payload(&req.payload) {
+        if !matches!(req.kind, claw_core::types::TaskKind::Ask) {
+            return api_err::<SubmitTaskResponse>(
+                StatusCode::BAD_REQUEST,
+                "conversation_compaction_task_kind_invalid",
+            );
+        }
+        if let Err(error) =
+            worker::conversation_compaction::validate_conversation_compaction_payload(&req.payload)
+        {
+            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error);
+        }
+    }
     if worker::run_capability::is_direct_capability_payload(&req.payload) {
         if !matches!(req.kind, claw_core::types::TaskKind::Ask) {
             return api_err::<SubmitTaskResponse>(
@@ -992,7 +1029,7 @@ async fn submit_task(
             );
         }
         Err(SubmitTaskContextError::InvalidUserKey) => {
-            return api_err::<SubmitTaskResponse>(StatusCode::UNAUTHORIZED, "Invalid user_key");
+            return api_err::<SubmitTaskResponse>(StatusCode::UNAUTHORIZED, "auth_key_invalid");
         }
         Err(SubmitTaskContextError::UnknownAgentId(agent_id)) => {
             return api_err::<SubmitTaskResponse>(
@@ -1027,6 +1064,11 @@ async fn submit_task(
         requested_execution_mode,
     ) {
         return api_err::<SubmitTaskResponse>(error.status_code(), error.as_token());
+    }
+    if let Err(error) =
+        task_model_selection::validate_and_stamp_task_model_selection(&state, &mut req.payload)
+    {
+        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error);
     }
 
     match check_submit_task_access(&state, &submit_ctx) {
@@ -1237,13 +1279,13 @@ async fn get_task(
                 Err(TaskViewerAccessError::TaskOwnerMismatch) => {
                     return api_err::<TaskQueryResponse>(
                         StatusCode::UNAUTHORIZED,
-                        "Task owner mismatch",
+                        "task_owner_mismatch",
                     );
                 }
                 Err(TaskViewerAccessError::InvalidUserKey) => {
                     return api_err::<TaskQueryResponse>(
                         StatusCode::UNAUTHORIZED,
-                        "Invalid user_key",
+                        "auth_key_invalid",
                     );
                 }
             }
@@ -1283,14 +1325,11 @@ fn require_auth_identity_for_api<T: Serialize>(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
-        return Err(api_err::<T>(
-            StatusCode::UNAUTHORIZED,
-            "Missing X-RustClaw-Key header",
-        ));
+        return Err(api_err::<T>(StatusCode::UNAUTHORIZED, "auth_key_required"));
     };
     match resolve_auth_identity_by_key(state, raw_key) {
         Ok(Some(identity)) => Ok(identity),
-        Ok(None) => Err(api_err::<T>(StatusCode::UNAUTHORIZED, "Invalid user_key")),
+        Ok(None) => Err(api_err::<T>(StatusCode::UNAUTHORIZED, "auth_key_invalid")),
         Err(err) => {
             error!("resolve auth identity failed: {}", err);
             Err(api_err::<T>(

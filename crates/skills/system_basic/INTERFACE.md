@@ -4,18 +4,15 @@
 > Keep this spec aligned with the system_basic skill implementation.
 
 ## Capability Summary
-- `system_basic` provides system/runtime introspection plus higher-level read-only query helpers.
-- For new planner-facing filesystem tasks, prefer the virtual `fs_basic` contract. For new structured config field/key tasks, prefer the virtual `config_basic` contract. `system_basic` remains the runtime backing and compatibility layer for many read-only helpers.
-- It does **not** replace standalone base skills for raw file, directory, or command operations.
-- It is intended for complex composed queries where builtin primitives alone are too low-level for stable planning.
+- `system_basic` provides system/runtime introspection plus higher-level read-only query helpers; new planner-facing filesystem and structured-config tasks should prefer virtual `fs_basic` and `config_basic`, while this skill remains their runtime backing.
+- It does **not** replace standalone base skills for raw file, directory, or command operations; it is for composed queries where builtin primitives are too low-level for stable planning.
 - It is not the semantic document parser. For supported local documents that need key-point extraction, section understanding, excerpt judgment, or grounded summarization, prefer `doc_parse` when that skill is enabled; use `read_range` only for exact bounded line slices or raw text previews.
-- For directory inventory with filename or extension filtering, use `inventory_dir` with `files_only=true` and `ext_filter`; do not use `extract_field` / `extract_fields` unless the user explicitly asks for fields, keys, or values inside a specific structured document.
-- For directory count requests that need separate component counts, use `count_inventory` and make the requested dimensions explicit (`count_files=true`, `count_dirs=true`, or the relevant `kind_filter`/`ext_filter`) so the final answer can preserve each requested dimension instead of returning only `counts.total`.
-- When the user asks to list files and then briefly explain their purpose, first collect the file names with `inventory_dir`; the final explanation should be synthesized from the names and known project conventions, not from missing structured fields.
+- Use `inventory_dir` with `files_only=true` and `ext_filter` for filtered inventories, and `count_inventory` with explicit count dimensions for component counts; explanations must be synthesized from observed names rather than missing structured fields.
 - For recent/latest/last-modified directory inventory, use `inventory_dir` with `sort_by="mtime_desc"` exactly. If the request asks for files, set `files_only=true`; use `max_entries` for the requested count. Do not emit unsupported values such as `mtime`.
 - `extract_field` and `extract_fields` operate on exactly one structured file per call: use `path` plus `field_path`/`field_paths`. Do not pass `paths`, `targets`, or other multi-file arrays to these actions; for multiple files, call the action once per file.
 - `extract_field` / `extract_fields` first resolve exact dot/bracket paths. If a caller supplies one bare field key and exact root-level lookup misses, the skill may resolve it to a unique nested key in that structured document and report `resolved_field_path`, `match_strategy`, and `match_count`; ambiguous bare keys remain missing instead of guessing.
-- When a request asks for a value from the same JSON/TOML/YAML array item or TOML `[[array_table]]` block where another field equals a specified value, encode that relationship in `field_path` with an array filter selector, for example `items[?(@.id=='abc')].status` or `skills.[name=run_cmd].planner_kind`. Do not flatten it to `items.status` / `skills.planner_kind`; that drops the row/block condition.
+- `summarize_structured` recursively reports exact empty-string, null, empty-container, and false-boolean counts plus their machine field paths without returning scalar values. Use `field_path` to scope a category such as skill switches instead of reading and manually counting raw configuration text.
+- When a request asks for a value from the same JSON/TOML/YAML array item or TOML `[[array_table]]` block where another field equals a specified value, encode that relationship in `field_path` with an array filter selector, for example `items[?(@.id=='abc')].status` or `skills.[name=run_cmd].planner_kind`. The LLM-friendly rooted shorthand `skills.run_cmd.planner_kind` is also accepted when `run_cmd` uniquely matches an item's `name`, `id`, or `key`. Do not flatten it to `items.status` / `skills.planner_kind`; that drops the row/block condition.
 - For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
 
 ## Actions
@@ -29,6 +26,7 @@
 - `extract_field`
 - `extract_fields`
 - `structured_keys`
+- `summarize_structured`
 - `validate_structured`
 - `find_path`
 - `read_range`
@@ -72,7 +70,7 @@
 | `dir_compare` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `dir_compare` | `max_diffs` | no | integer | `100` | Preview cap for reported left-only/right-only diffs, clamped to `1..500`. |
 | `extract_field` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path. |
-| `extract_field` | `field_path` | yes | string | - | Dot/bracket path like `package.name`, `dependencies.0.name`, `items[0].name`, or `skills[?(@.name=='run_cmd')].planner_kind` for array item lookup by field value. The shorter LLM-friendly selector form `skills.[name=run_cmd].planner_kind` is also accepted. |
+| `extract_field` | `field_path` | yes | string | - | Dot/bracket path like `package.name`, `dependencies.0.name`, `items[0].name`, or `skills[?(@.name=='run_cmd')].planner_kind` for array item lookup by field value. The shorter LLM-friendly selector forms `skills.[name=run_cmd].planner_kind` and `skills.run_cmd.planner_kind` are also accepted. |
 | `extract_field` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `extract_fields` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path. |
 | `extract_fields` | `field_paths` | yes | string[]/string | - | Multiple dot/bracket paths to extract in one pass; supports the same array index/filter syntax as `field_path`. |
@@ -81,6 +79,10 @@
 | `structured_keys` | `field_path` | no | string | root | Optional dot path to an object/array inside the parsed document. |
 | `structured_keys` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `structured_keys` | `max_keys` | no | integer | `200` | Cap for returned object keys preview, clamped to `1..1000`. |
+| `summarize_structured` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path to summarize without returning scalar values. |
+| `summarize_structured` | `field_path` | no | string | root | Optional exact dot path that scopes all counts and returned paths to one subtree. |
+| `summarize_structured` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
+| `summarize_structured` | `max_paths` | no | integer | `200` | Per-category path preview cap, clamped to `1..1000`; counts remain exact when path previews are omitted. |
 | `validate_structured` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path to parse. |
 | `validate_structured` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `find_path` | `root` | no | string(path) | `.` | Search root inside workspace. |
@@ -119,7 +121,7 @@
 - `extract_field` / `extract_fields` return explicit parse errors for unsupported/invalid JSON, TOML, or YAML.
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
-- `read_range` accepts UTF-8 and UTF-8 with BOM. Binary/NUL or invalid UTF-8 input returns `error_kind=unsupported_encoding` plus `error_code=unsupported_text_encoding`; files beyond the bounded scan limit return `error_kind=file_too_large` plus `requires_artifact_read=true`.
+- `read_range` accepts UTF-8 and UTF-8 with BOM. Binary/NUL, invalid UTF-8, and oversized input return stable error fields plus a machine `handoff` containing detected kind, MIME, canonical capability, and a safe path reference; runtime must not parse error prose to choose the next capability.
 - `read_artifact_range` accepts only canonical regular files below the workspace artifact root and returns exact byte-page metadata, full-file SHA-256, UTF-8 or base64 content, and a continuation cursor.
 - `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory. Success output includes `summary_rows` mirrored as `results` and `candidates`; each directory row carries machine fields such as `path`, `name`, `file_count`, `dir_count`, `child_count`, `omitted_children`, and `truncated`.
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
@@ -145,6 +147,8 @@
   - `action`, `path`, `count`, and `results[]` objects with field path, existence, value type, and value fields; evidence roles `results`, `field_value`, and `count`.
 - `structured_keys` success `extra` fields:
   - `action`, `path`, `field_path`, `keys`, `count`, and truncation metadata; evidence roles `entries` and `count`.
+- `summarize_structured` success `extra` fields:
+  - `action`, `path`, `field_path`, `exists`, `scan_complete`, node/scalar counts, `empty_value_count`, category-specific empty counts/paths, `false_boolean_count`, `false_boolean_paths`, and `paths_omitted`; evidence roles `path`, `entries`, and `count`. Scalar configuration values are never returned.
 - `validate_structured` success `extra` fields:
   - `action`, `path`, `valid`, format, and parse details; evidence role `status`.
 - `find_path` success `extra` fields:

@@ -15,8 +15,10 @@ forward_x_forwarded = true
 max_incoming_body_bytes = 104857600
 # HttpOnly 会话 Cookie 名；浏览器须与 webd 对外地址同源访问 UI，Cookie 才能随 `/v1/*` 代理请求发送。
 #session_cookie_name = "webd_sid"
-# 会话秒数；进程内存储，重启后需重新登录。
+# 会话秒数；会话索引保存在服务端，webd 重启后仍可继续使用未过期 Cookie。
 #session_ttl_seconds = 86400
+# 服务端会话索引路径；文件包含敏感认证材料，只允许部署用户读取。
+#session_store_path = "data/webd_sessions.json"
 # 同一真实 IP + 规范化用户名连续失败 6 次后，锁定该组合 15 分钟。
 login_failure_limit = 6
 login_lockout_seconds = 900

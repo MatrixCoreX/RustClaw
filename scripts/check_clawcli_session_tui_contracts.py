@@ -184,13 +184,19 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "clawcli_parses_session_subcommands",
     ),
     "crates/clawcli/src/chat.rs": (
-        '("/continue", None)',
         '"user_continue"',
-        '("/approve", None)',
         '"approve_once"',
-        '("/approve-scope", None)',
         '"always_for_scope"',
-        '("/deny", None)',
+    ),
+    "crates/clawcli/src/chat_command.rs": (
+        'spec("/continue", "none")',
+        'spec("/approve", "none")',
+        'spec("/approve-scope", "none")',
+        'spec("/deny", "none")',
+        'ChatCommand::Continue',
+        'ChatCommand::Approve',
+        'ChatCommand::ApproveScope',
+        'ChatCommand::Deny',
     ),
     "crates/clawcli/src/commands/permission.rs": (
         "run_permission_grants",

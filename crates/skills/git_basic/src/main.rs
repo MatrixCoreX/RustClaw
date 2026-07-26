@@ -10,6 +10,8 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use toml::Value as TomlValue;
 
+mod local_write;
+
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
 const SKILL_NAME: &str = "git_basic";
 const DEFAULT_PAGE_LIMIT: usize = 20;
@@ -18,14 +20,14 @@ const MAX_REVISION_BYTES: usize = 512;
 const MAX_REPO_PATH_BYTES: usize = 4096;
 
 #[derive(Debug)]
-struct GitBasicError {
+pub(crate) struct GitBasicError {
     code: &'static str,
     detail: String,
     extra: Option<Value>,
 }
 
 impl GitBasicError {
-    fn new(code: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
@@ -33,7 +35,7 @@ impl GitBasicError {
         }
     }
 
-    fn with_extra(mut self, extra: Value) -> Self {
+    pub(crate) fn with_extra(mut self, extra: Value) -> Self {
         self.extra = Some(extra);
         self
     }
@@ -106,7 +108,7 @@ fn default_catalog(lang: &str) -> TextCatalog {
     );
     current.insert(
         "git_basic.err.unsupported_action".to_string(),
-        "unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev".to_string(),
+        "git_basic.err.unsupported_action".to_string(),
     );
     current.insert(
         "git_basic.err.run_git_failed".to_string(),
@@ -245,6 +247,9 @@ fn execute_with_workspace_root(
     let raw_action = optional_string(obj, "action", "git_action_invalid")?.unwrap_or("status");
     let action = normalize_action(raw_action);
     let root = resolve_repository_root(workspace_root, obj.get("repo"))?;
+    if local_write::is_local_write_action(&action) {
+        return local_write::execute_local_write(&root, obj, &action);
+    }
     let page = page_spec(obj)?;
 
     let mut input_meta = Map::new();
@@ -505,7 +510,7 @@ fn resolve_repository_root(
     Ok(root)
 }
 
-fn normalize_repo_relative_path(value: &str) -> Result<String, GitBasicError> {
+pub(crate) fn normalize_repo_relative_path(value: &str) -> Result<String, GitBasicError> {
     if value.is_empty() || value.len() > MAX_REPO_PATH_BYTES {
         return Err(GitBasicError::new(
             "git_path_invalid",
@@ -558,7 +563,7 @@ fn validated_pathspec_args(value: Option<&Value>) -> Result<Vec<String>, GitBasi
     Ok(vec!["--".to_string(), path])
 }
 
-fn resolve_revision(root: &Path, requested: &str) -> Result<String, GitBasicError> {
+pub(crate) fn resolve_revision(root: &Path, requested: &str) -> Result<String, GitBasicError> {
     let requested = requested.trim();
     if requested.is_empty()
         || requested.len() > MAX_REVISION_BYTES
@@ -570,10 +575,9 @@ fn resolve_revision(root: &Path, requested: &str) -> Result<String, GitBasicErro
             "git_basic.revision_invalid",
         ));
     }
-    let revision_arg = format!("{requested}^{{object}}");
     let output = Command::new("git")
         .current_dir(root)
-        .args(["rev-parse", "--verify", &revision_arg])
+        .args(["rev-parse", "--verify", requested])
         .output()
         .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
     let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();

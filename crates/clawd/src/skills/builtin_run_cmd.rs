@@ -1,12 +1,9 @@
-use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-
-use super::*;
 
 #[path = "builtin_run_cmd_artifact.rs"]
 mod output_artifact;
@@ -110,18 +107,6 @@ pub(super) fn run_cmd_checkpoint_claim_markers(command: &str) -> Vec<&'static st
 pub(super) fn run_cmd_claims_runtime_checkpoint_without_async_start(command: &str) -> bool {
     command_has_shell_background_operator(command)
         && run_cmd_checkpoint_claim_markers(command).len() >= 2
-}
-
-pub(super) fn suggested_command_from_args(map: &serde_json::Map<String, Value>) -> Option<String> {
-    map.get("suggested_params")
-        .and_then(|v| v.as_object())
-        .and_then(|obj| {
-            obj.get("command")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -921,115 +906,4 @@ fn prepare_run_cmd_process_for_lifetime(
         "run_cmd_process_sandbox_prepared"
     );
     Ok(prepared.command)
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct RunCmdSuggestionPayload {
-    command: String,
-    confidence: Option<f64>,
-    reason: Option<String>,
-}
-
-pub(super) fn parse_run_cmd_suggestion_payload(
-    raw: &str,
-) -> Result<crate::prompt_utils::ValidatedSchemaJson<RunCmdSuggestionPayload>, String> {
-    crate::prompt_utils::validate_against_schema::<RunCmdSuggestionPayload>(
-        raw,
-        crate::prompt_utils::PromptSchemaId::RunCmdSuggestion,
-    )
-    .map_err(|err| format!("run_cmd.nl2cmd_schema_validation_failed error={err}"))
-}
-
-fn build_run_cmd_nl_prompt(
-    request_text: &str,
-    cwd: &std::path::Path,
-    previous_command: Option<&str>,
-    previous_error: Option<&str>,
-) -> String {
-    let mut prompt = String::new();
-    prompt.push_str("instruction=Map request_text to one executable bash command for Linux.\n");
-    prompt.push_str("format=Return strict JSON only: {\"command\":\"...\",\"confidence\":0.0-1.0,\"reason\":\"...\"}\n");
-    prompt.push_str("rules:\n");
-    prompt.push_str("rule=Prefer read-only and low-risk commands.\n");
-    prompt.push_str("rule_id=no_default_sudo detail=avoid_sudo_unless_explicit_request\n");
-    prompt.push_str("rule=Avoid destructive commands (rm -rf, mkfs, reboot, shutdown, kill -9).\n");
-    prompt.push_str(
-        "rule=If one command may be missing, use shell fallback in one line (example: cmd1 || cmd2).\n",
-    );
-    prompt.push_str("rule=Output only a single-line command.\n\n");
-    prompt.push_str(&format!("cwd: {}\n", cwd.display()));
-    prompt.push_str(&format!("request_text: {}\n", request_text.trim()));
-    if let Some(prev) = previous_command {
-        prompt.push_str(&format!("previous_command: {}\n", prev.trim()));
-    }
-    if let Some(err) = previous_error {
-        prompt.push_str(&format!(
-            "previous_error: {}\n",
-            crate::truncate_for_log(err)
-        ));
-    }
-    prompt
-}
-
-pub(super) async fn suggest_command_for_run_cmd(
-    state: &AppState,
-    task: Option<&ClaimedTask>,
-    request_text: &str,
-    cwd: &std::path::Path,
-    previous_command: Option<&str>,
-    previous_error: Option<&str>,
-) -> Result<String, String> {
-    let prompt = build_run_cmd_nl_prompt(request_text, cwd, previous_command, previous_error);
-    // Phase 1.2: 有 task 时走完整的 LLM gateway —— provider fallback /
-    // audit log / model_io 日志 / per-task trace 都会统一记录；仅在没有
-    // task 上下文（legacy `run_tool` / 测试路径）时回退到 first provider。
-    let text = if let Some(task_ctx) = task {
-        crate::llm_gateway::run_with_fallback_with_prompt_source(
-            state,
-            task_ctx,
-            &prompt,
-            "run_cmd_nl2cmd",
-        )
-        .await
-        .map_err(|e| format!("run_cmd.nl2cmd_provider_failed error={e}"))?
-    } else {
-        let provider = state
-            .core
-            .llm_providers
-            .first()
-            .cloned()
-            .ok_or_else(|| "run_cmd.nl2cmd_no_provider".to_string())?;
-        let resp = crate::call_provider_with_retry(provider, &prompt)
-            .await
-            .map_err(|e| format!("run_cmd.nl2cmd_provider_failed error={e}"))?;
-        resp.text
-    };
-    let validated = parse_run_cmd_suggestion_payload(&text)
-        .map_err(|err| format!("{err}; raw={}", crate::truncate_for_log(&text)))?;
-    if !validated.raw_parse_ok {
-        tracing::info!(
-            "run_cmd NL2CMD schema_parse_recovery normalized={}",
-            validated.schema_normalized
-        );
-    }
-    let parsed = validated.value;
-    let mut command = parsed.command.trim().to_string();
-    if command.contains('\n') {
-        command = command
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-    }
-    if command.is_empty() {
-        return Err("run_cmd.nl2cmd_empty_command".to_string());
-    }
-    if let Some(conf) = parsed.confidence {
-        tracing::info!("run_cmd NL2CMD confidence={:.2}", conf);
-    }
-    if let Some(reason) = parsed.reason {
-        tracing::info!("run_cmd NL2CMD reason={}", crate::truncate_for_log(&reason));
-    }
-    Ok(command)
 }

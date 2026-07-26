@@ -86,6 +86,12 @@ fn mark_machine_envelope_loop_complete(
 }
 
 fn latest_machine_envelope_message(loop_state: &LoopState) -> Option<String> {
+    if crate::agent_engine::observed_output::later_successful_respond_supersedes_matching_output(
+        loop_state,
+        |output| machine_envelope_payload(output).is_some(),
+    ) {
+        return None;
+    }
     loop_state
         .delivery_messages
         .iter()

@@ -55,16 +55,19 @@ flowchart TD
     M --> N
 ```
 
-教学模式投影持久化的任务事件和 provider 事件。点击同一轮对话中的用户提问或助手回复，UI 都会定位到对应 `task_id`，并展示编号 LLM 调用、原始请求/响应字段、runtime stage、代码入口、策略决策、checkpoint、工具和 child-task 事件。浏览器历史只保存 task/message 轻量索引；provider 详情从当前模型日志和最近 7 天按日归档重新加载，并用结构化可用性原因区分完整详情、仅元数据、任务仍在运行，以及当时未记录或已经过期。
+教学模式投影持久化的任务事件和 provider 事件。点击同一轮对话中的用户提问或助手回复，UI 都会定位到对应 `task_id`，并展示编号 LLM 调用、原始请求/响应字段、runtime stage、代码入口、策略决策、checkpoint、工具和 child-task 事件。持久化 ask task 及其 `conversation_id` 是对话历史的权威来源；浏览器存储只作为草稿/偏好缓存。Provider 详情从当前模型日志和最近 7 天按日归档重新加载，并用结构化可用性原因区分完整详情、仅元数据、任务仍在运行，以及当时未记录或已经过期。
 
 ```mermaid
 flowchart LR
-    A[一次对话轮次] --> B[保存轻量 task_id<br/>与消息 id 索引]
-    B --> C[Task event archive]
-    B --> D[当前 + 保留的服务端日志<br/>provider calls LLM#1..N]
-    C --> E[选中轮次的教学视图]
-    D --> E
-    E --> F[流程时间线]
-    E --> G[模型原始请求与响应]
-    E --> H[策略、预算、恢复、工具、<br/>编码与 subagent 证据]
+    A[一次对话轮次] --> B[持久化 ask task<br/>conversation_id + 有界结果]
+    B --> C[按 owner 过滤的历史 API<br/>cursor + 页面摘要]
+    B --> D[Task event archive]
+    B --> E[当前 + 保留的服务端日志<br/>provider calls LLM#1..N]
+    C --> F[重新加载消息与教学 task 索引]
+    D --> G[选中轮次的教学视图]
+    E --> G
+    F --> G
+    G --> H[流程时间线]
+    G --> I[模型原始请求与响应]
+    G --> J[策略、预算、恢复、工具、<br/>编码与 subagent 证据]
 ```

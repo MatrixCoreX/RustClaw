@@ -459,6 +459,10 @@ echo "AGENT_PARITY_GATE_STEP on_demand_skill_builds"
 python3 "${ROOT_DIR}/scripts/check_on_demand_skill_builds.py" \
   > "${OUT_DIR}/on_demand_skill_builds.txt"
 
+echo "AGENT_PARITY_GATE_STEP optional_skill_nl_cases"
+python3 "${SCRIPT_DIR}/check_optional_skill_cases.py" \
+  > "${OUT_DIR}/optional_skill_nl_cases.txt"
+
 echo "AGENT_PARITY_GATE_STEP agent_parity_gate_inventory_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_agent_parity_gate_inventory.py" --self-test
@@ -589,6 +593,7 @@ fi
   echo "deterministic_boundary_inventory_contracts=1"
   echo "maintainability_skill_contracts=1"
   echo "on_demand_skill_builds=1"
+  echo "optional_skill_nl_cases=1"
   echo "agent_parity_gate_inventory_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract_self_test=1"

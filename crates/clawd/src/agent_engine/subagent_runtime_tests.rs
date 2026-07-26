@@ -359,7 +359,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
     let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
     let args = serde_json::json!({
-        "execution_mode": "persistent_child_task",
+        "action": "persistent_child_task",
         "role": "review",
         "objective": "machine_child_objective:persistent-review",
         "context_refs": ["AGENTS.md"],
@@ -461,7 +461,7 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
     let args = serde_json::json!({
-        "execution_mode": "persistent_child_task",
+        "action": "persistent_child_task",
         "role": "writer",
         "objective": "machine_child_objective:isolated-write",
         "context_refs": ["README.md"],
@@ -527,13 +527,14 @@ fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
     let args = serde_json::json!({
-        "execution_mode": "persistent_child_task",
+        "action": "persistent_child_task",
         "max_parallel": 2,
         "children": [
             {
                 "node_id": "writer",
                 "role": "writer",
                 "objective": "machine_child_objective:write",
+                "context_refs": ["plan/current.md"],
                 "allowed_capabilities": ["filesystem.write_text"],
                 "owned_paths": ["crates/runtime"]
             },
@@ -541,9 +542,9 @@ fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
                 "node_id": "reviewer",
                 "role": "reviewer",
                 "objective": "machine_child_objective:review",
+                "context_refs": ["plan/current.md"],
                 "allowed_capabilities": ["filesystem.read_text_range"],
-                "depends_on": [{"node_id": "writer", "required": true}],
-                "model_policy": {"model_class": "reasoning"}
+                "depends_on": [{"node_id": "writer", "required": true}]
             }
         ]
     });
@@ -578,7 +579,7 @@ fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
         json!(["filesystem.write_text"])
     );
     assert_eq!(reviewer["readiness"], "blocked_dependency");
-    assert_eq!(reviewer["model_policy"]["model_class"], "reasoning");
+    assert_eq!(reviewer["model_policy"], json!({}));
     assert_eq!(graph["edges"][0]["edge_kind"], "declared_dependency");
     assert_eq!(
         graph["edges"][0]["predecessor_task_id"],
@@ -652,6 +653,84 @@ fn subagent_model_child_result_merges_into_runtime_observation() {
 }
 
 #[test]
+fn subagent_batch_model_results_replace_parent_scaffolding() {
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 2;
+    let args = json!({
+        "children": [
+            {
+                "role": "review",
+                "objective": "review_runtime",
+                "context_refs": ["AGENTS.md"],
+                "allowed_capabilities": ["filesystem.read_text_range"]
+            },
+            {
+                "role": "test",
+                "objective": "review_tests",
+                "context_refs": ["crates/clawd/src/verifier.rs"],
+                "allowed_capabilities": ["filesystem.read_text_range"],
+                "required": false
+            }
+        ]
+    });
+    assert!(record_subagent_action_from_args(&mut loop_state, 4, 1, &args).is_none());
+
+    let merged = apply_model_assisted_batch_results_for_test(
+        &mut loop_state,
+        4,
+        1,
+        vec![
+            (
+                "subagent-batch:2:1:1:review".to_string(),
+                true,
+                json!({
+                    "schema_version": 1,
+                    "owner_layer": "subagent_model_child",
+                    "output_format": "machine_json",
+                    "status": "completed",
+                    "role": "review",
+                    "findings": [{"code": "runtime_consistent"}],
+                    "evidence_refs": ["AGENTS.md"],
+                    "confidence": 0.9
+                }),
+            ),
+            (
+                "subagent-batch:2:1:2:test".to_string(),
+                false,
+                json!({
+                    "schema_version": 1,
+                    "owner_layer": "subagent_model_child",
+                    "output_format": "machine_json",
+                    "status": "failed",
+                    "role": "test",
+                    "findings": [],
+                    "evidence_refs": [],
+                    "confidence": 0.0,
+                    "error_code": "test_evidence_unavailable"
+                }),
+            ),
+        ],
+    );
+
+    assert!(merged);
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["model_assisted"], true);
+    assert_eq!(observation["status"], "partial");
+    assert_eq!(observation["delegated_terminal_evidence"], true);
+    assert_eq!(observation["aggregation"]["completed_count"], 1);
+    assert_eq!(observation["aggregation"]["required_failed_count"], 0);
+    assert_eq!(observation["aggregation"]["optional_failed_count"], 1);
+    assert_eq!(
+        observation["child_results"][0]["findings"][0]["code"],
+        "runtime_consistent"
+    );
+    assert_eq!(
+        observation["child_results"][0]["model_result"]["owner_layer"],
+        "subagent_model_child"
+    );
+}
+
+#[test]
 fn subagent_model_child_parser_ignores_visible_thinking_and_nested_json() {
     let raw = r#"<think>notes with a nested but irrelevant object {"id":"F0","summary":"not result"} and refs ["/tmp/a"].</think>
 {"schema_version":1,"owner_layer":"subagent_model_child","output_format":"machine_json","status":"completed","role":"review","findings":[{"code":"boundary_consistent","summary":"policy and plan align"}],"evidence_refs":["AGENTS.md","plan/current.md"],"confidence":0.82}"#;
@@ -674,6 +753,20 @@ fn subagent_model_child_parser_rejects_partial_nested_array_as_result() {
 
     assert_eq!(parsed["status"], "failed");
     assert_eq!(parsed["error_code"], "subagent_child_json_parse_failed");
+}
+
+#[test]
+fn subagent_model_child_parser_rejects_unstructured_completion() {
+    let parsed = parse_child_model_result_for_test(
+        r#"{"status":"completed","summary":"looks good","evidence_refs":[]}"#,
+    );
+
+    assert_eq!(parsed["status"], "failed");
+    assert_eq!(
+        parsed["error_code"],
+        "subagent_child_result_contract_invalid"
+    );
+    assert_eq!(parsed["findings"], json!([]));
 }
 
 #[test]
@@ -1198,7 +1291,7 @@ fn persistent_subagent_registry_action_selects_persistent_runtime() {
     );
     assert!(
         !super::subagent_runtime_persistent::persistent_child_task_requested(
-            &serde_json::json!({"role": "review", "objective": "inspect"})
+            &serde_json::json!({"execution_mode": "persistent_child_task"})
         )
     );
 }

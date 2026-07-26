@@ -16,6 +16,19 @@ export interface LlmDirtyStateInput {
   draftApiFormat: string;
 }
 
+export interface LlmConfiguredStateInput {
+  selectedVendor: string;
+  selectedModel: string;
+  vendors: ReadonlyArray<{
+    name: string;
+    api_key_configured: boolean;
+  }>;
+  runtime?: {
+    vendor: string;
+    model: string;
+  } | null;
+}
+
 export function llmVendorSupportsApiFormat(vendor: string | null | undefined): boolean {
   const normalized = (vendor || "").trim();
   return normalized === "minimax" || normalized === "mimo";
@@ -27,6 +40,20 @@ function normalizeLlmApiFormat(value: string | null | undefined): string {
     return "anthropic_claude";
   }
   return "openai_compat";
+}
+
+export function isLlmConfigured(input: LlmConfiguredStateInput | null | undefined): boolean {
+  if (!input) return false;
+  const runtimeVendor = input.runtime?.vendor.trim() || "";
+  const runtimeModel = input.runtime?.model.trim() || "";
+  if (runtimeVendor && runtimeModel) return true;
+
+  const selectedVendor = input.selectedVendor.trim();
+  const selectedModel = input.selectedModel.trim();
+  if (!selectedVendor || !selectedModel) return false;
+  return input.vendors.some(
+    (vendor) => vendor.name === selectedVendor && vendor.api_key_configured,
+  );
 }
 
 export function hasUnsavedLlmDraftChanges(input: LlmDirtyStateInput | null | undefined): boolean {

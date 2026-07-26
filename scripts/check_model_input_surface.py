@@ -21,7 +21,10 @@ REGISTRY = ROOT / "configs/skills_registry.toml"
 # protocol maintenance without allowing the old catalog to return.
 MAX_GLOBAL_TOOL_OVERLAY_BYTES = 10_000
 MAX_EAGER_NATIVE_GROUPS = 7
-MAX_EAGER_PLANNER_CAPABILITIES = 71
+# Exact replace/image discovery and confirmation-gated local Git writes are
+# core coding-loop actions. They extend existing eager groups without adding a
+# new group or restoring domain catalogs to the global prompt.
+MAX_EAGER_PLANNER_CAPABILITIES = 78
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 
@@ -140,11 +143,16 @@ planner_capabilities = [{ name = "demo.hidden" }]
         measured = inventory(overlay, registry)
         assert measured == SurfaceMetrics(len(b"generic protocol\n"), 1, 1, ())
         assert not findings_for(measured)
-        oversized = SurfaceMetrics(MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1, 8, 72, ())
+        oversized = SurfaceMetrics(
+            MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1,
+            MAX_EAGER_NATIVE_GROUPS + 1,
+            MAX_EAGER_PLANNER_CAPABILITIES + 1,
+            (),
+        )
         assert findings_for(oversized) == [
             f"global_tool_overlay_bytes_grew:{MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1}>{MAX_GLOBAL_TOOL_OVERLAY_BYTES}",
             "eager_native_groups_grew:8>7",
-            "eager_planner_capabilities_grew:72>71",
+            "eager_planner_capabilities_grew:79>78",
         ]
         overlay.write_text("generic protocol\n### visible\n", encoding="utf-8")
         named_heading = inventory(overlay, registry)

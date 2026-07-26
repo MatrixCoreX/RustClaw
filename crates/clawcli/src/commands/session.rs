@@ -7,6 +7,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+use crate::chat_attachments::attachment_payload;
+use crate::chat_session::{
+    current_working_directory_identity, ChatSessionState, ChatSessionTransition, ModelOverride,
+    PermissionMode, SessionAttachmentRef, WorkingDirectoryIdentity,
+};
 use crate::{client, output, task};
 
 use super::report::task_report_json;
@@ -88,32 +93,41 @@ pub(crate) fn run_session_continue_latest(
     submission_options: task::TaskSubmissionOptions,
 ) -> Result<()> {
     let mut store = load_session_store()?;
-    let mut thread = session_store_select_latest_chat_thread(&store)?;
-    let source_task_id = thread.current_task_id.clone();
+    let mut session = session_store_select_latest_chat_session(&store)?;
+    let source_task_id = session.active_task_id.clone();
+    let attachments = attachment_payload(&session.attachments)?;
     let task_id = task::submit_thread_ask(
         base_url,
         key,
         message,
-        &thread.thread_id,
-        &thread.session_id,
-        source_task_id.as_deref(),
+        task::ThreadAskContext {
+            conversation_id: &session.conversation_id,
+            session_id: &session.session_id,
+            resume_task_id: source_task_id.as_deref(),
+            model_override: session.model_override.as_ref(),
+            compacted_context_ref: session.compacted_context_ref.as_deref(),
+            goal_ref: session.goal_ref.as_deref(),
+            attachments: &attachments,
+        },
         submission_options,
     )?;
-    session_store_record_chat_task(&mut store, &mut thread, &task_id)?;
+    session.apply(ChatSessionTransition::AttachmentsCleared)?;
+    session_store_record_chat_task(&mut store, &mut session, &task_id)?;
+    session_store_persist_chat_session(&mut store, &session)?;
     save_session_store(&store)?;
     let summary = json!({
         "operation": "session_continue_latest",
-        "session_id": thread.session_id,
-        "thread_id": thread.thread_id,
+        "session_id": session.session_id,
+        "conversation_id": session.conversation_id,
         "source_task_id": source_task_id,
         "task_id": task_id,
-        "event_cursor": thread.last_event_seq,
+        "event_cursor": session.event_cursor,
     });
     if json_output {
         output::print_json_pretty(&summary);
     } else {
-        println!("session_id={}", thread.session_id);
-        println!("thread_id={}", thread.thread_id);
+        println!("session_id={}", session.session_id);
+        println!("conversation_id={}", session.conversation_id);
         println!("task_id={task_id}");
     }
     Ok(())
@@ -255,30 +269,31 @@ pub(super) struct StoredSession {
     latest_checkpoint_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     latest_event_seq: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_override: Option<ModelOverride>,
+    #[serde(default)]
+    permission_mode: PermissionMode,
+    #[serde(default)]
+    attachments: Vec<SessionAttachmentRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compacted_context_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    working_directory: Option<WorkingDirectoryIdentity>,
     #[serde(default)]
     archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forked_from: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ChatThreadState {
-    pub(crate) thread_id: String,
-    pub(crate) session_id: String,
-    pub(crate) current_task_id: Option<String>,
-    pub(crate) task_ids: Vec<String>,
-    pub(crate) last_event_seq: u64,
-}
-
-pub(crate) fn load_or_create_chat_thread(
-    requested_thread_id: Option<&str>,
+pub(crate) fn load_or_create_chat_session(
+    requested_conversation_id: Option<&str>,
     force_new: bool,
-) -> Result<ChatThreadState> {
+) -> Result<ChatSessionState> {
     let mut store = load_session_store()?;
-    let generated_id = format!("cli_thread_{}", uuid::Uuid::new_v4().simple());
-    let state = session_store_select_chat_thread(
+    let generated_id = format!("cli_conversation_{}", uuid::Uuid::new_v4().simple());
+    let state = session_store_select_chat_session(
         &mut store,
-        requested_thread_id,
+        requested_conversation_id,
         force_new,
         &generated_id,
     )?;
@@ -286,29 +301,35 @@ pub(crate) fn load_or_create_chat_thread(
     Ok(state)
 }
 
-pub(crate) fn record_chat_task(state: &mut ChatThreadState, task_id: &str) -> Result<()> {
+pub(crate) fn record_chat_session_task(state: &mut ChatSessionState, task_id: &str) -> Result<()> {
     let mut store = load_session_store()?;
     session_store_record_chat_task(&mut store, state, task_id)?;
     save_session_store(&store)
 }
 
-pub(crate) fn record_chat_cursor(state: &mut ChatThreadState, cursor: u64) -> Result<()> {
+pub(crate) fn record_chat_session_cursor(state: &mut ChatSessionState, cursor: u64) -> Result<()> {
     let mut store = load_session_store()?;
     session_store_record_chat_cursor(&mut store, state, cursor)?;
     save_session_store(&store)
 }
 
-pub(super) fn session_store_select_chat_thread(
+pub(crate) fn persist_chat_session(state: &ChatSessionState) -> Result<()> {
+    let mut store = load_session_store()?;
+    session_store_persist_chat_session(&mut store, state)?;
+    save_session_store(&store)
+}
+
+pub(super) fn session_store_select_chat_session(
     store: &mut SessionStore,
-    requested_thread_id: Option<&str>,
+    requested_conversation_id: Option<&str>,
     force_new: bool,
     generated_id: &str,
-) -> Result<ChatThreadState> {
-    let requested = requested_thread_id
+) -> Result<ChatSessionState> {
+    let requested = requested_conversation_id
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    if requested.is_some_and(|value| !valid_cli_thread_ref(value)) {
-        anyhow::bail!("chat_thread_id_invalid");
+    if requested.is_some_and(|value| !valid_cli_conversation_ref(value)) {
+        anyhow::bail!("chat_conversation_id_invalid");
     }
     let selected_id = if force_new {
         generated_id
@@ -326,28 +347,37 @@ pub(super) fn session_store_select_chat_thread(
             })
             .unwrap_or(generated_id)
     };
-    if !valid_cli_thread_ref(selected_id) {
-        anyhow::bail!("chat_thread_id_invalid");
+    if !valid_cli_conversation_ref(selected_id) {
+        anyhow::bail!("chat_conversation_id_invalid");
     }
+    let working_directory = current_working_directory_identity()?;
     let entry = store
         .sessions
         .entry(selected_id.to_string())
         .or_insert_with(|| StoredSession {
             session_id: selected_id.to_string(),
             thread_id: Some(selected_id.to_string()),
+            working_directory: Some(working_directory.clone()),
             ..StoredSession::default()
         });
     if entry.archived || entry.thread_id.is_none() {
         entry.archived = false;
         entry.thread_id = Some(selected_id.to_string());
     }
+    match entry.working_directory.as_ref() {
+        Some(existing) if existing != &working_directory => {
+            anyhow::bail!("chat_working_directory_mismatch")
+        }
+        Some(_) => {}
+        None => entry.working_directory = Some(working_directory),
+    }
     store.latest_session_id = Some(selected_id.to_string());
-    Ok(chat_thread_state(entry))
+    chat_session_state(entry)
 }
 
-pub(super) fn session_store_select_latest_chat_thread(
+pub(super) fn session_store_select_latest_chat_session(
     store: &SessionStore,
-) -> Result<ChatThreadState> {
+) -> Result<ChatSessionState> {
     let session_id = store
         .latest_session_id
         .as_deref()
@@ -357,80 +387,96 @@ pub(super) fn session_store_select_latest_chat_thread(
         .get(session_id)
         .filter(|session| !session.archived && session.thread_id.is_some())
         .ok_or_else(|| anyhow::anyhow!("chat_session_latest_missing"))?;
-    Ok(chat_thread_state(session))
+    chat_session_state(session)
 }
 
 pub(super) fn session_store_record_chat_task(
     store: &mut SessionStore,
-    state: &mut ChatThreadState,
+    state: &mut ChatSessionState,
     task_id: &str,
 ) -> Result<()> {
-    let task_id = task_id.trim();
-    if !valid_cli_task_ref(task_id) {
-        anyhow::bail!("chat_task_id_invalid");
-    }
+    let task_id = task_id.trim().to_string();
+    state.apply(ChatSessionTransition::TaskSubmitted(task_id.clone()))?;
     let entry = store
         .sessions
         .get_mut(&state.session_id)
         .ok_or_else(|| anyhow::anyhow!("chat_session_missing"))?;
-    if entry.task_ids.last().map(String::as_str) != Some(task_id) {
-        entry.task_ids.push(task_id.to_string());
-    }
-    entry.current_task_id = Some(task_id.to_string());
+    entry.task_ids = state.task_ids.clone();
+    entry.current_task_id = state.active_task_id.clone();
     entry.latest_event_seq = Some("0".to_string());
     store.latest_session_id = Some(state.session_id.clone());
-    state.current_task_id = Some(task_id.to_string());
-    state.task_ids = entry.task_ids.clone();
-    state.last_event_seq = 0;
     Ok(())
 }
 
 pub(super) fn session_store_record_chat_cursor(
     store: &mut SessionStore,
-    state: &mut ChatThreadState,
+    state: &mut ChatSessionState,
     cursor: u64,
 ) -> Result<()> {
+    state.apply(ChatSessionTransition::CursorAdvanced(cursor))?;
     let entry = store
         .sessions
         .get_mut(&state.session_id)
         .ok_or_else(|| anyhow::anyhow!("chat_session_missing"))?;
     entry.latest_event_seq = Some(cursor.to_string());
     store.latest_session_id = Some(state.session_id.clone());
-    state.last_event_seq = cursor;
     Ok(())
 }
 
-fn chat_thread_state(session: &StoredSession) -> ChatThreadState {
-    ChatThreadState {
-        thread_id: session
+pub(super) fn session_store_persist_chat_session(
+    store: &mut SessionStore,
+    state: &ChatSessionState,
+) -> Result<()> {
+    let entry = store
+        .sessions
+        .get_mut(&state.session_id)
+        .ok_or_else(|| anyhow::anyhow!("chat_session_missing"))?;
+    entry.thread_id = Some(state.conversation_id.clone());
+    entry.current_task_id = state.active_task_id.clone();
+    entry.task_ids = state.task_ids.clone();
+    entry.model_override = state.model_override.clone();
+    entry.permission_mode = state.permission_mode;
+    entry.attachments = state.attachments.clone();
+    entry.compacted_context_ref = state.compacted_context_ref.clone();
+    entry.active_goal_id = state.goal_ref.clone();
+    entry.latest_event_seq = Some(state.event_cursor.to_string());
+    entry.working_directory = Some(state.working_directory.clone());
+    store.latest_session_id = Some(state.session_id.clone());
+    Ok(())
+}
+
+fn chat_session_state(session: &StoredSession) -> Result<ChatSessionState> {
+    Ok(ChatSessionState {
+        conversation_id: session
             .thread_id
             .clone()
             .unwrap_or_else(|| session.session_id.clone()),
         session_id: session.session_id.clone(),
-        current_task_id: session.current_task_id.clone(),
+        active_task_id: session.current_task_id.clone(),
         task_ids: session.task_ids.clone(),
-        last_event_seq: session
+        model_override: session.model_override.clone(),
+        permission_mode: session.permission_mode,
+        attachments: session.attachments.clone(),
+        compacted_context_ref: session.compacted_context_ref.clone(),
+        goal_ref: session.active_goal_id.clone(),
+        event_cursor: session
             .latest_event_seq
             .as_deref()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(0),
-    }
+        working_directory: session
+            .working_directory
+            .clone()
+            .unwrap_or(current_working_directory_identity()?),
+    })
 }
 
-fn valid_cli_thread_ref(value: &str) -> bool {
+fn valid_cli_conversation_ref(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
-}
-
-fn valid_cli_task_ref(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
 pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &Value) -> Value {
@@ -451,6 +497,7 @@ pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &V
         .sessions
         .get(&session_id)
         .and_then(|session| session.forked_from.clone());
+    let previous = store.sessions.get(&session_id).cloned();
     let session = StoredSession {
         session_id: session_id.clone(),
         thread_id: string_at(summary, "/thread_id"),
@@ -461,6 +508,21 @@ pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &V
         workspace_root: string_at(summary, "/workspace_root"),
         latest_checkpoint_id: string_at(summary, "/latest_checkpoint_id"),
         latest_event_seq: string_at(summary, "/latest_event_seq"),
+        model_override: previous
+            .as_ref()
+            .and_then(|session| session.model_override.clone()),
+        permission_mode: previous
+            .as_ref()
+            .map(|session| session.permission_mode)
+            .unwrap_or_default(),
+        attachments: previous
+            .as_ref()
+            .map(|session| session.attachments.clone())
+            .unwrap_or_default(),
+        compacted_context_ref: previous
+            .as_ref()
+            .and_then(|session| session.compacted_context_ref.clone()),
+        working_directory: previous.and_then(|session| session.working_directory),
         archived: summary
             .get("archived")
             .and_then(Value::as_bool)
@@ -757,6 +819,11 @@ fn stored_session_json(session: &StoredSession) -> Value {
         "workspace_root": session.workspace_root.clone(),
         "latest_checkpoint_id": session.latest_checkpoint_id.clone(),
         "latest_event_seq": session.latest_event_seq.clone(),
+        "model_override": session.model_override.clone(),
+        "permission_mode": session.permission_mode.as_token(),
+        "attachments": session.attachments.clone(),
+        "compacted_context_ref": session.compacted_context_ref.clone(),
+        "working_directory": session.working_directory.clone(),
         "archived": session.archived,
         "forked_from": session.forked_from.clone(),
     })

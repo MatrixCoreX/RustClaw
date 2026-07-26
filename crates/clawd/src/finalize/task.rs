@@ -66,35 +66,15 @@ use task_payload_helpers::{
 };
 use task_provider_wait::record_provider_wait_checkpoint;
 pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
+pub(crate) use task_resume::retry_answer_after_verifier;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_is_missing_file_delivery_result,
-    resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
+    resume_failure_is_unbound_path_lookup_clarify_result,
 };
 use task_runtime_failure_payload::ask_runtime_failure_machine_payload;
 use task_verified_terminal::verified_terminal_answer_after_verifier_pass;
 use task_verifier_retry_commit::try_commit_answer_verifier_retry_answer;
-
-pub(crate) async fn retry_loop_answer_after_verifier(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    user_request: &str,
-    output_contract: &crate::IntentOutputContract,
-    journal: &crate::task_journal::TaskJournal,
-    rejected_answer: &str,
-    verifier: &crate::answer_verifier::AnswerVerifierOut,
-) -> Option<String> {
-    retry_answer_after_verifier(
-        state,
-        task,
-        user_request,
-        output_contract,
-        journal,
-        rejected_answer,
-        verifier,
-    )
-    .await
-}
 
 #[cfg(test)]
 use task_resume::{
@@ -134,6 +114,7 @@ async fn finalize_ask_success(
         task.claim_attempt,
         &result.to_string(),
     )?;
+    crate::assistant_presentation::publish_terminal_answer(state, task, answer_text);
     insert_ask_memory_pair(
         state,
         task,
@@ -357,6 +338,7 @@ pub(crate) async fn finalize_ask_direct_success(
         task.claim_attempt,
         &result.to_string(),
     )?;
+    crate::assistant_presentation::publish_terminal_answer(state, task, answer_text);
     insert_ask_memory_pair(
         state,
         task,
@@ -712,6 +694,7 @@ pub(crate) async fn finalize_ask_result(
                     let retry_verifier_input = answer_verifier.clone();
                     journal.record_answer_verifier_summary(answer_verifier);
                     if answer_verifier_retry {
+                        crate::assistant_presentation::abort_for_verifier_retry(state, task);
                         if let Some(retried_answer) = retry_answer_after_verifier(
                             state,
                             task,

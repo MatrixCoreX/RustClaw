@@ -5,9 +5,11 @@
 ## Capability Summary
 - 查询 A 股（沪/深）实时行情：现价、今开、昨收、涨跌幅、成交量等。
 - 支持股票代码查询，也支持通过配置的公司名/简称/别名查询后再取行情。
+- 支持 provider-free 报价请求预览，只规范化代码或标记名称解析方式，不调用行情接口或 LLM。
 - 仅读、不涉及交易或下单。
 
 ## Actions
+- `preview_quote`：离线检查报价请求并返回规范化结果；不请求新浪财经或 LLM。
 - `quote`（默认）/ `query`：按股票代码，或按已配置的公司名/别名，查询单只 A 股行情。
 
 ## Parameter Contract
@@ -15,6 +17,10 @@
 |---|---|---|---|---|---|
 | quote / query | `symbol` 或 `code` 或 `name` | 是 | string | - | 股票代码，或 `configs/stock.toml` 中配置的公司名/简称/别名，如 600519、000001、sh600519、sz000001、中国移动、茅台 |
 | quote / query | `action` | 否 | string | "quote" | 固定为 quote 或 query |
+| preview_quote | `symbol` 或 `code` 或 `name` | 是 | string | - | 待检查的股票代码或名称。 |
+| preview_quote | `action` | 是 | string | - | 固定为 `preview_quote`。 |
+
+- Preview `extra`: `action=preview_quote`, `requested_symbol`, `normalized_code`, `resolution_mode`, `provider=sina_finance`, `would_execute=false`, and `external_call_count=0`; no quote or model provider is contacted.
 
 ## Error Contract
 - 缺少 symbol/code 时返回明确提示。

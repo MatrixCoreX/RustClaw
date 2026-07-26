@@ -1,0 +1,3 @@
+# Registry-owned optional skill: invest_copy. Uses only local investor metadata.
+optional_skill_lifecycle|investor_list_ko|optional_skill:invest_copy,case_role:happy,provider_mode:offline,external_calls:0,independent,capability:invest_copy.list_investors,requires_tool_call:true|외부 API나 모델을 호출하지 말고, 투자 문안 기능에서 현재 선택 가능한 투자자 프로필 목록을 구조화된 필드로 보여 주세요.|expect=contains:personas
+optional_skill_lifecycle|invest_copy_missing_data_en|optional_skill:invest_copy,case_role:failure,provider_mode:offline,external_calls:0,independent,requires_tool_call:false|Validate a draft request that names an investor but supplies no grounded research data. Do not call a model; identify the structured field required before drafting.

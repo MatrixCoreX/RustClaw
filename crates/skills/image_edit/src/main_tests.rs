@@ -46,6 +46,57 @@ fn success_response_exposes_media_machine_fields() {
 }
 
 #[test]
+fn preview_edit_returns_machine_payload_without_writing() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-image-edit-preview-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp root");
+    let output = root.join("planned/edit.png");
+    let cfg = RootConfig {
+        image_edit: ImageSkillConfig {
+            default_vendor: Some("minimax".to_string()),
+            default_model: Some("image-01".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let (text, extra) = execute(
+        &cfg,
+        &root,
+        json!({
+            "action": "preview_edit",
+            "instruction": "pixel art",
+            "image": {"path": "source.png"},
+            "output_path": "planned/edit.png",
+        }),
+        None,
+    )
+    .expect("preview");
+
+    assert_eq!(text, "IMAGE_EDIT_DRY_RUN");
+    assert_eq!(extra["action"], "preview_edit");
+    assert_eq!(extra["status"], "dry_run");
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["would_mutate"], false);
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "image-01");
+    assert_eq!(extra["outputs"], json!([]));
+    assert_eq!(
+        extra["planned_outputs"][0]["path"].as_str(),
+        Some(output.to_string_lossy().as_ref())
+    );
+    assert!(!output.exists());
+    assert!(!output.parent().expect("output parent").exists());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn parse_vendor_aliases() {
     assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
     assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));

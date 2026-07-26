@@ -230,7 +230,7 @@ fn main() -> anyhow::Result<()> {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
-                        extra: Some(error_extra("execution_failed")),
+                        extra: Some(error_extra(&err)),
                         error_text: Some(err),
                     },
                 }
@@ -239,7 +239,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: Some(error_extra("invalid_input")),
+                extra: Some(error_extra("code=invalid_input")),
                 error_text: Some(format!("code=invalid_input detail={err}")),
             },
         };
@@ -249,15 +249,42 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
-    json!({
+fn error_extra(error_text: &str) -> Value {
+    let error_code = error_text
+        .split_ascii_whitespace()
+        .find_map(|part| part.strip_prefix("code="))
+        .filter(|code| {
+            !code.is_empty()
+                && code
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        })
+        .unwrap_or("execution_failed");
+    let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_kind": error_code,
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
-    })
+        "side_effect_applied": false,
+        "failure_phase": "pre_dispatch",
+    });
+    if error_code == "missing_anchor" {
+        extra["required_any"] = json!([
+            ["latitude", "longitude"],
+            ["city"],
+            ["district"],
+            ["address"],
+            ["place"]
+        ]);
+        extra["recovery_action"] = json!("request_missing_argument");
+    } else if error_code == "incomplete_coordinates" {
+        extra["required"] = json!(["latitude", "longitude"]);
+        extra["recovery_action"] = json!("request_missing_argument");
+    }
+    extra
 }
 
 fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
@@ -271,9 +298,12 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
         .unwrap_or("recommend")
         .trim()
         .to_ascii_lowercase();
+    if action == "preview_recommend" {
+        return preview_recommendation(args, req.context.as_ref(), cfg);
+    }
     if action != "recommend" {
         return Err(format!(
-            "code=unsupported_action action={action} expected=recommend"
+            "code=unsupported_action action={action} expected=preview_recommend|recommend"
         ));
     }
 
@@ -314,7 +344,7 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
         "action": "recommend",
         "mode": "merchant_recommendation",
         "provider": query.provider,
-        "provider_token": provider_token(query.provider),
+        "provider_id": provider_token(query.provider),
         "anchor": {
             "source": query.anchor_source,
             "label": query.anchor_text,
@@ -337,6 +367,134 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
         "candidates": top_list,
     });
     Ok((text, extra))
+}
+
+fn preview_recommendation(
+    args: &Map<String, Value>,
+    context: Option<&Value>,
+    cfg: &RuntimeConfig,
+) -> Result<(String, Value), String> {
+    let ctx_provider = context_string(context, &["provider"]);
+    let provider_input = args
+        .get("provider")
+        .and_then(Value::as_str)
+        .or(ctx_provider.as_deref());
+    let provider = provider_input
+        .and_then(|raw| parse_provider(Some(raw)).or_else(|| cfg.provider_for_alias(raw)))
+        .unwrap_or(cfg.default_provider);
+    let provider_runtime = match provider {
+        MapProvider::Amap => &cfg.amap,
+        MapProvider::Google => &cfg.google,
+    };
+
+    let category = get_trimmed(args, &["category"]);
+    let cuisine = get_trimmed(args, &["cuisine"]);
+    let keyword = get_trimmed(args, &["keyword"]);
+    let city = get_trimmed(args, &["city"]);
+    let district = get_trimmed(args, &["district"]);
+    let address = get_trimmed(args, &["address"]);
+    let place = get_trimmed(args, &["place", "location", "q"]);
+    let keyword_text = build_search_keyword(keyword, category.clone(), cuisine.clone(), cfg);
+    let price_pref = parse_price_pref(args.get("price_level"));
+    let ctx_sort = context_string(context, &["sort_by"]);
+    let sort_by = parse_sort_by(
+        args.get("sort_by")
+            .and_then(Value::as_str)
+            .or(ctx_sort.as_deref()),
+        &cfg.default_sort_by,
+    );
+    let radius_meters = args
+        .get("max_distance_meters")
+        .or_else(|| args.get("radius"))
+        .and_then(json_to_u32)
+        .unwrap_or(cfg.default_radius_meters)
+        .clamp(MIN_RADIUS_METERS, MAX_RADIUS_METERS);
+    let top_k = args
+        .get("top_k")
+        .or_else(|| args.get("topK"))
+        .and_then(json_to_usize)
+        .unwrap_or(cfg.default_top_k)
+        .clamp(1, MAX_TOP_K);
+
+    let latitude = args.get("latitude").and_then(json_to_f64);
+    let longitude = args.get("longitude").and_then(json_to_f64);
+    let (anchor_source, anchor_label, geocode_required) = match (latitude, longitude) {
+        (Some(latitude), Some(longitude)) => {
+            validate_map_coordinates(latitude, longitude)?;
+            (
+                "coordinates",
+                format!("lat={latitude:.6} lon={longitude:.6}"),
+                false,
+            )
+        }
+        (None, None) => {
+            let anchor = join_parts(&[
+                city.as_deref(),
+                district.as_deref(),
+                address.as_deref(),
+                place.as_deref(),
+            ]);
+            if anchor.is_empty() {
+                return Err(
+                    "code=missing_anchor required_any=latitude_longitude,city,district,address,place"
+                        .to_string(),
+                );
+            }
+            ("place", anchor, true)
+        }
+        _ => return Err("code=incomplete_coordinates required=latitude+longitude".to_string()),
+    };
+
+    let text = format!(
+        "message_key=skill.map_merchant.recommendation_preview_ready provider={} anchor_source={anchor_source}",
+        provider_token(provider)
+    );
+    Ok((
+        text,
+        json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "ok",
+            "message_key": "skill.map_merchant.recommendation_preview_ready",
+            "action": "preview_recommend",
+            "provider": provider,
+            "provider_id": provider_token(provider),
+            "provider_enabled": provider_runtime.enabled,
+            "provider_credentials_configured": !provider_runtime.api_key.trim().is_empty(),
+            "anchor": {
+                "source": anchor_source,
+                "label": anchor_label,
+                "latitude": latitude,
+                "longitude": longitude,
+                "geocode_required": geocode_required,
+            },
+            "query": {
+                "keyword": keyword_text,
+                "category": category,
+                "cuisine": cuisine,
+                "price_level": price_pref,
+                "sort_by": sort_by,
+                "radius_meters": radius_meters,
+                "top_k": top_k,
+                "city": city,
+                "district": district,
+                "address": address.or(place),
+            },
+            "would_execute": false,
+            "external_call_count": 0,
+        }),
+    ))
+}
+
+fn validate_map_coordinates(latitude: f64, longitude: f64) -> Result<(), String> {
+    if !latitude.is_finite()
+        || !longitude.is_finite()
+        || !(-90.0..=90.0).contains(&latitude)
+        || !(-180.0..=180.0).contains(&longitude)
+    {
+        return Err("code=invalid_coordinates".to_string());
+    }
+    Ok(())
 }
 
 fn build_query(
@@ -1048,7 +1206,21 @@ fn build_search_keyword(
     cuisine: Option<String>,
     cfg: &RuntimeConfig,
 ) -> String {
-    let merged = join_parts(&[keyword.as_deref(), cuisine.as_deref(), category.as_deref()]);
+    let mut seen = HashSet::new();
+    let mut parts = Vec::new();
+    for value in [keyword.as_deref(), cuisine.as_deref(), category.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if seen.insert(value.to_lowercase()) {
+            parts.push(value);
+        }
+    }
+    let merged = parts.join(" ");
     if merged.is_empty() {
         cfg.default_keyword.clone()
     } else {

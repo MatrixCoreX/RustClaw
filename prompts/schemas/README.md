@@ -57,7 +57,6 @@ For a prompt at `prompts/layers/overlays/<name>.md`:
 | `long_term_summary.schema.json` | `prompts/layers/overlays/long_term_summary_prompt.md` | `crates/clawd/src/memory/service.rs::LongTermRefreshLlmOut` + memory fact candidate parser (drift test: `long_term_summary_schema_drift`) |
 | `context_compaction.schema.json` | `prompts/layers/overlays/context_compaction_prompt.md` | `crates/clawd/src/agent_engine/context_compaction.rs::run_model_assisted_context_compaction` + strict normalizer |
 | `voice_mode_intent.schema.json` | `prompts/layers/overlays/voice_mode_intent_prompt.md` | `crates/claw-core/src/hard_rules/voice_mode.rs::VoiceModeIntentDecision` + `crates/telegramd/src/main.rs` (drift test: `voice_mode_intent_schema_drift`) |
-| `run_cmd_suggestion.schema.json` | inline prompt `crates/clawd/src/skills/builtin.rs::build_run_cmd_nl_prompt` | `crates/clawd/src/skills/builtin.rs::RunCmdSuggestionPayload` (drift test: `run_cmd_suggestion_schema_drift`) |
 | `image_reference_resolver.schema.json` | `prompts/layers/overlays/image_reference_resolver_prompt.md` | `crates/skills/image_edit/src/main.rs::parse_llm_selected_index` |
 | `language_infer.schema.json` | `prompts/layers/overlays/language_infer_prompt.md` | `crates/skills/image_vision/src/main.rs::parse_language_choice_from_llm` |
 | `stock_alias_choice.schema.json` | inline JSON contract in `optional_skills/stock/src/main.rs::choose_candidate_via_llm` | `optional_skills/stock/src/main.rs::parse_llm_alias_response` |

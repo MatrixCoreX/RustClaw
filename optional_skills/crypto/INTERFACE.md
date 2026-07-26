@@ -7,9 +7,11 @@
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.
 - It supports multi-exchange routing via `exchange` (mainly `binance` and `okx`; quote sources also include Gate.io, Coinbase, Kraken, CoinGecko).
 - Private exchange actions (`trade_preview`, `trade_submit`, order status/cancel/open orders/history, `positions`) require bound exchange credentials. The skill checks the target exchange binding before parameter validation or private API calls; if the current `user_key` has no bound API, it returns a clear “API not bound” error.
-- **Symbol / pair**: If the asset or trading pair is ambiguous or could map to multiple symbols, ask one concise clarification before calling trade/order/quote-affecting actions; do not guess `symbol`.
-- **Exchange default**: For exchange-scoped actions, use explicit `exchange` first. If omitted, use configured `crypto.execution_mode` / `crypto.default_exchange`. If neither is configured, ask one concise clarification instead of assuming `binance`.
-- **Execution vs preview**: `trade_preview` is for preview-only user intent. `trade_submit` is only when the **current** user message explicitly requests immediate execution (same turn). There is **no** platform-level second-step pending-confirm chain in `clawd`; do not rely on a later yes/no follow-up flow.
+- **Planner boundary:** the ordinary agent loop can resolve the provider-free `preview_quote_request` plus `quote`, `multi_quote`, and `positions` through `crypto.preview_quote`, `crypto.quote`, `crypto.multi_quote`, and `crypto.positions`.
+- **Direct/admin boundary:** every other action is available only through an explicit structured `run_skill`/admin invocation. This interface documents those actions but does not expose them to ordinary planner selection.
+- **Symbol / pair:** planner-visible calls require one unambiguous structured symbol. Direct/admin callers are responsible for resolving ambiguity before invocation.
+- **Exchange default:** explicit `exchange` wins; otherwise the skill uses configured `crypto.execution_mode` / `crypto.default_exchange`.
+- **Execution vs preview:** direct/admin callers use `trade_preview` for non-mutating preview and `trade_submit` for explicitly authorized execution. Runtime confirmation policy applies to the complete runner.
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
 ## Config Entry Points
@@ -31,7 +33,7 @@
   physically dropped. New runtime code must use the crypto storage repository.
 
 ## Actions
-- Market/info: `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles` (aliases `kline`, `klines`, `candlestick`, `candlesticks`, `ohlcv`; these normalize to `indicator` when an `indicator` param is also present), `indicator` (aliases `technical_indicator`, `technical_indicators`, `ta_indicator`, `ta`), `price_alert_check`, `onchain`
+- Market/info: `preview_quote_request` (provider-free normalization only), `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles` (aliases `kline`, `klines`, `candlestick`, `candlesticks`, `ohlcv`; these normalize to `indicator` when an `indicator` param is also present), `indicator` (aliases `technical_indicator`, `technical_indicators`, `ta_indicator`, `ta`), `price_alert_check`, `onchain`
 - **Price-alert aliases** (normalize to `price_alert_check` internally, no separate actions): `price_monitor`, `monitor_price`, `price_alert`, `volatility_alert`.
 - Trade/order: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `cancel_all_orders` (alias `cancel_open_orders`), `open_orders` (alias `get_open_orders`, `pending_orders`), `trade_history` (alias `my_trades`, `recent_trades`), `positions`
 
@@ -43,6 +45,7 @@
 | many actions | `symbol` | depends | string | - | Trading pair symbol. Normalize to canonical form only when uniquely identifiable; if ambiguous, planner must clarify first—do not guess. |
 | `quote` | `symbol` | yes | string | - | Single symbol quote; aggregates Binance/OKX/Gate/Coinbase/Kraken/CoinGecko. |
 | `multi_quote` | `symbols` or `symbol` | yes | array/string | - | Multi-symbol batch quote; max 20 symbols. |
+| `preview_quote_request` | `symbols` or `symbol` | yes | array/string | - | Normalize up to 20 requested symbols and show the provider plan without credentials or network calls. |
 | `get_book_ticker`/`book_ticker` | `symbol` | yes | string | - | Best bid/ask snapshot. |
 | `get_book_ticker`/`book_ticker` | `exchange` | no | string | `dual` | `dual` aggregates multiple exchanges. |
 | `binance_symbol_check` | `symbol` | yes | string | - | Validate symbol exists on Binance and return lot/filter info. |
@@ -73,6 +76,8 @@
 - `extra.content_excerpt`: compact quote text for runtime evidence checks. Consumers should use this structured field instead of depending on localized `text` parsing.
 - `extra.quote` / `extra.quotes`: preferred quote objects with `symbol`, `price_usd`, `change_24h_pct`, `exchange`, and `source`.
 - `extra.quotes_by_exchange`: per-exchange quote objects when available.
+
+- `preview_quote_request` returns `requested_symbols`, `normalized_symbols`, provider tokens, `would_execute=false`, and `external_call_count=0`; it does not read credentials, fetch quotes, or submit orders.
 | `onchain` | `chain` | no | string | `bitcoin` | `bitcoin`/`btc` or `ethereum`/`eth`. |
 | `onchain` (eth address mode) | `address` | no | string | - | If provided, returns address balance + recent txs. |
 | `onchain` (eth address mode) | `token` | no | string | `eth` | Native or configured ERC20 token symbol. |
@@ -101,15 +106,14 @@
 | `positions` | none | no | - | - | Returns exchange account balances. |
 | all | `timeout_seconds` | no | number | config default | Request timeout override (3–120s). |
 
-## Risk Rules (Important for Agents)
+## Risk Rules
 - **Respond**: Do not summarize unless the user explicitly asks for a summary. When the user did not ask for a summary, return only the skill result or one short necessary reply; no extra recap or conclusion.
-- **Symbol ambiguity (hard)**: If mapping from user wording to a single concrete `symbol` is ambiguous, low-confidence, or multi-valued, ask exactly one concise clarification (exact pair or coin) before any `trade_preview`, `trade_submit`, or other trade/order/cancel/status call that depends on `symbol`. Do not guess for execution or order paths.
-- For explicit place-order intents with complete params **and** an unambiguous symbol in the **same** user message, prefer direct `trade_submit` with `confirm=true` and return a clear success/failure result.
-- Use `trade_preview` when the user explicitly asks preview/estimate, or when key submit params are missing.
-- `trade_submit` should be used only when the **current** user request itself explicitly indicates immediate execution / confirmed execution (same turn, e.g. clear “市价买入…执行下单” / “place it now” with full params). Pass `confirm=true` in that case. Do **not** treat a prior `trade_preview` plus a separate follow-up as a platform-managed confirmation chain—`clawd` does not host a second-step yes/no or pending-confirm flow.
+- Ordinary planner calls are limited to the three registry-declared read capabilities. Do not construct unregistered `crypto.*` capability names or emit direct trading actions from the planner.
+- Direct/admin callers must supply unambiguous structured symbols and parameters. Runtime must not derive authorization by matching user-visible text or localized confirmation phrases.
+- `trade_preview` is non-mutating. `trade_submit` and cancel actions are mutating and require direct/admin authorization plus runtime confirmation policy.
+- `trade_submit.confirm=true` records direct caller intent but does not replace runtime authorization.
 - **`trade_preview` response `extra`**: includes structured **`order`** (submit-shaped fields) plus `effective_qty`, `notional_usd`, `risk_checks`, `decision=preview_only` for transparency; there is **no** platform-level second-step confirm chain in `clawd`.
-- **Planner routing**: Explicit place-order in one message (e.g. “在0.09挂单5U狗狗币”) → `trade_submit` with `confirm=true` when symbol and params are unambiguous. Preview-only (e.g. “预览一下”“先算算”) → only `trade_preview`. Cancel one order → `cancel_order` (require `order_id` or `client_order_id`; if missing, call `open_orders` first or ask). Cancel all for symbol → `cancel_all_orders` only when user said “所有”/“全部” for that symbol. Query open orders → `open_orders` only (do not route “查挂单” to cancel). After `trade_submit`, success must include `order_id` or exchange status; failure must include concrete error reason. For trade_preview and trade_submit, prefer including `exchange` (e.g. binance, okx) when known.
-- **Cancel safety**: Do not call `cancel_order` without at least one of `order_id` or `client_order_id` (or a prior step that supplies it). Do not call `cancel_all_orders` unless the user explicitly requested to cancel all orders or all for a symbol.
+- **Cancel safety:** direct callers must supply an order identifier for `cancel_order`. `cancel_all_orders` must be an explicit structured direct/admin action.
 - Binance spot orders are subject to `min_notional_usd` (default 1.0 USDT; Binance actually requires ~10 USDT) and `max_notional_usd` limits.
 - `qty=all` is only valid for `side=sell`.
 - `stop_loss_limit`/`take_profit_limit` require both `price` (limit price) and `stop_price` (trigger price).
@@ -182,30 +186,6 @@ Request (30-minute lookback, 5% threshold, both directions):
 {"request_id":"demo-3b","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":30,"threshold_pct":5,"direction":"both","exchange":"binance"}}
 ```
 Response `text` includes the lookback window, **reference/base** price, **current** price, change %, threshold, and direction. Response `extra` includes numeric `reference_price`, `current_price`, `change_pct`, `window_minutes`, `start_price` (same as `reference_price`), `triggered`, `trend`, `candles`, etc.
-
-### Example 4 — Stop-loss limit order preview
-Request:
-```json
-{"request_id":"demo-4","args":{"action":"trade_preview","exchange":"binance","symbol":"BTCUSDT","side":"sell","order_type":"stop_loss_limit","qty":0.001,"price":99000,"stop_price":99500}}
-```
-
-### Example 5 — Open orders query
-Request:
-```json
-{"request_id":"demo-5","args":{"action":"open_orders","exchange":"binance","symbol":"BTCUSDT"}}
-```
-
-### Example 6 — Cancel all orders (Binance)
-Request:
-```json
-{"request_id":"demo-6","args":{"action":"cancel_all_orders","exchange":"binance","symbol":"BTCUSDT"}}
-```
-
-### Example 7 — Trade history
-Request:
-```json
-{"request_id":"demo-7","args":{"action":"trade_history","exchange":"binance","symbol":"DOGEUSDT","limit":10}}
-```
 
 ### Example 8 — Trade preview (market buy with USDT amount)
 Request:

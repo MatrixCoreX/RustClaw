@@ -36,8 +36,13 @@
 - Publishing requires `use_xurl=true` (or `X_USE_XURL=true`) because non-`xurl` publish mode is not implemented.
 - Unsupported extra fields should be rejected by planner/contract.
 - All responses include machine-readable `extra` when the request is parsed.
-- Success `extra` contains `status`, `action`, `source_skill`, `outcome`, `dry_run`, `send`, `published`, text length fields, and sanitized config-presence booleans.
-- Error `extra` contains stable `error_kind` values such as `invalid_input`, `text_too_long`, `publish_disabled`, `xurl_spawn_failed`, `xurl_failed`, `xurl_timeout`, `xurl_non_json_response`, `xurl_api_errors`, and `xurl_missing_id`.
+- Success `extra` contains `status`, `action`, `source_skill`, `draft_text`,
+  `outcome`, `dry_run`, `send`, `published`, `would_execute`,
+  `external_call_count`, text length fields, and sanitized config-presence
+  booleans. Preview delivery should copy `draft_text` and status fields from
+  this machine object instead of rewriting the post text.
+- Error `extra` contains stable `error_kind`, `published=false`, `would_execute=false`, and `external_call_count`. Validation, disabled publishing, and spawn errors report zero external calls; errors after `xurl` starts report one attempted call.
+- Stable error kinds include `invalid_input`, `text_too_long`, `publish_disabled`, `xurl_spawn_failed`, `xurl_failed`, `xurl_timeout`, `xurl_non_json_response`, `xurl_api_errors`, and `xurl_missing_id`.
 
 ## Request/Response Examples
 ### Example 1
@@ -47,7 +52,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"x skill dry_run=1, preview post: Daily market note","extra":{"status":"ok","action":"post","source_skill":"x","outcome":"dry_run","dry_run":true,"send":false,"published":false,"text_char_count":17,"max_text_chars":280,"use_xurl":true,"require_explicit_send":true,"xurl_configured":{"bin":true,"app":false,"auth":false,"username":false}},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"x skill dry_run=1, preview post: Daily market note","extra":{"status":"ok","action":"post","source_skill":"x","draft_text":"Daily market note","outcome":"dry_run","dry_run":true,"send":false,"published":false,"would_execute":false,"external_call_count":0,"text_char_count":17,"max_text_chars":280,"use_xurl":true,"require_explicit_send":true,"xurl_configured":{"bin":true,"app":false,"auth":false,"username":false}},"error_text":null}
 ```
 
 ### Example 2

@@ -160,6 +160,31 @@ impl ChildPatchFixture {
 }
 
 #[test]
+fn missing_child_task_exposes_bounded_pre_dispatch_replan_contract() {
+    let fixture = ChildPatchFixture::new("missing-child");
+    let args = json!({
+        "action": "apply_child_patch",
+        "child_task_id": "does-not-exist",
+        "patch_ref": "missing-patch-ref",
+    });
+    let error = execute_child_task_patch(
+        &fixture.state,
+        Some(&fixture.parent),
+        args.as_object().expect("child patch args"),
+    )
+    .expect_err("missing child task must fail");
+    let parsed =
+        crate::skills::parse_structured_skill_error(&error).expect("structured missing task error");
+    let extra = parsed.extra.expect("replan metadata");
+
+    assert_eq!(parsed.error_kind, "child_patch_task_not_found");
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+}
+
+#[test]
 fn parent_reviews_then_applies_child_patch_with_checkpoint_and_cleanup() {
     let fixture = ChildPatchFixture::new("apply");
 

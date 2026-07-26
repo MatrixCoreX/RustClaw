@@ -200,6 +200,44 @@ fn mutation_projection_keeps_async_resume_contract_and_drops_user_content() {
 }
 
 #[test]
+fn mutation_projection_keeps_exact_replace_receipt_without_diff_content() {
+    let projection = safe_mutation_outcome_projection(Some(&serde_json::json!({
+        "schema_version": 1,
+        "source": "workspace_replace",
+        "status": "ok",
+        "action": "replace_text",
+        "checkpoint_id": "mutation_123",
+        "mutation_id": "sha256:mutation",
+        "before_sha256": "sha256:before",
+        "after_sha256": "sha256:after",
+        "occurrence_count": 1,
+        "replacement_count": 1,
+        "reversible": true,
+        "changed_byte_range": {
+            "before_start": 2,
+            "before_end": 5,
+            "after_start": 2,
+            "after_end": 7
+        },
+        "path": "secret-project-name.txt",
+        "diff_preview": "must not persist"
+    })))
+    .expect("safe projection");
+
+    assert_eq!(
+        projection["structured_extra"]["checkpoint_id"],
+        "mutation_123"
+    );
+    assert_eq!(
+        projection["structured_extra"]["changed_byte_range"]["after_end"],
+        7
+    );
+    assert!(projection["structured_extra"].get("path").is_none());
+    assert!(projection["structured_extra"].get("diff_preview").is_none());
+    assert!(!projection.to_string().contains("must not persist"));
+}
+
+#[test]
 fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture();
@@ -267,6 +305,12 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
             .get("agent_loop.mutation_replay_suppressed")
             .map(String::as_str),
         Some("true")
+    );
+    let replay_output = &loop_state.capability_results[0].data["output"];
+    assert_eq!(replay_output["idempotency_replay"], true);
+    assert_eq!(
+        replay_output["recorded_result"]["structured_extra"]["pending_async_job"]["job_id"],
+        "local_process:/tmp/rustclaw-job-1"
     );
 }
 

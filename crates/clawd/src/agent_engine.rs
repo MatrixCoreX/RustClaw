@@ -233,6 +233,9 @@ pub(crate) struct LoopState {
     pub(crate) last_actions_fingerprint: Option<String>,
     pub(crate) repeat_action_counts: HashMap<String, usize>,
     pub(crate) successful_action_fingerprints: HashMap<String, usize>,
+    /// Failed actions remain blocked at the exact same argument fingerprint
+    /// until a successful mutation changes the relevant runtime state.
+    pub(crate) failed_action_fingerprints: HashMap<String, usize>,
     pub(crate) consecutive_no_progress: usize,
     pub(crate) last_output: Option<String>,
     pub(crate) output_vars: HashMap<String, String>,

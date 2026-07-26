@@ -3,12 +3,14 @@ use serde_json::Value;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{
-    now_ts, now_ts_u64, parse_task_status, ActiveTaskItem, AppState, ClaimedTask, TaskQueryResponse,
-};
+use crate::{now_ts, now_ts_u64, parse_task_status, AppState, ClaimedTask, TaskQueryResponse};
 
+mod active;
 mod lifecycle_projection;
 
+pub(crate) use active::{
+    list_active_tasks_for_user_internal, list_active_tasks_internal, list_all_active_tasks_internal,
+};
 use lifecycle_projection::{
     append_checkpoint_resume_directive_lifecycle_fields, append_task_lease_lifecycle_fields,
     async_poll_terminal_projection_without_visible_reply, executing_resume_executor_state,
@@ -829,122 +831,6 @@ fn publish_parent_graph_terminal_event(
             parent_task_id, error
         );
     }
-}
-
-pub(crate) fn list_active_tasks_internal(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    exclude_task_id: Option<&str>,
-) -> anyhow::Result<Vec<ActiveTaskItem>> {
-    let exclude_task_id = normalized_optional_task_id(exclude_task_id);
-    let now = now_ts().parse::<i64>().unwrap_or_default();
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "SELECT task_id, kind, payload_json, status, result_json,
-                CAST(COALESCE(NULLIF(created_at, ''), '0') AS INTEGER) AS created_ts,
-                CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS updated_ts,
-                lease_owner,
-                lease_expires_at,
-                claim_attempt,
-                claimed_at
-         FROM tasks
-         WHERE user_id = ?1
-           AND chat_id = ?2
-           AND status IN ('running', 'queued')
-           AND (?3 IS NULL OR task_id <> ?3)
-         ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
-                  created_ts ASC,
-                  task_id ASC",
-    )?;
-    let rows = stmt.query_map(
-        params![user_id, chat_id, exclude_task_id.as_deref()],
-        |row| {
-            let task_id: String = row.get(0)?;
-            let kind: String = row.get(1)?;
-            let payload_json: String = row.get(2)?;
-            let status: String = row.get(3)?;
-            let result_json_str: Option<String> = row.get(4)?;
-            let created_ts: i64 = row.get(5)?;
-            let updated_ts: i64 = row.get(6)?;
-            let lease_owner: Option<String> = row.get(7)?;
-            let lease_expires_at: i64 = row.get(8)?;
-            let claim_attempt: i64 = row.get(9)?;
-            let claimed_at: i64 = row.get(10)?;
-            Ok((
-                task_id,
-                kind,
-                payload_json,
-                status,
-                result_json_str,
-                created_ts,
-                updated_ts,
-                lease_owner,
-                lease_expires_at,
-                claim_attempt,
-                claimed_at,
-            ))
-        },
-    )?;
-    let mut out = Vec::new();
-    for (idx, row) in rows.enumerate() {
-        let (
-            task_id,
-            kind,
-            payload_json,
-            status,
-            result_json_str,
-            created_ts,
-            updated_ts,
-            lease_owner,
-            lease_expires_at,
-            claim_attempt,
-            claimed_at,
-        ) = row?;
-        let ref_ts = if updated_ts > 0 {
-            updated_ts
-        } else {
-            created_ts
-        };
-        let age_seconds = if ref_ts > 0 { (now - ref_ts).max(0) } else { 0 };
-        let summary = summarize_active_task_payload(&kind, &payload_json);
-        let result_json = result_json_str
-            .as_deref()
-            .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-        let mut lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
-            &status,
-            result_json.as_ref(),
-            (updated_ts > 0).then_some(updated_ts),
-        );
-        append_task_lease_lifecycle_fields(
-            &mut lifecycle,
-            lease_owner.as_deref(),
-            lease_expires_at,
-            claim_attempt,
-            claimed_at,
-        );
-        append_checkpoint_resume_directive_lifecycle_fields(&mut lifecycle, result_json.as_ref());
-        let execution_state =
-            crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
-        out.push(ActiveTaskItem {
-            index: idx + 1,
-            task_id,
-            kind,
-            status,
-            execution_state: serde_json::to_value(execution_state)
-                .ok()
-                .and_then(|value| value.as_str().map(ToOwned::to_owned))
-                .unwrap_or_else(|| "failed".to_string()),
-            summary,
-            age_seconds,
-            lifecycle: Some(lifecycle),
-        });
-    }
-    Ok(out)
 }
 
 pub(crate) fn list_due_paused_checkpoint_tasks_internal(

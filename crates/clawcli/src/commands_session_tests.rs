@@ -1,8 +1,9 @@
 use super::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
-    session_store_delete_json, session_store_fork_json, session_store_record_chat_cursor,
-    session_store_record_chat_task, session_store_select_chat_thread,
-    session_store_select_latest_chat_thread, session_store_upsert_summary, SessionStore,
+    session_store_delete_json, session_store_fork_json, session_store_persist_chat_session,
+    session_store_record_chat_cursor, session_store_record_chat_task,
+    session_store_select_chat_session, session_store_select_latest_chat_session,
+    session_store_upsert_summary, SessionStore,
 };
 
 #[test]
@@ -136,46 +137,129 @@ fn session_store_archive_delete_and_fork_use_machine_metadata() {
 }
 
 #[test]
-fn chat_thread_store_resumes_latest_and_persists_task_cursor() {
+fn chat_session_store_resumes_latest_and_persists_task_cursor() {
     let mut store = SessionStore::default();
     let mut first =
-        session_store_select_chat_thread(&mut store, None, false, "cli_thread_generated_1")
-            .expect("create chat thread");
-    assert_eq!(first.thread_id, "cli_thread_generated_1");
-    assert!(first.current_task_id.is_none());
+        session_store_select_chat_session(&mut store, None, false, "cli_conversation_generated_1")
+            .expect("create chat session");
+    assert_eq!(first.conversation_id, "cli_conversation_generated_1");
+    assert!(first.active_task_id.is_none());
 
     session_store_record_chat_task(&mut store, &mut first, "task-first").expect("record task");
     session_store_record_chat_cursor(&mut store, &mut first, 17).expect("record cursor");
-    assert_eq!(first.current_task_id.as_deref(), Some("task-first"));
-    assert_eq!(first.last_event_seq, 17);
+    assert_eq!(first.active_task_id.as_deref(), Some("task-first"));
+    assert_eq!(first.event_cursor, 17);
 
     let resumed =
-        session_store_select_chat_thread(&mut store, None, false, "cli_thread_generated_2")
-            .expect("resume latest thread");
-    assert_eq!(resumed.thread_id, first.thread_id);
-    assert_eq!(resumed.current_task_id, first.current_task_id);
-    assert_eq!(resumed.last_event_seq, 17);
-    let latest = session_store_select_latest_chat_thread(&store).expect("select latest thread");
+        session_store_select_chat_session(&mut store, None, false, "cli_conversation_generated_2")
+            .expect("resume latest session");
+    assert_eq!(resumed.conversation_id, first.conversation_id);
+    assert_eq!(resumed.active_task_id, first.active_task_id);
+    assert_eq!(resumed.event_cursor, 17);
+    let latest = session_store_select_latest_chat_session(&store).expect("select latest session");
     assert_eq!(latest, resumed);
 
-    let fresh = session_store_select_chat_thread(&mut store, None, true, "cli_thread_generated_3")
-        .expect("create fresh thread");
-    assert_eq!(fresh.thread_id, "cli_thread_generated_3");
-    assert!(fresh.current_task_id.is_none());
+    let fresh =
+        session_store_select_chat_session(&mut store, None, true, "cli_conversation_generated_3")
+            .expect("create fresh session");
+    assert_eq!(fresh.conversation_id, "cli_conversation_generated_3");
+    assert!(fresh.active_task_id.is_none());
 }
 
 #[test]
-fn chat_thread_store_rejects_non_machine_thread_and_task_refs() {
+fn chat_session_store_rejects_non_machine_conversation_and_task_refs() {
     let mut store = SessionStore::default();
-    assert!(session_store_select_latest_chat_thread(&store).is_err());
-    assert!(session_store_select_chat_thread(
+    assert!(session_store_select_latest_chat_session(&store).is_err());
+    assert!(session_store_select_chat_session(
         &mut store,
-        Some("thread with spaces"),
+        Some("conversation with spaces"),
         false,
         "unused"
     )
     .is_err());
     let mut state =
-        session_store_select_chat_thread(&mut store, None, false, "cli_thread_valid").unwrap();
+        session_store_select_chat_session(&mut store, None, false, "cli_conversation_valid")
+            .unwrap();
     assert!(session_store_record_chat_task(&mut store, &mut state, "task/invalid").is_err());
+}
+
+#[test]
+fn chat_session_store_persists_only_safe_preferences_and_authoritative_refs() {
+    let mut store = SessionStore::default();
+    let mut state =
+        session_store_select_chat_session(&mut store, None, false, "cli_conversation_prefs")
+            .unwrap();
+    state.model_override = Some(crate::chat_session::ModelOverride {
+        provider: "minimax".to_string(),
+        model: "MiniMax-M3".to_string(),
+    });
+    state.permission_mode = crate::chat_session::PermissionMode::Safe;
+    state.compacted_context_ref = Some("context:1".to_string());
+    state.goal_ref = Some("goal:1".to_string());
+    state
+        .attachments
+        .push(crate::chat_session::SessionAttachmentRef {
+            canonical_path: state.working_directory.canonical_path.clone(),
+            display_path: "docs/input.md".to_string(),
+            kind: "file".to_string(),
+            mime_type: "text/markdown".to_string(),
+            size: 12,
+            sha256: "a".repeat(64),
+            materialization: "bounded_text_context".to_string(),
+            truncated: false,
+        });
+    session_store_persist_chat_session(&mut store, &state).unwrap();
+
+    let restored =
+        session_store_select_latest_chat_session(&store).expect("restore safe preferences");
+    assert_eq!(restored.model_override, state.model_override);
+    assert_eq!(restored.permission_mode, state.permission_mode);
+    assert_eq!(restored.compacted_context_ref, state.compacted_context_ref);
+    assert_eq!(restored.goal_ref, state.goal_ref);
+    assert_eq!(restored.attachments, state.attachments);
+
+    let encoded = serde_json::to_value(&store).unwrap().to_string();
+    assert!(!encoded.contains("prompt"));
+    assert!(!encoded.contains("api_key"));
+}
+
+#[test]
+fn successful_noninteractive_continuation_clears_persisted_pending_attachments() {
+    let mut store = SessionStore::default();
+    let mut state =
+        session_store_select_chat_session(&mut store, None, false, "cli_conversation_pending")
+            .unwrap();
+    state
+        .attachments
+        .push(crate::chat_session::SessionAttachmentRef {
+            canonical_path: state.working_directory.canonical_path.clone(),
+            display_path: "docs/pending.md".to_string(),
+            kind: "file".to_string(),
+            mime_type: "text/markdown".to_string(),
+            size: 12,
+            sha256: "b".repeat(64),
+            materialization: "bounded_text_context".to_string(),
+            truncated: false,
+        });
+    session_store_persist_chat_session(&mut store, &state).unwrap();
+    assert_eq!(
+        session_store_select_latest_chat_session(&store)
+            .unwrap()
+            .attachments
+            .len(),
+        1
+    );
+
+    state
+        .apply(crate::chat_session::ChatSessionTransition::AttachmentsCleared)
+        .unwrap();
+    session_store_record_chat_task(&mut store, &mut state, "task-continuation").unwrap();
+    session_store_persist_chat_session(&mut store, &state).unwrap();
+
+    let restored = session_store_select_latest_chat_session(&store).unwrap();
+    assert!(restored.attachments.is_empty());
+    assert_eq!(
+        restored.active_task_id.as_deref(),
+        Some("task-continuation")
+    );
 }

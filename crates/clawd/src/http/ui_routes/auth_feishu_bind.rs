@@ -970,13 +970,29 @@ async fn create_auth_key_handler(
     }
 }
 
-fn ui_auth_error(message: &str) -> (StatusCode, Json<ApiResponse<Value>>) {
+fn ui_auth_error(error_code: &'static str) -> (StatusCode, Json<ApiResponse<Value>>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ApiResponse {
+            ok: false,
+            data: Some(json!({
+                "owner_layer": "ui_auth",
+                "error_code": error_code,
+                "status_code": error_code,
+                "message_key": format!("clawd.ui.auth.{error_code}"),
+            })),
+            error: Some(error_code.to_string()),
+        }),
+    )
+}
+
+fn ui_auth_code_error<T>(error_code: &'static str) -> (StatusCode, Json<ApiResponse<T>>) {
     (
         StatusCode::UNAUTHORIZED,
         Json(ApiResponse {
             ok: false,
             data: None,
-            error: Some(message.to_string()),
+            error: Some(error_code.to_string()),
         }),
     )
 }
@@ -991,11 +1007,11 @@ pub(crate) fn require_ui_identity(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
-        return Err(ui_auth_error("Missing X-RustClaw-Key header"));
+        return Err(ui_auth_error("auth_key_required"));
     };
     match resolve_auth_identity_by_key(state, raw_key) {
         Ok(Some(identity)) => Ok(identity),
-        Ok(None) => Err(ui_auth_error("Invalid key")),
+        Ok(None) => Err(ui_auth_error("auth_key_invalid")),
         Err(err) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -1053,8 +1069,13 @@ async fn webd_internal_verify_login(
             StatusCode::UNAUTHORIZED,
             Json(ApiResponse {
                 ok: false,
-                data: None,
-                error: Some("invalid username or password".to_string()),
+                data: Some(json!({
+                    "owner_layer": "webd_login",
+                    "error_code": "invalid_credentials",
+                    "status_code": "invalid_credentials",
+                    "message_key": "clawd.webd.login.invalid_credentials",
+                })),
+                error: Some("invalid_credentials".to_string()),
             }),
         ),
         Err(err) => (
@@ -1180,14 +1201,7 @@ async fn verify_ui_key(
                 error: None,
             }),
         ),
-        Ok(None) => (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Invalid key".to_string()),
-            }),
-        ),
+        Ok(None) => ui_auth_code_error("auth_key_invalid"),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -1274,14 +1288,7 @@ async fn bind_channel_key(
                 error: None,
             }),
         ),
-        Ok(None) => (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Invalid key".to_string()),
-            }),
-        ),
+        Ok(None) => ui_auth_code_error("auth_key_invalid"),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {

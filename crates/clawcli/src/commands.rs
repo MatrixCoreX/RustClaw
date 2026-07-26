@@ -30,16 +30,16 @@ pub(crate) use goal::{
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
 pub(crate) use mcp::run_mcp;
-pub(crate) use models::{run_models_catalog, run_models_readiness};
+pub(crate) use models::{resolve_chat_model_override, run_models_catalog, run_models_readiness};
 pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_grants,
     run_permission_inspect, run_permission_revoke,
 };
 pub(crate) use run_skill::run_skill;
 pub(crate) use session::{
-    load_or_create_chat_thread, record_chat_cursor, record_chat_task, run_session_archive,
-    run_session_continue_latest, run_session_delete, run_session_fork, run_session_list,
-    run_session_resume, run_session_show, ChatThreadState,
+    load_or_create_chat_session, persist_chat_session, record_chat_session_cursor,
+    record_chat_session_task, run_session_archive, run_session_continue_latest, run_session_delete,
+    run_session_fork, run_session_list, run_session_resume, run_session_show,
 };
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
@@ -68,7 +68,7 @@ use llm_trace::{llm_trace_text_lines, task_llm_trace_url};
 #[cfg(test)]
 use models::{
     filter_catalog_response, model_catalog_text_lines, model_readiness_json,
-    model_readiness_text_lines,
+    model_readiness_text_lines, resolve_model_override_from_catalog,
 };
 #[cfg(test)]
 use permission::permission_report_json;
@@ -77,9 +77,10 @@ use report::{coding_review_json, subagent_report_json, task_report_json, task_re
 #[cfg(test)]
 use session::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
-    session_store_delete_json, session_store_fork_json, session_store_record_chat_cursor,
-    session_store_record_chat_task, session_store_select_chat_thread,
-    session_store_select_latest_chat_thread, session_store_upsert_summary, SessionStore,
+    session_store_delete_json, session_store_fork_json, session_store_persist_chat_session,
+    session_store_record_chat_cursor, session_store_record_chat_task,
+    session_store_select_chat_session, session_store_select_latest_chat_session,
+    session_store_upsert_summary, SessionStore,
 };
 #[cfg(test)]
 use task_control::{automation_runs_request_payload, task_resume_control_summary_json};

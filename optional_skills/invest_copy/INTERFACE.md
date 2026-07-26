@@ -49,7 +49,10 @@
 
 - `draft`：`schema_version`、`source_skill`、`status`、`message_key=skill.invest_copy.draft_ready`、`action`、`person_slug`、`summary_mode`（`llm` \| `heuristic`）、`data_truncated`（bool）、`compliance`、`disclaimer_required`、`word_count`；`summary_mode=llm` 时含 `llm.credential_source`（`clawd_internal`|`env_openai`|`config_toml`）与 `llm.model`。
 - **`summary_mode=heuristic`** 时另有 `summary_bullet_count`、`summary_bullets[]`、`brief`、`source_note`、`rendering.requires_language_rendering=true`。
-- `list_investors`：`action`、`count`.
+- `list_investors`：`schema_version`、`source_skill`、`status`、
+  `message_key=skill.invest_copy.investors_ready`、`action`、`count`，以及
+  `personas[]` 中的 `slug`、`display_name`、`one_liner`。精确列表应从
+  `extra.personas` 读取，`text` 仅作为用户可见兜底。
 
 ## Request/Response Examples
 
@@ -78,7 +81,7 @@ Request:
 Response（节选）：
 
 ```json
-{"request_id":"i2","status":"ok","text":"…","extra":{"action":"list_investors","count":8},"error_text":null}
+{"request_id":"i2","status":"ok","text":"…","extra":{"schema_version":1,"source_skill":"invest_copy","status":"ok","message_key":"skill.invest_copy.investors_ready","action":"list_investors","count":8,"personas":[{"slug":"warren_buffett","display_name":"沃伦·巴菲特（风格灵感）","one_liner":"侧重能力圈、护城河、安全边际与长期从事简单易懂的好生意。"}]},"error_text":null}
 ```
 
 ### Example 3：错误（数据过短）

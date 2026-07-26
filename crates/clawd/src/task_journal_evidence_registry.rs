@@ -313,6 +313,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["count", "field_value"],
     ),
     step_json_extractor(
+        "config_basic.summarize_structure",
+        "config_basic.summarize_structure.structured_json_v1",
+        &["count", "entries", "path"],
+    ),
+    step_json_extractor(
         "config_basic.validate",
         "config_basic.validate.structured_json_v1",
         &["field_value", "valid"],

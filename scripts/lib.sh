@@ -291,7 +291,15 @@ if not obj.get("ok"):
     sys.exit(0)
 data = obj.get("data") or {}
 status = str(data.get("status", "")).strip()
+execution_state = str(data.get("execution_state", "") or "").strip()
 result = data.get("result_json") or {}
+lifecycle = data.get("lifecycle") or result.get("task_lifecycle") or {}
+lifecycle_state = str(lifecycle.get("state", "") or "").strip()
+if status not in {"succeeded", "failed", "canceled", "timeout"} and (
+    execution_state in {"needs_confirmation", "blocked"}
+    or lifecycle_state == "needs_user"
+):
+    status = "needs_user"
 text = str(result.get("text", "") or "")
 error = str(data.get("error_text", "") or "")
 text = text.replace("\r", " ").replace("\n", "\\n").replace("\t", " ")
@@ -314,7 +322,7 @@ wait_task_until_terminal_with_limit() {
     triplet="$(printf '%s' "$raw" | extract_task_triplet)"
     status="$(printf '%s\n' "$triplet" | awk -F'\t' '{print $1}')"
     case "$status" in
-      succeeded|failed|canceled|timeout)
+      succeeded|failed|canceled|timeout|needs_user)
         printf '%s\n' "$raw"
         return 0
         ;;

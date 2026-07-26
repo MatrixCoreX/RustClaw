@@ -7,12 +7,15 @@ import {
   type RefObject,
 } from "react";
 import {
+  Check,
+  Ellipsis,
   FileText,
   Loader2,
   MessageSquare,
   Mic,
   Paperclip,
   Plus,
+  Pencil,
   RefreshCw,
   Search,
   Square,
@@ -81,6 +84,7 @@ export interface ChatPageProps {
   chatTeachingRuns: ChatTeachingRunSummary[];
   activeChatTeachingRunId: string | null;
   chatSending: boolean;
+  chatWorking: boolean;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
   chatAudioInputDevices: VoiceInputDeviceOption[];
@@ -92,8 +96,9 @@ export interface ChatPageProps {
   onSelectChatTeachingRun: (runId: string) => void;
   onCreateNewChatThread: () => void;
   onSelectChatThread: (threadId: string) => void;
-  onDeleteChatThread: (threadId: string) => void;
-  onClearMessages: () => void;
+  onRenameChatThread: (threadId: string, title: string) => Promise<boolean>;
+  onDeleteChatThread: (threadId: string) => void | Promise<boolean>;
+  onClearMessages: () => void | Promise<boolean>;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onAttachmentSelection: (fileList: FileList | null) => unknown | Promise<unknown>;
@@ -121,6 +126,7 @@ export function ChatPage({
   chatTeachingRuns,
   activeChatTeachingRunId,
   chatSending,
+  chatWorking,
   chatRecording,
   chatVoiceRecordingSupported,
   chatAudioInputDevices,
@@ -132,6 +138,7 @@ export function ChatPage({
   onSelectChatTeachingRun,
   onCreateNewChatThread,
   onSelectChatThread,
+  onRenameChatThread,
   onDeleteChatThread,
   onClearMessages,
   onChatInputChange,
@@ -145,6 +152,10 @@ export function ChatPage({
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   const [threadSearch, setThreadSearch] = useState("");
+  const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
+  const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const normalizedThreadSearch = threadSearch.trim().toLowerCase();
   const visibleChatThreads = useMemo(() => {
@@ -173,6 +184,29 @@ export function ChatPage({
     () => teachingRunByMessageId(chatTeachingRuns),
     [chatTeachingRuns],
   );
+  const activeThread =
+    chatThreads.find((thread) => thread.id === activeChatThreadId) ?? null;
+
+  const beginRename = (thread: ChatThreadSummary) => {
+    setThreadMenuId(null);
+    setRenamingThreadId(thread.id);
+    setRenameDraft(thread.title);
+  };
+  const cancelRename = () => {
+    if (renameSaving) return;
+    setRenamingThreadId(null);
+    setRenameDraft("");
+  };
+  const saveRename = async (threadId: string) => {
+    if (renameSaving) return;
+    setRenameSaving(true);
+    const saved = await onRenameChatThread(threadId, renameDraft);
+    setRenameSaving(false);
+    if (saved) {
+      setRenamingThreadId(null);
+      setRenameDraft("");
+    }
+  };
 
   useEffect(() => {
     const messageList = messageListRef.current;
@@ -184,7 +218,7 @@ export function ChatPage({
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeChatThreadId, chatMessages.length, chatSending]);
+  }, [activeChatThreadId, chatMessages.length, chatSending, chatWorking]);
   const teachingPanelVisible = chatTeachingMode;
   const selectTeachingRunFromMessage = (run: ChatTeachingRunSummary) => {
     if (!chatTeachingMode) return;
@@ -218,6 +252,7 @@ export function ChatPage({
         <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
           {visibleChatThreads.map((thread) => {
             const active = thread.id === activeChatThreadId;
+            const renaming = thread.id === renamingThreadId;
             return (
               <div
                 key={thread.id}
@@ -227,11 +262,57 @@ export function ChatPage({
                     : "grid grid-cols-[minmax(0,1fr)_auto] gap-1 rounded-xl border border-white/10 bg-black/20 p-2 hover:bg-white/5"
                 }
               >
-                <button
-                  type="button"
-                  onClick={() => onSelectChatThread(thread.id)}
-                  className="min-w-0 text-left"
-                >
+                {renaming ? (
+                  <form
+                    className="col-span-2 flex min-w-0 items-center gap-1"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveRename(thread.id);
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={renameDraft}
+                      maxLength={120}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") cancelRename();
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-emerald-300/40 bg-black/30 px-2 py-1.5 text-sm text-white outline-none focus:border-emerald-300/70"
+                      aria-label={t("任务名称", "Task name")}
+                    />
+                    <button
+                      type="submit"
+                      disabled={renameSaving || !renameDraft.trim()}
+                      className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/70 hover:bg-white/10 disabled:opacity-40"
+                      title={t("保存名称", "Save name")}
+                    >
+                      {renameSaving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={renameSaving}
+                      onClick={cancelRename}
+                      className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/60 hover:bg-white/10 disabled:opacity-40"
+                      title={t("取消", "Cancel")}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </form>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThreadMenuId(null);
+                        onSelectChatThread(thread.id);
+                      }}
+                      className="min-w-0 text-left"
+                    >
                   <div className="flex min-w-0 items-center gap-2">
                     <MessageSquare className="h-3.5 w-3.5 shrink-0 text-white/55" />
                     <span className="min-w-0 truncate text-sm font-medium text-white/90" title={thread.title}>
@@ -260,15 +341,47 @@ export function ChatPage({
                       </span>
                     ) : null}
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteChatThread(thread.id)}
-                  className="h-7 w-7 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/55 hover:bg-white/10 hover:text-white/80"
-                  title={t("删除任务", "Delete task")}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setThreadMenuId((current) =>
+                            current === thread.id ? null : thread.id,
+                          )
+                        }
+                        className="h-7 w-7 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/55 hover:bg-white/10 hover:text-white/80"
+                        title={t("任务操作", "Task actions")}
+                        aria-expanded={threadMenuId === thread.id}
+                      >
+                        <Ellipsis className="h-3.5 w-3.5" />
+                      </button>
+                      {threadMenuId === thread.id ? (
+                        <div className="absolute right-0 top-8 z-20 min-w-28 rounded-lg border border-white/15 bg-neutral-900 p-1 shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => beginRename(thread)}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-white/80 hover:bg-white/10"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            {t("重命名", "Rename")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setThreadMenuId(null);
+                              void onDeleteChatThread(thread.id);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-red-200 hover:bg-red-500/15"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {t("删除", "Delete")}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}
@@ -282,7 +395,12 @@ export function ChatPage({
 
       <div className="min-w-0 rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-base font-semibold">{t("和 RustClaw 对话", "Chat with RustClaw")}</h3>
+          <div className="min-w-0">
+            <p className="text-xs text-white/45">Agent</p>
+            <h3 className="truncate text-base font-semibold" title={activeThread?.title}>
+              {activeThread?.title ?? t("新任务", "New task")}
+            </h3>
+          </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="inline-flex items-center gap-2 text-white/80">
             <input
@@ -294,7 +412,7 @@ export function ChatPage({
           </label>
           <button
             type="button"
-            onClick={onClearMessages}
+            onClick={() => void onClearMessages()}
             className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
           >
             {t("清空记录", "Clear")}
@@ -372,7 +490,7 @@ export function ChatPage({
             </div>
           );
         })}
-        {chatSending ? <ChatWorkingIndicator t={t} /> : null}
+        {chatWorking ? <ChatWorkingIndicator t={t} /> : null}
       </div>
 
       {teachingPanelVisible ? (

@@ -3,6 +3,7 @@ export interface AiLearningPage {
   title: string;
   chapterId: string;
   chapterTitle: string;
+  stageId: string;
   kind: "chapter" | "section";
   markdown: string;
   diagramCount: number;
@@ -14,6 +15,7 @@ export interface StandaloneLearningDocument {
   id: string;
   chapterId: string;
   chapterTitle: string;
+  stageId?: string;
   markdown: string;
 }
 
@@ -21,7 +23,12 @@ interface Heading {
   level: 2 | 3;
   title: string;
   start: number;
+  stageId: string;
 }
+
+const DEFAULT_STAGE_ID = "general";
+const LEARNING_STAGE_PATTERN =
+  /^<!--\s*ai-learning-stage:\s*([a-z0-9_-]+)\s*-->\s*$/i;
 
 function withoutLearningExcludedBlocks(markdown: string): string {
   return markdown.replace(
@@ -45,6 +52,12 @@ function pageMetrics(markdown: string): Pick<AiLearningPage, "diagramCount"> {
   };
 }
 
+function withoutLearningMetadata(markdown: string): string {
+  return markdown
+    .replace(/<!--\s*ai-learning-stage:\s*[a-z0-9_-]+\s*-->\s*/gi, "")
+    .trim();
+}
+
 export function parseStandaloneLearningDocument(
   document: StandaloneLearningDocument,
 ): AiLearningPage {
@@ -57,41 +70,24 @@ export function parseStandaloneLearningDocument(
     .trim();
   const titleMatch = /^#\s+(.+?)\s*$/m.exec(normalized);
   const title = cleanTitle(titleMatch?.[1] ?? document.id);
+  const content = withoutLearningMetadata(markdown);
 
   return {
     id: document.id,
     title,
     chapterId: document.chapterId,
     chapterTitle: document.chapterTitle,
+    stageId: document.stageId ?? DEFAULT_STAGE_ID,
     kind: "section",
-    markdown,
-    ...pageMetrics(markdown),
+    markdown: content,
+    ...pageMetrics(content),
   };
-}
-
-export function insertAfterFirstDiagramChapter(
-  pages: AiLearningPage[],
-  insertedPages: AiLearningPage[],
-): AiLearningPage[] {
-  const anchor = pages.find((page) => page.diagramCount > 0);
-  if (!anchor) return [...pages, ...insertedPages];
-
-  let insertionIndex = pages.length;
-  for (let index = 0; index < pages.length; index += 1) {
-    if (pages[index].chapterId === anchor.chapterId) {
-      insertionIndex = index + 1;
-    }
-  }
-  return [
-    ...pages.slice(0, insertionIndex),
-    ...insertedPages,
-    ...pages.slice(insertionIndex),
-  ];
 }
 
 function markdownHeadings(lines: string[]): Heading[] {
   const headings: Heading[] = [];
   let fence: "```" | "~~~" | null = null;
+  let stageId = DEFAULT_STAGE_ID;
 
   lines.forEach((line, index) => {
     const trimmed = line.trimStart();
@@ -101,12 +97,18 @@ function markdownHeadings(lines: string[]): Heading[] {
       return;
     }
     if (fence) return;
+    const stageMatch = LEARNING_STAGE_PATTERN.exec(trimmed);
+    if (stageMatch) {
+      stageId = stageMatch[1].toLowerCase();
+      return;
+    }
     const match = /^(##|###)\s+(.+?)\s*$/.exec(line);
     if (match) {
       headings.push({
         level: match[1].length as 2 | 3,
         title: match[2],
         start: index,
+        stageId,
       });
     }
   });
@@ -119,7 +121,7 @@ function cleanTitle(title: string): string {
 }
 
 function pageMarkdown(lines: string[], start: number, end: number): string {
-  return lines.slice(start, end).join("\n").trim();
+  return withoutLearningMetadata(lines.slice(start, end).join("\n"));
 }
 
 function hasChapterIntroduction(lines: string[], chapterStart: number, firstSectionStart: number): boolean {
@@ -156,9 +158,10 @@ export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
           title: "README",
           chapterId: "readme",
           chapterTitle: "README",
+          stageId: DEFAULT_STAGE_ID,
           kind: "chapter",
-          markdown: content,
-          ...pageMetrics(content),
+          markdown: withoutLearningMetadata(content),
+          ...pageMetrics(withoutLearningMetadata(content)),
         }]
       : [];
   }
@@ -180,6 +183,7 @@ export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
         title: chapterTitle,
         chapterId,
         chapterTitle,
+        stageId: chapter.stageId,
         kind: "chapter" as const,
         markdown: content,
         ...pageMetrics(content),
@@ -194,6 +198,7 @@ export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
         title: chapterTitle,
         chapterId,
         chapterTitle,
+        stageId: chapter.stageId,
         kind: "chapter",
         markdown: content,
         ...pageMetrics(content),
@@ -209,6 +214,7 @@ export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
         title: cleanTitle(section.title),
         chapterId,
         chapterTitle,
+        stageId: section.stageId,
         kind: "section",
         markdown: content,
         ...pageMetrics(content),
@@ -217,4 +223,22 @@ export function parseReadmeLearningPages(markdown: string): AiLearningPage[] {
 
     return pages;
   });
+}
+
+export function orderLearningPagesByStage(
+  pages: AiLearningPage[],
+  stageOrder: string[],
+): AiLearningPage[] {
+  const rank = new Map(stageOrder.map((stageId, index) => [stageId, index]));
+  const fallbackRank = stageOrder.length;
+
+  return pages
+    .map((page, sourceIndex) => ({ page, sourceIndex }))
+    .sort((left, right) => {
+      const stageDifference =
+        (rank.get(left.page.stageId) ?? fallbackRank)
+        - (rank.get(right.page.stageId) ?? fallbackRank);
+      return stageDifference || left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ page }) => page);
 }

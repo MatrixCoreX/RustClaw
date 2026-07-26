@@ -27,7 +27,7 @@ flowchart TD
 
 主要合同类别包括：
 
-- planner/runtime 边界、已删除的 pre-route 兼容路径和仅限 loop 内的 repair；
+- planner authority、runtime 机器边界和 loop 范围内的 repair；
 - policy decision、授权、registry effect、幂等性和副作用 reconciliation；
 - 任务生命周期、checkpoint/resume、事件归档回放、上下文、编码和 subagent；
 - 生成式技能 prompt、registry parity、alias、异步多媒体合同和模型 readiness；

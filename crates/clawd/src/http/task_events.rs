@@ -70,7 +70,7 @@ pub(crate) async fn stream_task_events(
                 api_error(StatusCode::UNAUTHORIZED, "task_owner_mismatch")
             }
             TaskViewerAccessError::InvalidUserKey => {
-                api_error(StatusCode::UNAUTHORIZED, "invalid_user_key")
+                api_error(StatusCode::UNAUTHORIZED, "auth_key_invalid")
             }
         };
     }
@@ -177,7 +177,7 @@ pub(crate) async fn get_task_event_artifact(
                 api_error(StatusCode::UNAUTHORIZED, "task_owner_mismatch")
             }
             TaskViewerAccessError::InvalidUserKey => {
-                api_error(StatusCode::UNAUTHORIZED, "invalid_user_key")
+                api_error(StatusCode::UNAUTHORIZED, "auth_key_invalid")
             }
         };
     }
@@ -350,11 +350,25 @@ fn sse_event(value: &Value) -> Event {
 }
 
 fn event_is_terminal(value: &Value) -> bool {
-    value
+    let event_kind = value
         .get("event_kind")
         .or_else(|| value.get("event_type"))
         .and_then(Value::as_str)
-        == Some("task_final")
+        .unwrap_or_default();
+    if event_kind == "task_final" {
+        return true;
+    }
+    if event_kind != "task_state" {
+        return false;
+    }
+    let payload = value.get("payload").unwrap_or(&Value::Null);
+    matches!(
+        payload.get("execution_state").and_then(Value::as_str),
+        Some("needs_confirmation" | "blocked")
+    ) || matches!(
+        payload.pointer("/lifecycle/state").and_then(Value::as_str),
+        Some("needs_user" | "blocked")
+    )
 }
 
 fn cursor_expired_control_event(

@@ -1019,6 +1019,53 @@ async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists(
 }
 
 #[tokio::test]
+async fn workspace_update_snapshots_and_restores_only_runtime_config_conflicts() {
+    let root = temp_workspace_root();
+    run_workspace_update_test_git(&root, &["init"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    std::fs::create_dir_all(root.join("configs")).expect("create configs directory");
+    std::fs::write(root.join("configs/config.toml"), "value = 'base'\n")
+        .expect("write base config");
+    run_workspace_update_test_git(&root, &["add", "configs/config.toml"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "base"]);
+    std::fs::write(root.join("configs/config.toml"), "value = 'local'\n")
+        .expect("write local config");
+
+    let paths = WorkspaceUpdateConflictPaths {
+        tracked: vec!["configs/config.toml".to_string()],
+        untracked: Vec::new(),
+    };
+    assert!(!workspace_update_has_non_config_conflicts(&paths));
+    let snapshot = snapshot_workspace_update_config_conflicts(&root, &paths)
+        .await
+        .expect("snapshot local config");
+    prepare_workspace_update_config_paths_for_pull(&root, &paths)
+        .await
+        .expect("prepare config for pull");
+    assert_eq!(
+        std::fs::read_to_string(root.join("configs/config.toml")).unwrap(),
+        "value = 'base'\n"
+    );
+    std::fs::write(root.join("configs/config.toml"), "value = 'remote'\n")
+        .expect("write remote config");
+    restore_workspace_update_config_snapshot(&root, &snapshot)
+        .await
+        .expect("restore local config");
+    assert_eq!(
+        std::fs::read_to_string(root.join("configs/config.toml")).unwrap(),
+        "value = 'local'\n"
+    );
+
+    let source_conflict = WorkspaceUpdateConflictPaths {
+        tracked: vec!["crates/clawd/src/main.rs".to_string()],
+        untracked: Vec::new(),
+    };
+    assert!(workspace_update_has_non_config_conflicts(&source_conflict));
+    std::fs::remove_dir_all(root).expect("remove test repository");
+}
+
+#[tokio::test]
 async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches() {
     let root = temp_workspace_root();
     run_workspace_update_test_git(&root, &["init"]);

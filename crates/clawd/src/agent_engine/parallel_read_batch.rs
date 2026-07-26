@@ -114,6 +114,11 @@ fn merge_child_read_state(target: &mut LoopState, baseline: &LoopState, child: &
         &baseline.successful_action_fingerprints,
         &child.successful_action_fingerprints,
     );
+    merge_count_deltas(
+        &mut target.failed_action_fingerprints,
+        &baseline.failed_action_fingerprints,
+        &child.failed_action_fingerprints,
+    );
     for (key, value) in &child.output_vars {
         if baseline.output_vars.get(key) != Some(value) {
             target.output_vars.insert(key.clone(), value.clone());

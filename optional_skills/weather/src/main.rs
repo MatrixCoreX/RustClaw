@@ -300,6 +300,20 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
     let obj = args
         .as_object()
         .ok_or_else(|| tr(cat, "weather.err.args_object"))?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("query")
+        .trim()
+        .to_ascii_lowercase();
+    if action == "preview_query" {
+        return preview_weather_query(obj, cat, lang);
+    }
+    if action != "query" {
+        return Err(format!(
+            "code=unsupported_action action={action} allowed=preview_query|query"
+        ));
+    }
 
     let city = obj
         .get("city")
@@ -325,15 +339,18 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
             let (lat, lon, name) = geocode(c, cat)?;
             (lat, lon, name)
         }
-        (None, Some(lat), Some(lon)) => (
-            lat,
-            lon,
-            tr_with(
-                cat,
-                "weather.msg.coord_place",
-                &[("lat", &format!("{lat:.2}")), ("lon", &format!("{lon:.2}"))],
-            ),
-        ),
+        (None, Some(lat), Some(lon)) => {
+            validate_weather_coordinates(lat, lon)?;
+            (
+                lat,
+                lon,
+                tr_with(
+                    cat,
+                    "weather.msg.coord_place",
+                    &[("lat", &format!("{lat:.2}")), ("lon", &format!("{lon:.2}"))],
+                ),
+            )
+        }
         _ => return Err(tr(cat, "weather.err.need_location")),
     };
 
@@ -375,6 +392,89 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
         });
         Ok((current.text, extra))
     }
+}
+
+fn preview_weather_query(
+    obj: &Map<String, Value>,
+    cat: &TextCatalog,
+    lang: &str,
+) -> Result<(String, Value), String> {
+    let city = obj
+        .get("city")
+        .or_else(|| obj.get("location"))
+        .or_else(|| obj.get("place"))
+        .or_else(|| obj.get("q"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let display_location = obj
+        .get("display_location")
+        .or_else(|| obj.get("requested_location"))
+        .or_else(|| obj.get("original_location"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let latitude = obj.get("latitude").and_then(Value::as_f64);
+    let longitude = obj.get("longitude").and_then(Value::as_f64);
+
+    let (anchor_source, requested_location, geocode_required) = match (city, latitude, longitude) {
+        (Some(city), _, _) => ("place", display_location.unwrap_or(city).to_string(), true),
+        (None, Some(latitude), Some(longitude)) => {
+            validate_weather_coordinates(latitude, longitude)?;
+            (
+                "coordinates",
+                display_location
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("lat={latitude:.6} lon={longitude:.6}")),
+                false,
+            )
+        }
+        _ => return Err(tr(cat, "weather.err.need_location")),
+    };
+    let forecast = parse_forecast_days_arg(obj, cat)?;
+    let mode = if forecast.is_some() {
+        "daily"
+    } else {
+        "current"
+    };
+    let text = format!(
+        "message_key=skill.weather.query_preview_ready mode={mode} anchor_source={anchor_source}"
+    );
+    Ok((
+        text,
+        json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "ok",
+            "message_key": "skill.weather.query_preview_ready",
+            "action": "preview_query",
+            "mode": mode,
+            "locale": lang,
+            "provider": "open_meteo",
+            "anchor_source": anchor_source,
+            "requested_location": requested_location,
+            "city": city,
+            "latitude": latitude,
+            "longitude": longitude,
+            "geocode_required": geocode_required,
+            "forecast_days_requested": forecast.as_ref().map(|value| value.requested),
+            "forecast_days_applied": forecast.as_ref().map(|value| value.applied),
+            "forecast_days_capped": forecast.as_ref().map(|value| value.capped).unwrap_or(false),
+            "would_execute": false,
+            "external_call_count": 0,
+        }),
+    ))
+}
+
+fn validate_weather_coordinates(latitude: f64, longitude: f64) -> Result<(), String> {
+    if !latitude.is_finite()
+        || !longitude.is_finite()
+        || !(-90.0..=90.0).contains(&latitude)
+        || !(-180.0..=180.0).contains(&longitude)
+    {
+        return Err("code=invalid_coordinates".to_string());
+    }
+    Ok(())
 }
 
 fn weather_location_display(

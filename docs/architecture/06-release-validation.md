@@ -30,7 +30,7 @@ flowchart TD
 
 Important contract families include:
 
-- planner/runtime boundaries, removed pre-route compatibility, and loop-only repair;
+- planner authority, runtime machine boundaries, and loop-scoped repair;
 - policy decisions, approvals, registry effects, idempotency, and side-effect reconciliation;
 - task lifecycle, checkpoint/resume, event archive/replay, context, coding, and subagents;
 - generated skill prompts, registry parity, aliases, async media contracts, and model readiness;

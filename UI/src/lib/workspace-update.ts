@@ -112,8 +112,6 @@ export function formatWorkspaceUpdateNextStep(
 ): string | null {
   const key = status?.next_step_key?.trim();
   if (!key) return status?.next_step || null;
-  const args = status?.next_step_args ?? {};
-  const count = numberArg(args, "count");
   const labels: Record<string, string> = {
     "workspace_update.cancel_requested": copy(lang, "正在停止当前编译进程。", "Stopping the current build process."),
     "workspace_update.invalid_git_repo": copy(lang, "请确认 RustClaw 目录是有效 Git 仓库。", "Confirm the RustClaw directory is a valid Git repository."),
@@ -138,20 +136,40 @@ export function formatWorkspaceUpdateNextStep(
       "拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。",
       "Pull failed, but no direct conflict was found between remote changes and local uncommitted files. Local files were preserved; check branch divergence or permissions manually.",
     ),
-    "workspace_update.conflict_overwrite_failed": copy(
+    "workspace_update.local_source_conflicts_preserved": copy(
       lang,
-      "覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。",
-      "Overwriting conflicting files failed. Non-conflicting local files were left unchanged; resolve manually, then retry.",
+      "远端更新与本地源码改动冲突。系统没有覆盖任何源码；请先提交或手动处理这些改动后重试。",
+      "The remote update conflicts with local source changes. No source files were overwritten; commit or resolve the local changes, then retry.",
     ),
-    "workspace_update.conflicts_overwritten_retrying_pull": copy(
+    "workspace_update.config_snapshot_failed_preserved": copy(
       lang,
-      `已只覆盖 ${count ?? 0} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。`,
-      `Only ${count ?? 0} conflicting path(s) were overwritten. Other local changes and extra files were left unchanged; pulling remote again.`,
+      "无法安全保存当前运行配置，因此更新已停止，原文件保持不动。请检查 configs 目录权限和文件类型后重试。",
+      "The current runtime configuration could not be saved safely, so the update stopped without changing it. Check permissions and file types under configs, then retry.",
     ),
-    "workspace_update.pull_failed_after_conflict_overwrite": copy(
+    "workspace_update.config_prepare_failed_preserved": copy(
       lang,
-      "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
-      "Detected conflict files were overwritten, but pulling again still failed. Other local files were untouched; inspect Git output and resolve manually.",
+      "运行配置已经保存，但未能安全准备拉取；系统已尝试恢复原配置。请检查 Git 输出后重试。",
+      "Runtime configuration was saved, but the pull could not be prepared safely. The original configuration was restored where possible; inspect Git output and retry.",
+    ),
+    "workspace_update.config_saved_retrying_pull": copy(
+      lang,
+      "当前运行配置已临时保存，正在拉取源码；完成后会自动恢复配置。",
+      "The current runtime configuration is saved in memory while source is pulled, and will be restored automatically afterward.",
+    ),
+    "workspace_update.config_restore_failed": copy(
+      lang,
+      "源码拉取后未能自动恢复运行配置。请暂停使用更新功能，并根据构建日志手动核对 configs 目录。",
+      "Runtime configuration could not be restored after the source pull. Stop using the updater and inspect the configs directory against the build log.",
+    ),
+    "workspace_update.config_restored_building": copy(
+      lang,
+      "源码已拉取，原运行配置已恢复，接下来继续编译。",
+      "Source was pulled and the original runtime configuration was restored. The build will continue.",
+    ),
+    "workspace_update.pull_failed_after_config_restore": copy(
+      lang,
+      "重新拉取仍然失败，但原运行配置已经恢复；请查看 Git 输出后手动处理。",
+      "The retry pull still failed, but the original runtime configuration was restored. Inspect Git output and resolve the issue manually.",
     ),
     "workspace_update.pull_failed_preserved": copy(
       lang,
@@ -283,16 +301,6 @@ export function formatWorkspaceUpdateTime(ts: number | null | undefined, lang: U
   return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
     hour12: false,
   });
-}
-
-function numberArg(args: Record<string, unknown>, key: string): number | null {
-  const value = args[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
 }
 
 function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | undefined, running: boolean): number {

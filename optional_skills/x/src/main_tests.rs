@@ -27,12 +27,24 @@ fn dry_run_extra_uses_machine_fields_without_live_publish() {
     assert_eq!(extra.get("action").and_then(Value::as_str), Some("post"));
     assert_eq!(extra.get("source_skill").and_then(Value::as_str), Some("x"));
     assert_eq!(
+        extra.get("draft_text").and_then(Value::as_str),
+        Some("Daily market note")
+    );
+    assert_eq!(
         extra.get("outcome").and_then(Value::as_str),
         Some("dry_run")
     );
     assert_eq!(extra.get("dry_run").and_then(Value::as_bool), Some(true));
     assert_eq!(extra.get("send").and_then(Value::as_bool), Some(false));
     assert_eq!(extra.get("published").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        extra.get("would_execute").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        extra.get("external_call_count").and_then(Value::as_u64),
+        Some(0)
+    );
     assert_eq!(
         extra.get("text_char_count").and_then(Value::as_u64),
         Some(17)
@@ -52,5 +64,31 @@ fn invalid_flag_combo_returns_structured_error_kind() {
     assert_eq!(
         err.extra().get("error_kind").and_then(Value::as_str),
         Some("invalid_input")
+    );
+    assert_eq!(
+        err.extra()
+            .get("external_call_count")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        err.extra().get("published").and_then(Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn post_spawn_error_records_one_external_call_attempt() {
+    let err = XSkillError::after_external_call("xurl_failed", "provider rejected request");
+    let extra = err.extra();
+
+    assert_eq!(
+        extra.get("external_call_count").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(extra.get("published").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        extra.get("would_execute").and_then(Value::as_bool),
+        Some(false)
     );
 }

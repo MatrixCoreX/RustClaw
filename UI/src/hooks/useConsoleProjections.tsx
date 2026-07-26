@@ -438,7 +438,7 @@ export function useConsoleProjections({
       },
       {
         key: "chat",
-        required: true,
+        required: false,
         title: t("发送测试消息", "Send a test message"),
         description: t("先发一条简单消息，确认主模型已经能够正常回复。", "Send a simple message first to confirm the main model can reply normally."),
         status: testMessageStepStatus,

@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{attempt_ledger, execute_actions_once, AgentLoopGuardPolicy};
 
@@ -19,6 +19,35 @@ struct StepActionRecord {
     action: String,
     path: Option<String>,
     content_evidence: bool,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct DeferredTerminalPublication {
+    user_visible_respond: Option<String>,
+    publishable_synthesis: Option<String>,
+}
+
+pub(super) fn take_terminal_publication_for_reserve(
+    loop_state: &mut LoopState,
+) -> DeferredTerminalPublication {
+    let deferred = DeferredTerminalPublication {
+        user_visible_respond: loop_state.last_user_visible_respond.take(),
+        publishable_synthesis: loop_state.last_publishable_synthesis_output.take(),
+    };
+    loop_state.delivery_messages.clear();
+    deferred
+}
+
+pub(super) fn restore_terminal_publication_after_reserve(
+    loop_state: &mut LoopState,
+    deferred: DeferredTerminalPublication,
+) {
+    if loop_state.last_user_visible_respond.is_none() {
+        loop_state.last_user_visible_respond = deferred.user_visible_respond;
+    }
+    if loop_state.last_publishable_synthesis_output.is_none() {
+        loop_state.last_publishable_synthesis_output = deferred.publishable_synthesis;
+    }
 }
 
 pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) -> bool {
@@ -80,17 +109,26 @@ pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) ->
     true
 }
 
-pub(super) fn enforce_code_mutation_validation_success_guard(reply: &mut AskReply) -> bool {
+pub(super) fn enforce_workspace_mutation_validation_success_guard(reply: &mut AskReply) -> bool {
     let unresolved_fields = final_local_code_json_unresolved_fields(reply);
     let Some(journal) = reply.task_journal.as_mut() else {
         return false;
     };
-    let validation_gap = if journal_has_code_write_followed_by_failed_validation(journal) {
+    let validation_gap = if journal_has_workspace_mutation_followed_by_failed_validation(journal) {
         Some((
             vec!["validation_success".to_string()],
             "post_write_validation_failed".to_string(),
-            "repair the mutated code/test files using the observed validation error, rerun the validation command, collect bounded post-write content evidence, then finalize from successful machine evidence"
-                .to_string(),
+            json!({
+                "schema_version": 1,
+                "repair_kind": "post_write_validation",
+                "required_actions": [
+                    "repair_mutation",
+                    "rerun_validation",
+                    "collect_content_evidence",
+                    "complete_remaining_actions"
+                ]
+            })
+            .to_string(),
             0.97,
         ))
     } else if !unresolved_fields.is_empty() && journal_has_code_or_test_write(journal) {
@@ -242,30 +280,26 @@ fn journal_has_code_or_test_write(journal: &crate::task_journal::TaskJournal) ->
         })
 }
 
-pub(super) fn journal_has_code_write_followed_by_failed_validation(
+pub(super) fn journal_has_workspace_mutation_followed_by_failed_validation(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     let records = post_write_step_action_records(&journal.step_results);
-    let latest_code_write_index = records
+    let latest_mutation_index = records
         .iter()
-        .filter(|record| {
-            is_code_or_test_write_action(&record.action)
-                && record
-                    .path
-                    .as_deref()
-                    .is_some_and(path_looks_like_code_or_test)
-        })
+        .filter(|record| is_code_or_test_write_action(&record.action))
         .map(|record| record.index)
         .max();
-    let Some(latest_code_write_index) = latest_code_write_index else {
+    let Some(latest_mutation_index) = latest_mutation_index else {
         return false;
     };
     journal
         .step_results
         .iter()
         .enumerate()
-        .skip(latest_code_write_index + 1)
-        .any(|(_, step)| validation_step_failed(step))
+        .skip(latest_mutation_index + 1)
+        .filter_map(|(_, step)| is_validation_skill(&step.skill).then_some(step))
+        .next_back()
+        .is_some_and(validation_step_failed)
 }
 
 pub(super) async fn try_run_post_write_validation_reserve_recovery(
@@ -299,9 +333,7 @@ pub(super) async fn try_run_post_write_validation_reserve_recovery(
     let recovery_policy = post_write_content_evidence_recovery_policy(policy, actions.len());
 
     loop_state.has_recoverable_failure_context = true;
-    loop_state.delivery_messages.clear();
-    loop_state.last_user_visible_respond = None;
-    loop_state.last_publishable_synthesis_output = None;
+    let deferred_publication = take_terminal_publication_for_reserve(loop_state);
     loop_state.last_stop_signal = Some("post_write_validation_reserve".to_string());
     loop_state.output_vars.insert(
         "agent_loop.post_write_validation_reserve_recovery_used".to_string(),
@@ -332,7 +364,9 @@ pub(super) async fn try_run_post_write_validation_reserve_recovery(
         &recovery_policy,
         agent_run_context,
     )
-    .await?;
+    .await;
+    restore_terminal_publication_after_reserve(loop_state, deferred_publication);
+    let outcome = outcome?;
     loop_state.last_stop_signal = Some(
         outcome
             .stop_signal
@@ -380,15 +414,43 @@ pub(super) fn post_write_validation_reserve_actions(
     if has_code_write && missing_paths.is_empty() && saw_validation {
         return Vec::new();
     }
-    let executed_validation_commands = if readback_only_validation_context {
-        executed_run_cmd_commands(loop_state)
-    } else {
-        BTreeSet::new()
-    };
+    let executed_validation_commands = executed_run_cmd_commands(loop_state);
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
+    for path in &missing_paths {
+        let action = AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": path,
+                "mode": "head",
+                "n": 200
+            }),
+        };
+        if !planned_readback_action_matches_missing_path(state, &action, &missing_paths) {
+            continue;
+        }
+        let fingerprint =
+            serde_json::to_string(&action).unwrap_or_else(|_| format!("{:?}", action));
+        if !seen.insert(fingerprint) {
+            continue;
+        }
+        selected.push(action);
+        if selected.len() >= max_actions {
+            return selected;
+        }
+    }
     for action in latest_plan_trace_actions(loop_state) {
         let action = normalize_recovery_candidate_action(state, action);
+        if let Some(candidate_path) = content_evidence_action_path(state, &action) {
+            let already_selected = selected.iter().any(|selected_action| {
+                content_evidence_action_path(state, selected_action)
+                    .is_some_and(|selected_path| paths_match(candidate_path, selected_path))
+            });
+            if already_selected {
+                continue;
+            }
+        }
         if !post_write_validation_reserve_action_allowed(state, loop_state, &action, &missing_paths)
         {
             continue;
@@ -613,12 +675,21 @@ fn planned_readback_action_matches_missing_path(
     if missing_paths.is_empty() {
         return false;
     }
-    let Some((skill, args)) = concrete_skill_action_args(action) else {
+    let Some(path) = content_evidence_action_path(state, action) else {
         return false;
+    };
+    missing_paths
+        .iter()
+        .any(|missing_path| paths_match(path, missing_path))
+}
+
+fn content_evidence_action_path<'a>(state: &AppState, action: &'a AgentAction) -> Option<&'a str> {
+    let Some((skill, args)) = concrete_skill_action_args(action) else {
+        return None;
     };
     let canonical = state.resolve_canonical_skill_name(skill);
     if !matches!(canonical.as_str(), "fs_basic" | "system_basic") {
-        return false;
+        return None;
     }
     let action_name = args
         .get("action")
@@ -626,17 +697,11 @@ fn planned_readback_action_matches_missing_path(
         .map(normalize_action_name)
         .unwrap_or_default();
     if !is_content_evidence_action(&action_name) {
-        return false;
+        return None;
     }
-    let Some(path) = ["resolved_path", "effective_path", "path"]
+    ["resolved_path", "effective_path", "path"]
         .iter()
         .find_map(|field| args.get(*field).and_then(Value::as_str))
-    else {
-        return false;
-    };
-    missing_paths
-        .iter()
-        .any(|missing_path| paths_match(path, missing_path))
 }
 
 fn planned_validation_action_is_safe_to_resume(
@@ -817,7 +882,10 @@ fn normalize_action_name(action: &str) -> String {
 }
 
 fn is_code_or_test_write_action(action: &str) -> bool {
-    matches!(action, "write_text" | "append_text" | "shell_write")
+    matches!(
+        action,
+        "write_text" | "append_text" | "replace_text" | "shell_write"
+    )
 }
 
 fn is_content_evidence_action(action: &str) -> bool {

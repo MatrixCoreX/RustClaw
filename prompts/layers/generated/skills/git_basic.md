@@ -8,12 +8,20 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `git_basic` exposes read-oriented Git repository inspection commands.
-- It is designed for status/history/diff visibility without destructive history changes.
+- `git_basic` exposes bounded repository inspection plus confirmation-gated
+  local stage, commit, branch creation, and safe branch checkout.
+- Remote mutations (`push`, `pull`, remote branch deletion, tag publication)
+  are not implemented.
+- Local mutations use Git argument arrays, never shell command strings.
+- Commit hooks and commit signing are disabled for agent-owned commits.
+- Checkout requires a clean working tree and never uses force.
 - Repository selection is workspace-bound. `repo` may be a workspace-relative
   repository directory or an absolute path whose canonical target remains
   inside `WORKSPACE_ROOT`; it cannot escape `WORKSPACE_ROOT`.
-- Revision reads resolve `target` / `ref` to an exact Git object ID before executing the observation.
+- Revision reads resolve one `target` / `ref` object expression to an exact Git
+  object ID before executing the observation. `show` accepts Git's
+  `<revision>:<repository-path>` file-object syntax; multi-object ranges are
+  rejected.
 - Not a git repository: returns `status=error` and `error_text` (no silent ok).
 
 ## Config Entry Points (from interface)
@@ -28,14 +36,14 @@
 - `current_branch` — current branch name
 - `remote` — remote URLs (-v)
 - `changed_files` — file names that differ from HEAD
-- `show` — show commit/object (--stat)
+- `show` — show one commit/object (`--stat`), including a file object selected
+  with `<revision>:<repository-path>`
 - `show_file_at_rev` — show file content at revision (target + path)
 - `rev_parse` — rev-parse HEAD
-
-Action selection notes:
-- Use `current_branch` when the requested output is the single current branch name.
-- Use `branch` only when the requested output is the branch list.
-- Do not invent plural or helper actions such as `branches`, `list_branches`, or `get_current_branch`; the runtime may normalize some aliases defensively, but planner output should use the declared action names.
+- `stage` — stage only the explicit non-empty `paths` list
+- `commit` — commit the current staged set with hooks/signing disabled
+- `create_branch` — create a local branch without checkout
+- `checkout_branch` — checkout an existing local branch only from a clean tree
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -46,10 +54,15 @@ Action selection notes:
 | `status`, `log`, `branch`, `remote`, `changed_files` | `limit` | no | integer | 20 | Page size, range 1..200. |
 | `log` | `n` | no | integer | 20 | Alias for `limit`. |
 | `diff`, `diff_cached`, `changed_files` | `path` | no | string | - | Repository-relative pathspec. |
-| `show` | `target` | no | string | `HEAD` | Commit/object target to show. |
+| `show` | `target` | no | string | `HEAD` | Single commit/object expression to show; `<revision>:<repository-path>` is allowed. |
 | `show_file_at_rev` | `target` | no | string | `HEAD` | Revision. |
 | `show_file_at_rev` | `path` | yes | string | - | Repository-relative file path. |
 | `rev_parse` | `ref` | no | string | `HEAD` | Revision expression to resolve. |
+| `stage` | `paths` | yes | string[] | - | Explicit repository-relative paths; `.` and implicit add-all are rejected. |
+| `commit` | `message` | yes | string | - | Commit message, 1..16384 UTF-8 bytes. |
+| `create_branch` | `branch_name` | yes | string | - | Local branch name validated by Git. |
+| `create_branch` | `start_point` | no | string | `HEAD` | Revision resolved to an exact object before branch creation. |
+| `checkout_branch` | `branch_name` | yes | string | - | Existing local branch; dirty working trees are rejected. |
 
 ## Error Contract (from interface)
 - Unsupported action names.
@@ -60,37 +73,25 @@ Action selection notes:
   `error_code` values. An absolute `repo` selector is accepted only when its
   canonical target remains inside `WORKSPACE_ROOT`.
 - Non-zero `git` command exit codes are returned as `status=error` with `error_text=git command failed: exit=<code>\n<stdout/stderr>`.
+- Local-write errors include `git_paths_missing`, `git_paths_invalid`,
+  `git_stage_empty`, `git_commit_message_invalid`,
+  `git_branch_name_invalid`, `git_branch_not_found`,
+  `git_checkout_dirty_worktree`, and `git_unexpected_arg`.
 - Successful responses also mirror structured metadata into `extra`, including `schema_version`, `action`, `subcommand`, `exit_code`, `output`, and action-specific machine fields.
 
 ## Structured Evidence Contract (from interface)
-- Matrix admission status: built-in structured evidence only; `output` is legacy text evidence unless a stricter parser is explicitly registered.
-- Successful response `extra` fields:
-  - `schema_version`: number, currently `1`.
-  - `action`: string action name; evidence role `status`.
-  - `subcommand`: string Git subcommand used; evidence role `field_value`.
-  - `exit_code`: integer Git exit code; evidence role `status`.
-  - `target`, `revision`, `path`, `cursor`, or `limit`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
-  - `output`: exact Git observation. Large output is preserved for the runtime artifact spill path rather than silently cut inside the skill.
-  - `output_bytes`, `output_sha256`, `truncated`: exact observation integrity fields.
-  - `provenance`: `source=git_cli`, exact repository root, observed HEAD revision, observation time, and read-only operation class.
-  - `page`: stable `cursor`, `limit`, `returned_count`, `total_count`, `has_more`, `next_cursor`, and `previous_cursor` for list actions. `log.total_count` is null because Git history is fetched incrementally.
-  - `field_value`: object with stable action-specific evidence:
-    - `status`: `branch`, `current_branch`, `upstream`, `ahead`, `behind`, `clean`, `worktree_state`, `changed_count`, `staged_count`, `unstaged_count`, `untracked_count`.
-    - `current_branch`: `branch`, `current_branch`.
-    - `changed_files`: `changed_count`.
-    - `log`: `commit_count`.
-    - `rev_parse`: `revision`.
-    - `branch`: `branch_count`, `current_branch` when available.
-    - `remote`: `remote_count`.
-    - `show_file_at_rev`: `source`, `source_kind`, `target`, `revision`, `path`, `content_excerpt`, `content_line_count`, `content_bytes`.
-  - Top-level action-specific arrays/objects:
-    - `changed_files`: array of changed paths for `status` / `changed_files`.
-    - `subject`: first commit subject for exact latest-subject selection; `commits` is an array of `{sha, subject}` for `log`, and `subjects` is a compact string array.
-    - `branches`: array of `{name, current}` for `branch`.
-    - `remotes`: array of `{name, url, direction}` for `remote`.
-    - `show_file_at_rev`: stable `source="git_show_file_at_rev"` and `source_kind="git_revision_file"` so revision-bound content requests can be attributed to Git evidence before filesystem fallback.
+- Success `extra` always includes `schema_version`, `action`, `subcommand`,
+  `exit_code`, exact `output`, integrity fields, and Git CLI provenance.
+- List actions include bounded `page`; observations expose typed
+  `field_value`, `changed_files`, `commits`, `branches`, or `remotes`.
+- Revision-bound reads include exact `target`, resolved `revision`, and `path`.
+- Local-write success includes `status`, `effect=mutate`, `branch`,
+  `commit_hash`, `staged_paths`, `changed_paths`, `worktree_state`,
+  `hooks_enabled=false`, `signing_enabled=false`, and
+  `remote_mutation=false`.
 - Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested; raw `diff`, `show`, and `show_file_at_rev` output remains conservative.
-- Error responses include readable `error_text`; runtime decisions must use `error_code` / `error_kind`, never parse `error_text`.
+- Error responses include readable `error_text`; runtime decisions use
+  `error_code` / `error_kind`, never parse `error_text`.
 
 ## Request/Response Examples (from interface)
 ### Example 1

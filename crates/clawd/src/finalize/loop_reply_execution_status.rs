@@ -1,4 +1,5 @@
 use crate::agent_engine::{append_delivery_message, AgentRunContext};
+use crate::assistant_delivery_policy::terminal_respond_after_failed_observation_is_publishable;
 use crate::{AppState, ClaimedTask};
 
 use super::{
@@ -105,6 +106,9 @@ pub(super) fn delivery_is_content_answer_candidate(
     loop_state: &crate::agent_engine::LoopState,
     delivery_messages: &[String],
 ) -> bool {
+    if terminal_respond_after_failed_observation_is_publishable(loop_state, delivery_messages) {
+        return true;
+    }
     if !successful_content_observation_should_precede_status_summary(agent_run_context, loop_state)
     {
         return false;
@@ -342,6 +346,13 @@ pub(super) fn replace_delivery_with_deterministic_observed_execution_status_answ
         return false;
     };
     if has_publishable_synthesis_other_than_status(loop_state, &answer) {
+        return false;
+    }
+    if terminal_respond_after_failed_observation_is_publishable(
+        loop_state,
+        &loop_state.delivery_messages,
+    ) {
+        *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
         return false;
     }
     if loop_state.delivery_messages.last().is_some_and(|message| {

@@ -6,9 +6,13 @@ const path = require('node:path');
 const {
     SkillError,
     classifyError,
+    classifyNavigationFailure,
+    isReadableDocumentContentType,
+    isRetryableFailure,
     isPrivateIp,
     partialExtractionItem,
     resolvedAddressAllowed,
+    sanitizeExtractedText,
     validateNetworkUrl,
 } = require('./browser_web.js');
 
@@ -48,12 +52,75 @@ test('keeps dependency failures unavailable without invented partial content', (
     assert.equal(item.title, '');
     assert.equal(item.text, '');
     assert.equal(item.error_code, 'DEPENDENCY_MISSING');
+    assert.equal(item.retryable, false);
 });
 
 test('does not infer machine error codes from natural-language exception text', () => {
     const classified = classifyError(new Error('playwright chromium timeout selector captcha'));
 
     assert.equal(classified.code, 'BROWSER_OPERATION_FAILED');
+});
+
+test('classifies document responses from structured status and challenge signals', () => {
+    assert.equal(classifyNavigationFailure(200, []), null);
+    assert.equal(classifyNavigationFailure(401, []).code, 'AUTH_REQUIRED');
+    assert.equal(classifyNavigationFailure(403, []).code, 'ACCESS_BLOCKED');
+    assert.equal(classifyNavigationFailure(404, []).code, 'HTTP_STATUS_ERROR');
+    assert.equal(classifyNavigationFailure(429, []).code, 'RATE_LIMITED');
+    assert.equal(classifyNavigationFailure(503, []).code, 'HTTP_STATUS_ERROR');
+    assert.equal(
+        classifyNavigationFailure(200, [{ selector: 'captcha', count: 1 }]).code,
+        'BOT_BLOCKED',
+    );
+});
+
+test('accepts readable document media types and blocks binary documents', () => {
+    for (const contentType of [
+        '',
+        'text/html; charset=utf-8',
+        'text/plain',
+        'application/json',
+        'application/ld+json',
+        'application/rss+xml',
+    ]) {
+        assert.equal(isReadableDocumentContentType(contentType), true, contentType);
+    }
+    for (const contentType of ['application/pdf', 'image/png', 'application/octet-stream']) {
+        assert.equal(isReadableDocumentContentType(contentType), false, contentType);
+    }
+});
+
+test('derives retryability from machine error fields only', () => {
+    assert.equal(isRetryableFailure(new SkillError('RATE_LIMITED', 'rate_limited')), true);
+    assert.equal(
+        isRetryableFailure(new SkillError('HTTP_STATUS_ERROR', 'http_status_error', {
+            response_status: 503,
+        })),
+        true,
+    );
+    assert.equal(
+        isRetryableFailure(new SkillError('HTTP_STATUS_ERROR', 'http_status_error', {
+            response_status: 404,
+        })),
+        false,
+    );
+    assert.equal(
+        isRetryableFailure(new Error('a temporary failure written in natural language')),
+        true,
+    );
+});
+
+test('clean extraction preserves readable programming content', () => {
+    const source = [
+        'const answer = calculate(value);',
+        'function calculate(input) { return input * 2; }',
+        '@media (min-width: 40rem) { .example { display: block; } }',
+    ].join('\n');
+
+    const cleaned = sanitizeExtractedText(source);
+    assert.match(cleaned, /const answer/);
+    assert.match(cleaned, /function calculate/);
+    assert.match(cleaned, /@media/);
 });
 
 test('blocks literal private targets and credential-bearing URLs', async () => {

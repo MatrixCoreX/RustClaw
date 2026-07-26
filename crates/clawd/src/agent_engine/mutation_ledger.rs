@@ -243,6 +243,8 @@ pub(super) fn record_completed_without_replay(
         "fingerprint_hash": record.fingerprint_hash,
         "idempotency_key": record.idempotency_key,
         "attempt_no": record.attempt_no,
+        "idempotency_replay": true,
+        "recorded_result": record.receipt,
     })
     .to_string();
     loop_state
@@ -418,12 +420,32 @@ pub(crate) fn safe_mutation_outcome_projection(structured_extra: Option<&Value>)
         "status_code",
         "message_key",
         "checkpoint_id",
+        "mutation_id",
         "job_id",
         "result_ref",
         "patch_id",
+        "before_sha256",
+        "after_sha256",
+        "occurrence_count",
+        "replacement_count",
+        "reversible",
     ] {
         if let Some(value) = extra.get(key).and_then(safe_machine_scalar) {
             projected_extra.entry(key.to_string()).or_insert(value);
+        }
+    }
+    if let Some(range) = extra.get("changed_byte_range").and_then(Value::as_object) {
+        let mut projected_range = Map::new();
+        for key in ["before_start", "before_end", "after_start", "after_end"] {
+            if let Some(value) = range.get(key).and_then(safe_machine_scalar) {
+                projected_range.insert(key.to_string(), value);
+            }
+        }
+        if !projected_range.is_empty() {
+            projected_extra.insert(
+                "changed_byte_range".to_string(),
+                Value::Object(projected_range),
+            );
         }
     }
     (!projected_extra.is_empty()).then(|| {

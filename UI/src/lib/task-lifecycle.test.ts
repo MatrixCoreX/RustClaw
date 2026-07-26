@@ -10,6 +10,7 @@ import {
   canCancelTaskControl,
   canPauseTaskControl,
   canResumeTaskControl,
+  shouldTrackTaskLive,
 } from "./task-lifecycle.ts";
 
 test("builds a pollable running lifecycle view", () => {
@@ -260,4 +261,16 @@ test("task control helpers derive actions from machine lifecycle fields", () => 
     canCancelTaskControl({ state: "succeeded", can_cancel: true }, "succeeded"),
     false,
   );
+});
+
+test("live tracking stops for user input but continues for background work", () => {
+  assert.equal(
+    shouldTrackTaskLive("running", "needs_confirmation", { state: "needs_user", can_poll: false }),
+    false,
+  );
+  assert.equal(
+    shouldTrackTaskLive("running", "background", { state: "background", can_poll: true }),
+    true,
+  );
+  assert.equal(shouldTrackTaskLive("succeeded", "completed", { state: "succeeded" }), false);
 });

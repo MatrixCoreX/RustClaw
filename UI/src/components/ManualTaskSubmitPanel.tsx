@@ -1,6 +1,7 @@
 import { Loader2, RefreshCw } from "lucide-react";
 
 import type { ChannelName } from "../types/api";
+import { TaskIdCopyButton } from "./TaskIdCopyButton";
 
 type TaskSubmitKind = "ask" | "run_skill";
 type Translate = (zh: string, en: string) => string;
@@ -65,8 +66,19 @@ export function ManualTaskSubmitPanel({
 }: ManualTaskSubmitPanelProps) {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-      <h3 className="mb-4 text-lg font-semibold">{t("手动提交一条任务", "Submit a task manually")}</h3>
-      <div className="grid gap-4 md:grid-cols-2">
+      <h3 className="text-lg font-semibold">{t("手动提交一条任务", "Submit a task manually")}</h3>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">
+        {t(
+          "这里会直接创建一条后端任务，适合测试指定技能、复现问题或排查执行过程。日常对话建议使用 Agent 页面。",
+          "This creates a backend task directly. Use it to test a specific skill, reproduce an issue, or inspect execution. Use the Agent page for everyday conversations.",
+        )}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-white/50">
+        <span>{t("1. 选择任务类型并填写内容", "1. Choose a task type and enter its content")}</span>
+        <span>{t("2. 提交后在上方查看进度", "2. Track progress above after submitting")}</span>
+        <span>{t("3. 用任务 ID 查询完整结果", "3. Use the task ID to query the full result")}</span>
+      </div>
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
         <label className="space-y-2">
           <span className="text-xs uppercase tracking-widest text-white/50">{t("任务类型", "Task type")}</span>
           <select
@@ -180,6 +192,18 @@ export function ManualTaskSubmitPanel({
           </span>
         ) : null}
       </div>
+
+      {interactionSubmittedTaskId ? (
+        <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-3 py-3">
+          <p className="text-xs text-emerald-100/70">
+            {t("任务 ID 是这次执行的查询编号，不是任务内容或访问密钥。", "The task ID is the lookup reference for this run, not task content or an access key.")}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 select-all break-all text-xs text-emerald-50">{interactionSubmittedTaskId}</code>
+            <TaskIdCopyButton taskId={interactionSubmittedTaskId} t={t} />
+          </div>
+        </div>
+      ) : null}
 
       {interactionError ? (
         <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">

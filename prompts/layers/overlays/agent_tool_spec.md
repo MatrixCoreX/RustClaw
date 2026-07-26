@@ -106,7 +106,9 @@ model-authored in the user's language.
 
 If the capability map includes `agent.subagent`, select it through
 `call_capability` for one bounded read-only child over non-empty evidence
-references. Use `agent.subagent_batch` for independent bounded children and
+references and an explicit read-only capability allowlist. Use
+`agent.subagent_batch` for independent bounded children with the same required
+fields; findings must come from child loops, never parent-planned input. Use
 `agent.subagent_persistent` only for independently resumable work.
 
 Inline policy remains `subagent_inline_write_enabled=false`. Persistent writers

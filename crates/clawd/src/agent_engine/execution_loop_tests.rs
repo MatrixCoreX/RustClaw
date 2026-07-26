@@ -632,6 +632,49 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
 }
 
 #[test]
+fn repeat_guard_blocks_exact_failed_action_before_runner_reentry() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-repeat-failed-action");
+    let mut loop_state = super::LoopState::new();
+    let action = crate::AgentAction::CallSkill {
+        skill: "example_skill".to_string(),
+        args: serde_json::json!({"action": "preview", "value": 7}),
+    };
+    let policy = test_policy(false);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .failed_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        )
+        .as_deref(),
+        Some("repeat_failed_action")
+    );
+    let signal: serde_json::Value = serde_json::from_str(
+        loop_state
+            .output_vars
+            .get("agent_loop.repeat_failed_action")
+            .expect("machine repeat guard signal"),
+    )
+    .expect("valid machine signal");
+    assert_eq!(
+        signal
+            .get("status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("repeat_failed_action_blocked")
+    );
+}
+
+#[test]
 fn repeat_guard_blocks_identical_successful_observe_outside_active_recipe() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-observe");

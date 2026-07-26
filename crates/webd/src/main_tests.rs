@@ -4,15 +4,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
-use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
 use super::{
-    build_outgoing_headers, clear_login_failures, login_client_ip, login_locked_response,
-    login_retry_after, proxy_inner, record_login_failure, uses_long_running_upstream_wait,
-    AppState, LoginAttemptKey,
+    build_outgoing_headers, clear_login_failures, cors_allow_origin_from_headers, login_client_ip,
+    login_locked_response, login_retry_after, proxy_inner, record_login_failure,
+    request_uses_https, session_cookie_value, uses_long_running_upstream_wait, webd_error_response,
+    with_cors, AppState, LoginAttemptKey,
 };
 
 fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
@@ -24,6 +26,7 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
         max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
+        session_store_path: std::path::PathBuf::new(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         login_failure_limit: failure_limit,
         login_lockout_secs: lockout_secs,
@@ -195,6 +198,130 @@ fn key_mode_forwards_client_key_and_ui_origin_without_web_session() {
 }
 
 #[test]
+fn trusted_loopback_proxy_preserves_external_protocol_and_forwarding_chain() {
+    let mut incoming = HeaderMap::new();
+    incoming.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.44"));
+    incoming.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+
+    let outgoing = build_outgoing_headers(
+        &incoming,
+        "127.0.0.1:8787",
+        SocketAddr::from(([127, 0, 0, 1], 41006)),
+        true,
+        None,
+    );
+
+    assert_eq!(
+        outgoing
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok()),
+        Some("198.51.100.44, 127.0.0.1")
+    );
+    assert_eq!(
+        outgoing
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok()),
+        Some("https")
+    );
+}
+
+#[test]
+fn direct_clients_cannot_spoof_forwarded_identity_or_https() {
+    let mut incoming = HeaderMap::new();
+    incoming.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.44"));
+    incoming.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+
+    let outgoing = build_outgoing_headers(
+        &incoming,
+        "127.0.0.1:8787",
+        SocketAddr::from(([203, 0, 113, 9], 41007)),
+        true,
+        None,
+    );
+
+    assert_eq!(
+        outgoing
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok()),
+        Some("203.0.113.9")
+    );
+    assert_eq!(
+        outgoing
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok()),
+        Some("http")
+    );
+}
+
+#[test]
+fn credentialed_cors_is_limited_to_the_request_hostname() {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::HOST, HeaderValue::from_static("localhost:8788"));
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("http://localhost:3000"),
+    );
+    assert_eq!(
+        cors_allow_origin_from_headers(&headers)
+            .and_then(|value| value.to_str().ok().map(str::to_string)),
+        Some("http://localhost:3000".to_string())
+    );
+
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("https://untrusted.example"),
+    );
+    assert!(cors_allow_origin_from_headers(&headers).is_none());
+}
+
+#[test]
+fn credentialed_cors_preserves_upstream_vary_dimensions() {
+    let mut response = Response::builder()
+        .header(header::VARY, "Accept-Encoding")
+        .body(Body::empty())
+        .expect("build response");
+    let origin = HeaderValue::from_static("https://rustclaw.example");
+
+    response = with_cors(response, Some(&origin));
+
+    let vary = response
+        .headers()
+        .get_all(header::VARY)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>();
+    assert_eq!(vary, vec!["Accept-Encoding", "Origin"]);
+}
+
+#[tokio::test]
+async fn proxy_failures_use_a_structured_json_envelope() {
+    let response = webd_error_response(StatusCode::BAD_GATEWAY, "webd_upstream_unavailable", None);
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = to_bytes(response.into_body(), 1024)
+        .await
+        .expect("read proxy error response");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).expect("parse proxy error response");
+    assert_eq!(payload["error"], "webd_upstream_unavailable");
+    assert_eq!(payload["data"]["error_code"], "webd_upstream_unavailable");
+}
+
+#[test]
+fn https_sessions_use_secure_http_only_cookies() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+    assert!(request_uses_https(
+        &headers,
+        SocketAddr::from(([127, 0, 0, 1], 41008)),
+        true,
+    ));
+    let cookie = session_cookie_value("webd_sid", "session-id", 60, true);
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Lax"));
+    assert!(cookie.contains("; Secure"));
+}
+
+#[test]
 fn skill_store_install_uses_long_running_upstream_wait() {
     assert!(uses_long_running_upstream_wait(
         &Method::POST,
@@ -279,6 +406,7 @@ async fn install_wait_outlives_normal_proxy_deadline() {
         max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
+        session_store_path: std::path::PathBuf::new(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         login_failure_limit: 6,
         login_lockout_secs: 900,
@@ -339,6 +467,7 @@ async fn task_event_stream_outlives_normal_proxy_deadline() {
         max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
+        session_store_path: std::path::PathBuf::new(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         login_failure_limit: 6,
         login_lockout_secs: 900,

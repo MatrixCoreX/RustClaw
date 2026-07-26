@@ -20,10 +20,32 @@ pub(crate) fn print_task_status(
     }
 }
 
+pub(crate) fn print_task_status_without_result(
+    task: &task::TaskStatusView,
+    include_events: bool,
+    event_filters: &EventFilters,
+) {
+    for line in task_status_lines_with_result(task, include_events, event_filters, false) {
+        println!("{line}");
+    }
+    if let Some(error_text) = task.error_text.as_deref() {
+        eprintln!("error: {error_text}");
+    }
+}
+
 pub(crate) fn task_status_lines(
     task: &task::TaskStatusView,
     include_events: bool,
     event_filters: &EventFilters,
+) -> Vec<String> {
+    task_status_lines_with_result(task, include_events, event_filters, true)
+}
+
+fn task_status_lines_with_result(
+    task: &task::TaskStatusView,
+    include_events: bool,
+    event_filters: &EventFilters,
+    include_result: bool,
 ) -> Vec<String> {
     let mut lines = vec![
         format!("task_id: {}", task.task_id),
@@ -45,8 +67,10 @@ pub(crate) fn task_status_lines(
     if !lifecycle_tokens.is_empty() {
         lines.push(format!("lifecycle: {}", lifecycle_tokens.join(" ")));
     }
-    if let Some(text) = task.result_text.as_deref() {
-        lines.push(text.to_string());
+    if include_result {
+        if let Some(text) = task.result_text.as_deref() {
+            lines.push(text.to_string());
+        }
     }
     if include_events {
         for line in filtered_event_lines(task, event_filters) {

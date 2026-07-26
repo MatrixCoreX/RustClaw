@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
-import { AiLearningPage } from "./components/AiLearningPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
@@ -16,7 +15,12 @@ import { SignInPage } from "./components/SignInPage";
 import { SkillsPage } from "./components/SkillsPage";
 import { SkillStorePage } from "./components/SkillStorePage";
 import { TasksPage } from "./components/TasksPage";
-import { maskStoredKey } from "./lib/auth-keys";
+import {
+  formatAuthenticationError,
+  maskStoredKey,
+  responseIndicatesExpiredAuthentication,
+} from "./lib/auth-keys";
+import { conversationHistoryScope } from "./lib/chat-history";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import {
   formatDateTimeHuman as formatDateTimeHumanValue,
@@ -69,6 +73,12 @@ import type {
   AuthIdentityResponse,
   ConsolePage,
 } from "./types/api";
+
+const AiLearningPage = lazy(() =>
+  import("./components/AiLearningPage").then((module) => ({
+    default: module.AiLearningPage,
+  })),
+);
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
@@ -174,10 +184,9 @@ export default function App() {
     const fallback = t("未知错误", "Unknown error");
     if (!(err instanceof Error)) return fallback;
     const raw = err.message || fallback;
-    const lower = raw.toLowerCase();
-    const looksLikeNetworkError =
-      lower.includes("failed to fetch") || lower.includes("networkerror") || lower.includes("load failed");
-    if (!looksLikeNetworkError) return raw;
+    // Fetch rejects transport failures with TypeError across browser locales.
+    // Preserve explicit application errors without parsing their prose.
+    if (!(err instanceof TypeError)) return raw;
 
     try {
       const pageProtocol = window.location.protocol;
@@ -203,7 +212,7 @@ export default function App() {
     const credentials =
       authMode === "webd" ? "include" : init?.credentials ?? "same-origin";
     try {
-      return await fetch(targetUrl, {
+      const response = await fetch(targetUrl, {
         ...init,
         credentials,
         headers: {
@@ -211,6 +220,28 @@ export default function App() {
           ...(withAuth ? authHeaders : {}),
         },
       });
+      if (
+        withAuth &&
+        authMode &&
+        (await responseIndicatesExpiredAuthentication(response))
+      ) {
+        authFlowEpochRef.current += 1;
+        window.localStorage.removeItem(STORAGE_KEYS.userKey);
+        window.localStorage.removeItem(STORAGE_KEYS.authMode);
+        setAuthMode(null);
+        setUiKey("");
+        setUiKeyDraft("");
+        setUiAuthReady(false);
+        setUiAuthLoading(false);
+        setAuthIdentity(null);
+        setInteractionUserId(null);
+        setInteractionChatId(null);
+        setInteractionRole("-");
+        setUiAuthError(
+          t("登录状态已失效，请重新登录。", "Your session has expired. Please sign in again."),
+        );
+      }
+      return response;
     } catch (err) {
       throw new Error(normalizeFetchError(err, targetUrl));
     }
@@ -528,6 +559,12 @@ export default function App() {
     activeUserKey || interactionUserId == null || interactionChatId == null
       ? {}
       : { user_id: interactionUserId, chat_id: interactionChatId };
+  const activeConversationHistoryScope = conversationHistoryScope(
+    uiAuthReady,
+    authMode,
+    authIdentity?.user_id,
+    authIdentity?.chat_id,
+  );
   const {
     taskId,
     setTaskId,
@@ -616,6 +653,7 @@ export default function App() {
     chatTeachingRuns,
     activeChatTeachingRunId,
     chatSending,
+    chatWorking,
     chatRecording,
     chatVoiceRecordingSupported,
     chatAudioInputDevices,
@@ -626,6 +664,7 @@ export default function App() {
     selectChatTeachingRun,
     createNewChatThread,
     selectChatThread,
+    renameChatThread,
     deleteChatThread,
     clearChatMessages,
     setChatInput,
@@ -645,6 +684,7 @@ export default function App() {
     interactionChannel,
     activeUserKey,
     activeIdentityIds,
+    conversationHistoryScope: activeConversationHistoryScope,
     interactionExternalUserId,
     interactionExternalChatId,
     fetchTaskById,
@@ -668,7 +708,7 @@ export default function App() {
       const res = await apiFetch(`/v1/auth/me`);
       const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `auth/me 请求失败 (${res.status})`);
+        throw new Error(formatAuthenticationError(body.error, res.status, t));
       }
       applyIdentity(body.data);
       if (!silent) {
@@ -707,7 +747,7 @@ export default function App() {
       const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
       if (authEpoch !== authFlowEpochRef.current) return false;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `key 校验失败 (${res.status})`);
+        throw new Error(formatAuthenticationError(body.error, res.status, t));
       }
       setUiKey(normalized);
       setUiKeyDraft(normalized);
@@ -804,7 +844,9 @@ export default function App() {
             ),
           );
         }
-        throw new Error(body.error ?? `${t("登录失败", "Sign-in failed")} (${res.status})`);
+        throw new Error(
+          formatAuthenticationError(body.error_code ?? body.error, res.status, t),
+        );
       }
       setBaseUrl(webdBase);
       window.localStorage.setItem(STORAGE_KEYS.baseUrl, webdBase);
@@ -1433,6 +1475,7 @@ export default function App() {
               chatTeachingRuns={chatTeachingRuns}
               activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
+              chatWorking={chatWorking}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
               chatAudioInputDevices={chatAudioInputDevices}
@@ -1444,6 +1487,7 @@ export default function App() {
               onSelectChatTeachingRun={selectChatTeachingRun}
               onCreateNewChatThread={createNewChatThread}
               onSelectChatThread={selectChatThread}
+              onRenameChatThread={renameChatThread}
               onDeleteChatThread={deleteChatThread}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
@@ -1458,7 +1502,17 @@ export default function App() {
             />
           ) : null}
 
-          {currentPage === "ai_learning" ? <AiLearningPage lang={lang} t={t} /> : null}
+          {currentPage === "ai_learning" ? (
+            <Suspense
+              fallback={
+                <div className="flex min-h-48 items-center justify-center text-sm text-white/65">
+                  {t("正在打开学习内容...", "Opening learning content...")}
+                </div>
+              }
+            >
+              <AiLearningPage lang={lang} t={t} />
+            </Suspense>
+          ) : null}
 
           {currentPage === "nni" ? (
             <NniPage
@@ -1816,7 +1870,10 @@ export default function App() {
               taskControlSubmittingId={taskControlSubmittingId}
               taskControlMessage={taskControlMessage}
               taskControlError={taskControlError}
-              canUseInteractionContext={interactionUserId != null && interactionChatId != null}
+              canUseInteractionContext={
+                Boolean(activeUserKey.trim()) ||
+                (interactionUserId != null && interactionChatId != null)
+              }
               resumeDrafts={resumeDrafts}
               resumeSubmittingTaskId={resumeSubmittingTaskId}
               toLocalTime={toLocalTime}

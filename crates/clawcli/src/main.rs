@@ -1,7 +1,12 @@
 //! clawcli — terminal CLI for interacting with clawd.
 
+mod assistant_presentation;
 mod auth;
 mod chat;
+mod chat_attachments;
+mod chat_command;
+mod chat_editor;
+mod chat_session;
 mod client;
 mod commands;
 mod events;
@@ -10,6 +15,7 @@ mod output;
 mod replay;
 mod resources;
 mod task;
+mod terminal_capabilities;
 
 use anyhow::Result;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
@@ -43,14 +49,20 @@ enum Command {
     /// Interactive chat mode.
     Chat {
         /// Start a new persisted thread instead of continuing the latest one.
-        #[arg(long = "new", conflicts_with = "thread_id")]
-        new_thread: bool,
-        /// Continue a specific persisted thread.
+        #[arg(long = "new", conflicts_with = "conversation_id")]
+        new_conversation: bool,
+        /// Continue a specific persisted conversation.
         #[arg(long)]
-        thread_id: Option<String>,
+        conversation_id: Option<String>,
         /// Print raw task events as JSONL.
         #[arg(long)]
         jsonl: bool,
+        /// Add a file attachment before the first turn.
+        #[arg(long = "file")]
+        files: Vec<PathBuf>,
+        /// Add an image attachment before the first turn.
+        #[arg(long = "image")]
+        images: Vec<PathBuf>,
     },
 
     /// GET /v1/health
@@ -783,27 +795,36 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| cli.base_url.clone());
     let base_url = base_url.trim_end_matches('/');
     let key: Option<String> = cli.key.or_else(auth::default_admin_key);
-    let submission_options = task::TaskSubmissionOptions { yolo: cli.yolo };
+    let submission_options = task::TaskSubmissionOptions {
+        yolo: cli.yolo,
+        permission_mode: None,
+    };
     let cmd = cli.cmd.unwrap_or(Command::Chat {
-        new_thread: false,
-        thread_id: None,
+        new_conversation: false,
+        conversation_id: None,
         jsonl: false,
+        files: Vec::new(),
+        images: Vec::new(),
     });
 
     match &cmd {
         Command::Chat {
-            new_thread,
-            thread_id,
+            new_conversation,
+            conversation_id,
             jsonl,
+            files,
+            images,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             chat::run_chat(
                 base_url,
                 k,
-                thread_id.as_deref(),
-                *new_thread,
+                conversation_id.as_deref(),
+                *new_conversation,
                 *jsonl,
                 submission_options,
+                files,
+                images,
             )
         }
         Command::Health => commands::run_health(base_url, key.as_deref()),

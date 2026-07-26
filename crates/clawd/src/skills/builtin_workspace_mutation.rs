@@ -113,6 +113,10 @@ where
     let mut checkpoint =
         StructuredMutationCheckpoint::prepare(workspace_root, task_id, action, target)?;
     if let Err(operation_error) = operation() {
+        if checkpoint.current_matches_before_state().unwrap_or(false) {
+            remove_checkpoint_dir(&checkpoint.checkpoint_dir);
+            return Err(operation_error);
+        }
         if let Err(restore_error) = checkpoint.restore_before_state() {
             return Err(mutation_error(
                 "mutation_and_restore_failed",
@@ -305,6 +309,11 @@ impl StructuredMutationCheckpoint {
 
     fn restore_before_state(&mut self) -> Result<(), String> {
         restore_snapshot(&self.root, &self.checkpoint_dir, &self.manifest)
+    }
+
+    fn current_matches_before_state(&self) -> Result<bool, String> {
+        let current = capture_snapshot(&self.root, &self.manifest.target_path, None)?;
+        Ok(snapshot_states_equal(&self.manifest.before, &current))
     }
 
     fn restore_after_internal_failure(&mut self, failure: String) -> String {

@@ -29,6 +29,30 @@ CREATE TABLE IF NOT EXISTS tasks (
     claimed_at    INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS conversation_metadata (
+    owner_user_key TEXT NOT NULL,
+    owner_user_id  INTEGER NOT NULL,
+    conversation_id TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY(owner_user_key, conversation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_metadata_owner_updated
+ON conversation_metadata(owner_user_key, updated_at);
+
+CREATE TABLE IF NOT EXISTS conversation_archives (
+    owner_user_key TEXT NOT NULL,
+    owner_user_id  INTEGER NOT NULL,
+    conversation_id TEXT NOT NULL,
+    archived_at   TEXT NOT NULL,
+    PRIMARY KEY(owner_user_key, conversation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_archives_owner_archived
+ON conversation_archives(owner_user_key, archived_at);
+
 CREATE TABLE IF NOT EXISTS child_task_graphs (
     parent_task_id TEXT PRIMARY KEY,
     schema_version INTEGER NOT NULL,

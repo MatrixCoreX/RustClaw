@@ -41,6 +41,7 @@ struct XRunOutput {
 struct XSkillError {
     kind: &'static str,
     message: String,
+    external_call_count: u64,
 }
 
 impl XSkillError {
@@ -48,6 +49,15 @@ impl XSkillError {
         Self {
             kind,
             message: message.into(),
+            external_call_count: 0,
+        }
+    }
+
+    fn after_external_call(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            external_call_count: 1,
         }
     }
 
@@ -57,6 +67,9 @@ impl XSkillError {
             "action": "post",
             "source_skill": "x",
             "error_kind": self.kind,
+            "published": false,
+            "would_execute": false,
+            "external_call_count": self.external_call_count,
         })
     }
 }
@@ -249,10 +262,13 @@ fn x_post_extra(
         "status": "ok",
         "action": "post",
         "source_skill": "x",
+        "draft_text": input.text,
         "outcome": outcome,
         "dry_run": input.dry_run,
         "send": input.send,
         "published": published,
+        "would_execute": !input.dry_run && input.send && !published,
+        "external_call_count": if published { 1 } else { 0 },
         "text_char_count": input.text.chars().count(),
         "max_text_chars": runtime_cfg.max_text_chars,
         "use_xurl": runtime_cfg.use_xurl,
@@ -299,7 +315,8 @@ fn run_x_post_via_xurl(
     let output = wait_with_timeout(
         &mut child,
         Duration::from_secs(runtime_cfg.xurl_timeout_seconds),
-    )?;
+    )
+    .map_err(|error| XSkillError::after_external_call(error.kind, error.message))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
@@ -319,7 +336,7 @@ fn run_x_post_via_xurl(
         } else {
             detail
         };
-        return Err(XSkillError::new(
+        return Err(XSkillError::after_external_call(
             "xurl_failed",
             format!(
                 "xurl post failed. ensure `xurl auth oauth2` is completed with tweet.write scope; detail={}",
@@ -329,14 +346,14 @@ fn run_x_post_via_xurl(
     }
 
     if stdout.is_empty() {
-        return Err(XSkillError::new(
+        return Err(XSkillError::after_external_call(
             "xurl_empty_response",
             "xurl returned success exit code but empty response body",
         ));
     }
 
     let parsed: Value = serde_json::from_str(&stdout).map_err(|err| {
-        XSkillError::new(
+        XSkillError::after_external_call(
             "xurl_non_json_response",
             format!(
                 "xurl returned non-JSON success response: {} (parse error: {})",
@@ -346,7 +363,7 @@ fn run_x_post_via_xurl(
         )
     })?;
     if let Some(errs) = parsed.get("errors") {
-        return Err(XSkillError::new(
+        return Err(XSkillError::after_external_call(
             "xurl_api_errors",
             format!(
                 "xurl returned API errors: {}",
@@ -360,7 +377,7 @@ fn run_x_post_via_xurl(
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     if id.is_empty() {
-        return Err(XSkillError::new(
+        return Err(XSkillError::after_external_call(
             "xurl_missing_id",
             format!(
                 "xurl response missing data.id: {}",

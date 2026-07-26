@@ -11,11 +11,11 @@
 `doc_parse` parses local documents into structured output.
 
 Planner selection guidance:
-- Use `doc_parse` when the request needs semantic evidence from a user/business document: extracting key points, summarizing sections, judging excerpt meaning, collecting paragraphs, reading document structure, parsing tables, or preparing grounded synthesis from a supported document file.
+- Use `doc_parse` when the request needs semantic content from a user/business document: extracting key points, summarizing sections, judging excerpt meaning, collecting paragraphs, parsing readable tables, or preparing grounded synthesis from a supported document file.
 - Prefer `doc_parse` for PDF/docx/html files, markdown or text documents that need key points or section-level synthesis, table/section-aware parsing, long documents, or document-format behavior that `fs_basic.read_text_range` does not model.
 - Repository documentation files such as README, release notes, checklists, runbooks, and service notes still belong to `doc_parse` when the request asks to parse, summarize, extract key points, explain sections, or prepare a grounded document synthesis.
-- Use `fs_basic.read_text_range` first for source files, prompt markdown, generated skill docs, config-adjacent docs, exact line ranges, raw bounded excerpts, previews, or small text files when the user asks for raw text rather than document understanding; synthesize the user-facing answer from that bounded text.
-- Use generic filesystem/text tools when the request is explicitly about raw bytes, exact line ranges, path facts, file listings, or structured JSON/TOML/YAML field extraction.
+- Use `fs_basic.read_text_range` or another generic filesystem/text capability for source files, prompt markdown, generated skill docs, config-adjacent docs, raw bytes, exact line ranges, path facts, file listings, bounded excerpts, previews, small text files, or structured JSON/TOML/YAML field extraction when document understanding is not required; synthesize any user-facing answer from that bounded evidence.
+- Do not use `doc_parse` for DOCX/XLSX/PPTX package structure, integrity, relationships, stable object identifiers, source revisions, transactional edits, or Office-specific validation. Those requests belong to `office_workspace`, including when the requested Office path is unavailable and the expected result is a structured failure.
 - `doc_parse` only parses and exposes grounded document evidence. It does not have separate `summarize`, `extract`, `judge`, or rewrite actions; perform those user-facing transformations in the agent response or a later synthesis step using the parsed output.
 
 Supported formats:

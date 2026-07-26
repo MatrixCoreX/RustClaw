@@ -555,13 +555,20 @@ pub(super) fn structured_observed_body(skill: &str, body: &str) -> Option<String
                 "count_inventory" => count_inventory_observed_candidate(&value),
                 "tree_summary" => tree_summary_direct_answer_candidate(None, &value, true),
                 "dir_compare" => dir_compare_direct_answer_candidate(None, &value, true),
+                "summarize_structured" => Some(value.to_string()),
                 "validate_structured" => validate_structured_observed_candidate(&value),
                 "compare_paths" => compare_paths_observed_candidate(body),
                 "path_batch_facts" => path_batch_facts_observed_candidate(&value),
                 _ => None,
             }
         }
-        "config_basic" => validate_structured_observed_candidate(&value),
+        "config_basic" => {
+            if value.get("action").and_then(|v| v.as_str()) == Some("summarize_structured") {
+                Some(value.to_string())
+            } else {
+                validate_structured_observed_candidate(&value)
+            }
+        }
         "service_control" => None,
         "fs_search" | "fs_basic" => {
             if skill == "fs_basic" {

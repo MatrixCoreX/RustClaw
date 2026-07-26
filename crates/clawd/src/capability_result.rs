@@ -146,10 +146,66 @@ pub(crate) fn selected_result_value<'a>(
         })
 }
 
+pub(crate) fn selected_result_machine_value(
+    result: &CapabilityResultEnvelope,
+    selector: &str,
+) -> Option<Value> {
+    if selector == "status" {
+        return Some(Value::String(result.status.as_token().to_string()));
+    }
+    if selector == "data" || selector.starts_with("data.") {
+        return selected_result_value(result, selector).cloned();
+    }
+    let error_selector = selector.strip_prefix("error.")?;
+    let error = serde_json::to_value(result.error.as_ref()?).ok()?;
+    structured_value_at_path(&error, error_selector).cloned()
+}
+
+pub(crate) fn exact_object_projection_from_result(
+    result: &CapabilityResultEnvelope,
+    object: &serde_json::Map<String, Value>,
+) -> Option<Value> {
+    if object.is_empty() {
+        return None;
+    }
+    let result = serde_json::to_value(result).ok()?;
+    object
+        .iter()
+        .map(|(name, expected)| {
+            observed_named_value(&result, name, expected, 0)
+                .cloned()
+                .map(|value| (name.clone(), value))
+        })
+        .collect::<Option<JsonMap<String, Value>>>()
+        .map(Value::Object)
+}
+
+fn observed_named_value<'a>(
+    current: &'a Value,
+    field_name: &str,
+    expected: &Value,
+    depth: usize,
+) -> Option<&'a Value> {
+    if depth > 12 {
+        return None;
+    }
+    let object = current.as_object()?;
+    object.iter().find_map(|(name, value)| {
+        if name == field_name && value == expected {
+            Some(value)
+        } else {
+            observed_named_value(value, field_name, expected, depth + 1)
+        }
+    })
+}
+
 fn structured_value_at_path<'a>(value: &'a Value, selector: &str) -> Option<&'a Value> {
-    selector
-        .split('.')
-        .try_fold(value, |current, segment| current.as_object()?.get(segment))
+    selector.split('.').try_fold(value, |current, segment| {
+        if let Some(object) = current.as_object() {
+            return object.get(segment);
+        }
+        current.as_array()?.get(segment.parse::<usize>().ok()?)
+    })
 }
 
 fn exact_value_text(value: &Value) -> Option<String> {
@@ -211,6 +267,42 @@ fn redact_for_model(value: Value) -> Value {
 }
 
 fn structured_error(error: &str) -> StructuredError {
+    if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+        let extra = structured.extra.unwrap_or(Value::Null);
+        let code = machine_string(&extra, &["error_code", "error_kind", "code"])
+            .filter(|value| is_machine_ref(value))
+            .unwrap_or(structured.error_kind.as_str())
+            .to_string();
+        let code = if is_machine_ref(&code) {
+            code
+        } else {
+            "capability_execution_failed".to_string()
+        };
+        let message_key = machine_string(&extra, &["message_key"])
+            .filter(|value| is_machine_ref(value))
+            .unwrap_or(code.as_str())
+            .to_string();
+        let retryable = extra
+            .get("retryable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return StructuredError {
+            code: code.clone(),
+            message_key,
+            retryable,
+            details: json!({
+                "structured_error": {
+                    "skill": structured.skill,
+                    "error_kind": code,
+                    "error_text": redact_for_model(Value::String(structured.error_text)),
+                    "platform": structured.platform,
+                    "manager_type": structured.manager_type,
+                    "service_name": structured.service_name,
+                    "extra": redact_for_model(extra),
+                }
+            }),
+        };
+    }
     let parsed = serde_json::from_str::<Value>(error.trim()).ok();
     let code = parsed
         .as_ref()

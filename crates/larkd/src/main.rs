@@ -1349,8 +1349,24 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
     }
 }
 
+fn install_tls_crypto_provider() -> anyhow::Result<()> {
+    if rustls::crypto::CryptoProvider::get_default().is_some() {
+        return Ok(());
+    }
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_ok()
+        || rustls::crypto::CryptoProvider::get_default().is_some()
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("rustls_crypto_provider_install_failed")
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    install_tls_crypto_provider()?;
     tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "info,larkd=debug".to_string()),

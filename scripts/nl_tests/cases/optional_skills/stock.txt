@@ -1,0 +1,3 @@
+# Registry-owned optional skill: stock. No row may contact a live provider.
+optional_skill_lifecycle|stock_preview_en|optional_skill:stock,case_role:happy,provider_mode:offline,external_calls:0,independent,capability:stock.preview_quote,requires_tool_call:true|Preview an A-share quote request for code 600519 without fetching a live quote. Return only action, requested_symbol, normalized_code, resolution_mode, provider, would_execute, and external_call_count.|expect=contains:preview_quote;contains:SH600519;contains:external_call_count
+optional_skill_lifecycle|stock_missing_symbol_zh|optional_skill:stock,case_role:failure,provider_mode:offline,external_calls:0,independent,requires_tool_call:false|离线检查一个没有提供股票代码或名称的行情预览请求，不要访问行情服务；指出继续所需的结构化字段。

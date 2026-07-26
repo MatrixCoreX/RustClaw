@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::chat_session::ModelOverride;
 use crate::output;
 
 use super::common::get_v1_json;
@@ -35,6 +36,88 @@ pub(crate) fn run_models_readiness(base_url: &str, key: &str, json_output: bool)
         }
     }
     Ok(())
+}
+
+pub(crate) fn resolve_chat_model_override(
+    base_url: &str,
+    key: &str,
+    requested_model_id: &str,
+) -> Result<ModelOverride> {
+    let body = get_v1_json(base_url, key, "/models/catalog", "models_catalog")?;
+    resolve_model_override_from_catalog(&body, requested_model_id)
+}
+
+pub(super) fn resolve_model_override_from_catalog(
+    body: &serde_json::Value,
+    requested_model_id: &str,
+) -> Result<ModelOverride> {
+    let requested = requested_model_id.trim();
+    if requested.is_empty() {
+        anyhow::bail!("chat_model_id_missing");
+    }
+    let entries = body
+        .pointer("/data/entries")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("chat_model_catalog_entries_missing"))?;
+    let explicit = requested.split_once('/');
+    let mut matches = entries.iter().filter(|entry| {
+        if !entry
+            .get("supports_text")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if entry
+            .get("credential_state")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|state| matches!(state, "missing" | ""))
+        {
+            return false;
+        }
+        let provider = entry
+            .get("provider")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let configured_model = entry
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let models = entry
+            .get("models")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        match explicit {
+            Some((wanted_provider, wanted_model)) => {
+                provider == wanted_provider
+                    && (configured_model == wanted_model
+                        || models
+                            .iter()
+                            .any(|model| model.as_str() == Some(wanted_model)))
+            }
+            None => {
+                configured_model == requested
+                    || models.iter().any(|model| model.as_str() == Some(requested))
+            }
+        }
+    });
+    let Some(entry) = matches.next() else {
+        anyhow::bail!("chat_model_not_allowed");
+    };
+    if matches.next().is_some() {
+        anyhow::bail!("chat_model_id_ambiguous");
+    }
+    let provider = entry
+        .get("provider")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("chat_model_provider_missing"))?;
+    let model = explicit.map(|(_, model)| model).unwrap_or(requested).trim();
+    Ok(ModelOverride {
+        provider: provider.to_string(),
+        model: model.to_string(),
+    })
 }
 
 pub(super) fn filter_catalog_response(

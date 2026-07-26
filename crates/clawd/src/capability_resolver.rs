@@ -462,7 +462,7 @@ fn normalize_config_basic_capability_args(normalized_capability: &str, args: Val
             move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
             move_arg_alias_if_missing(&mut obj, "field_paths", &["fields", "keys", "field_names"]);
         }
-        Some("list_keys" | "validate" | "guard_rustclaw_config") => {
+        Some("list_keys" | "summarize_structure" | "validate" | "guard_rustclaw_config") => {
             move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
         }
         _ => {}

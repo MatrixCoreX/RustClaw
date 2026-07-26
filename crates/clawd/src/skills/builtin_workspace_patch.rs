@@ -59,6 +59,13 @@ pub(super) fn execute_workspace_patch_for_root(
     let action = required_token(args, "action")?;
     match action {
         "apply_patch" => apply_patch(workspace_root, task_id, args),
+        "preview_replace_text" | "replace_text" => {
+            super::builtin_workspace_replace::execute_workspace_replace_for_root(
+                workspace_root,
+                task_id,
+                args,
+            )
+        }
         "diff" => diff(workspace_root, args),
         "rewind" => rewind(workspace_root, args),
         _ => Err(patch_error(
@@ -557,7 +564,7 @@ fn verify_preconditions(
     Ok(())
 }
 
-fn validate_relative_patch_path(root: &Path, path: &str) -> Result<PathBuf, String> {
+pub(super) fn validate_relative_patch_path(root: &Path, path: &str) -> Result<PathBuf, String> {
     let target = lexical_workspace_path(root, path)?;
     let relative = target
         .strip_prefix(root)
@@ -1049,7 +1056,7 @@ fn patch_error(error_code: &str, message_key: &str, details: Value) -> String {
     )
 }
 
-fn invalid_path_error(path: &str) -> String {
+pub(super) fn invalid_path_error(path: &str) -> String {
     patch_error(
         "invalid_patch_path",
         "workspace.patch.invalid_path",

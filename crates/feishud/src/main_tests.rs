@@ -1,6 +1,6 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, handle_incoming_feishu_text,
-    is_unbound_allowed_command, AppState, FeishuConfig, FeishuSection,
+    install_tls_crypto_provider, is_unbound_allowed_command, AppState, FeishuConfig, FeishuSection,
 };
 use crate::media_helpers::feishu_media_agent_context;
 use axum::extract::State;
@@ -12,6 +12,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+
+#[test]
+fn tls_crypto_provider_installation_is_idempotent() {
+    install_tls_crypto_provider().expect("initial provider installation");
+    install_tls_crypto_provider().expect("repeated provider installation");
+    assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+}
 
 #[test]
 fn unbound_plain_text_requires_binding_prompt() {

@@ -140,6 +140,7 @@ mod builtin;
 mod external;
 mod memory_context;
 mod output_dirs;
+mod result_enrichment;
 mod runner;
 
 #[cfg(test)]
@@ -151,6 +152,7 @@ pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command_with_s
 pub(crate) use external::execute_external_skill;
 pub(crate) use memory_context::inject_skill_memory_context;
 pub(crate) use output_dirs::ensure_default_output_dir_for_skill_args;
+use result_enrichment::enrich_runtime_owned_skill_extra;
 pub(crate) use runner::{run_skill_with_runner, run_skill_with_runner_once};
 
 use crate::worker::task_runtime_channel;
@@ -277,6 +279,12 @@ fn structured_error_allows_bounded_replan(structured: &StructuredSkillError) -> 
         && extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
         && extra.get("failure_phase").and_then(Value::as_str) == Some("pre_dispatch")
         && extra.get("recovery_action").and_then(Value::as_str) == Some("replan_arguments")
+}
+
+pub(crate) fn structured_skill_error_requests_replan(err: &str) -> bool {
+    parse_structured_skill_error(err)
+        .as_ref()
+        .is_some_and(structured_error_allows_bounded_replan)
 }
 
 pub(crate) fn policy_block_error(
@@ -1837,8 +1845,10 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             .and_then(|v| v.get("validation"))
             .cloned()
     });
-    let mut extra =
-        append_extra_artifact_refs(value.get("extra").cloned(), isolation_artifact_refs);
+    let mut extra = append_extra_artifact_refs(
+        enrich_runtime_owned_skill_extra(execution_state, &skill_name, value.get("extra").cloned()),
+        isolation_artifact_refs,
+    );
     let mut text = value
         .get("text")
         .and_then(|v| v.as_str())

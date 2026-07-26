@@ -63,6 +63,28 @@ fn atomic_write_replaces_content_without_leaving_temporary_files() {
     assert_eq!(temporary_files, 0);
 }
 
+#[test]
+fn atomic_write_failure_removes_temporary_file() {
+    let workspace = TestWorkspace::new("atomic-write-cleanup");
+    let target = workspace.path().join("existing-directory");
+    fs::create_dir(&target).expect("create conflicting directory");
+
+    atomic_write_file(&target, b"after").expect_err("rename over directory must fail");
+
+    let temporary_files = fs::read_dir(workspace.path())
+        .expect("read workspace")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".rustclaw-write-")
+        })
+        .count();
+    assert_eq!(temporary_files, 0);
+    assert!(target.is_dir());
+}
+
 #[cfg(unix)]
 #[test]
 fn atomic_write_preserves_existing_unix_permissions() {

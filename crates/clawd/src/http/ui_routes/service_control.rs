@@ -168,6 +168,19 @@ fn service_is_running(service: &str) -> bool {
     }
 }
 
+async fn wait_for_service_running(service: &str) -> bool {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if service_is_running(service) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
 fn runtime_profile_default() -> &'static str {
     if cfg!(debug_assertions) {
         "debug"
@@ -193,13 +206,12 @@ fn validate_service_start_readiness(
 ) -> Result<(), ServiceControlFailure> {
     match service {
         "feishud" => {
-            let config = load_feishu_config_response(state, None)
-                .map_err(|err| {
-                    ServiceControlFailure::with_data(
-                        "feishu_config_read_failed",
-                        json!({"detail": err.to_string()}),
-                    )
-                })?;
+            let config = load_feishu_config_response(state, None).map_err(|err| {
+                ServiceControlFailure::with_data(
+                    "feishu_config_read_failed",
+                    json!({"detail": err.to_string()}),
+                )
+            })?;
             if !config.enabled {
                 return Err(ServiceControlFailure::new("service_disabled"));
             }
@@ -306,9 +318,7 @@ async fn control_service(
                     ),
                 );
             }
-            // Startup scripts are asynchronous; verify the target process after launch.
-            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-            if !service_is_running(service.as_str()) {
+            if !wait_for_service_running(service.as_str()).await {
                 return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     service.as_str(),
@@ -523,8 +533,7 @@ async fn control_service(
                     ),
                 );
             }
-            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-            if !service_is_running(service.as_str()) {
+            if !wait_for_service_running(service.as_str()).await {
                 return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     service.as_str(),
@@ -561,13 +570,11 @@ async fn restart_system(
         Err(resp) => return resp,
     };
     if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
+        return service_control_error_response(
             StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can restart RustClaw".to_string()),
-            }),
+            "rustclaw",
+            "restart",
+            ServiceControlFailure::new("admin_role_required"),
         );
     }
 
@@ -579,13 +586,14 @@ async fn restart_system(
             .stderr(std::process::Stdio::null());
 
         if let Err(err) = cmd.spawn() {
-            return (
+            return service_control_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("failed to schedule restart: {err}")),
-                }),
+                "rustclaw",
+                "restart",
+                ServiceControlFailure::with_data(
+                    "system_restart_schedule_failed",
+                    json!({"detail": err.to_string()}),
+                ),
             );
         }
 
@@ -616,13 +624,14 @@ async fn restart_system(
                 error: None,
             }),
         ),
-        Err(err) => (
+        Err(err) => service_control_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(err),
-            }),
+            "rustclaw",
+            "restart",
+            ServiceControlFailure::with_data(
+                "system_restart_schedule_failed",
+                json!({"detail": err}),
+            ),
         ),
     }
 }
@@ -635,7 +644,10 @@ async fn pi_app_status(
         return resp;
     }
     let model = raspberry_pi_model();
-    let script_path = state.skill_rt.workspace_root.join("pi_app/run-small-screen.sh");
+    let script_path = state
+        .skill_rt
+        .workspace_root
+        .join("pi_app/run-small-screen.sh");
     let script_exists = script_path.exists();
     (
         StatusCode::OK,
@@ -661,13 +673,11 @@ async fn restart_pi_app(
         Err(resp) => return resp,
     };
     if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
+        return service_control_error_response(
             StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can restart Pi App".to_string()),
-            }),
+            "pi_app",
+            "restart",
+            ServiceControlFailure::new("admin_role_required"),
         );
     }
 
@@ -698,13 +708,14 @@ async fn restart_pi_app(
                 error: None,
             }),
         ),
-        Err(err) => (
+        Err(err) => service_control_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(err),
-            }),
+            "pi_app",
+            "restart",
+            ServiceControlFailure::with_data(
+                "pi_app_restart_schedule_failed",
+                json!({"detail": err}),
+            ),
         ),
     }
 }
@@ -727,11 +738,13 @@ fn raspberry_pi_model() -> Option<String> {
         if lower.contains("raspberry pi") {
             let model = raw
                 .lines()
-                .find_map(|line| line.split_once(':').and_then(|(key, value)| {
-                    key.trim()
-                        .eq_ignore_ascii_case("model")
-                        .then(|| value.trim().to_string())
-                }))
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(key, value)| {
+                        key.trim()
+                            .eq_ignore_ascii_case("model")
+                            .then(|| value.trim().to_string())
+                    })
+                })
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| "Raspberry Pi".to_string());
             return Some(model);

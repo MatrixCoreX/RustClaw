@@ -421,6 +421,11 @@ pub(crate) struct TaskMetricsRegistry {
     /// after the complete fallback set is exhausted and is consumed by finalization to create a
     /// resumable waiting checkpoint.
     pub(crate) provider_blocker_per_task: Arc<Mutex<HashMap<String, TaskProviderBlocker>>>,
+    /// Task-scoped provider overrides reuse one validated runtime so HTTP,
+    /// concurrency, latency, and circuit-breaker state remain coherent for the
+    /// complete task. Entries are removed with the other per-task LLM state.
+    pub(crate) selected_llm_providers_per_task:
+        Arc<Mutex<HashMap<String, crate::task_model_selection::TaskModelProviderSelection>>>,
     /// Live task-event wakeups. Event payloads and replay state live in SQLite; this registry only
     /// wakes connected consumers, so the default test fixture remains lightweight.
     pub(crate) task_event_notifier: crate::task_event_transport::TaskEventNotifier,
@@ -1422,6 +1427,11 @@ impl AppState {
             .lock()
             .unwrap()
             .remove(task_id);
+        self.metrics
+            .selected_llm_providers_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
         self.clear_task_llm_cost_records(task_id);
         self.clear_task_llm_cost_budget(task_id);
         self.clear_task_cost_blocker(task_id);
@@ -1521,6 +1531,11 @@ impl AppState {
     }
 
     pub(crate) fn task_llm_providers(&self, task: &ClaimedTask) -> Vec<Arc<LlmProviderRuntime>> {
+        if let Some(providers) =
+            crate::task_model_selection::providers_for_task_model_selection(self, task)
+        {
+            return providers;
+        }
         let agent = self.task_agent(task);
         if !agent.llm_providers.is_empty() {
             return agent.llm_providers;

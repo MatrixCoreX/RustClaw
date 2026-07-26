@@ -20,6 +20,8 @@ BUILD_RELEASE=0
 EXTRA_SUITE_ARGS=()
 SUITE_SELECTION=(--category all)
 USER_KEY_VALUE="${USER_KEY:-${RUSTCLAW_USER_KEY:-}}"
+INSTALL_ON_DEMAND_SKILLS=()
+INSTALLED_ON_DEMAND_SKILLS=()
 
 usage() {
   cat <<'EOF'
@@ -52,6 +54,10 @@ Options:
   --reuse-server          explicitly reuse an existing server and its databases
   --no-reuse-server       retained compatibility spelling for the safe default
   --build-release         run cargo build -p clawd --release before starting
+  --install-on-demand-skill NAME
+                          install one registry on-demand skill through the
+                          isolated Skill Store HTTP API before NL execution;
+                          repeat for multiple skills. Reuse-server mode is rejected.
   -h, --help              show this help
 
 Examples:
@@ -128,6 +134,10 @@ while [[ $# -gt 0 ]]; do
       BUILD_RELEASE=1
       shift
       ;;
+    --install-on-demand-skill)
+      INSTALL_ON_DEMAND_SKILLS+=("$2")
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -169,10 +179,65 @@ started_pid=""
 suite_pid=""
 ISOLATION_ROOT=""
 
+skill_store_response_ok() {
+  local skill_name="$1"
+  local operation="$2"
+  python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+if payload.get("ok") is not True:
+    raise SystemExit(f"skill={sys.argv[1]} operation={sys.argv[2]} response_not_ok={payload}")
+' "$skill_name" "$operation"
+}
+
+install_on_demand_skill() {
+  local skill_name="$1"
+  if [[ ! "$skill_name" =~ ^[a-z0-9_]+$ ]]; then
+    echo "Invalid on-demand skill name: ${skill_name}" >&2
+    return 2
+  fi
+  local response
+  response="$(curl -fsS \
+    -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+    -H "Content-Type: application/json" \
+    --data "{\"skill_name\":\"${skill_name}\"}" \
+    "${BASE_URL%/}/v1/skills/store/install")"
+  if ! skill_store_response_ok "$skill_name" install <<<"$response"; then
+    echo "$response" >&2
+    return 1
+  fi
+  INSTALLED_ON_DEMAND_SKILLS+=("$skill_name")
+  echo "skill_store_install=ok skill=${skill_name}"
+}
+
+remove_installed_on_demand_skills() {
+  if [[ -z "${USER_KEY_VALUE:-}" || -z "${BASE_URL:-}" ]]; then
+    return 0
+  fi
+  local index skill_name response
+  for ((index=${#INSTALLED_ON_DEMAND_SKILLS[@]} - 1; index >= 0; index--)); do
+    skill_name="${INSTALLED_ON_DEMAND_SKILLS[$index]}"
+    response="$(curl -fsS \
+      -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+      -H "Content-Type: application/json" \
+      --data "{\"skill_name\":\"${skill_name}\",\"preserve_config\":true,\"preserve_data\":true}" \
+      "${BASE_URL%/}/v1/skills/store/remove" 2>/dev/null || true)"
+    if [[ -n "$response" ]] && skill_store_response_ok "$skill_name" remove <<<"$response"; then
+      echo "skill_store_remove=ok skill=${skill_name} config_preserved=true data_preserved=true"
+    else
+      echo "skill_store_remove=failed skill=${skill_name}" >&2
+    fi
+  done
+  INSTALLED_ON_DEMAND_SKILLS=()
+}
+
 cleanup() {
   if [[ -n "${suite_pid}" ]]; then
     kill "${suite_pid}" >/dev/null 2>&1 || true
     wait "${suite_pid}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${started_pid}" ]] && kill -0 "${started_pid}" >/dev/null 2>&1; then
+    remove_installed_on_demand_skills || true
   fi
   if [[ -n "${started_pid}" ]]; then
     kill "${started_pid}" >/dev/null 2>&1 || true
@@ -224,6 +289,10 @@ PY
   echo "task_db_identity=isolated/tasks.sqlite"
   echo "audit_db_identity=isolated/audit.sqlite"
 else
+  if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+    echo "--install-on-demand-skill requires the default isolated server mode" >&2
+    exit 2
+  fi
   BASE_URL="${REQUESTED_BASE_URL:-http://127.0.0.1:8787}"
   echo "server_mode=explicit_reuse"
   echo "base_url=${BASE_URL}"
@@ -313,6 +382,13 @@ else
   done
 fi
 
+if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+  for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
+    install_on_demand_skill "$skill_name"
+  done
+fi
+
 stamp="$(date +%Y%m%d_%H%M%S)"
 SUITE_LOG="${LOG_DIR%/}/rustclaw_full_nl_${stamp}.out"
 
@@ -369,5 +445,7 @@ else
   echo "server_log=<reused existing server>"
 fi
 echo "suite_log=${SUITE_LOG}"
+
+remove_installed_on_demand_skills
 
 exit "${suite_status}"

@@ -107,7 +107,7 @@ impl Default for StockSkillConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RuntimeConfig {
     llm: LlmConfig,
     stock: StockSkillConfig,
@@ -211,6 +211,7 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), Stri
         .to_ascii_lowercase();
 
     match action.as_str() {
+        "preview_quote" => preview_quote_request(obj),
         "quote" | "query" => {
             let symbol = obj
                 .get("symbol")
@@ -226,10 +227,49 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), Stri
             quote_a_share(&resolved)
         }
         _ => Err(format!(
-            "code=unsupported_action action={} allowed=quote|query",
+            "code=unsupported_action action={} allowed=preview_quote|quote|query",
             action
         )),
     }
+}
+
+fn preview_quote_request(obj: &serde_json::Map<String, Value>) -> Result<(String, Value), String> {
+    let requested_symbol = obj
+        .get("symbol")
+        .or_else(|| obj.get("code"))
+        .or_else(|| obj.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "code=missing_symbol required_any=symbol|code|name example=600519".to_string()
+        })?;
+    let direct_code = looks_like_stock_code(requested_symbol);
+    let normalized_code =
+        direct_code.then(|| normalize_code(requested_symbol).to_ascii_uppercase());
+    let resolution_mode = if direct_code {
+        "direct_code"
+    } else {
+        "configured_alias_or_model"
+    };
+    let text =
+        format!("message_key=skill.stock.quote_preview_ready resolution_mode={resolution_mode}");
+    Ok((
+        text,
+        json!({
+            "schema_version": 1,
+            "source_skill": "stock",
+            "status": "ok",
+            "message_key": "skill.stock.quote_preview_ready",
+            "action": "preview_quote",
+            "requested_symbol": requested_symbol,
+            "normalized_code": normalized_code,
+            "resolution_mode": resolution_mode,
+            "provider": "sina_finance",
+            "would_execute": false,
+            "external_call_count": 0,
+        }),
+    ))
 }
 
 fn stock_error_extra(error_kind: &str) -> Value {

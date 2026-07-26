@@ -11,20 +11,44 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 mod artifact_range;
+mod content_handoff;
 mod model_catalog_field_alias;
 mod path_helpers;
 mod platform_helpers;
 mod structured_helpers;
+mod structured_summary;
 
 use artifact_range::*;
+use content_handoff::*;
 use model_catalog_field_alias::*;
 use path_helpers::*;
 use platform_helpers::*;
 use structured_helpers::*;
+use structured_summary::*;
 
 const SKILL_NAME: &str = "system_basic";
 const MAX_READ_RANGE_SCAN_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_READ_RANGE_OUTPUT_BYTES: u64 = 64 * 1024;
+const SUPPORTED_ACTIONS: [&str; 18] = [
+    "info",
+    "runtime_status",
+    "inventory_dir",
+    "count_inventory",
+    "workspace_glance",
+    "tree_summary",
+    "dir_compare",
+    "extract_field",
+    "extract_fields",
+    "structured_keys",
+    "summarize_structured",
+    "validate_structured",
+    "find_path",
+    "read_range",
+    "read_artifact_range",
+    "compare_paths",
+    "path_batch_facts",
+    "diagnose_runtime",
+];
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -219,6 +243,9 @@ fn execute_action(
         "extract_field" => extract_field(workspace_root, obj, allow_path_outside_workspace),
         "extract_fields" => extract_fields(workspace_root, obj, allow_path_outside_workspace),
         "structured_keys" => structured_keys(workspace_root, obj, allow_path_outside_workspace),
+        "summarize_structured" => {
+            summarize_structured(workspace_root, obj, allow_path_outside_workspace)
+        }
         "validate_structured" => {
             validate_structured(workspace_root, obj, allow_path_outside_workspace)
         }
@@ -228,9 +255,15 @@ fn execute_action(
         "compare_paths" => compare_paths(workspace_root, obj, allow_path_outside_workspace),
         "path_batch_facts" => path_batch_facts(workspace_root, obj, allow_path_outside_workspace),
         "diagnose_runtime" => diagnose_runtime(workspace_root, obj),
-        other => Err(SkillError::unsupported_action(format!(
-            "unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime"
-        ))),
+        other => Err(
+            SkillError::unsupported_action(format!("unsupported_action={other}")).with_extra(
+                json!({
+                    "error_code": "unsupported_action",
+                    "received_action": other,
+                    "allowed_actions": SUPPORTED_ACTIONS,
+                }),
+            ),
+        ),
     }
 }
 
@@ -1420,16 +1453,18 @@ fn read_range(
             "resolved_path": real.display().to_string(),
             "size_bytes": meta.len(),
             "max_scan_bytes": MAX_READ_RANGE_SCAN_BYTES,
-            "requires_artifact_read": true,
+            "requires_handoff": true,
+            "handoff": content_handoff(workspace_root, path, &real, None),
         })));
     }
     let bytes = std::fs::read(&real).map_err(|err| SkillError::io("read_file", &real, err))?;
     let content_hash = sha256_hex(&bytes);
     if bytes.contains(&0) {
         return Err(unsupported_text_encoding_error(
+            workspace_root,
             path,
             &real,
-            bytes.len() as u64,
+            &bytes,
             "nul_byte",
         ));
     }
@@ -1439,7 +1474,7 @@ fn read_range(
         ("utf-8", bytes.as_slice())
     };
     let text = std::str::from_utf8(text_bytes).map_err(|_| {
-        unsupported_text_encoding_error(path, &real, bytes.len() as u64, "invalid_utf8")
+        unsupported_text_encoding_error(workspace_root, path, &real, &bytes, "invalid_utf8")
     })?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
@@ -1644,9 +1679,10 @@ fn read_range(
 }
 
 fn unsupported_text_encoding_error(
+    workspace_root: &Path,
     path: &str,
     resolved_path: &Path,
-    size_bytes: u64,
+    bytes: &[u8],
     detection: &'static str,
 ) -> SkillError {
     SkillError::new(
@@ -1660,10 +1696,11 @@ fn unsupported_text_encoding_error(
         "error_code": "unsupported_text_encoding",
         "path": path,
         "resolved_path": resolved_path.display().to_string(),
-        "size_bytes": size_bytes,
+        "size_bytes": bytes.len(),
         "binary": true,
         "detected_encoding": "binary_or_unsupported",
         "detection": detection,
+        "handoff": content_handoff(workspace_root, path, resolved_path, Some(bytes)),
     }))
 }
 
@@ -1877,3 +1914,7 @@ fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> SkillRes
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "structured_summary_tests.rs"]
+mod structured_summary_tests;

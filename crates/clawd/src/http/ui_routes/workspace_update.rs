@@ -75,16 +75,6 @@ fn set_workspace_update_next_step(status: &mut WorkspaceUpdateStatus, key: &str)
     status.next_step_args.clear();
 }
 
-fn set_workspace_update_next_step_args(
-    status: &mut WorkspaceUpdateStatus,
-    key: &str,
-    args: BTreeMap<String, Value>,
-) {
-    status.next_step = None;
-    status.next_step_key = Some(key.to_string());
-    status.next_step_args = args;
-}
-
 fn workspace_update_api_error(
     status: StatusCode,
     error_code: &'static str,
@@ -153,8 +143,7 @@ async fn refresh_workspace_update_versions(
         return snapshot;
     }
     let now = current_unix_ts();
-    let release_check_due =
-        latest_release_check_due(&snapshot, force_release_refresh, now);
+    let release_check_due = latest_release_check_due(&snapshot, force_release_refresh, now);
     let source_update_available = workspace_source_update_available(workspace_root);
     let installation_kind = workspace_installation_kind(workspace_root);
 
@@ -274,11 +263,7 @@ async fn refresh_workspace_update_versions(
     guard.clone()
 }
 
-fn latest_release_check_due(
-    status: &WorkspaceUpdateStatus,
-    force_refresh: bool,
-    now: i64,
-) -> bool {
+fn latest_release_check_due(status: &WorkspaceUpdateStatus, force_refresh: bool, now: i64) -> bool {
     if force_refresh {
         return true;
     }
@@ -297,10 +282,7 @@ fn release_platform_prefixes() -> Option<(&'static str, &'static str)> {
     release_platform_prefixes_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
-fn release_platform_prefixes_for(
-    os: &str,
-    arch: &str,
-) -> Option<(&'static str, &'static str)> {
+fn release_platform_prefixes_for(os: &str, arch: &str) -> Option<(&'static str, &'static str)> {
     if os != "linux" {
         return None;
     }
@@ -693,11 +675,7 @@ async fn run_workspace_update_job(
             return;
         }
         Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "workspace_update.git_unavailable",
-            );
+            fail_workspace_update_with_error(&shared, err, "workspace_update.git_unavailable");
             return;
         }
     };
@@ -758,11 +736,7 @@ async fn run_workspace_update_job(
             return;
         }
         Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "workspace_update.upstream_missing",
-            );
+            fail_workspace_update_with_error(&shared, err, "workspace_update.upstream_missing");
             return;
         }
     };
@@ -795,10 +769,10 @@ async fn run_workspace_update_job(
                         Ok(paths) => paths,
                         Err(err) => {
                             fail_workspace_update_with_error(
-                            &shared,
-                            err,
-                            "workspace_update.pull_conflict_detection_failed",
-                        );
+                                &shared,
+                                err,
+                                "workspace_update.pull_conflict_detection_failed",
+                            );
                             return;
                         }
                     };
@@ -812,49 +786,90 @@ async fn run_workspace_update_job(
                     return;
                 }
 
-                set_workspace_update_step(&shared, "resolving_conflicting_files");
+                if workspace_update_has_non_config_conflicts(&conflict_paths) {
+                    fail_workspace_update(
+                        &shared,
+                        "workspace_update_local_source_conflicts",
+                        "workspace_update.local_source_conflicts_preserved",
+                        first_pull_out,
+                    );
+                    return;
+                }
+
+                set_workspace_update_step(&shared, "snapshotting_runtime_config");
+                let config_snapshot = match snapshot_workspace_update_config_conflicts(
+                    &workspace_root,
+                    &conflict_paths,
+                )
+                .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(err) => {
+                        fail_workspace_update_with_error(
+                            &shared,
+                            err,
+                            "workspace_update.config_snapshot_failed_preserved",
+                        );
+                        return;
+                    }
+                };
                 if let Err(err) =
-                    overwrite_workspace_update_conflict_paths(&workspace_root, &conflict_paths)
+                    prepare_workspace_update_config_paths_for_pull(&workspace_root, &conflict_paths)
                         .await
                 {
+                    let _ =
+                        restore_workspace_update_config_snapshot(&workspace_root, &config_snapshot)
+                            .await;
                     fail_workspace_update_with_error(
                         &shared,
                         err,
-                        "workspace_update.conflict_overwrite_failed",
+                        "workspace_update.config_prepare_failed_preserved",
                     );
                     return;
                 }
                 {
                     let mut guard = workspace_update_status_lock(shared.as_ref());
-                    let mut args = BTreeMap::new();
-                    args.insert("count".to_string(), json!(conflict_paths.len()));
-                    set_workspace_update_next_step_args(
+                    set_workspace_update_next_step(
                         &mut guard,
-                        "workspace_update.conflicts_overwritten_retrying_pull",
-                        args,
+                        "workspace_update.config_saved_retrying_pull",
                     );
                 }
 
                 set_workspace_update_step(&shared, "pulling_latest_code");
-                match run_workspace_update_command(
+                let retry_result = run_workspace_update_command(
                     "git",
                     &["pull", "--ff-only"],
                     &workspace_root,
                     600,
                 )
-                .await
+                .await;
+                if let Err(err) =
+                    restore_workspace_update_config_snapshot(&workspace_root, &config_snapshot)
+                        .await
                 {
+                    fail_workspace_update_with_error(
+                        &shared,
+                        err,
+                        "workspace_update.config_restore_failed",
+                    );
+                    return;
+                }
+                match retry_result {
                     Ok(out) if out.exit_code == Some(0) => {
                         let mut guard = workspace_update_status_lock(shared.as_ref());
                         guard.exit_code = out.exit_code;
                         guard.stdout_tail = out.stdout_tail;
                         guard.stderr_tail = out.stderr_tail;
+                        set_workspace_update_next_step(
+                            &mut guard,
+                            "workspace_update.config_restored_building",
+                        );
                     }
                     Ok(out) => {
                         fail_workspace_update(
                             &shared,
-                            "git pull --ff-only failed after resolving conflicts",
-                            "workspace_update.pull_failed_after_conflict_overwrite",
+                            "workspace_update_pull_failed_after_config_restore",
+                            "workspace_update.pull_failed_after_config_restore",
                             out,
                         );
                         return;
@@ -863,7 +878,7 @@ async fn run_workspace_update_job(
                         fail_workspace_update_with_error(
                             &shared,
                             err,
-                            "workspace_update.pull_failed_after_conflict_overwrite",
+                            "workspace_update.pull_failed_after_config_restore",
                         );
                         return;
                     }
@@ -1033,11 +1048,7 @@ async fn run_workspace_update_ui_only_job(
             {
                 return;
             }
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "workspace_update.ui_dependency_check",
-            );
+            fail_workspace_update_with_error(&shared, err, "workspace_update.ui_dependency_check");
         }
     }
 }
@@ -1110,11 +1121,7 @@ async fn run_workspace_update_clawd_only_job(
             set_workspace_update_next_step(&mut guard, "workspace_update.restart_wait");
         }
         Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "workspace_update.clawd_restart_failed",
-            );
+            fail_workspace_update_with_error(&shared, err, "workspace_update.clawd_restart_failed");
         }
     }
 }
@@ -1170,12 +1177,7 @@ async fn run_workspace_update_release_job(
             "1",
         ]
     } else {
-        vec![
-            "./deploy-github-release.sh",
-            "--root",
-            ".",
-            "--no-restart",
-        ]
+        vec!["./deploy-github-release.sh", "--root", ".", "--no-restart"]
     };
     match run_workspace_update_command_streaming(
         "bash",
@@ -1279,18 +1281,11 @@ async fn run_workspace_update_source_checkout_job(
     reset_workspace_update_build_logs(&shared);
     {
         let mut guard = workspace_update_status_lock(shared.as_ref());
-        set_workspace_update_next_step(
-            &mut guard,
-            "workspace_update.source_checkout_cloning",
-        );
+        set_workspace_update_next_step(&mut guard, "workspace_update.source_checkout_cloning");
     }
     match run_workspace_update_command_streaming(
         "bash",
-        &[
-            "./scripts/switch-to-source-checkout.sh",
-            "--root",
-            ".",
-        ],
+        &["./scripts/switch-to-source-checkout.sh", "--root", "."],
         &workspace_root,
         shared.clone(),
         control.clone(),
@@ -1575,7 +1570,11 @@ async fn detect_workspace_update_conflict_paths(
     let mut local_untracked = BTreeSet::new();
     for batch in remote_changed.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
         let (unstaged, staged, untracked) = tokio::try_join!(
-            git_workspace_name_list_raw(&["diff", "--name-only", "-z", "--"], batch, workspace_root),
+            git_workspace_name_list_raw(
+                &["diff", "--name-only", "-z", "--"],
+                batch,
+                workspace_root
+            ),
             git_workspace_name_list_raw(
                 &["diff", "--cached", "--name-only", "-z", "--"],
                 batch,
@@ -1596,44 +1595,6 @@ async fn detect_workspace_update_conflict_paths(
         tracked: tracked_dirty.into_iter().collect(),
         untracked: local_untracked.into_iter().collect(),
     })
-}
-
-async fn overwrite_workspace_update_conflict_paths(
-    workspace_root: &Path,
-    paths: &WorkspaceUpdateConflictPaths,
-) -> Result<(), String> {
-    for batch in paths.tracked.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
-        let mut args = vec![
-            "restore".to_string(),
-            "--source".to_string(),
-            "HEAD".to_string(),
-            "--staged".to_string(),
-            "--worktree".to_string(),
-            "--".to_string(),
-        ];
-        args.extend(batch.iter().cloned());
-        let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
-        if out.exit_code != Some(0) {
-            return Err(format!(
-                "git restore conflict files failed: {}",
-                workspace_update_output_detail(&out)
-            ));
-        }
-    }
-
-    for batch in paths.untracked.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
-        let mut args = vec!["clean".to_string(), "-fd".to_string(), "--".to_string()];
-        args.extend(batch.iter().cloned());
-        let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
-        if out.exit_code != Some(0) {
-            return Err(format!(
-                "git clean conflict files failed: {}",
-                workspace_update_output_detail(&out)
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 async fn git_workspace_name_list_raw(

@@ -270,6 +270,9 @@ const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
     "running_oldest_age_seconds",
     "clawd_process_count",
     "clawd_health_port_open",
+    "clawd_visible",
+    "db_available",
+    "overall_status",
     "telegramd_healthy",
     "telegramd_process_count",
     "channel_gateway_healthy",
@@ -343,6 +346,9 @@ pub(super) fn json_status_scalar_field_is_priority(field: &str, value: &Value) -
             | "running_length"
             | "queue_length"
             | "memory_rss_bytes"
+            | "clawd_visible"
+            | "db_available"
+            | "overall_status"
             | "user_count"
             | "bound_channel_count"
             | "hostname"

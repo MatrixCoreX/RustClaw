@@ -409,6 +409,14 @@ async fn handle_skill_step_success(
             .successful_action_fingerprints
             .entry(fingerprint.to_string())
             .or_insert(0) += 1;
+        if action_effect.mutates {
+            loop_state.failed_action_fingerprints.clear();
+        }
+    } else {
+        *loop_state
+            .failed_action_fingerprints
+            .entry(fingerprint.to_string())
+            .or_insert(0) += 1;
     }
     if matches!(ledger_status, crate::executor::StepExecutionStatus::Ok)
         && had_observed_output
@@ -607,6 +615,12 @@ async fn handle_skill_step_failure(
         None,
         &error_observation,
     );
+    if let Some(fingerprint) = loop_state.last_actions_fingerprint.as_deref() {
+        *loop_state
+            .failed_action_fingerprints
+            .entry(fingerprint.to_string())
+            .or_insert(0) += 1;
+    }
     let effect = recovery_args
         .map(|args| {
             crate::execution_recipe::apply_target_scope_progress(

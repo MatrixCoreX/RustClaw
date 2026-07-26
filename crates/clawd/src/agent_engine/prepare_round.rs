@@ -176,6 +176,47 @@ fn planner_user_text<'a>(
         .unwrap_or(fallback)
 }
 
+fn execution_action_for_verified_step(
+    original_plan: &PlanResult,
+    verified_step: &crate::PlanStep,
+    original_capability_step_index: Option<usize>,
+) -> Option<AgentAction> {
+    if let Some(original_step) = original_capability_step_index
+        .and_then(|index| original_plan.steps.get(index))
+        .filter(|step| {
+            step.step_id == verified_step.step_id && step.action_type == "call_capability"
+        })
+    {
+        return original_step.to_agent_action();
+    }
+    verified_step.to_agent_action()
+}
+
+fn verified_execution_actions(
+    original_plan: &PlanResult,
+    verify_result: &crate::verifier::VerifyResult,
+) -> Vec<AgentAction> {
+    if !verify_result.rewritten_steps.is_empty() {
+        return verify_result
+            .rewritten_steps
+            .iter()
+            .filter_map(crate::PlanStep::to_agent_action)
+            .collect();
+    }
+    verify_result
+        .approved_steps
+        .iter()
+        .filter_map(|step| {
+            let original_capability_step_index = verify_result
+                .capability_resolutions
+                .iter()
+                .find(|resolution| resolution.plan_step_id == step.step_id)
+                .map(|resolution| resolution.plan_step_index);
+            execution_action_for_verified_step(original_plan, step, original_capability_step_index)
+        })
+        .collect()
+}
+
 pub(super) async fn prepare_round_actions(
     state: &AppState,
     task: &ClaimedTask,
@@ -287,26 +328,8 @@ pub(super) async fn prepare_round_actions(
         )
         .await;
         vec![AgentAction::Respond { content }]
-    } else if matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce) {
-        let verified_steps = if !verify_result.rewritten_steps.is_empty() {
-            &verify_result.rewritten_steps
-        } else {
-            &verify_result.approved_steps
-        };
-        verified_steps
-            .iter()
-            .filter_map(|step| step.to_agent_action())
-            .collect()
     } else {
-        let verified_steps = if !verify_result.rewritten_steps.is_empty() {
-            &verify_result.rewritten_steps
-        } else {
-            &verify_result.approved_steps
-        };
-        verified_steps
-            .iter()
-            .filter_map(|step| step.to_agent_action())
-            .collect()
+        verified_execution_actions(&plan_result, &verify_result)
     };
     Ok(PreparedRoundActions {
         actions,

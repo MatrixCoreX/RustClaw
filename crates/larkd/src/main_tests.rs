@@ -1,5 +1,15 @@
-use super::{extract_bind_key_candidate, is_unbound_allowed_command, lark_media_agent_context};
+use super::{
+    extract_bind_key_candidate, install_tls_crypto_provider, is_unbound_allowed_command,
+    lark_media_agent_context,
+};
 use serde_json::Value;
+
+#[test]
+fn tls_crypto_provider_installation_is_idempotent() {
+    install_tls_crypto_provider().expect("initial provider installation");
+    install_tls_crypto_provider().expect("repeated provider installation");
+    assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+}
 
 #[test]
 fn unbound_plain_text_requires_binding_prompt() {

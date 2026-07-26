@@ -100,20 +100,20 @@ pub(super) fn prefer_latest_synthesis_for_compound_observation_delivery(
     if super::route_helpers::delivery_message_is_json_container(&current) {
         return false;
     }
-    let Some(synthesis) =
-        super::delivery_backfill::latest_publishable_synthesis_step_output(loop_state)
-            .or_else(|| super::delivery_backfill::latest_contractual_synthesis_output(loop_state))
-            .or_else(|| latest_publishable_terminal_language_output(loop_state))
-            .map(str::trim)
-            .filter(|text| {
-                super::language_closeout::planned_delivery_is_publishable_model_language_answer(
-                    text,
-                ) || structured_compound_synthesis_can_replace_current_delivery(
-                    route, loop_state, &current, text,
-                )
-            })
-            .map(str::to_string)
-    else {
+    let Some(synthesis) = super::delivery_backfill::latest_publishable_synthesis_step_output(
+        loop_state,
+    )
+    .or_else(|| super::delivery_backfill::latest_contractual_synthesis_output(loop_state))
+    .or_else(|| latest_publishable_terminal_language_output(loop_state))
+    .map(str::trim)
+    .filter(|text| {
+        crate::assistant_delivery_policy::planned_delivery_is_publishable_model_language_answer(
+            text,
+        ) || structured_compound_synthesis_can_replace_current_delivery(
+            route, loop_state, &current, text,
+        )
+    })
+    .map(str::to_string) else {
         return false;
     };
     if current.is_empty() || current == synthesis {
@@ -329,7 +329,7 @@ fn latest_publishable_terminal_language_output(loop_state: &LoopState) -> Option
         .map(str::trim)
         .find(|output| {
             !output.is_empty()
-                && super::language_closeout::planned_delivery_is_publishable_model_language_answer(
+                && crate::assistant_delivery_policy::planned_delivery_is_publishable_model_language_answer(
                     output,
                 )
                 && !crate::finalize::is_execution_summary_message(output)
