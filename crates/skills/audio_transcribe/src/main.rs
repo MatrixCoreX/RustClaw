@@ -87,6 +87,8 @@ struct AudioTranscribeConfig {
     #[serde(default)]
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
+    qwen_chat_models: Option<Vec<String>>,
+    #[serde(default)]
     minimax_models: Option<Vec<String>>,
     #[serde(default)]
     native_models: Option<Vec<String>>,
@@ -165,6 +167,29 @@ enum AudioInput {
     Url(String),
 }
 
+#[derive(Debug)]
+struct SkillFailure {
+    code: &'static str,
+    message: String,
+    retryable: bool,
+}
+
+impl SkillFailure {
+    fn new(code: &'static str, message: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            retryable,
+        }
+    }
+}
+
+impl From<String> for SkillFailure {
+    fn from(message: String) -> Self {
+        Self::new("provider_request_failed", message, true)
+    }
+}
+
 const DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/audio_transcribe_prompt.md");
 const AUDIO_TRANSCRIBE_PROMPT_LOGICAL_PATH: &str = "prompts/audio_transcribe_prompt.md";
@@ -192,15 +217,15 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
+                    extra: Some(error_extra(err.code, err.retryable)),
+                    error_text: Some(err.message),
                 },
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: Some(error_extra("invalid_input")),
+                extra: Some(error_extra("invalid_input", false)),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -210,14 +235,15 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
+fn error_extra(error_code: &str, retryable: bool) -> Value {
     json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
-        "retryable": false,
+        "error_code": error_code,
+        "error_kind": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
+        "retryable": retryable,
     })
 }
 
@@ -225,7 +251,7 @@ fn execute(
     cfg: &RootConfig,
     workspace_root: &Path,
     args: Value,
-) -> Result<(String, Value), String> {
+) -> Result<(String, Value), SkillFailure> {
     let args_obj = args.as_object();
     let action = args_obj
         .and_then(|obj| obj.get("action"))
@@ -234,11 +260,17 @@ fn execute(
         .filter(|value| !value.is_empty())
         .unwrap_or("transcribe");
     if !matches!(action, "transcribe" | "preview_transcribe") {
-        return Err(format!("unsupported_action:{action}"));
+        return Err(SkillFailure::new(
+            "invalid_input",
+            format!("unsupported_action:{action}"),
+            false,
+        ));
     }
 
-    let audio_input = parse_audio_input(&args, workspace_root)?;
-    let (vendor, vendor_name, provider_cfg, model) = resolve_transcription_target(cfg, args_obj)?;
+    let audio_input = parse_audio_input(&args, workspace_root)
+        .map_err(|message| SkillFailure::new("invalid_input", message, false))?;
+    let (vendor, vendor_name, provider_cfg, model) = resolve_transcription_target(cfg, args_obj)
+        .map_err(|message| SkillFailure::new("provider_not_configured", message, false))?;
     if action == "preview_transcribe" {
         return Ok(preview_transcription(
             cfg,
@@ -255,12 +287,21 @@ fn execute(
         .max_input_bytes
         .unwrap_or(25 * 1024 * 1024);
     if let AudioInput::LocalPath(audio_path) = &audio_input {
-        let metadata = std::fs::metadata(audio_path)
-            .map_err(|err| format!("read audio metadata failed: {err}"))?;
+        let metadata = std::fs::metadata(audio_path).map_err(|err| {
+            SkillFailure::new(
+                "invalid_input",
+                format!("read audio metadata failed: {err}"),
+                false,
+            )
+        })?;
         if metadata.len() as usize > max_input_bytes {
-            return Err(format!(
-                "audio file too large: {} bytes, max={max_input_bytes}",
-                metadata.len()
+            return Err(SkillFailure::new(
+                "input_too_large",
+                format!(
+                    "audio file too large: {} bytes, max={max_input_bytes}",
+                    metadata.len()
+                ),
+                false,
             ));
         }
     }
@@ -269,6 +310,11 @@ fn execute(
         .and_then(|v| v.get("transcribe_hint"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let source_language = args_obj
+        .and_then(|v| v.get("language"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let transcribe_prompt_template = load_prompt_template_for_vendor(
         workspace_root,
         prompt_vendor_name_for_vendor(vendor),
@@ -276,7 +322,8 @@ fn execute(
         DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE,
     );
     let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
-    let auth_token = provider_auth_token(vendor_name, provider_cfg)?;
+    let auth_token = provider_auth_token(vendor_name, provider_cfg)
+        .map_err(|message| SkillFailure::new("provider_not_configured", message, false))?;
     let timeout_seconds = cfg
         .audio_transcribe
         .timeout_seconds
@@ -285,7 +332,13 @@ fn execute(
     let client = Client::builder()
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
-        .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+        .map_err(|err| {
+            SkillFailure::new(
+                "provider_client_failed",
+                format!("build {vendor_name} client failed: {err}"),
+                false,
+            )
+        })?;
     let (text, model_kind) = transcribe_by_vendor(
         &client,
         &cfg.audio_transcribe,
@@ -296,6 +349,7 @@ fn execute(
         &model,
         &audio_input,
         &transcribe_prompt,
+        source_language,
         auth_token.as_deref(),
     )?;
     let audio_source = match &audio_input {
@@ -303,6 +357,10 @@ fn execute(
         AudioInput::Url(url) => url.clone(),
     };
     let extra = json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "ok",
+        "action": "transcribe",
         "provider": vendor_name,
         "model": model,
         "model_kind": model_kind,
@@ -391,6 +449,7 @@ fn planned_model_kind(
     match vendor {
         VendorKind::Google => "native",
         VendorKind::OpenAI => "compat",
+        VendorKind::Qwen if qwen_uses_chat_asr_model(cfg, model) => "chat_audio",
         VendorKind::Qwen
             if should_use_qwen_native_asr(
                 cfg,
@@ -418,8 +477,9 @@ fn transcribe_by_vendor(
     model: &str,
     audio_input: &AudioInput,
     prompt: &str,
+    source_language: Option<&str>,
     auth_token: Option<&str>,
-) -> Result<(String, &'static str), String> {
+) -> Result<(String, &'static str), SkillFailure> {
     let mode = resolve_adapter_mode(audio_cfg, vendor);
     match vendor {
         VendorKind::Google => {
@@ -450,12 +510,13 @@ fn transcribe_by_vendor(
         | VendorKind::MiniMax
         | VendorKind::Custom => {
             if mode == AdapterMode::Native {
-                return Err(format!("{vendor_name} native stt adapter is not available"));
+                return Err(format!("{vendor_name} native stt adapter is not available").into());
             }
             if !allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(format!(
                     "{vendor_name} native stt adapter is not available; set audio_transcribe.allow_compat_adapters=true to use compatible endpoint"
-                ));
+                )
+                .into());
             }
             let audio_path = require_local_audio(audio_input)?;
             Ok((
@@ -472,6 +533,22 @@ fn transcribe_by_vendor(
             ))
         }
         VendorKind::Qwen => {
+            if qwen_uses_chat_asr_model(audio_cfg, model) {
+                let token =
+                    auth_token.ok_or_else(|| "qwen api key is not configured".to_string())?;
+                return Ok((
+                    qwen_chat_transcribe(
+                        client,
+                        cfg,
+                        model,
+                        audio_input,
+                        prompt,
+                        source_language,
+                        token,
+                    )?,
+                    "chat_audio",
+                ));
+            }
             if should_use_qwen_native_asr(audio_cfg, model, mode, allow_compat_adapters) {
                 Ok((
                     qwen_native_transcribe(
@@ -489,7 +566,8 @@ fn transcribe_by_vendor(
                 if !allow_compat_adapters {
                     return Err(
                         "qwen native stt adapter is not available; set audio_transcribe.allow_compat_adapters=true to use compatible endpoint"
-                            .to_string(),
+                            .to_string()
+                            .into(),
                     );
                 }
                 let audio_path = require_local_audio(audio_input)?;
@@ -508,6 +586,144 @@ fn transcribe_by_vendor(
             }
         }
     }
+}
+
+fn qwen_uses_chat_asr_model(cfg: &AudioTranscribeConfig, model: &str) -> bool {
+    cfg.qwen_chat_models.as_ref().is_some_and(|models| {
+        models
+            .iter()
+            .any(|candidate| candidate.trim().eq_ignore_ascii_case(model.trim()))
+    })
+}
+
+fn qwen_chat_transcribe(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    audio_input: &AudioInput,
+    prompt: &str,
+    source_language: Option<&str>,
+    auth_token: &str,
+) -> Result<String, SkillFailure> {
+    let audio_data = match audio_input {
+        AudioInput::LocalPath(path) => {
+            if !path.exists() || !path.is_file() {
+                return Err(SkillFailure::new(
+                    "invalid_input",
+                    "audio file does not exist",
+                    false,
+                ));
+            }
+            let bytes = std::fs::read(path).map_err(|err| format!("read audio failed: {err}"))?;
+            format!(
+                "data:{};base64,{}",
+                guess_audio_mime(path),
+                STANDARD.encode(bytes)
+            )
+        }
+        AudioInput::Url(url) => url.clone(),
+    };
+    let body = qwen_chat_request_body(model, &audio_data, prompt, source_language);
+    let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
+    let response = client
+        .post(url)
+        .bearer_auth(auth_token)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("qwen transcription request failed: {err}"))?;
+    let status = response.status().as_u16();
+    let response_text = response
+        .text()
+        .map_err(|err| format!("read qwen transcription response failed: {err}"))?;
+    if status >= 300 {
+        return Err(provider_http_failure(
+            status,
+            format!(
+                "qwen transcription failed status={status}: {}",
+                truncate(&response_text, 400)
+            ),
+        ));
+    }
+    let response_json: Value = serde_json::from_str(&response_text)
+        .map_err(|err| format!("parse qwen transcription response failed: {err}"))?;
+    extract_qwen_chat_transcript(&response_json).ok_or_else(|| {
+        SkillFailure::new(
+            "empty_transcript",
+            format!(
+                "qwen transcription response missing text: {}",
+                truncate(&response_text, 400)
+            ),
+            false,
+        )
+    })
+}
+
+fn provider_http_failure(status: u16, message: String) -> SkillFailure {
+    let retryable = status == 408 || status == 429 || status >= 500;
+    let code = if (400..500).contains(&status) && !retryable {
+        "provider_rejected"
+    } else {
+        "provider_request_failed"
+    };
+    SkillFailure::new(code, message, retryable)
+}
+
+fn qwen_chat_request_body(
+    model: &str,
+    audio_data: &str,
+    prompt: &str,
+    source_language: Option<&str>,
+) -> Value {
+    let mut messages = Vec::new();
+    if !prompt.trim().is_empty() {
+        messages.push(json!({"role": "system", "content": prompt.trim()}));
+    }
+    messages.push(json!({
+        "role": "user",
+        "content": [{
+            "type": "input_audio",
+            "input_audio": {"data": audio_data}
+        }]
+    }));
+    let mut asr_options = Map::new();
+    asr_options.insert("enable_itn".to_string(), Value::Bool(true));
+    if let Some(language) = source_language
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        asr_options.insert("language".to_string(), Value::String(language.to_string()));
+    }
+    json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "asr_options": asr_options,
+    })
+}
+
+fn extract_qwen_chat_transcript(value: &Value) -> Option<String> {
+    let content = value
+        .pointer("/choices/0/message/content")
+        .or_else(|| value.pointer("/output/choices/0/message/content"))?;
+    if let Some(text) = content
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(text.to_string());
+    }
+    let mut parts = Vec::new();
+    for item in content.as_array()? {
+        if let Some(text) = item
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            parts.push(text);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, String> {
@@ -959,9 +1175,13 @@ fn openai_compatible_transcribe(
     audio_path: &Path,
     prompt: &str,
     auth_token: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, SkillFailure> {
     if !audio_path.exists() || !audio_path.is_file() {
-        return Err("audio file does not exist".to_string());
+        return Err(SkillFailure::new(
+            "invalid_input",
+            "audio file does not exist",
+            false,
+        ));
     }
     let url = format!(
         "{}/audio/transcriptions",
@@ -984,25 +1204,36 @@ fn openai_compatible_transcribe(
         .text()
         .map_err(|err| format!("read {vendor_name} transcription response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!(
-            "{vendor_name} transcription failed status={status}: {}",
-            truncate(&body, 400)
+        return Err(provider_http_failure(
+            status,
+            format!(
+                "{vendor_name} transcription failed status={status}: {}",
+                truncate(&body, 400)
+            ),
         ));
     }
-    let parsed_json: Result<Value, _> = serde_json::from_str(&body);
-    if let Ok(v) = parsed_json {
-        if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-            let out = text.trim();
-            if !out.is_empty() {
-                return Ok(out.to_string());
+    extract_compatible_transcript(&body)
+        .map_err(|message| SkillFailure::new("empty_transcript", message, true))
+}
+
+fn extract_compatible_transcript(body: &str) -> Result<String, String> {
+    match serde_json::from_str::<Value>(body) {
+        Ok(value) => value
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "transcription result is empty".to_string()),
+        Err(_) => {
+            let text = body.trim();
+            if text.is_empty() {
+                Err("transcription result is empty".to_string())
+            } else {
+                Ok(text.to_string())
             }
         }
     }
-    let out = body.trim();
-    if out.is_empty() {
-        return Err("transcription result is empty".to_string());
-    }
-    Ok(out.to_string())
 }
 
 fn google_native_transcribe(
@@ -1352,9 +1583,13 @@ fn guess_audio_mime(path: &Path) -> &'static str {
         "wav" => "audio/wav",
         "mp3" => "audio/mpeg",
         "m4a" => "audio/mp4",
+        "mp4" => "audio/mp4",
         "ogg" => "audio/ogg",
         "opus" => "audio/ogg",
         "flac" => "audio/flac",
+        "webm" => "audio/webm",
+        "aac" => "audio/aac",
+        "aiff" | "aif" => "audio/aiff",
         _ => "application/octet-stream",
     }
 }

@@ -32,13 +32,14 @@ Provide one audio source: local path or URL.
 
 ## Config Entry Points
 - Main STT config: `configs/audio.toml` -> `[audio_transcribe]`.
+- Default STT is the managed local whisper.cpp server; Qwen `qwen3-asr-flash` is available via `/chat/completions` `input_audio` with `QWEN_API_KEY` or `[llm.qwen].api_key`.
+- `qwen_chat_models` selects this structured adapter; never infer it from user-language phrases.
 - Local whisper.cpp uses the OpenAI-compatible custom provider:
   - set `default_vendor = "custom"`
   - set `adapter_mode = "compat"` and `allow_compat_adapters = true`
   - set `default_model = "local-whisper"` or another configured custom model name
   - enable `[audio_transcribe.providers.custom]` with `base_url = "http://127.0.0.1:8178/v1"`
-- Loopback `custom` providers (`localhost`, `127.0.0.1`, `::1`) may leave `api_key = ""`.
-- Remote `custom` providers still require a real API key.
+- Loopback `custom` providers may omit `api_key`; remote providers require one.
 - Chinese transcription is supported when the local whisper.cpp server runs a multilingual Whisper model, not an English-only `.en` model.
 - For multilingual agents, start whisper.cpp with `--language auto`; the server default may otherwise bias recognition toward English.
 
@@ -50,6 +51,8 @@ Provide one audio source: local path or URL.
 - `audio_path`: original local path or URL string actually used
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"text\",\"preview\":\"...\"}]`
 - `latency_ms`: reserved latency field
+- `model_kind=chat_audio` identifies Qwen's compatible `input_audio` request;
+  `native` and `compat` retain their provider-adapter meanings.
 
 ## Error Contract
 - Missing audio source.
@@ -57,6 +60,7 @@ Provide one audio source: local path or URL.
 - Compatible adapters that require local file upload return clear path-related errors.
 - Native adapters that require public URL input return clear URL/configuration errors.
 - Provider/runtime transcription failures should return clear error text.
+- Machine-readable failures use `error_code`, `message_key`, and `retryable` (including invalid input/size/configuration/client/request failures); runtime and UI must not parse `error_text` or expose internal transport markers.
 
 ## Request/Response Examples
 ### Example 1
@@ -66,7 +70,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"action":"preview_transcribe","status":"dry_run","dry_run":true,"provider_call":false,"provider":"custom","model":"local-whisper","input_path":"recordings/meeting.wav","input_exists":false},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"action":"preview_transcribe","status":"dry_run","dry_run":true,"provider_call":false,"provider":"qwen","model":"qwen3-asr-flash","model_kind":"chat_audio","input_path":"recordings/meeting.wav","input_exists":false},"error_text":null}
 ```
 
 ### Example 2

@@ -216,4 +216,8 @@ PY
   fi
 fi
 
+if ! "$SCRIPT_DIR/component_start/start-whisper-server.sh" "$PROFILE"; then
+  echo "Local audio transcription is unavailable; clawd will continue to start." >&2
+fi
+
 component_exec_binary clawd "$CLAWD_BIN"

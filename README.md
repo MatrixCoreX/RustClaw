@@ -765,19 +765,28 @@ Skill integration entry points:
 - external skill example: `external_skills/example/README.md`
 - skill setup and prerequisite reference: `prompts/references/skill_setup_guide.md`
 
-### Local STT With whisper.cpp
+### Speech-To-Text Backends
+
+The default `audio_transcribe` path uses local whisper.cpp. When its binary and
+multilingual model are present, RustClaw starts the loopback model server with
+the rest of the runtime and stops it during normal shutdown. Qwen
+`qwen3-asr-flash` is also supported through `/chat/completions` `input_audio`;
+select it in `configs/audio.toml` when a working Qwen account is preferred.
+
+#### Local whisper.cpp
 
 `audio_transcribe` can use a local whisper.cpp server through the `custom` OpenAI-compatible provider. Use a dedicated local port such as `8178` so it does not collide with `clawd` or UI ports.
 
 Download a multilingual model into the gitignored local model directory. The script picks `tiny` / `base` / `small` / `medium` from detected device memory, and `large-v3` is available only when explicitly requested with `--model large-v3`.
 
 ```bash
-MODEL_PATH="$(bash scripts/download-whisper-model.sh --print-path-only)"
-data/vendor/whisper.cpp/build/bin/whisper-server -m "$MODEL_PATH" \
-  --host 127.0.0.1 --port 8178 \
-  --request-path /v1 --inference-path /audio/transcriptions \
-  --convert --language auto
+bash scripts/download-whisper-model.sh
+component_start/start-whisper-server.sh --check
 ```
+
+The check command validates the configured binary and model without starting
+the server. Normal `start-all-bin.sh` and `component_start/start-clawd.sh`
+startup perform the actual launch.
 
 Use a multilingual Whisper model for Chinese, for example `ggml-small.bin`, `ggml-medium.bin`, or `ggml-large-v3.bin`; avoid English-only `.en` models for Chinese audio.
 

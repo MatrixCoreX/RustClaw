@@ -108,19 +108,19 @@ timeout_seconds = 60
 # Audio Transcribe / 语音转写（STT）
 # =========================
 # Quick guide / 快速说明：
-# - current default: qwen + compat + qwen3-asr-flash
-#   / 当前默认：qwen + compat + qwen3-asr-flash
-# - recommended API key location: configs/config.toml -> [llm.qwen].api_key
-#   / 推荐把 key 填到 configs/config.toml 的 [llm.qwen].api_key
+# - current default: local whisper.cpp; RustClaw starts its loopback server when available
+#   / 当前默认：本地 whisper.cpp；组件可用时由 RustClaw 启动回环服务
+# - Qwen qwen3-asr-flash remains an optional remote backend
+#   / Qwen qwen3-asr-flash 仍可作为可选远端后端
 # - if you want STT to use its own separate key, uncomment
 #   [audio_transcribe.providers.qwen] below
 #   / 如果想让 STT 单独用一套 key，再取消下面 [audio_transcribe.providers.qwen] 注释
-# - current default compat flow does NOT use OSS
-#   / 当前默认 compat 转写链路不使用 OSS
+# - Qwen chat-audio sends a bounded local Data URL and does not use OSS
+#   / Qwen chat-audio 使用受限的本地 Data URL，不使用 OSS
 #
 # Routing / 路由：
 # - qwen:
-#   - qwen3-asr-flash: prefer compat direct upload / 建议 compat 直传
+#   - qwen3-asr-flash: OpenAI-compatible chat input_audio / 兼容 chat input_audio
 #   - fun-asr / filetrans: prefer native flow / 建议 native 链路
 # - google: native / 原生
 # - openai/anthropic/grok/minimax/custom: compat / compat
@@ -142,13 +142,22 @@ qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 # Default model / 默认模型
 default_model = "local-whisper"
 
+# Local whisper.cpp component / 本地 whisper.cpp 组件
+local_server_enabled = true
+local_server_binary = "data/vendor/whisper.cpp/build/bin/whisper-server"
+local_model_path = "" # auto-detect an installed multilingual ggml-*.bin / 自动发现已安装的多语言模型
+local_server_host = "127.0.0.1"
+local_server_port = 8178
+local_server_threads = 4
+
 # Vendor models / 按厂商模型
 openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
 google_models = ["gemini-2.5-flash"]
 anthropic_models = []
 grok_models = []
 qwen_models = ["qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
-minimax_models = ["speech-01"]
+qwen_chat_models = ["qwen3-asr-flash"]
+minimax_models = []
 native_models = ["fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
 custom_models = ["local-whisper", "whisper-1"]
 models = ["local-whisper", "whisper-1", "qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
@@ -159,8 +168,8 @@ max_input_bytes = 26214400
 timeout_seconds = 90
 
 # OSS block (only for some qwen native STT models) / OSS 配置块（仅少数 qwen 原生 STT 模型会用到）
-# - current default is compat + qwen3-asr-flash, so this whole block is normally ignored
-#   / 当前默认是 compat + qwen3-asr-flash，所以这一整块通常不会生效
+# - this block is ignored by the default local backend and Qwen chat-audio adapter
+#   / 默认本地后端和 Qwen chat-audio 适配器都会忽略这一块
 # - only relevant when switching to qwen native models that require `file_urls`
 #   / 只有切到要求 `file_urls` 的 qwen 原生模型时，这一块才相关
 # - off: native mode requires audio_url / 关闭时：native 模式要求直接传 audio_url
@@ -177,12 +186,8 @@ oss_url_ttl_seconds = 3600
 # 1. [audio_transcribe.providers.<vendor>]     <- module-only override / 模块单独覆盖
 # 2. [llm.<vendor>] in configs/config.toml     <- shared fallback / 全局共享回退
 #
-# Current recommendation / 当前推荐：
-# - because STT is now using qwen by default, fill one shared key in:
-#   configs/config.toml -> [llm.qwen].api_key
-#   / 由于当前默认 STT 走 qwen，推荐只在 configs/config.toml -> [llm.qwen].api_key 填一次
-# - leave [audio_transcribe.providers.qwen] commented unless you need a dedicated STT key
-#   / 如果不需要 STT 单独 key，就不要取消 [audio_transcribe.providers.qwen] 注释
+# Qwen is optional; enable this override only when remote STT is selected.
+# Qwen 是可选后端；只有选择远端 STT 时才启用此覆盖配置。
 #
 # Optional dedicated override for STT / 可选：STT 单独 key
 # [audio_transcribe.providers.qwen]
@@ -191,28 +196,15 @@ oss_url_ttl_seconds = 3600
 # model = "qwen3-asr-flash"
 # timeout_seconds = 90
 #
-# Local whisper.cpp example / 本地 whisper.cpp 示例：
+# Default local whisper.cpp backend / 默认本地 whisper.cpp 后端：
 # 0. Download a multilingual model by device memory / 按设备内存下载多语言模型：
 #    bash scripts/download-whisper-model.sh
-# 1. Start whisper-server with an OpenAI-compatible route / 先启动兼容 OpenAI 路由的 whisper-server：
+# 1. RustClaw starts whisper-server automatically; manual equivalent / RustClaw 会自动启动，等价手工命令：
 #    MODEL_PATH="$(bash scripts/download-whisper-model.sh --print-path-only)"
 #    data/vendor/whisper.cpp/build/bin/whisper-server -m "$MODEL_PATH" --host 127.0.0.1 --port 8178 --request-path /v1 --inference-path /audio/transcriptions --convert --language auto
-# 2. To use local STT, change the active values above / 要选用本地 STT，把上面的实际值改成：
-#    default_vendor = "custom"
-#    adapter_mode = "compat"
-#    allow_compat_adapters = true
-#    default_model = "local-whisper"
-#    custom_models = ["local-whisper", "whisper-1"]
-# 3. Then enable this provider block / 再启用这个 provider 配置块：
+# 2. Provider endpoint consumed by audio_transcribe / audio_transcribe 使用的 provider 端点：
 [audio_transcribe.providers.custom]
 base_url = "http://127.0.0.1:8178/v1"
 api_key = "" # allowed only for loopback local custom providers / 只允许本机 custom provider 留空
 model = "local-whisper"
 timeout_seconds = 120
-#
-# Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
-# [audio_transcribe.providers.minimax]
-# base_url = "https://api.minimaxi.com/v1"
-# api_key = ""
-# model = "speech-01"
-# timeout_seconds = 90

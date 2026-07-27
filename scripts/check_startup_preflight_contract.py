@@ -30,6 +30,11 @@ def build_fixture(root: Path) -> Path:
         (ROOT / "component_start/common.sh").read_text(encoding="utf-8"),
         executable=True,
     )
+    write(
+        root / "component_start/start-whisper-server.sh",
+        "#!/usr/bin/env bash\necho 'local whisper fixture skipped'\nexit 0\n",
+        executable=True,
+    )
 
     write(
         root / "scripts/version_info.sh",

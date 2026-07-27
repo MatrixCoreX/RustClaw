@@ -196,7 +196,6 @@ export function useChatRuntime({
   const apiFetchRef = useRef(apiFetch);
   const conversationHistoryScopeRef = useRef("");
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
-  const voiceSendOnStopRef = useRef(false);
   const voiceStopRequestedRef = useRef(false);
 
   chatInputValueRef.current = chatInput;
@@ -693,8 +692,14 @@ export function useChatRuntime({
       }
       if (voiceStopRequestedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
-        voiceSendOnStopRef.current = false;
         return;
+      }
+      const actualDeviceId = stream
+        .getAudioTracks()[0]
+        ?.getSettings()
+        .deviceId?.trim();
+      if (actualDeviceId && actualDeviceId !== chatAudioInputDeviceIdRef.current) {
+        setChatAudioInputDeviceId(actualDeviceId);
       }
       if (navigator.mediaDevices.enumerateDevices) {
         void navigator.mediaDevices
@@ -705,7 +710,6 @@ export function useChatRuntime({
       const recorderMimeType = preferredVoiceRecorderMimeType();
       const recorder = new MediaRecorder(stream, voiceRecorderOptions(recorderMimeType));
       chatAudioChunksRef.current = [];
-      voiceSendOnStopRef.current = true;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chatAudioChunksRef.current.push(event.data);
@@ -714,14 +718,11 @@ export function useChatRuntime({
       recorder.onerror = () => {
         stream.getTracks().forEach((track) => track.stop());
         chatRecordingValueRef.current = false;
-        voiceSendOnStopRef.current = false;
         setChatRecording(false);
         setChatError(t("录音失败，请重新尝试。", "Recording failed. Please try again."));
       };
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
-        const shouldSend = voiceSendOnStopRef.current;
-        voiceSendOnStopRef.current = false;
         chatRecordingValueRef.current = false;
         chatMediaRecorderRef.current = null;
         setChatRecording(false);
@@ -744,15 +745,8 @@ export function useChatRuntime({
             CHAT_MAX_ATTACHMENTS,
           );
           setChatError(null);
-          if (shouldSend) {
-            void submitChatMessageSnapshot(chatInputValueRef.current, attached, {
-              clearInput: true,
-              clearAttachments: true,
-            });
-          } else {
-            chatAttachmentsValueRef.current = attached;
-            setChatAttachments(attached);
-          }
+          chatAttachmentsValueRef.current = attached;
+          setChatAttachments(attached);
         } catch (err) {
           setChatError(
             err instanceof Error
@@ -772,7 +766,6 @@ export function useChatRuntime({
       setChatError(null);
     } catch (err) {
       chatRecordingValueRef.current = false;
-      voiceSendOnStopRef.current = false;
       setChatRecording(false);
       setChatError(
         err instanceof Error ? err.message : t("无法开始录音。", "Unable to start recording."),

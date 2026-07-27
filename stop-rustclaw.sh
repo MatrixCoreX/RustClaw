@@ -195,6 +195,7 @@ stop_component "feishud" "feishud" "$SCRIPT_DIR/target/release/feishud" || failu
 stop_component "larkd" "larkd" "$SCRIPT_DIR/target/release/larkd" || failures=1
 stop_component "webd" "webd" "$SCRIPT_DIR/target/release/webd" || failures=1
 stop_component "clawd" "clawd" "$SCRIPT_DIR/target/release/clawd" || failures=1
+stop_component "whisper-server" "whisper-server" "${WHISPER_SERVER_BIN:-$SCRIPT_DIR/data/vendor/whisper.cpp/build/bin/whisper-server}" || failures=1
 
 if [[ "$failures" != "0" ]]; then
   echo "RustClaw stop completed with errors." >&2

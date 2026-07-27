@@ -108,7 +108,7 @@ minimax_models = ["image-01"]
         r#"
 [audio_transcribe]
 qwen_models = ["qwen3-asr-flash"]
-minimax_models = ["speech-01"]
+minimax_models = []
 
 [audio_synthesize]
 minimax_models = ["speech-2.8-turbo"]
@@ -157,7 +157,7 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     assert!(minimax.supports_image_input);
     assert!(minimax.supports_video_input);
     assert!(!minimax.supports_audio_input);
-    assert!(minimax.supports_audio_transcription);
+    assert!(!minimax.supports_audio_transcription);
     assert!(minimax.supports_image_generation);
     assert!(minimax.supports_audio_generation);
     assert!(minimax.supports_video_generation);
