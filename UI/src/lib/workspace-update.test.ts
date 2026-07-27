@@ -69,6 +69,8 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStatus("running", "release_package", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
+  assert.equal(formatWorkspaceUpdateStatus("running", "nginx_enable", "zh"), "配置中");
+  assert.equal(formatWorkspaceUpdateStatus("running", "nginx_deploy", "en"), "Deploying");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");
   assert.equal(formatWorkspaceUpdateStatus("idle", undefined, "zh"), "待更新");
   assert.equal(formatWorkspaceUpdateApiError("workspace_update_already_running", "en"), "An update is already running.");
@@ -125,6 +127,22 @@ test("builds release deployment progress view", () => {
   assert.equal(view.progressPercent, 78);
   assert.equal(view.progressLabel, "Deploying the Release package; configs will be preserved and clawd will restart.");
   assert.equal(view.notice?.detail, "Release deployment is running. Logs will keep refreshing below.");
+});
+
+test("builds nginx enable and deployment progress views", () => {
+  const enabling = buildWorkspaceUpdateView(
+    status({ status: "running", mode: "nginx_enable", step: "enabling_nginx" }),
+    "en",
+  );
+  assert.equal(enabling.progressPercent, 45);
+  assert.match(enabling.progressLabel, /configuring the RustClaw web entry/);
+
+  const deploying = buildWorkspaceUpdateView(
+    status({ status: "running", mode: "nginx_deploy", step: "deploying_nginx_ui" }),
+    "zh",
+  );
+  assert.equal(deploying.progressPercent, 82);
+  assert.match(deploying.progressLabel, /重载 nginx/);
 });
 
 test("builds source checkout migration progress view", () => {
@@ -294,6 +312,8 @@ test("reloads once after compile modes complete but not after release deployment
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "clawd_only", "idle"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_deploy", "up_to_date"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_package", "up_to_date"), false);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "nginx_enable", "succeeded"), false);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "nginx_deploy", "succeeded"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(false, "ui_only", "succeeded"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "ui_only", "failed"), false);
 });

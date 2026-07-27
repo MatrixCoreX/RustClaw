@@ -310,15 +310,11 @@ fn build_bot_state(
 }
 
 fn clawd_base_url_from_config(config: &AppConfig) -> String {
-    config.server.clawd_base_url.clone().unwrap_or_else(|| {
-        let listen = config.server.listen.as_str();
-        let host = if listen.starts_with("0.0.0.0:") {
-            listen.replacen("0.0.0.0", "127.0.0.1", 1)
-        } else {
-            listen.to_string()
-        };
-        format!("http://{}", host)
-    })
+    config
+        .server
+        .clawd_base_url
+        .clone()
+        .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string())
 }
 
 fn load_voice_reply_mode_by_chat(config: &AppConfig) -> HashMap<i64, String> {

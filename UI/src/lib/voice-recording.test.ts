@@ -6,6 +6,7 @@ import {
   pcmWavRecordingSupported,
   shouldRetryVoiceCaptureWithDefault,
   voiceAudioTrackConstraints,
+  voiceRecordingAvailability,
   voiceInputDeviceOptions,
 } from "./voice-recording.ts";
 
@@ -32,6 +33,7 @@ test("binds an explicitly selected microphone without weakening speech constrain
 
 test("reports PCM recording unsupported outside a browser", () => {
   assert.equal(pcmWavRecordingSupported(), false);
+  assert.equal(voiceRecordingAvailability(), "media_devices_unavailable");
 });
 
 test("encodes mono float samples as a standard little-endian PCM WAV", async () => {

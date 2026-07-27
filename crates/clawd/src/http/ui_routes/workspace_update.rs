@@ -13,6 +13,8 @@ enum WorkspaceUpdateMode {
     Full,
     UiOnly,
     ClawdOnly,
+    NginxEnable,
+    NginxDeploy,
     ReleaseDeploy,
     ReleasePackage,
     SourceCheckout,
@@ -24,6 +26,8 @@ impl WorkspaceUpdateMode {
             Self::Full => "full",
             Self::UiOnly => "ui_only",
             Self::ClawdOnly => "clawd_only",
+            Self::NginxEnable => "nginx_enable",
+            Self::NginxDeploy => "nginx_deploy",
             Self::ReleaseDeploy => "release_deploy",
             Self::ReleasePackage => "release_package",
             Self::SourceCheckout => "source_checkout",
@@ -661,6 +665,14 @@ async fn run_workspace_update_job(
         }
         WorkspaceUpdateMode::ClawdOnly => {
             run_workspace_update_clawd_only_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::NginxEnable => {
+            run_workspace_update_nginx_job(workspace_root, shared, control, false).await;
+            return;
+        }
+        WorkspaceUpdateMode::NginxDeploy => {
+            run_workspace_update_nginx_job(workspace_root, shared, control, true).await;
             return;
         }
         WorkspaceUpdateMode::ReleaseDeploy => {

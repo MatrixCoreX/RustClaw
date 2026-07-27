@@ -301,7 +301,8 @@ unsupported 错误，不会尝试 Linux 服务命令。
 
 ## 9. UI 与云服务器
 
-本地部署由 `clawd`/`webd` 直接提供 UI，不需要 nginx。
+本地部署由 `webd` 提供 UI、登录会话和到 loopback `clawd` 的 API 代理，
+不需要 nginx。`clawd` 固定监听 `127.0.0.1:8787`，不得对外暴露。
 
 UI 开发服务器：
 

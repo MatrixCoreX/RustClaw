@@ -5,12 +5,15 @@ import {
   ChevronUp,
   Cpu,
   Download,
+  ExternalLink,
   GitBranch,
   LayoutDashboard,
   Loader2,
   PackageCheck,
   RefreshCw,
+  ServerCog,
   Settings2,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -28,6 +31,7 @@ import type {
   ConsolePage,
   DashboardCommunicationRow,
   HostSystemSummary,
+  NginxUiStatus,
   PiAppStatusResponse,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -59,6 +63,9 @@ export interface DashboardPageProps {
   workspaceUpdateStatus: WorkspaceUpdateStatus | null;
   workspaceUpdateCanceling: boolean;
   workspaceUpdateMessage: string | null;
+  nginxStatus: NginxUiStatus | null;
+  nginxStatusLoading: boolean;
+  nginxStatusError: string | null;
   workspaceUpdateRestarting: boolean;
   workspaceUpdateDisplayStatus: string | undefined;
   workspaceUpdateProgressVisible: boolean;
@@ -80,6 +87,7 @@ export interface DashboardPageProps {
   runningOldestAgeLabel: string;
   onSetCurrentPage: (page: ConsolePage) => void;
   onFetchWorkspaceUpdateStatus: () => unknown | Promise<unknown>;
+  onFetchNginxStatus: () => unknown | Promise<unknown>;
   onStartWorkspaceUpdate: (mode: WorkspaceUpdateMode) => unknown | Promise<unknown>;
   onCancelWorkspaceUpdate: () => unknown | Promise<unknown>;
   onRestartSystem: () => unknown | Promise<unknown>;
@@ -104,6 +112,9 @@ export function DashboardPage({
   workspaceUpdateStatus,
   workspaceUpdateCanceling,
   workspaceUpdateMessage,
+  nginxStatus,
+  nginxStatusLoading,
+  nginxStatusError,
   workspaceUpdateRestarting,
   workspaceUpdateDisplayStatus,
   workspaceUpdateProgressVisible,
@@ -125,6 +136,7 @@ export function DashboardPage({
   runningOldestAgeLabel,
   onSetCurrentPage,
   onFetchWorkspaceUpdateStatus,
+  onFetchNginxStatus,
   onStartWorkspaceUpdate,
   onCancelWorkspaceUpdate,
   onRestartSystem,
@@ -147,6 +159,8 @@ export function DashboardPage({
   const requiredSetupComplete = areRequiredDashboardStepsComplete(onboardingSteps);
   const [completedSetupExpanded, setCompletedSetupExpanded] = useState(false);
   const showOnboarding = !requiredSetupComplete || completedSetupExpanded;
+  const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
+  const nginxEntryUrl = `${window.location.protocol}//${window.location.hostname}`;
 
   return (
     <>
@@ -469,6 +483,108 @@ export function DashboardPage({
         ) : null}
 
         {isAdminIdentity ? (
+          <div className="rounded-lg border border-sky-400/20 bg-sky-400/[0.06] p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex max-w-3xl items-start gap-3">
+                <span className="rounded-lg bg-sky-400/10 p-2 text-sky-200">
+                  <ServerCog className="h-5 w-5" />
+                </span>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold text-white">{t("Web 入口（nginx）", "Web Entry (nginx)")}</h4>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${nginxReady ? "bg-emerald-400/10 text-emerald-200" : "bg-white/8 text-white/60"}`}>
+                      {nginxReady ? t("已就绪", "Ready") : t("待配置", "Setup needed")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    {t(
+                      "nginx 提供对外页面并把 API 交给 webd；clawd 只保留本机内部 API，不直接对外开放。",
+                      "nginx serves the public UI and passes API traffic to webd. clawd remains an internal-only API and is not exposed directly.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onFetchNginxStatus()}
+                disabled={nginxStatusLoading || workspaceUpdateRunning}
+                className="theme-topbar-btn px-3 py-2 text-sm"
+              >
+                {nginxStatusLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t("刷新状态", "Refresh status")}
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              {[
+                [t("已安装", "Installed"), nginxStatus?.installed],
+                [t("运行中", "Running"), nginxStatus?.running],
+                [t("站点已配置", "Site configured"), nginxStatus?.configured],
+                [t("UI 已部署", "UI deployed"), nginxStatus?.ui_deployed],
+              ].map(([label, ready]) => (
+                <span
+                  key={String(label)}
+                  className={`rounded-full border px-2.5 py-1 ${
+                    ready
+                      ? "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-100"
+                      : "border-white/10 bg-black/15 text-white/50"
+                  }`}
+                >
+                  {label}
+                </span>
+              ))}
+              <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2.5 py-1 text-emerald-100">
+                {t("clawd 仅本机", "clawd local only")}
+              </span>
+            </div>
+
+            {nginxStatus?.supported === false ? (
+              <p className="mt-3 text-sm text-amber-100">
+                {t("当前系统不支持自动管理 nginx。", "Automatic nginx management is not supported on this system.")}
+              </p>
+            ) : null}
+            {nginxStatusError ? (
+              <p className="mt-3 text-sm text-amber-100">{t("状态读取失败", "Status check failed")}: {nginxStatusError}</p>
+            ) : null}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void onStartWorkspaceUpdate("nginx_enable")}
+                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting || nginxStatus?.supported === false}
+                className="theme-secondary-btn px-3 py-2 text-sm"
+              >
+                {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "nginx_enable" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ServerCog className="h-4 w-4" />
+                )}
+                {t("启用/修复 nginx", "Enable/Repair nginx")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onStartWorkspaceUpdate("nginx_deploy")}
+                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting || nginxStatus?.supported === false}
+                className="theme-secondary-btn px-3 py-2 text-sm"
+              >
+                {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "nginx_deploy" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {sourceUpdateAvailable ? t("构建并部署最新 UI", "Build and Deploy Latest UI") : t("部署当前 UI", "Deploy Current UI")}
+              </button>
+              {nginxReady ? (
+                <a href={nginxEntryUrl} className="theme-secondary-btn px-3 py-2 text-sm">
+                  <ExternalLink className="h-4 w-4" />
+                  {t("打开 nginx 入口", "Open nginx entry")}
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {isAdminIdentity ? (
           <div className="flex flex-wrap items-center gap-2">
             {workspaceUpdateStatus?.status === "running" ? (
               <button
@@ -486,6 +602,8 @@ export function DashboardPage({
                   ? t("停止中", "Stopping")
                   : workspaceUpdateStatus.mode === "release_deploy"
                     ? t("停止更新", "Stop Update")
+                    : workspaceUpdateStatus.mode === "nginx_enable" || workspaceUpdateStatus.mode === "nginx_deploy"
+                      ? t("停止 nginx 操作", "Stop nginx operation")
                     : t("停止编译", "Stop Build")}
               </button>
             ) : null}

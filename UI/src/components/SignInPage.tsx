@@ -108,10 +108,10 @@ export function SignInPage({
                       className="theme-input"
                       value={baseUrl}
                       onChange={(event) => onBaseUrlChange(event.target.value)}
-                      placeholder="http://127.0.0.1:8787"
+                      placeholder="http://127.0.0.1:8788"
                     />
                     <p className="text-xs text-white/45">
-                      {t("直连 clawd 或经 webd 代理时均可；请与浏览器能访问到的 API 地址一致。", "Use the API URL your browser can reach (direct clawd or via webd).")}
+                      {t("填写浏览器可访问的 webd 或 nginx 地址；clawd 只允许本机组件访问。", "Use the browser-accessible webd or nginx URL. clawd is reserved for machine-local components.")}
                     </p>
                   </label>
 

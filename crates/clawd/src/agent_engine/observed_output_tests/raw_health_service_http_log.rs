@@ -514,7 +514,7 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "process_basic",
-            "exit=0\nCOMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nclawd 4498 testuser 12u IPv4 0x0 0t0 TCP *:8787 (LISTEN)\nnginx 51129 testuser 6u IPv4 0x0 0t0 TCP *:80 (LISTEN)\nss-local 424 testuser 6u IPv4 0x0 0t0 TCP 127.0.0.1:1086 (LISTEN)\n",
+            "exit=0\nCOMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nwebd 4498 testuser 12u IPv4 0x0 0t0 TCP *:8788 (LISTEN)\nnginx 51129 testuser 6u IPv4 0x0 0t0 TCP *:80 (LISTEN)\nclawd 424 testuser 6u IPv4 0x0 0t0 TCP 127.0.0.1:8787 (LISTEN)\n",
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -556,8 +556,8 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
                 "all_interface_listener_count": 2,
                 "localhost_listener_count": 1,
                 "internet_reachability": "not_observed",
-                "ports": ["80", "8787", "46225"],
-                "all_interface_ports": ["80", "8787"],
+                "ports": ["80", "8788", "46225"],
+                "all_interface_ports": ["80", "8788"],
                 "all_interface_listeners": [
                     {
                         "bind_scope": "all_interfaces",
@@ -574,10 +574,10 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
                         "is_loopback": false,
                         "is_wildcard": true,
                         "local_address": "0.0.0.0",
-                        "local_endpoint": "0.0.0.0:8787",
+                        "local_endpoint": "0.0.0.0:8788",
                         "pid": 2308287,
-                        "port": "8787",
-                        "process_name": "clawd"
+                        "port": "8788",
+                        "process_name": "webd"
                     }
                 ],
                 "listeners": [],
@@ -622,8 +622,8 @@ fn observed_entries_compact_wrapped_process_basic_port_list() {
                 "all_interface_listener_count": 2,
                 "localhost_listener_count": 1,
                 "internet_reachability": "not_observed",
-                "ports": ["80", "8787", "46225"],
-                "all_interface_ports": ["80", "8787"],
+                "ports": ["80", "8788", "46225"],
+                "all_interface_ports": ["80", "8788"],
                 "all_interface_listeners": [
                     {
                         "bind_scope": "all_interfaces",
@@ -634,14 +634,14 @@ fn observed_entries_compact_wrapped_process_basic_port_list() {
                     },
                     {
                         "bind_scope": "all_interfaces",
-                        "local_endpoint": "0.0.0.0:8787",
+                        "local_endpoint": "0.0.0.0:8788",
                         "pid": 2308287,
-                        "port": "8787",
-                        "process_name": "clawd"
+                        "port": "8788",
+                        "process_name": "webd"
                     }
                 ],
                 "listeners": [],
-                "output": "exit=0\nState Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:((\"clawd\",pid=2308287,fd=31))"
+                "output": "exit=0\nState Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0 4096 0.0.0.0:8788 0.0.0.0:* users:((\"webd\",pid=2308287,fd=31))"
             },
             "text": "exit=0\nState Recv-Q Send-Q Local Address:Port Peer Address:PortProcess"
         })
@@ -652,11 +652,11 @@ fn observed_entries_compact_wrapped_process_basic_port_list() {
     let joined = entries.join("\n");
 
     assert!(joined.contains("process_basic.port_list"));
-    assert!(joined.contains("listener.2.port=8787"));
-    assert!(joined.contains("listener.2.process=clawd"));
+    assert!(joined.contains("listener.2.port=8788"));
+    assert!(joined.contains("listener.2.process=webd"));
     assert!(joined.contains("listener.2.pid=2308287"));
     assert!(!joined.contains("State Recv-Q"));
-    assert!(!joined.contains("users:((\"clawd\""));
+    assert!(!joined.contains("users:((\"webd\""));
 }
 
 #[test]

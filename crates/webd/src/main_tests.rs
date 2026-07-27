@@ -9,12 +9,13 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
+use tower::ServiceExt;
 
 use super::{
-    build_outgoing_headers, clear_login_failures, cors_allow_origin_from_headers, login_client_ip,
-    login_locked_response, login_retry_after, proxy_inner, record_login_failure,
-    request_uses_https, session_cookie_value, uses_long_running_upstream_wait, webd_error_response,
-    with_cors, AppState, LoginAttemptKey,
+    build_outgoing_headers, build_webd_router, clear_login_failures,
+    cors_allow_origin_from_headers, login_client_ip, login_locked_response, login_retry_after,
+    proxy_inner, record_login_failure, request_uses_https, session_cookie_value,
+    uses_long_running_upstream_wait, webd_error_response, with_cors, AppState, LoginAttemptKey,
 };
 
 fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
@@ -32,6 +33,57 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
         login_lockout_secs: lockout_secs,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
     }
+}
+
+#[tokio::test]
+async fn webd_serves_ui_assets_without_forwarding_them_to_clawd() {
+    let root = std::env::temp_dir().join(format!("rustclaw-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html>webd-ui-marker</html>")
+        .expect("write UI fixture");
+    let app = build_webd_router(login_test_state(6, 900), root.clone());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("serve UI");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store, max-age=0")
+    );
+    let body = to_bytes(response.into_body(), 4096)
+        .await
+        .expect("read UI response");
+    assert!(String::from_utf8_lossy(&body).contains("webd-ui-marker"));
+
+    let mut api_request = Request::builder()
+        .uri("/v1/health")
+        .body(Body::empty())
+        .expect("API request");
+    api_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41008,
+        ))));
+    let api_response = app.oneshot(api_request).await.expect("proxy API");
+    assert_eq!(api_response.status(), StatusCode::BAD_GATEWAY);
+    let api_body = to_bytes(api_response.into_body(), 4096)
+        .await
+        .expect("read API response");
+    assert!(!String::from_utf8_lossy(&api_body).contains("webd-ui-marker"));
+
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
 }
 
 fn login_attempt_key(ip: [u8; 4], username: &str) -> LoginAttemptKey {

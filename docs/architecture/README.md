@@ -17,6 +17,7 @@ GitHub 的 README 不支持真正的页内分页。RustClaw 因此只在仓库 R
 | 7 | [Office artifact workspace](07-office-artifacts.md) | [Office 工件工作区](07-office-artifacts.zh-CN.md) |
 | 8 | [Skill-owned storage](08-skill-owned-storage.md) | [技能独立存储](08-skill-owned-storage.zh-CN.md) |
 | 9 | [Interactive coding and presentation](09-interactive-coding.md) | [交互式编码与输出呈现](09-interactive-coding.zh-CN.md) |
+| 10 | [Web entry and core isolation](10-web-entry-security.md) | [Web 入口与核心隔离](10-web-entry-security.zh-CN.md) |
 
 These files are also the source documents rendered by the UI's AI Learning
 page. Edit a diagram here instead of copying it into UI source.

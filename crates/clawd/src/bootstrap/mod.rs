@@ -4,7 +4,7 @@ pub(crate) mod prompts;
 pub(crate) mod skill_runner;
 
 pub(crate) use channels::{
-    load_feishu_send_config, load_lark_send_config, load_wechat_send_config, resolve_ui_dist_dir,
+    load_feishu_send_config, load_lark_send_config, load_wechat_send_config,
 };
 pub(crate) use config_loaders::{
     load_command_intent_runtime, load_memory_runtime_config, load_schedule_runtime,

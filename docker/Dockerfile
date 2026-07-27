@@ -123,6 +123,6 @@ RUN chmod +x \
 
 ENV RUST_LOG=warn
 
-EXPOSE 8787
+EXPOSE 8788
 
 ENTRYPOINT ["/app/docker/docker-entrypoint.sh"]

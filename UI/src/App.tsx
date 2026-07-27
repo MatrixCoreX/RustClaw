@@ -55,8 +55,8 @@ import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
 import { useServiceActionsRuntime } from "./hooks/useServiceActionsRuntime";
 import { useWhatsappWebRuntime } from "./hooks/useWhatsappWebRuntime";
 import {
-  defaultClawdBaseUrl,
-  preferredClawdBaseUrl,
+  defaultBrowserApiBaseUrl,
+  preferredBrowserApiBaseUrl,
   preferredWebdBaseUrl,
 } from "./lib/service-origins";
 import { useWechatRuntime } from "./hooks/useWechatRuntime";
@@ -95,9 +95,9 @@ const STORAGE_KEYS = {
   themeMode: "rustclaw.monitor.themeMode",
 } as const;
 
-/** 根据当前页面地址推断 clawd API 的默认 baseUrl；获取不到主机名时用 127.0.0.1 */
-function getDefaultClawdBaseUrl(): string {
-  return defaultClawdBaseUrl(
+/** 根据当前页面地址推断浏览器网关地址；获取不到主机名时使用本机 webd。 */
+function getDefaultBrowserApiBaseUrl(): string {
+  return defaultBrowserApiBaseUrl(
     typeof window === "undefined" ? undefined : window.location,
   );
 }
@@ -116,9 +116,9 @@ export default function App() {
   });
   const [baseUrl, setBaseUrl] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
-    return preferredClawdBaseUrl(saved, window.location);
+    return preferredBrowserApiBaseUrl(saved, window.location);
   });
-  const apiBase = baseUrl || getDefaultClawdBaseUrl();
+  const apiBase = baseUrl || getDefaultBrowserApiBaseUrl();
   const [uiKey, setUiKey] = useState(() => window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim() ?? "");
   const [authMode, setAuthMode] = useState<"key" | "webd" | null>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.authMode);
@@ -659,6 +659,7 @@ export default function App() {
     chatWorking,
     chatRecording,
     chatVoiceRecordingSupported,
+    chatVoiceRecordingAvailability,
     chatAudioInputDevices,
     chatAudioInputDeviceId,
     chatError,
@@ -676,6 +677,7 @@ export default function App() {
     removeChatAttachment,
     startChatVoiceRecording,
     stopChatVoiceRecording,
+    cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
     queryChatTeachingLlmDebug,
@@ -928,6 +930,10 @@ export default function App() {
     workspaceUpdateLoading,
     workspaceUpdateCanceling,
     workspaceUpdateMessage,
+    nginxStatus,
+    nginxStatusLoading,
+    nginxStatusError,
+    fetchNginxStatus,
     fetchWorkspaceUpdateStatus,
     startWorkspaceUpdate,
     cancelWorkspaceUpdate,
@@ -1429,6 +1435,9 @@ export default function App() {
               workspaceUpdateStatus={workspaceUpdateStatus}
               workspaceUpdateCanceling={workspaceUpdateCanceling}
               workspaceUpdateMessage={workspaceUpdateMessage}
+              nginxStatus={nginxStatus}
+              nginxStatusLoading={nginxStatusLoading}
+              nginxStatusError={nginxStatusError}
               workspaceUpdateRestarting={workspaceUpdateRestarting}
               workspaceUpdateDisplayStatus={workspaceUpdateDisplayStatus}
               workspaceUpdateProgressVisible={workspaceUpdateProgressVisible}
@@ -1450,6 +1459,7 @@ export default function App() {
               runningOldestAgeLabel={formatDuration(health?.running_oldest_age_seconds)}
               onSetCurrentPage={setCurrentPage}
               onFetchWorkspaceUpdateStatus={() => fetchWorkspaceUpdateStatus(false)}
+              onFetchNginxStatus={() => fetchNginxStatus(false)}
               onStartWorkspaceUpdate={startWorkspaceUpdate}
               onCancelWorkspaceUpdate={cancelWorkspaceUpdate}
               onRestartSystem={restartSystem}
@@ -1481,6 +1491,7 @@ export default function App() {
               chatWorking={chatWorking}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
+              chatVoiceRecordingAvailability={chatVoiceRecordingAvailability}
               chatAudioInputDevices={chatAudioInputDevices}
               chatAudioInputDeviceId={chatAudioInputDeviceId}
               chatError={chatError}
@@ -1499,6 +1510,7 @@ export default function App() {
               onRemoveAttachment={removeChatAttachment}
               onStartVoiceRecording={startChatVoiceRecording}
               onStopVoiceRecording={stopChatVoiceRecording}
+              onCancelVoiceRecording={cancelChatVoiceRecording}
               onAudioInputDeviceChange={setChatAudioInputDeviceId}
               onSendMessage={sendChatMessage}
               onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}

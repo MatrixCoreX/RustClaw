@@ -28,7 +28,6 @@ fn write_minimal_config(root: &Path, persona_text: &str) {
         "configs/config.toml",
         r#"
 [server]
-listen = "127.0.0.1:0"
 request_timeout_seconds = 30
 
 [telegram]

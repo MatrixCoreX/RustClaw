@@ -39,7 +39,6 @@ fn app_config_load_allows_missing_telegram_split_config() {
         &config_path,
         r#"
 [server]
-listen = "127.0.0.1:0"
 request_timeout_seconds = 30
 
 [database]
@@ -70,7 +69,6 @@ fn app_config_load_defaults_mcp_boundary_closed() {
         &config_path,
         r#"
 [server]
-listen = "127.0.0.1:0"
 request_timeout_seconds = 30
 
 [database]
@@ -103,7 +101,6 @@ fn app_config_loads_mcp_server_runtime_policy_boundary() {
         &config_path,
         r#"
 [server]
-listen = "127.0.0.1:0"
 request_timeout_seconds = 30
 
 [database]

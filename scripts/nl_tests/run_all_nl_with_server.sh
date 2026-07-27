@@ -281,8 +281,7 @@ PY
     --source "${SOURCE_CONFIG}" \
     --output "${ISOLATED_CONFIG}" \
     --sqlite-path "${ISOLATED_DB}" \
-    --audit-sqlite-path "${ISOLATED_AUDIT_DB}" \
-    --listen "${isolated_listen}"
+    --audit-sqlite-path "${ISOLATED_AUDIT_DB}"
   echo "server_mode=isolated"
   echo "base_url=${BASE_URL}"
   echo "config_identity=isolated/config.toml"
@@ -310,6 +309,7 @@ BASE_URL="${SELECTED_BASE_URL}"
 if [[ "${REUSE_SERVER}" -eq 0 ]]; then
   export RUSTCLAW_CONFIG_PATH="${ISOLATED_CONFIG}"
   export RUSTCLAW_DB_PATH="${ISOLATED_DB}"
+  export RUSTCLAW_INTERNAL_LISTEN="${isolated_listen}"
   export CLIENT_LIKE_CHANNEL="ui"
   # An isolated database gets its own generated admin key. Never reuse a key
   # inherited from the developer's normal runtime against that database.

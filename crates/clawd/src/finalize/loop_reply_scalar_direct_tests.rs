@@ -788,7 +788,7 @@ fn direct_structured_observed_answer_preserves_publishable_respond_for_content_r
 
 #[test]
 fn direct_structured_observed_answer_skips_observed_passthrough_for_strict_exact_sentence() {
-    let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
+    let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096       127.0.0.1:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -815,7 +815,7 @@ fn direct_structured_observed_answer_skips_observed_passthrough_for_strict_exact
 
 #[test]
 fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
-    let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
+    let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096       127.0.0.1:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .output_vars

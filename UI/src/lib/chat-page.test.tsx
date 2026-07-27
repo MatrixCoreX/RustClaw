@@ -39,6 +39,7 @@ function props(): ComponentProps<typeof ChatPage> {
     chatWorking: false,
     chatRecording: false,
     chatVoiceRecordingSupported: false,
+    chatVoiceRecordingAvailability: "media_devices_unavailable",
     chatAudioInputDevices: [],
     chatAudioInputDeviceId: "",
     chatError: null,
@@ -57,6 +58,7 @@ function props(): ComponentProps<typeof ChatPage> {
     onRemoveAttachment: () => {},
     onStartVoiceRecording: () => {},
     onStopVoiceRecording: () => {},
+    onCancelVoiceRecording: () => {},
     onAudioInputDeviceChange: () => {},
     onSendMessage: () => {},
     onQueryChatTeachingLlmDebug: () => {},
@@ -69,4 +71,30 @@ test("renders task rename and delete as directly operable controls", () => {
   assert.match(markup, /aria-label="重命名任务：自定义任务"/);
   assert.match(markup, /aria-label="删除任务：自定义任务"/);
   assert.doesNotMatch(markup, /aria-expanded=/);
+});
+
+test("describes hold-to-talk voice as release-to-send without a preview step", () => {
+  const markup = renderToStaticMarkup(
+    <ChatPage
+      {...props()}
+      chatVoiceRecordingSupported
+      chatVoiceRecordingAvailability="available"
+    />,
+  );
+
+  assert.match(markup, /按住发言/);
+  assert.match(markup, /松开后自动发送/);
+  assert.doesNotMatch(markup, /松开后试听/);
+});
+
+test("keeps an actionable HTTPS explanation when HTTP IP recording is blocked", () => {
+  const markup = renderToStaticMarkup(
+    <ChatPage
+      {...props()}
+      chatVoiceRecordingAvailability="insecure_context"
+    />,
+  );
+
+  assert.match(markup, /语音需要 HTTPS/);
+  assert.match(markup, /HTTP IP 页面使用麦克风/);
 });

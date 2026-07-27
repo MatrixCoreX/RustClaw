@@ -33,7 +33,10 @@ import {
   teachingRunByMessageId,
 } from "../lib/chat-teaching";
 import type { ChatAttachment, ChatMessage, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
-import type { VoiceInputDeviceOption } from "../lib/voice-recording";
+import type {
+  VoiceInputDeviceOption,
+  VoiceRecordingAvailability,
+} from "../lib/voice-recording";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
 type Translate = (zh: string, en: string) => string;
@@ -86,6 +89,7 @@ export interface ChatPageProps {
   chatWorking: boolean;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
+  chatVoiceRecordingAvailability: VoiceRecordingAvailability;
   chatAudioInputDevices: VoiceInputDeviceOption[];
   chatAudioInputDeviceId: string;
   chatError: string | null;
@@ -104,6 +108,7 @@ export interface ChatPageProps {
   onRemoveAttachment: (index: number) => void;
   onStartVoiceRecording: () => unknown | Promise<unknown>;
   onStopVoiceRecording: () => unknown | Promise<unknown>;
+  onCancelVoiceRecording: () => unknown | Promise<unknown>;
   onAudioInputDeviceChange: (deviceId: string) => void;
   onSendMessage: () => unknown | Promise<unknown>;
   onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
@@ -128,6 +133,7 @@ export function ChatPage({
   chatWorking,
   chatRecording,
   chatVoiceRecordingSupported,
+  chatVoiceRecordingAvailability,
   chatAudioInputDevices,
   chatAudioInputDeviceId,
   chatError,
@@ -146,6 +152,7 @@ export function ChatPage({
   onRemoveAttachment,
   onStartVoiceRecording,
   onStopVoiceRecording,
+  onCancelVoiceRecording,
   onAudioInputDeviceChange,
   onSendMessage,
   onQueryChatTeachingLlmDebug,
@@ -570,10 +577,11 @@ export function ChatPage({
                     void onStartVoiceRecording();
                   }}
                   onPointerUp={(event) => {
+                    if (event.button !== 0) return;
                     event.preventDefault();
                     onStopVoiceRecording();
                   }}
-                  onPointerCancel={() => onStopVoiceRecording()}
+                  onPointerCancel={() => onCancelVoiceRecording()}
                   onKeyDown={(event) => {
                     if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
                     event.preventDefault();
@@ -598,17 +606,38 @@ export function ChatPage({
                     <Mic className="h-3.5 w-3.5" />
                   )}
                   {chatRecording
-                    ? t("松开后试听", "Release to preview")
-                    : t("按住录音", "Hold to record")}
+                    ? t("松开发送", "Release to send")
+                    : t("按住发言", "Hold to talk")}
                 </button>
               </>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                onClick={() => void onStartVoiceRecording()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-500/15"
+                title={
+                  chatVoiceRecordingAvailability === "insecure_context"
+                    ? t("HTTP IP 地址无法获得浏览器麦克风权限", "HTTP IP addresses cannot receive browser microphone permission")
+                    : t("当前浏览器不支持直接录音", "This browser does not support direct recording")
+                }
+              >
+                <Mic className="h-3.5 w-3.5" />
+                {chatVoiceRecordingAvailability === "insecure_context"
+                  ? t("语音需要 HTTPS", "Voice needs HTTPS")
+                  : t("语音不可用", "Voice unavailable")}
+              </button>
+            )}
             <span className="text-xs text-white/45">
               {chatVoiceRecordingSupported
                 ? t(
-                    "可直接发送图片、文件或语音，也可以带一句说明。",
-                    "Send images, files, or voice directly, with an optional note.",
+                    "按住发言，松开后自动发送；也可以发送图片或文件。",
+                    "Hold to talk and release to send automatically; images and files are also supported.",
                   )
+                : chatVoiceRecordingAvailability === "insecure_context"
+                  ? t(
+                      "浏览器不允许 HTTP IP 页面使用麦克风，请改用受信任的 HTTPS 地址。",
+                      "Browsers do not allow microphone access on HTTP IP pages. Use a trusted HTTPS address.",
+                    )
                 : t(
                     "可直接发送图片或文件，也可以带一句说明。",
                     "Send images or files directly, with an optional note.",

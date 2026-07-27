@@ -78,6 +78,10 @@ export function formatWorkspaceUpdateStep(step: string | null | undefined, lang:
     building_workspace: copy(lang, "正在完整编译", "Running full build"),
     building_ui: copy(lang, "正在编译 UI", "Building UI"),
     ui_build_succeeded: copy(lang, "UI 编译完成", "UI build completed"),
+    enabling_nginx: copy(lang, "正在启用 nginx", "Enabling nginx"),
+    nginx_enabled: copy(lang, "nginx 已启用", "nginx enabled"),
+    deploying_nginx_ui: copy(lang, "正在部署 nginx UI", "Deploying nginx UI"),
+    nginx_ui_deployed: copy(lang, "nginx UI 已部署", "nginx UI deployed"),
     building_clawd: copy(lang, "正在编译 clawd", "Building clawd"),
     downloading_release: copy(lang, "正在下载 Release 包", "Downloading Release package"),
     deploying_release: copy(lang, "正在部署 Release 包", "Deploying Release package"),
@@ -101,6 +105,8 @@ export function formatWorkspaceUpdateStatus(
 ): string {
   if (status === "running") {
     if (mode === "ui_only" || mode === "clawd_only") return copy(lang, "编译中", "Building");
+    if (mode === "nginx_enable") return copy(lang, "配置中", "Configuring");
+    if (mode === "nginx_deploy") return copy(lang, "部署中", "Deploying");
     if (mode === "release_deploy") return copy(lang, "部署中", "Deploying");
     if (mode === "release_package") return copy(lang, "切换中", "Switching");
     if (mode === "source_checkout") return copy(lang, "切换中", "Switching");
@@ -250,6 +256,21 @@ export function formatWorkspaceUpdateNextStep(
       "请确认 UI 依赖完整，并查看编译日志。",
       "Confirm UI dependencies are complete and inspect the build logs.",
     ),
+    "workspace_update.nginx_enable_failed": copy(
+      lang,
+      "请查看操作日志，确认 nginx 安装状态和系统管理员权限后重试。",
+      "Check the operation log, confirm nginx installation and system administrator privileges, then retry.",
+    ),
+    "workspace_update.nginx_ui_deploy_failed": copy(
+      lang,
+      "请查看操作日志，修复 UI 构建、nginx 配置或写入权限问题后重试。",
+      "Check the operation log, fix UI build, nginx configuration, or write-permission issues, then retry.",
+    ),
+    "workspace_update.nginx_command_failed": copy(
+      lang,
+      "nginx 管理命令未能启动，请确认部署脚本完整且当前用户具有所需权限。",
+      "The nginx management command could not start. Confirm the deployment scripts are present and the current user has the required privileges.",
+    ),
     "workspace_update.clawd_build_failed": copy(
       lang,
       "请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
@@ -356,6 +377,8 @@ function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | u
     checking_new_version: 58,
     building_workspace: 82,
     building_ui: 82,
+    enabling_nginx: 45,
+    deploying_nginx_ui: 82,
     building_clawd: 82,
     downloading_release: 35,
     deploying_release: 78,
@@ -375,6 +398,12 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
   }
   if (running && status?.step === "building_clawd") {
     return copy(lang, "clawd 编译中，完成后会安排 clawd 重启。", "Building clawd; clawd will restart when finished.");
+  }
+  if (running && status?.mode === "nginx_enable") {
+    return copy(lang, "正在安装或启动 nginx，并配置 RustClaw Web 入口。", "Installing or starting nginx and configuring the RustClaw web entry.");
+  }
+  if (running && status?.mode === "nginx_deploy") {
+    return copy(lang, "正在构建或复制 UI 产物，完成后会重载 nginx。", "Building or copying UI assets, then reloading nginx.");
   }
   if (running && status?.mode === "release_package") {
     return copy(
@@ -433,14 +462,18 @@ function workspaceUpdateErrorNotice(
           ? "请查看下方日志摘要；当前源码备份仍会保留，可修复网络或写入权限后重试。"
         : status.mode === "source_checkout"
           ? "请查看下方日志摘要；当前 Release 安装仍然保留，可修复网络、Git 或写入权限后重试。"
-        : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
+        : status.mode === "nginx_enable" || status.mode === "nginx_deploy"
+          ? "请查看下方日志摘要；修复 nginx、UI 产物或系统权限问题后再重试。"
+          : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
       status.mode === "release_deploy"
         ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
         : status.mode === "release_package"
           ? "Check the log summary below. The source backup remains available; fix network or write permissions and retry."
         : status.mode === "source_checkout"
           ? "Check the log summary below. The current Release installation is still preserved; fix network, Git, or write permissions and retry."
-        : "Check the log summary below, then fix Git, network, or build issues and retry.",
+        : status.mode === "nginx_enable" || status.mode === "nginx_deploy"
+          ? "Check the log summary below, then fix nginx, UI asset, or system-permission issues and retry."
+          : "Check the log summary below, then fix Git, network, or build issues and retry.",
     ),
   };
 }
@@ -511,6 +544,8 @@ function workspaceUpdateNotice(
             ? "正在安全切换回 Release 模式，操作日志会在下方持续刷新。"
           : status.mode === "source_checkout"
             ? "正在安全切换到源码模式，操作日志会在下方持续刷新。"
+          : status.mode === "nginx_enable" || status.mode === "nginx_deploy"
+            ? "nginx 操作正在进行，日志会在下方持续刷新。"
           : "更新流程正在进行，编译日志会在下方持续刷新。",
         status.mode === "release_deploy"
           ? "Release deployment is running. Logs will keep refreshing below."
@@ -518,6 +553,8 @@ function workspaceUpdateNotice(
             ? "The safe switch back to Release mode is running. Operation logs will keep refreshing below."
           : status.mode === "source_checkout"
             ? "The safe source-mode migration is running. Operation logs will keep refreshing below."
+          : status.mode === "nginx_enable" || status.mode === "nginx_deploy"
+            ? "The nginx operation is running. Logs will keep refreshing below."
           : "The update is running. Build logs will keep refreshing below.",
       ),
     };
@@ -527,16 +564,32 @@ function workspaceUpdateNotice(
       tone: "success",
       title: copy(
         lang,
-        status.mode === "ui_only" ? "UI 编译和部署已完成。" : "编译已完成。",
-        status.mode === "ui_only" ? "UI build and deployment completed." : "Build completed.",
+        status.mode === "ui_only"
+          ? "UI 编译和部署已完成。"
+          : status.mode === "nginx_enable"
+            ? "nginx 已启用。"
+            : status.mode === "nginx_deploy"
+              ? "nginx UI 已部署。"
+              : "编译已完成。",
+        status.mode === "ui_only"
+          ? "UI build and deployment completed."
+          : status.mode === "nginx_enable"
+            ? "nginx is enabled."
+            : status.mode === "nginx_deploy"
+              ? "The nginx UI was deployed."
+              : "Build completed.",
       ),
       detail: copy(
         lang,
-        status.mode === "ui_only"
+        status.mode === "ui_only" || status.mode === "nginx_deploy"
           ? "页面会自动刷新并使用新版本；进度条已结束。"
+          : status.mode === "nginx_enable"
+            ? "现在可以通过主机 80 端口打开 RustClaw。"
           : "当前构建流程已成功结束。",
-        status.mode === "ui_only"
+        status.mode === "ui_only" || status.mode === "nginx_deploy"
           ? "The page will refresh automatically and use the new version. The progress run has ended."
+          : status.mode === "nginx_enable"
+            ? "RustClaw is now available through the host's port 80."
           : "The current build completed successfully.",
       ),
     };
@@ -587,6 +640,6 @@ export function shouldReloadAfterWorkspaceBuild(
   mode: WorkspaceUpdateStatus["mode"] | undefined,
   status: WorkspaceUpdateStatus["status"] | undefined,
 ): boolean {
-  if (!wasActive || mode === "release_deploy" || mode === "release_package") return false;
+  if (!wasActive || mode === "release_deploy" || mode === "release_package" || mode === "nginx_enable") return false;
   return status === "succeeded" || status === "idle" || status === "up_to_date";
 }

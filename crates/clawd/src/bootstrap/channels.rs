@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use toml::Value as TomlValue;
 
@@ -9,20 +9,6 @@ fn env_non_empty(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-pub(crate) fn resolve_ui_dist_dir(workspace_root: &Path) -> PathBuf {
-    if let Ok(raw) = std::env::var("RUSTCLAW_UI_DIST") {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            let candidate = PathBuf::from(trimmed);
-            if candidate.is_absolute() {
-                return candidate;
-            }
-            return workspace_root.join(candidate);
-        }
-    }
-    workspace_root.join("UI").join("dist")
 }
 
 pub(crate) fn load_feishu_send_config(

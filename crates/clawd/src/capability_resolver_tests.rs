@@ -1704,7 +1704,7 @@ fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback()
         ),
         (
             "system_basic.extract_field",
-            json!({"path": "configs/config.toml", "field_path": "server.listen"}),
+            json!({"path": "configs/config.toml", "field_path": "webd.listen"}),
             "tool:system_basic",
         ),
         (

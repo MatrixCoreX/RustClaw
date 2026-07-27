@@ -376,18 +376,11 @@ intent_rules_path = "prompts/schedule_intent_rules.md"
 locale = "zh-CN"
 timezone = "Asia/Shanghai"
 
-# 用途/Purpose: HTTP 服务监听与请求超时.
-# 建议修改/Recommended change: 可改.
-# 风险/Risk: 监听地址改为 0.0.0.0 会暴露外网；超时过低会误中断.
-# listen 填 0.0.0.0:8787 可公网访问；同机 telegramd/whatsappd 会连 127.0.0.1:8787。
-# clawd_base_url（可选）：telegramd/whatsappd 连 clawd 的地址；未设则用 http://{listen}。
+# 用途/Purpose: clawd 内部 HTTP 请求超时.
+# clawd 固定只监听 127.0.0.1:8787；对外访问由 webd 承担。
+# clawd_base_url（可选）仅供通信守护进程显式连到另一个 clawd 实例。
 #clawd_base_url = "http://127.0.0.1:8787"
-# [WARNING - Phase 0.1 安全提醒]
-# `listen = "0.0.0.0:8787"` 会直接把 clawd HTTP API 暴露到所有网卡（含公网）。
-# 若本机没有独立防火墙/反代，建议改回 `127.0.0.1:8787`，只让 telegramd/whatsappd
-# 这类同机伴随进程或专门的网关访问；再在外层放 TLS + 鉴权。
 [server]
-listen = "0.0.0.0:8787"
 request_timeout_seconds = 30
 # 用途/Purpose: 技能执行并发/超时与启用基线.
 # 建议修改/Recommended change: 可改，但建议优先用 skill_switches 管理开关.
@@ -582,3 +575,4 @@ llm_total_timeout_seconds = 900
 
 [nni]
 remote_nodes = ["https://api.matrixai.one"]
+joined = false

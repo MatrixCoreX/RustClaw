@@ -13,7 +13,7 @@ RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”�
 
 当前仓库的主要能力包括：
 
-- 多通道接入：Telegram、微信、飞书、Lark、WhatsApp Cloud、WhatsApp Web、浏览器 UI，以及可选的 `webd`
+- 多通道接入：Telegram、微信、飞书、Lark、WhatsApp Cloud、WhatsApp Web，以及统一通过 `webd` 进入的浏览器 UI；nginx/TLS 可选
 - 由 `clawd` 提供任务运行时、HTTP API、路由、记忆和调度
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
@@ -385,6 +385,8 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 6. [发布验证](docs/architecture/06-release-validation.zh-CN.md)
 7. [Office 工件工作区](docs/architecture/07-office-artifacts.zh-CN.md)
 8. [技能独立存储](docs/architecture/08-skill-owned-storage.zh-CN.md)
+9. [交互式编码与输出呈现](docs/architecture/09-interactive-coding.zh-CN.md)
+10. [Web 入口与核心隔离](docs/architecture/10-web-entry-security.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。
@@ -396,7 +398,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 - `crates/clawd`：核心运行时、HTTP API、任务队列、路由、记忆、鉴权、调度
 - `crates/skill-runner`：启动 runner 技能二进制；`clawd` 会先解析 registry kind / `runner_name` 再调用它
 - `crates/clawcli`：面向 `clawd` 的终端 CLI
-- `crates/webd`：可选的反向代理和登录会话桥接层
+- `crates/webd`：浏览器 UI 托管、登录/会话边界，以及到内部核心 API 的鉴权代理
 - `crates/telegramd`、`crates/wechatd`、`crates/feishud`、`crates/larkd`、`crates/whatsappd`、`crates/whatsapp_webd`：通道守护进程
 - `services/wa-web-bridge`：WhatsApp Web 通道使用的本地 Node bridge
 - `crates/skills/*`：固定/核心内建技能实现及其 `INTERFACE.md`
@@ -426,7 +428,7 @@ rustclaw -logs clawd 200 --follow
 
 关键原则：
 
-- 本地部署由 RustClaw 直接提供 UI，不需要 nginx。
+- 本地部署直接打开 `webd` 提供的 UI，不需要 nginx。
 - 云服务器使用域名/TLS 时，再显式部署 UI 到 nginx。
 - Linux systemd unit 由 `scripts/install-systemd-service.sh` 根据实际用户和路径生成；仓库不保存写死主机路径的 unit。
 - 树莓派优先使用预编译 aarch64 Release 包，避免低内存设备重复完整编译。
@@ -453,17 +455,36 @@ rustclaw -key disable rk-xxxx
 
 ## UI、API 与 `webd`
 
-主 API 由 `clawd` 提供；部署方式按环境拆分：
+主 API 由只监听 loopback 的 `clawd` 提供，所有浏览器流量统一从 `webd` 进入：
 
-- 本地机器：`clawd` 同时提供 `UI/dist` 和 `/v1`，不需要 nginx
-- 云服务器：可由 nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
-- `webd` 在启用时提供密码登录和会话桥接；本地直连 UI 可以使用 RustClaw key
+```mermaid
+flowchart LR
+    B[浏览器]
+    N[nginx<br/>可选 TLS + 静态 UI]
+    W[webd :8788<br/>UI + 登录 + 会话 + 代理]
+    C[clawd 127.0.0.1:8787<br/>内部 /v1 API]
+    U[UI/dist]
+
+    B -->|本地| W
+    B -->|域名 / TLS| N
+    N -->|静态文件| U
+    N -->|/v1 与 /webd| W
+    W -->|无 nginx 时的静态文件| U
+    W -->|已鉴权 /v1| C
+```
+
+- 本地机器：直接打开 `webd`；它托管 `UI/dist` 并代理已鉴权的 `/v1` 请求
+- 云服务器：nginx 可以托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`；nginx 不直接连接 `clawd`
+- `webd` 是浏览器安全边界，负责密码登录、会话持久化、凭据注入、请求限制和 API 代理
+- `clawd` 不再托管浏览器资源，也不能绑定非 loopback 地址；本地通道守护进程和 `clawcli` 可以使用其内部 API
+- 首页的“Web 入口”区域显示 nginx 安装、进程、站点和 UI 部署状态；管理员可以启用/修复 nginx、部署当前 UI，并在检查通过后打开入口。
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
 - `AI 学习` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
+- 桌面端点击主操作区域任意位置都会自动收起左侧导航，可用导航开关再次展开；移动端选择页面或点击菜单外部后会关闭导航菜单。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
 
-在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
+`clawd` 固定使用内部地址 `127.0.0.1:8787`，不再提供面向用户的监听配置。`webd` 默认常见监听为 `0.0.0.0:8788`，可选 nginx 的上游由部署脚本从 `configs/channels/webd.toml` 推导。Docker 只发布 `8788`，不发布 `8787`。
 
 常用接口（请求时带上当前 UI/user key 的 `X-RustClaw-Key`）：
 
@@ -478,6 +499,9 @@ rustclaw -key disable rk-xxxx
 - `POST /v1/tasks/cancel-by-task-id`
 - `POST /v1/tasks/cancel-one`：按 active-list index 取消
 - `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
+- `GET /v1/admin/nginx`：返回仅管理员可见的 nginx 安装、进程、站点和已部署 UI 状态
+- `POST /v1/admin/workspace-update/nginx-enable`：安装/启动或修复 nginx 入口，并部署已有 UI 资源
+- `POST /v1/admin/workspace-update/nginx-deploy`：源码存在时先构建当前 UI，再部署到 nginx
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`：按当前 `X-RustClaw-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
@@ -485,7 +509,7 @@ rustclaw -key disable rk-xxxx
 - `GET /v1/nni/device/status`：返回 NNI helper 状态、支持的操作，以及是否检测到设备签名芯片
 - `POST /v1/nni/device/action`：执行 `pubkey`、`sign_timestamp`、`tng_device_pubkey`、`tng_device_cert`、`tng_signer_cert` 或 `tng_root_cert`
 
-快速示例：
+本机内部 API 示例（不得暴露或转发 `8787`）：
 
 ```bash
 curl http://127.0.0.1:8787/v1/health \

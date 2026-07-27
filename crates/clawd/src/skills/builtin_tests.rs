@@ -1084,7 +1084,7 @@ fn detached_background_detection_ignores_common_redirections() {
         "python3 -m http.server 64884 --bind 127.0.0.1 > /dev/null 2>&1 &"
     ));
     assert!(!super::looks_detached_background_command(
-        "curl -s http://127.0.0.1:8787/ >/dev/null 2>&1"
+        "curl -s http://127.0.0.1:8788/ >/dev/null 2>&1"
     ));
     assert!(super::looks_detached_background_command(
         "nohup python3 -m http.server 64884 >/tmp/demo.log 2>&1 & disown"
@@ -1108,7 +1108,7 @@ fn runtime_checkpoint_claim_detection_requires_real_background_operator() {
         )
     );
     assert!(!super::run_cmd_claims_runtime_checkpoint_without_async_start(
-        "curl 'http://127.0.0.1:8787/?a=1&b=2' && echo checkpoint_id=demo && echo poll_ref=/tmp/demo"
+        "curl 'http://127.0.0.1:8788/?a=1&b=2' && echo checkpoint_id=demo && echo poll_ref=/tmp/demo"
     ));
 }
 
