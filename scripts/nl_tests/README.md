@@ -463,6 +463,9 @@ For `maintainability_skill_contracts.txt`, the required content includes
 `LONG_FILE_CHECK ok`, `OK: all`,
 `registry skills have a generated layered prompt body`,
 `REGISTRY_PARITY mode=all`, `differences=0`,
+`BUILTIN_CAPABILITY_INVENTORY_SELF_TEST ok`, and
+`BUILTIN_CAPABILITY_INVENTORY findings=0`, proving the declared, hidden-alias,
+exposed, schema-debt, and unmapped-action inventory is release-gated,
 `MCP_RUNTIME_CONTRACT_SELF_TEST ok`, and
 `MCP_RUNTIME_CONTRACT_CHECK findings=0`, plus
 `AGENT_HOOK_RUNTIME_CONTRACT_SELF_TEST ok` and
