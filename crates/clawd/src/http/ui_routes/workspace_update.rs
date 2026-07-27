@@ -1739,11 +1739,13 @@ async fn run_workspace_update_command_streaming(
         .stdin(StdProcessStdio::null())
         .stdout(StdProcessStdio::piped())
         .stderr(StdProcessStdio::piped());
+    crate::skills::place_subprocess_in_own_process_group(&mut cmd);
 
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("failed to run {program}: {err}"))?;
-    if let Some(pid) = child.id() {
+    let process_group_pid = child.id();
+    if let Some(pid) = process_group_pid {
         let mut guard = workspace_update_control_lock(control.as_ref());
         guard.active_child_pid = Some(pid);
     }
@@ -1761,11 +1763,17 @@ async fn run_workspace_update_command_streaming(
 
     let status = loop {
         if workspace_update_cancel_requested(&control) {
-            if let Some(pid) = child.id() {
+            if let Some(pid) = process_group_pid {
                 terminate_workspace_update_process_tree(pid);
             }
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+            if let Some(pid) = process_group_pid {
+                force_kill_workspace_update_process_tree(pid);
+            }
             let _ = child.kill().await;
-            let _ = child.wait().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+            stdout_task.abort();
+            stderr_task.abort();
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             finish_workspace_update_canceled(&shared, &control);
@@ -1779,8 +1787,9 @@ async fn run_workspace_update_command_streaming(
         }
     };
 
-    let _ = stdout_task.await;
-    let _ = stderr_task.await;
+    cleanup_workspace_update_process_group(process_group_pid).await;
+    finish_workspace_update_stream_task(stdout_task).await;
+    finish_workspace_update_stream_task(stderr_task).await;
     {
         let mut guard = workspace_update_control_lock(control.as_ref());
         guard.active_child_pid = None;
@@ -1794,7 +1803,32 @@ async fn run_workspace_update_command_streaming(
     })
 }
 
+async fn cleanup_workspace_update_process_group(process_group_pid: Option<u32>) {
+    let Some(pid) = process_group_pid.filter(|pid| workspace_update_process_group_exists(*pid))
+    else {
+        return;
+    };
+    terminate_workspace_update_process_tree(pid);
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    if workspace_update_process_group_exists(pid) {
+        force_kill_workspace_update_process_tree(pid);
+    }
+}
+
+async fn finish_workspace_update_stream_task(mut task: tokio::task::JoinHandle<()>) {
+    if tokio::time::timeout(std::time::Duration::from_secs(2), &mut task)
+        .await
+        .is_err()
+    {
+        task.abort();
+        let _ = task.await;
+    }
+}
+
 fn terminate_workspace_update_process_tree(pid: u32) {
+    if signal_workspace_update_process_group(pid, libc::SIGTERM) {
+        return;
+    }
     let pid_text = pid.to_string();
     for _ in 0..3 {
         let _ = StdCommand::new("pkill")
@@ -1808,6 +1842,60 @@ fn terminate_workspace_update_process_tree(pid: u32) {
         .stdout(StdProcessStdio::null())
         .stderr(StdProcessStdio::null())
         .status();
+}
+
+fn force_kill_workspace_update_process_tree(pid: u32) {
+    if signal_workspace_update_process_group(pid, libc::SIGKILL) {
+        return;
+    }
+    let pid_text = pid.to_string();
+    let _ = StdCommand::new("pkill")
+        .args(["-KILL", "-P", pid_text.as_str()])
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .status();
+    let _ = StdCommand::new("kill")
+        .args(["-KILL", pid_text.as_str()])
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .status();
+}
+
+#[cfg(unix)]
+fn signal_workspace_update_process_group(pid: u32, signal: i32) -> bool {
+    let Ok(process_group) = i32::try_from(pid) else {
+        return false;
+    };
+    if process_group <= 0 {
+        return false;
+    }
+    // SAFETY: a negative PID targets the dedicated process group created for
+    // this build. No pointer or shared-memory invariants are involved.
+    unsafe { libc::kill(-process_group, signal) == 0 }
+}
+
+#[cfg(not(unix))]
+fn signal_workspace_update_process_group(_pid: u32, _signal: i32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn workspace_update_process_group_exists(pid: u32) -> bool {
+    let Ok(process_group) = i32::try_from(pid) else {
+        return false;
+    };
+    if process_group <= 0 {
+        return false;
+    }
+    if unsafe { libc::kill(-process_group, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn workspace_update_process_group_exists(_pid: u32) -> bool {
+    false
 }
 
 async fn read_workspace_update_stream<R>(

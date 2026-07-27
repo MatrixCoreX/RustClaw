@@ -129,10 +129,14 @@ fn current_runtime_llm_info(state: &AppState) -> Value {
     json!(null)
 }
 
-fn saved_llm_vendor_runtime_fields(
+fn saved_llm_vendor_runtime_fields_with_env<F>(
     parsed: &toml::Value,
     selected_vendor: &str,
-) -> (String, String, String) {
+    env_value: F,
+) -> (String, String, String)
+where
+    F: Fn(&str) -> Option<String>,
+{
     let section_key = format!("llm.{selected_vendor}");
     let vendor = parsed
         .get("llm")
@@ -144,12 +148,20 @@ fn saved_llm_vendor_runtime_fields(
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    let api_key = vendor
+    let mut api_key = vendor
         .and_then(|v| v.get("api_key"))
         .and_then(|v| v.as_str())
         .map(str::trim)
         .unwrap_or("")
         .to_string();
+    for env_name in claw_core::config::llm_vendor_api_key_env_names(selected_vendor) {
+        if let Some(value) = env_value(env_name)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            api_key = value;
+        }
+    }
     let provider_type = if llm_vendor_supports_api_format(selected_vendor) {
         normalize_llm_api_format(
             vendor
@@ -244,7 +256,9 @@ fn llm_restart_required(
         .strip_prefix("vendor-")
         .unwrap_or(provider.config.name.as_str());
     let (saved_base_url, saved_api_key, saved_provider_type) =
-        saved_llm_vendor_runtime_fields(parsed, selected_vendor.trim());
+        saved_llm_vendor_runtime_fields_with_env(parsed, selected_vendor.trim(), |name| {
+            std::env::var(name).ok()
+        });
     llm_runtime_differs(
         runtime_vendor,
         &provider.config.model,
