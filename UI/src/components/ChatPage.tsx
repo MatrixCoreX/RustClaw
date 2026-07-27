@@ -8,7 +8,6 @@ import {
 } from "react";
 import {
   Check,
-  Ellipsis,
   FileText,
   Loader2,
   MessageSquare,
@@ -152,7 +151,6 @@ export function ChatPage({
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   const [threadSearch, setThreadSearch] = useState("");
-  const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
@@ -188,7 +186,6 @@ export function ChatPage({
     chatThreads.find((thread) => thread.id === activeChatThreadId) ?? null;
 
   const beginRename = (thread: ChatThreadSummary) => {
-    setThreadMenuId(null);
     setRenamingThreadId(thread.id);
     setRenameDraft(thread.title);
   };
@@ -308,7 +305,6 @@ export function ChatPage({
                     <button
                       type="button"
                       onClick={() => {
-                        setThreadMenuId(null);
                         onSelectChatThread(thread.id);
                       }}
                       className="min-w-0 text-left"
@@ -342,43 +338,25 @@ export function ChatPage({
                     ) : null}
                   </div>
                     </button>
-                    <div className="relative">
+                    <div className="flex flex-col gap-1">
                       <button
                         type="button"
-                        onClick={() =>
-                          setThreadMenuId((current) =>
-                            current === thread.id ? null : thread.id,
-                          )
-                        }
+                        onClick={() => beginRename(thread)}
                         className="h-7 w-7 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/55 hover:bg-white/10 hover:text-white/80"
-                        title={t("任务操作", "Task actions")}
-                        aria-expanded={threadMenuId === thread.id}
+                        title={t("重命名任务", "Rename task")}
+                        aria-label={t(`重命名任务：${thread.title}`, `Rename task: ${thread.title}`)}
                       >
-                        <Ellipsis className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      {threadMenuId === thread.id ? (
-                        <div className="absolute right-0 top-8 z-20 min-w-28 rounded-lg border border-white/15 bg-neutral-900 p-1 shadow-xl">
-                          <button
-                            type="button"
-                            onClick={() => beginRename(thread)}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-white/80 hover:bg-white/10"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            {t("重命名", "Rename")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setThreadMenuId(null);
-                              void onDeleteChatThread(thread.id);
-                            }}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-red-200 hover:bg-red-500/15"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            {t("删除", "Delete")}
-                          </button>
-                        </div>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void onDeleteChatThread(thread.id)}
+                        className="h-7 w-7 rounded-lg border border-red-300/15 bg-red-500/5 p-1.5 text-red-200/70 hover:bg-red-500/15 hover:text-red-100"
+                        title={t("删除任务", "Delete task")}
+                        aria-label={t(`删除任务：${thread.title}`, `Delete task: ${thread.title}`)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </>
                 )}
