@@ -246,6 +246,61 @@ fn llm_runtime_differs_is_false_when_runtime_matches_saved_config() {
 }
 
 #[test]
+fn llm_runtime_differs_is_false_when_environment_key_matches_runtime() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+api_key = ""
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+"#,
+    )
+    .expect("parse");
+    let (base_url, api_key, provider_type) =
+        saved_llm_vendor_runtime_fields_with_env(&parsed, "minimax", |name| {
+            (name == "MINIMAX_API_KEY").then(|| "environment-key".to_string())
+        });
+
+    assert!(!llm_runtime_differs(
+        "minimax",
+        "MiniMax-M3",
+        "openai_compat",
+        "https://api.minimaxi.com/v1",
+        "environment-key",
+        "minimax",
+        "MiniMax-M3",
+        &provider_type,
+        &base_url,
+        &api_key,
+    ));
+}
+
+#[test]
+fn effective_saved_llm_key_uses_runtime_environment_precedence() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm.mimo]
+api_key = "config-key"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+"#,
+    )
+    .expect("parse");
+    let (_, api_key, _) =
+        saved_llm_vendor_runtime_fields_with_env(&parsed, "mimo", |name| match name {
+            "XIAOMI_API_KEY" => Some("xiaomi-key".to_string()),
+            "MIMO_API_KEY" => Some("mimo-key".to_string()),
+            _ => None,
+        });
+
+    assert_eq!(api_key, "mimo-key");
+}
+
+#[test]
 fn llm_runtime_differs_when_only_minimax_provider_type_changes() {
     assert!(llm_runtime_differs(
         "minimax",
@@ -1332,6 +1387,127 @@ fn workspace_update_start_preserves_release_lookup_state() {
     );
     assert_eq!(started.latest_release_check_status, "available");
     assert_eq!(started.latest_release_checked_ts, Some(1_234));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workspace_update_cancel_terminates_the_dedicated_process_group() {
+    let root = temp_workspace_root();
+    let child_pid_path = root.join("workspace-update-child.pid");
+    let command = format!(
+        "trap '' TERM; sleep 120 & echo $! > {}; wait",
+        child_pid_path.display()
+    );
+    let shared = Arc::new(Mutex::new(WorkspaceUpdateStatus::default()));
+    let control = Arc::new(Mutex::new(WorkspaceUpdateControl::default()));
+    let run_root = root.clone();
+    let run_shared = shared.clone();
+    let run_control = control.clone();
+    let job = tokio::spawn(async move {
+        run_workspace_update_command_streaming(
+            "bash",
+            &["-c", command.as_str()],
+            &run_root,
+            run_shared,
+            run_control,
+        )
+        .await
+    });
+
+    for _ in 0..100 {
+        if child_pid_path.is_file()
+            && workspace_update_control_lock(control.as_ref())
+                .active_child_pid
+                .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(child_pid_path.is_file(), "child process did not start");
+    let process_group_pid = workspace_update_control_lock(control.as_ref())
+        .active_child_pid
+        .expect("active process group");
+    workspace_update_control_lock(control.as_ref()).cancel_requested = true;
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(8), job)
+        .await
+        .expect("cancel timed out")
+        .expect("join workspace update task");
+    assert_eq!(result.unwrap_err(), WORKSPACE_UPDATE_CANCELED_ERROR);
+    assert_eq!(
+        workspace_update_status_lock(shared.as_ref()).status,
+        "canceled"
+    );
+
+    let process_group = i32::try_from(process_group_pid).expect("process group fits i32");
+    for _ in 0..100 {
+        if unsafe { libc::kill(-process_group, 0) } != 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_ne!(
+        unsafe { libc::kill(-process_group, 0) },
+        0,
+        "build process group survived cancellation"
+    );
+
+    std::fs::remove_dir_all(root).expect("remove temp workspace");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workspace_update_command_cleans_detached_processes_after_parent_exit() {
+    let root = temp_workspace_root();
+    let child_pid_path = root.join("workspace-update-detached-child.pid");
+    let command = format!(
+        "trap '' TERM; sleep 120 >/dev/null 2>&1 & echo $! > {}",
+        child_pid_path.display()
+    );
+    let shared = Arc::new(Mutex::new(WorkspaceUpdateStatus::default()));
+    let control = Arc::new(Mutex::new(WorkspaceUpdateControl::default()));
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        run_workspace_update_command_streaming(
+            "bash",
+            &["-c", command.as_str()],
+            &root,
+            shared,
+            control.clone(),
+        ),
+    )
+    .await
+    .expect("detached process cleanup timed out")
+    .expect("run workspace update command");
+    assert_eq!(result.exit_code, Some(0));
+    assert!(child_pid_path.is_file(), "detached child did not start");
+    assert!(
+        workspace_update_control_lock(control.as_ref())
+            .active_child_pid
+            .is_none(),
+        "active process group was not cleared"
+    );
+
+    let child_pid = std::fs::read_to_string(&child_pid_path)
+        .expect("read detached child pid")
+        .trim()
+        .parse::<i32>()
+        .expect("parse detached child pid");
+    for _ in 0..100 {
+        if unsafe { libc::kill(child_pid, 0) } != 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_ne!(
+        unsafe { libc::kill(child_pid, 0) },
+        0,
+        "detached build child survived command completion"
+    );
+
+    std::fs::remove_dir_all(root).expect("remove temp workspace");
 }
 
 #[test]
