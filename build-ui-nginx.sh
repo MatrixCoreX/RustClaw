@@ -37,6 +37,7 @@ DO_DEPLOY=""
 DEPLOY_IF_CONFIGURED=""
 ACTION_SPECIFIED=""
 NGINX_ROOT="$NGINX_ROOT_DEFAULT"
+NGINX_ROOT_EXPLICIT=""
 
 ui_deps_healthy() {
   local vite_pkg_bin="$UI_DIR/node_modules/vite/bin/vite.js"
@@ -585,6 +586,33 @@ nginx_ui_config_is_tls_managed() {
   grep -Eq '^[[:space:]]*(listen[[:space:]]+.*443|ssl_certificate(_key)?[[:space:]])' "$conf_path"
 }
 
+nginx_ui_site_is_configured() {
+  local conf_path="$1"
+  [[ -f "$conf_path" ]] || return 1
+  grep -Fq "RustClaw UI" "$conf_path" \
+    && grep -Fq "location ^~ /v1/" "$conf_path" \
+    && grep -Fq "location ^~ /webd/" "$conf_path"
+}
+
+nginx_ui_root_from_config() {
+  local conf_path="$1"
+  [[ -f "$conf_path" ]] || return 1
+  python3 - "$conf_path" <<'PY'
+from pathlib import Path
+import sys
+
+for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if line.startswith("#") or not line.startswith("root ") or not line.endswith(";"):
+        continue
+    root = line[len("root ") : -1].strip()
+    if root and "$" not in root:
+        print(root)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 ensure_deployed_ui_readable() {
   local ui_root="$1"
   if [[ -w "$ui_root" ]]; then
@@ -771,6 +799,7 @@ while [[ $# -gt 0 ]]; do
     --path)
       ACTION_SPECIFIED=1
       NGINX_ROOT="${2:?Missing argument for --path}"
+      NGINX_ROOT_EXPLICIT=1
       DO_DEPLOY=1
       shift 2
       ;;
@@ -792,8 +821,15 @@ if [[ -z "$ACTION_SPECIFIED" ]]; then
 fi
 
 if [[ -n "$DEPLOY_IF_CONFIGURED" ]]; then
-  if [[ -f "$NGINX_CONF" || ( -n "$NGINX_SITE_LINK" && -e "$NGINX_SITE_LINK" ) ]]; then
+  if nginx_available && nginx_ui_site_is_configured "$NGINX_CONF"; then
     DO_DEPLOY=1
+    if [[ -z "$NGINX_ROOT_EXPLICIT" ]]; then
+      EXISTING_NGINX_ROOT="$(nginx_ui_root_from_config "$NGINX_CONF" 2>/dev/null || true)"
+      if [[ -n "$EXISTING_NGINX_ROOT" ]]; then
+        NGINX_ROOT="$EXISTING_NGINX_ROOT"
+        echo "Using existing RustClaw nginx UI root: $NGINX_ROOT"
+      fi
+    fi
     if [[ -n "$DO_BUILD" ]]; then
       echo "Existing RustClaw nginx site detected; UI assets will be deployed after the build."
     else
@@ -801,9 +837,9 @@ if [[ -n "$DEPLOY_IF_CONFIGURED" ]]; then
     fi
   else
     if [[ -n "$DO_BUILD" ]]; then
-      echo "No existing RustClaw nginx site detected; keeping local build-only mode."
+      echo "No deployed RustClaw nginx site detected; keeping local build-only mode."
     else
-      echo "No existing RustClaw nginx site detected; skipping UI deployment."
+      echo "No deployed RustClaw nginx site detected; skipping UI deployment."
     fi
   fi
 fi

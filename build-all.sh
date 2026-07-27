@@ -339,9 +339,11 @@ for extra_target in "${EXTRA_TARGETS[@]}"; do
 	append_unique_target "$(resolve_requested_target "$extra_target")"
 done
 
+UI_BUILT=0
 if [[ -d "$SCRIPT_DIR/UI" ]] && [[ "$SKIP_UI" != "1" ]]; then
-	echo "Building UI assets for direct local serving..."
-	bash "$SCRIPT_DIR/build-ui-nginx.sh"
+	echo "Building UI assets; deployment is deferred until the full build succeeds..."
+	bash "$SCRIPT_DIR/build-ui-nginx.sh" --build
+	UI_BUILT=1
 elif [[ "$SKIP_UI" == "1" ]]; then
 	echo "Skipping UI build (SKIP_UI=1 or no-ui)."
 else
@@ -457,6 +459,15 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 		exit 1
 	fi
 done
+
+if [[ "$UI_BUILT" == "1" ]]; then
+	if [[ "$PRIMARY_TARGET" == "$HOST_TARGET" ]]; then
+		echo "Checking whether an existing RustClaw nginx site needs the latest UI..."
+		bash "$SCRIPT_DIR/build-ui-nginx.sh" --copy-if-configured
+	else
+		echo "Skipping nginx UI deployment for cross-target build: $PRIMARY_TARGET"
+	fi
+fi
 
 echo "Build completed."
 echo "Primary output: $(preferred_release_dir_for_target "$SCRIPT_DIR" "$PRIMARY_TARGET")"

@@ -75,7 +75,7 @@ export function formatWorkspaceUpdateStep(step: string | null | undefined, lang:
     resolving_conflicting_files: copy(lang, "只覆盖冲突文件", "Overwriting conflicts only"),
     skipping_pull_latest_code: copy(lang, "远端无新版本，继续编译", "No remote changes, building"),
     checking_new_version: copy(lang, "确认新版本", "Checking new version"),
-    building_workspace: copy(lang, "正在完整编译", "Running full build"),
+    building_workspace: copy(lang, "正在完整编译/部署", "Running full build/deploy"),
     building_ui: copy(lang, "正在编译 UI", "Building UI"),
     ui_build_succeeded: copy(lang, "UI 编译完成", "UI build completed"),
     enabling_nginx: copy(lang, "正在启用 nginx", "Enabling nginx"),
@@ -222,8 +222,8 @@ export function formatWorkspaceUpdateNextStep(
     ),
     "workspace_update.no_remote_changes_building": copy(
       lang,
-      "远端没有新版本；本地文件保持不动，将继续执行完整编译。",
-      "No newer remote version was found. Local files remain unchanged; the full build will continue.",
+      "远端没有新版本；本地文件保持不动，将继续执行完整编译/部署。",
+      "No newer remote version was found. Local files remain unchanged; the full build/deploy will continue.",
     ),
     "workspace_update.build_logs_refreshing": copy(lang, "正在编译，编译日志会持续刷新。", "Building. Build logs will keep refreshing."),
     "workspace_update.full_build_failed": copy(
@@ -492,8 +492,8 @@ function workspaceUpdateNotice(
       title: copy(lang, "编译已停止。", "Build stopped."),
       detail: nextStep ?? copy(
         lang,
-        "当前编译进程已结束；如果需要继续，请修复问题后重新点击完整编译。",
-        "The current build process has ended. Fix any issues and run Build All again when ready.",
+        "当前编译/部署进程已结束；如果需要继续，请修复问题后重新点击完整编译/部署。",
+        "The current build/deploy process has ended. Fix any issues and run Build and Deploy All again when ready.",
       ),
     };
   }
@@ -516,14 +516,14 @@ function workspaceUpdateNotice(
             ? "Release 模式已启用，RustClaw 正在重启。"
           : status.mode === "source_checkout"
             ? "源码模式已启用，RustClaw 正在重启。"
-            : "构建已完成，RustClaw 正在重启。",
+            : "编译/部署已完成，RustClaw 正在重启。",
         status.mode === "release_deploy"
           ? "Release package deployed and RustClaw is restarting."
           : status.mode === "release_package"
             ? "Release mode is enabled and RustClaw is restarting."
           : status.mode === "source_checkout"
             ? "Source mode is enabled and RustClaw is restarting."
-            : "Build completed and RustClaw is restarting.",
+            : "Build/deploy completed and RustClaw is restarting.",
       ),
       detail: nextStep ?? copy(
         lang,
@@ -600,8 +600,8 @@ function workspaceUpdateNotice(
       title: copy(lang, "远端已经是最新版本。", "The remote version is up to date."),
       detail: copy(
         lang,
-        "如需重新应用当前本地环境，仍可点击完整编译。",
-        "Use Build All if you need to re-apply the current local environment.",
+        "如需重新应用当前本地环境，仍可点击完整编译/部署。",
+        "Use Build and Deploy All if you need to re-apply the current local environment.",
       ),
     };
   }

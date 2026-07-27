@@ -99,7 +99,7 @@ test("builds running workspace update view", () => {
   assert.equal(view.progressActive, true);
   assert.equal(view.progressLabel, "Building; duration depends on device performance.");
   assert.equal(view.notice?.tone, "info");
-  assert.equal(view.notice?.title, "Running full build");
+  assert.equal(view.notice?.title, "Running full build/deploy");
 });
 
 test("shows active stage progress only while a UI-only build is running", () => {

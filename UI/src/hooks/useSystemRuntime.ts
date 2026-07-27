@@ -147,8 +147,8 @@ export function useSystemRuntime({
     const modeConfig: Record<WorkspaceUpdateMode, { confirm: string; endpoint: string; started: string }> = {
       full: {
         confirm: t(
-          "系统会先检查本地改动：如果只有 configs 目录存在冲突，会临时保存配置、拉取后再恢复；如果源码有本地改动，会停止更新且不会覆盖文件。检查通过后才会拉取、完整编译并重启 clawd。确认现在开始吗？",
-          "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls, builds everything, and restarts clawd. Start now?",
+          "系统会先检查本地改动：如果只有 configs 目录存在冲突，会临时保存配置、拉取后再恢复；如果源码有本地改动，会停止更新且不会覆盖文件。检查通过后会拉取并完整编译；如果已配置 nginx，还会部署最新 UI，随后重启 RustClaw。确认现在开始吗？",
+          "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls and builds everything, deploys the latest UI when nginx is already configured, and restarts RustClaw. Start now?",
         ),
         endpoint: "/v1/admin/workspace-update",
         started: t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."),
