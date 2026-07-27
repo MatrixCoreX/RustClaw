@@ -302,6 +302,7 @@ export interface WorkspaceUpdateStatus {
   new_commit?: string | null;
   remote_commit?: string | null;
   current_version?: string | null;
+  current_release_version?: string | null;
   latest_release_tag?: string | null;
   latest_release_check_status?: "unchecked" | "available" | "stale" | "unavailable" | string;
   latest_release_check_error?: string | null;

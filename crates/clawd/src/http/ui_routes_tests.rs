@@ -120,6 +120,50 @@ fn workspace_update_api_error_uses_machine_token() {
 }
 
 #[test]
+fn workspace_release_version_prefers_release_tag_and_falls_back_to_version() {
+    let root = temp_workspace_root();
+    std::fs::write(root.join("VERSION"), "0.1.8\n").expect("write version");
+    assert_eq!(workspace_release_version(&root).as_deref(), Some("0.1.8"));
+
+    std::fs::write(root.join(".release-tag"), "ubuntu-x86_64-20260727-1\n")
+        .expect("write release tag");
+    assert_eq!(
+        workspace_release_version(&root).as_deref(),
+        Some("ubuntu-x86_64-20260727-1")
+    );
+    std::fs::remove_dir_all(root).expect("remove release version fixture");
+}
+
+#[tokio::test]
+async fn workspace_update_refresh_reports_release_version_without_git_fields() {
+    let root = temp_workspace_root();
+    std::fs::write(root.join("VERSION"), "0.1.8\n").expect("write version");
+    std::fs::write(root.join(".release-tag"), "ubuntu-x86_64-20260727-1\n")
+        .expect("write release tag");
+    let shared = Arc::new(Mutex::new(WorkspaceUpdateStatus {
+        old_commit: Some("stale-local".to_string()),
+        new_commit: Some("stale-new".to_string()),
+        remote_commit: Some("stale-remote".to_string()),
+        latest_release_tag: Some("ubuntu-x86_64-20260727-2".to_string()),
+        latest_release_check_status: "available".to_string(),
+        latest_release_checked_ts: Some(current_unix_ts()),
+        ..WorkspaceUpdateStatus::default()
+    }));
+
+    let status = refresh_workspace_update_versions(&root, shared, false).await;
+
+    assert_eq!(status.installation_kind, "release_package");
+    assert_eq!(
+        status.current_release_version.as_deref(),
+        Some("ubuntu-x86_64-20260727-1")
+    );
+    assert_eq!(status.old_commit, None);
+    assert_eq!(status.new_commit, None);
+    assert_eq!(status.remote_commit, None);
+    std::fs::remove_dir_all(root).expect("remove release status fixture");
+}
+
+#[test]
 fn update_feishu_config_raw_preserves_template_comments_and_updates_only_keys() {
     let output = update_feishu_config_raw_preserving_format(
         FEISHU_CONFIG_TEMPLATE,
@@ -260,6 +304,43 @@ models = ["MiniMax-M2.7"]
         minimax.get("api_format").and_then(|v| v.as_str()),
         Some("openai_compat")
     );
+}
+
+#[test]
+fn collect_llm_vendor_info_reports_environment_credentials_without_exposing_them() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+api_key = ""
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+"#,
+    )
+    .expect("parse");
+
+    let vendors = collect_llm_vendor_info_with_env(&parsed, |name| {
+        (name == "MINIMAX_API_KEY").then(|| "environment-secret".to_string())
+    });
+    let minimax = vendors
+        .iter()
+        .find(|vendor| vendor.get("name").and_then(|value| value.as_str()) == Some("minimax"))
+        .expect("minimax vendor");
+
+    assert_eq!(
+        minimax
+            .get("api_key_configured")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        minimax.get("api_key").and_then(|value| value.as_str()),
+        Some("")
+    );
+    assert!(!minimax.to_string().contains("environment-secret"));
 }
 
 #[test]

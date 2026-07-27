@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { WorkspaceUpdateStatus } from "../types/api";
 import {
+  buildWorkspaceVersionDisplay,
   buildWorkspaceUpdateView,
   formatWorkspaceUpdateApiError,
   formatWorkspaceUpdateNextStep,
@@ -21,6 +22,44 @@ function status(overrides: Partial<WorkspaceUpdateStatus>): WorkspaceUpdateStatu
     ...overrides,
   };
 }
+
+test("shows only Git revisions for source checkouts", () => {
+  assert.deepEqual(
+    buildWorkspaceVersionDisplay(
+      status({
+        installation_kind: "source_checkout",
+        old_commit: "203884fb",
+        new_commit: "203884fb",
+        remote_commit: "203884fb",
+        current_version: "0.1.8",
+        current_release_version: "release-old",
+        latest_release_tag: "release-new",
+      }),
+    ),
+    { kind: "git", current: "203884fb", latest: "203884fb" },
+  );
+});
+
+test("shows only Release versions for release packages", () => {
+  assert.deepEqual(
+    buildWorkspaceVersionDisplay(
+      status({
+        installation_kind: "release_package",
+        old_commit: "git-old",
+        new_commit: "git-new",
+        remote_commit: "git-remote",
+        current_version: "0.1.8",
+        current_release_version: "ubuntu-x86_64-20260727-1",
+        latest_release_tag: "ubuntu-x86_64-20260727-2",
+      }),
+    ),
+    {
+      kind: "release",
+      current: "ubuntu-x86_64-20260727-1",
+      latest: "ubuntu-x86_64-20260727-2",
+    },
+  );
+});
 
 test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStep("building_ui", "en"), "Building UI");

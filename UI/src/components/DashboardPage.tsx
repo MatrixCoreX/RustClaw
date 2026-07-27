@@ -19,7 +19,10 @@ import {
   type DashboardOverviewItem,
   type DashboardStepStatus,
 } from "../lib/dashboard-home";
-import type { WorkspaceUpdateNotice } from "../lib/workspace-update";
+import {
+  buildWorkspaceVersionDisplay,
+  type WorkspaceUpdateNotice,
+} from "../lib/workspace-update";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import type {
   ConsolePage,
@@ -140,6 +143,7 @@ export function DashboardPage({
     (latestReleaseStatus === "unavailable"
       ? t("暂时无法获取", "Temporarily unavailable")
       : t("正在检查...", "Checking..."));
+  const workspaceVersionDisplay = buildWorkspaceVersionDisplay(workspaceUpdateStatus);
   const requiredSetupComplete = areRequiredDashboardStepsComplete(onboardingSteps);
   const [completedSetupExpanded, setCompletedSetupExpanded] = useState(false);
   const showOnboarding = !requiredSetupComplete || completedSetupExpanded;
@@ -309,9 +313,15 @@ export function DashboardPage({
                   </p>
                   <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                     <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                      <p className="text-white/45">{t("当前版本", "Current version")}</p>
+                      <p className="text-white/45">
+                        {workspaceVersionDisplay.kind === "git"
+                          ? t("本地 Git", "Local Git")
+                          : workspaceVersionDisplay.kind === "release"
+                            ? t("当前 Release", "Current Release")
+                            : t("当前版本", "Current version")}
+                      </p>
                       <p className="mt-1 font-mono text-white/85">
-                        {workspaceUpdateStatus?.current_version || "--"}
+                        {workspaceVersionDisplay.current}
                       </p>
                     </div>
                     <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
@@ -587,16 +597,23 @@ export function DashboardPage({
             </p>
           </div>
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-            <p className="text-[11px] tracking-[0.14em] text-white/45">{t("本地版本", "Local version")}</p>
+            <p className="text-[11px] tracking-[0.14em] text-white/45">
+              {workspaceVersionDisplay.kind === "git"
+                ? t("本地 Git", "Local Git")
+                : workspaceVersionDisplay.kind === "release"
+                  ? t("当前 Release", "Current Release")
+                  : t("本地版本", "Local version")}
+            </p>
             <p className="mt-2 text-sm font-semibold text-white/90">
-              {workspaceUpdateStatus?.old_commit || workspaceUpdateStatus?.current_version || "--"}
-              {workspaceUpdateStatus?.new_commit && workspaceUpdateStatus.new_commit !== workspaceUpdateStatus.old_commit
-                ? ` -> ${workspaceUpdateStatus.new_commit}`
-                : ""}
+              {workspaceVersionDisplay.current}
             </p>
             <p className="mt-1 text-xs text-white/50">
-              {t("远端最新", "Remote latest")}:{" "}
-              {workspaceUpdateStatus?.remote_commit || workspaceUpdateStatus?.latest_release_tag || "--"}
+              {workspaceVersionDisplay.kind === "git"
+                ? t("远端 Git", "Remote Git")
+                : workspaceVersionDisplay.kind === "release"
+                  ? t("最新 Release", "Latest Release")
+                  : t("最新版本", "Latest version")}
+              : {workspaceVersionDisplay.latest}
             </p>
           </div>
           <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
