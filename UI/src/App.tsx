@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
@@ -165,7 +165,10 @@ export default function App() {
   });
   const logContainerRef = useRef<HTMLPreElement | null>(null);
 
-  const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const t = useCallback(
+    (zh: string, en: string) => (lang === "zh" ? zh : en),
+    [lang],
+  );
   const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
   const tSlash = (mixed: string) => {
     const [zh, en] = mixed.split(" / ");

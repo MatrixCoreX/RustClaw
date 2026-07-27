@@ -1,4 +1,4 @@
-import { Database, Loader2, RefreshCw, Server } from "lucide-react";
+import { Database, Loader2, RefreshCw, Server, Square } from "lucide-react";
 
 import type {
   ServiceActionNotice,
@@ -11,12 +11,68 @@ import {
   type FeishuBindStatusCopy,
   type FeishuSetupGuidance,
 } from "../lib/feishu-bind";
+import {
+  serviceControlActions,
+  type CommunicationServiceAction,
+} from "../lib/communication-service-controls";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
 type SetupStepStatus = "done" | "attention" | "todo";
 type ServiceName = "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd";
-type ServiceAction = "start" | "stop" | "restart";
+type ServiceAction = CommunicationServiceAction;
+
+interface ChannelServiceControlsProps {
+  t: Translate;
+  serviceName: ServiceName;
+  serviceLabelZh: string;
+  serviceLabelEn: string;
+  healthy: boolean;
+  loading: boolean;
+  disabled: boolean;
+  className?: string;
+  onControlService: CommunicationSetupPageProps["onControlService"];
+}
+
+function ChannelServiceControls({
+  t,
+  serviceName,
+  serviceLabelZh,
+  serviceLabelEn,
+  healthy,
+  loading,
+  disabled,
+  className = "",
+  onControlService,
+}: ChannelServiceControlsProps) {
+  const actionLabel = (action: ServiceAction) => {
+    if (action === "start") {
+      return t(`启动${serviceLabelZh}服务`, `Start ${serviceLabelEn} service`);
+    }
+    if (action === "restart") {
+      return t(`重启${serviceLabelZh}服务`, `Restart ${serviceLabelEn} service`);
+    }
+    return t(`关闭${serviceLabelZh}服务`, `Stop ${serviceLabelEn} service`);
+  };
+
+  return serviceControlActions(healthy).map((action) => {
+    const ActionIcon = action === "stop" ? Square : action === "restart" ? RefreshCw : Server;
+    return (
+      <button
+        key={action}
+        type="button"
+        onClick={() => void onControlService(serviceName, action)}
+        disabled={loading || disabled}
+        className={`theme-secondary-btn px-3 py-2 text-sm ${className}`}
+      >
+        {loading
+          ? <Loader2 className="h-4 w-4 animate-spin" />
+          : <ActionIcon className={`h-4 w-4 ${action === "stop" ? "fill-current" : ""}`} />}
+        {actionLabel(action)}
+      </button>
+    );
+  });
+}
 
 export interface CommunicationSetupPageProps {
   lang: UiLanguage;
@@ -222,15 +278,17 @@ export function CommunicationSetupPage({
                 ) : null}
 
                 <div className="mt-auto flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onControlService("wechatd", wechatServiceHealthy ? "restart" : "start")}
-                    disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigEnabled}
-                    className="theme-secondary-btn px-4 py-2.5 text-sm"
-                  >
-                    {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    {wechatServiceHealthy ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
-                  </button>
+                  <ChannelServiceControls
+                    t={t}
+                    serviceName="wechatd"
+                    serviceLabelZh="微信"
+                    serviceLabelEn="WeChat"
+                    healthy={wechatServiceHealthy}
+                    loading={Boolean(serviceActionLoading.wechatd)}
+                    disabled={!wechatConfigEnabled}
+                    className="!px-4 !py-2.5"
+                    onControlService={onControlService}
+                  />
                   <button
                     type="button"
                     onClick={() => void onStartWechatQrLogin(true)}
@@ -309,15 +367,17 @@ export function CommunicationSetupPage({
                 {telegramConfigSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
                 {t("保存 Telegram", "Save Telegram")}
               </button>
-              <button
-                type="button"
-                onClick={() => void onControlService("telegramd", telegramServiceHealthy ? "restart" : "start")}
-                disabled={Boolean(serviceActionLoading.telegramd) || !telegramBotTokenConfigured}
-                className="theme-secondary-btn theme-key-create-btn px-3 py-2 text-sm"
-              >
-                {serviceActionLoading.telegramd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
-                {telegramServiceHealthy ? t("重启 Telegram 服务", "Restart the Telegram service") : t("启动 Telegram 服务", "Start the Telegram service")}
-              </button>
+              <ChannelServiceControls
+                t={t}
+                serviceName="telegramd"
+                serviceLabelZh=" Telegram "
+                serviceLabelEn="Telegram"
+                healthy={telegramServiceHealthy}
+                loading={Boolean(serviceActionLoading.telegramd)}
+                disabled={!telegramBotTokenConfigured}
+                className="theme-key-create-btn"
+                onControlService={onControlService}
+              />
             </div>
           </div>
 
@@ -405,17 +465,16 @@ export function CommunicationSetupPage({
                 {feishuBindSession ? t("重新生成二维码", "Refresh QR") : t("开始飞书接入", "Start Feishu setup")}
               </button>
               {feishuSetupGuidance.canStartService || feishuServiceHealthy ? (
-                <button
-                  type="button"
-                  onClick={() => void onControlService("feishud", feishuServiceHealthy ? "restart" : "start")}
-                  disabled={Boolean(serviceActionLoading.feishud) || !canControlFeishuService}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                >
-                  {serviceActionLoading.feishud ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
-                  {feishuServiceHealthy
-                    ? t("重启飞书服务", "Restart Feishu service")
-                    : t("启动飞书服务", "Start Feishu service")}
-                </button>
+                <ChannelServiceControls
+                  t={t}
+                  serviceName="feishud"
+                  serviceLabelZh="飞书"
+                  serviceLabelEn="Feishu"
+                  healthy={feishuServiceHealthy}
+                  loading={Boolean(serviceActionLoading.feishud)}
+                  disabled={!canControlFeishuService}
+                  onControlService={onControlService}
+                />
               ) : null}
               <button
                 type="button"

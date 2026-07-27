@@ -90,7 +90,7 @@ function architectureDocuments(lang: UiLanguage): ArchitectureDocument[] {
 const ARCHITECTURE_DOCUMENTS = {
   en: architectureDocuments("en"),
   zh: architectureDocuments("zh"),
-} satisfies Record<UiLanguage, string[]>;
+} satisfies Record<UiLanguage, ArchitectureDocument[]>;
 
 const LEARNING_STAGE_ORDER = [
   "foundations",
@@ -670,7 +670,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         return (
           <span
             className="learning-reference"
-            title={t("仓库内参考资料", "Repository reference")}
+            title={lang === "zh" ? "仓库内参考资料" : "Repository reference"}
           >
             {children}
           </span>
@@ -680,7 +680,9 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
       h3: ({ children }) => <h3 id={learningHeadingId(reactNodeText(children))}>{children}</h3>,
       h4: ({ children }) => <h4 id={learningHeadingId(reactNodeText(children))}>{children}</h4>,
     }),
-    [lang, t],
+    // Keep component identities stable across App health polling so an open
+    // diagram portal is not unmounted and recreated.
+    [lang],
   );
 
   if (!page || stages.length === 0 || routePages.length === 0) return null;

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, PanelLeftClose, PanelLeftOpen, ShieldAlert } from "lucide-react";
 
@@ -9,6 +9,17 @@ type AuthMode = "key" | "webd" | null;
 type Translate = (zh: string, en: string) => string;
 
 const NAV_COLLAPSED_STORAGE_KEY = "rustclaw.monitor.navCollapsed";
+const CONTENT_ACTION_SELECTOR =
+  "button, a[href], input, select, textarea, [role='button'], [role='link']";
+
+export function shouldCollapseNavigationForTarget(target: EventTarget | null): boolean {
+  const candidate = target as HTMLElement | null;
+  if (typeof candidate?.closest !== "function") return false;
+  const interactive = candidate.closest<HTMLElement>(CONTENT_ACTION_SELECTOR);
+  if (!interactive || interactive.closest("[data-keep-navigation-open='true']")) return false;
+  return !interactive.matches(":disabled")
+    && interactive.getAttribute("aria-disabled") !== "true";
+}
 
 export interface ConsoleNavItem {
   id: ConsolePage;
@@ -72,6 +83,12 @@ export function ConsoleLayout({
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [navDropdownOpen]);
+
+  const collapseNavigationForContentAction = (event: ReactMouseEvent<HTMLElement>) => {
+    if (sidebarCollapsed || !window.matchMedia("(min-width: 1024px)").matches) return;
+    if (!shouldCollapseNavigationForTarget(event.target)) return;
+    setSidebarCollapsed(true);
+  };
 
   return (
     <div className="theme-shell min-h-screen">
@@ -264,7 +281,12 @@ export function ConsoleLayout({
           </div>
         </aside>
 
-        <main className="mx-auto min-w-0 max-w-7xl space-y-4">{children}</main>
+        <main
+          className="mx-auto min-w-0 max-w-7xl space-y-4"
+          onClickCapture={collapseNavigationForContentAction}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );
