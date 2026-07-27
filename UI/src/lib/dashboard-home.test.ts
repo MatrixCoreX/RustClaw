@@ -28,7 +28,7 @@ test("considers only required onboarding steps when deciding whether setup is co
   assert.equal(areRequiredDashboardStepsComplete([{ required: false, status: "done" }]), false);
 });
 
-test("allows the first-run panel to collapse after model setup", () => {
+test("collapses after model setup while message and communication stay optional", () => {
   assert.equal(
     areRequiredDashboardStepsComplete([
       { required: true, status: "done" },
@@ -36,6 +36,14 @@ test("allows the first-run panel to collapse after model setup", () => {
       { required: false, status: "todo" },
     ]),
     true,
+  );
+  assert.equal(
+    areRequiredDashboardStepsComplete([
+      { required: true, status: "attention" },
+      { required: false, status: "done" },
+      { required: false, status: "done" },
+    ]),
+    false,
   );
 });
 

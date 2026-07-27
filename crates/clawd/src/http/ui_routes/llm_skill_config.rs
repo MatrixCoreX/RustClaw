@@ -20,6 +20,13 @@ fn llm_vendor_supports_api_format(vendor_name: &str) -> bool {
 }
 
 fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
+    collect_llm_vendor_info_with_env(value, |name| std::env::var(name).ok())
+}
+
+fn collect_llm_vendor_info_with_env<F>(value: &toml::Value, env_value: F) -> Vec<Value>
+where
+    F: Fn(&str) -> Option<String>,
+{
     let mut vendors = Vec::new();
     let Some(llm) = value.get("llm").and_then(|v| v.as_table()) else {
         return vendors;
@@ -40,11 +47,15 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             .unwrap_or("")
             .trim()
             .to_string();
-        let api_key_configured = vendor
+        let config_api_key_configured = vendor
             .get("api_key")
             .and_then(|v| v.as_str())
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
+        let env_api_key_configured = claw_core::config::llm_vendor_api_key_env_names(vendor_name)
+            .iter()
+            .any(|name| env_value(name).is_some_and(|value| !value.trim().is_empty()));
+        let api_key_configured = config_api_key_configured || env_api_key_configured;
         let api_key_masked = vendor
             .get("api_key")
             .and_then(|v| v.as_str())

@@ -251,17 +251,22 @@ fn apply_llm_vendor_api_key_env(target: &mut Option<LlmVendorConfig>, key: &str)
     }
 }
 
+fn apply_llm_vendor_api_key_envs(target: &mut Option<LlmVendorConfig>, vendor: &str) {
+    for key in super::llm_vendor_api_key_env_names(vendor) {
+        apply_llm_vendor_api_key_env(target, key);
+    }
+}
+
 fn apply_env_overrides(app: &mut AppConfig) {
-    apply_llm_vendor_api_key_env(&mut app.llm.openai, "OPENAI_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.google, "GOOGLE_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.anthropic, "ANTHROPIC_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.grok, "GROK_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.deepseek, "DEEPSEEK_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.qwen, "QWEN_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.minimax, "MINIMAX_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.mimo, "XIAOMI_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.mimo, "MIMO_API_KEY");
-    apply_llm_vendor_api_key_env(&mut app.llm.custom, "CUSTOM_API_KEY");
+    apply_llm_vendor_api_key_envs(&mut app.llm.openai, "openai");
+    apply_llm_vendor_api_key_envs(&mut app.llm.google, "google");
+    apply_llm_vendor_api_key_envs(&mut app.llm.anthropic, "anthropic");
+    apply_llm_vendor_api_key_envs(&mut app.llm.grok, "grok");
+    apply_llm_vendor_api_key_envs(&mut app.llm.deepseek, "deepseek");
+    apply_llm_vendor_api_key_envs(&mut app.llm.qwen, "qwen");
+    apply_llm_vendor_api_key_envs(&mut app.llm.minimax, "minimax");
+    apply_llm_vendor_api_key_envs(&mut app.llm.mimo, "mimo");
+    apply_llm_vendor_api_key_envs(&mut app.llm.custom, "custom");
 
     apply_string_env(&mut app.telegram.bot_token, "TELEGRAM_BOT_TOKEN");
     apply_string_env(&mut app.telegram_bot.bot_token, "TELEGRAM_BOT_TOKEN");

@@ -1,4 +1,7 @@
-use super::{base_skill_names, core_skills_always_enabled, AppConfig, ToolsConfig};
+use super::{
+    base_skill_names, core_skills_always_enabled, llm_vendor_api_key_env_names, AppConfig,
+    ToolsConfig,
+};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
@@ -12,6 +15,19 @@ fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
             .as_nanos()
     ));
     dir
+}
+
+#[test]
+fn llm_vendor_api_key_env_names_are_shared_by_runtime_and_ui_status() {
+    assert_eq!(
+        llm_vendor_api_key_env_names("minimax"),
+        &["MINIMAX_API_KEY"]
+    );
+    assert_eq!(
+        llm_vendor_api_key_env_names("MIMO"),
+        &["XIAOMI_API_KEY", "MIMO_API_KEY"]
+    );
+    assert!(llm_vendor_api_key_env_names("unknown").is_empty());
 }
 
 #[test]

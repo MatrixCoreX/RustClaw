@@ -22,8 +22,46 @@ export interface WorkspaceUpdateView {
   notice: WorkspaceUpdateNotice | null;
 }
 
+export interface WorkspaceVersionDisplay {
+  kind: "git" | "release" | "standalone";
+  current: string;
+  latest: string;
+}
+
 function copy(lang: UiLanguage, zh: string, en: string): string {
   return lang === "zh" ? zh : en;
+}
+
+export function buildWorkspaceVersionDisplay(
+  status: WorkspaceUpdateStatus | null | undefined,
+): WorkspaceVersionDisplay {
+  if (status?.installation_kind === "source_checkout") {
+    const previous = status.old_commit?.trim();
+    const updated = status.new_commit?.trim();
+    return {
+      kind: "git",
+      current:
+        previous && updated && previous !== updated
+          ? `${previous} -> ${updated}`
+          : updated || previous || "--",
+      latest: status.remote_commit?.trim() || "--",
+    };
+  }
+  if (status?.installation_kind === "release_package") {
+    return {
+      kind: "release",
+      current:
+        status.current_release_version?.trim() ||
+        status.current_version?.trim() ||
+        "--",
+      latest: status.latest_release_tag?.trim() || "--",
+    };
+  }
+  return {
+    kind: "standalone",
+    current: status?.current_version?.trim() || "--",
+    latest: "--",
+  };
 }
 
 export function formatWorkspaceUpdateStep(step: string | null | undefined, lang: UiLanguage): string {

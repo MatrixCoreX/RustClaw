@@ -47,6 +47,21 @@ fn workspace_installation_kind(workspace_root: &Path) -> &'static str {
     }
 }
 
+fn workspace_release_version(workspace_root: &Path) -> Option<String> {
+    [".release-tag", "VERSION"].into_iter().find_map(|name| {
+        std::fs::read_to_string(workspace_root.join(name))
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .next()
+                    .map(str::trim)
+                    .filter(|version| !version.is_empty())
+                    .map(ToOwned::to_owned)
+            })
+    })
+}
+
 fn workspace_update_status_lock(
     shared: &Mutex<WorkspaceUpdateStatus>,
 ) -> std::sync::MutexGuard<'_, WorkspaceUpdateStatus> {
@@ -146,6 +161,11 @@ async fn refresh_workspace_update_versions(
     let release_check_due = latest_release_check_due(&snapshot, force_release_refresh, now);
     let source_update_available = workspace_source_update_available(workspace_root);
     let installation_kind = workspace_installation_kind(workspace_root);
+    let current_release_version = if installation_kind == "release_package" {
+        workspace_release_version(workspace_root)
+    } else {
+        None
+    };
 
     let (git_versions, latest_release_result) = tokio::join!(
         async {
@@ -191,6 +211,7 @@ async fn refresh_workspace_update_versions(
     let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.installation_kind = installation_kind.to_string();
     guard.source_update_available = source_update_available;
+    guard.current_release_version = current_release_version;
     if !source_update_available {
         guard.old_commit = None;
         guard.new_commit = None;
@@ -559,6 +580,7 @@ fn begin_workspace_update_status(
         installation_kind: previous.installation_kind.clone(),
         source_update_available: previous.source_update_available,
         started_ts: Some(current_unix_ts()),
+        current_release_version: previous.current_release_version.clone(),
         latest_release_tag: previous.latest_release_tag.clone(),
         latest_release_check_status: previous.latest_release_check_status.clone(),
         latest_release_check_error: previous.latest_release_check_error.clone(),
