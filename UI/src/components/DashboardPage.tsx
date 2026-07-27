@@ -427,12 +427,12 @@ export function DashboardPage({
                   </span>
                   <div>
                     <h4 className="text-sm font-semibold text-white">
-                      {t("拉取源码并编译", "Pull Source and Compile")}
+                      {t("拉取源码并编译/部署", "Pull, Build, and Deploy Source")}
                     </h4>
                     <p className="mt-2 text-sm leading-6 text-white/65">
                       {t(
-                        "用于开发或排障，可完整拉取并编译，也可只编译 UI 或 clawd。",
-                        "For development or troubleshooting. Pull and build everything, or build only the UI or clawd.",
+                        "用于开发或排障。完整流程会拉取并编译全部内容；如果已配置 nginx，还会自动替换为最新 UI。也可以只编译 UI 或 clawd。",
+                        "For development or troubleshooting. The full flow pulls and builds everything, then replaces the nginx-hosted UI when nginx is already configured. You can also build only the UI or clawd.",
                       )}
                     </p>
                   </div>
@@ -455,8 +455,8 @@ export function DashboardPage({
                   >
                     <RefreshCw className="h-4 w-4" />
                     {workspaceUpdateHasRemoteDiff
-                      ? t("拉取并编译", "Pull and Build")
-                      : t("完整编译", "Build All")}
+                      ? t("拉取、编译并部署", "Pull, Build, and Deploy")
+                      : t("完整编译/部署", "Build and Deploy All")}
                   </button>
                   <button
                     type="button"
