@@ -22,6 +22,26 @@ Current repository highlights:
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
   Seatbelt process isolation selected through a machine-configured backend
 
+### Five ideas to know first
+
+- **Agent**: reads the current request and decides whether to answer, ask a question, or use a capability.
+- **Task**: the persisted unit of work. A `task_id` lets the UI return to its status and result later.
+- **Capability**: a stable description of what can be done, such as reading a file or searching the web.
+- **Tool or skill**: the executable implementation selected for a capability after permission and argument checks.
+- **Checkpoint or artifact**: saved progress or output that allows long work to continue without starting over.
+
+### From one request to a result
+
+For example, “summarize this document” becomes a task. The agent inspects the attached file, selects a document capability, runs the verified tool or skill, checks the observation, and then writes the answer. Runtime policy controls identity, permissions, budgets, and side effects; it does not guess intent from hardcoded language phrases.
+
+### Complete a first task
+
+1. Configure and save one text model on the Models page.
+2. Open Agent, create a task, and send a small request such as “summarize the main points in three bullets.”
+3. Keep the same task open for follow-up instructions. Check task details only when progress, permission, or recovery needs attention.
+
+Messaging channels are optional. Configure them only when the browser workflow is already working and you need access from another app.
+
 <!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop Architecture
 
@@ -500,8 +520,8 @@ The main API is provided by `clawd`. Deployment is split by environment:
 - cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`
 - `webd` provides password-login/session bridging when enabled; direct local UI can use a RustClaw key
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
-- The `AI Learning` navigation page reads this bundled README, organizes top-level topics into pages, and renders Mermaid flows with zoom and full-screen controls; switching the UI language selects the matching README.
-- The Agent page keeps server-backed conversation history. Each task has a custom name available from its action menu, and the saved name remains available after refresh or restart.
+- The `AI Learning` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
+- The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
 
 In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
@@ -548,6 +568,8 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 <!-- ai-learning-stage: development-release -->
 ## NL Regression Shortcuts
 
+### Choose the smallest useful scope
+
 Use the smallest affected NL set while code is still moving, then widen coverage only at phase or release gates:
 
 1. Static compact coverage: `python3 scripts/nl_tests/check_compact_coverage.py --report` verifies that the compact source-controlled case files cover basic skills, route/lifecycle classes, and media dry-run cases without calling a provider.
@@ -566,6 +588,8 @@ the run. Reusing a development server is opt-in with `--reuse-server`. Use
 
 Current `configs/agent_guard.toml` keeps verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. When a runtime boundary changes, run the boundary guards and update replay and README flow descriptions together.
 
+### Understand the release evidence
+
 The agent parity gate writes portable release evidence rather than trusting a
 single successful command. `agent_loop_static_contracts.txt` contains the
 self-tested planner-authority, NL hard-match, hardcoded-language, and front
@@ -575,6 +599,7 @@ must produce `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`, proving that the
 ask front door only prepares the turn boundary and does not decide whether an
 ordinary request should answer, clarify, or execute.
 
+<!-- ai-learning-exclude:start -->
 The same gate writes `planner_runtime_boundary_contracts.txt` and requires
 `PLANNER_RUNTIME_BOUNDARY_CHECK findings=0`,
 `CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
@@ -670,6 +695,9 @@ Focused long-tail closed-loop entries:
 - `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `RUSTCLAW_CLI_SMOKE_KEY` / `RUSTCLAW_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable. New CLI-only logic is also covered by `cargo test -p clawcli`.
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
+<!-- ai-learning-exclude:end -->
+
+### Validate UI delivery
 
 UI notes:
 

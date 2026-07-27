@@ -1,5 +1,8 @@
 # Agent Loop and Planning
 
+<!-- ai-learning-stage: agent-runtime -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 [Architecture index](README.md) | Next: [Security and execution](02-security-execution.md)
 

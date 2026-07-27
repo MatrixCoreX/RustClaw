@@ -25,8 +25,10 @@ import {
   Minimize2,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
   Workflow,
+  X,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
@@ -37,11 +39,18 @@ import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
 import {
   classifyLearningLink,
+  learningHeadingId,
   orderLearningPagesByStage,
   parseReadmeLearningPages,
-  parseStandaloneLearningDocument,
+  parseStandaloneLearningPages,
+  searchLearningPages,
   type AiLearningPage as LearningPage,
+  type LearningAudience,
 } from "../lib/ai-learning";
+import {
+  loadLearningProgress,
+  saveLearningProgress,
+} from "../lib/ai-learning-progress";
 import {
   fitDiagramScale,
   readDiagramSize,
@@ -63,11 +72,19 @@ const ARCHITECTURE_DOCUMENT_MODULES = import.meta.glob(
   { eager: true, import: "default", query: "?raw" },
 ) as Record<string, string>;
 
-function architectureDocuments(lang: UiLanguage): string[] {
+interface ArchitectureDocument {
+  id: string;
+  markdown: string;
+}
+
+function architectureDocuments(lang: UiLanguage): ArchitectureDocument[] {
   return Object.entries(ARCHITECTURE_DOCUMENT_MODULES)
     .filter(([file]) => file.endsWith(".zh-CN.md") === (lang === "zh"))
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([, markdown]) => markdown);
+    .map(([file, markdown]) => ({
+      id: file.split("/").pop()?.replace(/\.zh-CN\.md$|\.md$/g, "") ?? file,
+      markdown,
+    }));
 }
 
 const ARCHITECTURE_DOCUMENTS = {
@@ -82,17 +99,6 @@ const LEARNING_STAGE_ORDER = [
   "safety-operations",
   "capabilities-artifacts",
   "development-release",
-] as const;
-
-const ARCHITECTURE_STAGE_IDS = [
-  "agent-runtime",
-  "safety-operations",
-  "context-memory",
-  "development-release",
-  "capabilities-artifacts",
-  "development-release",
-  "capabilities-artifacts",
-  "capabilities-artifacts",
 ] as const;
 
 interface LearningStageDefinition {
@@ -117,6 +123,36 @@ interface LearningChapter {
 interface LearningStage extends LearningStageDefinition {
   chapters: LearningChapter[];
   pages: IndexedLearningPage[];
+}
+
+interface LearningAudienceDefinition {
+  id: LearningAudience;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+function audienceDefinitions(t: Translate): LearningAudienceDefinition[] {
+  return [
+    {
+      id: "beginner",
+      title: t("初次使用", "Getting started"),
+      description: t("先理解能做什么，以及如何完成第一次任务。", "Understand the product and complete a first task."),
+      icon: Compass,
+    },
+    {
+      id: "operator",
+      title: t("使用与运维", "Use & operate"),
+      description: t("学习任务、记忆、能力、安全和运行状态。", "Learn tasks, memory, capabilities, safety, and operations."),
+      icon: ShieldCheck,
+    },
+    {
+      id: "developer",
+      title: t("开发与维护", "Build & maintain"),
+      description: t("查看完整架构、扩展合同、验证和发布细节。", "Explore architecture, extension contracts, validation, and release details."),
+      icon: Code2,
+    },
+  ];
 }
 
 function stageDefinitions(t: Translate): LearningStageDefinition[] {
@@ -490,29 +526,52 @@ function mermaidSource(children: ReactNode): string | null {
   return String(child.props.children ?? "").replace(/\n$/, "");
 }
 
+function reactNodeText(node: ReactNode): string {
+  return Children.toArray(node)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child);
+      return isValidElement<{ children?: ReactNode }>(child)
+        ? reactNodeText(child.props.children)
+        : "";
+    })
+    .join("");
+}
+
 export function AiLearningPage({ lang, t }: AiLearningPageProps) {
   const pages = useMemo(() => {
     const readmePages = parseReadmeLearningPages(lang === "zh" ? readmeZh : readmeEn);
     const chapterTitle = lang === "zh" ? "架构指南" : "Architecture Guide";
-    const architecturePages = ARCHITECTURE_DOCUMENTS[lang].map((markdown, index) =>
-      parseStandaloneLearningDocument({
-        id: `architecture-guide-${index + 1}`,
+    const architecturePages = ARCHITECTURE_DOCUMENTS[lang].flatMap((document) =>
+      parseStandaloneLearningPages({
+        id: `architecture-guide-${document.id}`,
         chapterId: "architecture-guide",
         chapterTitle,
-        stageId: ARCHITECTURE_STAGE_IDS[index] ?? "development-release",
-        markdown,
+        markdown: document.markdown,
       }));
     return orderLearningPagesByStage(
       [...readmePages, ...architecturePages],
       [...LEARNING_STAGE_ORDER],
     );
   }, [lang]);
+  const [audience, setAudience] = useState<LearningAudience>("beginner");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [visitedPageIds, setVisitedPageIds] = useState<string[]>([]);
+  const [lastPageByAudience, setLastPageByAudience] = useState<
+    Partial<Record<LearningAudience, string>>
+  >({});
+  const [loadedLanguage, setLoadedLanguage] = useState<UiLanguage | null>(null);
+  const routePages = useMemo(
+    () => pages
+      .map((page, index) => ({ index, page }))
+      .filter(({ page }) => page.audiences.includes(audience)),
+    [audience, pages],
+  );
   const stages = useMemo<LearningStage[]>(() => {
     const definitions = stageDefinitions(t);
     return definitions
       .map((definition) => {
-        const stagePages = pages
-          .map((page, index) => ({ index, page }))
+        const stagePages = routePages
           .filter(({ page }) => page.stageId === definition.id);
         return {
           ...definition,
@@ -521,19 +580,65 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         };
       })
       .filter((stage) => stage.pages.length > 0);
-  }, [pages, t]);
-  const [pageIndex, setPageIndex] = useState(0);
+  }, [routePages, t]);
+  const pageIndexById = useMemo(
+    () => new Map(pages.map((page, index) => [page.id, index])),
+    [pages],
+  );
+  const searchResults = useMemo(() => {
+    const resultIds = new Set(searchLearningPages(
+      routePages.map(({ page }) => page),
+      searchQuery,
+    ).map((page) => page.id));
+    return routePages.filter(({ page }) => resultIds.has(page.id));
+  }, [routePages, searchQuery]);
   const stageNavRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    setPageIndex((index) => Math.min(index, Math.max(0, pages.length - 1)));
-  }, [pages.length]);
+    const validPageIds = new Set(pages.map((page) => page.id));
+    const progress = loadLearningProgress(window.localStorage, lang, validPageIds);
+    const preferredPageId = progress.lastPageByAudience[progress.audience];
+    const preferredPageIndex = preferredPageId ? pageIndexById.get(preferredPageId) : undefined;
+    const firstAudiencePage = pages.findIndex((page) => page.audiences.includes(progress.audience));
+    setAudience(progress.audience);
+    setVisitedPageIds(progress.visitedPageIds);
+    setLastPageByAudience(progress.lastPageByAudience);
+    setPageIndex(preferredPageIndex ?? Math.max(0, firstAudiencePage));
+    setSearchQuery("");
+    setLoadedLanguage(lang);
+  }, [lang, pageIndexById, pages]);
+
+  useEffect(() => {
+    if (routePages.length === 0 || routePages.some(({ index }) => index === pageIndex)) return;
+    const preferredPageId = lastPageByAudience[audience];
+    const preferred = preferredPageId ? pageIndexById.get(preferredPageId) : undefined;
+    const preferredIsInRoute = preferred !== undefined
+      && routePages.some(({ index }) => index === preferred);
+    setPageIndex(preferredIsInRoute ? preferred : routePages[0].index);
+  }, [audience, lastPageByAudience, pageIndex, pageIndexById, routePages]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [pageIndex]);
 
   const page = pages[pageIndex];
+
+  useEffect(() => {
+    if (loadedLanguage !== lang || !page || !page.audiences.includes(audience)) return;
+    setVisitedPageIds((current) => current.includes(page.id) ? current : [...current, page.id]);
+    setLastPageByAudience((current) => current[audience] === page.id
+      ? current
+      : { ...current, [audience]: page.id });
+  }, [audience, lang, loadedLanguage, page]);
+
+  useEffect(() => {
+    if (loadedLanguage !== lang) return;
+    saveLearningProgress(window.localStorage, lang, {
+      audience,
+      visitedPageIds,
+      lastPageByAudience,
+    });
+  }, [audience, lang, lastPageByAudience, loadedLanguage, visitedPageIds]);
 
   useEffect(() => {
     const stageId = page?.stageId;
@@ -571,15 +676,23 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
           </span>
         );
       },
+      h2: ({ children }) => <h2 id={learningHeadingId(reactNodeText(children))}>{children}</h2>,
+      h3: ({ children }) => <h3 id={learningHeadingId(reactNodeText(children))}>{children}</h3>,
+      h4: ({ children }) => <h4 id={learningHeadingId(reactNodeText(children))}>{children}</h4>,
     }),
-    [lang],
+    [lang, t],
   );
 
-  if (!page || stages.length === 0) return null;
+  if (!page || stages.length === 0 || routePages.length === 0) return null;
   const stageIndex = stages.findIndex((stage) => stage.id === page.stageId);
   const activeStage = stages[Math.max(0, stageIndex)] ?? stages[0];
-  const previousPage = pages[pageIndex - 1];
-  const nextPage = pages[pageIndex + 1];
+  const routePageIndex = routePages.findIndex(({ index }) => index === pageIndex);
+  const previousPage = routePages[routePageIndex - 1];
+  const nextPage = routePages[routePageIndex + 1];
+  const routePositionById = new Map(routePages.map(({ page: item }, index) => [item.id, index]));
+  const visitedCount = routePages.filter(({ page: item }) => visitedPageIds.includes(item.id)).length;
+  const progressPercent = Math.round((visitedCount / routePages.length) * 100);
+  const audienceOptions = audienceDefinitions(t);
 
   return (
     <section className="overflow-hidden rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card)]">
@@ -595,7 +708,35 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
                 {t("从使用到架构，分阶段理解 RustClaw", "Learn RustClaw from everyday use to architecture")}
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
-                {t("先建立整体认识，再逐步进入 Agent、记忆、安全、技能和开发细节。内容与仓库文档同步，流程图支持缩放、拖动和全屏查看。", "Start with the product view, then move through the agent, memory, safety, capabilities, and development layers. Content stays synchronized with repository docs, with zoomable and pannable diagrams.")}
+                {t("选择适合你的路线，再从具体任务逐步进入 Agent、记忆、安全、技能和开发细节。阅读位置会保存在当前浏览器。", "Choose the route that fits you, then move from practical tasks into the agent, memory, safety, capabilities, and development details. Your reading position is saved in this browser.")}
+              </p>
+              <div className="mt-3 inline-flex max-w-full overflow-x-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-card-strong)] p-1">
+                {audienceOptions.map((option) => {
+                  const AudienceIcon = option.icon;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1.5 text-xs transition ${
+                        audience === option.id
+                          ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]"
+                          : "text-[var(--theme-text-muted)] hover:text-[var(--theme-text-strong)]"
+                      }`}
+                      title={option.description}
+                      aria-pressed={audience === option.id}
+                      onClick={() => {
+                        setAudience(option.id);
+                        setSearchQuery("");
+                      }}
+                    >
+                      <AudienceIcon className="h-3.5 w-3.5" />
+                      {option.title}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-[var(--theme-text-faint)]">
+                {audienceOptions.find((option) => option.id === audience)?.description}
               </p>
             </div>
           </div>
@@ -603,23 +744,23 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             <button
               type="button"
               className="theme-topbar-btn !px-2.5 disabled:opacity-35"
-              disabled={pageIndex === 0}
+              disabled={!previousPage}
               title={t("上一页", "Previous page")}
               aria-label={t("上一页", "Previous page")}
-              onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+              onClick={() => previousPage && setPageIndex(previousPage.index)}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <span className="min-w-16 text-center font-mono text-xs text-[var(--theme-text-muted)]">
-              {pageIndex + 1} / {pages.length}
+              {routePageIndex + 1} / {routePages.length}
             </span>
             <button
               type="button"
               className="theme-topbar-btn !px-2.5 disabled:opacity-35"
-              disabled={pageIndex >= pages.length - 1}
+              disabled={!nextPage}
               title={t("下一页", "Next page")}
               aria-label={t("下一页", "Next page")}
-              onClick={() => setPageIndex((index) => Math.min(pages.length - 1, index + 1))}
+              onClick={() => nextPage && setPageIndex(nextPage.index)}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -632,7 +773,13 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
         className="theme-scrollbar overflow-x-auto border-b border-[var(--theme-border)] px-3 py-3 sm:px-5"
         aria-label={t("学习路线", "Learning path")}
       >
-        <div className="grid min-w-[780px] grid-cols-6 overflow-hidden rounded-md border border-[var(--theme-border)]">
+        <div
+          className="grid overflow-hidden rounded-md border border-[var(--theme-border)]"
+          style={{
+            minWidth: `${Math.max(1, stages.length) * 130}px`,
+            gridTemplateColumns: `repeat(${Math.max(1, stages.length)}, minmax(0, 1fr))`,
+          }}
+        >
           {stages.map((stage, index) => {
             const StageIcon = stage.icon;
             const isActive = stage.id === activeStage.id;
@@ -667,27 +814,84 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
           <label className="mb-2 block px-2 text-[10px] uppercase text-[var(--theme-text-faint)]" htmlFor="ai-learning-page">
             {t("学习目录", "Learning contents")}
           </label>
+          <div className="relative mb-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--theme-text-faint)]" />
+            <input
+              type="search"
+              className="theme-input w-full !pl-9 !pr-9"
+              value={searchQuery}
+              placeholder={t("搜索主题或关键词", "Search topics or keywords")}
+              aria-label={t("搜索学习内容", "Search learning content")}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--theme-text-faint)] hover:text-[var(--theme-text-strong)]"
+                title={t("清除搜索", "Clear search")}
+                aria-label={t("清除搜索", "Clear search")}
+                onClick={() => setSearchQuery("")}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <select
             id="ai-learning-page"
             className="theme-input w-full lg:hidden"
             value={pageIndex}
             onChange={(event) => setPageIndex(Number(event.target.value))}
           >
-            {stages.map((stage) => (
+            {searchQuery.trim() ? searchResults.map(({ index, page: item }) => (
+              <option key={item.id} value={index}>
+                {(routePositionById.get(item.id) ?? 0) + 1}. {item.title}
+              </option>
+            )) : stages.map((stage) => (
               <optgroup key={stage.id} label={`${stage.level} · ${stage.title}`}>
                 {stage.pages.map(({ index, page: item }) => (
                   <option key={item.id} value={index}>
-                    {index + 1}. {item.title}
+                    {(routePositionById.get(item.id) ?? 0) + 1}. {item.title}
                   </option>
                 ))}
               </optgroup>
             ))}
           </select>
+          {searchQuery.trim() && searchResults.length === 0 && (
+            <p className="mt-2 px-2 text-xs text-[var(--theme-text-faint)] lg:hidden">
+              {t("没有找到相关内容，请尝试更短的关键词。", "No matching content. Try a shorter keyword.")}
+            </p>
+          )}
           <nav
             className="theme-scrollbar hidden max-h-[calc(100vh-10rem)] space-y-2 overflow-y-auto pr-1 lg:block"
             aria-label={t("学习主题", "Learning topics")}
           >
-            {stages.map((stage, index) => {
+            {searchQuery.trim() ? (
+              <div className="space-y-1">
+                <p className="px-2 pb-1 text-[10px] text-[var(--theme-text-faint)]">
+                  {searchResults.length > 0
+                    ? t(`找到 ${searchResults.length} 项`, `${searchResults.length} results`)
+                    : t("没有找到相关内容", "No matching content")}
+                </p>
+                {searchResults.map(({ index, page: item }) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs leading-5 transition ${
+                      index === pageIndex
+                        ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]"
+                        : "text-[var(--theme-text-muted)] hover:bg-white/5 hover:text-[var(--theme-text-strong)]"
+                    }`}
+                    onClick={() => setPageIndex(index)}
+                  >
+                    <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--theme-text-faint)]" />
+                    <span>
+                      <span className="block">{item.title}</span>
+                      <span className="block text-[10px] text-[var(--theme-text-faint)]">{item.chapterTitle}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : stages.map((stage, index) => {
               const StageIcon = stage.icon;
               const isActive = stage.id === activeStage.id;
               return (
@@ -735,7 +939,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
                                 aria-current={itemIndex === pageIndex ? "page" : undefined}
                               >
                                 <span className="mt-px w-5 shrink-0 font-mono text-[9px] text-[var(--theme-text-faint)]">
-                                  {String(itemIndex + 1).padStart(2, "0")}
+                                  {String((routePositionById.get(item.id) ?? 0) + 1).padStart(2, "0")}
                                 </span>
                                 <span>{item.title}</span>
                               </button>
@@ -758,7 +962,9 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               <span aria-hidden="true">/</span>
               <span>{t("阶段", "Stage")} {stageIndex + 1} / {stages.length}</span>
               <span aria-hidden="true">/</span>
-              <span>{t("内容", "Page")} {pageIndex + 1} / {pages.length}</span>
+              <span>{t("内容", "Page")} {routePageIndex + 1} / {routePages.length}</span>
+              <span aria-hidden="true">/</span>
+              <span>{t(`约 ${page.estimatedMinutes} 分钟`, `${page.estimatedMinutes} min read`)}</span>
               {page.diagramCount > 0 && (
                 <>
                   <span aria-hidden="true">/</span>
@@ -772,13 +978,32 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
               {activeStage.description}
             </p>
+            <p className="mt-2 text-xs text-[var(--theme-text-faint)]">
+              {t(`这条路线已读 ${visitedCount} / ${routePages.length} 项`, `${visitedCount} of ${routePages.length} read in this route`)}
+            </p>
             <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/8" aria-hidden="true">
               <div
                 className="h-full bg-[var(--theme-icon-accent-color)] transition-[width]"
-                style={{ width: `${((stageIndex + 1) / stages.length) * 100}%` }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
           </div>
+          {page.headings.length > 1 && (
+            <nav className="mx-auto mb-7 max-w-4xl border-l-2 border-[var(--theme-border)] pl-4" aria-label={t("本页内容", "On this page")}>
+              <p className="text-xs font-medium text-[var(--theme-text-strong)]">{t("本页内容", "On this page")}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {page.headings.map((heading) => (
+                  <a
+                    key={`${heading.level}-${heading.id}`}
+                    href={`#${heading.id}`}
+                    className={`text-xs text-[var(--theme-text-muted)] hover:text-[var(--theme-text-strong)] ${heading.level > 2 ? "before:mr-1 before:content-['·']" : "font-medium"}`}
+                  >
+                    {heading.title}
+                  </a>
+                ))}
+              </div>
+            </nav>
+          )}
           <article className="learning-markdown mx-auto max-w-4xl">
             <ReactMarkdown components={markdownComponents}>{page.markdown}</ReactMarkdown>
           </article>
@@ -786,24 +1011,24 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             <button
               type="button"
               className="theme-secondary-btn !px-3 disabled:opacity-35"
-              disabled={pageIndex === 0}
-              onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+              disabled={!previousPage}
+              onClick={() => previousPage && setPageIndex(previousPage.index)}
             >
               <ChevronLeft className="h-4 w-4" />
               <span className="min-w-0 text-left">
                 <span className="block text-[10px] text-[var(--theme-text-faint)]">{t("上一页", "Previous")}</span>
-                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{previousPage?.title ?? t("已到开头", "Start")}</span>
+                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{previousPage?.page.title ?? t("已到开头", "Start")}</span>
               </span>
             </button>
             <button
               type="button"
               className="theme-secondary-btn !px-3 disabled:opacity-35"
-              disabled={pageIndex >= pages.length - 1}
-              onClick={() => setPageIndex((index) => Math.min(pages.length - 1, index + 1))}
+              disabled={!nextPage}
+              onClick={() => nextPage && setPageIndex(nextPage.index)}
             >
               <span className="min-w-0 text-right">
                 <span className="block text-[10px] text-[var(--theme-text-faint)]">{t("下一页", "Next")}</span>
-                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{nextPage?.title ?? t("已完成", "Complete")}</span>
+                <span className="block max-w-[34vw] truncate text-xs sm:max-w-56">{nextPage?.page.title ?? t("已完成", "Complete")}</span>
               </span>
               <ChevronRight className="h-4 w-4" />
             </button>

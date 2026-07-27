@@ -1,5 +1,8 @@
 # Task State and Context
 
+<!-- ai-learning-stage: context-memory -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Security and execution](02-security-execution.md) |
 [Architecture index](README.md) |

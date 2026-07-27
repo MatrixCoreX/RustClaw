@@ -1,5 +1,8 @@
 # Skills, Media, and Models
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Coding and observability](04-coding-observability.md) |
 [Architecture index](README.md) |

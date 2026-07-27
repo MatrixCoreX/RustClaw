@@ -20,6 +20,26 @@ RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”�
 - 本地浏览器控制台位于 `UI/`，其中包含独立的 NNI 设备签名页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 
+### 先认识五个概念
+
+- **Agent**：读取当前请求，自己判断应该回答、追问，还是调用能力。
+- **任务**：可持久化的一次工作；UI 可以通过 `task_id` 再次查看状态与结果。
+- **能力**：对“能做什么”的稳定描述，例如读取文件、搜索网页。
+- **工具或技能**：通过参数和权限检查后，真正执行该能力的实现。
+- **Checkpoint 或工件**：保存长任务进度或输出，让任务能够继续而不是从头开始。
+
+### 一句话如何变成结果
+
+例如“总结这份文档”会先成为任务。Agent 查看附件，选择文档能力，运行经过验证的工具或技能，检查执行结果，再组织最终回复。运行时只负责身份、权限、预算和副作用边界，不靠写死的中文或英文短语猜测意图。
+
+### 完成第一个任务
+
+1. 在“大模型”页面配置并保存一个文本模型。
+2. 打开“Agent”，新建任务，发送“把要点整理成三条”这类小请求。
+3. 在同一任务中继续补充要求；只有需要查看进度、授权或恢复时，再展开任务详情。
+
+通信渠道不是必选项。先确认浏览器里的 Agent 可以正常工作，有跨应用使用需求时再配置渠道。
+
 <!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop 架构
 
@@ -439,8 +459,8 @@ rustclaw -key disable rk-xxxx
 - 云服务器：可由 nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
 - `webd` 在启用时提供密码登录和会话桥接；本地直连 UI 可以使用 RustClaw key
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
-- 导航栏中的 `AI 学习` 页面直接读取随 UI 打包的 README，按一级主题分页，并把 Mermaid 流程图渲染为可缩放、可全屏查看的图形；切换 UI 语言时会选择对应语言的 README。
-- Agent 页面使用服务端会话历史。每个任务都能从操作菜单修改自定义名称，刷新页面或重启后仍会保留。
+- `AI 学习` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
+- Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
 
 在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
@@ -477,17 +497,26 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: developer -->
 ## 模型能力目录与中文 Provider 验证
+
+### 能力目录回答什么
 
 模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness` 会为当前选中的 provider/model 渲染 compact 的 `model_readiness_summary`，task debug/教学 trace 和 `clawcli llm-trace` 也会用 `model_catalog_trace.readiness` 暴露同一组选中模型投影，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`，同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
 
 
 模型目录、readiness 与 provider 验证流程见[技能、多媒体与模型](docs/architecture/05-skills-media-models.zh-CN.md)和[发布验证](docs/architecture/06-release-validation.zh-CN.md)。
 
+### 如何验证 Provider
+
 MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；它的 `--self-test` 会覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`，之后 gate 才信任配置派生的元数据。`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
+
+### 发布门禁如何证明结果
 
 Agent parity gate 会把中文 provider catalog、smoke preflight、结构化 evidence、permission token、registry policy、长尾 async 合同、NL hard-match 和固定回复检查统一写成可搬移 artifact。`gate_summary.env`、wrapped run log 和 `case_coverage.json` 只记录 repo-relative、`out_dir/...` 或 `external_path` 引用，不记录密钥、env-file 路径或本机绝对路径。关键结果包括 `runtime_hard_reply_baseline.txt` 的 `new=0`、`repair_no_user_text_fields.txt` 的 `REPAIR_USER_TEXT_FIELD_CHECK ok`、`policy_decision_tokens.txt` 的 `POLICY_DECISION_TOKEN_CHECK ok`，以及 `agent_loop_static_contracts.txt` 的全部 front door、planner authority、多语言和机器合同检查。
 
+<!-- ai-learning-exclude:start -->
 Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --self-test`，写入 `agent_loop_guard_final_scope.txt`，并记录 `agent_loop_guard_final_scope=1`；该 artifact 必须包含 `AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok` 和 `AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0`，保证 answer-verifier evidence 与 registry idempotency 边界使用当前 `all` scope。
 
 `agent_loop_static_contracts.txt` 还会包含 frontdoor boundary dispatch 守卫：`scripts/check_frontdoor_boundary_dispatch.py --self-test` 和主检查必须输出 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` 与 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`，确保 ask front door 只保留 schedule/resume/边界准备入口，不重新决定普通请求该直答、澄清还是执行。
@@ -525,9 +554,12 @@ Wrapped gate 的路径只记录可搬移的 `out_dir_ref`、`run_dir_ref` 和 `r
 Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.py --self-test` 并写入 `secret_scan_contract_self_test.txt`；该 artifact 必须包含 `SECRET_SCAN_CONTRACT_SELF_TEST ok`，证明 forbidden secret field 和 secret-like value 的拒绝路径有效，之后才信任主 JSON 结果。随后它运行 `scripts/nl_tests/check_secret_scan_contract.py --json` 并写入 `secret_scan_contract.json`，把禁用密钥字段、非 object JSON artifact 和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。它还会运行 `scripts/nl_tests/check_runner_path_ref_contract.py` 并写入 `runner_path_ref_contract.json`，保证 full/manual/multi-turn/client-like/provider A/B/dynamic/regression runner 的 console log 继续使用可搬移 path-ref，而不是本机绝对路径。它还会运行 `check_suite_wrapper_contract.py --self-test`、`check_runner_path_ref_contract.py --self-test` 和 `check_compact_coverage.py --self-test`，并写入 `nl_suite_checker_self_tests.txt`；该 artifact 必须包含 `SUITE_WRAPPER_CONTRACT_SELF_TEST ok`、`RUNNER_PATH_REF_CONTRACT_SELF_TEST ok` 与 `COMPACT_COVERAGE_SELF_TEST ok`，证明这些 NL-suite checker 能拒绝坏 snippet、坏 path ref、compact tag 缺失、不安全媒体 dry-run 行和禁止 live 发布行，之后才信任它们的 JSON 报告。它还会运行 `scripts/nl_tests/check_suite_artifact_contract.py --self-test`、`scripts/nl_tests/print_llm_raw_trace.py --self-test` 和 `scripts/nl_tests/summarize_rollout_metrics.py --self-test`，并写入 `suite_artifact_contract_self_test.txt`、`llm_raw_trace_runner_contract.txt`、`rollout_metrics_contract.txt`，证明 checker 会拒绝 report 缺失、不可读取、JSON 损坏、顶层不是 object、基础 report 字段错误、未完成自证、summary 不一致、嵌套 agent parity contract 不一致、中文 live provider scope 非法、env-file state/source 非法、gate summary path ref 不安全、中文 provider smoke path ref 不安全、rollout metrics source/output ref 不安全或意外带入嵌套 agent parity contract 的 report，之后才把它作为 release artifact 信任。当通过 `scripts/nl_tests/run_suite.sh agent_parity_gate` 启动时，`suite_artifact_contract.json` 还会验证嵌套的 `agent_parity_gate/` artifacts，并记录 `agent_parity_gate_contract.checked=true`，证明 runtime hard-reply、policy-boundary hard-reply、repair no-user-text、policy-decision-token、final-scope、registry-policy、registry-alias、long-tail-skill、clawcli exec/replay、clawcli session/TUI、clawcli goal、clawcli LLM trace、agent-loop static、no-agent-mode、evidence-extractor、secret scan self-test、secret、wrapper、runner path-ref、NL-suite checker self-tests、suite-artifact self-test、raw LLM trace 和 rollout metrics path 合同都参与了该 wrapped run；如果嵌套 gate summary 缺失，checker 会返回结构化 `agent_parity_gate_summary_missing` finding，而不是 traceback。最终 report 写入会使用 `--validate-contract-report-content` 和 `--require-contract-report-content-checked`，要求既有 report 为 `ok=true`、无 findings、与当前 summary 和嵌套合同计数一致，并且已经标记 `contract_report_content_checked=true`。`gate_summary.env` 必须包含 `live_metrics=0|1`，`chinese_provider_live_providers` 必须是 `all` 或已知中文 provider 机器 token 的 CSV，env-file state/source 也必须保持在允许的机器 token 集合内；`metrics=1` 只表示 metrics gate 没有被禁用，`live_metrics=1` 才表示提供了 run directory 且 `run_metrics.*` 已生成并以可搬移 source/output refs 通过内容校验，checker 不会从 `metrics` 推断 live metrics。NL/live NL runner 会保留 `logs/model_io.log` offset、`task_id`、`PRINT_LLM_TRACE` 和 `LLM#1..N` 原始字段回放合同。
 
 同一个 raw LLM trace artifact 现在会同时运行 `print_llm_raw_trace.py --self-test`、`check_llm_raw_trace_runner_contract.py --self-test` 和 checker 主检查。`llm_raw_trace_runner_contract.txt` 必须包含 `LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok` 与 `LLM_RAW_TRACE_RUNNER_CONTRACT ok`，证明原始字段打印 helper 和 runner wiring checker 都通过后，才信任 NL/live NL 的 `LLM#1..N` trace 输出。
+<!-- ai-learning-exclude:end -->
 
 <!-- ai-learning-stage: development-release -->
 ## NL 回归快捷入口
+
+### 选择最小但有效的范围
 
 代码还在快速推进时，优先跑最小受影响 NL 集；阶段收口或 release gate 时再扩大覆盖：
 
@@ -543,6 +575,8 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 复用正在运行的开发服务器。可用 `--suite <name>` 或 `--category <name>` 选择
 最小受影响范围；除非明确关闭，仍会打印带编号的原始 `LLM#1..N` 请求/返回字段。
 
+### 验收证据与长尾回归
+
 当前 release 验收组合使用受影响范围的 compact live NL、release-gate 等价覆盖（`scripts/nl_tests/build_release_gate_subset.py --check` 选择维护中的代表性集合）、loop-boundary/replay 无 unexplained mismatch，以及 planner/runtime/repair 静态门禁。Planner/output-contract 改动运行 `python3 scripts/check_planner_runtime_boundary.py`、`python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_finalizer_architecture.py`；repair 改动运行 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
 
 面向长尾闭环链路的常用入口：
@@ -552,6 +586,8 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 
 其中 `ops_http_repair` 是专门盯 `ops_http_repair_then_validate_{zh,en}` 的双语回归入口，日志写到 `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`。
+
+### 验证 UI 构建与部署
 
 UI 相关说明：
 

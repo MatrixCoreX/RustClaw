@@ -1,5 +1,8 @@
 # Agent Loop 与规划
 
+<!-- ai-learning-stage: agent-runtime -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 [架构索引](README.md) | 下一页：[安全与执行](02-security-execution.zh-CN.md)
 

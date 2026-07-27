@@ -1,5 +1,8 @@
 # 发布验证
 
+<!-- ai-learning-stage: development-release -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[技能、多媒体与模型](05-skills-media-models.zh-CN.md) |
 [架构索引](README.md) |

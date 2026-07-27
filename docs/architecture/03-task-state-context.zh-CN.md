@@ -1,5 +1,8 @@
 # 任务状态与上下文
 
+<!-- ai-learning-stage: context-memory -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[安全与执行](02-security-execution.zh-CN.md) |
 [架构索引](README.md) |

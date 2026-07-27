@@ -1,5 +1,8 @@
 # Skill-Owned Storage
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Office artifact workspace](07-office-artifacts.md) |
 [Architecture index](README.md) |

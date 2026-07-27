@@ -1,5 +1,8 @@
 # 安全与执行
 
+<!-- ai-learning-stage: safety-operations -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[Agent Loop 与规划](01-agent-loop.zh-CN.md) |
 [架构索引](README.md) |
