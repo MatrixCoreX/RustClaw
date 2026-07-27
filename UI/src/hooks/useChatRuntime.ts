@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import {
-  audioExtensionForMime,
   attachmentIsAudio,
   attachmentIsImage,
   CHAT_MAX_ATTACHMENTS,
@@ -21,11 +20,13 @@ import {
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
 import {
-  preferredVoiceRecorderMimeType,
+  PcmWavRecordingError,
+  pcmWavRecordingSupported,
   shouldRetryVoiceCaptureWithDefault,
+  startPcmWavRecording,
   voiceAudioTrackConstraints,
   voiceInputDeviceOptions,
-  voiceRecorderOptions,
+  type PcmWavRecordingSession,
   type VoiceInputDeviceOption,
 } from "../lib/voice-recording";
 import type {
@@ -184,8 +185,7 @@ export function useChatRuntime({
   );
   const [chatError, setChatError] = useState<string | null>(null);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chatAudioChunksRef = useRef<Blob[]>([]);
+  const chatVoiceRecorderRef = useRef<PcmWavRecordingSession | null>(null);
   const chatInputValueRef = useRef("");
   const chatAttachmentsValueRef = useRef<ChatAttachment[]>([]);
   const chatSendingValueRef = useRef(false);
@@ -206,6 +206,15 @@ export function useChatRuntime({
   chatAudioInputDeviceIdRef.current = chatAudioInputDeviceId;
   activeChatThreadRef.current = activeChatThread;
   apiFetchRef.current = apiFetch;
+
+  useEffect(
+    () => () => {
+      const recorder = chatVoiceRecorderRef.current;
+      chatVoiceRecorderRef.current = null;
+      if (recorder) void recorder.cancel().catch(() => undefined);
+    },
+    [],
+  );
 
   useEffect(() => {
     const scope = conversationHistoryScope.trim();
@@ -707,58 +716,10 @@ export function useChatRuntime({
           .then((devices) => setChatAudioInputDevices(voiceInputDeviceOptions(devices)))
           .catch(() => undefined);
       }
-      const recorderMimeType = preferredVoiceRecorderMimeType();
-      const recorder = new MediaRecorder(stream, voiceRecorderOptions(recorderMimeType));
-      chatAudioChunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chatAudioChunksRef.current.push(event.data);
-        }
-      };
-      recorder.onerror = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        chatRecordingValueRef.current = false;
-        setChatRecording(false);
-        setChatError(t("录音失败，请重新尝试。", "Recording failed. Please try again."));
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        chatRecordingValueRef.current = false;
-        chatMediaRecorderRef.current = null;
-        setChatRecording(false);
-        const mimeType = recorder.mimeType || "audio/webm";
-        const blob = new Blob(chatAudioChunksRef.current, { type: mimeType });
-        chatAudioChunksRef.current = [];
-        if (blob.size <= 0) {
-          setChatError(t("没有录到声音，请重新尝试。", "No audio was recorded. Please try again."));
-          return;
-        }
-        try {
-          const file = new File(
-            [blob],
-            `voice-${Date.now()}.${audioExtensionForMime(mimeType)}`,
-            { type: mimeType },
-          );
-          const attachment = await fileToChatAttachment(file, "audio");
-          const attached = [...chatAttachmentsValueRef.current, attachment].slice(
-            0,
-            CHAT_MAX_ATTACHMENTS,
-          );
-          setChatError(null);
-          chatAttachmentsValueRef.current = attached;
-          setChatAttachments(attached);
-        } catch (err) {
-          setChatError(
-            err instanceof Error
-              ? err.message
-              : t("读取录音失败。", "Failed to read the recording."),
-          );
-        }
-      };
-      chatMediaRecorderRef.current = recorder;
-      recorder.start();
+      const recorder = await startPcmWavRecording(stream);
+      chatVoiceRecorderRef.current = recorder;
       if (voiceStopRequestedRef.current) {
-        recorder.stop();
+        void finishChatVoiceRecording(recorder);
       } else {
         chatRecordingValueRef.current = true;
         setChatRecording(true);
@@ -775,9 +736,34 @@ export function useChatRuntime({
 
   const stopChatVoiceRecording = () => {
     voiceStopRequestedRef.current = true;
-    const recorder = chatMediaRecorderRef.current;
-    if (recorder && recorder.state === "recording") {
-      recorder.stop();
+    const recorder = chatVoiceRecorderRef.current;
+    if (recorder) {
+      void finishChatVoiceRecording(recorder);
+    }
+  };
+
+  const finishChatVoiceRecording = async (recorder: PcmWavRecordingSession) => {
+    if (chatVoiceRecorderRef.current !== recorder) return;
+    chatVoiceRecorderRef.current = null;
+    chatRecordingValueRef.current = false;
+    setChatRecording(false);
+    try {
+      const blob = await recorder.stop();
+      const file = new File([blob], `voice-${Date.now()}.wav`, { type: "audio/wav" });
+      const attachment = await fileToChatAttachment(file, "audio");
+      const attached = [...chatAttachmentsValueRef.current, attachment].slice(
+        0,
+        CHAT_MAX_ATTACHMENTS,
+      );
+      setChatError(null);
+      chatAttachmentsValueRef.current = attached;
+      setChatAttachments(attached);
+    } catch (err) {
+      setChatError(
+        err instanceof PcmWavRecordingError && err.code === "empty"
+          ? t("没有录到声音，请重新尝试。", "No audio was recorded. Please try again.")
+          : t("读取录音失败，请重新尝试。", "Failed to read the recording. Please try again."),
+      );
     }
   };
 
@@ -1591,7 +1577,7 @@ function canUseDirectVoiceRecording(): boolean {
     typeof navigator !== "undefined" &&
     window.isSecureContext &&
     Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== "undefined"
+    pcmWavRecordingSupported()
   );
 }
 

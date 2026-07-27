@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  preferredVoiceRecorderMimeType,
+  encodePcm16Wav,
+  pcmWavRecordingSupported,
   shouldRetryVoiceCaptureWithDefault,
   voiceAudioTrackConstraints,
   voiceInputDeviceOptions,
-  voiceRecorderOptions,
 } from "./voice-recording.ts";
 
 test("builds speech-oriented audio constraints for the default microphone", () => {
@@ -30,15 +30,34 @@ test("binds an explicitly selected microphone without weakening speech constrain
   });
 });
 
-test("prefers Opus WebM and uses a voice-sized recorder bitrate", () => {
-  const supported = new Set(["audio/webm;codecs=opus", "audio/mp4"]);
-  const mimeType = preferredVoiceRecorderMimeType((candidate) => supported.has(candidate));
+test("reports PCM recording unsupported outside a browser", () => {
+  assert.equal(pcmWavRecordingSupported(), false);
+});
 
-  assert.equal(mimeType, "audio/webm;codecs=opus");
-  assert.deepEqual(voiceRecorderOptions(mimeType), {
-    mimeType: "audio/webm;codecs=opus",
-    audioBitsPerSecond: 64_000,
-  });
+test("encodes mono float samples as a standard little-endian PCM WAV", async () => {
+  const blob = encodePcm16Wav(
+    [new Float32Array([-1, -0.5, 0, 0.5, 1])],
+    48_000,
+  );
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  const ascii = (start: number, length: number) =>
+    String.fromCharCode(...bytes.slice(start, start + length));
+
+  assert.equal(blob.type, "audio/wav");
+  assert.equal(ascii(0, 4), "RIFF");
+  assert.equal(ascii(8, 4), "WAVE");
+  assert.equal(ascii(12, 4), "fmt ");
+  assert.equal(ascii(36, 4), "data");
+  assert.equal(view.getUint16(20, true), 1);
+  assert.equal(view.getUint16(22, true), 1);
+  assert.equal(view.getUint32(24, true), 48_000);
+  assert.equal(view.getUint16(34, true), 16);
+  assert.equal(view.getUint32(40, true), 10);
+  assert.deepEqual(
+    Array.from({ length: 5 }, (_, index) => view.getInt16(44 + index * 2, true)),
+    [-32768, -16384, 0, 16383, 32767],
+  );
 });
 
 test("keeps unique audio input devices only", () => {
