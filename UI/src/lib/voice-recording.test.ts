@@ -12,9 +12,10 @@ import {
 test("builds speech-oriented audio constraints for the default microphone", () => {
   assert.deepEqual(voiceAudioTrackConstraints(), {
     channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
     echoCancellation: { ideal: true },
     noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
+    autoGainControl: { ideal: false },
   });
 });
 
@@ -22,9 +23,10 @@ test("binds an explicitly selected microphone without weakening speech constrain
   assert.deepEqual(voiceAudioTrackConstraints(" microphone-2 "), {
     deviceId: { exact: "microphone-2" },
     channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
     echoCancellation: { ideal: true },
     noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
+    autoGainControl: { ideal: false },
   });
 });
 

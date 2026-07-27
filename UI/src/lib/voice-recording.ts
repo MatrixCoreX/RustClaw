@@ -14,9 +14,10 @@ export function voiceAudioTrackConstraints(deviceId = ""): MediaTrackConstraints
   return {
     ...(deviceId.trim() ? { deviceId: { exact: deviceId.trim() } } : {}),
     channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
     echoCancellation: { ideal: true },
     noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
+    autoGainControl: { ideal: false },
   };
 }
 

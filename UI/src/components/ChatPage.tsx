@@ -597,7 +597,9 @@ export function ChatPage({
                   ) : (
                     <Mic className="h-3.5 w-3.5" />
                   )}
-                  {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
+                  {chatRecording
+                    ? t("松开后试听", "Release to preview")
+                    : t("按住录音", "Hold to record")}
                 </button>
               </>
             ) : null}

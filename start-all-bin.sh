@@ -334,6 +334,10 @@ start_future_adapters_placeholder() {
   "$SCRIPT_DIR/component_start/start-future-adapters.sh" || true
 }
 
+start_local_whisper() {
+  "$SCRIPT_DIR/component_start/start-whisper-server.sh" "$PROFILE"
+}
+
 STARTUP_FAILURES=()
 
 start_optional_component() {
@@ -347,6 +351,7 @@ start_optional_component() {
   return 0
 }
 
+start_optional_component "whisper-server" start_local_whisper
 start_clawd
 start_optional_component "webd" start_webd
 if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" == "1" ]]; then

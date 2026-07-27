@@ -651,11 +651,17 @@ def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
         findings,
         "audio_synthesize.qwen_models must include qwen3-tts-flash",
     )
+    require(stt.get("default_vendor") == "custom", findings, "audio_transcribe.default_vendor must be custom")
     require(stt.get("default_model") == "local-whisper", findings, "audio_transcribe.default_model must be local-whisper")
     require(
         "qwen3-asr-flash" in as_list(stt.get("qwen_models")),
         findings,
         "audio_transcribe.qwen_models must include qwen3-asr-flash",
+    )
+    require(
+        "qwen3-asr-flash" in as_list(stt.get("qwen_chat_models")),
+        findings,
+        "audio_transcribe.qwen_chat_models must include qwen3-asr-flash",
     )
 
     for section_name, cfg, expected_model in [

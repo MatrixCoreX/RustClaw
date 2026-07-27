@@ -17,18 +17,22 @@ pub(super) async fn prepare_planner_owned_ask_routing(
     prompt: &str,
     _source: &str,
 ) -> Result<PreparedAskRouting> {
-    let transcribed_prompt =
+    let audio_materialization =
         crate::transcribe_attached_audio_for_ask(state, task, payload, prompt).await?;
     let attachment_count = payload
         .get("attachments")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     let input_materialization = crate::turn_boundary_envelope::TurnInputMaterialization::classify(
-        transcribed_prompt.is_some(),
+        audio_materialization
+            .as_ref()
+            .is_some_and(|materialization| materialization.transcript_available),
         !prompt.trim().is_empty(),
         attachment_count,
     );
-    let planner_user_request = transcribed_prompt.unwrap_or_else(|| prompt.to_string());
+    let planner_user_request = audio_materialization
+        .map(|materialization| materialization.planner_text)
+        .unwrap_or_else(|| prompt.to_string());
     let planner_user_request =
         crate::ui_attachments::prompt_with_ui_attachment_context(&planner_user_request, payload);
     let turn_boundary_envelope =
