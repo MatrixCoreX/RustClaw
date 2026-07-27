@@ -11,6 +11,7 @@ import type {
   ConsolePage,
   HealthResponse,
   HostSystemSummary,
+  NginxUiStatus,
   PiAppStatusResponse,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -70,6 +71,9 @@ export function useSystemRuntime({
   const [workspaceUpdateLoading, setWorkspaceUpdateLoading] = useState(false);
   const [workspaceUpdateCanceling, setWorkspaceUpdateCanceling] = useState(false);
   const [workspaceUpdateMessage, setWorkspaceUpdateMessage] = useState<string | null>(null);
+  const [nginxStatus, setNginxStatus] = useState<NginxUiStatus | null>(null);
+  const [nginxStatusLoading, setNginxStatusLoading] = useState(false);
+  const [nginxStatusError, setNginxStatusError] = useState<string | null>(null);
   const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
   const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
     formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
@@ -119,6 +123,26 @@ export function useSystemRuntime({
     }
   };
 
+  const fetchNginxStatus = async (silent = false): Promise<NginxUiStatus | null> => {
+    if (!silent) setNginxStatusLoading(true);
+    setNginxStatusError(null);
+    try {
+      const res = await apiFetch("/v1/admin/nginx");
+      const body = (await res.json()) as ApiResponse<NginxUiStatus>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `nginx status failed (${res.status})`);
+      }
+      setNginxStatus(body.data);
+      return body.data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setNginxStatusError(message);
+      return null;
+    } finally {
+      if (!silent) setNginxStatusLoading(false);
+    }
+  };
+
   const startWorkspaceUpdate = async (mode: WorkspaceUpdateMode = "full") => {
     const modeConfig: Record<WorkspaceUpdateMode, { confirm: string; endpoint: string; started: string }> = {
       full: {
@@ -144,6 +168,22 @@ export function useSystemRuntime({
         ),
         endpoint: "/v1/admin/workspace-update/build-clawd",
         started: t("clawd 编译已开始，下面会自动刷新进度。", "clawd build started. Progress will refresh automatically."),
+      },
+      nginx_enable: {
+        confirm: t(
+          "将安装或启动 nginx，配置 RustClaw Web 入口，并部署已有 UI 产物。可能需要系统管理员权限，确认继续吗？",
+          "Install or start nginx, configure the RustClaw web entry, and deploy the existing UI assets. System administrator privileges may be required. Continue?",
+        ),
+        endpoint: "/v1/admin/workspace-update/nginx-enable",
+        started: t("nginx 启用任务已开始。", "The nginx enable task has started."),
+      },
+      nginx_deploy: {
+        confirm: t(
+          "将构建当前 UI 源码并部署到 nginx；Release 安装会直接部署包内 UI。确认继续吗？",
+          "Build the current UI source and deploy it to nginx. Release installations deploy the packaged UI directly. Continue?",
+        ),
+        endpoint: "/v1/admin/workspace-update/nginx-deploy",
+        started: t("nginx UI 部署已开始。", "The nginx UI deployment has started."),
       },
       release_deploy: {
         confirm: t(
@@ -345,6 +385,7 @@ export function useSystemRuntime({
     void fetchHostSystemSummary();
     if (isAdminIdentity) {
       void fetchWorkspaceUpdateStatus(true);
+      void fetchNginxStatus(true);
       void fetchPiAppStatus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -352,6 +393,12 @@ export function useSystemRuntime({
 
   useEffect(() => {
     const status = workspaceUpdateStatus?.status;
+    if (
+      (workspaceUpdateStatus?.mode === "nginx_enable" || workspaceUpdateStatus?.mode === "nginx_deploy") &&
+      (status === "succeeded" || status === "failed" || status === "canceled")
+    ) {
+      void fetchNginxStatus(true);
+    }
     if (status === "running" || status === "restarting") {
       workspaceUpdateWasActiveRef.current = true;
       workspaceUpdateActiveModeRef.current = workspaceUpdateStatus?.mode;
@@ -413,6 +460,10 @@ export function useSystemRuntime({
     workspaceUpdateLoading,
     workspaceUpdateCanceling,
     workspaceUpdateMessage,
+    nginxStatus,
+    nginxStatusLoading,
+    nginxStatusError,
+    fetchNginxStatus,
     fetchWorkspaceUpdateStatus,
     startWorkspaceUpdate,
     cancelWorkspaceUpdate,

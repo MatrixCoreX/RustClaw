@@ -657,13 +657,13 @@ fn process_basic_port_list_evidence_keeps_all_interface_port_samples() {
         })
         .collect::<Vec<_>>();
     listeners.push(json!({
-        "local_endpoint": "0.0.0.0:8787",
+        "local_endpoint": "0.0.0.0:8788",
         "local_address": "0.0.0.0",
-        "port": "8787",
+        "port": "8788",
         "bind_scope": "all_interfaces",
         "is_wildcard": true,
         "is_loopback": false,
-        "process_name": "clawd",
+        "process_name": "webd",
         "pid": 878474,
     }));
     let all_interface_listeners = vec![listeners.last().cloned().expect("all-interface listener")];
@@ -684,11 +684,11 @@ fn process_basic_port_list_evidence_keeps_all_interface_port_samples() {
                     "listeners": listeners,
                     "listeners_truncated": false,
                     "localhost_listener_count": 30,
-                    "ports": ["40000", "8787"],
+                    "ports": ["40000", "8788"],
                     "all_interface_listener_count": 1,
                     "all_interface_listeners": all_interface_listeners,
                     "all_interface_listeners_truncated": false,
-                    "all_interface_ports": ["8787"],
+                    "all_interface_ports": ["8788"],
                     "internet_reachability": "not_observed"
                 }
             })
@@ -721,7 +721,7 @@ fn process_basic_port_list_evidence_keeps_all_interface_port_samples() {
     assert!(all_interface_ports
         .get("sample_values")
         .and_then(Value::as_array)
-        .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("8787"))));
+        .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("8788"))));
     let all_interface_listener = items
         .iter()
         .find(|item| {
@@ -732,9 +732,9 @@ fn process_basic_port_list_evidence_keeps_all_interface_port_samples() {
         .get("sample_values")
         .and_then(Value::as_array)
         .is_some_and(|values| values.iter().any(|value| {
-            value.get("local_endpoint").and_then(Value::as_str) == Some("0.0.0.0:8787")
-                && value.get("port").and_then(Value::as_str) == Some("8787")
-                && value.get("process_name").and_then(Value::as_str) == Some("clawd")
+            value.get("local_endpoint").and_then(Value::as_str) == Some("0.0.0.0:8788")
+                && value.get("port").and_then(Value::as_str) == Some("8788")
+                && value.get("process_name").and_then(Value::as_str) == Some("webd")
                 && value.get("pid").and_then(Value::as_i64) == Some(878474)
         })));
 }

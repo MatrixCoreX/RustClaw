@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use std::path::Path;
+use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -65,36 +65,15 @@ fn selected_provider_api_key_env_names(vendor: &str, provider_type: &str) -> Vec
     names
 }
 
-fn local_clawd_base_url_from_config(config_path: &Path) -> String {
-    let parsed = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|raw| raw.parse::<toml::Value>().ok());
-    let server = parsed
-        .as_ref()
-        .and_then(|value| value.get("server"))
-        .and_then(|value| value.as_table());
-    if let Some(base_url) = server
-        .and_then(|table| table.get("clawd_base_url"))
-        .and_then(|value| value.as_str())
+fn local_clawd_base_url_from_internal_listen(internal_listen: Option<&str>) -> String {
+    let address = internal_listen
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        return base_url.trim_end_matches('/').to_string();
-    }
-    let listen = server
-        .and_then(|table| table.get("listen"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("127.0.0.1:8787");
-    let loopback_listen = if listen.starts_with("0.0.0.0:") {
-        listen.replacen("0.0.0.0", "127.0.0.1", 1)
-    } else if listen.starts_with("[::]:") {
-        listen.replacen("[::]", "[::1]", 1)
-    } else {
-        listen.to_string()
-    };
-    format!("http://{}", loopback_listen.trim_end_matches('/'))
+        .and_then(|value| value.parse::<SocketAddr>().ok())
+        .filter(|value| value.ip().is_loopback());
+    address
+        .map(|value| format!("http://{value}"))
+        .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string())
 }
 
 pub(crate) async fn run_skill_with_runner(
@@ -371,8 +350,9 @@ pub(crate) async fn run_skill_with_runner_once(
         "skill_runner_process_sandbox_prepared"
     );
     let sandbox_token_store_dir = prepared.additional_writable_targets.first().cloned();
+    let internal_listen = std::env::var("RUSTCLAW_INTERNAL_LISTEN").ok();
     let local_clawd_base_url =
-        local_clawd_base_url_from_config(Path::new(&state.reload_ctx.config_path_for_reload));
+        local_clawd_base_url_from_internal_listen(internal_listen.as_deref());
     let mut cmd = prepared.command;
     if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
         tracing::info!(

@@ -65,14 +65,13 @@ prepare_workspace() {
   ln -s "$ROOT_DIR/scripts" "$TEMP_WORKSPACE/scripts"
   ln -s "$ROOT_DIR/target" "$TEMP_WORKSPACE/target"
 
-  python3 - "$TEMP_WORKSPACE/configs/config.toml" "$PORT" "$TEMP_WORKSPACE/data/tasks.sqlite" <<'PY'
+  python3 - "$TEMP_WORKSPACE/configs/config.toml" "$TEMP_WORKSPACE/data/tasks.sqlite" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 path = Path(sys.argv[1])
-port = sys.argv[2]
-sqlite_path = sys.argv[3]
+sqlite_path = sys.argv[2]
 text = path.read_text(encoding="utf-8")
 
 def replace_once(pattern: str, replacement: str, raw: str) -> str:
@@ -81,7 +80,6 @@ def replace_once(pattern: str, replacement: str, raw: str) -> str:
         raise SystemExit(f"failed to patch config pattern: {pattern}")
     return updated
 
-text = replace_once(r'^listen\s*=\s*".*"$', f'listen = "127.0.0.1:{port}"', text)
 text = replace_once(r'^sqlite_path\s*=\s*".*"$', f'sqlite_path = "{sqlite_path}"', text)
 text = replace_once(r'^access_profile\s*=\s*".*"$', 'access_profile = "full"', text)
 text = replace_once(r'^poll_interval_ms\s*=\s*\d+$', 'poll_interval_ms = 200', text)
@@ -104,7 +102,8 @@ start_clawd() {
   local log_path="$1"
   (
     cd "$TEMP_WORKSPACE"
-    WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
+    RUSTCLAW_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
+      WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
   ) >"$log_path" 2>&1 &
   CLAWD_PID=$!
 }

@@ -10,6 +10,9 @@ pub use defaults::{
     base_skill_names, core_skills_always_enabled, skill_store_optional_skill_names,
 };
 
+pub const CLAWD_INTERNAL_LISTEN: &str = "127.0.0.1:8787";
+pub const CLAWD_INTERNAL_BASE_URL: &str = "http://127.0.0.1:8787";
+
 pub fn llm_vendor_api_key_env_names(vendor: &str) -> &'static [&'static str] {
     match vendor.trim().to_ascii_lowercase().as_str() {
         "openai" => &["OPENAI_API_KEY"],
@@ -80,9 +83,8 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
-    pub listen: String,
     pub request_timeout_seconds: u64,
-    /// 可选。telegramd 等连 clawd 的地址；未设则用 http://{listen}（listen 为 0.0.0.0 时自动改为 127.0.0.1）。
+    /// 可选。仅供将通信守护进程显式连到另一个 clawd 实例。
     #[serde(default)]
     pub clawd_base_url: Option<String>,
 }

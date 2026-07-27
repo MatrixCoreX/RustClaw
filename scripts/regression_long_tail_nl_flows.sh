@@ -238,16 +238,14 @@ prepare_temp_workspace() {
 
 patch_temp_config() {
   local config_path="$1"
-  local port="$2"
-  local sqlite_path="$3"
-  python3 - "$config_path" "$port" "$sqlite_path" <<'PY'
+  local sqlite_path="$2"
+  python3 - "$config_path" "$sqlite_path" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 config_path = Path(sys.argv[1])
-port = sys.argv[2]
-sqlite_path = sys.argv[3]
+sqlite_path = sys.argv[2]
 text = config_path.read_text(encoding="utf-8")
 
 def replace_once(pattern: str, replacement: str, raw: str) -> str:
@@ -256,7 +254,6 @@ def replace_once(pattern: str, replacement: str, raw: str) -> str:
         raise SystemExit(f"failed to patch config pattern: {pattern}")
     return updated
 
-text = replace_once(r'^listen\s*=\s*".*"$', f'listen = "127.0.0.1:{port}"', text)
 text = replace_once(r'^sqlite_path\s*=\s*".*"$', f'sqlite_path = "{sqlite_path}"', text)
 text = replace_once(
     r'^access_profile\s*=\s*".*"$',
@@ -1151,7 +1148,6 @@ fi
 prepare_temp_workspace "$TEMP_WORKSPACE"
 patch_temp_config \
   "$TEMP_WORKSPACE/configs/config.toml" \
-  "$PORT" \
   "$TEMP_WORKSPACE/data/long_tail_nl.sqlite"
 prepare_http_demo "$TEMP_WORKSPACE"
 prepare_http_repair_demo "$TEMP_WORKSPACE"
@@ -1174,7 +1170,8 @@ REGULAR_USER_KEY="$(
     # shellcheck source=/dev/null
     source "$RUNTIME_ENV_FILE"
   fi
-  WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
+  RUSTCLAW_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
+    WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
 ) >"$LOG_DIR/clawd.log" 2>&1 &
 CLAWD_PID=$!
 

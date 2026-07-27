@@ -3,6 +3,12 @@ export interface VoiceInputDeviceOption {
   label: string;
 }
 
+export type VoiceRecordingAvailability =
+  | "available"
+  | "insecure_context"
+  | "media_devices_unavailable"
+  | "audio_context_unavailable";
+
 export interface PcmWavRecordingSession {
   stop: () => Promise<Blob>;
   cancel: () => Promise<void>;
@@ -39,6 +45,16 @@ export function pcmWavRecordingSupported(): boolean {
   if (typeof window === "undefined") return false;
   const browserWindow = window as AudioContextWindow;
   return Boolean(browserWindow.AudioContext ?? browserWindow.webkitAudioContext);
+}
+
+export function voiceRecordingAvailability(): VoiceRecordingAvailability {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return "media_devices_unavailable";
+  }
+  if (!window.isSecureContext) return "insecure_context";
+  if (!navigator.mediaDevices?.getUserMedia) return "media_devices_unavailable";
+  if (!pcmWavRecordingSupported()) return "audio_context_unavailable";
+  return "available";
 }
 
 export async function startPcmWavRecording(

@@ -25,17 +25,7 @@ if [[ ! -x "${CLAWD_BIN}" ]]; then
   exit 1
 fi
 
-LISTEN_ADDR="$(
-python3 - "${CONFIG_PATH}" <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-cfg = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-listen = str(cfg.get("server", {}).get("listen", "127.0.0.1:8787"))
-print(listen)
-PY
-)"
+LISTEN_ADDR="${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
 PORT="${LISTEN_ADDR##*:}"
 
 pkill -f 'target/release/clawd|cargo run -p clawd' || true

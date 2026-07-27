@@ -685,31 +685,37 @@ reload_nginx() {
 
   if systemctl_available; then
     sudo "$nginx_bin" -t
-    sudo systemctl reload nginx
-    echo "Nginx reloaded via systemctl."
+    sudo systemctl enable nginx >/dev/null
+    if sudo systemctl is-active --quiet nginx; then
+      sudo systemctl reload nginx
+      echo "Nginx reloaded via systemctl."
+    else
+      sudo systemctl start nginx
+      echo "Nginx started via systemctl."
+    fi
     return
   fi
 
   if service_available; then
     sudo "$nginx_bin" -t
-    if sudo service nginx reload >/dev/null 2>&1; then
+    if sudo service nginx status >/dev/null 2>&1 && sudo service nginx reload >/dev/null 2>&1; then
       echo "Nginx reloaded via service."
       return
     fi
-    if sudo service nginx restart >/dev/null 2>&1; then
-      echo "Nginx restarted via service."
+    if sudo service nginx start >/dev/null 2>&1; then
+      echo "Nginx started via service."
       return
     fi
   fi
 
   if openrc_available; then
     sudo "$nginx_bin" -t
-    if sudo rc-service nginx reload >/dev/null 2>&1; then
+    if sudo rc-service nginx status >/dev/null 2>&1 && sudo rc-service nginx reload >/dev/null 2>&1; then
       echo "Nginx reloaded via rc-service."
       return
     fi
-    if sudo rc-service nginx restart >/dev/null 2>&1; then
-      echo "Nginx restarted via rc-service."
+    if sudo rc-service nginx start >/dev/null 2>&1; then
+      echo "Nginx started via rc-service."
       return
     fi
   fi
@@ -723,8 +729,12 @@ reload_nginx() {
 
   if [[ -n "$nginx_bin" ]]; then
     sudo "$nginx_bin" -t
-    sudo "$nginx_bin" -s reload
-    echo "Nginx reloaded via nginx -s reload."
+    if sudo "$nginx_bin" -s reload >/dev/null 2>&1; then
+      echo "Nginx reloaded via nginx -s reload."
+    else
+      sudo "$nginx_bin"
+      echo "Nginx started directly."
+    fi
     return
   fi
 
@@ -885,10 +895,6 @@ if [[ -n "$DO_DEPLOY" ]]; then
     NGINX_CONFIG_CHANGED=1
   fi
 
-  if [[ "$NGINX_CONFIG_CHANGED" == "1" ]]; then
-    reload_nginx
-  else
-    echo "Skip nginx reload (no config changes)."
-  fi
+  reload_nginx
   echo "Deploy completed. Open http://<host-ip>/ to access the UI. Same-origin API requests will be proxied by nginx to $PROXY_UPSTREAM"
 fi

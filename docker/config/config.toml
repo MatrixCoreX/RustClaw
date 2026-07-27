@@ -323,14 +323,11 @@ intent_rules_path = "prompts/schedule_intent_rules.md"
 locale = "zh-CN"
 timezone = "Asia/Shanghai"
 
-# 用途/Purpose: HTTP 服务监听与请求超时.
-# 建议修改/Recommended change: 可改.
-# 风险/Risk: 监听地址改为 0.0.0.0 会暴露外网；超时过低会误中断.
-# listen 填 0.0.0.0:8787 可公网访问；同机 telegramd/whatsappd 会连 127.0.0.1:8787。
-# clawd_base_url（可选）：telegramd/whatsappd 连 clawd 的地址；未设则用 http://{listen}。
+# 用途/Purpose: clawd 内部 HTTP 请求超时.
+# clawd 固定只监听 127.0.0.1:8787；容器对外只发布 webd :8788。
+# clawd_base_url（可选）仅供通信守护进程显式连到另一个 clawd 实例。
 #clawd_base_url = "http://127.0.0.1:8787"
 [server]
-listen = "0.0.0.0:8787"
 request_timeout_seconds = 30
 # 用途/Purpose: 技能执行并发/超时与启用基线.
 # 建议修改/Recommended change: 可改，但建议优先用 skill_switches 管理开关.

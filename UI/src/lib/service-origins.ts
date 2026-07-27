@@ -26,18 +26,6 @@ function currentHttpOrigin(location: BrowserLocation): string | null {
   }
 }
 
-export function defaultClawdBaseUrl(
-  location?: BrowserLocation,
-): string {
-  if (!location) return "http://127.0.0.1:8787";
-  if (LOCAL_FRONTEND_PORTS.has(location.port)) {
-    return originWithPort(location, "8787") ?? "http://127.0.0.1:8787";
-  }
-  return currentHttpOrigin(location) ??
-    originWithPort(location, "8787") ??
-    "http://127.0.0.1:8787";
-}
-
 export function defaultWebdBaseUrl(
   location?: BrowserLocation,
 ): string {
@@ -48,6 +36,12 @@ export function defaultWebdBaseUrl(
   return currentHttpOrigin(location) ??
     originWithPort(location, "8788") ??
     "http://127.0.0.1:8788";
+}
+
+export function defaultBrowserApiBaseUrl(
+  location?: BrowserLocation,
+): string {
+  return defaultWebdBaseUrl(location);
 }
 
 function preferredServiceBaseUrl(
@@ -65,14 +59,14 @@ function preferredServiceBaseUrl(
   return normalized;
 }
 
-export function preferredClawdBaseUrl(
+export function preferredBrowserApiBaseUrl(
   stored: string | null,
   location?: BrowserLocation,
 ): string {
   return preferredServiceBaseUrl(
     stored,
     location,
-    defaultClawdBaseUrl(location),
+    defaultBrowserApiBaseUrl(location),
     "8787",
   );
 }

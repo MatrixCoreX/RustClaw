@@ -10,7 +10,7 @@ services:
       RUST_LOG: warn
       RUSTCLAW_PROFILE: release
     ports:
-      - "8787:8787"
+      - "8788:8788"
     restart: unless-stopped
     volumes:
       - rustclaw-data:/app/data

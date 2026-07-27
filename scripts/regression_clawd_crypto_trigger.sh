@@ -92,16 +92,7 @@ need_cmd jq
 need_cmd python3
 
 if [[ -z "$BASE_URL" ]]; then
-  BASE_URL="$(
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-listen = str(cfg.get("server", {}).get("listen", "127.0.0.1:8787"))
-print(f"http://{listen}")
-PY
-  )"
+  BASE_URL="http://${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
 fi
 BASE_URL="${BASE_URL%/}"
 

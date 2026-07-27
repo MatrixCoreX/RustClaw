@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::routing::{delete, get, get_service, post, put};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
 use claw_core::types::{
@@ -16,8 +16,6 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Semaphore;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
-use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -124,7 +122,7 @@ pub(crate) use bootstrap::active_prompt_vendor_name;
 use bootstrap::{
     load_command_intent_runtime, load_feishu_send_config, load_lark_send_config,
     load_memory_runtime_config, load_persona_prompt, load_prompt_template_for_state,
-    load_schedule_runtime, load_wechat_send_config, resolve_ui_dist_dir,
+    load_schedule_runtime, load_wechat_send_config,
 };
 use db_init::{
     ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, ensure_task_lease_schema,
@@ -607,7 +605,6 @@ async fn run() -> anyhow::Result<()> {
         );
     }
 
-    let ui_dist_dir = resolve_ui_dist_dir(&workspace_root);
     let telegram_runtime_bots = config.telegram_runtime_bots();
     let telegram_bot_token = telegram_runtime_bots
         .iter()
@@ -843,16 +840,6 @@ async fn run() -> anyhow::Result<()> {
     spawn_schedule_worker(state.clone());
     http::ui_routes::spawn_nni_heartbeat_worker(state.clone());
 
-    let ui_index_path = ui_dist_dir.join("index.html");
-    if ui_index_path.exists() {
-        info!("UI static assets enabled at {}", ui_dist_dir.display());
-    } else {
-        warn!(
-            "UI static assets missing: {} (run `cd UI && npm run build`)",
-            ui_index_path.display()
-        );
-    }
-
     let api = Router::new()
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
@@ -914,20 +901,11 @@ async fn run() -> anyhow::Result<()> {
         .route("/admin/mcp/servers/:server_id/test", post(test_mcp_server))
         .with_state(state.clone());
 
-    let ui_service =
-        get_service(ServeDir::new(&ui_dist_dir).not_found_service(ServeFile::new(ui_index_path)))
-            .layer(SetResponseHeaderLayer::if_not_present(
-                axum::http::header::CACHE_CONTROL,
-                HeaderValue::from_static("no-store, max-age=0"),
-            ));
+    let app = Router::new().nest("/v1", api).layer(api_cors_layer());
 
-    let app = Router::new()
-        .nest("/v1", api)
-        .fallback_service(ui_service)
-        .layer(api_cors_layer());
-
-    let listener = tokio::net::TcpListener::bind(&config.server.listen).await?;
-    info!("clawd listening on {}", config.server.listen);
+    let clawd_listen = clawd_internal_listen()?;
+    let listener = tokio::net::TcpListener::bind(&clawd_listen).await?;
+    info!("clawd internal listener bound to {}", clawd_listen);
 
     // §3.5d: prompts hot-reload via SIGHUP。
     // 行为见 [`crate::PromptsConfig`] / [`bootstrap::reload_runtime_prompts`]。
@@ -938,6 +916,24 @@ async fn run() -> anyhow::Result<()> {
     state.core.mcp_runtime.stop().await;
     serve_result?;
     Ok(())
+}
+
+fn clawd_internal_listen() -> anyhow::Result<String> {
+    let listen = std::env::var("RUSTCLAW_INTERNAL_LISTEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_LISTEN.to_string());
+    validate_clawd_internal_listen(&listen)
+}
+
+fn validate_clawd_internal_listen(listen: &str) -> anyhow::Result<String> {
+    let address = listen.parse::<std::net::SocketAddr>().map_err(|_| {
+        anyhow::anyhow!("RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address")
+    })?;
+    if !address.ip().is_loopback() {
+        anyhow::bail!("RUSTCLAW_INTERNAL_LISTEN must use a loopback address");
+    }
+    Ok(address.to_string())
 }
 
 /// §3.5d: 启动后台 SIGHUP listener。该任务与 `axum::serve` 同 runtime 共存；
@@ -981,6 +977,10 @@ fn spawn_prompts_sighup_listener(state: AppState, cfg: claw_core::config::Prompt
 fn spawn_prompts_sighup_listener(_state: AppState, _cfg: claw_core::config::PromptsConfig) {
     // No-op on non-unix targets.
 }
+
+#[cfg(test)]
+#[path = "internal_listener_tests.rs"]
+mod internal_listener_tests;
 
 async fn submit_task(
     State(state): State<AppState>,

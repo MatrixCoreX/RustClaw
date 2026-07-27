@@ -15,7 +15,9 @@
 /skills_output/
 /.rustclaw/
 /plan/
-/docs/
+/docs/*
+!/docs/architecture/
+!/docs/architecture/*.md
 /document/
 /scripts/nl_suite_logs/
 /skill_develop/.cache/

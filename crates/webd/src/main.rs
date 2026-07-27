@@ -13,7 +13,7 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, get_service, post};
 use axum::Json;
 use axum::Router;
 use claw_core::config::AppConfig;
@@ -21,6 +21,8 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
+use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -139,12 +141,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let listen = config.webd.listen.trim().to_string();
-    let app = Router::new()
-        .route("/webd/login", post(webd_login).options(webd_options))
-        .route("/webd/logout", post(webd_logout).options(webd_options))
-        .route("/webd/session", get(webd_session).options(webd_options))
-        .fallback(proxy_handler)
-        .with_state(state);
+    let ui_dist_dir = resolve_ui_dist_dir();
+    let ui_index_path = ui_dist_dir.join("index.html");
+    if ui_index_path.exists() {
+        info!("webd UI static assets enabled at {}", ui_dist_dir.display());
+    } else {
+        warn!("webd UI static assets missing: {}", ui_index_path.display());
+    }
+    let app = build_webd_router(state, ui_dist_dir);
 
     let listener = match TcpListener::bind(&listen).await {
         Ok(l) => l,
@@ -169,6 +173,32 @@ async fn main() -> anyhow::Result<()> {
     .await
     .context("axum serve failed")?;
     Ok(())
+}
+
+fn build_webd_router(state: AppState, ui_dist_dir: PathBuf) -> Router {
+    let ui_index_path = ui_dist_dir.join("index.html");
+    let ui_service =
+        get_service(ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_path)))
+            .layer(SetResponseHeaderLayer::if_not_present(
+                axum::http::header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store, max-age=0"),
+            ));
+    Router::new()
+        .route("/webd/login", post(webd_login).options(webd_options))
+        .route("/webd/logout", post(webd_logout).options(webd_options))
+        .route("/webd/session", get(webd_session).options(webd_options))
+        .route("/v1", any(proxy_handler))
+        .route("/v1/*path", any(proxy_handler))
+        .fallback_service(ui_service)
+        .with_state(state)
+}
+
+fn resolve_ui_dist_dir() -> PathBuf {
+    std::env::var("RUSTCLAW_UI_DIST")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("UI/dist"))
 }
 
 #[derive(Debug, Deserialize)]

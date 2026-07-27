@@ -717,7 +717,7 @@ build_ui_if_needed() {
 
 choose_ui_mode
 if [[ "$ENABLE_UI" == "1" ]]; then
-	echo "Web UI enabled via --with-ui; clawd will serve UI/dist directly without nginx." # zh: --with-ui 会由 clawd 直接托管 UI/dist，不依赖 nginx。
+	echo "Web UI enabled via --with-ui; webd will serve UI/dist directly without nginx." # zh: --with-ui 会由 webd 直接托管 UI/dist，不依赖 nginx。
 else
 	echo "Web UI prompt skipped; continuing with release startup." # zh: 跳过 Web UI 交互，继续执行 release 启动。
 fi
@@ -744,7 +744,7 @@ if [[ ! -x "$CLAWD_BIN" ]]; then
 fi
 echo "Detected prebuilt binaries under target/$PROFILE; starting directly in background." # zh: 已检测到预编译二进制，直接后台启动。
 
-# Optional UI build and stale check for clawd static assets.
+# Optional UI build and stale check for webd static assets.
 echo "Step 4.5/5: UI build check" # zh: 第 4.5/5 步：检查 UI 资源是否需要构建
 build_ui_if_needed
 
@@ -1005,13 +1005,14 @@ if [[ "$ENABLE_UI" == "1" ]]; then
 import tomllib
 from pathlib import Path
 
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-listen = str((cfg.get("server", {}) or {}).get("listen", "127.0.0.1:8787")).strip()
+path = Path("configs/channels/webd.toml")
+cfg = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+listen = str((cfg.get("webd", {}) or {}).get("listen", "127.0.0.1:8788")).strip()
 if listen.startswith("0.0.0.0:"):
     listen = "127.0.0.1:" + listen.rsplit(":", 1)[1]
 elif listen.startswith("[::]:"):
     listen = "127.0.0.1:" + listen.rsplit(":", 1)[1]
-print(listen or "127.0.0.1:8787")
+print(listen or "127.0.0.1:8788")
 PY
 	)"
 	echo "Local UI: http://$UI_LISTEN/"

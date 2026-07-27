@@ -240,6 +240,15 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/admin/workspace-update/build-clawd",
             post(start_workspace_update_clawd_only),
         )
+        .route("/admin/nginx", get(get_nginx_ui_status))
+        .route(
+            "/admin/workspace-update/nginx-enable",
+            post(start_workspace_update_nginx_enable),
+        )
+        .route(
+            "/admin/workspace-update/nginx-deploy",
+            post(start_workspace_update_nginx_deploy),
+        )
         .route(
             "/admin/workspace-update/deploy-release",
             post(start_workspace_update_release_deploy),
@@ -355,6 +364,7 @@ include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/slo_metrics.rs");
 include!("ui_routes/service_control.rs");
 include!("ui_routes/workspace_update.rs");
+include!("ui_routes/workspace_nginx.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/skill_import_config.rs");
@@ -386,6 +396,10 @@ mod crypto_credentials_tests;
 #[cfg(test)]
 #[path = "ui_routes/host_system_tests.rs"]
 mod host_system_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/workspace_nginx_tests.rs"]
+mod workspace_nginx_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/auth_contract_tests.rs"]

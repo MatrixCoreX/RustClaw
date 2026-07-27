@@ -286,6 +286,8 @@ export type WorkspaceUpdateMode =
   | "full"
   | "ui_only"
   | "clawd_only"
+  | "nginx_enable"
+  | "nginx_deploy"
   | "release_deploy"
   | "release_package"
   | "source_checkout";
@@ -313,6 +315,16 @@ export interface WorkspaceUpdateStatus {
   next_step?: string | null;
   next_step_key?: string | null;
   next_step_args?: Record<string, unknown> | null;
+}
+
+export interface NginxUiStatus {
+  supported: boolean;
+  platform: string;
+  installed: boolean;
+  running: boolean;
+  configured: boolean;
+  ui_deployed: boolean;
+  clawd_exposure: "loopback_only" | string;
 }
 
 export interface PiAppStatusResponse {

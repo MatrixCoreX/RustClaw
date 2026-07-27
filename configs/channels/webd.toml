@@ -1,5 +1,5 @@
 # 用途/Purpose: webd — 对外 HTTP 反向代理到本机 clawd；可选 `/webd/login` 会话并注入 `X-RustClaw-Key`。
-# 建议修改/Recommended change: 启用 webd 时把主配置 `configs/config.toml` 里 `[server].listen` 改为 127.0.0.1:8787，由 webd 独占对外端口。
+# clawd 固定只监听 127.0.0.1:8787；webd 是对外 HTTP 入口。
 # 风险/Risk: `[webd].listen` 勿与 clawd、本目录其他渠道守护进程监听冲突。
 #
 # 本文件由 `AppConfig::load` 与主配置合并加载（后加载覆盖先加载的同名键）。

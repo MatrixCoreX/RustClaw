@@ -169,15 +169,11 @@ async fn main() -> anyhow::Result<()> {
         warn!("whatsappd disabled by config [whatsapp].enabled=false");
     }
 
-    let clawd_base_url = config.server.clawd_base_url.clone().unwrap_or_else(|| {
-        let listen = config.server.listen.as_str();
-        let host = if listen.starts_with("0.0.0.0:") {
-            listen.replacen("0.0.0.0", "127.0.0.1", 1)
-        } else {
-            listen.to_string()
-        };
-        format!("http://{}", host)
-    });
+    let clawd_base_url = config
+        .server
+        .clawd_base_url
+        .clone()
+        .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string());
     let i18n_path = resolve_i18n_path(&config.whatsapp.language, &config.whatsapp.i18n_path);
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let state = AppState {

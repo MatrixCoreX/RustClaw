@@ -13,7 +13,7 @@ RustClaw is built for daily use and administration from messaging apps or a brow
 
 Current repository highlights:
 
-- multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`
+- multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, and the browser UI through `webd`, with optional nginx/TLS
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
@@ -446,6 +446,8 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 6. [Release validation](docs/architecture/06-release-validation.md)
 7. [Office artifact workspace](docs/architecture/07-office-artifacts.md)
 8. [Skill-owned storage](docs/architecture/08-skill-owned-storage.md)
+9. [Interactive coding and presentation](docs/architecture/09-interactive-coding.md)
+10. [Web entry and core isolation](docs/architecture/10-web-entry-security.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.
@@ -457,7 +459,7 @@ The [full documentation index](docs/README.md) links every engineering document 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
 - `crates/skill-runner`: launches runner skill binaries; `clawd` resolves registry kind / `runner_name` before invoking it
 - `crates/clawcli`: terminal CLI for talking to `clawd`
-- `crates/webd`: optional reverse proxy and login session bridge for public/browser access
+- `crates/webd`: browser UI host, login/session boundary, and authenticated proxy to the internal core API
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
 - `services/wa-web-bridge`: local Node bridge used by the WhatsApp Web channel
 - `crates/skills/*`: fixed/core built-in skill implementations and `INTERFACE.md` specs
@@ -487,7 +489,7 @@ rustclaw -logs clawd 200 --follow
 
 Operational rules:
 
-- Local deployments serve the UI directly and do not need nginx.
+- Local deployments open the UI through `webd` and do not need nginx.
 - Cloud deployments opt in to nginx only when a domain or TLS reverse proxy is needed.
 - Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; the repository does not keep a host-specific unit.
 - Raspberry Pi users should prefer the prebuilt aarch64 Release package to avoid repeated full builds on low-memory hardware.
@@ -514,17 +516,37 @@ rustclaw -key disable rk-xxxx
 
 ## UI, API, and `webd`
 
-The main API is provided by `clawd`. Deployment is split by environment:
+The main API is provided by the loopback-only `clawd`, while all browser traffic enters through `webd`:
 
-- local workstation: `clawd` serves both `UI/dist` and `/v1` directly, without nginx
-- cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`
-- `webd` provides password-login/session bridging when enabled; direct local UI can use a RustClaw key
+```mermaid
+flowchart LR
+    B[Browser]
+    N[nginx<br/>optional TLS + static UI]
+    W[webd :8788<br/>UI + login + session + proxy]
+    C[clawd 127.0.0.1:8787<br/>internal /v1 API]
+    U[UI/dist]
+
+    B -->|local| W
+    B -->|domain / TLS| N
+    N -->|static files| U
+    N -->|/v1 and /webd| W
+    W -->|static files without nginx| U
+    W -->|authenticated /v1| C
+```
+
+- local workstation: open `webd` directly; it serves `UI/dist` and proxies authenticated `/v1` requests
+- cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`; nginx never proxies to `clawd`
+- `webd` is the browser security boundary and provides password login, session persistence, credential injection, request limits, and API proxying
+- `clawd` does not serve browser assets and cannot bind a non-loopback address; local channel daemons and `clawcli` may use its internal API
+- The dashboard's **Web Entry** section reports nginx installation, process, site, and UI deployment status. Admins can enable or repair nginx, deploy the current UI, and open the checked entry.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
+- Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the RustClaw host itself.
 - The `AI Learning` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
 - The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
+- On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
 
-In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
+`clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` commonly listens on `0.0.0.0:8788`, and deploy scripts derive the optional nginx upstream from `configs/channels/webd.toml`. Docker publishes `8788`, not `8787`.
 
 Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 
@@ -541,6 +563,9 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/tasks/cancel-by-task-id`
 - `POST /v1/tasks/cancel-one`: cancels by active-list index
 - `POST /v1/services/{service}/{action}`: browser-console service start/stop/restart; failures return machine fields such as `error_code`, `status_code`, `message_key`, `service`, and `action`
+- `GET /v1/admin/nginx`: returns admin-only nginx installation, process, site, and deployed-UI status
+- `POST /v1/admin/workspace-update/nginx-enable`: installs/starts or repairs the nginx entry and deploys existing UI assets
+- `POST /v1/admin/workspace-update/nginx-deploy`: builds current UI source when available, then deploys it to nginx
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
@@ -553,7 +578,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` stores the current NNI state.
 - The standalone `nni_server` writes runtime events to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) instead of `clawd.log`; enable `NNI_SERVER_LOG_STDOUT=1` only when an external supervisor intentionally captures those logs.
 
-Quick example:
+Machine-local API example (`8787` must not be exposed or port-forwarded):
 
 ```bash
 curl http://127.0.0.1:8787/v1/health \
@@ -717,7 +742,7 @@ UI notes:
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
-- `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
+- `webd` is the only browser-facing RustClaw service; nginx is an optional outer TLS/static layer, and `clawd` remains loopback-only
 
 <!-- ai-learning-stage: capabilities-artifacts -->
 ## Skills

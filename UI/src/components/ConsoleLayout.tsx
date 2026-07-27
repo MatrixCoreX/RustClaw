@@ -9,16 +9,11 @@ type AuthMode = "key" | "webd" | null;
 type Translate = (zh: string, en: string) => string;
 
 const NAV_COLLAPSED_STORAGE_KEY = "rustclaw.monitor.navCollapsed";
-const CONTENT_ACTION_SELECTOR =
-  "button, a[href], input, select, textarea, [role='button'], [role='link']";
 
 export function shouldCollapseNavigationForTarget(target: EventTarget | null): boolean {
   const candidate = target as HTMLElement | null;
   if (typeof candidate?.closest !== "function") return false;
-  const interactive = candidate.closest<HTMLElement>(CONTENT_ACTION_SELECTOR);
-  if (!interactive || interactive.closest("[data-keep-navigation-open='true']")) return false;
-  return !interactive.matches(":disabled")
-    && interactive.getAttribute("aria-disabled") !== "true";
+  return !candidate.closest("[data-keep-navigation-open='true']");
 }
 
 export interface ConsoleNavItem {
@@ -84,7 +79,7 @@ export function ConsoleLayout({
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [navDropdownOpen]);
 
-  const collapseNavigationForContentAction = (event: ReactMouseEvent<HTMLElement>) => {
+  const collapseNavigationForContentClick = (event: ReactMouseEvent<HTMLElement>) => {
     if (sidebarCollapsed || !window.matchMedia("(min-width: 1024px)").matches) return;
     if (!shouldCollapseNavigationForTarget(event.target)) return;
     setSidebarCollapsed(true);
@@ -283,7 +278,7 @@ export function ConsoleLayout({
 
         <main
           className="mx-auto min-w-0 max-w-7xl space-y-4"
-          onClickCapture={collapseNavigationForContentAction}
+          onClickCapture={collapseNavigationForContentClick}
         >
           {children}
         </main>

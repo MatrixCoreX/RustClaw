@@ -21,10 +21,10 @@ import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
 import {
   PcmWavRecordingError,
-  pcmWavRecordingSupported,
   shouldRetryVoiceCaptureWithDefault,
   startPcmWavRecording,
   voiceAudioTrackConstraints,
+  voiceRecordingAvailability,
   voiceInputDeviceOptions,
   type PcmWavRecordingSession,
   type VoiceInputDeviceOption,
@@ -176,7 +176,8 @@ export function useChatRuntime({
   const [chatSending, setChatSending] = useState(false);
   const [chatWorking, setChatWorking] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
-  const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
+  const [chatVoiceRecordingAvailability] = useState(voiceRecordingAvailability);
+  const chatVoiceRecordingSupported = chatVoiceRecordingAvailability === "available";
   const [chatAudioInputDevices, setChatAudioInputDevices] = useState<
     VoiceInputDeviceOption[]
   >([]);
@@ -675,17 +676,25 @@ export function useChatRuntime({
 
   const startChatVoiceRecording = async () => {
     if (chatRecordingValueRef.current || chatSendingValueRef.current) return;
-    if (!canUseDirectVoiceRecording()) {
+    const availability = voiceRecordingAvailability();
+    if (availability !== "available") {
       setChatError(
-        t(
-          "当前浏览器不允许直接录音。请用 HTTPS 或 localhost 打开页面，或点“上传图片/文件”选择音频。",
-          "This browser cannot record directly here. Open the page with HTTPS or localhost, or choose an audio file from Upload image/file.",
-        ),
+        availability === "insecure_context"
+          ? t(
+              "浏览器禁止 HTTP IP 地址使用麦克风。请通过受信任的 HTTPS 地址访问；如果浏览器就在 RustClaw 主机上，也可以使用 localhost。",
+              "Browsers block microphone access on HTTP IP addresses. Use a trusted HTTPS address, or localhost when the browser runs on the RustClaw host.",
+            )
+          : t(
+              "当前浏览器不支持直接录音，请改用支持录音的现代浏览器或上传音频文件。",
+              "This browser does not support direct recording. Use a modern browser with recording support or upload an audio file.",
+            ),
       );
       return;
     }
     try {
       voiceStopRequestedRef.current = false;
+      chatRecordingValueRef.current = true;
+      setChatRecording(true);
       const selectedDeviceId = chatAudioInputDeviceIdRef.current;
       let stream: MediaStream;
       try {
@@ -701,6 +710,8 @@ export function useChatRuntime({
       }
       if (voiceStopRequestedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
+        chatRecordingValueRef.current = false;
+        setChatRecording(false);
         return;
       }
       const actualDeviceId = stream
@@ -720,9 +731,6 @@ export function useChatRuntime({
       chatVoiceRecorderRef.current = recorder;
       if (voiceStopRequestedRef.current) {
         void finishChatVoiceRecording(recorder);
-      } else {
-        chatRecordingValueRef.current = true;
-        setChatRecording(true);
       }
       setChatError(null);
     } catch (err) {
@@ -742,6 +750,17 @@ export function useChatRuntime({
     }
   };
 
+  const cancelChatVoiceRecording = () => {
+    voiceStopRequestedRef.current = true;
+    const recorder = chatVoiceRecorderRef.current;
+    chatVoiceRecorderRef.current = null;
+    chatRecordingValueRef.current = false;
+    setChatRecording(false);
+    if (recorder) {
+      void recorder.cancel().catch(() => undefined);
+    }
+  };
+
   const finishChatVoiceRecording = async (recorder: PcmWavRecordingSession) => {
     if (chatVoiceRecorderRef.current !== recorder) return;
     chatVoiceRecorderRef.current = null;
@@ -756,8 +775,10 @@ export function useChatRuntime({
         CHAT_MAX_ATTACHMENTS,
       );
       setChatError(null);
-      chatAttachmentsValueRef.current = attached;
-      setChatAttachments(attached);
+      await submitChatMessageSnapshot(chatInputValueRef.current, attached, {
+        clearInput: true,
+        clearAttachments: true,
+      });
     } catch (err) {
       setChatError(
         err instanceof PcmWavRecordingError && err.code === "empty"
@@ -1091,6 +1112,7 @@ export function useChatRuntime({
     chatWorking,
     chatRecording,
     chatVoiceRecordingSupported,
+    chatVoiceRecordingAvailability,
     chatAudioInputDevices,
     chatAudioInputDeviceId,
     chatError,
@@ -1104,6 +1126,7 @@ export function useChatRuntime({
     removeChatAttachment,
     startChatVoiceRecording,
     stopChatVoiceRecording,
+    cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
     queryChatTeachingLlmDebug,
@@ -1569,16 +1592,6 @@ function upsertThreadMessage(messages: ChatMessage[], message: ChatMessage): Cha
   const next = [...messages];
   next[index] = message;
   return next;
-}
-
-function canUseDirectVoiceRecording(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof navigator !== "undefined" &&
-    window.isSecureContext &&
-    Boolean(navigator.mediaDevices?.getUserMedia) &&
-    pcmWavRecordingSupported()
-  );
 }
 
 const SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY =

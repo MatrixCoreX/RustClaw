@@ -1,65 +1,33 @@
 use super::*;
 
-fn write_runner_config(contents: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "rustclaw-runner-config-{}-{}.toml",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos()
-    ));
-    std::fs::write(&path, contents).expect("write runner config");
-    path
-}
-
 #[test]
-fn local_clawd_base_url_uses_active_config_listen_port() {
-    let path = write_runner_config("[server]\nlisten = \"127.0.0.1:59871\"\n");
+fn local_clawd_base_url_accepts_loopback_test_override() {
     assert_eq!(
-        local_clawd_base_url_from_config(&path),
+        local_clawd_base_url_from_internal_listen(Some("127.0.0.1:59871")),
         "http://127.0.0.1:59871"
     );
-    let _ = std::fs::remove_file(path);
+    assert_eq!(
+        local_clawd_base_url_from_internal_listen(Some("[::1]:59872")),
+        "http://[::1]:59872"
+    );
 }
 
 #[test]
-fn local_clawd_base_url_prefers_explicit_base_url() {
-    let path = write_runner_config(
-        "[server]\nlisten = \"127.0.0.1:8787\"\nclawd_base_url = \"http://localhost:9123/control/\"\n",
-    );
+fn local_clawd_base_url_rejects_non_loopback_override() {
     assert_eq!(
-        local_clawd_base_url_from_config(&path),
-        "http://localhost:9123/control"
-    );
-    let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn local_clawd_base_url_normalizes_wildcard_listeners() {
-    let ipv4 = write_runner_config("[server]\nlisten = \"0.0.0.0:8787\"\n");
-    let ipv6 = write_runner_config("[server]\nlisten = \"[::]:8788\"\n");
-    assert_eq!(
-        local_clawd_base_url_from_config(&ipv4),
+        local_clawd_base_url_from_internal_listen(Some("0.0.0.0:8787")),
         "http://127.0.0.1:8787"
     );
-    assert_eq!(local_clawd_base_url_from_config(&ipv6), "http://[::1]:8788");
-    let _ = std::fs::remove_file(ipv4);
-    let _ = std::fs::remove_file(ipv6);
-}
-
-#[test]
-fn local_clawd_base_url_has_stable_missing_config_fallback() {
-    let path = std::env::temp_dir().join(format!(
-        "rustclaw-missing-runner-config-{}-{}.toml",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos()
-    ));
     assert_eq!(
-        local_clawd_base_url_from_config(&path),
+        local_clawd_base_url_from_internal_listen(Some("192.168.1.10:8787")),
+        "http://127.0.0.1:8787"
+    );
+    assert_eq!(
+        local_clawd_base_url_from_internal_listen(Some("invalid")),
+        "http://127.0.0.1:8787"
+    );
+    assert_eq!(
+        local_clawd_base_url_from_internal_listen(None),
         "http://127.0.0.1:8787"
     );
 }

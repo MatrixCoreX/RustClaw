@@ -126,7 +126,7 @@ fn config_preview_keeps_reads_for_a_different_target() {
             capability: "config.read_field".to_string(),
             args: json!({
                 "path": "configs/config.toml",
-                "field_path": "server.listen"
+                "field_path": "webd.listen"
             }),
         },
         AgentAction::CallCapability {
