@@ -1,5 +1,8 @@
 # Release Validation
 
+<!-- ai-learning-stage: development-release -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Skills, media, and models](05-skills-media-models.md) |
 [Architecture index](README.md) |

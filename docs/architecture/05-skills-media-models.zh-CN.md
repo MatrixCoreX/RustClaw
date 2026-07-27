@@ -1,5 +1,8 @@
 # 技能、多媒体与模型
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[编码与可观测性](04-coding-observability.zh-CN.md) |
 [架构索引](README.md) |

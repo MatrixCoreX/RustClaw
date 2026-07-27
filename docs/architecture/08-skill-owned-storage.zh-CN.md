@@ -1,5 +1,8 @@
 # 技能独立存储
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[Office 工件工作区](07-office-artifacts.zh-CN.md) |
 [架构索引](README.md) |

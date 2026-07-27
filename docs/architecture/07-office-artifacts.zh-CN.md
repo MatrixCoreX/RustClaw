@@ -1,5 +1,8 @@
 # Office 工件工作区
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[发布验证](06-release-validation.zh-CN.md) |
 [架构索引](README.md) |

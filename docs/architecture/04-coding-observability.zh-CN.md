@@ -1,5 +1,8 @@
 # 编码与可观测性
 
+<!-- ai-learning-stage: development-release -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 上一页：[任务状态与上下文](03-task-state-context.zh-CN.md) |
 [架构索引](README.md) |

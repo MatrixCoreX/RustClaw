@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
   classifyLearningLink,
+  learningHeadingId,
   orderLearningPagesByStage,
   parseReadmeLearningPages,
   parseStandaloneLearningDocument,
+  parseStandaloneLearningPages,
+  searchLearningPages,
 } from "./ai-learning";
 
 test("groups level-three sections under chapters and omits repository preamble", () => {
@@ -132,6 +135,31 @@ Details.
   assert.match(page.markdown, /## Planning/);
 });
 
+test("splits architecture guides at functional level-two boundaries", () => {
+  const pages = parseStandaloneLearningPages({
+    id: "architecture-agent-loop",
+    chapterId: "architecture-guide",
+    chapterTitle: "Architecture Guide",
+    markdown: `# Agent Loop
+
+Introduction.
+
+## Runtime
+
+Runtime details.
+
+## Planning
+
+Planning details.
+`,
+  });
+
+  assert.deepEqual(pages.map((page) => page.title), ["Runtime", "Planning"]);
+  assert.match(pages[0].markdown, /Introduction/);
+  assert.doesNotMatch(pages[1].markdown, /Runtime details/);
+  assert.equal(pages[0].chapterId, pages[1].chapterId);
+});
+
 test("inherits stable learning stages without exposing metadata in content", () => {
   const pages = parseReadmeLearningPages(`<!-- ai-learning-stage: foundations -->
 ## Overview
@@ -186,4 +214,88 @@ Steps.
     ordered.map((page) => page.title),
     ["Overview", "Tests", "Release"],
   );
+});
+
+test("applies explicit audience metadata and stage defaults", () => {
+  const pages = parseReadmeLearningPages(`<!-- ai-learning-stage: foundations -->
+## Start
+
+Basics.
+
+<!-- ai-learning-stage: agent-runtime -->
+<!-- ai-learning-audience: beginner,developer -->
+## Runtime
+
+Details.
+
+<!-- ai-learning-stage: development-release -->
+## Release
+
+Checks.
+`);
+
+  assert.deepEqual(pages[0].audiences, ["beginner", "operator", "developer"]);
+  assert.deepEqual(pages[1].audiences, ["beginner", "developer"]);
+  assert.deepEqual(pages[2].audiences, ["developer"]);
+  pages.forEach((page) => assert.doesNotMatch(page.markdown, /ai-learning-audience/));
+});
+
+test("standalone documents own their stage and audience metadata", () => {
+  const page = parseStandaloneLearningDocument({
+    id: "architecture",
+    chapterId: "guide",
+    chapterTitle: "Guide",
+    stageId: "wrong-fallback",
+    markdown: `# Runtime
+
+<!-- ai-learning-stage: agent-runtime -->
+<!-- ai-learning-audience: operator,developer -->
+
+## Loop
+
+Details.
+`,
+  });
+
+  assert.equal(page.stageId, "agent-runtime");
+  assert.deepEqual(page.audiences, ["operator", "developer"]);
+  assert.doesNotMatch(page.markdown, /ai-learning-(stage|audience)/);
+});
+
+test("extracts page headings and reading estimates outside code fences", () => {
+  const [page] = parseReadmeLearningPages([
+    "## Guide",
+    "",
+    "Introduction text.",
+    "",
+    "#### First step",
+    "",
+    "Read this.",
+    "",
+    "```md",
+    "## Hidden heading",
+    "```",
+  ].join("\n"));
+
+  assert.equal(page.estimatedMinutes, 1);
+  assert.deepEqual(page.headings.map((heading) => heading.title), ["Guide", "First step"]);
+  assert.equal(page.headings[1].id, learningHeadingId("First step"));
+});
+
+test("searches titles and content with all query tokens", () => {
+  const pages = parseReadmeLearningPages(`## Runtime planning
+
+Capability resolver details.
+
+## Storage
+
+Private database ownership.
+`);
+
+  assert.deepEqual(
+    searchLearningPages(pages, "runtime resolver").map((page) => page.title),
+    ["Runtime planning"],
+  );
+  assert.deepEqual(searchLearningPages(pages, "missing term"), []);
+  assert.equal(searchLearningPages(pages, "").length, 2);
 });

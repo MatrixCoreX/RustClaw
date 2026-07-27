@@ -1,5 +1,8 @@
 # Security and Execution
 
+<!-- ai-learning-stage: safety-operations -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Agent loop and planning](01-agent-loop.md) |
 [Architecture index](README.md) |

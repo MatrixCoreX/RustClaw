@@ -1,5 +1,8 @@
 # Office Artifact Workspace
 
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Release validation](06-release-validation.md) |
 [Architecture index](README.md) |

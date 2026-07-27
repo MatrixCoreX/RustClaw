@@ -1,5 +1,8 @@
 # Coding and Observability
 
+<!-- ai-learning-stage: development-release -->
+<!-- ai-learning-audience: developer -->
+
 <!-- ai-learning-navigation:start -->
 Previous: [Task state and context](03-task-state-context.md) |
 [Architecture index](README.md) |
