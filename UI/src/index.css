@@ -178,6 +178,9 @@
     background:
       radial-gradient(circle at top, var(--theme-shell-radial), transparent 32%),
       linear-gradient(180deg, var(--theme-shell-start) 0%, var(--theme-shell-end) 100%);
+    background-color: var(--theme-shell-end);
+    background-repeat: no-repeat;
+    background-size: 100% 100vh;
     color: var(--theme-body-text);
   }
 
