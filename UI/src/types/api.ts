@@ -285,6 +285,7 @@ export interface SubmitTaskResponse {
 
 export type WorkspaceUpdateMode =
   | "full"
+  | "full_preserve_nginx"
   | "ui_only"
   | "clawd_only"
   | "nginx_enable"

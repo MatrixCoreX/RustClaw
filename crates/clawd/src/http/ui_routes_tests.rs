@@ -1397,6 +1397,16 @@ fn workspace_update_start_preserves_release_lookup_state() {
     assert_eq!(started.latest_release_checked_ts, Some(1_234));
 }
 
+#[test]
+fn workspace_update_full_preserve_nginx_mode_is_explicit() {
+    let previous = WorkspaceUpdateStatus::default();
+
+    let started = begin_workspace_update_status(&previous, WorkspaceUpdateMode::FullPreserveNginx);
+
+    assert_eq!(started.status, "running");
+    assert_eq!(started.mode, "full_preserve_nginx");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn workspace_update_cancel_terminates_the_dedicated_process_group() {
@@ -1574,6 +1584,11 @@ fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() 
     assert!(deploy_script.contains("brew upgrade nginx"));
     assert!(deploy_script.contains("apt-get install -y nginx"));
     assert!(deploy_script.contains("apk add --upgrade nginx"));
+
+    let build_script = include_str!("../../../../build-all.sh");
+    assert!(build_script.contains("preserve-nginx"));
+    assert!(build_script.contains("Preserving nginx as requested"));
+    assert!(build_script.contains("RUSTCLAW_PRESERVE_NGINX"));
 
     let disable_script = include_str!("../../../../scripts/disable-nginx-web.sh");
     assert!(disable_script.contains("brew services stop nginx"));

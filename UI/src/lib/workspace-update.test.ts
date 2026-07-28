@@ -68,6 +68,7 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
   assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
+  assert.equal(formatWorkspaceUpdateStatus("running", "full_preserve_nginx", "zh"), "更新中");
   assert.equal(formatWorkspaceUpdateStatus("running", "nginx_enable", "zh"), "配置中");
   assert.equal(formatWorkspaceUpdateStatus("running", "nginx_disable", "en"), "Disabling");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");

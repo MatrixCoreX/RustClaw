@@ -11,6 +11,7 @@ struct WorkspaceUpdateQuery {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum WorkspaceUpdateMode {
     Full,
+    FullPreserveNginx,
     UiOnly,
     ClawdOnly,
     NginxEnable,
@@ -23,6 +24,7 @@ impl WorkspaceUpdateMode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Full => "full",
+            Self::FullPreserveNginx => "full_preserve_nginx",
             Self::UiOnly => "ui_only",
             Self::ClawdOnly => "clawd_only",
             Self::NginxEnable => "nginx_enable",
@@ -428,6 +430,14 @@ async fn start_workspace_update(
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::Full).await
 }
 
+async fn start_workspace_update_preserve_nginx(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::FullPreserveNginx)
+        .await
+}
+
 async fn start_workspace_update_ui_only(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -508,6 +518,7 @@ async fn start_workspace_update_with_mode(
         guard.source_update_available = source_update_available;
         match mode {
             WorkspaceUpdateMode::Full
+            | WorkspaceUpdateMode::FullPreserveNginx
             | WorkspaceUpdateMode::UiOnly
             | WorkspaceUpdateMode::ClawdOnly
                 if !source_update_available =>
@@ -639,7 +650,7 @@ async fn run_workspace_update_job(
     mode: WorkspaceUpdateMode,
 ) {
     match mode {
-        WorkspaceUpdateMode::Full => {}
+        WorkspaceUpdateMode::Full | WorkspaceUpdateMode::FullPreserveNginx => {}
         WorkspaceUpdateMode::UiOnly => {
             run_workspace_update_ui_only_job(workspace_root, shared, control).await;
             return;
@@ -944,9 +955,14 @@ async fn run_workspace_update_job(
         guard.stderr_tail.clear();
         set_workspace_update_next_step(&mut guard, "workspace_update.build_logs_refreshing");
     }
+    let build_args: &[&str] = if mode == WorkspaceUpdateMode::FullPreserveNginx {
+        &["./build-all.sh", "preserve-nginx"]
+    } else {
+        &["./build-all.sh"]
+    };
     match run_workspace_update_command_streaming(
         "bash",
-        &["./build-all.sh"],
+        build_args,
         &workspace_root,
         shared.clone(),
         control.clone(),
