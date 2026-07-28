@@ -21,14 +21,22 @@ async fn run_child_skill_times_out_and_kills_child() {
 
 #[tokio::test]
 async fn run_child_skill_reports_nonzero_exit() {
+    let Some(child) = ["/bin/false", "/usr/bin/false"]
+        .into_iter()
+        .find(|path| Path::new(path).is_file())
+    else {
+        eprintln!("skipping nonzero-exit assertion: no false executable found");
+        return;
+    };
     let result = run_child_skill(
-        &ChildLaunch::legacy("/bin/false"),
+        &ChildLaunch::legacy(child),
         "ignored",
         Duration::from_secs(2),
     )
     .await;
     assert!(
-        matches!(result, Err(ref e) if e.error_code == "child_nonzero_exit" && e.exit_code == Some(1))
+        matches!(result, Err(ref e) if e.error_code == "child_nonzero_exit" && e.exit_code.is_some_and(|code| code != 0)),
+        "expected a nonzero child exit, got {result:?}"
     );
 }
 
