@@ -1104,14 +1104,20 @@ async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists(
     run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
 
     std::fs::write(root.join("tracked.txt"), "base\n").expect("write base file");
-    run_workspace_update_test_git(&root, &["add", "tracked.txt"]);
+    std::fs::write(root.join("already_remote.txt"), "base\n").expect("write generated base file");
+    run_workspace_update_test_git(&root, &["add", "tracked.txt", "already_remote.txt"]);
     run_workspace_update_test_git(&root, &["commit", "-m", "base"]);
     let base_commit = run_workspace_update_test_git(&root, &["rev-parse", "HEAD"]);
     let branch = run_workspace_update_test_git(&root, &["branch", "--show-current"]);
 
     std::fs::write(root.join("tracked.txt"), "remote\n").expect("write remote change");
+    std::fs::write(root.join("already_remote.txt"), "remote\n")
+        .expect("write generated remote change");
     std::fs::write(root.join("new_remote.txt"), "remote\n").expect("write remote file");
-    run_workspace_update_test_git(&root, &["add", "tracked.txt", "new_remote.txt"]);
+    run_workspace_update_test_git(
+        &root,
+        &["add", "tracked.txt", "already_remote.txt", "new_remote.txt"],
+    );
     run_workspace_update_test_git(&root, &["commit", "-m", "remote"]);
     let remote_commit = run_workspace_update_test_git(&root, &["rev-parse", "HEAD"]);
 
@@ -1134,6 +1140,8 @@ async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists(
     run_workspace_update_test_git(&root, &["config", &branch_merge_key, &branch_merge_ref]);
 
     std::fs::write(root.join("tracked.txt"), "local\n").expect("write local change");
+    std::fs::write(root.join("already_remote.txt"), "remote\n")
+        .expect("materialize incoming generated content");
     std::fs::write(root.join("new_remote.txt"), "local\n").expect("write local conflict");
     let unrelated = root.join("unrelated");
     std::fs::create_dir_all(&unrelated).expect("create unrelated directory");
