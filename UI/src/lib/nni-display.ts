@@ -97,7 +97,7 @@ export function nniSimulationControlMode(
 function messageForNniKey(key: string | null | undefined, lang: UiLanguage): string | null {
   switch (key) {
     case "nni.device_status.helper_missing":
-      return copy(lang, "设备签名 helper 未安装，无法检测签名芯片。", "The device-signing helper is not installed, so the signature chip cannot be checked.");
+      return copy(lang, "设备签名 helper 未安装，无法检测芯片。", "The device-signing helper is not installed, so the chip cannot be checked.");
     case "nni.device_status.helper_missing.next_step":
       return copy(
         lang,
@@ -105,7 +105,7 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
         "If this device needs NNI device signing, confirm pi_app/signature.py was deployed with RustClaw.",
       );
     case "nni.device_status.ready":
-      return copy(lang, "已检测到设备签名芯片，NNI 设备签名可用。", "A device signature chip was detected, and NNI device signing is available.");
+      return copy(lang, "已检测到芯片，NNI 设备签名可用。", "A chip was detected, and NNI device signing is available.");
     case "nni.device_status.simulated":
       return copy(lang, "软件模拟芯片正在运行，可用于本机协议测试。", "The software-simulated chip is running and can be used for local protocol testing.");
     case "nni.device_status.simulated.next_step":
@@ -117,14 +117,14 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_status.signature_chip_missing":
       return copy(
         lang,
-        "未检测到 MatrixAI 设备签名芯片。此设备仍可使用 RustClaw 的其他功能。",
-        "No MatrixAI device signature chip was detected. This device can still use other RustClaw features.",
+        "未检测到 MatrixAI 芯片。此设备仍可使用 RustClaw 的其他功能。",
+        "No MatrixAI chip was detected. This device can still use other RustClaw features.",
       );
     case "nni.device_status.signature_chip_missing.next_step":
       return copy(
         lang,
-        "正式参与网络原生智能需要带签名芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
-        "Production participation in Network Native Intelligence requires MatrixAI hardware with a signature chip. For local protocol testing only, simulation becomes available after detection is confirmed.",
+        "正式参与网络原生智能需要带芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
+        "Production participation in Network Native Intelligence requires MatrixAI hardware with a chip. For local protocol testing only, simulation becomes available after detection is confirmed.",
       );
     case "nni.device_action.completed":
       return copy(lang, "NNI 设备签名操作完成。", "NNI device signing action completed.");
@@ -139,9 +139,9 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
         "The simulated chip could not start. Confirm that RustClaw can write to its data directory, then try again.",
       );
     case "nni.device_action.simulation_not_needed":
-      return copy(lang, "已检测到真实签名芯片，无需启用模拟。", "A real signature chip was detected, so simulation is not needed.");
+      return copy(lang, "已检测到真实芯片，无需启用模拟。", "A real chip was detected, so simulation is not needed.");
     case "nni.device_action.signature_chip_missing":
-      return copy(lang, "未检测到设备签名芯片，无法完成本次 NNI 签名操作。", "No device signature chip was detected, so this NNI signing action cannot be completed.");
+      return copy(lang, "未检测到芯片，无法完成本次 NNI 签名操作。", "No chip was detected, so this NNI signing action cannot be completed.");
     default:
       return null;
   }

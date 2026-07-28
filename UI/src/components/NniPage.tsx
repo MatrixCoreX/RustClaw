@@ -178,8 +178,8 @@ export function NniPage({
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
   const nniStatusMessage = nniStatusLoading
     ? t(
-        `正在检测真实签名芯片，请等待约 ${nniDetectionSecondsLeft} 秒。`,
-        `Checking for a real signature chip. Please wait about ${nniDetectionSecondsLeft} seconds.`,
+        `正在检测真实芯片，请等待约 ${nniDetectionSecondsLeft} 秒。`,
+        `Checking for a real chip. Please wait about ${nniDetectionSecondsLeft} seconds.`,
       )
     : nniDeviceMessage(
         nniStatus,
@@ -277,7 +277,7 @@ export function NniPage({
               className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
               title={
                 nniChipMissing
-                  ? t("当前设备缺少签名芯片，不能加入需要设备签名的 NNI。", "This device has no signature chip, so it cannot join signed NNI.")
+                  ? t("当前设备缺少芯片，不能加入需要设备签名的 NNI。", "This device has no chip, so it cannot join signed NNI.")
                   : nniRemoteNodeCount === 0
                     ? t("请先填写远程 NNI 节点地址。", "Enter a remote NNI node URL first.")
                     : undefined
@@ -299,8 +299,8 @@ export function NniPage({
                 title={
                   nniChipMissing
                     ? t(
-                        "上次检测未找到签名芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
-                        "The last check did not find a signature chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
+                        "上次检测未找到芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
+                        "The last check did not find a chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
                       )
                     : t(
                         "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
@@ -331,7 +331,7 @@ export function NniPage({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("设备状态", "Device status")}</p>
-              <h4 className="mt-2 text-lg font-semibold">{t("设备签名芯片", "Device signature chip")}</h4>
+              <h4 className="mt-2 text-lg font-semibold">{t("芯片", "Chip")}</h4>
             </div>
             <div className="flex flex-col items-end gap-2">
               {nniSimulationControl ? (
@@ -388,7 +388,7 @@ export function NniPage({
                 ) : (
                   <>
                     <ShieldAlert className="h-3.5 w-3.5" />
-                    {t("缺失签名芯片", "Signature chip missing")}
+                    {t("缺少芯片", "Chip missing")}
                   </>
                 )}
               </span>
@@ -586,8 +586,8 @@ export function NniPage({
           <p className="mt-4 text-sm leading-7 text-white/65">
             {nniChipMissing
               ? t(
-                  "当前设备缺少签名芯片，因此不会显示为已加入。你仍可以继续使用 RustClaw 的其它功能。",
-                  "This device has no signature chip, so it will not be marked as joined. Other RustClaw features remain available.",
+                  "当前设备缺少芯片，因此不会显示为已加入。你仍可以继续使用 RustClaw 的其它功能。",
+                  "This device has no chip, so it will not be marked as joined. Other RustClaw features remain available.",
                 )
               : nniJoined
                 ? t(
@@ -927,7 +927,7 @@ export function NniPage({
                 className="theme-topbar-btn justify-between px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 title={
                   nniChipMissing
-                    ? t("当前设备缺少签名芯片，不能执行该操作。", "This device has no signature chip, so this action cannot run.")
+                    ? t("当前设备缺少芯片，不能执行该操作。", "This device has no chip, so this action cannot run.")
                     : undefined
                 }
               >
