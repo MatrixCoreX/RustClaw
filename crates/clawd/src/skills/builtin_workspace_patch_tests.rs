@@ -306,3 +306,100 @@ fn two_file_failure_repair_review_and_rewind_preserves_user_file() {
         "pre-existing user change\n"
     );
 }
+
+#[test]
+fn verified_patch_shards_complete_and_rewind_in_reverse_order() {
+    let workspace = TestWorkspace::new();
+    write(&workspace.root.join("src/a.txt"), "a=1\n");
+    write(&workspace.root.join("src/b.txt"), "b=1\n");
+    let first_patch = "diff --git a/src/a.txt b/src/a.txt\n--- a/src/a.txt\n+++ b/src/a.txt\n@@ -1 +1 @@\n-a=1\n+a=2\n";
+    let second_patch = "diff --git a/src/b.txt b/src/b.txt\n--- a/src/b.txt\n+++ b/src/b.txt\n@@ -1 +1 @@\n-b=1\n+b=2\n";
+
+    let first = workspace
+        .run(json!({
+            "action": "apply_patch_shard",
+            "transaction_id": "txn_shard_complete",
+            "shard_index": 0,
+            "shard_count": 2,
+            "patch": first_patch,
+        }))
+        .expect("apply first shard");
+    assert_eq!(first["complete"], false);
+    assert_eq!(first["continuation"]["kind"], "verified_shard");
+    let second = workspace
+        .run(json!({
+            "action": "apply_patch_shard",
+            "transaction_id": "txn_shard_complete",
+            "shard_index": 1,
+            "shard_count": 2,
+            "patch": second_patch,
+        }))
+        .expect("apply second shard");
+    assert_eq!(second["complete"], true);
+    assert_eq!(second["shards"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
+        "a=2\n"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/b.txt")).unwrap(),
+        "b=2\n"
+    );
+
+    let rewound = workspace
+        .run(json!({
+            "action": "transaction_rewind",
+            "transaction_id": "txn_shard_complete",
+        }))
+        .expect("rewind transaction");
+    assert_eq!(rewound["state"], "rewound");
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
+        "a=1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/b.txt")).unwrap(),
+        "b=1\n"
+    );
+}
+
+#[test]
+fn failed_patch_shard_exposes_total_rollback_plan_for_owned_changes() {
+    let workspace = TestWorkspace::new();
+    write(&workspace.root.join("src/a.txt"), "a=1\n");
+    let first_patch = "diff --git a/src/a.txt b/src/a.txt\n--- a/src/a.txt\n+++ b/src/a.txt\n@@ -1 +1 @@\n-a=1\n+a=2\n";
+    workspace
+        .run(json!({
+            "action": "apply_patch_shard",
+            "transaction_id": "txn_shard_failure",
+            "shard_index": 0,
+            "shard_count": 2,
+            "patch": first_patch,
+        }))
+        .expect("apply first shard");
+    let error = workspace
+        .run(json!({
+            "action": "apply_patch_shard",
+            "transaction_id": "txn_shard_failure",
+            "shard_index": 1,
+            "shard_count": 2,
+            "patch": "not a patch",
+        }))
+        .expect_err("second shard must fail");
+    assert!(error.contains("shard_apply_failed"));
+    assert!(error.contains("transaction_rewind"));
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
+        "a=2\n"
+    );
+    workspace
+        .run(json!({
+            "action": "transaction_rewind",
+            "transaction_id": "txn_shard_failure",
+        }))
+        .expect("rollback previously applied shard");
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
+        "a=1\n"
+    );
+}

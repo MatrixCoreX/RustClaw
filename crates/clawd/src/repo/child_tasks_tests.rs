@@ -31,6 +31,55 @@ impl Drop for TempDirGuard {
     }
 }
 
+#[test]
+fn child_completion_settles_parent_budget_and_reclaims_unused_units() {
+    let mut slice = crate::task_budget_contract::TaskBudgetSlice::new(
+        crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+        300_000,
+        crate::task_budget_contract::BudgetHardCeilings::default(),
+    );
+    slice
+        .allocate(
+            "child:task-child-budget",
+            "child_task:task-child-budget",
+            crate::task_budget_contract::BudgetAllocationKind::ChildTask,
+            crate::task_budget_contract::BudgetUnits {
+                model_turns: 5,
+                tool_calls: 20,
+                tokens: 50_000,
+                elapsed_ms: 120_000,
+            },
+        )
+        .unwrap();
+    let mut parent = json!({
+        "task_checkpoint": {
+            "boundary_context": {"task_budget_slice": slice.to_machine_json()}
+        }
+    });
+    settle_parent_child_budget_allocations(
+        &mut parent,
+        &[json!({
+            "budget_allocation_id": "child:task-child-budget",
+            "budget_consumed": {
+                "model_turns": 2,
+                "tool_calls": 7,
+                "tokens": 4_000,
+                "elapsed_ms": 30_000
+            }
+        })],
+    );
+    let restored = crate::task_budget_contract::TaskBudgetSlice::from_machine_json(
+        parent
+            .pointer("/task_checkpoint/boundary_context/task_budget_slice")
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(restored.allocations[0].settled);
+    assert_eq!(restored.allocations[0].reclaimed.tool_calls, 13);
+    assert_eq!(restored.delegated_consumed.model_turns, 2);
+    assert_eq!(restored.delegated_consumed.tokens, 4_000);
+}
+
 fn file_db_pool(path: &Path) -> crate::db_init::DbPool {
     let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(
         |conn: &mut rusqlite::Connection| {

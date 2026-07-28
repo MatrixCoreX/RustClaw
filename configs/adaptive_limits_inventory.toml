@@ -1,0 +1,321 @@
+schema_version = 1
+reviewed_at = "2026-07-28"
+source_audit = "plan/reports/model_capability_hard_limits_audit_20260728.md"
+
+# `locations` are source anchors, not enforcement configuration. The checker
+# verifies that every active migration anchor still exists until its entry is
+# moved to a tested migrated/retained disposition.
+
+[[limits]]
+id = "HL-01"
+priority = "p0"
+title = "duplicate task-level model budgets"
+class = "task_resource"
+owner = "task_budget_manager"
+disposition = "migrated"
+recovery = "checkpoint_requeue"
+terminal_behavior = "Only the administrator task-budget ceiling may end or checkpoint total task work."
+acceptance_case = "productive_model_call_41"
+locations = [
+  "crates/clawd/src/task_budget_contract.rs::TaskBudgetPolicy",
+  "crates/clawd/src/task_budget_contract.rs::BudgetAllocation",
+]
+migration_tests = [
+  "crates/clawd/src/task_budget_contract_tests.rs::productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption",
+  "crates/clawd/src/task_budget_contract_tests.rs::allocation_ledger_reclaims_unused_units_and_survives_checkpoint",
+  "crates/claw-core/src/config_tests.rs::removed_worker_model_budget_fields_are_ignored_without_becoming_runtime_authority",
+]
+
+[[limits]]
+id = "HL-02"
+priority = "p0"
+title = "fixed capability quick-index projection"
+class = "model_window"
+owner = "capability_catalog"
+disposition = "migrated"
+recovery = "none"
+terminal_behavior = "The complete compact catalog retains every canonical capability ID and schema field."
+acceptance_case = "capability_25_and_schema_field_9"
+locations = [
+  "crates/clawd/src/agent_engine/capability_catalog.rs::catalog_entries_for_task",
+  "crates/clawd/src/agent_engine/capability_catalog.rs::expand_catalog",
+]
+migration_tests = [
+  "crates/clawd/src/agent_engine_tests.rs::quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable",
+  "crates/clawd/src/agent_engine_tests.rs::quick_index_catalog_keeps_every_alias_id_even_when_actions_overlap",
+]
+
+[[limits]]
+id = "HL-03"
+priority = "p0"
+title = "fixed two-playbook projection"
+class = "model_window"
+owner = "capability_catalog"
+disposition = "migrated"
+recovery = "none"
+terminal_behavior = "Every playbook selected by the active plan remains present without a fixed skill-count ceiling."
+acceptance_case = "three_skill_plan"
+locations = [
+  "crates/clawd/src/agent_engine/planner_skill_context.rs::build_skill_playbooks_bundle_scoped",
+]
+migration_tests = [
+  "crates/clawd/src/agent_engine/planner_skill_context_tests.rs::structured_plan_can_select_three_skill_playbooks_without_a_fixed_count_cap",
+  "crates/clawd/src/agent_engine/planner_skill_context_tests.rs::first_round_uses_complete_compact_index_without_playbooks",
+]
+
+[[limits]]
+id = "HL-04"
+priority = "p0"
+title = "fixed-character context compaction stages"
+class = "model_window"
+owner = "context_evidence_store"
+disposition = "migrated"
+recovery = "artifact_range"
+terminal_behavior = "Compaction is a reversible model view chosen from the provider window; canonical source remains addressable."
+acceptance_case = "context_beyond_24k"
+locations = [
+  "crates/clawd/src/task_context_builder/compaction.rs::plan_agent_loop_context_compaction_with_provider_window",
+  "crates/clawd/src/agent_engine/context_compaction.rs::materialize_context_source_artifacts",
+]
+migration_tests = [
+  "crates/clawd/src/task_context_builder_compaction_tests.rs::old_character_threshold_does_not_compact_without_provider_pressure",
+  "crates/clawd/src/task_context_builder_compaction_tests.rs::provider_context_window_pressure_triggers_from_token_estimate",
+  "crates/clawd/src/agent_engine/context_compaction_tests.rs::context_compaction_source_bundle_enforces_total_budget",
+]
+
+[[limits]]
+id = "HL-05"
+priority = "p0"
+title = "stacked result and observation projections"
+class = "model_window"
+owner = "context_evidence_store"
+disposition = "migrated"
+recovery = "artifact_range"
+terminal_behavior = "Planner, synthesizer and verifier use views over the same immutable evidence identity."
+acceptance_case = "result_9_and_large_result"
+locations = [
+  "crates/clawd/src/agent_engine/capability_result_synthesis.rs::synthesis_evidence_catalog",
+  "crates/clawd/src/skill_output_artifact.rs::spill_skill_text_if_needed",
+]
+migration_tests = [
+  "crates/clawd/src/agent_engine/capability_result_synthesis_tests.rs::result_nine_and_large_result_remain_content_addressed_and_recoverable",
+  "crates/clawd/src/skill_output_artifact_tests.rs::large_text_output_is_preserved_with_exact_resume_metadata",
+]
+
+[[limits]]
+id = "HL-06"
+priority = "p0"
+title = "fixed child topology and child-local ceilings"
+class = "task_resource"
+owner = "execution_scheduler"
+disposition = "migrated"
+recovery = "checkpoint_requeue"
+terminal_behavior = "Ready DAG nodes queue under global task resources; cycles and ownership conflicts remain fail-closed."
+acceptance_case = "child_depth_2_and_child_17"
+locations = [
+  "crates/clawd/src/child_task_contract.rs::ChildTaskBudget",
+  "crates/clawd/src/repo/child_tasks.rs::enqueue_child_task_specs",
+]
+migration_tests = [
+  "crates/clawd/src/child_task_contract_tests.rs::fanout_policy_allows_depth_two_and_child_seventeen_for_dag_validation",
+  "crates/clawd/src/repo/child_task_graph_tests.rs::graph_queues_more_than_sixteen_independent_nodes_without_dropping_any",
+]
+
+[[limits]]
+id = "HL-07"
+priority = "p0"
+title = "fixed repair verifier and action phases"
+class = "task_resource"
+owner = "execution_scheduler"
+disposition = "migrated"
+recovery = "checkpoint_requeue"
+terminal_behavior = "New evidence permits continuation; equivalent progress digests trigger structured stagnation handling."
+acceptance_case = "repair_4_with_new_evidence"
+locations = [
+  "crates/clawd/src/agent_engine/planning.rs::NativeRepairProgress",
+  "crates/clawd/src/agent_engine/execution_loop.rs::run_agent_round",
+]
+migration_tests = [
+  "crates/clawd/src/agent_engine/planning_native_tests.rs::native_contract_repair_continues_past_four_when_evidence_changes",
+  "crates/clawd/src/agent_engine/planning_native_tests.rs::native_contract_repair_stops_only_after_equivalent_state_stagnates",
+  "crates/clawd/src/agent_engine/execution_loop_tests.rs::action_count_is_an_explicit_replan_boundary_not_a_terminal_drop",
+]
+
+[[limits]]
+id = "HL-08"
+priority = "p1"
+title = "journal and checkpoint evidence projection"
+class = "task_resource"
+owner = "task_journal"
+disposition = "migrated"
+recovery = "artifact_range"
+terminal_behavior = "Compact checkpoint state retains integrity-protected references to complete evidence."
+acceptance_case = "checkpoint_replays_old_and_large_evidence"
+locations = [
+  "crates/clawd/src/agent_engine/checkpoint_resume_state.rs::build_checkpoint_resume_state",
+  "crates/clawd/src/agent_engine/checkpoint_resume_state.rs::restore_checkpoint_resume_state",
+]
+migration_tests = [
+  "crates/clawd/src/agent_engine/checkpoint_resume_state_tests.rs::restart_snapshot_preserves_large_state_and_ignores_unknown_stage_tokens",
+]
+
+[[limits]]
+id = "HL-09"
+priority = "p1"
+title = "code-index repository and source ceilings"
+class = "safety"
+owner = "code_index_adapter"
+disposition = "retain_with_recovery"
+recovery = "opaque_continuation"
+terminal_behavior = "Per-shard resource ceilings remain, while scan and result completeness are independent and resumable."
+acceptance_case = "repository_over_50k_files"
+locations = [
+  "crates/clawd/src/skills/builtin_code_index.rs::HARD_MAX_FILES",
+  "crates/clawd/src/skills/builtin_code_index.rs::MAX_SOURCE_BYTES",
+]
+boundary_tests = [
+  "crates/clawd/src/skills/builtin_code_index_tests.rs::max_file_budget_is_reported_as_incomplete_index_evidence",
+  "crates/clawd/src/skills/builtin_code_index_tests.rs::symbol_results_expose_stable_cursor_pages",
+]
+
+[[limits]]
+id = "HL-10"
+priority = "p1"
+title = "web-search cursor terminal window"
+class = "external_service"
+owner = "web_search_adapter"
+disposition = "migrated"
+recovery = "opaque_continuation"
+terminal_behavior = "Small pages remain; a query-bound backend cursor or snapshot continues beyond the former window."
+acceptance_case = "web_result_after_cursor_100"
+locations = [
+  "crates/skills/web_search_extract/src/main.rs::build_backend_page_payload",
+  "crates/skills/web_search_extract/src/main.rs::decode_search_continuation",
+]
+migration_tests = [
+  "crates/skills/web_search_extract/src/main_tests.rs::strict_input_rejects_wrong_types_but_allows_continuation_beyond_100",
+  "crates/skills/web_search_extract/src/main_tests.rs::backend_page_payload_continues_after_former_cursor_100",
+]
+
+[[limits]]
+id = "HL-11"
+priority = "p1"
+title = "filesystem traversal safety ceilings"
+class = "safety"
+owner = "filesystem_adapter"
+disposition = "retain_with_recovery"
+recovery = "opaque_continuation"
+terminal_behavior = "Deadlines and memory ceilings stay fail-closed; partial responses persist the unvisited traversal frontier."
+acceptance_case = "filesystem_safety_ceiling"
+locations = [
+  "crates/fs-discovery/src/types.rs::DEFAULT_HARD_ENTRY_LIMIT",
+  "crates/skills/fs_search/src/main.rs::MAX_RESULT_SNAPSHOT_ITEMS",
+  "crates/skills/fs_search/src/main.rs::MAX_GREP_SCAN_BYTES",
+]
+boundary_tests = [
+  "crates/fs-discovery/src/discovery_tests.rs::hard_limit_and_deadline_are_machine_visible",
+  "crates/skills/fs_search/src/main_tests.rs::opaque_continuation_reuses_declared_skill_snapshot_cache",
+]
+
+[[limits]]
+id = "HL-12"
+priority = "p1"
+title = "single-transaction workspace mutation ceilings"
+class = "safety"
+owner = "workspace_artifact_layer"
+disposition = "retain_with_recovery"
+recovery = "verified_shard"
+terminal_behavior = "Each shard remains bounded and verified; the manifest exposes whole-operation progress and rollback scope."
+acceptance_case = "patch_over_2mib_or_512_files"
+locations = [
+  "crates/clawd/src/skills/builtin_workspace_patch.rs::MAX_PATCH_BYTES",
+  "crates/clawd/src/execution_isolation_patch.rs::MAX_CHILD_PATCH_FILES",
+  "crates/clawd/src/skills/builtin_workspace_mutation.rs::MAX_SNAPSHOT_BYTES",
+]
+boundary_tests = [
+  "crates/clawd/src/skills/builtin_workspace_patch_tests.rs::verified_patch_shards_complete_and_rewind_in_reverse_order",
+  "crates/clawd/src/skills/builtin_workspace_patch_tests.rs::failed_patch_shard_exposes_total_rollback_plan_for_owned_changes",
+]
+
+[[limits]]
+id = "HL-13"
+priority = "p1"
+title = "inline read and process-output ceilings"
+class = "protocol"
+owner = "workspace_artifact_layer"
+disposition = "retain_with_recovery"
+recovery = "artifact_range"
+terminal_behavior = "Unsafe output growth may stop the producer, but every preserved byte range and terminal reason is addressable."
+acceptance_case = "output_over_inline_limit"
+locations = [
+  "crates/clawd/src/main.rs::MAX_READ_FILE_BYTES",
+  "crates/skill-sdk/src/process.rs::MAX_CAPTURE_BYTES",
+]
+boundary_tests = [
+  "crates/skills/system_basic/src/main_tests.rs::read_range_enforces_output_byte_budget_with_resume_line",
+  "crates/clawd/src/skill_output_artifact_tests.rs::large_text_output_is_preserved_with_exact_resume_metadata",
+]
+
+[[limits]]
+id = "HL-14"
+priority = "p1"
+title = "conversation and browser-cache retention limits"
+class = "display_cache"
+owner = "conversation_service_ui"
+disposition = "migrated"
+recovery = "opaque_continuation"
+terminal_behavior = "Pages and browser caches may be bounded; canonical conversations remain server-accessible after reload."
+acceptance_case = "history_beyond_ui_cache"
+locations = [
+  "crates/clawd/src/repo/conversation_history.rs::read_conversation_body_range",
+  "UI/src/lib/chat-history.ts::fetchConversationHistoryPage",
+  "UI/src/hooks/useChatRuntime.ts::loadEarlierConversationHistory",
+]
+migration_tests = [
+  "crates/clawd/src/repo/conversation_history_tests.rs::large_conversation_bodies_expose_verified_ranges_without_data_loss",
+  "crates/clawd/src/repo/conversation_history_tests.rs::conversation_body_ranges_are_owner_scoped_and_snapshot_bound",
+  "UI/src/hooks/useChatRuntime.history.test.ts::more than 80 teaching runs and 120 messages remain reachable through incremental pages",
+]
+
+[[limits]]
+id = "HL-15"
+priority = "p2"
+title = "skill-local semantic output prefixes"
+class = "protocol"
+owner = "skill_sdk"
+disposition = "migrated"
+recovery = "artifact_range"
+terminal_behavior = "Every bounded skill result reports completeness, original and returned sizes, and a usable continuation or artifact."
+acceptance_case = "skill_bounded_result_contract"
+locations = [
+  "crates/skill-sdk/src/bounded_result.rs::BoundedResult",
+  "crates/skill-sdk/src/bounded_result.rs::ArtifactSpill",
+]
+migration_tests = [
+  "crates/skill-sdk/src/bounded_result_tests.rs::oversized_text_spills_complete_bytes_and_returns_a_range",
+  "crates/skills/log_analyze/src/main_tests.rs::bounded_match_pages_continue_to_older_lines_and_reject_changed_logs",
+  "crates/skills/doc_parse/src/main_tests.rs::document_text_pages_continue_without_losing_the_canonical_range",
+  "crates/skills/process_basic/src/main_tests.rs::process_pages_continue_without_silently_dropping_rows",
+  "optional_skills/invest_copy/src/main_tests.rs::large_material_pages_are_query_bound_and_resumable",
+]
+
+[[limits]]
+id = "HL-16"
+priority = "p2"
+title = "protocol and security scan memory ceilings"
+class = "protocol"
+owner = "skill_sdk_security"
+disposition = "retain_with_recovery"
+recovery = "artifact_range"
+terminal_behavior = "Protocol frames and safety scans stay fail-closed; larger values use descriptors, streams, or fully verified shards."
+acceptance_case = "protocol_frame_and_security_scan_ceiling"
+locations = [
+  "crates/skill-sdk/src/lib.rs::MAX_PROTOCOL_LINE_BYTES",
+  "crates/skill-runner/src/main.rs::MAX_PROTOCOL_LINE_BYTES",
+  "crates/skill-sdk/src/installer.rs::MAX_PROTOCOL_LINE_BYTES",
+]
+boundary_tests = [
+  "crates/skill-sdk/src/lib_tests.rs::protocol_rejects_multiple_records_and_requires_structured_errors",
+  "crates/skill-sdk/src/prebuilt_tests.rs::archive_traversal_and_links_are_rejected",
+  "crates/skill-sdk/src/installer_tests.rs::prebuilt_adapter_rejects_digest_mismatch_before_activation",
+]

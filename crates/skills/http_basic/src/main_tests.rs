@@ -2,9 +2,9 @@ use super::{
     bounded_preview, detects_proxy_synthetic_dns, domain_matches, error_extra, execute,
     host_matches_no_proxy, http_observation, is_proxy_synthetic_ip, is_public_ip,
     is_sensitive_header, is_textual_content, read_limited, redirect_switches_to_get,
-    resolve_output_path, should_forward_header, should_inject_rustclaw_key_for_base,
-    validate_target_url, FetchPolicy, HttpArtifact, HttpObservationInput, RequestMethod,
-    SKILL_NAME,
+    resolve_output_path, resolve_output_path_with_permissions, should_forward_header,
+    should_inject_rustclaw_key_for_base, validate_target_url, FetchPolicy, HttpArtifact,
+    HttpObservationInput, RequestMethod, SKILL_NAME,
 };
 use reqwest::StatusCode;
 use serde_json::json;
@@ -157,6 +157,28 @@ fn http_download_output_path_must_stay_inside_workspace() {
     assert_eq!(traversal.code, "output_path_outside_workspace");
 
     let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn admin_http_download_accepts_service_account_visible_absolute_output() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-http-admin-path-test-{}",
+        std::process::id()
+    ));
+    let workspace = root.join("workspace");
+    let outside = root.join("outside").join("download.body");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+
+    let resolved = resolve_output_path_with_permissions(
+        &workspace,
+        "document/http/download",
+        outside.to_str(),
+        true,
+    )
+    .expect("admin absolute output");
+    assert_eq!(resolved, outside);
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

@@ -62,12 +62,43 @@ pub(super) fn query_sha256(obj: &serde_json::Map<String, Value>) -> String {
     normalized.remove("cursor");
     normalized.remove("offset");
     normalized.remove("max_results");
+    normalized.remove("scan_continuation");
     // Runtime recall is advisory context injected by clawd, not part of the
     // filesystem query. It can legitimately change between continuation
     // requests and must not invalidate an otherwise identical opaque cursor.
     normalized.remove("_memory");
     let encoded = serde_json::to_vec(&normalized).unwrap_or_default();
     format!("{:x}", Sha256::digest(encoded))
+}
+
+pub(super) fn scan_offset_from_args(
+    obj: &serde_json::Map<String, Value>,
+    query_sha256: &str,
+) -> Result<usize, String> {
+    let Some(token) = obj
+        .get("scan_continuation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(0);
+    };
+    let mut parts = token.splitn(3, ':');
+    if parts.next() != Some("fs_scan_v1") {
+        return Err("invalid_scan_continuation".to_string());
+    }
+    let offset = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "invalid_scan_continuation".to_string())?;
+    if offset == 0 || parts.next().unwrap_or_default() != query_sha256 {
+        return Err("scan_continuation_query_mismatch".to_string());
+    }
+    Ok(offset)
+}
+
+pub(super) fn encode_scan_continuation(query_sha256: &str, offset: usize) -> String {
+    format!("fs_scan_v1:{offset}:{query_sha256}")
 }
 
 pub(super) fn cursor_snapshot_identity(

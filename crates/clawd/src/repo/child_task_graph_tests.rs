@@ -102,6 +102,38 @@ fn disjoint_writers_are_ready_and_overlapping_writers_are_serialized() {
 }
 
 #[test]
+fn graph_queues_more_than_sixteen_independent_nodes_without_dropping_any() {
+    let specs = (0..20)
+        .map(|index| {
+            spec(
+                "parent-many",
+                &format!("child-{index}"),
+                ChildTaskPermissionProfile::ReadOnly,
+                json!({}),
+            )
+        })
+        .collect::<Vec<_>>();
+    let graph = prepare_child_task_graph(&specs, 3).expect("twenty-node graph");
+    assert_eq!(graph.nodes.len(), 20);
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.readiness == "ready")
+            .count(),
+        3
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.readiness == "blocked_capacity")
+            .count(),
+        17
+    );
+}
+
+#[test]
 fn persisted_graph_promotes_successors_and_cancels_required_dependents() {
     let mut db = Connection::open_in_memory().expect("open db");
     db.execute_batch(

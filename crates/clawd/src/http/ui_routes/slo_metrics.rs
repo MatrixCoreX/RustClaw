@@ -17,6 +17,17 @@ struct SloAggregate {
     terminal_tasks: u64,
     succeeded_tasks: u64,
     failed_tasks: u64,
+    complete_outcomes: u64,
+    partial_resumable_outcomes: u64,
+    partial_terminal_outcomes: u64,
+    checkpointed_outcomes: u64,
+    user_input_blocked_outcomes: u64,
+    policy_denied_outcomes: u64,
+    continuation_descriptors: u64,
+    stagnation_events: u64,
+    admin_budget_exhaustions: u64,
+    artifact_descriptors: u64,
+    artifact_bytes: u64,
     model_failures: u64,
     agent_failures: u64,
     tool_failures: u64,
@@ -172,6 +183,7 @@ fn aggregate_slo_rows(rows: &[SloTaskRow]) -> SloAggregate {
         );
         aggregate.terminal_tasks += u64::from(terminal);
         aggregate.succeeded_tasks += u64::from(row.status == "succeeded");
+        collect_adaptive_outcome_metrics(row, terminal, &mut aggregate);
         if matches!(row.status.as_str(), "failed" | "timeout") {
             aggregate.failed_tasks += 1;
             let failure_class = row
@@ -215,6 +227,59 @@ fn aggregate_slo_rows(rows: &[SloTaskRow]) -> SloAggregate {
         collect_cost_metrics(summary, &mut aggregate);
     }
     aggregate
+}
+
+fn collect_adaptive_outcome_metrics(
+    row: &SloTaskRow,
+    terminal: bool,
+    aggregate: &mut SloAggregate,
+) {
+    let Some(result) = row.result.as_ref() else {
+        return;
+    };
+    let continuation_descriptors = count_object_or_string_field(result, "continuation");
+    let has_continuation = continuation_descriptors > 0;
+    let explicit_partial = contains_machine_bool(result, "complete", false)
+        || find_machine_string(result, "partial_reason", 0).is_some();
+    let lifecycle_state = result
+        .pointer("/task_lifecycle/state")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            result
+                .pointer("/task_journal/summary/task_lifecycle/state")
+                .and_then(Value::as_str)
+        });
+    let checkpointed = result.pointer("/task_checkpoint").is_some()
+        || result.pointer("/task_lifecycle/task_checkpoint").is_some()
+        || result
+            .pointer("/task_journal/summary/task_checkpoint")
+            .is_some();
+    let user_input_blocked = matches!(lifecycle_state, Some("needs_user"))
+        || find_machine_string(result, "resume_entrypoint", 0) == Some("await_user_input");
+    let policy_denied = contains_machine_bool(result, "denied_by_policy", true)
+        || machine_failure_attribution(result) == Some("permission_denied");
+
+    aggregate.complete_outcomes += u64::from(row.status == "succeeded" && !explicit_partial);
+    aggregate.partial_resumable_outcomes += u64::from(explicit_partial && has_continuation);
+    aggregate.partial_terminal_outcomes +=
+        u64::from(explicit_partial && terminal && !has_continuation);
+    aggregate.checkpointed_outcomes += u64::from(checkpointed);
+    aggregate.user_input_blocked_outcomes += u64::from(user_input_blocked);
+    aggregate.policy_denied_outcomes += u64::from(policy_denied);
+    aggregate.continuation_descriptors = aggregate
+        .continuation_descriptors
+        .saturating_add(continuation_descriptors);
+    aggregate.stagnation_events = aggregate
+        .stagnation_events
+        .saturating_add(count_nonzero_machine_number(result, "stagnation_count"));
+    aggregate.admin_budget_exhaustions = aggregate
+        .admin_budget_exhaustions
+        .saturating_add(count_admin_budget_exhaustions(result));
+    let (artifact_descriptors, artifact_bytes) = artifact_metrics(result);
+    aggregate.artifact_descriptors = aggregate
+        .artifact_descriptors
+        .saturating_add(artifact_descriptors);
+    aggregate.artifact_bytes = aggregate.artifact_bytes.saturating_add(artifact_bytes);
 }
 
 fn classify_structured_failure(result: &Value) -> SloFailureClass {
@@ -304,6 +369,71 @@ fn count_nonzero_machine_number(value: &Value, key: &str) -> u64 {
             count.saturating_add(count_nonzero_machine_number(child, key))
         }),
         _ => 0,
+    }
+}
+
+fn count_object_or_string_field(value: &Value, key: &str) -> u64 {
+    match value {
+        Value::Object(map) => {
+            let own = u64::from(
+                map.get(key)
+                    .is_some_and(|item| item.is_object() || item.is_string()),
+            );
+            map.values().fold(own, |count, child| {
+                count.saturating_add(count_object_or_string_field(child, key))
+            })
+        }
+        Value::Array(items) => items.iter().fold(0_u64, |count, child| {
+            count.saturating_add(count_object_or_string_field(child, key))
+        }),
+        _ => 0,
+    }
+}
+
+fn count_admin_budget_exhaustions(value: &Value) -> u64 {
+    match value {
+        Value::Object(map) => {
+            let own = u64::from(
+                map.get("reason_code")
+                    .and_then(Value::as_str)
+                    .is_some_and(|reason| {
+                        reason.starts_with("administrator_")
+                            && reason.ends_with("_budget_exhausted")
+                    }),
+            );
+            map.values().fold(own, |count, child| {
+                count.saturating_add(count_admin_budget_exhaustions(child))
+            })
+        }
+        Value::Array(items) => items.iter().fold(0_u64, |count, child| {
+            count.saturating_add(count_admin_budget_exhaustions(child))
+        }),
+        _ => 0,
+    }
+}
+
+fn artifact_metrics(value: &Value) -> (u64, u64) {
+    match value {
+        Value::Object(map) => map.values().fold((0_u64, 0_u64), |total, child| {
+            let child_metrics = artifact_metrics(child);
+            (
+                total.0.saturating_add(child_metrics.0),
+                total.1.saturating_add(child_metrics.1),
+            )
+        }),
+        Value::Array(items) => items.iter().fold((0_u64, 0_u64), |total, child| {
+            let own = child.as_object().and_then(|item| {
+                item.get("size_bytes")
+                    .and_then(Value::as_u64)
+                    .filter(|_| item.contains_key("id") || item.contains_key("artifact_id"))
+            });
+            let nested = artifact_metrics(child);
+            (
+                total.0.saturating_add(u64::from(own.is_some())).saturating_add(nested.0),
+                total.1.saturating_add(own.unwrap_or(0)).saturating_add(nested.1),
+            )
+        }),
+        _ => (0, 0),
     }
 }
 
@@ -520,6 +650,20 @@ fn slo_metrics_json(
                 aggregate.resumed_succeeded_tasks,
                 aggregate.resumed_terminal_tasks,
             ),
+        },
+        "adaptive_outcomes": {
+            "classification_source": "structured_runtime_fields",
+            "complete": aggregate.complete_outcomes,
+            "partial_resumable": aggregate.partial_resumable_outcomes,
+            "partial_terminal": aggregate.partial_terminal_outcomes,
+            "checkpointed": aggregate.checkpointed_outcomes,
+            "user_input_blocked": aggregate.user_input_blocked_outcomes,
+            "policy_denied": aggregate.policy_denied_outcomes,
+            "continuation_descriptors": aggregate.continuation_descriptors,
+            "stagnation_events": aggregate.stagnation_events,
+            "administrator_budget_exhaustions": aggregate.admin_budget_exhaustions,
+            "artifact_descriptors": aggregate.artifact_descriptors,
+            "artifact_bytes": aggregate.artifact_bytes,
         },
         "failure_classes": {
             "classification_source": "structured_runtime_fields",

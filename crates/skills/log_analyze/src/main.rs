@@ -4,8 +4,10 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 const MATCH_LINE_MAX_CHARS: usize = 240;
 const RECOVERY_KEYWORDS: &[&str] = &["retry", "recover", "recovered", "succeeded", "success"];
@@ -40,6 +42,11 @@ struct LogAnalysis {
     recent_recovery_lines: Vec<String>,
     tail_lines_requested: usize,
     tail_lines: Vec<String>,
+    page_cursor: usize,
+    snapshot_sha256: String,
+    match_total: usize,
+    notable_total: usize,
+    recovery_total: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -108,6 +115,11 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .unwrap_or(20)
         .min(200) as usize;
     let tail_lines = requested_tail_lines(obj);
+    let continuation = obj
+        .get("continuation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     let default_keywords = [
         "error",
@@ -136,12 +148,30 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .filter(|v: &Vec<String>| !v.is_empty())
         .unwrap_or_else(|| default_keywords.iter().map(|s| s.to_string()).collect());
 
-    let analysis = analyze_log_target(&path, &keywords, max_matches, tail_lines)?;
+    let analysis = analyze_log_target(&path, &keywords, max_matches, tail_lines, continuation)?;
     let extra = log_analysis_extra(analysis);
     Ok((extra.to_string(), extra))
 }
 
 fn log_analysis_extra(analysis: LogAnalysis) -> Value {
+    let match_page = bounded_log_page(
+        analysis.recent_matches.clone(),
+        analysis.match_total,
+        analysis.page_cursor,
+        &analysis.snapshot_sha256,
+    );
+    let notable_page = bounded_log_page(
+        analysis.recent_notable_lines.clone(),
+        analysis.notable_total,
+        analysis.page_cursor,
+        &analysis.snapshot_sha256,
+    );
+    let recovery_page = bounded_log_page(
+        analysis.recent_recovery_lines.clone(),
+        analysis.recovery_total,
+        analysis.page_cursor,
+        &analysis.snapshot_sha256,
+    );
     json!({
         "action": "analyze_log",
         "requested_path": analysis.requested_path,
@@ -155,8 +185,46 @@ fn log_analysis_extra(analysis: LogAnalysis) -> Value {
         "recent_recovery_lines": analysis.recent_recovery_lines,
         "tail_lines_requested": analysis.tail_lines_requested,
         "tail_lines": analysis.tail_lines,
-        "tail_excerpt": analysis.tail_lines.join("\n")
+        "tail_excerpt": analysis.tail_lines.join("\n"),
+        "snapshot_sha256": analysis.snapshot_sha256,
+        "page_cursor": analysis.page_cursor,
+        "bounded_results": {
+            "matches": match_page,
+            "notable_lines": notable_page,
+            "recovery_lines": recovery_page,
+        },
+        "line_excerpt": {
+            "complete": false,
+            "max_chars_per_line": MATCH_LINE_MAX_CHARS,
+            "partial_reason": "display_excerpt",
+            "recovery": {
+                "capability": "filesystem.read_range",
+                "path": analysis.path,
+                "unit": "line",
+                "line_number_prefix_in_result": true,
+            }
+        }
     })
+}
+
+fn bounded_log_page(
+    values: Vec<String>,
+    total: usize,
+    cursor: usize,
+    snapshot_sha256: &str,
+) -> BoundedResult<Vec<String>> {
+    let next_cursor = cursor.saturating_add(values.len());
+    let continuation = (next_cursor < total).then(|| ContinuationDescriptor {
+        kind: "opaque".to_string(),
+        token: Some(encode_log_continuation(next_cursor, snapshot_sha256)),
+        state: json!({"direction": "older", "cursor": next_cursor}),
+    });
+    BoundedResult::page(
+        values,
+        next_cursor.saturating_sub(cursor) as u64,
+        total as u64,
+        continuation,
+    )
 }
 
 fn requested_tail_lines(obj: &serde_json::Map<String, Value>) -> usize {
@@ -229,17 +297,19 @@ fn analyze_log_target(
     keywords: &[String],
     max_matches: usize,
     tail_lines: usize,
+    continuation: Option<&str>,
 ) -> Result<LogAnalysis, String> {
     if path.is_dir() {
-        return analyze_log_directory(path, keywords, max_matches, tail_lines);
+        return analyze_log_directory(path, keywords, max_matches, tail_lines, continuation);
     }
     let resolved = resolve_log_path(path)?;
-    analyze_log_file(
+    analyze_log_file_page(
         &resolved,
         path.display().to_string(),
         keywords,
         max_matches,
         tail_lines,
+        continuation,
     )
 }
 
@@ -248,17 +318,20 @@ fn analyze_log_directory(
     keywords: &[String],
     max_matches: usize,
     tail_lines: usize,
+    continuation: Option<&str>,
 ) -> Result<LogAnalysis, String> {
     let selected = resolve_log_path(path)?;
-    analyze_log_file(
+    analyze_log_file_page(
         &selected,
         path.display().to_string(),
         keywords,
         max_matches,
         tail_lines,
+        continuation,
     )
 }
 
+#[cfg(test)]
 fn analyze_log_file(
     resolved_path: &PathBuf,
     requested_path: String,
@@ -266,8 +339,31 @@ fn analyze_log_file(
     max_matches: usize,
     tail_lines: usize,
 ) -> Result<LogAnalysis, String> {
+    analyze_log_file_page(
+        resolved_path,
+        requested_path,
+        keywords,
+        max_matches,
+        tail_lines,
+        None,
+    )
+}
+
+fn analyze_log_file_page(
+    resolved_path: &PathBuf,
+    requested_path: String,
+    keywords: &[String],
+    max_matches: usize,
+    tail_lines: usize,
+    continuation: Option<&str>,
+) -> Result<LogAnalysis, String> {
     let text =
         std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
+    let snapshot_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let page_cursor = continuation
+        .map(|token| decode_log_continuation(token, &snapshot_sha256))
+        .transpose()?
+        .unwrap_or(0);
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut level_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut matches = Vec::new();
@@ -315,16 +411,12 @@ fn analyze_log_file(
             ));
         }
     }
-    if matches.len() > max_matches {
-        matches = matches[matches.len().saturating_sub(max_matches)..].to_vec();
-    }
-    if notable_lines.len() > max_matches {
-        notable_lines = notable_lines[notable_lines.len().saturating_sub(max_matches)..].to_vec();
-    }
-    if recovery_lines.len() > max_matches {
-        recovery_lines =
-            recovery_lines[recovery_lines.len().saturating_sub(max_matches)..].to_vec();
-    }
+    let match_total = matches.len();
+    let notable_total = notable_lines.len();
+    let recovery_total = recovery_lines.len();
+    matches = recent_page(&matches, page_cursor, max_matches);
+    notable_lines = recent_page(&notable_lines, page_cursor, max_matches);
+    recovery_lines = recent_page(&recovery_lines, page_cursor, max_matches);
     Ok(LogAnalysis {
         requested_path,
         path: resolved_path.display().to_string(),
@@ -337,7 +429,37 @@ fn analyze_log_file(
         recent_recovery_lines: recovery_lines,
         tail_lines_requested: tail_lines,
         tail_lines: tail_excerpt_lines(&text, tail_lines),
+        page_cursor,
+        snapshot_sha256,
+        match_total,
+        notable_total,
+        recovery_total,
     })
+}
+
+fn recent_page(values: &[String], cursor: usize, limit: usize) -> Vec<String> {
+    let end = values.len().saturating_sub(cursor.min(values.len()));
+    let start = end.saturating_sub(limit);
+    values[start..end].to_vec()
+}
+
+fn encode_log_continuation(cursor: usize, snapshot_sha256: &str) -> String {
+    format!("log_analyze_v1:{cursor}:sha256:{snapshot_sha256}")
+}
+
+fn decode_log_continuation(token: &str, snapshot_sha256: &str) -> Result<usize, String> {
+    let mut parts = token.splitn(4, ':');
+    if parts.next() != Some("log_analyze_v1") {
+        return Err("invalid_continuation".to_string());
+    }
+    let cursor = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "invalid_continuation".to_string())?;
+    if parts.next() != Some("sha256") || parts.next() != Some(snapshot_sha256) {
+        return Err("stale_snapshot".to_string());
+    }
+    Ok(cursor)
 }
 
 fn tail_excerpt_lines(text: &str, requested: usize) -> Vec<String> {

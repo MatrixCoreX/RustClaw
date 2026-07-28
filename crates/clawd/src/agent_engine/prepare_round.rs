@@ -223,7 +223,7 @@ pub(super) async fn prepare_round_actions(
     goal: &str,
     user_text: &str,
     policy: &AgentLoopGuardPolicy,
-    loop_state: &LoopState,
+    loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
     initial_plan: Option<&crate::PlanResult>,
 ) -> Result<PreparedRoundActions, String> {

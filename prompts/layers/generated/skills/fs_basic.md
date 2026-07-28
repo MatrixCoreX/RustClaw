@@ -65,7 +65,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `find_entries` | `glob` / `globs` | conditional | string/string[] | - | Typed path glob(s), used when a path shape is known; parsed as data rather than shell syntax. |
 | `find_entries` | `ext` | conditional | string/string[] | - | Extension selector for extension search. |
 | `find_entries` | `target_kind` | no | string | `any` | `any|file|dir`. |
-| `find_entries` | `match_mode` / `case_mode` | no | enums | `contains` / `smart` | Name matching: `exact|prefix|suffix|contains|glob`; case: `smart|sensitive|insensitive`. |
+| `find_entries` | `match_mode` / `case_mode` | no | enums | `contains` / `smart` | Name matching: `exact|prefix|suffix|contains|fuzzy|glob`; `fuzzy` is typo-tolerant and relevance-ranked. Case: `smart|sensitive|insensitive`. |
 | `find_entries` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`; ties use path order. |
 | `find_entries` / `grep_text` / `find_images` | `include_hidden` | no | boolean | `false` | Include hidden entries for an explicit request. |
 | `find_entries` / `grep_text` / `find_images` | `respect_ignore` | no | boolean | `true` | Respect repository ignore files by default. |
@@ -100,6 +100,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Known explicit path content: use `read_text_range` or a known-file `grep_text`; do not launch a repository-wide path search first.
 - Symbol definitions, references, tests, and impact: prefer `code_index`. Use `grep_text` only as literal/regex fallback when parser coverage is unavailable or incomplete, and do not describe it as semantic resolution.
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
+- When the authenticated admin execution context reports unrestricted system scope, an explicit absolute `root` (including `/`) may search everything visible to the RustClaw service account. Never claim or request this scope for a non-admin task.
 - Start at the narrowest known root with an exact basename/kind when possible. If results are broad, narrow root/filter; if completeness is partial, continue or refine from machine evidence rather than claiming absence.
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
 - Directory inventory: use `list_dir`, not `grep_text`.

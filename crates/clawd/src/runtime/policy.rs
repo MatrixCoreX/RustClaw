@@ -182,19 +182,24 @@ impl ToolsPolicy {
         &self,
         tokens: &[&str],
         provider_type: Option<&str>,
-        bypass_default_profile: bool,
+        unrestricted_admin: bool,
     ) -> bool {
-        if tokens.is_empty()
-            || self
-                .deny
-                .iter()
-                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
+        if tokens.is_empty() {
+            return false;
+        }
+        if unrestricted_admin {
+            return true;
+        }
+        if self
+            .deny
+            .iter()
+            .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
         {
             return false;
         }
 
         let mut allowed = if self.allow.is_empty() {
-            bypass_default_profile || tokens.iter().any(|token| self.default_allowed(token))
+            tokens.iter().any(|token| self.default_allowed(token))
         } else {
             self.allow
                 .iter()

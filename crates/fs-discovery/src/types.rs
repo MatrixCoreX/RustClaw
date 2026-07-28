@@ -70,6 +70,7 @@ pub enum MatchMode {
     EndsWith,
     #[default]
     Contains,
+    Fuzzy,
     Glob,
 }
 
@@ -188,6 +189,8 @@ impl CancellationToken {
 #[derive(Debug, Clone)]
 pub struct DiscoveryBudget {
     pub max_depth: Option<usize>,
+    /// Number of traversal entries already consumed by a prior resumable shard.
+    pub start_after_entries: usize,
     pub hard_entry_limit: usize,
     pub match_snapshot_limit: usize,
     pub deadline: Option<Duration>,
@@ -198,6 +201,7 @@ impl Default for DiscoveryBudget {
     fn default() -> Self {
         Self {
             max_depth: None,
+            start_after_entries: 0,
             hard_entry_limit: DEFAULT_HARD_ENTRY_LIMIT,
             match_snapshot_limit: DEFAULT_MATCH_SNAPSHOT_LIMIT,
             deadline: None,
@@ -251,6 +255,8 @@ pub struct DiscoveryReport {
     pub permission_denied: usize,
     pub skipped_counts_complete: bool,
     pub cancelled: bool,
+    pub traversal_start: usize,
+    pub traversal_next: Option<usize>,
     pub backend: BackendProvenance,
 }
 

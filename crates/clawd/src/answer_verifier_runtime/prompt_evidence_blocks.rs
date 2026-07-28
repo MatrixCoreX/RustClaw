@@ -175,6 +175,7 @@ fn provider_safe_capability_result_evidence(
 ) -> serde_json::Value {
     const MAX_STRUCTURED_RESULT_CHARS: usize = 8_000;
 
+    let identity = result.canonical_evidence_identity();
     let explicit_observation = crate::capability_result::explicit_model_observation(&result.data);
     let evidence_value = explicit_observation
         .map(|observation| {
@@ -205,100 +206,51 @@ fn provider_safe_capability_result_evidence(
     if sanitized_chars <= MAX_STRUCTURED_RESULT_CHARS {
         return json!({
             "projection": "structured_result",
+            "evidence_id": identity.evidence_id,
+            "sha256": identity.sha256,
+            "size_bytes": identity.size_bytes,
             "result": value,
         });
     }
-
-    let mut scalar_facts = Vec::new();
-    collect_provider_safe_scalar_facts("", &value, &mut scalar_facts);
-    let total_scalar_facts = scalar_facts.len();
-    let head = scalar_facts.iter().take(48);
-    let tail_start = total_scalar_facts.saturating_sub(48).max(48);
-    let tail = scalar_facts.iter().skip(tail_start);
-    let bounded_facts = head.chain(tail).cloned().collect::<Vec<_>>();
     json!({
-        "projection": "bounded_scalar_facts",
+        "projection": "canonical_evidence_reference",
         "truncated": true,
         "original_chars": sanitized_chars,
-        "total_scalar_facts": total_scalar_facts,
-        "facts": bounded_facts,
+        "evidence_id": identity.evidence_id,
+        "sha256": identity.sha256,
+        "size_bytes": identity.size_bytes,
+        "recovery": "canonical_evidence_catalog.artifact_range",
     })
-}
-
-fn collect_provider_safe_scalar_facts(
-    path: &str,
-    value: &serde_json::Value,
-    out: &mut Vec<serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, child) in object {
-                let child_path = if path.is_empty() {
-                    key.to_string()
-                } else {
-                    format!("{path}.{key}")
-                };
-                collect_provider_safe_scalar_facts(&child_path, child, out);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for (index, child) in items.iter().enumerate() {
-                collect_provider_safe_scalar_facts(&format!("{path}[{index}]"), child, out);
-            }
-        }
-        serde_json::Value::String(text) => {
-            const MAX_SCALAR_STRING_CHARS: usize = 512;
-            let text_chars = text.chars().count();
-            let value = if text_chars <= MAX_SCALAR_STRING_CHARS {
-                serde_json::Value::String(text.clone())
-            } else {
-                serde_json::Value::String(format!(
-                    "{}...(truncated)",
-                    text.chars()
-                        .take(MAX_SCALAR_STRING_CHARS)
-                        .collect::<String>()
-                ))
-            };
-            out.push(json!({
-                "path": path,
-                "value": value,
-                "original_chars": text_chars,
-            }));
-        }
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
-            out.push(json!({
-                "path": path,
-                "value": value,
-            }));
-        }
-    }
 }
 
 pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
     journal: &crate::task_journal::TaskJournal,
 ) -> String {
-    let mut steps = journal
+    let steps = journal
         .step_results
         .iter()
         .filter(|step| step_can_supply_verifier_prompt_observation(step))
-        .rev()
-        .take(MAX_VERIFIER_STEPS)
         .map(provider_safe_step_evidence)
         .collect::<Vec<_>>();
-    steps.reverse();
     let capability_results = journal
         .capability_results
         .iter()
-        .rev()
-        .take(MAX_VERIFIER_STEPS)
         .map(provider_safe_capability_result_evidence)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
+        .collect::<Vec<_>>();
+    let canonical_evidence_catalogs = journal
+        .task_observations
+        .iter()
+        .filter(|observation| {
+            observation
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("canonical_evidence_store")
+        })
         .collect::<Vec<_>>();
     serde_json::to_string_pretty(&json!({
         "step_evidence": steps,
         "capability_result_evidence": capability_results,
+        "canonical_evidence_catalogs": canonical_evidence_catalogs,
     }))
     .unwrap_or_else(|_| "{}".to_string())
 }
@@ -306,7 +258,6 @@ pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
 pub(in crate::answer_verifier) fn current_context_prompt_block(
     journal: &crate::task_journal::TaskJournal,
 ) -> String {
-    const MAX_CHARS: usize = 12_000;
     let Some(summary) = journal.context_bundle_summary.as_deref() else {
         return "<none>".to_string();
     };
@@ -314,8 +265,5 @@ pub(in crate::answer_verifier) fn current_context_prompt_block(
     if trimmed.is_empty() {
         return "<none>".to_string();
     }
-    if trimmed.chars().count() <= MAX_CHARS {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(MAX_CHARS).collect()
+    trimmed.to_string()
 }

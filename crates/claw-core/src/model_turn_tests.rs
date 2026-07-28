@@ -58,3 +58,23 @@ fn provider_capabilities_are_conservative_by_default() {
         }
     );
 }
+
+#[test]
+fn provider_descriptor_round_trips_budgeting_capabilities() {
+    let descriptor = ProviderModelDescriptor {
+        capabilities: ProviderModelCapabilities::default(),
+        context_window_tokens: Some(128_000),
+        output_reserve_tokens: 8_192,
+        request_timeout_seconds: 180,
+        estimator_confidence: TokenEstimatorConfidence::Conservative,
+    };
+    let encoded = serde_json::to_value(&descriptor).unwrap();
+    assert_eq!(encoded["context_window_tokens"], 128_000);
+    assert_eq!(encoded["output_reserve_tokens"], 8_192);
+    assert_eq!(encoded["request_timeout_seconds"], 180);
+    assert_eq!(encoded["estimator_confidence"], "conservative");
+    assert_eq!(
+        serde_json::from_value::<ProviderModelDescriptor>(encoded).unwrap(),
+        descriptor
+    );
+}

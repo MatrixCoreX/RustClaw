@@ -4,7 +4,6 @@ use super::{subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig};
 use crate::agent_runtime_contract::SubagentRoleDefinition;
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
-    DEFAULT_MAX_CHILDREN_PER_PARENT,
 };
 use crate::repo::child_tasks::{enqueue_child_task_specs, ChildTaskParentContext};
 use crate::{AppState, ClaimedTask};
@@ -28,7 +27,8 @@ pub(super) fn record_persistent_child_task_from_args(
     args: &Value,
     config: &SubagentRuntimeConfig,
 ) -> Result<&'static str, &'static str> {
-    let specs = persistent_child_specs(task, args, config)?;
+    let mut specs = persistent_child_specs(task, args, config)?;
+    let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs
         .iter()
         .any(|spec| spec.permission_profile == ChildTaskPermissionProfile::LocalWorktree);
@@ -37,6 +37,7 @@ pub(super) fn record_persistent_child_task_from_args(
     let recursion_depth = child_recursion_depth_from_payload(&task.payload_json);
     let enqueue = enqueue_child_task_specs(state, &parent, &specs, max_parallel, recursion_depth)
         .map_err(|err| {
+        settle_rejected_child_allocations(loop_state, &allocation_ids);
         record_persistent_schedule_error(
             loop_state,
             global_step,
@@ -48,6 +49,7 @@ pub(super) fn record_persistent_child_task_from_args(
     })?;
 
     if enqueue.get("status").and_then(Value::as_str) != Some("scheduled") {
+        settle_rejected_child_allocations(loop_state, &allocation_ids);
         record_persistent_schedule_error(
             loop_state,
             global_step,
@@ -70,7 +72,7 @@ pub(super) fn record_persistent_child_task_from_args(
     Ok(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING)
 }
 
-fn persistent_child_specs(
+pub(super) fn persistent_child_specs(
     task: &ClaimedTask,
     args: &Value,
     config: &SubagentRuntimeConfig,
@@ -81,11 +83,7 @@ fn persistent_child_specs(
         .filter(|items| !items.is_empty());
     let mut specs = Vec::new();
     if let Some(children) = child_args {
-        for (index, child) in children
-            .iter()
-            .take(DEFAULT_MAX_CHILDREN_PER_PARENT)
-            .enumerate()
-        {
+        for (index, child) in children.iter().enumerate() {
             specs.push(persistent_child_spec(
                 task,
                 child,
@@ -102,6 +100,64 @@ fn persistent_child_specs(
     } else {
         resolve_persistent_dependency_refs(&mut specs)?;
         Ok(specs)
+    }
+}
+
+pub(super) fn allocate_persistent_child_budgets(
+    loop_state: &mut LoopState,
+    specs: &mut [ChildTaskSpec],
+) -> Result<Vec<String>, &'static str> {
+    let Some(slice) = loop_state.task_budget_slice.as_mut() else {
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    };
+    let mut allocation_ids: Vec<String> = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let allocation_id = format!("child:{}", spec.child_task_id);
+        let requested = crate::task_budget_contract::BudgetUnits {
+            model_turns: spec.budget.max_rounds,
+            tool_calls: spec.budget.max_tool_calls,
+            tokens: spec.budget.max_tokens,
+            elapsed_ms: spec.budget.timeout_ms,
+        };
+        let Some(allocation) = slice.allocate(
+            allocation_id.clone(),
+            format!("child_task:{}", spec.child_task_id),
+            crate::task_budget_contract::BudgetAllocationKind::ChildTask,
+            requested,
+        ) else {
+            for allocated in &allocation_ids {
+                slice.settle_allocation(
+                    allocated,
+                    crate::task_budget_contract::BudgetUnits::default(),
+                );
+            }
+            return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+        };
+        spec.budget.max_rounds = allocation.granted.model_turns.max(1);
+        spec.budget.max_tool_calls = allocation.granted.tool_calls.max(1);
+        spec.budget.max_tokens = allocation.granted.tokens.max(1);
+        spec.budget.timeout_ms = allocation.granted.elapsed_ms.max(1_000);
+        if let Some(scope) = spec.scope.as_object_mut() {
+            scope.insert(
+                "budget_allocation_id".to_string(),
+                json!(allocation_id.clone()),
+            );
+            scope.insert("budget_owner".to_string(), json!("task_budget_manager"));
+        }
+        allocation_ids.push(allocation_id);
+    }
+    Ok(allocation_ids)
+}
+
+fn settle_rejected_child_allocations(loop_state: &mut LoopState, allocation_ids: &[String]) {
+    let Some(slice) = loop_state.task_budget_slice.as_mut() else {
+        return;
+    };
+    for allocation_id in allocation_ids {
+        slice.settle_allocation(
+            allocation_id,
+            crate::task_budget_contract::BudgetUnits::default(),
+        );
     }
 }
 
@@ -157,6 +213,7 @@ fn persistent_child_spec(
         "owned_paths": owned_paths,
         "model_policy": model_policy,
         "tool_policy": tool_policy,
+        "recursion_depth": child_recursion_depth_from_payload(&task.payload_json),
     });
     Ok(ChildTaskSpec {
         parent_task_id: task.task_id.clone(),
@@ -288,7 +345,6 @@ fn persistent_allowed_capabilities(
         options.allowed_capabilities.clone()
     };
     if capabilities.is_empty()
-        || capabilities.len() > 32
         || capabilities
             .iter()
             .any(|capability| !machine_capability_token(capability))
@@ -314,13 +370,16 @@ fn persistent_child_budget(args: &Value, top_level_args: Option<&Value>) -> Chil
     let mut budget = ChildTaskBudget::readonly_default();
     if let Some(value) = budget_value {
         if let Some(max_rounds) = value.get("max_rounds").and_then(Value::as_u64) {
-            budget.max_rounds = max_rounds.clamp(1, 12);
+            budget.max_rounds = max_rounds.max(1);
         }
         if let Some(max_tool_calls) = value.get("max_tool_calls").and_then(Value::as_u64) {
-            budget.max_tool_calls = max_tool_calls.clamp(1, 64);
+            budget.max_tool_calls = max_tool_calls.max(1);
+        }
+        if let Some(max_tokens) = value.get("max_tokens").and_then(Value::as_u64) {
+            budget.max_tokens = max_tokens.max(1);
         }
         if let Some(timeout_ms) = value.get("timeout_ms").and_then(Value::as_u64) {
-            budget.timeout_ms = timeout_ms.clamp(1_000, 3_600_000);
+            budget.timeout_ms = timeout_ms.max(1_000);
         }
     }
     budget
@@ -330,15 +389,21 @@ fn persistent_max_parallel(args: &Value, config: &SubagentRuntimeConfig) -> usiz
     args.get("max_parallel")
         .and_then(Value::as_u64)
         .unwrap_or(config.max_parallel_readonly)
-        .clamp(1, DEFAULT_MAX_CHILDREN_PER_PARENT as u64) as usize
+        .min(config.max_parallel_readonly.max(1))
+        .max(1) as usize
 }
 
 fn child_recursion_depth_from_payload(payload_json: &str) -> usize {
     serde_json::from_str::<Value>(payload_json)
         .ok()
-        .filter(crate::repo::child_tasks::is_child_subagent_payload)
-        .map(|_| crate::child_task_contract::DEFAULT_MAX_CHILD_DEPTH + 1)
-        .unwrap_or(1)
+        .and_then(|payload| {
+            payload
+                .pointer("/child_task_contract/scope/recursion_depth")
+                .and_then(Value::as_u64)
+        })
+        .and_then(|depth| usize::try_from(depth).ok())
+        .unwrap_or(0)
+        .saturating_add(1)
 }
 
 fn child_parent_context(state: &AppState, task: &ClaimedTask) -> ChildTaskParentContext {

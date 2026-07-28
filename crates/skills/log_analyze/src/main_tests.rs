@@ -245,3 +245,57 @@ fn execute_returns_tail_lines_when_requested() {
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_dir(dir);
 }
+
+#[test]
+fn bounded_match_pages_continue_to_older_lines_and_reject_changed_logs() {
+    let dir = std::env::temp_dir().join(format!(
+        "rustclaw-log-analyze-page-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("app.log");
+    let source = (1..=7)
+        .map(|index| format!("2026-07-28 ERROR event-{index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, &source).expect("write log");
+
+    let (_, first) = execute(json!({
+        "path": path.to_string_lossy(),
+        "keywords": ["error"],
+        "max_matches": 3
+    }))
+    .expect("first page");
+    assert_eq!(first["bounded_results"]["matches"]["complete"], false);
+    assert_eq!(first["bounded_results"]["matches"]["original_count"], 7);
+    let continuation = first["bounded_results"]["matches"]["continuation"]["token"]
+        .as_str()
+        .expect("continuation");
+
+    let (_, second) = execute(json!({
+        "path": path.to_string_lossy(),
+        "keywords": ["error"],
+        "max_matches": 3,
+        "continuation": continuation,
+    }))
+    .expect("second page");
+    assert!(second["recent_matches"]
+        .as_array()
+        .expect("matches")
+        .iter()
+        .any(|line| line.as_str().is_some_and(|line| line.contains("event-2"))));
+
+    std::fs::write(&path, format!("{source}\n2026-07-28 ERROR changed"))
+        .expect("change log snapshot");
+    let error = execute(json!({
+        "path": path.to_string_lossy(),
+        "keywords": ["error"],
+        "max_matches": 3,
+        "continuation": continuation,
+    }))
+    .expect_err("changed snapshot must not silently restart");
+    assert_eq!(error, "stale_snapshot");
+
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir(dir);
+}

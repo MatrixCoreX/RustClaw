@@ -1,16 +1,13 @@
 use serde_json::{json, Value};
 
-use super::{
-    stable_machine_ref, CHILD_TASK_SCHEMA_VERSION, DEFAULT_MAX_CHILDREN_PER_PARENT,
-    DEFAULT_MAX_CHILD_DEPTH,
-};
+use super::{stable_machine_ref, CHILD_TASK_SCHEMA_VERSION};
 
 pub(crate) fn child_scheduler_decision(
     requested_count: usize,
     max_parallel: usize,
     recursion_depth: usize,
 ) -> Value {
-    let bounded_max_parallel = max_parallel.clamp(1, DEFAULT_MAX_CHILDREN_PER_PARENT);
+    let bounded_max_parallel = max_parallel.max(1);
     let fanout = child_fanout_policy(recursion_depth, requested_count);
     if fanout.get("decision").and_then(Value::as_str) != Some("allowed") {
         return json!({
@@ -24,54 +21,33 @@ pub(crate) fn child_scheduler_decision(
             "fanout": fanout,
         });
     }
-    let scheduled = requested_count.min(bounded_max_parallel);
+    let ready = requested_count.min(bounded_max_parallel);
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
-        "decision": if scheduled == requested_count { "scheduled" } else { "bounded_partial" },
-        "reason_code": if scheduled == requested_count {
+        "decision": "scheduled",
+        "reason_code": if ready == requested_count {
             "child_parallel_capacity_available"
         } else {
-            "child_parallel_capacity_exceeded"
+            "child_parallel_capacity_queued"
         },
         "requested_child_count": requested_count,
-        "scheduled_child_count": scheduled,
-        "skipped_child_count": requested_count.saturating_sub(scheduled),
+        "scheduled_child_count": requested_count,
+        "ready_child_count": ready,
+        "queued_child_count": requested_count.saturating_sub(ready),
+        "skipped_child_count": 0,
         "max_parallel": bounded_max_parallel,
         "fanout": fanout,
     })
 }
 
 pub(crate) fn child_fanout_policy(recursion_depth: usize, requested_count: usize) -> Value {
-    if recursion_depth > DEFAULT_MAX_CHILD_DEPTH {
-        return json!({
-            "schema_version": CHILD_TASK_SCHEMA_VERSION,
-            "decision": "rejected",
-            "reason_code": "child_recursion_depth_exceeded",
-            "recursion_depth": recursion_depth,
-            "max_child_depth": DEFAULT_MAX_CHILD_DEPTH,
-            "requested_child_count": requested_count,
-            "max_children_per_parent": DEFAULT_MAX_CHILDREN_PER_PARENT,
-        });
-    }
-    if requested_count > DEFAULT_MAX_CHILDREN_PER_PARENT {
-        return json!({
-            "schema_version": CHILD_TASK_SCHEMA_VERSION,
-            "decision": "rejected",
-            "reason_code": "child_fanout_limit_exceeded",
-            "recursion_depth": recursion_depth,
-            "max_child_depth": DEFAULT_MAX_CHILD_DEPTH,
-            "requested_child_count": requested_count,
-            "max_children_per_parent": DEFAULT_MAX_CHILDREN_PER_PARENT,
-        });
-    }
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "decision": "allowed",
-        "reason_code": "child_fanout_within_bounds",
+        "reason_code": "child_dag_validated",
         "recursion_depth": recursion_depth,
-        "max_child_depth": DEFAULT_MAX_CHILD_DEPTH,
         "requested_child_count": requested_count,
-        "max_children_per_parent": DEFAULT_MAX_CHILDREN_PER_PARENT,
+        "topology_guard": "dependency_dag_cycle_and_conflict_validation",
     })
 }
 
@@ -143,7 +119,7 @@ fn append_machine_ref_array(value: Option<&Value>, output: &mut Vec<String>) {
     let Some(items) = value.and_then(Value::as_array) else {
         return;
     };
-    for item in items.iter().take(DEFAULT_MAX_CHILDREN_PER_PARENT) {
+    for item in items {
         if let Some(token) = item.as_str().map(stable_machine_ref) {
             output.push(token);
         }

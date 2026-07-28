@@ -2,6 +2,7 @@
 //! RustClaw skills.
 
 pub mod adapter;
+pub mod bounded_result;
 pub mod error;
 pub mod installer;
 pub mod manifest;
@@ -16,9 +17,13 @@ pub mod sandbox;
 mod secret_scan;
 pub mod templates;
 
+pub use bounded_result::{
+    ArtifactDescriptor, ArtifactSpill, BoundedResult, ContinuationDescriptor, FieldTruncation,
+};
 pub use error::{SkillSdkError, SkillSdkResult};
 pub use installer::{
-    AdoptBuiltRequest, InstallControl, InstallOutcome, InstallRequest, SkillInstaller,
+    AdoptBuiltRequest, InstallControl, InstallOrigin, InstallOutcome, InstallRequest,
+    PrecompiledInstallRequest, SkillInstaller,
 };
 pub use manifest::{
     ArchiveFormat, BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest, SandboxProfile,

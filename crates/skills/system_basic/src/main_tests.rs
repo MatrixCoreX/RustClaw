@@ -1499,6 +1499,30 @@ fn find_path_match_includes_resolved_path() {
 }
 
 #[test]
+fn find_path_fuzzy_matches_typos_and_ranks_the_closest_name_first() {
+    let root = temp_root("find_path_fuzzy");
+    std::fs::write(root.join("configuration.toml"), "x=1").expect("write closest");
+    std::fs::write(root.join("configurator-notes.txt"), "notes").expect("write secondary");
+    std::fs::create_dir_all(root.join("configuration-backup")).expect("write directory");
+    let mut obj = Map::new();
+    obj.insert("name".to_string(), json!("configuraiton.toml"));
+    obj.insert("match_mode".to_string(), json!("fuzzy"));
+    obj.insert("target_kind".to_string(), json!("file"));
+
+    let out = find_path(&root, &obj, false).expect("fuzzy find path");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(value["match_mode"], "fuzzy");
+    assert_eq!(value["matches"][0]["name"], "configuration.toml");
+    assert!(value["matches"]
+        .as_array()
+        .expect("matches")
+        .iter()
+        .all(|item| item["kind"] == "file"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn find_path_default_search_reaches_beyond_eight_levels() {
     let root = temp_root("find_path_deep_default");
     let mut parent = root.clone();

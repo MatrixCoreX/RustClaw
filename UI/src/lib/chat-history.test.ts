@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
   conversationHistoryScope,
   conversationHistoryStorageKey,
+  advanceConversationBodyDescriptor,
+  fetchAllConversationHistory,
+  fetchConversationHistoryPage,
+  fetchNextConversationBodyPage,
   projectConversationHistory,
 } from "./chat-history";
 import type { ConversationHistoryPage } from "../types/api";
@@ -141,4 +146,110 @@ test("uses an identity-scoped local cache key without credentials", () => {
     conversationHistoryStorageKey("webd:42:7"),
     "rustclaw.ui.chatThreads.v2.webd:42:7",
   );
+});
+
+test("loads every server history page without a fixed page or conversation cap", async () => {
+  const pages = Array.from({ length: 7 }, (_, pageIndex) => {
+    const turns = Array.from({ length: 5 }, (_, turnIndex) => {
+      const sequence = pageIndex * 5 + turnIndex;
+      return {
+        schema_version: 1,
+        conversation_id: `chat-thread-${sequence}`,
+        external_chat_id: `ui-chat-${sequence}`,
+        task_id: `task-${sequence}`,
+        status: "succeeded" as const,
+        user_text: `问题 ${sequence}`,
+        assistant_text: `回答 ${sequence}`,
+        error_text: null,
+        attachment_count: 0,
+        attachment_kinds: [],
+        created_at: 100 + sequence,
+        updated_at: 100 + sequence,
+      };
+    });
+    const truncated = pageIndex < 6;
+    return {
+      schema_version: 1,
+      status: "ok" as const,
+      turns,
+      next_cursor: truncated ? `${pageIndex + 1}:task-${pageIndex + 1}` : null,
+      truncated,
+      content_sha256: createHash("sha256").update(JSON.stringify(turns)).digest("hex"),
+    } satisfies ConversationHistoryPage;
+  });
+  let requestCount = 0;
+  const loaded = await fetchAllConversationHistory(async () => {
+    const page = pages[requestCount];
+    requestCount += 1;
+    return new Response(JSON.stringify({ ok: true, data: page }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  assert.equal(requestCount, 7);
+  assert.equal(loaded.length, 7);
+  assert.equal(projectConversationHistory(loaded, t).length, 35);
+});
+
+test("loads one history page at a time for browser memory isolation", async () => {
+  const value = page();
+  value.next_cursor = "101:task-older";
+  value.truncated = true;
+  value.content_sha256 = createHash("sha256")
+    .update(JSON.stringify(value.turns))
+    .digest("hex");
+  let requested = "";
+  const loaded = await fetchConversationHistoryPage(async (path) => {
+    requested = path;
+    return new Response(JSON.stringify({ ok: true, data: value }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  assert.match(requested, /limit=60/);
+  assert.equal(loaded.next_cursor, "101:task-older");
+});
+
+test("validates and advances a snapshot-bound conversation body page", async () => {
+  const descriptor = {
+    schema_version: 1 as const,
+    complete: false,
+    original_size_bytes: 12,
+    returned_size_bytes: 6,
+    content_sha256: "b".repeat(64),
+    continuation: {
+      kind: "conversation_body_range" as const,
+      url: `/v1/tasks/task-2/conversation-body/assistant?start_byte=6&sha256=${"b".repeat(64)}`,
+      next_start_byte: 6,
+    },
+  };
+  const next = await fetchNextConversationBodyPage(async () => {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          schema_version: 1,
+          status: "ok",
+          task_id: "task-2",
+          field: "assistant",
+          text: "second",
+          start_byte: 6,
+          end_byte: 12,
+          total_size_bytes: 12,
+          complete: true,
+          next_start_byte: null,
+          content_sha256: "b".repeat(64),
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }, descriptor);
+  const advanced = advanceConversationBodyDescriptor(descriptor, next);
+
+  assert.equal(next.text, "second");
+  assert.equal(advanced.complete, true);
+  assert.equal(advanced.returned_size_bytes, 12);
+  assert.equal(advanced.continuation, null);
 });

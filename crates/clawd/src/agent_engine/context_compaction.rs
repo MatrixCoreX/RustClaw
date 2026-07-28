@@ -1,22 +1,17 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use sha2::Digest;
 use tracing::{info, warn};
 
 use crate::task_context_builder::{ContextCompactionPlan, TaskContextBundle};
 use crate::{llm_gateway, AppState, ClaimedTask};
 
 const CONTEXT_COMPACTION_PROMPT_LOGICAL_PATH: &str = "prompts/context_compaction_prompt.md";
-const CONTEXT_COMPACTION_MAX_TOKENS: u64 = 8_192;
 const CONTEXT_COMPACTION_MIN_TIMEOUT_SECONDS: u64 = 120;
 const CONTEXT_COMPACTION_MAX_TIMEOUT_SECONDS: u64 = 300;
 const CONTEXT_COMPACTION_TIMEOUT_GRACE_SECONDS: u64 = 30;
-const MAX_COMPACTION_ITEMS: usize = 64;
-const MAX_CONTEXT_SOURCE_TOTAL_CHARS: usize = 48_000;
-const MAX_CONTEXT_SOURCE_ITEM_CHARS: usize = 24_000;
-const MAX_FACT_VALUE_CHARS: usize = 1_024;
 const MAX_REF_CHARS: usize = 256;
-const MIN_RESERVED_LLM_CALLS_AFTER_COMPACTION: u64 = 2;
 const FORBIDDEN_INSTRUCTION_FIELDS: &[&str] = &[
     "action",
     "actions",
@@ -44,14 +39,6 @@ pub(crate) async fn run_model_assisted_context_compaction(
     bundle: &TaskContextBundle,
     plan: &ContextCompactionPlan,
 ) -> (Option<Value>, &'static str) {
-    let current_calls = state.task_llm_call_count(&task.task_id);
-    if current_calls
-        .saturating_add(1)
-        .saturating_add(MIN_RESERVED_LLM_CALLS_AFTER_COMPACTION)
-        > state.worker.llm_max_calls_per_task
-    {
-        return (None, "context_compaction_llm_budget_reserved");
-    }
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
         CONTEXT_COMPACTION_PROMPT_LOGICAL_PATH,
@@ -65,7 +52,8 @@ pub(crate) async fn run_model_assisted_context_compaction(
             return (None, "context_compaction_prompt_missing");
         }
     };
-    let source_bundle = context_source_bundle(bundle, plan);
+    let mut source_bundle = context_source_bundle(bundle, plan);
+    materialize_context_source_artifacts(state, task, bundle, &mut source_bundle);
     let source_json =
         serde_json::to_string_pretty(&source_bundle).unwrap_or_else(|_| source_bundle.to_string());
     let prompt = crate::render_prompt_template(
@@ -87,7 +75,7 @@ pub(crate) async fn run_model_assisted_context_compaction(
         &resolved.source,
         crate::ChatRequestHints {
             temperature: Some(0.0),
-            max_tokens: Some(CONTEXT_COMPACTION_MAX_TOKENS),
+            max_tokens: Some(context_compaction_output_tokens(state, task)),
             ..Default::default()
         },
     );
@@ -143,6 +131,17 @@ pub(crate) async fn run_model_assisted_context_compaction(
     (Some(normalized), "context_compaction_model_completed")
 }
 
+fn context_compaction_output_tokens(state: &AppState, task: &ClaimedTask) -> u64 {
+    state
+        .task_llm_providers(task)
+        .iter()
+        .map(|provider| provider.model_descriptor().output_reserve_tokens)
+        .min()
+        .and_then(|tokens| u64::try_from(tokens).ok())
+        .unwrap_or(4_096)
+        .max(1)
+}
+
 fn context_compaction_timeout_seconds(provider_timeout_seconds: Option<u64>) -> u64 {
     provider_timeout_seconds
         .unwrap_or(CONTEXT_COMPACTION_MIN_TIMEOUT_SECONDS)
@@ -154,10 +153,15 @@ fn context_compaction_timeout_seconds(provider_timeout_seconds: Option<u64>) -> 
 }
 
 fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPlan) -> Value {
+    let source_char_budget = plan
+        .provider_compaction_threshold_tokens
+        .unwrap_or(plan.before_token_estimate.max(1))
+        .saturating_mul(4)
+        .max(1);
     let mut sources = Vec::new();
-    let mut remaining_chars = MAX_CONTEXT_SOURCE_TOTAL_CHARS;
+    let mut remaining_chars = source_char_budget;
     if let Some(view) = bundle.execution_view.as_ref() {
-        for (source_ref, value) in [
+        let source_values = [
             ("runtime_context", view.runtime_context.as_str()),
             ("goal_context", view.goal_context.as_str()),
             ("active_task_context", view.active_task_context.as_str()),
@@ -180,25 +184,43 @@ fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPla
                 "recent_execution_context",
                 view.recent_execution_context.as_str(),
             ),
-        ] {
+        ];
+        let mut remaining_sources = source_values
+            .iter()
+            .filter(|(_, value)| context_value_present(value))
+            .count();
+        for (source_ref, value) in source_values {
             if !context_value_present(value) || remaining_chars == 0 {
                 continue;
             }
-            let source_budget = remaining_chars.min(MAX_CONTEXT_SOURCE_ITEM_CHARS);
-            let bounded_value = bounded_text(value, source_budget);
+            let source_budget = remaining_chars
+                .saturating_add(remaining_sources.saturating_sub(1))
+                .checked_div(remaining_sources.max(1))
+                .unwrap_or(remaining_chars)
+                .max(1);
+            let (model_safe_value, model_view_redacted) =
+                crate::skill_output_artifact::sensitivity_aware_text_model_view(value);
+            let bounded_value = bounded_text(&model_safe_value, source_budget);
             let included_char_count = bounded_value.chars().count();
             remaining_chars = remaining_chars.saturating_sub(included_char_count);
+            remaining_sources = remaining_sources.saturating_sub(1);
+            let source_sha256 = format!("{:x}", sha2::Sha256::digest(value.as_bytes()));
             sources.push(json!({
                 "ref": source_ref,
                 "provenance": source_provenance(source_ref),
+                "sha256": source_sha256,
                 "char_count": value.chars().count(),
                 "included_char_count": included_char_count,
                 "truncated": included_char_count < value.chars().count(),
+                "included_range": {"start_char": 0, "end_char": included_char_count},
+                "canonical_ref": format!("evidence:context_source:{source_sha256}"),
+                "sensitivity": if model_view_redacted { "restricted_redacted" } else { "task_owner" },
+                "model_view_redacted": model_view_redacted,
                 "value": bounded_value,
             }));
         }
     }
-    let included_source_char_count = MAX_CONTEXT_SOURCE_TOTAL_CHARS - remaining_chars;
+    let included_source_char_count = source_char_budget - remaining_chars;
     json!({
         "schema_version": 1,
         "generation": plan.generation,
@@ -209,10 +231,96 @@ fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPla
         "provider_context_window_tokens": plan.provider_context_window_tokens,
         "provider_compaction_threshold_tokens": plan.provider_compaction_threshold_tokens,
         "trigger_codes": plan.trigger_codes,
-        "source_char_budget": MAX_CONTEXT_SOURCE_TOTAL_CHARS,
+        "source_char_budget": source_char_budget,
         "included_source_char_count": included_source_char_count,
         "sources": sources,
     })
+}
+
+fn materialize_context_source_artifacts(
+    state: &AppState,
+    task: &ClaimedTask,
+    bundle: &TaskContextBundle,
+    source_bundle: &mut Value,
+) {
+    let Some(view) = bundle.execution_view.as_ref() else {
+        return;
+    };
+    let source_values = [
+        ("runtime_context", view.runtime_context.as_str()),
+        ("goal_context", view.goal_context.as_str()),
+        ("active_task_context", view.active_task_context.as_str()),
+        ("last_turn_full", view.last_turn_full.as_str()),
+        ("recent_turns_full", view.recent_turns_full.as_str()),
+        (
+            "active_execution_anchor_context",
+            view.active_execution_anchor_context.as_str(),
+        ),
+        ("session_alias_context", view.session_alias_context.as_str()),
+        (
+            "recent_execution_anchor",
+            view.recent_execution_anchor.as_str(),
+        ),
+        (
+            "image_context",
+            view.image_context.as_deref().unwrap_or("<none>"),
+        ),
+        (
+            "recent_execution_context",
+            view.recent_execution_context.as_str(),
+        ),
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeMap<_, _>>();
+    let Some(sources) = source_bundle
+        .get_mut("sources")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for source in sources.iter_mut().filter(|source| {
+        source
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }) {
+        let Some(source_ref) = source.get("ref").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(value) = source_values.get(source_ref) else {
+            continue;
+        };
+        let evidence_id = source
+            .get("canonical_ref")
+            .and_then(Value::as_str)
+            .unwrap_or("evidence:context_source:unavailable");
+        let envelope = json!({
+            "schema_version": 1,
+            "source_ref": source_ref,
+            "provenance": source_provenance(source_ref),
+            "value": value,
+        });
+        let Ok(bytes) = serde_json::to_vec(&envelope) else {
+            continue;
+        };
+        let Ok(published) = crate::skill_output_artifact::publish_canonical_evidence_artifact(
+            &state.skill_rt.workspace_root,
+            &task.task_id,
+            evidence_id,
+            &bytes,
+        ) else {
+            continue;
+        };
+        if let Some(object) = source.as_object_mut() {
+            object.insert(
+                "continuation".to_string(),
+                json!({
+                    "kind": "artifact_range",
+                    "range_handle": published.range_handle,
+                }),
+            );
+        }
+    }
 }
 
 fn compaction_summary_provenance_valid(summary: &Value, source_bundle: &Value) -> bool {
@@ -275,7 +383,7 @@ pub(super) fn normalize_model_assisted_compaction_output(value: &Value) -> Optio
         "summary_kind": "model_assisted_context_compaction",
         "facts": bounded_fact_array(value)?,
         "decisions": bounded_decision_array(value)?,
-        "open_questions": bounded_string_array_field(value, "open_questions", MAX_FACT_VALUE_CHARS, false)?,
+        "open_questions": bounded_string_array_field(value, "open_questions", usize::MAX, false)?,
         "active_goal_refs": bounded_string_array_field(value, "active_goal_refs", MAX_REF_CHARS, false)?,
         "constraint_refs": bounded_string_array_field(value, "constraint_refs", MAX_REF_CHARS, false)?,
         "evidence_refs": bounded_string_array_field(value, "evidence_refs", MAX_REF_CHARS, false)?,
@@ -295,14 +403,10 @@ fn bounded_fact_array(value: &Value) -> Option<Value> {
         .get("facts")
         .and_then(Value::as_array)?
         .iter()
-        .take(MAX_COMPACTION_ITEMS)
         .map(|item| {
             let object = item.as_object()?;
             let fact_key = bounded_machine_token(object.get("fact_key")?.as_str()?, 96)?;
-            let fact_value = bounded_non_empty_or_empty(
-                object.get("fact_value")?.as_str()?,
-                MAX_FACT_VALUE_CHARS,
-            );
+            let fact_value = object.get("fact_value")?.as_str()?.trim().to_string();
             let source_ref = bounded_non_empty(object.get("source_ref")?.as_str()?, MAX_REF_CHARS)?;
             let provenance = normalized_provenance(object.get("provenance")?.as_str()?)?;
             Some(json!({
@@ -321,14 +425,10 @@ fn bounded_decision_array(value: &Value) -> Option<Value> {
         .get("decisions")
         .and_then(Value::as_array)?
         .iter()
-        .take(MAX_COMPACTION_ITEMS)
         .map(|item| {
             let object = item.as_object()?;
             let decision_key = bounded_machine_token(object.get("decision_key")?.as_str()?, 96)?;
-            let decision_value = bounded_non_empty_or_empty(
-                object.get("decision_value")?.as_str()?,
-                MAX_FACT_VALUE_CHARS,
-            );
+            let decision_value = object.get("decision_value")?.as_str()?.trim().to_string();
             let source_ref = bounded_non_empty(object.get("source_ref")?.as_str()?, MAX_REF_CHARS)?;
             Some(json!({
                 "decision_key": decision_key,
@@ -345,7 +445,6 @@ fn bounded_source_ref_array(value: &Value) -> Option<Value> {
         .get("source_refs")
         .and_then(Value::as_array)?
         .iter()
-        .take(MAX_COMPACTION_ITEMS)
         .map(|item| {
             let object = item.as_object()?;
             let source_ref = bounded_non_empty(object.get("ref")?.as_str()?, MAX_REF_CHARS)?;
@@ -366,7 +465,6 @@ fn bounded_string_array_field(
         .get(key)
         .and_then(Value::as_array)?
         .iter()
-        .take(MAX_COMPACTION_ITEMS)
         .map(|item| {
             let item = item.as_str()?;
             if machine_tokens_only {
@@ -422,10 +520,6 @@ fn bounded_machine_token(value: &str, max_chars: usize) -> Option<String> {
 fn bounded_non_empty(value: &str, max_chars: usize) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.chars().take(max_chars).collect())
-}
-
-fn bounded_non_empty_or_empty(value: &str, max_chars: usize) -> String {
-    value.trim().chars().take(max_chars).collect()
 }
 
 fn bounded_text(value: &str, max_chars: usize) -> String {

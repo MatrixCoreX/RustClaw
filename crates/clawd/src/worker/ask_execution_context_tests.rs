@@ -4,6 +4,14 @@ use serde_json::json;
 #[tokio::test]
 async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
     let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let provider = std::sync::Arc::make_mut(
+        state
+            .core
+            .llm_providers
+            .first_mut()
+            .expect("fixture provider"),
+    );
+    provider.config.context_window_tokens = Some(8_000);
     state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     {
         let db = state.core.db.get().expect("database");

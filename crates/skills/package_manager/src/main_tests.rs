@@ -136,3 +136,40 @@ fn dry_run_uninstall_returns_machine_fields() {
         Some("jq")
     );
 }
+
+#[test]
+fn failed_package_command_preserves_complete_output_behind_artifact_range() {
+    let root = TempDir::new("failed-output-artifact");
+    let source = "package-manager failure detail\n".repeat(1_000);
+    let spill =
+        ArtifactSpill::new(root.path.join("artifacts"), SKILL_NAME).expect("create artifact spill");
+    let bounded_output = BoundedResult::text(&source, 64, Some(&spill), "package-command-output")
+        .expect("bound command output");
+
+    let failure = package_command_failure(
+        "install",
+        "apt-get",
+        &["missing-package".to_string()],
+        false,
+        false,
+        "apt-get install -y missing-package".to_string(),
+        100,
+        bounded_output,
+    );
+
+    assert_eq!(failure.extra["status"], "error");
+    assert_eq!(failure.extra["error_code"], "package_command_failed");
+    assert_eq!(failure.extra["exit_code"], 100);
+    assert_eq!(failure.extra["output_result"]["complete"], false);
+    assert_eq!(
+        failure.extra["output_result"]["original_size_bytes"],
+        source.len() as u64
+    );
+    let artifact_path = failure.extra["output_result"]["artifacts"][0]["path"]
+        .as_str()
+        .expect("artifact path");
+    assert_eq!(
+        std::fs::read_to_string(artifact_path).expect("read complete failure output"),
+        source
+    );
+}

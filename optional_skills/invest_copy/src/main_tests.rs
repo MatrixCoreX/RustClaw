@@ -135,3 +135,40 @@ fn sentence_scoring_uses_currency_markers_without_language_units() {
     assert!(score_sentence("Revenue reached CNY 120m") > score_sentence("Revenue improved"));
     assert!(score_sentence("Revenue reached ¥120m") > score_sentence("Revenue improved"));
 }
+
+#[test]
+fn large_material_pages_are_query_bound_and_resumable() {
+    let source = "投资材料".repeat(MAX_DATA_CHARS);
+    let (first_text, first) = page_owned(&source, None).expect("first page");
+    assert_eq!(first_text.chars().count(), MAX_DATA_CHARS);
+    assert!(!first.complete);
+    let first_token = first
+        .continuation
+        .as_ref()
+        .and_then(|value| value.get("token"))
+        .and_then(Value::as_str)
+        .expect("continuation")
+        .to_string();
+
+    let mut reconstructed = first_text;
+    let mut page = first;
+    while !page.complete {
+        let token = page
+            .continuation
+            .as_ref()
+            .and_then(|value| value.get("token"))
+            .and_then(Value::as_str)
+            .expect("continuation");
+        let previous_end = page.end_char;
+        let (text, next_page) = page_owned(&source, Some(token)).expect("next page");
+        assert_eq!(next_page.start_char, previous_end);
+        assert!(!text.is_empty());
+        reconstructed.push_str(&text);
+        page = next_page;
+    }
+    assert_eq!(reconstructed, source);
+
+    let error = page_owned(&format!("{source}changed"), Some(&first_token))
+        .expect_err("changed material must be stale");
+    assert_eq!(error, "stale_snapshot");
+}

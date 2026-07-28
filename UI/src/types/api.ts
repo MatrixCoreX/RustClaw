@@ -70,11 +70,43 @@ export interface ConversationHistoryTurn {
   user_text?: string | null;
   assistant_text?: string | null;
   error_text?: string | null;
+  user_text_result?: ConversationBodyDescriptor | null;
+  assistant_text_result?: ConversationBodyDescriptor | null;
+  error_text_result?: ConversationBodyDescriptor | null;
   attachment_count: number;
   attachment_kinds: string[];
   artifacts?: TaskArtifact[];
   created_at: number;
   updated_at: number;
+}
+
+export interface ConversationBodyContinuation {
+  kind: "conversation_body_range";
+  url: string;
+  next_start_byte: number;
+}
+
+export interface ConversationBodyDescriptor {
+  schema_version: 1;
+  complete: boolean;
+  original_size_bytes: number;
+  returned_size_bytes: number;
+  content_sha256: string;
+  continuation?: ConversationBodyContinuation | null;
+}
+
+export interface ConversationBodyPage {
+  schema_version: 1;
+  status: "ok";
+  task_id: string;
+  field: "user" | "assistant" | "error";
+  text: string;
+  start_byte: number;
+  end_byte: number;
+  total_size_bytes: number;
+  complete: boolean;
+  next_start_byte?: number | null;
+  content_sha256: string;
 }
 
 export interface ConversationTitleUpdate {
@@ -547,6 +579,7 @@ export interface SkillStoreMutationResponse {
   enabled: boolean;
   package_installed?: boolean;
   adapter?: string | null;
+  install_origin?: "source_build" | "built_artifact" | "platform_precompiled" | null;
   installed_version?: string | null;
   receipt_digest?: string | null;
   install_reused?: boolean;
@@ -1139,6 +1172,7 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   images?: ChatAttachment[];
   artifacts?: TaskArtifact[];
+  bodyResult?: ConversationBodyDescriptor | null;
 }
 
 export interface TaskArtifact {
@@ -1166,6 +1200,16 @@ export interface ChatAttachment {
   size: number;
   kind: ChatAttachmentKind;
   durationMs?: number;
+}
+
+export interface UiAttachmentConstraints {
+  schema_version: 1;
+  status: "ok";
+  channel: "ui_base64";
+  max_attachments: number;
+  max_attachment_bytes: number;
+  max_total_attachment_bytes: number;
+  error_codes: string[];
 }
 
 export type ChatImageAttachment = ChatAttachment;

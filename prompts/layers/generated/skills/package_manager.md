@@ -37,6 +37,7 @@
 - Install command failures return readable stderr/system errors.
 - Non-zero install command exit codes are returned as `status=error` with `error_text=package install failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `manager`, `platform`, `packages`, and `output`.
+- Large successful command output is preserved in a private workspace artifact. `extra.output_result` reports completeness, original/returned byte sizes, the artifact descriptor, and an `artifact_range` continuation instead of silently cutting the output.
 
 ## Structured Evidence Contract (from interface)
 - Runtime evidence source: package manager results must come from structured `extra`, not from natural-language `text`.
@@ -64,6 +65,7 @@
   - `dry_run`: boolean preview flag; evidence role `status`.
   - `command`: string command preview/executed command; evidence role `field_value`.
   - `output`: string bounded install observation; fallback evidence only.
+  - `output_result`: shared bounded-result envelope; when partial, use its `continuation.state.read_capability` and artifact reference to retrieve the remaining bytes.
 - Sensitive fields: package names and command strings are usually low sensitivity, but provider-facing traces should still avoid full stderr dumps unless needed.
 - Error responses include readable `error_text`; top-level or `extra.error_kind` should be preferred over matching error text when present.
 

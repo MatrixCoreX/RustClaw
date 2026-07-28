@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { KeyRound, Loader2 } from "lucide-react";
+import { KeyRound, Loader2, Moon, Sun } from "lucide-react";
 
 type UiLanguage = "zh" | "en";
 type LoginTab = "key" | "webd";
@@ -8,6 +8,7 @@ type Translate = (zh: string, en: string) => string;
 export interface SignInPageProps {
   t: Translate;
   lang: UiLanguage;
+  themeMode: "light" | "dark";
   loginTab: LoginTab;
   baseUrl: string;
   uiKey: string;
@@ -28,11 +29,13 @@ export interface SignInPageProps {
   onLoginWebd: () => unknown | Promise<unknown>;
   onSwitchLoginTab: (tab: LoginTab) => void;
   onToggleLanguage: () => void;
+  onToggleTheme: () => void;
 }
 
 export function SignInPage({
   t,
   lang,
+  themeMode,
   loginTab,
   baseUrl,
   uiKey,
@@ -53,6 +56,7 @@ export function SignInPage({
   onLoginWebd,
   onSwitchLoginTab,
   onToggleLanguage,
+  onToggleTheme,
 }: SignInPageProps) {
   return (
     <>
@@ -261,6 +265,19 @@ export function SignInPage({
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
                 >
                   {lang === "zh" ? "中文" : "EN"}
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
+                  aria-label={
+                    themeMode === "dark"
+                      ? t("切换到浅色主题", "Switch to light theme")
+                      : t("切换到深色主题", "Switch to dark theme")
+                  }
+                >
+                  {themeMode === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                  {themeMode === "dark" ? t("浅色", "Light") : t("深色", "Dark")}
                 </button>
               </div>
             </div>

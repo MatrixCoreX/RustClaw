@@ -44,7 +44,9 @@ Parse one local file and return:
 - `action` (required, string): `parse_doc`
 - `path` (required, string): local file path
 - `mode` (optional, string, default `auto`): `auto|text_only`
-- `max_chars` (optional, integer, default `12000`): text truncation cap
+- `max_chars` (optional, integer, default `12000`): size of one text page
+- `start_char` (optional, integer, default `0`): explicit Unicode-character page start
+- `continuation` (optional, string): opaque query-bound token returned by the previous page; preferred over manually setting `start_char`
 - `include_metadata` (optional, bool, default `true`)
 - `page_range` (optional, string/object): PDF page range, e.g. `"1-5"` or `{ "start": 1, "end": 5 }`
 - `table_mode` (optional, string, default `basic`): `basic|strict`
@@ -55,6 +57,8 @@ Parse one local file and return:
 - `DEPENDENCY_MISSING`: required parser dependency is missing, especially for PDF parsing.
 - `UNSUPPORTED_FORMAT`: file type is not supported by the skill.
 - `PARSE_FAILED`: parsing failed after format detection and dependency checks.
+- `invalid_continuation`: malformed page token.
+- `stale_snapshot`: the document changed after the continuation was issued.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -91,6 +95,7 @@ Returned JSON inside `text` contains:
 - `tables`: array of table objects
 - `metadata`: object or `null`
   - `title`, `pages`, `type`, `path`, `encoding`, `truncated`, `truncation_notice`, `page_range_applied`
+  - `original_chars`, `returned_chars`, `start_char`, `end_char`, `snapshot_sha256`, `next_continuation`
 - `error_code`: nullable string (`NOT_FOUND|DEPENDENCY_MISSING|UNSUPPORTED_FORMAT|PARSE_FAILED|INVALID_ACTION`)
 - `error`: nullable string
 
@@ -103,6 +108,7 @@ Top-level `extra` contains stable machine-readable evidence:
 - `content_excerpt`: bounded excerpt from parsed document text for evidence coverage
 - `content_excerpt_truncated`: whether `content_excerpt` was capped
 - `text_length_chars`: parsed text length in Unicode scalar values
+- `text_result`: shared bounded-result envelope. It reports original/returned character counts and carries the next opaque continuation while another page exists.
 - `sections_count`: number of parsed sections
 - `tables_count`: number of parsed tables
 - `metadata`: compact metadata copy when available
@@ -110,7 +116,7 @@ Top-level `extra` contains stable machine-readable evidence:
 
 - Never fabricate content.
 - If parser dependency is missing (for PDF), return explicit error.
-- For large documents, enforce `max_chars` and set truncation metadata.
+- For large documents, return a stable page and continuation; do not silently discard the remaining text.
 - For non-UTF8 text, use lossy fallback decoding.
 - `table_mode=strict` drops rows that do not match header width.
 

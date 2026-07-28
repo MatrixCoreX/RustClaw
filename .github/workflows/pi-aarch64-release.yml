@@ -135,7 +135,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          INSTALL_DEPS=0 ./cross-build-pi.sh --target pi64 --workspace --no-ui --skip-deps
+          INSTALL_DEPS=0 ./scripts/archive/cross-build/cross-build-pi.sh \
+            --target pi64 --workspace --no-ui --skip-deps --precompile-skill-store
 
       - name: Package runtime
         shell: bash
@@ -157,6 +158,15 @@ jobs:
           target/release/rustclaw-skill receipt-verify \
             "target/skill-packages/${RUST_TARGET}" \
             health_check
+          while IFS= read -r skill_name; do
+            [[ -n "${skill_name}" ]] || continue
+            target/release/rustclaw-skill receipt-verify \
+              "target/prebuilt-skill-packages/${RUST_TARGET}" \
+              "${skill_name}" >/dev/null
+          done < <(
+            python3 scripts/skill_store_packages.py \
+              --scope platform-precompiled --target "${RUST_TARGET}" --format skills
+          )
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -177,7 +187,7 @@ jobs:
             printf 'Target: %s\n' "${RUST_TARGET}"
             printf 'Commit: %s\n' "${GITHUB_SHA}"
             printf '\n'
-            printf '%s\n' "This package contains prebuilt Rust binaries and UI/dist assets. On Pi, keep existing runtime configs/data, replace the packaged runtime files, then restart RustClaw."
+            printf '%s\n' "This package contains prebuilt Rust binaries, platform-matched Skill Store packages, and UI/dist assets. On Pi, keep existing runtime configs/data, replace the packaged runtime files, then restart RustClaw."
           } > release-notes.md
 
       - name: Publish GitHub Release

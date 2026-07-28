@@ -7,6 +7,9 @@ use std::process::{Command, Output};
 
 use crate::{AppState, ClaimedTask};
 
+#[path = "builtin_workspace_patch_transaction.rs"]
+mod transaction;
+
 const MAX_PATCH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 const CHECKPOINT_SCHEMA_VERSION: u32 = 1;
@@ -59,6 +62,9 @@ pub(super) fn execute_workspace_patch_for_root(
     let action = required_token(args, "action")?;
     match action {
         "apply_patch" => apply_patch(workspace_root, task_id, args),
+        "apply_patch_shard" => transaction::apply_patch_shard(workspace_root, task_id, args),
+        "transaction_status" => transaction::transaction_status(workspace_root, task_id, args),
+        "transaction_rewind" => transaction::transaction_rewind(workspace_root, task_id, args),
         "preview_replace_text" | "replace_text" => {
             super::builtin_workspace_replace::execute_workspace_replace_for_root(
                 workspace_root,
@@ -90,6 +96,13 @@ fn apply_patch(
             serde_json::json!({
                 "patch_bytes": patch.len(),
                 "max_patch_bytes": MAX_PATCH_BYTES,
+                "complete": false,
+                "partial_reason": "single_transaction_safety_limit",
+                "recovery": {
+                    "kind": "verified_shard",
+                    "action": "apply_patch_shard",
+                    "max_shard_bytes": MAX_PATCH_BYTES,
+                },
             }),
         ));
     }

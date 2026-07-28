@@ -300,8 +300,6 @@ pub(crate) struct WorkerConfig {
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
     pub(crate) worker_task_timeout_seconds: u64,
-    pub(crate) llm_max_calls_per_task: u64,
-    pub(crate) llm_total_timeout_ms: u64,
     pub(crate) worker_task_heartbeat_seconds: u64,
     pub(crate) worker_running_no_progress_timeout_seconds: u64,
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
@@ -369,8 +367,6 @@ impl WorkerConfig {
             started_at: Instant::now(),
             queue_limit: 1,
             worker_task_timeout_seconds: 300,
-            llm_max_calls_per_task: crate::llm_gateway::DEFAULT_MAX_LLM_CALLS_PER_TASK,
-            llm_total_timeout_ms: crate::llm_gateway::DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK,
             worker_task_heartbeat_seconds: 10,
             worker_running_no_progress_timeout_seconds: 300,
             worker_running_recovery_check_interval_seconds: 30,
@@ -391,11 +387,9 @@ impl WorkerConfig {
 #[derive(Clone, Default)]
 pub(crate) struct TaskMetricsRegistry {
     pub(crate) llm_calls_per_task: Arc<Mutex<HashMap<String, u64>>>,
-    /// Phase 1.3: 单任务 LLM 累计耗时（ms），与 `llm_calls_per_task` 一起构成
-    /// "单任务 LLM 预算"。在 `llm_gateway::run_with_fallback_with_prompt_source`
-    /// 入口处做一次预算检查，超过 `worker.llm_max_calls_per_task` 或
-    /// `worker.llm_total_timeout_ms` 就直接短路返回错误，防止单个任务
-    /// 无限扩张 LLM 预算（例如 plan_repair 抖动、fallback 雪崩）。
+    /// Per-task cumulative model-link time. This is telemetry consumed by the
+    /// unified task budget manager and journal, not an independent gateway
+    /// termination threshold.
     pub(crate) llm_elapsed_per_task: Arc<Mutex<HashMap<String, u64>>>,
     /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
     /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
@@ -1375,29 +1369,6 @@ impl AppState {
             .lock()
             .unwrap()
             .remove(task_id);
-    }
-
-    /// Phase 1.3: 在每次真正发起 LLM 调用前做预算检查。
-    /// 超过任一阈值就返回 `Some(reason)`，调用方应立即短路。
-    /// 阈值刻意给得宽松（40 次 / 180 秒），只用于兜底异常放大场景。
-    pub(crate) fn task_llm_budget_exceeded(&self, task_id: &str) -> Option<String> {
-        let calls = self.task_llm_call_count(task_id);
-        let max_calls = self.worker.llm_max_calls_per_task.max(1);
-        if calls >= max_calls {
-            return Some(format!(
-                "llm budget exceeded: calls={calls} limit={}",
-                max_calls
-            ));
-        }
-        let elapsed = self.task_llm_elapsed_ms(task_id);
-        let max_elapsed = self.worker.llm_total_timeout_ms.max(1_000);
-        if elapsed >= max_elapsed {
-            return Some(format!(
-                "llm budget exceeded: elapsed_ms={elapsed} limit={}",
-                max_elapsed
-            ));
-        }
-        None
     }
 
     pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {

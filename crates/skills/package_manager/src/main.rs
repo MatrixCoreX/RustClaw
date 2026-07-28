@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rustclaw_skill_sdk::{ArtifactSpill, BoundedResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -22,6 +23,21 @@ struct Resp {
     text: String,
     extra: Option<Value>,
     error_text: Option<String>,
+}
+
+#[derive(Debug)]
+struct ExecutionError {
+    message: String,
+    extra: Value,
+}
+
+impl From<String> for ExecutionError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            extra: error_extra("execution_failed"),
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -44,8 +60,8 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
+                    extra: Some(err.extra),
+                    error_text: Some(err.message),
                 },
             },
             Err(err) => Resp {
@@ -74,7 +90,7 @@ fn error_extra(error_kind: &str) -> Value {
     })
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
+fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -207,7 +223,11 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 use_sudo,
             )
         }
-        _ => Err("unsupported action; use detect|install|smart_install|uninstall".to_string()),
+        _ => Err(
+            "unsupported action; use detect|install|smart_install|uninstall"
+                .to_string()
+                .into(),
+        ),
     }
 }
 
@@ -452,7 +472,7 @@ fn manage_packages(
     packages: &[String],
     dry_run: bool,
     use_sudo: bool,
-) -> Result<(String, Value), String> {
+) -> Result<(String, Value), ExecutionError> {
     let mut argv: Vec<String> = Vec::new();
     append_package_manager_argv(&mut argv, manager, operation)?;
     argv.extend(packages.iter().cloned());
@@ -503,10 +523,16 @@ fn manage_packages(
         .output()
         .map_err(|err| format!("run package install failed: {err}"))?;
 
-    let mut text = format_command_output(&output.stdout, &output.stderr);
-    if text.len() > 12000 {
-        text.truncate(12000);
-    }
+    let full_text = format_command_output(&output.stdout, &output.stderr);
+    let spill = ArtifactSpill::new(
+        workspace_root().join(".rustclaw/artifacts/skill-output"),
+        SKILL_NAME,
+    )
+    .map_err(|error| error.to_string())?;
+    let bounded_output =
+        BoundedResult::text(&full_text, 12_000, Some(&spill), "package-command-output")
+            .map_err(|error| error.to_string())?;
+    let text = bounded_output.value.clone();
     let exit_code = output.status.code().unwrap_or(-1);
     append_install_log(
         if output.status.success() {
@@ -545,10 +571,57 @@ fn manage_packages(
                 "exit_code": exit_code,
                 "command": command,
                 "output": output,
+                "output_result": bounded_output,
             }),
         ))
     } else {
-        Err(format!("package install failed: exit={exit_code}\n{text}"))
+        Err(package_command_failure(
+            action,
+            manager,
+            packages,
+            dry_run,
+            use_sudo,
+            full_cmd.join(" "),
+            exit_code,
+            bounded_output,
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn package_command_failure(
+    action: &str,
+    manager: &str,
+    packages: &[String],
+    dry_run: bool,
+    use_sudo: bool,
+    command: String,
+    exit_code: i32,
+    output_result: BoundedResult<String>,
+) -> ExecutionError {
+    ExecutionError {
+        message: format!(
+            "package command failed: manager={manager} exit={exit_code}; command output is available in extra.output_result"
+        ),
+        extra: json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "error",
+            "error_kind": "package_command_failed",
+            "error_code": "package_command_failed",
+            "message_key": "skill.package_manager.package_command_failed",
+            "retryable": false,
+            "action": action,
+            "manager": manager,
+            "package": single_package(packages),
+            "packages": packages,
+            "dry_run": dry_run,
+            "use_sudo": use_sudo,
+            "platform": std::env::consts::OS,
+            "exit_code": exit_code,
+            "command": command,
+            "output_result": output_result,
+        }),
     }
 }
 

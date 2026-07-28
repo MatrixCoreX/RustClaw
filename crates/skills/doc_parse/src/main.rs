@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use office_workspace::read_docx_for_legacy_parser;
 use regex::Regex;
+use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
 use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -76,6 +78,8 @@ struct ParseOptions {
     include_metadata: bool,
     table_mode: TableMode,
     page_range: PageRange,
+    start_char: usize,
+    continuation: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -104,6 +108,12 @@ struct Metadata {
     truncated: bool,
     truncation_notice: Option<String>,
     page_range_applied: Option<String>,
+    original_chars: usize,
+    returned_chars: usize,
+    start_char: usize,
+    end_char: usize,
+    snapshot_sha256: String,
+    next_continuation: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -203,6 +213,26 @@ fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
         .error_code
         .as_ref()
         .map(|code| format!("skill.doc_parse.{}", code.to_ascii_lowercase()));
+    let text_result = payload.metadata.as_ref().map(|metadata| {
+        let continuation =
+            metadata
+                .next_continuation
+                .as_ref()
+                .map(|token| ContinuationDescriptor {
+                    kind: "opaque".to_string(),
+                    token: Some(token.clone()),
+                    state: json!({
+                        "start_char": metadata.end_char,
+                        "snapshot_sha256": metadata.snapshot_sha256,
+                    }),
+                });
+        BoundedResult::page(
+            payload.text.clone(),
+            metadata.returned_chars as u64,
+            metadata.original_chars as u64,
+            continuation,
+        )
+    });
 
     json!({
         "action": "parse_doc",
@@ -212,6 +242,7 @@ fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
         "content_excerpt": content_excerpt,
         "content_excerpt_truncated": content_excerpt_truncated,
         "text_length_chars": text_length_chars,
+        "text_result": text_result,
         "sections_count": payload.sections.len(),
         "tables_count": payload.tables.len(),
         "metadata": payload.metadata.as_ref().map(|metadata| json!({
@@ -222,6 +253,12 @@ fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
             "encoding": &metadata.encoding,
             "truncated": metadata.truncated,
             "page_range_applied": &metadata.page_range_applied,
+            "original_chars": metadata.original_chars,
+            "returned_chars": metadata.returned_chars,
+            "start_char": metadata.start_char,
+            "end_char": metadata.end_char,
+            "snapshot_sha256": &metadata.snapshot_sha256,
+            "next_continuation": &metadata.next_continuation,
         })),
         "error_code": &payload.error_code,
         "message_key": message_key,
@@ -252,16 +289,40 @@ fn normalize_action(action: &str) -> Option<&'static str> {
 fn handle_parse_doc(req: &Value) -> ParsePayload {
     match parse_options(req).and_then(parse_document) {
         Ok((mut parsed, opts, doc_type)) => {
-            let mut truncated = false;
-            let mut notice = None;
-            if parsed.text.chars().count() > opts.max_chars {
-                parsed.text = parsed.text.chars().take(opts.max_chars).collect::<String>();
-                truncated = true;
-                notice = Some(format!(
-                    "content truncated by max_chars={} (original exceeds limit)",
-                    opts.max_chars
-                ));
+            let original_chars = parsed.text.chars().count();
+            let snapshot_sha256 = format!("{:x}", Sha256::digest(parsed.text.as_bytes()));
+            let start_char = match opts.continuation.as_deref() {
+                Some(token) => match decode_doc_continuation(token, &snapshot_sha256) {
+                    Ok(offset) => offset,
+                    Err(code) => {
+                        return ParsePayload {
+                            text: String::new(),
+                            tables: vec![],
+                            sections: vec![],
+                            metadata: None,
+                            status: "error".to_string(),
+                            error_code: Some(code.to_string()),
+                            error: Some(code.to_string()),
+                        };
+                    }
+                },
+                None => opts.start_char,
             }
+            .min(original_chars);
+            parsed.text = parsed
+                .text
+                .chars()
+                .skip(start_char)
+                .take(opts.max_chars)
+                .collect::<String>();
+            let returned_chars = parsed.text.chars().count();
+            let end_char = start_char.saturating_add(returned_chars);
+            let next_continuation = (end_char < original_chars)
+                .then(|| encode_doc_continuation(end_char, &snapshot_sha256));
+            let truncated = start_char > 0 || next_continuation.is_some();
+            let notice = truncated.then(|| {
+                format!("content page chars={start_char}..{end_char} total={original_chars}")
+            });
             let metadata = if opts.include_metadata {
                 Some(Metadata {
                     title: parsed.title.clone(),
@@ -272,6 +333,12 @@ fn handle_parse_doc(req: &Value) -> ParsePayload {
                     truncated,
                     truncation_notice: notice,
                     page_range_applied: page_range_str(&opts.page_range),
+                    original_chars,
+                    returned_chars,
+                    start_char,
+                    end_char,
+                    snapshot_sha256,
+                    next_continuation,
                 })
             } else {
                 None
@@ -323,6 +390,17 @@ fn parse_options(req: &Value) -> Result<ParseOptions> {
         .unwrap_or(true);
     let table_mode = TableMode::from_value(args.get("table_mode").and_then(Value::as_str));
     let page_range = parse_page_range(args.get("page_range"));
+    let start_char = args
+        .get("start_char")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0);
+    let continuation = args
+        .get("continuation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     Ok(ParseOptions {
         path,
         mode,
@@ -330,7 +408,31 @@ fn parse_options(req: &Value) -> Result<ParseOptions> {
         include_metadata,
         table_mode,
         page_range,
+        start_char,
+        continuation,
     })
+}
+
+fn encode_doc_continuation(start_char: usize, snapshot_sha256: &str) -> String {
+    format!("doc_parse_v1:{start_char}:sha256:{snapshot_sha256}")
+}
+
+fn decode_doc_continuation(
+    token: &str,
+    snapshot_sha256: &str,
+) -> std::result::Result<usize, &'static str> {
+    let mut parts = token.splitn(4, ':');
+    if parts.next() != Some("doc_parse_v1") {
+        return Err("invalid_continuation");
+    }
+    let start_char = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or("invalid_continuation")?;
+    if parts.next() != Some("sha256") || parts.next() != Some(snapshot_sha256) {
+        return Err("stale_snapshot");
+    }
+    Ok(start_char)
 }
 
 fn parse_page_range(v: Option<&Value>) -> PageRange {

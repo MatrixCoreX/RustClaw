@@ -279,9 +279,12 @@ function createRunId(ts = new Date()) {
     return `run_${compact}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function ensureWithinRoot(root, target) {
+function ensureWithinRoot(root, target, allowOutside = false) {
     const absRoot = path.resolve(root);
     const absTarget = path.resolve(target);
+    if (allowOutside) {
+        return absTarget;
+    }
     if (absTarget !== absRoot && !absTarget.startsWith(`${absRoot}${path.sep}`)) {
         throw new SkillError('WORKSPACE_PATH_OUTSIDE', 'workspace_path_outside');
     }
@@ -410,7 +413,8 @@ async function initCaptureStorage(options = {}) {
     const workspaceRoot = path.resolve(options.workspaceRoot || process.cwd());
     const root = ensureWithinRoot(
         workspaceRoot,
-        path.resolve(options.captureRoot || DEFAULT_CAPTURE_ROOT)
+        path.resolve(options.captureRoot || DEFAULT_CAPTURE_ROOT),
+        options.allowPathOutsideWorkspace === true
     );
     const runRoot = ensureWithinRoot(root, path.join(root, source, date, runId));
 
@@ -592,13 +596,13 @@ function chooseWaitUntilForUrl(url, preferredWaitUntil, waitMap) {
     return preferredWaitUntil;
 }
 
-async function loadWaitMap(customPath, workspaceRoot = process.cwd()) {
+async function loadWaitMap(customPath, workspaceRoot = process.cwd(), allowPathOutsideWorkspace = false) {
     const candidates = [];
     if (customPath && typeof customPath === 'string' && customPath.trim() !== '') {
         const candidate = path.isAbsolute(customPath)
             ? customPath
             : path.join(workspaceRoot, customPath.trim());
-        candidates.push(ensureWithinRoot(workspaceRoot, candidate));
+        candidates.push(ensureWithinRoot(workspaceRoot, candidate, allowPathOutsideWorkspace));
     }
     candidates.push(ensureWithinRoot(workspaceRoot, DEFAULT_WAIT_MAP_PATH));
 
@@ -837,7 +841,7 @@ async function extractPage(page, url, waitUntil, options = {}) {
     await page.waitForTimeout(EXTRACT_SETTLE_MS);
     const fullRawHtml = await page.content();
     const rawHtmlTruncated = fullRawHtml.length > MAX_CAPTURE_HTML_CHARS;
-    const rawHtml = rawHtmlTruncated
+    const rawHtmlPreview = rawHtmlTruncated
         ? fullRawHtml.slice(0, MAX_CAPTURE_HTML_CHARS)
         : fullRawHtml;
 
@@ -1154,9 +1158,12 @@ async function extractPage(page, url, waitUntil, options = {}) {
         extraction_trace: extracted.extraction_trace,
         text_truncated: textTruncated,
         text_chars_before_limit: cleaned.length,
+        text_chars_returned: finalText.length,
         content_sha256: sha256Hex(finalText),
         screenshot_path: screenshotPath,
-        raw_html: rawHtml,
+        canonical_text: cleaned,
+        raw_html: fullRawHtml,
+        raw_html_preview_sha256: sha256Hex(rawHtmlPreview),
         raw_html_truncated: rawHtmlTruncated,
         raw_html_chars_before_limit: fullRawHtml.length,
         image_candidates: extracted.image_candidates || [],
@@ -1184,6 +1191,7 @@ async function openExtract(input) {
         domainsAllow = [],
         domainsDeny = [],
         allowProxySyntheticDns = false,
+        allowPathOutsideWorkspace = false,
         workspaceRoot = process.cwd(),
     } = input;
 
@@ -1202,7 +1210,8 @@ async function openExtract(input) {
     const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
     const { map: waitMap, path: waitMapResolved } = await loadWaitMap(
         waitMapPath,
-        resolvedWorkspaceRoot
+        resolvedWorkspaceRoot,
+        allowPathOutsideWorkspace
     );
     const capture = await initCaptureStorage({
         enableCapture,
@@ -1211,12 +1220,14 @@ async function openExtract(input) {
         runId,
         source: 'browser_web',
         workspaceRoot: resolvedWorkspaceRoot,
+        allowPathOutsideWorkspace,
     });
     const effectiveScreenshotDir = ensureWithinRoot(
         resolvedWorkspaceRoot,
         screenshotDir
         ? (path.isAbsolute(screenshotDir) ? screenshotDir : path.join(resolvedWorkspaceRoot, screenshotDir))
-        : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT)
+        : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT),
+        allowPathOutsideWorkspace
     );
     const {
         browser,
@@ -1247,9 +1258,9 @@ async function openExtract(input) {
                     const textPath = path.join(capture.dirs.processedText, `${baseName}.txt`);
 
                     await fs.writeFile(htmlPath, item.raw_html || '', 'utf8');
-                    await fs.writeFile(textPath, item.text || '', 'utf8');
+                    await fs.writeFile(textPath, item.canonical_text || item.text || '', 'utf8');
 
-                    const contentHash = sha256Hex(item.text || '');
+                    const contentHash = sha256Hex(item.canonical_text || item.text || '');
                     const htmlHash = sha256Hex(item.raw_html || '');
                     let imageRel = item.screenshot_path ? toPosixRel(capture.runRoot, item.screenshot_path) : null;
                     const capturedImages = [];
@@ -1297,7 +1308,7 @@ async function openExtract(input) {
                         title: item.title || '',
                         fetched_at: item.extracted_at,
                         fetch_method: item.fetch_method,
-                        text_chars: (item.text || '').length,
+                        text_chars: (item.canonical_text || item.text || '').length,
                         content_hash_sha256: contentHash,
                         html_hash_sha256: htmlHash,
                         html_path: toPosixRel(capture.runRoot, htmlPath),
@@ -1309,7 +1320,7 @@ async function openExtract(input) {
                         error: null,
                     });
 
-                    const chunks = chunkTextByChars(item.text || '', chunkChars);
+                    const chunks = chunkTextByChars(item.canonical_text || item.text || '', chunkChars);
                     for (let idx = 0; idx < chunks.length; idx += 1) {
                         const chunkText = chunks[idx];
                         await appendJsonl(capture.files.chunks, {
@@ -1338,9 +1349,51 @@ async function openExtract(input) {
                         manifest_path: capture.files.manifest,
                         chunks_path: capture.files.chunks,
                     };
+                    if (item.text_truncated) {
+                        item.text_result = {
+                            complete: false,
+                            partial_reason: 'inline_protocol_budget',
+                            original_size_chars: item.text_chars_before_limit,
+                            returned_size_chars: item.text_chars_returned,
+                            continuation: {
+                                kind: 'artifact_range',
+                                token: `browser_text:${contentHash}`,
+                                state: {
+                                    path: textPath,
+                                    start_char: item.text_chars_returned,
+                                    end_char: item.text_chars_before_limit,
+                                    read_capability: 'artifact.read_range',
+                                },
+                            },
+                            artifacts: [{
+                                id: `browser_text:${contentHash}`,
+                                path: textPath,
+                                media_type: 'text/plain; charset=utf-8',
+                                size_chars: item.text_chars_before_limit,
+                                sha256: contentHash,
+                            }],
+                        };
+                    }
                 }
                 delete item.raw_html;
+                delete item.canonical_text;
                 delete item.image_candidates;
+                if (item.text_truncated && !item.text_result) {
+                    item.text_result = {
+                        complete: false,
+                        partial_reason: 'inline_protocol_budget',
+                        original_size_chars: item.text_chars_before_limit,
+                        returned_size_chars: item.text_chars_returned,
+                        continuation: {
+                            kind: 'retry_with_larger_page',
+                            state: {
+                                action: 'open_extract',
+                                url,
+                                max_text_chars: Math.min(200000, item.text_chars_before_limit),
+                            },
+                        },
+                    };
+                }
                 item.trust = {
                     classification: 'untrusted_web_content',
                     instructions_executable: false,

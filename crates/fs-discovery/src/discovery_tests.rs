@@ -91,6 +91,38 @@ fn exact_name_matching_normalizes_case_and_fullwidth_punctuation() {
 }
 
 #[test]
+fn fuzzy_name_matching_tolerates_typos_transpositions_and_subsequences() {
+    let root = fixture_root("fuzzy-name");
+    clean_fixture(&root);
+    std::fs::create_dir_all(root.join("conversation-history")).expect("create fuzzy directory");
+    std::fs::write(root.join("configuration.toml"), "fixture\n").expect("write fixture");
+    std::fs::write(root.join("unrelated.txt"), "fixture\n").expect("write unrelated");
+
+    let mut transposed = DiscoveryRequest::new(&root, ".");
+    transposed.selector.patterns = vec!["configruation.toml".to_string()];
+    transposed.selector.match_mode = MatchMode::Fuzzy;
+    transposed.selector.target_kind = TargetKind::File;
+    let transposed_report = discover(&transposed).expect("transposition fuzzy search");
+    assert_eq!(transposed_report.entries.len(), 1);
+    assert_eq!(
+        transposed_report.entries[0].relative_path,
+        "configuration.toml"
+    );
+
+    let mut subsequence = DiscoveryRequest::new(&root, ".");
+    subsequence.selector.patterns = vec!["cnvrshstry".to_string()];
+    subsequence.selector.match_mode = MatchMode::Fuzzy;
+    subsequence.selector.target_kind = TargetKind::Directory;
+    let subsequence_report = discover(&subsequence).expect("subsequence fuzzy search");
+    assert_eq!(subsequence_report.entries.len(), 1);
+    assert_eq!(
+        subsequence_report.entries[0].relative_path,
+        "conversation-history"
+    );
+    clean_fixture(&root);
+}
+
+#[test]
 fn explicit_depth_is_semantic_scope_not_a_default() {
     let root = fixture_root("depth");
     clean_fixture(&root);

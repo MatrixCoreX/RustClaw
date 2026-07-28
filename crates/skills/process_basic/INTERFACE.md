@@ -31,6 +31,7 @@
 | all | `action` | yes | string | - | Must be one of supported actions. |
 | `ps` | `limit` | no | number | impl default | Max number of process rows. |
 | `ps` | `filter` / `query` / `name` | no | string | - | Case-insensitive process command filter. |
+| `ps` | `continuation` | no | string | - | Opaque token for the next process page. Tokens are bound to the observed process snapshot and return `stale_snapshot` when it changed. |
 | `port_list` | `filter` / `query` / `port` | no | string | - | Optional substring filter, commonly a port number or process name. |
 | `kill` | `pid` | yes | number | - | Target process id. |
 | `kill` | `signal` | no | string | `TERM` | Signal name/number for termination. |
@@ -44,7 +45,7 @@
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
 - `port_list` additionally emits structured listener evidence in `extra.listeners`, `extra.all_interface_listeners`, `extra.ports`, and `extra.all_interface_ports`; use these machine fields for grounding instead of inferring ports from truncated `output` text.
-- `ps` additionally emits `extra.running`, `extra.status`, `extra.match_count`, and `extra.process_count`; use these machine fields for process status grounding instead of parsing `text` or `extra.output`.
+- `ps` additionally emits `extra.running`, `extra.status`, `extra.match_count`, `extra.process_count`, `snapshot_sha256`, and a shared `process_result` envelope with original/returned counts and continuation; use these machine fields instead of parsing `text`.
 
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; `output` remains legacy text evidence unless a stricter parser is explicitly registered.

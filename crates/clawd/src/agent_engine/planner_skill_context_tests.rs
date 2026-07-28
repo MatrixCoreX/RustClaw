@@ -70,7 +70,7 @@ fn loop_state_with_plan(plan: crate::PlanResult) -> super::super::LoopState {
 }
 
 #[test]
-fn first_round_uses_only_budgeted_compact_index() {
+fn first_round_uses_complete_compact_index_without_playbooks() {
     let state = state();
     let task = task();
     let loop_state = super::super::LoopState {
@@ -81,10 +81,15 @@ fn first_round_uses_only_budgeted_compact_index() {
 
     assert_eq!(context.disclosure_mode, "compact_index");
     assert!(context.selected_skills.is_empty());
-    assert!(context.text.contains("runtime_skill_context_v2"));
+    assert!(context.text.contains("runtime_skill_context_v3"));
     assert!(context.text.contains("Compact skill index:"));
     assert!(!context.text.contains("Selected skill playbooks:"));
-    assert!(context.quick_index_chars <= SKILL_QUICK_INDEX_CHAR_BUDGET);
+    assert!(context
+        .quick_index_text
+        .contains("capability_catalog_v1 complete=true"));
+    assert!(context
+        .quick_index_text
+        .contains("capability_detail_views_v1"));
     assert_eq!(context.playbook_chars, 0);
     assert!(context.text.chars().count() < full_visible_playbook_chars(&state, &task));
     let task_control_line = context
@@ -99,14 +104,6 @@ fn first_round_uses_only_budgeted_compact_index() {
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
     let task_control_line = task_control_line.expect("task_control compact-index line");
-    assert!(
-        task_control_line.contains("allowed_failure_class="),
-        "task_control_line={task_control_line}"
-    );
-    assert!(
-        task_control_line.contains("quota_exhausted"),
-        "task_control_line={task_control_line}"
-    );
     assert!(
         task_control_line.contains("provider_cause_policy"),
         "task_control_line={task_control_line}"
@@ -131,16 +128,8 @@ fn first_round_uses_only_budgeted_compact_index() {
         .find(|line| line.contains("system.runtime_status(action=runtime_status"))
         .expect("system_basic compact-index line");
     assert!(
-        system_basic_line.contains("system.runtime_status(action=runtime_status,required=kind"),
-        "system_basic_line={system_basic_line}"
-    );
-    assert!(
-        system_basic_line.contains("allowed_kind=current_time|current_user|current_working_directory|host_name|kernel_release"),
-        "system_basic_line={system_basic_line}"
-    );
-    assert!(
-        system_basic_line
-            .contains("allowed_sort_by=mtime_asc|mtime_desc|name|name_desc|size_asc|size_desc"),
+        system_basic_line.contains("system.runtime_status(action=runtime_status")
+            && system_basic_line.contains("required=kind"),
         "system_basic_line={system_basic_line}"
     );
     let fs_basic_line = context
@@ -163,10 +152,6 @@ fn first_round_uses_only_budgeted_compact_index() {
             "missing capability={capability}; fs_basic_line={fs_basic_line}"
         );
     }
-    assert!(
-        fs_basic_line.contains("Use list_entries for complete direct-child inventories"),
-        "fs_basic_line={fs_basic_line}"
-    );
     let loadable_groups = crate::capability_map::planner_loadable_capability_group_names_for_task(
         &state,
         &task,
@@ -183,6 +168,33 @@ fn first_round_uses_only_budgeted_compact_index() {
             "deferred_skill={deferred_skill}; loadable_groups={loadable_groups:?}"
         );
     }
+}
+
+#[test]
+fn small_provider_window_uses_searchable_catalog_reference_without_data_loss() {
+    let mut state = state();
+    let provider = std::sync::Arc::make_mut(
+        state
+            .core
+            .llm_providers
+            .first_mut()
+            .expect("fixture provider"),
+    );
+    provider.config.context_window_tokens = Some(256);
+    provider.config.params.default_max_tokens = Some(64);
+    let loop_state = super::super::LoopState {
+        round_no: 1,
+        ..Default::default()
+    };
+    let context = build_planner_skill_context(&state, &task(), &loop_state);
+
+    assert_eq!(context.disclosure_mode, "provider_fitted_catalog");
+    assert!(context.quick_index_text.contains("complete=false"));
+    assert!(context.quick_index_text.contains("canonical_complete=true"));
+    assert!(context.quick_index_text.contains("canonical_ref=catalog:"));
+    assert!(context
+        .quick_index_text
+        .contains("recovery=load_capability_groups(op=search|expand)"));
 }
 
 #[test]
@@ -236,7 +248,43 @@ fn later_round_expands_playbook_from_structured_capability_only() {
     assert_eq!(context.selected_skills, vec!["fs_basic".to_string()]);
     assert!(context.text.contains("Selected skill playbooks:"));
     assert!(context.text.contains("### fs_basic"));
-    assert!(context.playbook_chars <= SKILL_PLAYBOOK_CHAR_BUDGET);
+    assert_eq!(
+        context.playbook_chars,
+        context.playbook_text.chars().count()
+    );
+}
+
+#[test]
+fn structured_plan_can_select_three_skill_playbooks_without_a_fixed_count_cap() {
+    let state = state();
+    let mut plan = plan_with_step(
+        "call_capability",
+        "filesystem.list_entries",
+        json!({"path": "."}),
+    );
+    plan.steps.push(crate::PlanStep {
+        step_id: "step_2".to_string(),
+        action_type: "call_capability".to_string(),
+        skill: "system.runtime_status".to_string(),
+        args: json!({"kind": "current_time"}),
+        depends_on: Vec::new(),
+        why: "fixture".to_string(),
+    });
+    plan.steps.push(crate::PlanStep {
+        step_id: "step_3".to_string(),
+        action_type: "call_capability".to_string(),
+        skill: "task_control.list".to_string(),
+        args: json!({"action": "list"}),
+        depends_on: Vec::new(),
+        why: "fixture".to_string(),
+    });
+    let loop_state = loop_state_with_plan(plan);
+
+    let scope = candidate_skill_scope_from_loop_state(&state, &task(), &loop_state);
+    assert_eq!(scope.len(), 3, "scope={scope:?}");
+    assert!(scope.contains("fs_basic"));
+    assert!(scope.contains("system_basic"));
+    assert!(scope.contains("task_control"));
 }
 
 #[test]

@@ -100,6 +100,7 @@ pub(crate) fn discover_rust(
     let mut skipped_symlinks = 0usize;
     let mut permission_denied = 0usize;
     let mut was_cancelled = false;
+    let mut traversed_entries = 0usize;
 
     for item in builder.build() {
         if deadline_reached(request, started) || cancelled(request) {
@@ -124,6 +125,10 @@ pub(crate) fn discover_rust(
         };
         if entry.path_is_symlink() {
             skipped_symlinks = skipped_symlinks.saturating_add(1);
+            continue;
+        }
+        traversed_entries = traversed_entries.saturating_add(1);
+        if traversed_entries <= request.budget.start_after_entries {
             continue;
         }
         if visited_files.saturating_add(visited_directories) >= hard_entry_limit {
@@ -173,6 +178,14 @@ pub(crate) fn discover_rust(
         permission_denied,
         skipped_counts_complete: false,
         cancelled: was_cancelled,
+        traversal_start: request.budget.start_after_entries,
+        traversal_next: (!completeness.is_complete()).then_some(
+            request
+                .budget
+                .start_after_entries
+                .saturating_add(visited_files)
+                .saturating_add(visited_directories),
+        ),
         backend: BackendProvenance::rust(
             backend_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             fallback_reason,

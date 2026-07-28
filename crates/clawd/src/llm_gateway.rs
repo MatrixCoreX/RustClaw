@@ -200,34 +200,6 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     }
 }
 
-/// Phase 1.3: 单任务最多触发多少次 LLM 调用。超过即视为异常放大
-/// （例如 plan_repair 抖动、fallback 雪崩、normalizer/self-classify
-/// 循环误判），直接短路返回错误。正常 agent 单轮 ask 不会接近这个上限。
-///
-/// **预算的"次数"语义**（重要）：
-/// 这里统计的是**逻辑调用次数**，即 [`run_with_fallback_with_prompt_source`]
-/// 的入口次数。每个入口内部会做：
-///   * Provider fallback：依次尝试 N 个 provider，全部失败才返回错误。
-///   * Per-provider retry：每个 provider 内部 [`call_provider_with_retry`]
-///     会重试 `LLM_RETRY_TIMES` 次（默认 2 次）。
-///
-/// 因此**最坏情况**一个"逻辑调用"可能放大成 `N_providers × (1 + LLM_RETRY_TIMES)`
-/// 次 HTTP 请求，但只占 1 个预算名额。预算的目的是挡"逻辑调用过多"
-/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
-///
-/// 如需更细的 HTTP 维度限流，参见 P1 优化项：把计数下沉到
-/// [`call_provider_with_retry`]，但要同时调整重试上限以避免误熔断。
-pub(crate) const DEFAULT_MAX_LLM_CALLS_PER_TASK: u64 = 40;
-
-/// Phase 1.3: 单任务 LLM 总耗时（ms）上限。主要挡住某一个 provider
-/// 长时间挂住、不停重试的场景。默认 420s，实际运行值来自
-/// `worker.llm_total_timeout_seconds`。
-///
-/// **预算的"耗时"语义**：累加的是每次 `run_with_fallback_*` 入口的
-/// **wall-clock 耗时**（包括所有失败 provider 的尝试时间），而不是
-/// "成功 provider 的纯耗时"。这样能更准确反映任务对 LLM 链路施加的真实压力。
-pub(crate) const DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK: u64 = 420_000;
-
 fn matches_provider_override(name: &str, provider_type: &str, override_name: &str) -> bool {
     let wanted = override_name.trim().to_ascii_lowercase();
     let provider_name = name.trim().to_ascii_lowercase();
@@ -676,21 +648,10 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
     }
 
-    // Phase 1.3: 预算检查 —— 在真正命中 provider 之前短路异常放大的任务。
-    // 预算统计包括本次调用链里所有 `run_with_fallback_*` 入口累计的调用次数
-    // 和总耗时；超限就立即返回，不再继续 fallback / retry，避免雪崩。
-    if let Some(reason) = state.task_llm_budget_exceeded(&task.task_id) {
-        warn!(
-            "{} [LLM_CALL] stage=budget_block task_id={} prompt_source={} reason={}",
-            crate::highlight_tag("llm"),
-            task.task_id,
-            prompt_source,
-            reason
-        );
-        return Err(reason);
-    }
-
-    // 记一次 LLM 调用（无论是否成功）。原先 `note_task_llm_call` 挂在
+    // Record one logical model call for the task budget manager and diagnostics.
+    // Provider retries and circuit breaking remain link-safety controls; this
+    // gateway no longer owns a second task-level terminal budget.
+    // 原先 `note_task_llm_call` 挂在
     // `append_model_io_log` 里，只有 `debug_log_prompt=true` 时才计数；
     // 现在移到 gateway 入口，保证预算统计始终可靠。
     // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。

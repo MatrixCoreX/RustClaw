@@ -257,6 +257,11 @@ fn skill_package_root(state: &AppState) -> PathBuf {
     state.skill_rt.workspace_root.join("data/skill-packages")
 }
 
+#[cfg(not(test))]
+fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
+    state.skill_rt.workspace_root.join("prebuilt/skill-packages")
+}
+
 fn skill_store_package_available(
     state: &AppState,
     registry: &claw_core::skill_registry::SkillsRegistry,
@@ -416,15 +421,35 @@ async fn install_skill_store_package(
     control: rustclaw_skill_sdk::InstallControl,
     allow_network: bool,
 ) -> SkillStoreOperationResult<rustclaw_skill_sdk::InstallOutcome> {
-    let request = rustclaw_skill_sdk::InstallRequest {
-        manifest_path: spec.manifest_path.clone(),
-        workspace_root: state.skill_rt.workspace_root.clone(),
-        package_root: skill_package_root(state),
-        target: None,
-        allow_network,
-        control: Some(control),
-    };
-    tokio::task::spawn_blocking(move || rustclaw_skill_sdk::SkillInstaller.install(&request))
+    let manifest_path = spec.manifest_path.clone();
+    let workspace_root = state.skill_rt.workspace_root.clone();
+    let package_root = skill_package_root(state);
+    let precompiled_root = precompiled_skill_package_root(state);
+    tokio::task::spawn_blocking(move || {
+        if precompiled_root.is_dir() {
+            let precompiled = rustclaw_skill_sdk::PrecompiledInstallRequest {
+                manifest_path: manifest_path.clone(),
+                workspace_root: workspace_root.clone(),
+                package_root: package_root.clone(),
+                precompiled_root,
+                target: None,
+                control: Some(control.clone()),
+            };
+            match rustclaw_skill_sdk::SkillInstaller.install_precompiled(&precompiled) {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) if precompiled_source_fallback_allowed(&error.code) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        rustclaw_skill_sdk::SkillInstaller.install(&rustclaw_skill_sdk::InstallRequest {
+            manifest_path,
+            workspace_root,
+            package_root,
+            target: None,
+            allow_network,
+            control: Some(control),
+        })
+    })
         .await
         .map_err(|error| {
             SkillStoreOperationError::new(
@@ -449,6 +474,15 @@ async fn install_skill_store_package(
             )
             .with_phase(phase)
         })
+}
+
+fn precompiled_source_fallback_allowed(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "precompiled_package_unavailable"
+            | "precompiled_platform_mismatch"
+            | "precompiled_manifest_mismatch"
+    )
 }
 
 #[cfg(test)]
@@ -628,6 +662,7 @@ async fn install_skill_store_package(
             )
         })?,
         adapter: spec.adapter,
+        origin: rustclaw_skill_sdk::InstallOrigin::SourceBuild,
         reused: false,
         phases: vec![
             "preflight".to_string(),

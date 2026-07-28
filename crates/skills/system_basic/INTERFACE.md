@@ -88,7 +88,7 @@
 | `validate_structured` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `find_path` | `root` | no | string(path) | `.` | Focused recursive search root inside the trusted boundary. |
 | `find_path` | `name`/`pattern` | yes | string | - | Name or pattern to match. |
-| `find_path` | `match_mode` | no | string | `contains` | `contains|exact|starts_with|ends_with`. |
+| `find_path` | `match_mode` | no | string | `contains` | `contains|exact|starts_with|ends_with|fuzzy`; fuzzy mode tolerates small typos and ranks more relevant paths first. |
 | `find_path` | `target_kind` | no | string | `any` | `any|file|dir`. |
 | `find_path` | `max_results` | no | integer | `20` | Output cap, clamped to `1..200`. |
 | `find_path` | `include_hidden` | no | bool | `false` | Include hidden entries. |

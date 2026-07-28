@@ -2,8 +2,8 @@ use serde_json::json;
 
 use super::{
     ArtifactRef, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
-    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef, RetryDirective,
-    StructuredError, CAPABILITY_RESULT_SCHEMA_VERSION,
+    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef,
+    ResultCompleteness, RetryDirective, StructuredError, CAPABILITY_RESULT_SCHEMA_VERSION,
 };
 
 #[test]
@@ -154,9 +154,75 @@ fn legacy_envelopes_deserialize_with_empty_extended_metadata() {
 
     envelope.validate().unwrap();
     assert!(envelope.page.is_none());
+    assert!(envelope.completeness.is_none());
     assert!(!envelope.truncated);
     assert_eq!(envelope.provenance, json!({}));
     assert!(envelope.retry.is_none());
     assert!(envelope.effect.is_none());
     assert_eq!(envelope.verification, json!({}));
+}
+
+#[test]
+fn partial_result_requires_a_reason_and_safe_recovery() {
+    let mut envelope = CapabilityResultEnvelope::ok(
+        "filesystem.search",
+        Some("continue".to_string()),
+        json!({"entries": []}),
+    );
+    envelope.completeness = Some(ResultCompleteness::partial(
+        "resource_checkpoint",
+        Some(200),
+        None,
+        false,
+    ));
+    assert_eq!(
+        envelope.validate(),
+        Err(CapabilityResultValidationError::MissingPartialRecovery)
+    );
+
+    envelope.continuation = Some(Continuation {
+        kind: ContinuationKind::Opaque,
+        reference: Some("snapshot:next".to_string()),
+        poll_after_ms: None,
+        state: json!({"snapshot_sha256": "abc123"}),
+    });
+    envelope.validate().unwrap();
+}
+
+#[test]
+fn complete_result_rejects_partial_reason() {
+    let mut envelope =
+        CapabilityResultEnvelope::ok("filesystem.read", Some("read".to_string()), json!({}));
+    let mut completeness = ResultCompleteness::complete(Some(1));
+    completeness.reason_code = Some("partial_deadline".to_string());
+    envelope.completeness = Some(completeness);
+    assert_eq!(
+        envelope.validate(),
+        Err(CapabilityResultValidationError::InvalidCompleteness)
+    );
+}
+
+#[test]
+fn canonical_evidence_identity_is_stable_and_content_addressed() {
+    let result = CapabilityResultEnvelope::ok(
+        "filesystem.read_text",
+        Some("read".to_string()),
+        json!({"content": "hello", "complete": true}),
+    );
+    let first = result.canonical_evidence_identity();
+    let second = result.canonical_evidence_identity();
+    assert_eq!(first, second);
+    assert!(first.evidence_id.starts_with("evidence:capability_result:"));
+    assert_eq!(first.sha256.len(), 64);
+    assert!(first.size_bytes > 0);
+
+    let changed = CapabilityResultEnvelope::ok(
+        "filesystem.read_text",
+        Some("read".to_string()),
+        json!({"content": "changed", "complete": true}),
+    );
+    assert_ne!(
+        first.evidence_id,
+        changed.canonical_evidence_identity().evidence_id
+    );
 }

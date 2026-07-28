@@ -51,6 +51,9 @@ pub(crate) struct LlmProviderRouteEvaluation {
     pub(crate) prompt_byte_count: usize,
     pub(crate) prompt_char_count: usize,
     pub(crate) context_window_tokens: Option<usize>,
+    pub(crate) output_reserve_tokens: usize,
+    pub(crate) request_timeout_seconds: u64,
+    pub(crate) estimator_confidence: String,
     pub(crate) input_modalities: Vec<String>,
     pub(crate) native_tools: bool,
     pub(crate) latency_sample_count: u64,
@@ -73,6 +76,7 @@ pub(crate) fn route_providers(
     let mut candidates = providers
         .into_iter()
         .map(|provider| {
+            let model_descriptor = provider.model_descriptor();
             let prompt_estimate = crate::token_estimator::estimate_provider_tokens(
                 &provider.config.name,
                 &provider.config.provider_type,
@@ -81,7 +85,12 @@ pub(crate) fn route_providers(
             );
             let required_context_window_tokens = prompt_estimate
                 .safety_tokens
-                .saturating_add(hints.max_tokens.unwrap_or(0) as usize)
+                .saturating_add(
+                    hints
+                        .max_tokens
+                        .and_then(|value| usize::try_from(value).ok())
+                        .unwrap_or(model_descriptor.output_reserve_tokens),
+                )
                 .max(hints.minimum_context_window_tokens.unwrap_or(0));
             let breaker = provider.breaker.snapshot();
             let (latency_sample_count, observed_latency_ms) = provider.latency.snapshot();
@@ -96,12 +105,11 @@ pub(crate) fn route_providers(
             {
                 exclusion_codes.push("required_input_modality_unsupported".to_string());
             }
-            let model_capabilities = provider.model_capabilities();
+            let model_capabilities = model_descriptor.capabilities;
             if hints.requires_native_tools && !model_capabilities.native_tools {
                 exclusion_codes.push("native_tools_required".to_string());
             }
-            if provider
-                .config
+            if model_descriptor
                 .context_window_tokens
                 .is_some_and(|capacity| capacity < required_context_window_tokens)
             {
@@ -120,7 +128,10 @@ pub(crate) fn route_providers(
                 prompt_token_estimator: prompt_estimate.estimator.as_str().to_string(),
                 prompt_byte_count: prompt_estimate.byte_count,
                 prompt_char_count: prompt_estimate.char_count,
-                context_window_tokens: provider.config.context_window_tokens,
+                context_window_tokens: model_descriptor.context_window_tokens,
+                output_reserve_tokens: model_descriptor.output_reserve_tokens,
+                request_timeout_seconds: model_descriptor.request_timeout_seconds,
+                estimator_confidence: model_descriptor.estimator_confidence.as_token().to_string(),
                 input_modalities,
                 native_tools: model_capabilities.native_tools,
                 latency_sample_count,

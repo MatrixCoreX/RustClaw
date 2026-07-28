@@ -137,6 +137,12 @@ jobs:
           set -euo pipefail
           ./build-all.sh no-ui
 
+      - name: Precompile platform Skill Store packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
+
       - name: Package runtime
         shell: bash
         run: |
@@ -169,7 +175,7 @@ jobs:
             printf 'Target: %s\n' "${RUST_TARGET}"
             printf 'Commit: %s\n' "${GITHUB_SHA}"
             printf '\n'
-            printf '%s\n' "This package contains prebuilt Rust binaries and UI/dist assets for Ubuntu x86_64. Keep existing runtime configs/data when updating an existing install."
+            printf '%s\n' "This package contains prebuilt Rust binaries, platform-matched Skill Store packages, and UI/dist assets for Ubuntu x86_64. Keep existing runtime configs/data when updating an existing install."
           } > release-notes.md
 
       - name: Publish GitHub Release

@@ -4,7 +4,6 @@ use crate::{AppState, ClaimedTask};
 use serde::Deserialize;
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
-const MAX_VERIFIER_STEPS: usize = 8;
 #[path = "answer_verifier_control_envelope.rs"]
 mod answer_verifier_control_envelope;
 #[path = "answer_verifier_delivery_exact.rs"]

@@ -223,6 +223,9 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "missing=0",
     },
     "agent_parity_gate/maintainability_skill_contracts.txt": {
+        "ADAPTIVE_LIMIT_CONTRACT_SELF_TEST ok",
+        "ADAPTIVE_LIMIT_INVENTORY_CHECK ok",
+        "ADAPTIVE_SEMANTIC_LIMIT_BASELINE_CHECK ok",
         "LONG_FILE_CHECK ok",
         "CROSS_PLATFORM_CONTRACT_SELF_TEST ok",
         "CROSS_PLATFORM_CONTRACT_CHECK findings=0",

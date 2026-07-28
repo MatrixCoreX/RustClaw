@@ -19,8 +19,7 @@ const SYNTHETIC_DNS_PROBE_HOST: &str = "example.com";
 struct Request {
     request_id: String,
     args: Value,
-    #[serde(rename = "context")]
-    _context: Option<Value>,
+    context: Option<Value>,
     #[serde(rename = "user_id")]
     _user_id: i64,
     #[serde(rename = "chat_id")]
@@ -140,6 +139,7 @@ fn handle(req: Request) -> Response {
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
+    let allow_path_outside_workspace = context_allows_path_outside_workspace(req.context.as_ref());
     let obj = match req.args.as_object() {
         Some(o) => o,
         None => {
@@ -168,7 +168,9 @@ fn handle(req: Request) -> Response {
     let result = match action {
         "open_extract" => parse_open_extract_args(obj)
             .map_err(|message| SkillFailure::with_message("INVALID_INPUT", message))
-            .and_then(|args| open_extract_action(&workspace_root, args)),
+            .and_then(|args| {
+                open_extract_action(&workspace_root, args, allow_path_outside_workspace)
+            }),
         _ => Err(SkillFailure::with_message(
             "INVALID_ACTION",
             "unsupported_action",
@@ -470,6 +472,7 @@ fn parse_domain_list(value: Option<&Value>, field: &str) -> Result<Vec<String>, 
 fn open_extract_action(
     workspace_root: &Path,
     args: OpenExtractArgs,
+    allow_path_outside_workspace: bool,
 ) -> Result<String, SkillFailure> {
     let mut urls = Vec::new();
     if let Some(url) = args.url {
@@ -503,11 +506,12 @@ fn open_extract_action(
         &args
             .screenshot_dir
             .unwrap_or_else(|| "skills_output/browser_web/screenshots".to_string()),
+        allow_path_outside_workspace,
     )?;
     let wait_map_path = args
         .wait_map_path
         .as_deref()
-        .map(|path| resolve_workspace_file(workspace_root, path))
+        .map(|path| resolve_workspace_file(workspace_root, path, allow_path_outside_workspace))
         .transpose()?;
 
     let allow_proxy_synthetic_dns = proxy_synthetic_dns_active();
@@ -526,6 +530,7 @@ fn open_extract_action(
         "domainsAllow": domains_allow,
         "domainsDeny": domains_deny,
         "allowProxySyntheticDns": allow_proxy_synthetic_dns,
+        "allowPathOutsideWorkspace": allow_path_outside_workspace,
         "workspaceRoot": workspace_root,
     });
 
@@ -752,11 +757,14 @@ fn normalize_workspace_relative(path: &str) -> Result<PathBuf, SkillFailure> {
 fn resolve_workspace_directory(
     workspace_root: &Path,
     requested: &str,
+    allow_path_outside_workspace: bool,
 ) -> Result<PathBuf, SkillFailure> {
     let workspace = workspace_root
         .canonicalize()
         .map_err(|_| SkillFailure::machine("WORKSPACE_UNAVAILABLE"))?;
-    let candidate = if Path::new(requested).is_absolute() {
+    let candidate = if allow_path_outside_workspace && Path::new(requested).is_absolute() {
+        PathBuf::from(requested)
+    } else if Path::new(requested).is_absolute() {
         let requested = Path::new(requested);
         let relative = requested
             .strip_prefix(&workspace)
@@ -773,13 +781,17 @@ fn resolve_workspace_directory(
     let canonical = candidate
         .canonicalize()
         .map_err(|_| SkillFailure::machine("WORKSPACE_PATH_INVALID"))?;
-    if !canonical.starts_with(&workspace) {
+    if !allow_path_outside_workspace && !canonical.starts_with(&workspace) {
         return Err(SkillFailure::machine("WORKSPACE_PATH_OUTSIDE"));
     }
     Ok(canonical)
 }
 
-fn resolve_workspace_file(workspace_root: &Path, requested: &str) -> Result<PathBuf, SkillFailure> {
+fn resolve_workspace_file(
+    workspace_root: &Path,
+    requested: &str,
+    allow_path_outside_workspace: bool,
+) -> Result<PathBuf, SkillFailure> {
     let workspace = workspace_root
         .canonicalize()
         .map_err(|_| SkillFailure::machine("WORKSPACE_UNAVAILABLE"))?;
@@ -791,10 +803,25 @@ fn resolve_workspace_file(workspace_root: &Path, requested: &str) -> Result<Path
     let canonical = candidate
         .canonicalize()
         .map_err(|_| SkillFailure::machine("WORKSPACE_FILE_UNAVAILABLE"))?;
-    if !canonical.starts_with(&workspace) || !canonical.is_file() {
+    if (!allow_path_outside_workspace && !canonical.starts_with(&workspace)) || !canonical.is_file()
+    {
         return Err(SkillFailure::machine("WORKSPACE_PATH_OUTSIDE"));
     }
     Ok(canonical)
+}
+
+fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
+    context
+        .and_then(Value::as_object)
+        .and_then(|ctx| {
+            ctx.get("permissions")
+                .and_then(Value::as_object)
+                .and_then(|permissions| permissions.get("allow_path_outside_workspace"))
+                .or_else(|| ctx.get("allow_path_outside_workspace"))
+        })
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, SkillFailure> {

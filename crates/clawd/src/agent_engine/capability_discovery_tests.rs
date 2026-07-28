@@ -1,14 +1,18 @@
 use super::*;
 
 #[test]
-fn group_loader_requires_one_or_two_machine_tokens() {
+fn group_loader_requires_nonempty_machine_tokens_without_an_arbitrary_count_cap() {
     assert_eq!(
         parse_requested_groups(&json!({"groups": []})).unwrap_err(),
         "capability_group_load_count_invalid"
     );
     assert_eq!(
-        parse_requested_groups(&json!({"groups": ["crypto", "weather", "kb"]})).unwrap_err(),
-        "capability_group_load_count_invalid"
+        parse_requested_groups(&json!({"groups": ["crypto", "weather", "kb"]})).unwrap(),
+        vec![
+            "crypto".to_string(),
+            "kb".to_string(),
+            "weather".to_string()
+        ]
     );
     assert_eq!(
         parse_requested_groups(&json!({"groups": ["weather group"]})).unwrap_err(),
@@ -89,17 +93,79 @@ fn group_loader_expands_only_exact_registry_groups() {
 }
 
 #[test]
-fn active_scope_set_evicts_lru_and_can_visit_more_than_four_groups() {
+fn catalog_tool_searches_then_expands_exact_authorized_contracts() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "capability-search-expand".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let entry = super::super::capability_catalog::catalog_entries_for_task(&state, &task)
+        .into_iter()
+        .next()
+        .expect("authorized fixture capability");
+    let mut loop_state = LoopState::new();
+    let mut executed = 0;
+    let search = handle_capability_group_load(
+        &state,
+        &task,
+        &mut loop_state,
+        &json!({"op": "search", "query": entry.capability_id}),
+        "catalog:search",
+        1,
+        1,
+        &mut executed,
+    )
+    .expect("catalog search");
+    assert!(
+        matches!(search, ActionLoopDecision::StopRound(signal) if signal == "capability_catalog_searched")
+    );
+    assert!(loop_state
+        .last_output
+        .as_deref()
+        .is_some_and(|output| output.contains(&entry.contract_sha256)));
+
+    let expand = handle_capability_group_load(
+        &state,
+        &task,
+        &mut loop_state,
+        &json!({"op": "expand", "capability_refs": [entry.capability_ref]}),
+        "catalog:expand",
+        2,
+        2,
+        &mut executed,
+    )
+    .expect("catalog expansion");
+    assert!(
+        matches!(expand, ActionLoopDecision::StopRound(signal) if signal == "capability_contracts_expanded")
+    );
+    assert!(loop_state
+        .loaded_capability_skills
+        .contains(&entry.skill_id));
+    assert_eq!(executed, 2);
+}
+
+#[test]
+fn active_scope_set_keeps_every_selected_group_queryable() {
     let mut loop_state = LoopState::new();
     for group in ["alpha", "beta", "gamma", "delta", "epsilon"] {
         activate_registry_groups(&mut loop_state, &[group.to_string()]);
     }
 
-    assert_eq!(loop_state.active_capability_scopes.len(), 4);
-    assert!(!loop_state.loaded_capability_skills.contains("alpha"));
+    assert_eq!(loop_state.active_capability_scopes.len(), 5);
     assert_eq!(
         loop_state.loaded_capability_skills,
         BTreeSet::from([
+            "alpha".to_string(),
             "beta".to_string(),
             "delta".to_string(),
             "epsilon".to_string(),
@@ -109,8 +175,9 @@ fn active_scope_set_evicts_lru_and_can_visit_more_than_four_groups() {
 
     activate_registry_groups(&mut loop_state, &["beta".to_string()]);
     activate_registry_groups(&mut loop_state, &["zeta".to_string()]);
+    assert_eq!(loop_state.active_capability_scopes.len(), 6);
     assert!(loop_state.loaded_capability_skills.contains("beta"));
-    assert!(!loop_state.loaded_capability_skills.contains("gamma"));
+    assert!(loop_state.loaded_capability_skills.contains("gamma"));
     assert_eq!(
         loop_state
             .active_capability_scopes

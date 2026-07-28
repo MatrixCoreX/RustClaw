@@ -195,6 +195,36 @@ pub struct ProviderModelCapabilities {
     pub prompt_cache: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenEstimatorConfidence {
+    Exact,
+    Calibrated,
+    Conservative,
+    #[default]
+    Unknown,
+}
+
+impl TokenEstimatorConfidence {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Calibrated => "calibrated",
+            Self::Conservative => "conservative",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderModelDescriptor {
+    pub capabilities: ProviderModelCapabilities,
+    pub context_window_tokens: Option<usize>,
+    pub output_reserve_tokens: usize,
+    pub request_timeout_seconds: u64,
+    pub estimator_confidence: TokenEstimatorConfidence,
+}
+
 #[cfg(test)]
 #[path = "model_turn_tests.rs"]
 mod tests;

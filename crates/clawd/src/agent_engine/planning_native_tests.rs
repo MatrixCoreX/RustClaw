@@ -1287,7 +1287,7 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         vec!["call_capability", "load_capability_groups", "respond"]
     );
     assert_eq!(
-        request.tools[1].input_schema["properties"]["groups"]["items"]["enum"],
+        request.tools[1].input_schema["oneOf"][2]["properties"]["groups"]["items"]["enum"],
         json!(["doc_parse"])
     );
 
@@ -1308,7 +1308,8 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
     assert!(matches!(
         &actions[0],
         AgentAction::CallTool { tool, args }
-            if tool == "load_capability_groups" && args == &json!({"groups": ["doc_parse"]})
+            if tool == "load_capability_groups"
+                && args == &json!({"op": "load_groups", "groups": ["doc_parse"]})
     ));
 
     let hidden_direct = turn(
@@ -1716,9 +1717,7 @@ fn native_observed_path_schema_and_repair_explain_array_segments() {
 }
 
 #[test]
-fn native_contract_repair_supports_three_bounded_protocol_transitions() {
-    assert_eq!(MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS, 3);
-
+fn native_contract_repair_continues_past_four_when_evidence_changes() {
     let capability_signal = native_contract_repair_signal("native_plan_capability_missing");
     let respond_signal = native_contract_repair_signal("native_plan_respond_tool_required");
     let request = native_planner_request(
@@ -1741,6 +1740,32 @@ fn native_contract_repair_supports_three_bounded_protocol_transitions() {
     assert_eq!(capability_retry.tool_choice, ModelToolChoice::Required);
     assert_eq!(respond_retry.tool_choice, ModelToolChoice::Required);
 
+    let mut progress = NativeRepairProgress {
+        seen_digests: BTreeSet::new(),
+        consecutive_stagnant: 0,
+        stagnation_tolerance: 2,
+        attempts: 0,
+        max_repair_calls: 20,
+    };
+    for index in 0..5 {
+        let response = turn(
+            vec![ModelToolCall {
+                id: format!("ignored-provider-id-{index}"),
+                name: "call_capability".to_string(),
+                arguments: json!({"capability": "fs.read", "repair_step": index}),
+            }],
+            "",
+        );
+        assert!(matches!(
+            progress.observe("native_plan_capability_missing", &response),
+            NativeRepairDecision::Retry {
+                new_evidence: true,
+                ..
+            }
+        ));
+    }
+    assert_eq!(progress.attempts, 5);
+
     let notes = native_contract_repair_notes(&[
         "native_plan_capability_missing".to_string(),
         "native_plan_respond_tool_required".to_string(),
@@ -1749,6 +1774,50 @@ fn native_contract_repair_supports_three_bounded_protocol_transitions() {
         notes,
         "native_contract_repair_reason_codes=native_plan_capability_missing,native_plan_respond_tool_required"
     );
+}
+
+#[test]
+fn native_contract_repair_stops_only_after_equivalent_state_stagnates() {
+    let response = turn(
+        vec![ModelToolCall {
+            id: "provider-id-does-not-affect-progress".to_string(),
+            name: "call_capability".to_string(),
+            arguments: json!({"capability": "fs.read"}),
+        }],
+        "",
+    );
+    let mut progress = NativeRepairProgress {
+        seen_digests: BTreeSet::new(),
+        consecutive_stagnant: 0,
+        stagnation_tolerance: 2,
+        attempts: 0,
+        max_repair_calls: 20,
+    };
+    assert!(matches!(
+        progress.observe("native_plan_capability_missing", &response),
+        NativeRepairDecision::Retry {
+            new_evidence: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        progress.observe("native_plan_capability_missing", &response),
+        NativeRepairDecision::Retry {
+            new_evidence: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        progress.observe("native_plan_capability_missing", &response),
+        NativeRepairDecision::Retry {
+            new_evidence: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        progress.observe("native_plan_capability_missing", &response),
+        NativeRepairDecision::Stagnated { .. }
+    ));
 }
 
 #[test]

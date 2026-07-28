@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -100,6 +101,11 @@ struct RefreshStats {
     removed_files: usize,
     skipped_files: usize,
     scan_truncated: bool,
+    total_candidates: usize,
+    scan_start: usize,
+    scan_end: usize,
+    scan_snapshot_sha256: String,
+    next_continuation: Option<String>,
     refreshed_at: u64,
 }
 
@@ -123,12 +129,13 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
         1,
         HARD_MAX_FILES,
     )?;
+    let scan_continuation = optional_machine_string(object, "scan_continuation");
 
     let lock = INDEX_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock
         .lock()
         .map_err(|_| CodeIndexError::new("index_lock_failed", "code_index.index_lock_failed"))?;
-    let (index, refresh) = refresh_index(workspace_root, max_files)?;
+    let (index, refresh) = refresh_index(workspace_root, max_files, scan_continuation)?;
     let result = match action {
         "refresh" => json!({
             "schema_version": INDEX_SCHEMA_VERSION,
@@ -157,41 +164,68 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
 fn refresh_index(
     workspace_root: &Path,
     max_files: usize,
+    scan_continuation: Option<&str>,
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
     let previous = load_index(&index_path);
-    let (candidates, scan_truncated) = collect_source_candidates(workspace_root, max_files)?;
+    let candidates = collect_source_candidates(workspace_root)?;
+    let scan_snapshot_sha256 = source_candidate_snapshot(workspace_root, &candidates);
+    let scan_start = decode_scan_continuation(scan_continuation, &scan_snapshot_sha256)?;
+    if scan_start > candidates.len() {
+        return Err(CodeIndexError::new(
+            "invalid_continuation",
+            "code_index.scan_continuation_offset_invalid",
+        ));
+    }
+    let scan_end = scan_start.saturating_add(max_files).min(candidates.len());
+    let scan_truncated = scan_end < candidates.len();
     let mut stats = RefreshStats {
         scan_truncated,
+        total_candidates: candidates.len(),
+        scan_start,
+        scan_end,
+        scan_snapshot_sha256: scan_snapshot_sha256.clone(),
+        next_continuation: scan_truncated
+            .then(|| encode_scan_continuation(&scan_snapshot_sha256, scan_end)),
         refreshed_at: crate::now_ts_u64(),
         ..RefreshStats::default()
     };
-    let mut files = BTreeMap::new();
+    let mut files = previous.files.clone();
 
-    for candidate in candidates {
+    for candidate in &candidates[scan_start..scan_end] {
         stats.scanned_files += 1;
         if let Some(existing) = previous.files.get(&candidate.relative_path) {
             if existing.size_bytes == candidate.size_bytes
                 && existing.modified_ns == candidate.modified_ns
             {
-                files.insert(candidate.relative_path, existing.clone());
+                files.insert(candidate.relative_path.clone(), existing.clone());
                 stats.reused_files += 1;
                 continue;
             }
         }
-        let indexed = index_source_file(&candidate)?;
+        let indexed = index_source_file(candidate)?;
         if indexed.parse_status == "parsed" {
             stats.parsed_files += 1;
         } else {
             stats.skipped_files += 1;
         }
-        files.insert(candidate.relative_path, indexed);
+        files.insert(candidate.relative_path.clone(), indexed);
     }
-    stats.removed_files = previous
-        .files
-        .keys()
-        .filter(|path| !files.contains_key(*path))
-        .count();
+    if !scan_truncated {
+        let current_paths = candidates
+            .iter()
+            .map(|candidate| candidate.relative_path.as_str())
+            .collect::<BTreeSet<_>>();
+        let stale_paths = files
+            .keys()
+            .filter(|path| !current_paths.contains(path.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        stats.removed_files = stale_paths.len();
+        for path in stale_paths {
+            files.remove(&path);
+        }
+    }
     let index = RepositoryIndex {
         schema_version: INDEX_SCHEMA_VERSION,
         generated_at: stats.refreshed_at,
@@ -235,8 +269,7 @@ fn persist_index(path: &Path, index: &RepositoryIndex) -> Result<(), CodeIndexEr
 
 fn collect_source_candidates(
     workspace_root: &Path,
-    max_files: usize,
-) -> Result<(Vec<SourceCandidate>, bool), CodeIndexError> {
+) -> Result<Vec<SourceCandidate>, CodeIndexError> {
     let mut candidates = Vec::new();
     let mut stack = vec![workspace_root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -276,15 +309,59 @@ fn collect_source_candidates(
                 size_bytes: metadata.len(),
                 modified_ns: modified_ns(&metadata),
             });
-            if candidates.len() > max_files {
-                candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-                candidates.truncate(max_files);
-                return Ok((candidates, true));
-            }
         }
     }
     candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok((candidates, false))
+    Ok(candidates)
+}
+
+fn source_candidate_snapshot(workspace_root: &Path, candidates: &[SourceCandidate]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(workspace_root.to_string_lossy().as_bytes());
+    for candidate in candidates {
+        digest.update([0]);
+        digest.update(candidate.relative_path.as_bytes());
+        digest.update(candidate.size_bytes.to_le_bytes());
+        digest.update(candidate.modified_ns.to_le_bytes());
+    }
+    format!("sha256:{:x}", digest.finalize())
+}
+
+fn encode_scan_continuation(snapshot_sha256: &str, offset: usize) -> String {
+    format!("code_index_scan_v1:{offset}:{snapshot_sha256}")
+}
+
+fn decode_scan_continuation(
+    continuation: Option<&str>,
+    snapshot_sha256: &str,
+) -> Result<usize, CodeIndexError> {
+    let Some(continuation) = continuation else {
+        return Ok(0);
+    };
+    let mut parts = continuation.splitn(3, ':');
+    if parts.next() != Some("code_index_scan_v1") {
+        return Err(CodeIndexError::new(
+            "invalid_continuation",
+            "code_index.scan_continuation_invalid",
+        ));
+    }
+    let offset = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| {
+            CodeIndexError::new(
+                "invalid_continuation",
+                "code_index.scan_continuation_invalid",
+            )
+        })?;
+    let encoded_snapshot = parts.next().unwrap_or_default();
+    if encoded_snapshot != snapshot_sha256 || offset == 0 {
+        return Err(CodeIndexError::new(
+            "stale_snapshot",
+            "code_index.scan_snapshot_changed",
+        ));
+    }
+    Ok(offset)
 }
 
 fn excluded_directory(name: &str) -> bool {
@@ -316,6 +393,9 @@ fn source_language(path: &Path) -> Option<&'static str> {
 }
 
 fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeIndexError> {
+    if candidate.language == "rust" && candidate.size_bytes > MAX_SOURCE_BYTES {
+        return index_large_rust_source(candidate);
+    }
     let bytes = fs::read(&candidate.path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
@@ -328,7 +408,7 @@ fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeInd
         symbols: Vec::new(),
         references: Vec::new(),
     };
-    if candidate.language != "rust" || candidate.size_bytes > MAX_SOURCE_BYTES {
+    if candidate.language != "rust" {
         return Ok(indexed);
     }
     let Ok(source) = std::str::from_utf8(&bytes) else {
@@ -346,6 +426,89 @@ fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeInd
     indexed.symbols = collector.symbols;
     indexed.references = collector.references;
     Ok(indexed)
+}
+
+fn index_large_rust_source(candidate: &SourceCandidate) -> Result<IndexedFile, CodeIndexError> {
+    let mut hasher = Sha256::new();
+    let mut file = fs::File::open(&candidate.path)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    let file = fs::File::open(&candidate.path)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let mut symbols = Vec::new();
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let line =
+            line.map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+        if let Some((kind, name)) = rust_definition_from_line(&line) {
+            symbols.push(SymbolDefinition {
+                name: name.clone(),
+                qualified_name: name,
+                kind: kind.to_string(),
+                line: index + 1,
+                end_line: index + 1,
+                visibility: line
+                    .trim_start()
+                    .starts_with("pub")
+                    .then_some("public")
+                    .unwrap_or("private")
+                    .to_string(),
+                is_test: false,
+            });
+        }
+    }
+    Ok(IndexedFile {
+        language: candidate.language.to_string(),
+        size_bytes: candidate.size_bytes,
+        modified_ns: candidate.modified_ns,
+        sha256: format!("{:x}", hasher.finalize()),
+        parse_status: "range_indexed".to_string(),
+        symbols,
+        references: Vec::new(),
+    })
+}
+
+fn rust_definition_from_line(line: &str) -> Option<(&'static str, String)> {
+    let trimmed = line.trim_start();
+    for (keyword, kind) in [
+        ("fn ", "function"),
+        ("struct ", "struct"),
+        ("enum ", "enum"),
+        ("trait ", "trait"),
+        ("type ", "type"),
+        ("const ", "const"),
+        ("static ", "static"),
+        ("mod ", "module"),
+    ] {
+        let Some(position) = trimmed.find(keyword) else {
+            continue;
+        };
+        let before = &trimmed[..position];
+        if !before.is_empty()
+            && !before
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '(' | ')' | ' '))
+        {
+            continue;
+        }
+        let name = trimmed[position + keyword.len()..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+            .collect::<String>();
+        if !name.is_empty() {
+            return Some((kind, name));
+        }
+    }
+    None
 }
 
 #[derive(Default)]
@@ -947,6 +1110,16 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         "skipped_files": refresh.skipped_files,
         "scan_truncated": refresh.scan_truncated,
         "scan_complete": index.scan_complete,
+        "complete": index.scan_complete,
+        "total_candidates": refresh.total_candidates,
+        "scan_start": refresh.scan_start,
+        "scan_end": refresh.scan_end,
+        "scan_snapshot_sha256": refresh.scan_snapshot_sha256,
+        "continuation": refresh.next_continuation.as_ref().map(|token| json!({
+            "kind": "opaque",
+            "token": token,
+            "reason_code": "repository_scan_shard_complete",
+        })),
         "generated_at": index.generated_at,
         "refreshed_at": refresh.refreshed_at,
         "index_source": "rustclaw_repository_index",

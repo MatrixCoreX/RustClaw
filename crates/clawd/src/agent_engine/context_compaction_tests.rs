@@ -85,7 +85,8 @@ fn context_compaction_source_bundle_enforces_total_budget() {
     let bundle = source_bundle_fixture();
     let plan =
         crate::task_context_builder::plan_agent_loop_context_compaction_with_provider_window(
-            &bundle, None,
+            &bundle,
+            Some(16_000),
         )
         .expect("large source fixture should require compaction");
     let source = context_source_bundle(&bundle, &plan);
@@ -165,7 +166,7 @@ fn model_assisted_compaction_rejects_nested_instruction_fields() {
 }
 
 #[test]
-fn model_assisted_compaction_bounds_arrays_and_text() {
+fn model_assisted_compaction_normalizer_does_not_silently_truncate_text() {
     let mut value = valid_output();
     value["open_questions"] = Value::Array(
         (0..30)
@@ -183,12 +184,12 @@ fn model_assisted_compaction_bounds_arrays_and_text() {
             .unwrap()
             .chars()
             .count(),
-        1_024
+        2_000
     );
 }
 
 #[test]
-fn model_assisted_compaction_bounds_large_arrays_at_sixty_four_items() {
+fn model_assisted_compaction_normalizer_does_not_silently_drop_array_items() {
     let mut value = valid_output();
     value["open_questions"] = Value::Array(
         (0..80)
@@ -198,7 +199,7 @@ fn model_assisted_compaction_bounds_large_arrays_at_sixty_four_items() {
 
     let normalized = normalize_model_assisted_compaction_output(&value).unwrap();
 
-    assert_eq!(normalized["open_questions"].as_array().unwrap().len(), 64);
+    assert_eq!(normalized["open_questions"].as_array().unwrap().len(), 80);
 }
 
 #[test]

@@ -38,17 +38,16 @@ fn context_bundle(recent_turns_chars: usize) -> TaskContextBundle {
     }
 }
 
-#[test]
-fn transcript_budget_triggers_before_context_provider_truncation() {
-    let plan =
-        plan_agent_loop_context_compaction_with_provider_window(&context_bundle(13_000), None)
-            .expect("long transcript should trigger compaction");
+fn adaptive_plan(bundle: &TaskContextBundle) -> Option<super::ContextCompactionPlan> {
+    plan_agent_loop_context_compaction_with_provider_window(bundle, Some(4_000))
+}
 
-    assert_eq!(plan.generation, 1);
-    assert!(plan.before_char_count > plan.transcript_char_count);
-    assert_eq!(plan.threshold_chars, 24_000);
-    assert!(plan.trigger_codes.contains(&"transcript_budget_exceeded"));
-    assert_eq!(plan.hook_metadata()["generation"], 1);
+#[test]
+fn old_character_threshold_does_not_compact_without_provider_pressure() {
+    assert!(
+        plan_agent_loop_context_compaction_with_provider_window(&context_bundle(30_000), None)
+            .is_none()
+    );
 }
 
 #[test]
@@ -79,7 +78,7 @@ fn provider_context_window_pressure_triggers_from_token_estimate() {
     )
     .expect("provider token pressure should trigger compaction");
 
-    assert!(plan.before_char_count < plan.threshold_chars);
+    assert_eq!(plan.threshold_chars, 3_000);
     assert!(plan.before_token_estimate >= 750);
     assert_eq!(plan.provider_context_window_tokens, Some(1_000));
     assert_eq!(plan.provider_compaction_threshold_tokens, Some(750));
@@ -100,8 +99,7 @@ fn fifty_turn_fixture_compacts_history_and_retains_active_machine_context() {
         .join("\n");
     let mut bundle = context_bundle(0);
     bundle.execution_view.as_mut().unwrap().recent_turns_full = transcript;
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None)
-        .expect("52 turns should compact");
+    let plan = adaptive_plan(&bundle).expect("52 turns should compact");
 
     let record = apply_context_compaction_with_inputs(
         "task-context-compaction",
@@ -135,7 +133,7 @@ fn fifty_turn_fixture_compacts_history_and_retains_active_machine_context() {
 #[test]
 fn model_summary_is_attached_as_data_only_compacted_history() {
     let mut bundle = context_bundle(13_000);
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
     let model_summary = serde_json::json!({
         "schema_version": 1,
         "summary_kind": "model_assisted_context_compaction",
@@ -181,7 +179,7 @@ fn compacted_permission_and_child_state_reaches_the_next_planner_prompt() {
     let state =
         crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
     let mut bundle = context_bundle(13_000);
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
     let model_summary = serde_json::json!({
         "schema_version": 1,
         "summary_kind": "model_assisted_context_compaction",
@@ -240,7 +238,7 @@ fn compacted_coding_continuity_reaches_the_next_planner_prompt() {
     let state =
         crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
     let mut bundle = context_bundle(13_000);
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
     let model_summary = serde_json::json!({
         "schema_version": 1,
         "summary_kind": "model_assisted_context_compaction",
@@ -325,7 +323,7 @@ fn deterministic_fallback_preserves_stable_machine_references() {
         view.last_turn_full =
             "risk:stale next:stale open:stale constraint:no_external_publish".to_string();
     }
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
 
     let record = apply_context_compaction_with_inputs(
         "task-context-compaction-machine-refs",
@@ -394,7 +392,7 @@ fn model_summary_receives_deterministic_continuity_references() {
         "goal:active fact:first fact:second constraint:read_only\n{}",
         "x".repeat(13_000)
     );
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
     let model_summary = serde_json::json!({
         "schema_version": 1,
         "summary_kind": "model_assisted_context_compaction",
@@ -449,7 +447,7 @@ fn deterministic_reference_extraction_rejects_truncated_tokens() {
         "constraint:no_duplicate_tool_call. decision:canary_b... fact:build_green…\n{}decision:ca",
         "x".repeat(13_000),
     );
-    let plan = plan_agent_loop_context_compaction_with_provider_window(&bundle, None).unwrap();
+    let plan = adaptive_plan(&bundle).unwrap();
 
     let record = apply_context_compaction_with_inputs(
         "task-context-compaction-truncated-refs",

@@ -595,6 +595,7 @@ dependencies = [
  "config",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "toml 0.8.23",
  "tracing",
@@ -1020,8 +1021,10 @@ dependencies = [
  "anyhow",
  "office-workspace-skill",
  "regex",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "sha2",
  "zip",
 ]
 
@@ -1996,6 +1999,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "toml 0.8.23",
 ]
 
@@ -2272,8 +2276,10 @@ name = "log-analyze-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -2609,6 +2615,7 @@ name = "package-manager-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
 ]
@@ -2873,8 +2880,10 @@ name = "process-basic-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

@@ -1,8 +1,39 @@
-use super::build_attempt_ledger_compact;
+use super::{build_attempt_ledger_compact, build_attempt_ledger_snapshot};
 use serde_json::Value;
 
 fn ledger_value(ledger: &str) -> Value {
     serde_json::from_str(ledger).expect("attempt ledger should be valid JSON")
+}
+
+#[test]
+fn attempt_ledger_checkpoint_keeps_all_records_while_prompt_view_is_explicitly_partial() {
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    for index in 0..25 {
+        super::record_attempt(
+            &mut loop_state,
+            "fs_search",
+            &format!("query=fixture-{index}"),
+            crate::executor::StepExecutionStatus::Ok,
+            &format!("result-{index}"),
+            None,
+            "completed",
+        );
+    }
+
+    let snapshot = build_attempt_ledger_snapshot(&loop_state).expect("canonical ledger");
+    assert_eq!(snapshot.as_array().map(Vec::len), Some(25));
+    assert_eq!(snapshot[0]["attempt_id"], "a1");
+    assert_eq!(snapshot[24]["attempt_id"], "a25");
+
+    let prompt_view = ledger_value(&build_attempt_ledger_compact(&loop_state));
+    assert_eq!(prompt_view["complete"], false);
+    assert_eq!(prompt_view["original_count"], 25);
+    assert_eq!(prompt_view["returned_count"], 10);
+    assert_eq!(prompt_view["recent_attempts"][0]["attempt_id"], "a16");
+    assert_eq!(
+        prompt_view["canonical_location"],
+        "task_checkpoint.attempt_ledger"
+    );
 }
 
 #[test]

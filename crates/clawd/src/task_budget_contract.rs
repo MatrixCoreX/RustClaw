@@ -7,6 +7,46 @@ const TASK_BUDGET_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub(crate) enum BudgetAllocationKind {
+    ModelTurn,
+    ChildTask,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BudgetUnits {
+    pub(crate) model_turns: u64,
+    pub(crate) tool_calls: u64,
+    pub(crate) tokens: u64,
+    pub(crate) elapsed_ms: u64,
+}
+
+impl BudgetUnits {
+    fn saturating_sub(&self, consumed: &Self) -> Self {
+        Self {
+            model_turns: self.model_turns.saturating_sub(consumed.model_turns),
+            tool_calls: self.tool_calls.saturating_sub(consumed.tool_calls),
+            tokens: self.tokens.saturating_sub(consumed.tokens),
+            elapsed_ms: self.elapsed_ms.saturating_sub(consumed.elapsed_ms),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BudgetAllocation {
+    pub(crate) allocation_id: String,
+    pub(crate) owner_ref: String,
+    pub(crate) kind: BudgetAllocationKind,
+    pub(crate) granted: BudgetUnits,
+    #[serde(default)]
+    pub(crate) consumed: BudgetUnits,
+    #[serde(default)]
+    pub(crate) reclaimed: BudgetUnits,
+    #[serde(default)]
+    pub(crate) settled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum TaskBudgetProfile {
     General,
     FastRead,
@@ -294,6 +334,15 @@ pub(crate) struct TaskBudgetSlice {
     pub(crate) progress: BudgetProgress,
     pub(crate) hard_ceilings: BudgetHardCeilings,
     pub(crate) last_decision: BudgetDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_limit_hit: Option<claw_core::adaptive_limits::LimitHit>,
+    /// Persisted reservations owned by the single task-budget authority.
+    /// Settled entries remain as an audit ledger; their unused units are
+    /// reclaimed and therefore do not reduce future allocations.
+    #[serde(default)]
+    pub(crate) allocations: Vec<BudgetAllocation>,
+    #[serde(default)]
+    pub(crate) delegated_consumed: BudgetUnits,
 }
 
 impl TaskBudgetSlice {
@@ -342,7 +391,137 @@ impl TaskBudgetSlice {
             progress: BudgetProgress::default(),
             hard_ceilings,
             last_decision: BudgetDecision::Continue,
+            last_limit_hit: None,
+            allocations: Vec::new(),
+            delegated_consumed: BudgetUnits::default(),
         }
+    }
+
+    pub(crate) fn allocate(
+        &mut self,
+        allocation_id: impl Into<String>,
+        owner_ref: impl Into<String>,
+        kind: BudgetAllocationKind,
+        requested: BudgetUnits,
+    ) -> Option<BudgetAllocation> {
+        let allocation_id = allocation_id.into();
+        if allocation_id.trim().is_empty()
+            || self
+                .allocations
+                .iter()
+                .any(|allocation| allocation.allocation_id == allocation_id)
+        {
+            return None;
+        }
+        let remaining = self.remaining_units();
+        let granted = BudgetUnits {
+            model_turns: requested.model_turns.min(remaining.model_turns),
+            tool_calls: requested.tool_calls.min(remaining.tool_calls),
+            tokens: requested.tokens.min(remaining.tokens),
+            elapsed_ms: requested.elapsed_ms.min(remaining.elapsed_ms),
+        };
+        if (requested.model_turns > 0 && granted.model_turns == 0)
+            || (requested.tool_calls > 0 && granted.tool_calls == 0)
+            || (requested.tokens > 0 && granted.tokens == 0)
+            || (requested.elapsed_ms > 0 && granted.elapsed_ms == 0)
+        {
+            return None;
+        }
+        let allocation = BudgetAllocation {
+            allocation_id,
+            owner_ref: owner_ref.into(),
+            kind,
+            granted,
+            consumed: BudgetUnits::default(),
+            reclaimed: BudgetUnits::default(),
+            settled: false,
+        };
+        self.allocations.push(allocation.clone());
+        Some(allocation)
+    }
+
+    pub(crate) fn remaining_units(&self) -> BudgetUnits {
+        let reserved = self.active_reserved_units();
+        let consumed_tokens = self
+            .cumulative_input_tokens
+            .saturating_add(self.cumulative_output_tokens);
+        BudgetUnits {
+            model_turns: self
+                .hard_ceilings
+                .model_turns
+                .saturating_sub(self.cumulative_model_turns)
+                .saturating_sub(self.delegated_consumed.model_turns)
+                .saturating_sub(reserved.model_turns),
+            tool_calls: self
+                .hard_ceilings
+                .tool_calls
+                .saturating_sub(self.cumulative_tool_calls)
+                .saturating_sub(self.delegated_consumed.tool_calls)
+                .saturating_sub(reserved.tool_calls),
+            tokens: self
+                .hard_ceilings
+                .total_tokens
+                .saturating_sub(consumed_tokens)
+                .saturating_sub(self.delegated_consumed.tokens)
+                .saturating_sub(reserved.tokens),
+            elapsed_ms: self
+                .hard_ceilings
+                .elapsed_ms
+                .saturating_sub(self.cumulative_elapsed_ms)
+                .saturating_sub(self.delegated_consumed.elapsed_ms)
+                .saturating_sub(reserved.elapsed_ms),
+        }
+    }
+
+    pub(crate) fn settle_allocation(&mut self, allocation_id: &str, consumed: BudgetUnits) -> bool {
+        let Some(allocation) = self
+            .allocations
+            .iter_mut()
+            .find(|allocation| allocation.allocation_id == allocation_id && !allocation.settled)
+        else {
+            return false;
+        };
+        allocation.consumed = consumed;
+        allocation.reclaimed = allocation.granted.saturating_sub(&allocation.consumed);
+        allocation.settled = true;
+        if allocation.kind == BudgetAllocationKind::ChildTask {
+            self.delegated_consumed.model_turns = self
+                .delegated_consumed
+                .model_turns
+                .saturating_add(allocation.consumed.model_turns);
+            self.delegated_consumed.tool_calls = self
+                .delegated_consumed
+                .tool_calls
+                .saturating_add(allocation.consumed.tool_calls);
+            self.delegated_consumed.tokens = self
+                .delegated_consumed
+                .tokens
+                .saturating_add(allocation.consumed.tokens);
+            self.delegated_consumed.elapsed_ms = self
+                .delegated_consumed
+                .elapsed_ms
+                .saturating_add(allocation.consumed.elapsed_ms);
+        }
+        true
+    }
+
+    pub(crate) fn active_reserved_units(&self) -> BudgetUnits {
+        self.allocations
+            .iter()
+            .filter(|allocation| !allocation.settled)
+            .fold(BudgetUnits::default(), |mut total, allocation| {
+                total.model_turns = total
+                    .model_turns
+                    .saturating_add(allocation.granted.model_turns);
+                total.tool_calls = total
+                    .tool_calls
+                    .saturating_add(allocation.granted.tool_calls);
+                total.tokens = total.tokens.saturating_add(allocation.granted.tokens);
+                total.elapsed_ms = total
+                    .elapsed_ms
+                    .saturating_add(allocation.granted.elapsed_ms);
+                total
+            })
     }
 
     pub(crate) fn apply_profile(
@@ -373,6 +552,7 @@ impl TaskBudgetSlice {
 
     pub(crate) fn observe(&mut self, observation: BudgetObservation) -> BudgetDecision {
         let progress_advanced = observation.progress.advanced_from(&self.progress);
+        let limit_hit = administrator_limit_hit(self, &observation);
         let decision = evaluate_budget_decision(self, &observation, progress_advanced);
         self.cumulative_model_turns = observation.cumulative_model_turns;
         self.cumulative_tool_calls = observation.cumulative_tool_calls;
@@ -382,6 +562,7 @@ impl TaskBudgetSlice {
         self.cumulative_elapsed_ms = observation.cumulative_elapsed_ms;
         self.progress = observation.progress;
         self.last_decision = decision;
+        self.last_limit_hit = limit_hit;
         decision
     }
 
@@ -468,15 +649,92 @@ pub(crate) fn evaluate_budget_decision(
 }
 
 fn hard_ceiling_reached(slice: &TaskBudgetSlice, observation: &BudgetObservation) -> bool {
-    observation.cumulative_model_turns >= slice.hard_ceilings.model_turns
-        || observation.cumulative_tool_calls >= slice.hard_ceilings.tool_calls
-        || observation
+    administrator_limit_hit(slice, observation).is_some()
+}
+
+fn administrator_limit_hit(
+    slice: &TaskBudgetSlice,
+    observation: &BudgetObservation,
+) -> Option<claw_core::adaptive_limits::LimitHit> {
+    use claw_core::adaptive_limits::{
+        LimitClass, LimitHit, LimitRecovery, LimitUnit, LIMIT_HIT_SCHEMA_VERSION,
+    };
+
+    let total_model_turns = observation
+        .cumulative_model_turns
+        .saturating_add(slice.delegated_consumed.model_turns);
+    let total_tool_calls = observation
+        .cumulative_tool_calls
+        .saturating_add(slice.delegated_consumed.tool_calls);
+    let boundary = if total_model_turns >= slice.hard_ceilings.model_turns {
+        (
+            LimitUnit::Calls,
+            slice.hard_ceilings.model_turns,
+            total_model_turns,
+            "administrator_model_turn_budget_exhausted",
+        )
+    } else if total_tool_calls >= slice.hard_ceilings.tool_calls {
+        (
+            LimitUnit::Calls,
+            slice.hard_ceilings.tool_calls,
+            total_tool_calls,
+            "administrator_tool_call_budget_exhausted",
+        )
+    } else {
+        let total_tokens = observation
             .cumulative_input_tokens
             .saturating_add(observation.cumulative_output_tokens)
-            >= slice.hard_ceilings.total_tokens
-        || observation.cumulative_cost_usd_nanos >= slice.hard_ceilings.cost_usd_nanos
-        || observation.cumulative_elapsed_ms >= slice.hard_ceilings.elapsed_ms
-        || slice.continuation_index >= slice.hard_ceilings.continuations
+            .saturating_add(slice.delegated_consumed.tokens);
+        if total_tokens >= slice.hard_ceilings.total_tokens {
+            (
+                LimitUnit::Tokens,
+                slice.hard_ceilings.total_tokens,
+                total_tokens,
+                "administrator_token_budget_exhausted",
+            )
+        } else if observation.cumulative_cost_usd_nanos >= slice.hard_ceilings.cost_usd_nanos {
+            (
+                LimitUnit::CostUsdNanos,
+                slice.hard_ceilings.cost_usd_nanos,
+                observation.cumulative_cost_usd_nanos,
+                "administrator_cost_budget_exhausted",
+            )
+        } else if observation
+            .cumulative_elapsed_ms
+            .saturating_add(slice.delegated_consumed.elapsed_ms)
+            >= slice.hard_ceilings.elapsed_ms
+        {
+            (
+                LimitUnit::Milliseconds,
+                slice.hard_ceilings.elapsed_ms,
+                observation
+                    .cumulative_elapsed_ms
+                    .saturating_add(slice.delegated_consumed.elapsed_ms),
+                "administrator_elapsed_budget_exhausted",
+            )
+        } else if slice.continuation_index >= slice.hard_ceilings.continuations {
+            (
+                LimitUnit::Continuations,
+                u64::from(slice.hard_ceilings.continuations),
+                u64::from(slice.continuation_index),
+                "administrator_continuation_budget_exhausted",
+            )
+        } else {
+            return None;
+        }
+    };
+
+    Some(LimitHit {
+        schema_version: LIMIT_HIT_SCHEMA_VERSION,
+        class: LimitClass::TaskResource,
+        owner: "task_budget_manager".to_string(),
+        unit: boundary.0,
+        configured_value: boundary.1,
+        observed_value: boundary.2,
+        reason_code: boundary.3.to_string(),
+        terminal: true,
+        recovery: LimitRecovery::None,
+    })
 }
 
 pub(crate) fn load_task_budget_policy(workspace_root: &Path) -> TaskBudgetPolicy {

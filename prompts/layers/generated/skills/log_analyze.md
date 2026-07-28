@@ -32,12 +32,14 @@
 | analyze | `tail_lines` | no | number | 0 | Return the last N log lines as bounded `tail_lines` / `tail_excerpt` evidence; use a small bounded value for log health/anomaly judgment when recent evidence is needed. |
 | analyze | `tail` | no | number | 0 | Alias for `tail_lines`. |
 | analyze | `n` | no | number | 0 | Alias for `tail_lines` when planner has a generic count. |
+| analyze | `continuation` | no | string | - | Opaque token from `bounded_results.*.continuation.token`; continues toward older matching lines and rejects a changed log as `stale_snapshot`. |
 
 ## Error Contract (from interface)
 - Invalid/missing log path when path is provided.
 - Directory path with no readable files should return a clear error.
 - Read/parse errors should return clear filesystem/runtime details.
 - Oversized/unbounded scans should be summarized safely.
+- Invalid continuation returns `invalid_continuation`; a changed log returns `stale_snapshot` and never silently restarts at the newest page.
 
 ## Request/Response Examples (from interface)
 ### Example 1

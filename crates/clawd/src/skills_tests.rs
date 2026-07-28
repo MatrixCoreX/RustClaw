@@ -1128,6 +1128,55 @@ fn task_allows_privileged_tools_for_admin_only() {
 }
 
 #[test]
+fn authenticated_admin_yolo_bypasses_ordinary_permission_switches() {
+    let state = test_state("zh-CN");
+    assert!(!state.policy.allow_sudo);
+    assert!(!state.policy.allow_path_outside_workspace);
+    insert_auth_key(&state, "rk-admin-yolo", "admin");
+    insert_auth_key(&state, "rk-user-yolo", "user");
+
+    let admin_identity = crate::resolve_auth_identity_by_key(&state, "rk-admin-yolo")
+        .expect("resolve admin identity")
+        .expect("admin identity");
+    let mut admin_payload = json!({"text": "inspect the host"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut admin_payload,
+        Some(&admin_identity),
+        Some("ui"),
+        None,
+    )
+    .expect("stamp admin policy");
+    let mut admin_task = test_task(admin_payload);
+    admin_task.user_key = Some("rk-admin-yolo".to_string());
+    assert!(task_allows_sudo(&state, Some(&admin_task)));
+    assert!(task_allows_path_outside_workspace(
+        &state,
+        Some(&admin_task)
+    ));
+
+    let mut user_task = test_task(json!({"text": "inspect the host"}));
+    user_task.user_key = Some("rk-user-yolo".to_string());
+    assert!(!task_allows_sudo(&state, Some(&user_task)));
+    assert!(!task_allows_path_outside_workspace(
+        &state,
+        Some(&user_task)
+    ));
+
+    let db = state.core.db.get().expect("db pool");
+    db.execute(
+        "UPDATE auth_keys SET enabled = 0 WHERE user_key = ?1",
+        params!["rk-admin-yolo"],
+    )
+    .expect("revoke admin key");
+    drop(db);
+    assert!(!task_allows_sudo(&state, Some(&admin_task)));
+    assert!(!task_allows_path_outside_workspace(
+        &state,
+        Some(&admin_task)
+    ));
+}
+
+#[test]
 fn read_file_not_found_is_recoverable() {
     let err = format!("{}/etc/missing", READ_FILE_NOT_FOUND_PREFIX);
     assert!(is_recoverable_skill_error("read_file", &err));

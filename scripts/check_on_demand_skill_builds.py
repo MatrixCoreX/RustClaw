@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard proactive build scripts against compiling Skill Store packages."""
+"""Guard normal builds and require explicit platform release precompilation."""
 
 from __future__ import annotations
 
@@ -40,6 +40,9 @@ REQUIRED_SNIPPETS = {
         "pkg.get(\"name\") in excluded_packages",
         'RUSTCLAW_PACKAGE_TARGET="${RUSTCLAW_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
         "target/skill-packages/$RUSTCLAW_PACKAGE_TARGET",
+        "target/prebuilt-skill-packages/$RUSTCLAW_PACKAGE_TARGET",
+        "--scope platform-precompiled --target \"$RUSTCLAW_PACKAGE_TARGET\" --format skills",
+        "prebuilt/skill-packages",
     ),
     "scripts/archive/cross-build/cross-build-upload.sh": (
         "bash ./build-all.sh no-ui --target",
@@ -78,9 +81,27 @@ REQUIRED_SNIPPETS = {
         "configure_cargo_build_environment",
     ),
     "scripts/project_skill_receipts.py": (
+        'choices=("proactive", "platform-precompiled")',
         'if spec.adapter == "cargo"',
         '"install-local"',
         'command.extend(["--target", args.target])',
+    ),
+    "scripts/precompile_skill_store.sh": (
+        "--scope platform-precompiled --target \"$TARGET\" --format packages",
+        "cargo \"${CARGO_ARGS[@]}\"",
+        "--scope platform-precompiled",
+        "target/prebuilt-skill-packages/$TARGET",
+    ),
+    ".github/workflows/ubuntu-x86_64-release.yml": (
+        './scripts/precompile_skill_store.sh "${RUST_TARGET}"',
+    ),
+    ".github/workflows/pi-aarch64-release.yml": (
+        "--precompile-skill-store",
+        "--scope platform-precompiled --target \"${RUST_TARGET}\" --format skills",
+    ),
+    ".github/workflows/macos-polyglot-skill-ci.yml": (
+        "./scripts/precompile_skill_store.sh host",
+        "target/prebuilt-skill-packages/*",
     ),
     "docker/Dockerfile": (
         "--scope build-excludes --target linux --format cargo-excludes",

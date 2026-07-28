@@ -892,10 +892,6 @@ pub struct WorkerConfig {
     pub concurrency: usize,
     #[serde(default = "default_worker_task_timeout_seconds")]
     pub task_timeout_seconds: u64,
-    #[serde(default = "default_worker_llm_max_calls_per_task")]
-    pub llm_max_calls_per_task: u64,
-    #[serde(default = "default_worker_llm_total_timeout_seconds")]
-    pub llm_total_timeout_seconds: u64,
     #[serde(default = "default_worker_poll_interval_ms")]
     pub poll_interval_ms: u64,
     #[serde(default = "default_worker_queue_limit")]
@@ -913,8 +909,6 @@ impl Default for WorkerConfig {
         Self {
             concurrency: default_worker_concurrency(),
             task_timeout_seconds: default_worker_task_timeout_seconds(),
-            llm_max_calls_per_task: default_worker_llm_max_calls_per_task(),
-            llm_total_timeout_seconds: default_worker_llm_total_timeout_seconds(),
             poll_interval_ms: default_worker_poll_interval_ms(),
             queue_limit: default_worker_queue_limit(),
             task_heartbeat_seconds: default_worker_task_heartbeat_seconds(),

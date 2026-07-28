@@ -54,12 +54,15 @@ fn command_output_filter_keeps_exit_and_matching_rows() {
 
 #[test]
 fn ps_extra_includes_structured_running_status() {
-    let extra = ps_extra(
-        20,
-        Some("telegramd".to_string()),
-        "exit=0\nPID PPID %CPU %MEM COMM\n",
-        0,
-    );
+    let page = ProcessPage {
+        text: "exit=0\nPID PPID %CPU %MEM COMM\n".to_string(),
+        match_count: 0,
+        cursor: 0,
+        returned_count: 0,
+        snapshot_sha256: "fixture".to_string(),
+        continuation: None,
+    };
+    let extra = ps_extra(20, Some("telegramd".to_string()), &page);
 
     assert_eq!(extra.get("action").and_then(Value::as_str), Some("ps"));
     assert_eq!(
@@ -73,6 +76,42 @@ fn ps_extra_includes_structured_running_status() {
         extra.get("status").and_then(Value::as_str),
         Some("not_running")
     );
+}
+
+#[test]
+fn process_pages_continue_without_silently_dropping_rows() {
+    let lines = (1..=7)
+        .map(|pid| format!("{pid} 1 0.0 0.0 process-{pid}"))
+        .collect::<Vec<_>>();
+    let first = process_page("PID PPID %CPU %MEM COMM", lines.clone(), 7, 3, None, None)
+        .expect("first page");
+    assert_eq!(first.returned_count, 3);
+    let continuation = first.continuation.as_deref().expect("continuation");
+    let second = process_page(
+        "PID PPID %CPU %MEM COMM",
+        lines.clone(),
+        7,
+        3,
+        None,
+        Some(continuation),
+    )
+    .expect("second page");
+    assert_eq!(second.cursor, 3);
+    assert!(second.text.contains("process-4"));
+    assert!(!second.text.contains("process-1"));
+
+    let mut changed = lines;
+    changed.push("8 1 0.0 0.0 changed".to_string());
+    let error = process_page(
+        "PID PPID %CPU %MEM COMM",
+        changed,
+        8,
+        3,
+        None,
+        Some(continuation),
+    )
+    .expect_err("changed snapshot is stale");
+    assert_eq!(error, "stale_snapshot");
 }
 
 #[test]

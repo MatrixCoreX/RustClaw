@@ -118,6 +118,8 @@ pub(crate) fn discover(request: &DiscoveryRequest) -> Result<DiscoveryReport, Ri
         permission_denied: 0,
         skipped_counts_complete: false,
         cancelled: captured.cancelled,
+        traversal_start: 0,
+        traversal_next: (!completeness.is_complete()).then_some(visited_files),
         backend: BackendProvenance {
             backend: DiscoveryBackend::Ripgrep,
             version: Some(binary.version.clone()),
@@ -174,6 +176,8 @@ fn discover_single_file(
         permission_denied: 0,
         skipped_counts_complete: false,
         cancelled: false,
+        traversal_start: 0,
+        traversal_next: None,
         backend: BackendProvenance {
             backend: DiscoveryBackend::Ripgrep,
             version: Some(binary.version.clone()),

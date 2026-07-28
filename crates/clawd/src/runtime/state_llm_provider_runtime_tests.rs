@@ -217,3 +217,21 @@ fn model_capabilities_require_adapter_and_configuration_support() {
     provider.config.supports_tools = false;
     assert!(!provider.model_capabilities().native_tools);
 }
+
+#[test]
+fn model_descriptor_unifies_window_output_timeout_and_estimator_confidence() {
+    let mut provider = make_provider("vendor-openai", "k");
+    provider.config.context_window_tokens = Some(128_000);
+    provider.config.params.default_max_tokens = Some(8_192);
+    provider.config.timeout_seconds = 180;
+
+    let descriptor = provider.model_descriptor();
+    assert_eq!(descriptor.context_window_tokens, Some(128_000));
+    assert_eq!(descriptor.output_reserve_tokens, 8_192);
+    assert_eq!(descriptor.request_timeout_seconds, 180);
+    assert_eq!(
+        descriptor.estimator_confidence,
+        claw_core::model_turn::TokenEstimatorConfidence::Conservative
+    );
+    assert!(descriptor.capabilities.native_tools);
+}

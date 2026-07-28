@@ -102,6 +102,9 @@ export interface ChatPageProps {
   chatAudioInputDevices: VoiceInputDeviceOption[];
   chatAudioInputDeviceId: string;
   chatError: string | null;
+  chatHistoryHasMore: boolean;
+  chatHistoryLoading: boolean;
+  chatBodyLoadingMessageId: string | null;
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
   onChatTeachingModeChange: (value: boolean) => void;
@@ -110,6 +113,8 @@ export interface ChatPageProps {
   onSelectChatThread: (threadId: string) => void;
   onRenameChatThread: (threadId: string, title: string) => Promise<boolean>;
   onDeleteChatThread: (threadId: string) => void | Promise<boolean>;
+  onLoadEarlierConversationHistory: () => void | Promise<unknown>;
+  onLoadNextChatMessageBody: (messageId: string) => void | Promise<unknown>;
   onClearMessages: () => void | Promise<boolean>;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -146,6 +151,9 @@ export function ChatPage({
   chatAudioInputDevices,
   chatAudioInputDeviceId,
   chatError,
+  chatHistoryHasMore,
+  chatHistoryLoading,
+  chatBodyLoadingMessageId,
   chatAttachmentInputRef,
   toLocalTime,
   onChatTeachingModeChange,
@@ -154,6 +162,8 @@ export function ChatPage({
   onSelectChatThread,
   onRenameChatThread,
   onDeleteChatThread,
+  onLoadEarlierConversationHistory,
+  onLoadNextChatMessageBody,
   onClearMessages,
   onChatInputChange,
   onChatInputKeyDown,
@@ -448,6 +458,19 @@ export function ChatPage({
               {t("没有匹配的任务。", "No matching tasks.")}
             </div>
           ) : null}
+          {chatHistoryHasMore && !normalizedThreadSearch ? (
+            <button
+              type="button"
+              disabled={chatHistoryLoading}
+              onClick={() => void onLoadEarlierConversationHistory()}
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70 hover:bg-white/10 disabled:cursor-wait disabled:opacity-55"
+            >
+              {chatHistoryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {chatHistoryLoading
+                ? t("正在加载...", "Loading...")
+                : t("加载更早的任务", "Load earlier tasks")}
+            </button>
+          ) : null}
             </div>
         </div>
       </aside>
@@ -554,6 +577,34 @@ export function ChatPage({
                         t={t}
                       />
                     ))}
+                  </div>
+                ) : null}
+                {message.bodyResult && !message.bodyResult.complete ? (
+                  <div className="mt-3 rounded-lg border border-sky-300/20 bg-sky-500/5 p-2.5 text-xs text-sky-100/80">
+                    <p>
+                      {t(
+                        "结果较大，可继续查看。当前已显示",
+                        "This result is large and can be continued. Currently showing",
+                      )}{" "}
+                      {formatAttachmentSize(message.bodyResult.returned_size_bytes)} /{" "}
+                      {formatAttachmentSize(message.bodyResult.original_size_bytes)}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={chatBodyLoadingMessageId !== null}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onLoadNextChatMessageBody(message.id);
+                      }}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-sky-300/25 bg-sky-500/10 px-2.5 py-1.5 text-sky-100 hover:bg-sky-500/20 disabled:cursor-wait disabled:opacity-55"
+                    >
+                      {chatBodyLoadingMessageId === message.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      {chatBodyLoadingMessageId === message.id
+                        ? t("正在继续读取...", "Loading more...")
+                        : t("继续查看完整内容", "Show more")}
+                    </button>
                   </div>
                 ) : null}
               </div>

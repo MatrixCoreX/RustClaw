@@ -1,7 +1,7 @@
 use super::{
-    profile_for_verified_plan, task_budget_policy_from_toml, BudgetDecision, BudgetHardCeilings,
-    BudgetObservation, BudgetProfilePolicy, BudgetProgress, BudgetTimeoutClass, TaskBudgetProfile,
-    TaskBudgetSlice, VerifiedPlanBudgetFacts,
+    profile_for_verified_plan, task_budget_policy_from_toml, BudgetAllocationKind, BudgetDecision,
+    BudgetHardCeilings, BudgetObservation, BudgetProfilePolicy, BudgetProgress, BudgetTimeoutClass,
+    BudgetUnits, TaskBudgetProfile, TaskBudgetSlice, VerifiedPlanBudgetFacts,
 };
 
 fn slice() -> TaskBudgetSlice {
@@ -189,6 +189,94 @@ fn checkpoint_round_trip_resumes_once() {
 }
 
 #[test]
+fn allocation_ledger_reclaims_unused_units_and_survives_checkpoint() {
+    let mut slice = slice();
+    let first = slice
+        .allocate(
+            "turn:1",
+            "round:1",
+            BudgetAllocationKind::ModelTurn,
+            BudgetUnits {
+                model_turns: 1,
+                tool_calls: 8,
+                tokens: 10_000,
+                elapsed_ms: 30_000,
+            },
+        )
+        .expect("first allocation");
+    assert_eq!(first.granted.tool_calls, 8);
+    assert_eq!(slice.active_reserved_units().tokens, 10_000);
+    assert!(slice.settle_allocation(
+        "turn:1",
+        BudgetUnits {
+            model_turns: 1,
+            tool_calls: 2,
+            tokens: 1_500,
+            elapsed_ms: 2_000,
+        }
+    ));
+    assert_eq!(slice.active_reserved_units(), BudgetUnits::default());
+    assert_eq!(slice.allocations[0].reclaimed.tool_calls, 6);
+    assert_eq!(slice.allocations[0].reclaimed.tokens, 8_500);
+
+    let second = slice
+        .allocate(
+            "child:1",
+            "child_task:1",
+            BudgetAllocationKind::ChildTask,
+            BudgetUnits {
+                model_turns: 2,
+                tool_calls: 8,
+                tokens: 5_000,
+                elapsed_ms: 120_000,
+            },
+        )
+        .expect("reclaimed units are available to child");
+    assert_eq!(second.granted.model_turns, 2);
+
+    let restored = TaskBudgetSlice::from_machine_json(&slice.to_machine_json())
+        .expect("allocation ledger checkpoint");
+    assert!(restored.allocations[0].settled);
+    assert!(!restored.allocations[1].settled);
+    assert_eq!(restored.active_reserved_units().tool_calls, 8);
+}
+
+#[test]
+fn allocation_never_overcommits_administrator_remaining_budget() {
+    let mut slice = slice();
+    slice.cumulative_model_turns = 19;
+    slice.cumulative_tool_calls = 39;
+    let allocation = slice
+        .allocate(
+            "turn:last",
+            "round:last",
+            BudgetAllocationKind::ModelTurn,
+            BudgetUnits {
+                model_turns: 4,
+                tool_calls: 7,
+                tokens: 1,
+                elapsed_ms: 1,
+            },
+        )
+        .expect("partial final allocation");
+    assert_eq!(allocation.granted.model_turns, 1);
+    assert_eq!(allocation.granted.tool_calls, 1);
+    assert!(slice
+        .allocate(
+            "turn:overcommit",
+            "round:overcommit",
+            BudgetAllocationKind::ModelTurn,
+            BudgetUnits {
+                model_turns: 1,
+                tool_calls: 1,
+                tokens: 1,
+                elapsed_ms: 1,
+            },
+        )
+        .is_none());
+}
+
+#[test]
 fn machine_config_selects_profile_slice_and_admin_ceilings() {
     let parsed = toml::from_str::<toml::Value>(
         r#"
@@ -305,4 +393,59 @@ fn timeout_classes_are_bounded_by_soft_slice_and_administrator_ceiling() {
     slice.soft_slice_ms = 500;
     assert_eq!(slice.provider_call_timeout_seconds(), 1);
     assert_eq!(slice.tool_call_timeout_seconds(), 1);
+}
+
+#[test]
+fn productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption() {
+    let mut slice = TaskBudgetSlice::new(
+        TaskBudgetProfile::General,
+        300_000,
+        BudgetHardCeilings {
+            model_turns: 256,
+            ..BudgetHardCeilings::default()
+        },
+    );
+
+    for turn in 1..=41 {
+        let decision = slice.observe(BudgetObservation {
+            cumulative_model_turns: turn,
+            progress: BudgetProgress {
+                evidence_count: turn,
+                machine_progress_digest: Some(format!("turn:{turn}")),
+                ..BudgetProgress::default()
+            },
+            resumable: true,
+            ..BudgetObservation::default()
+        });
+        assert_eq!(decision, BudgetDecision::Continue, "turn {turn}");
+    }
+
+    let restored = TaskBudgetSlice::from_machine_json(&slice.to_machine_json())
+        .expect("task budget checkpoint must deserialize")
+        .resumed();
+    assert_eq!(restored.cumulative_model_turns, 41);
+    assert_eq!(restored.continuation_index, 1);
+
+    let mut exhausted = restored;
+    let decision = exhausted.observe(BudgetObservation {
+        cumulative_model_turns: 256,
+        progress: BudgetProgress {
+            evidence_count: 256,
+            machine_progress_digest: Some("turn:256".to_string()),
+            ..BudgetProgress::default()
+        },
+        resumable: true,
+        ..BudgetObservation::default()
+    });
+    assert_eq!(decision, BudgetDecision::Terminal);
+    let limit_hit = exhausted
+        .last_limit_hit
+        .as_ref()
+        .expect("administrator ceiling must have a structured limit hit");
+    assert_eq!(limit_hit.owner, "task_budget_manager");
+    assert_eq!(
+        limit_hit.reason_code,
+        "administrator_model_turn_budget_exhausted"
+    );
+    limit_hit.validate().unwrap();
 }

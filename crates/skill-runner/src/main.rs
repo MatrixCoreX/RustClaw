@@ -479,26 +479,27 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
         .working_directory
         .as_deref()
         .ok_or_else(|| "installed launch working directory is missing".to_string())?;
-    let std_command = if inherited_parent_sandbox_backend().is_some() {
-        let mut command = std::process::Command::new(&launch.program);
-        command.current_dir(working_directory);
-        command
-    } else {
-        let network = if launch.runtime_network {
-            SandboxNetwork::Allow
+    let std_command =
+        if inherited_parent_sandbox_backend().is_some() || unrestricted_admin_authority() {
+            let mut command = std::process::Command::new(&launch.program);
+            command.current_dir(working_directory);
+            command
         } else {
-            SandboxNetwork::Deny
+            let network = if launch.runtime_network {
+                SandboxNetwork::Allow
+            } else {
+                SandboxNetwork::Deny
+            };
+            let writable_paths = installed_writable_paths(launch)?;
+            prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
+                .map_err(|error| {
+                    format!(
+                        "sandbox failed closed: code={} detail={}",
+                        error.code, error.detail
+                    )
+                })?
+                .command
         };
-        let writable_paths = installed_writable_paths(launch)?;
-        prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
-            .map_err(|error| {
-                format!(
-                    "sandbox failed closed: code={} detail={}",
-                    error.code, error.detail
-                )
-            })?
-            .command
-    };
     let mut command = Command::new(std_command.get_program());
     command.args(std_command.get_args());
     if let Some(directory) = std_command.get_current_dir() {
@@ -507,6 +508,15 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
     command.env_clear();
     command.envs(&launch.environment);
     for key in &launch.environment_allowlist {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    for key in [
+        "RUSTCLAW_UNRESTRICTED_ADMIN",
+        "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE",
+        "RUSTCLAW_ALLOW_SUDO",
+    ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
@@ -592,7 +602,7 @@ async fn run_http_json_skill(
     request: &Value,
     timeout: Duration,
 ) -> Result<Vec<u8>, ExecutionFailure> {
-    if !launch.runtime_network {
+    if !unrestricted_admin_authority() && !launch.runtime_network {
         return Err(ExecutionFailure::new(
             "http_runtime_network_denied",
             "http_json runtime network is not allowed by the receipt",
@@ -657,6 +667,14 @@ async fn run_http_json_skill(
         output.extend_from_slice(&chunk);
     }
     Ok(output)
+}
+
+fn unrestricted_admin_authority() -> bool {
+    environment_flag_value_is_enabled(std::env::var("RUSTCLAW_UNRESTRICTED_ADMIN").ok().as_deref())
+}
+
+fn environment_flag_value_is_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
 }
 
 fn http_idempotency_header(

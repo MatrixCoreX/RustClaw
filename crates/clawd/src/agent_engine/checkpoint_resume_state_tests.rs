@@ -128,12 +128,12 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
 }
 
 #[test]
-fn restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens() {
+fn restart_snapshot_preserves_large_state_and_ignores_unknown_stage_tokens() {
     let mut source = LoopState::new();
-    source.last_output = Some("x".repeat(MAX_LAST_OUTPUT_CHARS + 100));
+    source.last_output = Some("x".repeat(32_000));
     source
         .task_observations
-        .push(json!({"payload": "x".repeat(MAX_OBSERVATION_BYTES + 100)}));
+        .push(json!({"payload": "x".repeat(32_000)}));
     let mut snapshot = build_checkpoint_resume_state(&source, AgentCheckpointStage::ToolExecution);
     snapshot["stage"] = json!("untrusted_stage");
     snapshot["loaded_capability_skills"] = json!([
@@ -150,14 +150,17 @@ fn restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens() {
     let stage = restore_checkpoint_resume_state(&mut restored, &boundary);
 
     assert_eq!(stage, AgentCheckpointStage::Planning);
+    assert_eq!(restored.last_output.as_deref().map(str::len), Some(32_000));
     assert_eq!(
-        restored.last_output.as_deref().map(str::len),
-        Some(MAX_LAST_OUTPUT_CHARS)
+        restored.task_observations[0]["payload"]
+            .as_str()
+            .map(str::len),
+        Some(32_000)
     );
-    assert!(restored.task_observations.is_empty());
     assert_eq!(
         restored.loaded_capability_skills,
         std::collections::BTreeSet::from([
+            "crypto".to_string(),
             "extra_group".to_string(),
             "kb".to_string(),
             "rss_fetch".to_string(),

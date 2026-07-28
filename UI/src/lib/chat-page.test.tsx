@@ -43,6 +43,9 @@ function props(): ComponentProps<typeof ChatPage> {
     chatAudioInputDevices: [],
     chatAudioInputDeviceId: "",
     chatError: null,
+    chatHistoryHasMore: false,
+    chatHistoryLoading: false,
+    chatBodyLoadingMessageId: null,
     chatAttachmentInputRef: createRef<HTMLInputElement>(),
     toLocalTime: () => "刚刚",
     onChatTeachingModeChange: () => {},
@@ -51,6 +54,8 @@ function props(): ComponentProps<typeof ChatPage> {
     onSelectChatThread: () => {},
     onRenameChatThread: async () => true,
     onDeleteChatThread: async () => true,
+    onLoadEarlierConversationHistory: () => {},
+    onLoadNextChatMessageBody: () => {},
     onClearMessages: async () => true,
     onChatInputChange: () => {},
     onChatInputKeyDown: () => {},
@@ -73,6 +78,37 @@ test("renders task rename and delete as directly operable controls", () => {
   assert.match(markup, /aria-label="收起任务历史"/);
   assert.match(markup, /aria-expanded="true"/);
   assert.match(markup, /aria-controls="chat-task-history-content"/);
+});
+
+test("renders progressive controls for older history and long messages", () => {
+  const pageProps = props();
+  pageProps.chatHistoryHasMore = true;
+  pageProps.chatMessages = [
+    {
+      id: "a-large",
+      role: "assistant",
+      text: "部分回答",
+      ts: 1,
+      bodyResult: {
+        schema_version: 1,
+        complete: false,
+        original_size_bytes: 100_000,
+        returned_size_bytes: 10_000,
+        content_sha256: "a".repeat(64),
+        continuation: {
+          kind: "conversation_body_range",
+          url: `/v1/tasks/task-1/conversation-body/assistant?start_byte=10000&sha256=${"a".repeat(64)}`,
+          next_start_byte: 10_000,
+        },
+      },
+    },
+  ];
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.match(markup, /加载更早的任务/);
+  assert.match(markup, /继续查看完整内容/);
+  assert.match(markup, /9.8 KB/);
 });
 
 test("renders a newly prepended task above older task history", () => {

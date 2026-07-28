@@ -953,7 +953,37 @@ fn partial_zero_result_is_not_reported_as_complete_absence() {
     assert_eq!(out["returned_count"], 0);
     assert_eq!(out["completeness"], "partial_hard_limit");
     assert_eq!(out["total_count_is_complete"], false);
-    assert_eq!(out["continuation"]["kind"], "narrow_search");
+    assert_eq!(out["continuation"]["kind"], "scan_frontier");
+    let mut continuation = out["continuation"]["token"]
+        .as_str()
+        .expect("frontier token")
+        .to_string();
+    let mut found = false;
+    for _ in 0..4 {
+        let page = execute(json!({
+            "action": "find_name",
+            "pattern": "z-target.txt",
+            "exact": true,
+            "target_kind": "file",
+            "root": root.to_string_lossy(),
+            "__test_hard_entry_limit": 1,
+            "max_results": 10,
+            "scan_continuation": continuation,
+        }))
+        .expect("resume traversal frontier");
+        if page["returned_count"].as_u64().unwrap_or_default() > 0 {
+            found = true;
+            break;
+        }
+        let Some(next) = page["continuation"]["token"].as_str() else {
+            break;
+        };
+        continuation = next.to_string();
+    }
+    assert!(
+        found,
+        "target must be reachable through traversal continuation"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1038,11 +1068,54 @@ fn resolve_path_rejects_existing_paths_outside_workspace() {
     std::fs::create_dir_all(&workspace).expect("create workspace");
     std::fs::create_dir_all(&outside).expect("create outside");
 
-    let error = resolve_path(&workspace, outside.to_string_lossy().as_ref())
+    let error = resolve_path(&workspace, outside.to_string_lossy().as_ref(), false)
         .expect_err("outside path must be rejected");
 
     assert!(error.contains("outside workspace"), "error={error:?}");
     let _ = std::fs::remove_dir_all(parent);
+}
+
+#[test]
+fn resolve_path_allows_admin_service_account_scope_outside_workspace() {
+    let parent = unique_temp_dir("admin-workspace-fence");
+    let workspace = parent.join("workspace");
+    let outside = parent.join("outside");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    std::fs::create_dir_all(&outside).expect("create outside");
+
+    let resolved = resolve_path(&workspace, outside.to_string_lossy().as_ref(), true)
+        .expect("admin outside path must resolve");
+
+    assert_eq!(resolved, outside.canonicalize().expect("canonical outside"));
+    let _ = std::fs::remove_dir_all(parent);
+}
+
+#[test]
+fn admin_system_root_normalizes_to_the_host_root() {
+    let workspace = unique_temp_dir("admin-system-root");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+
+    let resolved = resolve_path(&workspace, std::path::MAIN_SEPARATOR_STR, true)
+        .expect("admin host root must resolve");
+
+    assert_eq!(
+        resolved,
+        std::path::Path::new(std::path::MAIN_SEPARATOR_STR)
+            .canonicalize()
+            .expect("canonical host root")
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn runner_permission_context_controls_admin_external_root_access() {
+    assert!(!context_allows_path_outside_workspace(None));
+    assert!(!context_allows_path_outside_workspace(Some(&json!({
+        "permissions": {"allow_path_outside_workspace": false}
+    }))));
+    assert!(context_allows_path_outside_workspace(Some(&json!({
+        "permissions": {"allow_path_outside_workspace": true}
+    }))));
 }
 
 #[cfg(unix)]
@@ -1148,6 +1221,54 @@ fn find_name_supports_prefix_and_suffix_modes() {
     }))
     .expect("suffix search");
     assert_eq!(suffix["returned_count"], 2);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
+    let root = unique_temp_dir("fuzzy-ranking");
+    std::fs::create_dir_all(root.join("rustclaw-cache")).expect("create fuzzy directory");
+    std::fs::write(root.join("rustclaw.toml"), "fixture\n").expect("write close match");
+    std::fs::write(root.join("rustclaw-backup.toml"), "fixture\n").expect("write broader match");
+    std::fs::write(root.join("unrelated.toml"), "fixture\n").expect("write unrelated");
+
+    let files = execute(json!({
+        "action": "find_name",
+        "pattern": "rustclw",
+        "match_mode": "fuzzy",
+        "target_kind": "file",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 10
+    }))
+    .expect("fuzzy file search succeeds");
+
+    assert_eq!(files["match_mode"], "fuzzy");
+    assert_eq!(files["sort_by"], "relevance");
+    assert_eq!(
+        files["results"][0].as_str(),
+        Some(root.join("rustclaw.toml").to_string_lossy().as_ref())
+    );
+    assert!(files["results"]
+        .as_array()
+        .is_some_and(|items| items.iter().all(|item| !item
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("unrelated.toml"))));
+
+    let directories = execute(json!({
+        "action": "find_name",
+        "pattern": "rstclwcache",
+        "match_mode": "fuzzy",
+        "target_kind": "dir",
+        "root": root.to_string_lossy().to_string(),
+        "max_results": 10
+    }))
+    .expect("fuzzy directory search succeeds");
+    assert_eq!(directories["count"], 1);
+    assert!(directories["results"][0]
+        .as_str()
+        .is_some_and(|path| path.ends_with("rustclaw-cache")));
+
     let _ = std::fs::remove_dir_all(root);
 }
 

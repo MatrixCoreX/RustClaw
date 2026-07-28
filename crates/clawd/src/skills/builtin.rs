@@ -32,7 +32,7 @@ use builtin_run_cmd::{
     start_async_command, RunSafeCommandError,
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
-use builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
+use builtin_workspace_mutation::{atomic_write_file, run_authorized_mutation};
 use builtin_workspace_patch::execute_workspace_patch;
 
 fn builtin_error(
@@ -275,11 +275,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             let action = if append { "append_text" } else { "write_text" };
-            run_checkpointed_workspace_mutation(
+            run_authorized_mutation(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 action,
                 &real_path,
+                builtin_allows_path_outside_workspace(state, task),
                 || {
                     if create_parents {
                         if let Some(parent) = real_path.parent() {
@@ -781,11 +782,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let create_parents = optional_bool(map, "parents")
                 .or_else(|| optional_bool(map, "recursive"))
                 .unwrap_or(true);
-            run_checkpointed_workspace_mutation(
+            run_authorized_mutation(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 "make_dir",
                 &real_path,
+                builtin_allows_path_outside_workspace(state, task),
                 || {
                     let create_result = if create_parents {
                         std::fs::create_dir_all(&real_path)
@@ -829,11 +831,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     None,
                 ));
             }
-            run_checkpointed_workspace_mutation(
+            run_authorized_mutation(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 "remove_path",
                 &real_path,
+                builtin_allows_path_outside_workspace(state, task),
                 || {
                     if real_path.is_dir() {
                         std::fs::remove_dir_all(&real_path).map_err(|err| {
@@ -1057,9 +1060,6 @@ fn resolve_workspace_path(
 }
 
 fn builtin_allows_path_outside_workspace(state: &AppState, task: Option<&ClaimedTask>) -> bool {
-    if crate::execution_isolation::is_execution_isolation_root(&state.skill_rt.workspace_root) {
-        return false;
-    }
     crate::skills::task_allows_path_outside_workspace(state, task)
 }
 

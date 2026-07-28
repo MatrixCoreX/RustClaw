@@ -897,10 +897,10 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.equal(buildTaskTraceEventView(events[10], "en").tone, "ok");
   assert.equal(buildTaskTraceEventView(events[11], "en").title, "Context budget");
   assert.equal(buildTaskTraceEventView(events[12], "en").title, "Context compaction");
-  assert.equal(buildTaskTraceEventView(events[13], "en").title, "Task budget decision");
+  assert.equal(buildTaskTraceEventView(events[13], "en").title, "Task progress");
   assert.equal(
     buildTaskTraceEventView(events[13], "en").detail,
-    "multi_step_workspace · checkpoint_requeue · continuation 2",
+    "Progress is saved and RustClaw will continue safely.",
   );
   assert.equal(buildTaskTraceEventView(events[13], "en").tone, "attention");
 });
@@ -927,6 +927,38 @@ test("collects artifact refs recursively without duplicate mirrored arrays", () 
   assert.equal(refs.length, 2);
   assert.equal(refs[0].summary, "ref=artifact:summary · path=out/summary.json · role=summary");
   assert.equal(refs[1].summary, "output_path=out/report.md · kind=report");
+});
+
+test("explains administrator budget boundaries without exposing raw tuning values", () => {
+  const event = {
+    event_type: "budget_decision",
+    payload: {
+      decision: "terminal",
+      profile: "general",
+      hard_model_turns: 256,
+      limit_hit: {
+        owner: "task_budget_manager",
+        reason_code: "administrator_model_turn_budget_exhausted",
+        configured_value: 256,
+        observed_value: 256,
+      },
+    },
+  };
+
+  const view = buildTaskTraceEventView(event, "en");
+  assert.equal(view.title, "Task progress");
+  assert.equal(
+    view.detail,
+    "The task reached an administrator safety boundary and stopped safely.",
+  );
+  assert.equal(view.tone, "failed");
+  assert.ok(view.meta.includes("limit_owner=task_budget_manager"));
+  assert.ok(
+    view.meta.includes(
+      "limit_reason_code=administrator_model_turn_budget_exhausted",
+    ),
+  );
+  assert.ok(!view.detail.includes("256"));
 });
 
 test("summarizes recorded replay machine fields", () => {

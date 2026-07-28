@@ -34,10 +34,6 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     if !llm_cost_policy_allows(state, task, None, prompt_source) {
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
     }
-    if let Some(reason) = state.task_llm_budget_exceeded(&task.task_id) {
-        return Err(reason);
-    }
-
     let prompt_label = super::classify_prompt_source(prompt_source);
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     let logical_call_index = state.task_llm_call_count(&task.task_id);

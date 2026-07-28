@@ -41,7 +41,7 @@
 | all | `action` | yes | string | - | Must be one of supported search actions. |
 | `find_name` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | conditional | string or string[] | - | Basename selector; required unless `glob`/`globs` supplies a path selector. |
 | `find_name` | `exact` | no | boolean | `false` | Require an exact basename match instead of substring matching. |
-| `find_name` / `find_ext` | `match_mode` | no | string | `contains` | `exact|prefix|suffix|contains|glob`; `glob` applies the pattern as a basename glob. |
+| `find_name` / `find_ext` | `match_mode` | no | string | `contains` | `exact|prefix|suffix|contains|fuzzy|glob`; `fuzzy` tolerates small typos/transpositions and ranks by relevance, while `glob` applies the pattern as a basename glob. |
 | `find_name` / `find_ext` / `grep_text` | `glob` / `globs` | no | string or string[] | none | Typed path globs such as `**/*.rs`; parsed as data, never shell flags. |
 | `find_name` / `find_ext` / `grep_text` | `case_mode` | no | string | `smart` | `smart|sensitive|insensitive`; smart mode becomes sensitive when a selector contains uppercase characters. |
 | `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. `files_only=true` and `dirs_only=true` are accepted aliases. |
@@ -71,7 +71,7 @@
 - Missing required query, unsupported action, invalid/workspace-external root, or runtime failure returns readable `error_text` plus stable `error_kind` when available.
 - Invalid, query-mismatched, or out-of-range cursors fail structurally; a changed tree returns `stale_snapshot` plus a `new_snapshot` continuation.
 - An opaque next-page cursor reuses a short-lived declared-skill snapshot when valid. TTL/capacity eviction returns `stale_snapshot` with a `new_snapshot` continuation instead of silently rescanning. Changes to the root, result/ancestor stamps, or applicable `.gitignore` / `.ignore` controls also invalidate the snapshot.
-- Search never follows directory symlinks; roots are canonicalized inside the configured workspace.
+- Search never follows directory symlinks; roots are canonicalized inside the task's permitted workspace or authenticated administrator host boundary.
 - `completeness` is one of `complete|partial_deadline|partial_hard_limit|partial_permission|stale_snapshot`. A `partial_*` result with zero matches is never authoritative absence.
 - Successful JSON is mirrored into `extra`; it contains version/action/root/policy, authoritative page `results`, returned and known counts, completeness, continuation, scan evidence, and opaque query/snapshot cursors.
 - `find_name` may return files and directories unless narrowed. `grep_text.matches[]` carries path/line/byte/text/context evidence; `find_images.images[]` carries path/MIME/size/mtime/dimensions.
@@ -81,6 +81,7 @@
 - Matrix admission uses machine `extra`, never natural-language `text` parsing.
 - Common evidence: `action` (status), `root`/`workspace_root` (path), `count`/`returned_count`/`known_match_count`/`total_count_is_complete` (count), `results`/`matches` (results/entries/path), and `page`/`completeness`/`continuation`/`snapshot_sha256` (status/provenance).
 - Action-specific fields include `exts`, `patterns`, `globs`, `match_mode`, `case_mode`, `target_kind`, image metadata, and grep line/byte/context provenance.
+- The trusted runner context may grant `permissions.allow_path_outside_workspace=true`; only then may an explicit absolute `root` search the full host scope visible to the RustClaw service account. A caller-provided argument cannot grant this permission.
 - `scan.backend`, backend version/fallback/elapsed fields, `cache_reused`, `cache_status`, and `observation_bytes` provide diagnostic provenance. They are executor evidence, not planner-selected backend controls.
 - Content matches include exact `start_byte`/`end_byte`, `matched_text`, encoding/binary evidence, and a file-identity-bound `range_handle` for a later bounded read.
 - Sensitive fields: `matches[].text` may include user data. Provider-facing traces should prefer short excerpts, hashes, line numbers, and paths unless the user requested matched content.

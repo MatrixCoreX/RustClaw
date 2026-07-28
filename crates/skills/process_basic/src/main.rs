@@ -6,8 +6,10 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 const SKILL_NAME: &str = "process_basic";
 
@@ -95,10 +97,14 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .unwrap_or(30)
                 .min(200);
             let filter = string_arg(obj, &["filter", "query", "name"]);
-            run_ps_snapshot(limit as usize, filter.as_deref()).map(|(text, match_count)| {
-                let extra = ps_extra(limit, filter, &text, match_count);
-                (text, extra)
-            })
+            let continuation = string_arg(obj, &["continuation"]);
+            run_ps_snapshot(limit as usize, filter.as_deref(), continuation.as_deref()).map(
+                |page| {
+                    let text = page.text.clone();
+                    let extra = ps_extra(limit, filter, &page);
+                    (text, extra)
+                },
+            )
         }
         "port_list" => {
             let filter = string_arg(obj, &["filter", "query", "port"]);
@@ -182,24 +188,58 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
     }
 }
 
-fn ps_extra(limit: u64, filter: Option<String>, text: &str, match_count: usize) -> Value {
-    let running = match_count > 0;
+#[derive(Debug, Clone)]
+struct ProcessPage {
+    text: String,
+    match_count: usize,
+    cursor: usize,
+    returned_count: usize,
+    snapshot_sha256: String,
+    continuation: Option<String>,
+}
+
+fn ps_extra(limit: u64, filter: Option<String>, page: &ProcessPage) -> Value {
+    let running = page.match_count > 0;
+    let continuation = page
+        .continuation
+        .as_ref()
+        .map(|token| ContinuationDescriptor {
+            kind: "opaque".to_string(),
+            token: Some(token.clone()),
+            state: json!({
+                "cursor": page.cursor.saturating_add(page.returned_count),
+                "snapshot_sha256": page.snapshot_sha256,
+            }),
+        });
+    let process_result = BoundedResult::page(
+        page.text.clone(),
+        page.returned_count as u64,
+        page.match_count as u64,
+        continuation,
+    );
     json!({
         "action": "ps",
         "exit_code": 0,
         "limit": limit,
         "filter": filter,
         "platform": std::env::consts::OS,
-        "output": text,
-        "match_count": match_count,
-        "process_count": match_count,
+        "output": page.text,
+        "match_count": page.match_count,
+        "process_count": page.match_count,
+        "cursor": page.cursor,
+        "snapshot_sha256": page.snapshot_sha256,
+        "process_result": process_result,
         "running": running,
         "status": if running { "running" } else { "not_running" },
     })
 }
 
 #[cfg(not(target_os = "macos"))]
-fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize), String> {
+fn run_ps_snapshot(
+    limit: usize,
+    filter: Option<&str>,
+    continuation: Option<&str>,
+) -> Result<ProcessPage, String> {
     let output = Command::new("ps")
         .args(["-Ao", "pid=,ppid=,pcpu=,pmem=,comm="])
         .output()
@@ -228,30 +268,31 @@ fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize)
     });
     let match_count = rows.len();
 
-    let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
-    for row in rows.iter().take(limit) {
-        lines.push(format!(
-            "{} {} {:.1} {:.1} {}",
-            row.pid, row.ppid, row.cpu, row.mem, row.comm
-        ));
-    }
-    if lines.len() == 1 {
-        if let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) {
-            lines.push(format!("no matching processes for filter: {filter}"));
-        }
-    }
-    Ok((
-        format!(
-            "exit={}\n{}",
-            output.status.code().unwrap_or(0),
-            lines.join("\n")
-        ),
+    let lines = rows
+        .iter()
+        .map(|row| {
+            format!(
+                "{} {} {:.1} {:.1} {}",
+                row.pid, row.ppid, row.cpu, row.mem, row.comm
+            )
+        })
+        .collect::<Vec<_>>();
+    process_page(
+        "PID PPID %CPU %MEM COMM",
+        lines,
         match_count,
-    ))
+        limit,
+        filter,
+        continuation,
+    )
 }
 
 #[cfg(target_os = "macos")]
-fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize), String> {
+fn run_ps_snapshot(
+    limit: usize,
+    filter: Option<&str>,
+    continuation: Option<&str>,
+) -> Result<ProcessPage, String> {
     // macOS denies execution of the setuid /bin/ps inside Seatbelt. pgrep is
     // non-setuid and provides a stable process snapshot through sysmond.
     let output = Command::new("/usr/bin/pgrep")
@@ -274,16 +315,79 @@ fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize)
     rows.sort_by_key(|row| row.pid);
     let match_count = rows.len();
 
-    let mut lines = vec!["PID COMMAND".to_string()];
-    for row in rows.iter().take(limit) {
-        lines.push(format!("{} {}", row.pid, row.comm));
-    }
-    if lines.len() == 1 {
+    let lines = rows
+        .iter()
+        .map(|row| format!("{} {}", row.pid, row.comm))
+        .collect::<Vec<_>>();
+    process_page(
+        "PID COMMAND",
+        lines,
+        match_count,
+        limit,
+        filter,
+        continuation,
+    )
+}
+
+fn process_page(
+    header: &str,
+    lines: Vec<String>,
+    match_count: usize,
+    limit: usize,
+    filter: Option<&str>,
+    continuation: Option<&str>,
+) -> Result<ProcessPage, String> {
+    let canonical = lines.join("\n");
+    let snapshot_sha256 = format!("{:x}", Sha256::digest(canonical.as_bytes()));
+    let cursor = continuation
+        .map(|token| decode_process_continuation(token, &snapshot_sha256))
+        .transpose()?
+        .unwrap_or(0)
+        .min(lines.len());
+    let returned = lines
+        .iter()
+        .skip(cursor)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    let returned_count = returned.len();
+    let next_cursor = cursor.saturating_add(returned_count);
+    let continuation = (next_cursor < lines.len())
+        .then(|| encode_process_continuation(next_cursor, &snapshot_sha256));
+    let mut output = vec![format!("exit=0"), header.to_string()];
+    output.extend(returned);
+    if returned_count == 0 {
         if let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) {
-            lines.push(format!("no matching processes for filter: {filter}"));
+            output.push(format!("no matching processes for filter: {filter}"));
         }
     }
-    Ok((format!("exit=0\n{}", lines.join("\n")), match_count))
+    Ok(ProcessPage {
+        text: output.join("\n"),
+        match_count,
+        cursor,
+        returned_count,
+        snapshot_sha256,
+        continuation,
+    })
+}
+
+fn encode_process_continuation(cursor: usize, snapshot_sha256: &str) -> String {
+    format!("process_ps_v1:{cursor}:sha256:{snapshot_sha256}")
+}
+
+fn decode_process_continuation(token: &str, snapshot_sha256: &str) -> Result<usize, String> {
+    let mut parts = token.splitn(4, ':');
+    if parts.next() != Some("process_ps_v1") {
+        return Err("invalid_continuation".to_string());
+    }
+    let cursor = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "invalid_continuation".to_string())?;
+    if parts.next() != Some("sha256") || parts.next() != Some(snapshot_sha256) {
+        return Err("stale_snapshot".to_string());
+    }
+    Ok(cursor)
 }
 
 fn ps_row_matches_filter(row: &PsRow, filter: Option<&str>) -> bool {

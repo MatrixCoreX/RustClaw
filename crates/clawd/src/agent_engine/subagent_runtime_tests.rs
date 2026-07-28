@@ -66,6 +66,14 @@ fn child_task_row(state: &crate::AppState, task_id: &str) -> (String, serde_json
     )
 }
 
+fn install_test_task_budget(loop_state: &mut LoopState) {
+    loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
+        crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
+        3_600_000,
+        crate::task_budget_contract::BudgetHardCeilings::default(),
+    ));
+}
+
 #[test]
 fn subagent_action_records_safe_machine_observation() {
     let mut loop_state = LoopState::new();
@@ -358,6 +366,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
     loop_state.round_no = 1;
+    install_test_task_budget(&mut loop_state);
     let args = serde_json::json!({
         "action": "persistent_child_task",
         "role": "review",
@@ -460,6 +469,7 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
     };
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
+    install_test_task_budget(&mut loop_state);
     let args = serde_json::json!({
         "action": "persistent_child_task",
         "role": "writer",
@@ -526,6 +536,7 @@ fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
     };
     insert_running_parent_task(&state, &task);
     let mut loop_state = LoopState::new();
+    install_test_task_budget(&mut loop_state);
     let args = serde_json::json!({
         "action": "persistent_child_task",
         "max_parallel": 2,
@@ -1280,6 +1291,68 @@ fn subagent_batch_expected_required_child_failure_dry_run_is_delivered() {
         observation["merge_contract"]["parent_result_status"],
         "completed_expected_failure"
     );
+}
+
+#[test]
+fn persistent_child_specs_keep_twenty_nodes_and_allocate_each_budget_slice() {
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-persistent-twenty-nodes".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    let children = (0..20)
+        .map(|index| {
+            serde_json::json!({
+                "node_id": format!("node_{index}"),
+                "role": "explorer",
+                "objective": format!("machine_child_objective:{index}"),
+                "context_refs": ["AGENTS.md"],
+                "allowed_capabilities": ["filesystem.read_text_range"]
+            })
+        })
+        .collect::<Vec<_>>();
+    let args = serde_json::json!({
+        "action": "persistent_child_task",
+        "children": children
+    });
+    let mut specs = super::subagent_runtime_persistent::persistent_child_specs(
+        &task,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    )
+    .expect("materialize every child spec");
+    assert_eq!(specs.len(), 20);
+
+    let mut loop_state = LoopState::new();
+    install_test_task_budget(&mut loop_state);
+    let allocations = super::subagent_runtime_persistent::allocate_persistent_child_budgets(
+        &mut loop_state,
+        &mut specs,
+    )
+    .expect("allocate every child budget");
+
+    assert_eq!(allocations.len(), 20);
+    assert_eq!(
+        loop_state
+            .task_budget_slice
+            .as_ref()
+            .expect("budget slice")
+            .allocations
+            .len(),
+        20
+    );
+    assert!(specs.iter().all(|spec| spec
+        .scope
+        .get("budget_allocation_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some()));
 }
 
 #[test]

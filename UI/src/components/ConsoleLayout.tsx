@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, ShieldAlert } from "lucide-react";
+import { ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun } from "lucide-react";
 
 import type { AuthIdentityResponse, ConsolePage } from "../types/api";
 
@@ -25,6 +25,7 @@ export interface ConsoleNavItem {
 export interface ConsoleLayoutProps {
   t: Translate;
   lang: UiLanguage;
+  themeMode: "light" | "dark";
   authMode: AuthMode;
   authIdentity: AuthIdentityResponse | null;
   isAdminIdentity: boolean;
@@ -36,6 +37,7 @@ export interface ConsoleLayoutProps {
   children: ReactNode;
   onCurrentPageChange: (page: ConsolePage) => void;
   onToggleLanguage: () => void;
+  onToggleTheme: () => void;
   onLogout: () => unknown | Promise<unknown>;
   onOpenFactoryReset: () => void;
 }
@@ -43,6 +45,7 @@ export interface ConsoleLayoutProps {
 export function ConsoleLayout({
   t,
   lang,
+  themeMode,
   authMode,
   authIdentity,
   isAdminIdentity,
@@ -54,6 +57,7 @@ export function ConsoleLayout({
   children,
   onCurrentPageChange,
   onToggleLanguage,
+  onToggleTheme,
   onLogout,
   onOpenFactoryReset,
 }: ConsoleLayoutProps) {
@@ -161,6 +165,25 @@ export function ConsoleLayout({
                 title={t("切换界面语言", "Switch interface language")}
               >
                 {lang === "zh" ? "中文" : "English"}
+              </button>
+              <span className="theme-toolbar-divider" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="theme-toolbar-segment inline-flex items-center gap-1.5"
+                title={
+                  themeMode === "dark"
+                    ? t("切换到浅色主题", "Switch to light theme")
+                    : t("切换到深色主题", "Switch to dark theme")
+                }
+                aria-label={
+                  themeMode === "dark"
+                    ? t("切换到浅色主题", "Switch to light theme")
+                    : t("切换到深色主题", "Switch to dark theme")
+                }
+              >
+                {themeMode === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                <span>{themeMode === "dark" ? t("浅色", "Light") : t("深色", "Dark")}</span>
               </button>
               <span className="theme-toolbar-divider" aria-hidden="true" />
               <button

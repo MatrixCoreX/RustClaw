@@ -325,6 +325,17 @@ fn owner_history_is_bounded_structured_and_cursor_paged() {
     assert_eq!(first.turns[0].attachment_kinds, ["file", "image"]);
     assert_eq!(first.content_sha256.len(), 64);
 
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET updated_at = '999' WHERE task_id = ?1",
+            rusqlite::params![first_id.to_string()],
+        )
+        .unwrap();
+
     let second = list_conversation_history(
         &state,
         &identity("user"),
@@ -403,5 +414,169 @@ fn malformed_conversation_ids_and_cursors_are_rejected_without_prose_matching() 
             .unwrap_err()
             .to_string(),
         "conversation_history_cursor_invalid"
+    );
+}
+
+#[test]
+fn large_conversation_bodies_expose_verified_ranges_without_data_loss() {
+    let state = state_with_tasks();
+    let task_id = Uuid::new_v4();
+    let question = "完整问题段落。".repeat(4_000);
+    let answer = "完整回答段落。".repeat(12_000);
+    insert_turn(
+        &state,
+        TurnFixture {
+            task_id,
+            user_id: 42,
+            user_key: "owner-key",
+            conversation_id: "chat-thread-large-body",
+            text: &question,
+            answer: &answer,
+            updated_at: 700,
+        },
+    );
+    let error_text = "结构化失败详情。".repeat(2_000);
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET error_text = ?2 WHERE task_id = ?1",
+            rusqlite::params![task_id.to_string(), error_text],
+        )
+        .unwrap();
+
+    let history = list_conversation_history(&state, &identity("user"), Some(1), None).unwrap();
+    let turn = &history.turns[0];
+    let descriptor = turn.assistant_text_result.as_ref().unwrap();
+    assert!(!descriptor.complete);
+    assert_eq!(descriptor.original_size_bytes, answer.len());
+    assert_eq!(
+        descriptor.returned_size_bytes,
+        turn.assistant_text.as_ref().unwrap().len()
+    );
+    assert!(!turn.user_text_result.as_ref().unwrap().complete);
+    assert!(!turn.error_text_result.as_ref().unwrap().complete);
+    assert_eq!(
+        descriptor.continuation.as_ref().unwrap().kind,
+        "conversation_body_range"
+    );
+
+    let mut reconstructed = turn.assistant_text.clone().unwrap();
+    let mut next = descriptor
+        .continuation
+        .as_ref()
+        .map(|item| item.next_start_byte);
+    while let Some(start) = next {
+        let page = read_conversation_body_range(
+            &state,
+            &identity("user"),
+            &task_id.to_string(),
+            ConversationBodyField::Assistant,
+            Some(start),
+            Some(17_003),
+            Some(&descriptor.content_sha256),
+        )
+        .unwrap();
+        assert_eq!(page.start_byte, reconstructed.len());
+        reconstructed.push_str(&page.text);
+        next = page.next_start_byte;
+    }
+    assert_eq!(reconstructed, answer);
+
+    for (field, result) in [
+        (
+            ConversationBodyField::User,
+            turn.user_text_result.as_ref().unwrap(),
+        ),
+        (
+            ConversationBodyField::Error,
+            turn.error_text_result.as_ref().unwrap(),
+        ),
+    ] {
+        let start = result.continuation.as_ref().unwrap().next_start_byte;
+        let page = read_conversation_body_range(
+            &state,
+            &identity("user"),
+            &task_id.to_string(),
+            field,
+            Some(start),
+            Some(4096),
+            Some(&result.content_sha256),
+        )
+        .unwrap();
+        assert_eq!(page.start_byte, start);
+        assert!(!page.text.is_empty());
+    }
+}
+
+#[test]
+fn conversation_body_ranges_are_owner_scoped_and_snapshot_bound() {
+    let state = state_with_tasks();
+    let task_id = Uuid::new_v4();
+    insert_turn(
+        &state,
+        TurnFixture {
+            task_id,
+            user_id: 42,
+            user_key: "owner-key",
+            conversation_id: "chat-thread-snapshot",
+            text: "检查快照",
+            answer: "原始回答",
+            updated_at: 701,
+        },
+    );
+    let page = read_conversation_body_range(
+        &state,
+        &identity("user"),
+        &task_id.to_string(),
+        ConversationBodyField::Assistant,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+            rusqlite::params![task_id.to_string(), json!({"text": "更新回答"}).to_string()],
+        )
+        .unwrap();
+    assert_eq!(
+        read_conversation_body_range(
+            &state,
+            &identity("user"),
+            &task_id.to_string(),
+            ConversationBodyField::Assistant,
+            None,
+            None,
+            Some(&page.content_sha256),
+        )
+        .unwrap_err()
+        .to_string(),
+        "conversation_body_stale_snapshot"
+    );
+
+    let mut other = identity("user");
+    other.user_key = "other-key".to_string();
+    other.user_id = 99;
+    assert_eq!(
+        read_conversation_body_range(
+            &state,
+            &other,
+            &task_id.to_string(),
+            ConversationBodyField::Assistant,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err()
+        .to_string(),
+        "conversation_body_not_found"
     );
 }

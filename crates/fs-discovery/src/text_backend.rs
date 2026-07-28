@@ -59,6 +59,7 @@ pub fn ripgrep_text_search(
     }
     let budget = DiscoveryBudget {
         max_depth: None,
+        start_after_entries: 0,
         hard_entry_limit: usize::MAX,
         match_snapshot_limit: request.max_matches.max(1),
         deadline: request.deadline,

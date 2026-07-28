@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn advertised_attachment_constraints_match_materialization_enforcement() {
+    let value = serde_json::to_value(ui_attachment_constraints()).unwrap();
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["channel"], "ui_base64");
+    assert_eq!(value["max_attachments"], MAX_UI_ATTACHMENTS);
+    assert_eq!(value["max_attachment_bytes"], MAX_UI_ATTACHMENT_BYTES);
+    assert_eq!(
+        value["max_total_attachment_bytes"],
+        MAX_UI_TOTAL_ATTACHMENT_BYTES
+    );
+    assert_eq!(
+        value["error_codes"],
+        json!([
+            "ui_attachments_too_many",
+            "ui_attachment_too_large",
+            "ui_attachments_total_too_large"
+        ])
+    );
+}
+
+#[test]
 fn data_url_decodes_mime_and_bytes() {
     let (bytes, mime) =
         decode_data_url("data:text/plain;base64,aGVsbG8=").expect("decode data url");

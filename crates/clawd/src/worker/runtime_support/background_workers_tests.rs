@@ -41,7 +41,13 @@ fn checkpoint_result(checkpoint_id: &str, next_check_after: i64) -> Value {
     })
 }
 
-fn insert_task(state: &AppState, task_id: &str, status: &str, result: Option<&Value>) {
+fn insert_task_with_kind(
+    state: &AppState,
+    task_id: &str,
+    kind: &str,
+    status: &str,
+    result: Option<&Value>,
+) {
     let db = state.core.db.get().expect("get db");
     db.execute(
         "INSERT INTO tasks (
@@ -49,17 +55,26 @@ fn insert_task(state: &AppState, task_id: &str, status: &str, result: Option<&Va
             status, result_json, error_text, created_at, updated_at,
             lease_owner, lease_expires_at, claim_attempt, claimed_at
         ) VALUES (
-            ?1, 42, 7, 'test-key', 'ui', 'ask', ?2,
-            ?3, ?4, NULL, '1', '1', NULL, 0, 0, 0
+            ?1, 42, 7, 'test-key', 'ui', ?2, ?3,
+            ?4, ?5, NULL, '1', '1', NULL, 0, 0, 0
         )",
         rusqlite::params![
             task_id,
-            json!({"text": "scheduled fixture"}).to_string(),
+            kind,
+            json!({
+                "text": "scheduled fixture",
+                "conversation_id": "chat-history-preserved"
+            })
+            .to_string(),
             status,
             result.map(Value::to_string),
         ],
     )
     .expect("insert task");
+}
+
+fn insert_task(state: &AppState, task_id: &str, status: &str, result: Option<&Value>) {
+    insert_task_with_kind(state, task_id, "ask", status, result);
 }
 
 fn insert_due_job(state: &AppState, job_id: &str, task_id: &str, next_run_at: i64) {
@@ -103,7 +118,7 @@ fn task_result(state: &AppState, task_id: &str) -> Value {
 fn cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner() {
     let state = test_state();
     let task_id = format!("task-cost-cleanup-{}", Uuid::new_v4().simple());
-    insert_task(&state, &task_id, "succeeded", Some(&json!({})));
+    insert_task_with_kind(&state, &task_id, "run_skill", "succeeded", Some(&json!({})));
     crate::task_event_transport::publish_event(
         &state,
         &task_id,
@@ -160,6 +175,42 @@ fn cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner() {
     assert_eq!(cost_count, 0);
     assert_eq!(archived_event_count, 0);
     assert_eq!(archived_snapshot_count, 0);
+}
+
+#[test]
+fn cleanup_preserves_conversation_tasks_for_user_controlled_history() {
+    let mut state = test_state();
+    state.policy.maintenance.tasks_max_rows = 0;
+    let conversation_task_id = format!("task-chat-history-{}", Uuid::new_v4().simple());
+    let transient_task_id = format!("task-transient-{}", Uuid::new_v4().simple());
+    insert_task(&state, &conversation_task_id, "succeeded", Some(&json!({})));
+    insert_task_with_kind(
+        &state,
+        &transient_task_id,
+        "run_skill",
+        "succeeded",
+        Some(&json!({})),
+    );
+
+    cleanup_once(&state).expect("run cleanup");
+
+    let db = state.core.db.get().expect("get db");
+    let conversation_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id=?1",
+            rusqlite::params![conversation_task_id],
+            |row| row.get(0),
+        )
+        .expect("count conversation task");
+    let transient_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id=?1",
+            rusqlite::params![transient_task_id],
+            |row| row.get(0),
+        )
+        .expect("count transient task");
+    assert_eq!(conversation_count, 1);
+    assert_eq!(transient_count, 0);
 }
 
 #[test]

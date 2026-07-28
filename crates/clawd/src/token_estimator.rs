@@ -1,3 +1,5 @@
+use claw_core::model_turn::TokenEstimatorConfidence;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokenEstimatorKind {
     MiniMaxM2,
@@ -57,6 +59,20 @@ fn estimator_kind(provider_name: &str, provider_type: &str, model: &str) -> Toke
         TokenEstimatorKind::OpenAiCompatible
     } else {
         TokenEstimatorKind::GenericUnicode
+    }
+}
+
+pub(crate) fn estimator_confidence(
+    provider_name: &str,
+    provider_type: &str,
+    model: &str,
+) -> TokenEstimatorConfidence {
+    match estimator_kind(provider_name, provider_type, model) {
+        TokenEstimatorKind::MiniMaxM2 => TokenEstimatorConfidence::Calibrated,
+        TokenEstimatorKind::OpenAiCompatible | TokenEstimatorKind::AnthropicCompatible => {
+            TokenEstimatorConfidence::Conservative
+        }
+        TokenEstimatorKind::GenericUnicode => TokenEstimatorConfidence::Unknown,
     }
 }
 

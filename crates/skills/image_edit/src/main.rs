@@ -1026,7 +1026,7 @@ fn to_workspace_path(workspace_root: &Path, input: &str) -> Result<PathBuf, Stri
     } else {
         workspace_root.join(p)
     };
-    if !joined.starts_with(workspace_root) {
+    if !runtime_allows_external_paths() && !joined.starts_with(workspace_root) {
         return Err("image path is outside workspace".to_string());
     }
     Ok(joined)
@@ -1055,7 +1055,7 @@ fn resolve_output_path(
         } else {
             workspace_root.join(p)
         };
-        if !out.starts_with(workspace_root) {
+        if !runtime_allows_external_paths() && !out.starts_with(workspace_root) {
             return Err("output_path is outside workspace".to_string());
         }
         return Ok(out);
@@ -1201,6 +1201,10 @@ fn workspace_root() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn runtime_allows_external_paths() -> bool {
+    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn vendor_order(

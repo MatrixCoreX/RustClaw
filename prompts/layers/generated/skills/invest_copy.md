@@ -34,6 +34,7 @@
 | draft | `compliance` | no | string | `standard` | `light` 或 `standard`：免责段落长短。 |
 | draft | `locale` / `language` / `lang` | no | string | - | `en`、`en-US` 时段落标题等为英文简述。 |
 | draft | `use_heuristic` | no | bool | false | `true` 时不调用 LLM，返回离线规则摘要证据和机器 fallback（无密钥或未配置时使用）。 |
+| draft | `continuation` | no | string | - | 超长 `data` 的下一页令牌；令牌绑定完整材料摘要，材料变化时返回 `stale_snapshot`。 |
 | draft | `action` | no | string | `draft` | 固定 `draft`。 |
 | list_investors | `action` | yes | string | - | `list_investors` |
 | all | — | — | — | — | 输入信封仍遵循技能协议：`request_id`、`args`、`context`、`user_id`、`chat_id`。 |
