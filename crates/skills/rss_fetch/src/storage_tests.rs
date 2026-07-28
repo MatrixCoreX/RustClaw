@@ -56,6 +56,7 @@ fn legacy_state() -> RssMachineState {
             last_error: "timeout".to_string(),
             deprecated_at: "2".to_string(),
         }],
+        pending_categories: BTreeMap::new(),
     }
 }
 

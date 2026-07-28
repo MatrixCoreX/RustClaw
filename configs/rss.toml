@@ -44,6 +44,185 @@ output_language = "en-US"
 bilingual_summary = true
 topic = "tech_ecosystem"
 
+[rss.categories.ai]
+sources = [
+    "https://news.mit.edu/rss/topic/artificial-intelligence2",
+    "https://huggingface.co/blog/feed.xml",
+    "https://www.microsoft.com/en-us/research/feed/",
+    "https://blog.google/technology/ai/rss/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "artificial_intelligence"
+
+[rss.categories.climate]
+sources = [
+    "https://www.theguardian.com/environment/rss",
+    "https://e360.yale.edu/feed.xml",
+    "https://www.carbonbrief.org/feed/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "climate_environment"
+
+[rss.categories.cybersecurity]
+sources = [
+    "https://www.bleepingcomputer.com/feed/",
+    "https://krebsonsecurity.com/feed/",
+    "https://feeds.feedburner.com/TheHackersNews",
+    "https://security.googleblog.com/feeds/posts/default",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "cybersecurity"
+
+[rss.categories.biology]
+sources = [
+    "https://www.nature.com/nature.rss",
+    "https://phys.org/rss-feed/biology-news/",
+    "https://www.sciencedaily.com/rss/plants_animals/biology.xml",
+    "https://journals.plos.org/plosbiology/feed/atom",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "life_sciences"
+
+[rss.categories.science]
+sources = [
+    "https://www.sciencedaily.com/rss/top/science.xml",
+    "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+    "https://www.nasa.gov/feed/",
+    "https://phys.org/rss-feed/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "science_research"
+
+[rss.categories.space]
+sources = [
+    "https://www.nasa.gov/feed/",
+    "https://www.esa.int/rssfeed/Our_Activities/Space_News",
+    "https://www.space.com/feeds/all",
+    "https://www.universetoday.com/feed/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "space_exploration"
+
+[rss.categories.health]
+sources = [
+    "https://www.who.int/rss-feeds/news-english.xml",
+    "https://feeds.npr.org/1128/rss.xml",
+    "https://www.sciencedaily.com/rss/health_medicine.xml",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "health_medicine"
+
+[rss.categories.open_source]
+sources = [
+    "https://github.blog/feed/",
+    "https://hacks.mozilla.org/feed/",
+    "https://www.linuxfoundation.org/blog/rss.xml",
+    "https://www.redhat.com/en/rss/blog",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "open_source"
+
+[rss.categories.sports]
+sources = [
+    "https://feeds.bbci.co.uk/sport/rss.xml",
+    "https://www.theguardian.com/sport/rss",
+    "https://www.skysports.com/rss/12040",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "sports"
+
+[rss.categories.gaming]
+sources = [
+    "https://feeds.feedburner.com/ign/all",
+    "https://www.gamespot.com/feeds/mashup/",
+    "https://www.polygon.com/rss/index.xml",
+    "https://www.eurogamer.net/feed",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "gaming"
+
+[rss.categories.education]
+sources = [
+    "https://www.edsurge.com/articles_rss",
+    "https://news.mit.edu/rss/topic/education",
+    "https://theconversation.com/us/education/articles.atom",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "education"
+
+[rss.categories.energy]
+sources = [
+    "https://www.eia.gov/rss/todayinenergy.xml",
+    "https://cleantechnica.com/feed/",
+    "https://www.utilitydive.com/feeds/news/",
+    "https://www.energymonitor.ai/feed/",
+    "https://www.pv-magazine.com/feed/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "energy"
+
+[rss.categories.culture]
+sources = [
+    "https://www.theguardian.com/culture/rss",
+    "https://feeds.npr.org/1008/rss.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml",
+    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+topic = "arts_culture"
+
 [rss.categories.general]
 sources = [
     "https://feeds.bbci.co.uk/news/rss.xml",

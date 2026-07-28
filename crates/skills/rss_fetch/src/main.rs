@@ -8,9 +8,13 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod category_discovery;
 mod source_discovery;
 mod storage;
 
+use category_discovery::{
+    list_categories, preview_category, promote_category, propose_category, PendingCategoryEntry,
+};
 use source_discovery::{
     discover_sources, fetch_public_feed_xml, promote_sources, refresh_candidates, source_health,
     CandidateSourceEntry, RssDiscoveryConfig,
@@ -116,6 +120,8 @@ pub(crate) struct RssMachineState {
     candidates: BTreeMap<String, Vec<CandidateSourceEntry>>,
     #[serde(default)]
     deprecated: Vec<DeprecatedEntry>,
+    #[serde(default)]
+    pending_categories: BTreeMap<String, PendingCategoryEntry>,
 }
 
 impl RssMachineState {
@@ -123,12 +129,18 @@ impl RssMachineState {
         self.source_states.values().all(Vec::is_empty)
             && self.candidates.values().all(Vec::is_empty)
             && self.deprecated.is_empty()
+            && self.pending_categories.is_empty()
     }
 
     pub(crate) fn entry_count(&self) -> usize {
         self.source_states.values().map(Vec::len).sum::<usize>()
             + self.candidates.values().map(Vec::len).sum::<usize>()
             + self.deprecated.len()
+            + self
+                .pending_categories
+                .values()
+                .map(|entry| entry.candidates.len().saturating_add(1))
+                .sum::<usize>()
     }
 }
 
@@ -165,12 +177,13 @@ impl SkillFailure {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         Self {
-            error_text: format!("no configured feeds for category={category}"),
+            error_text: "category_not_configured".to_string(),
             extra: json!({
                 "schema_version": 1,
                 "source_skill": SKILL_NAME,
                 "status": "error",
                 "error_kind": "category_not_configured",
+                "error_code": "category_not_configured",
                 "message_key": "skill.rss_fetch.category_not_configured",
                 "retryable": true,
                 "failure_phase": "pre_dispatch",
@@ -180,6 +193,8 @@ impl SkillFailure {
                 "rejected_value": category,
                 "default_category": default_category,
                 "available_categories": available_categories,
+                "pending_categories": cfg.rss.pending_categories.keys().collect::<Vec<_>>(),
+                "recommended_action": "list_categories",
             }),
         }
     }
@@ -222,6 +237,10 @@ struct RssConfig {
     /// 废弃的 RSS 地址列表；默认抓取时不参与。
     #[serde(default)]
     deprecated: Option<DeprecatedSection>,
+    /// Candidate categories live only in the skill-owned SQLite state until
+    /// an explicitly confirmed promotion writes operator configuration.
+    #[serde(skip)]
+    pending_categories: BTreeMap<String, PendingCategoryEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -382,7 +401,21 @@ fn process_request(req: Req) -> Resp {
             return response_from_execution(req.request_id, Err(failure), None);
         }
     };
-    let mut cfg = load_root_config();
+    let mut cfg = match load_root_config() {
+        Ok(cfg) => cfg,
+        Err(cause_code) => {
+            return response_from_execution(
+                req.request_id,
+                Err(SkillFailure::execution_failed("config_load_failed")),
+                Some(PersistenceError {
+                    error_kind: "config_load_failed",
+                    failure_phase: "config_loading",
+                    cause_code,
+                    side_effect_applied: false,
+                }),
+            );
+        }
+    };
     let config_on_disk = cfg.clone();
     let legacy_state = machine_state_from_config(&cfg);
     let loaded = match storage::initialize_and_load(&runtime, &legacy_state) {
@@ -418,7 +451,9 @@ fn process_request(req: Req) -> Resp {
     }
     apply_machine_state(&mut cfg, &loaded.state);
     let expected_operator_config = operator_config(&cfg);
-    let expected_machine_state = machine_state_from_config(&cfg);
+    // Keep the exact storage snapshot as the optimistic-write baseline. The
+    // applied config may deliberately reconcile stale machine-owned records.
+    let expected_machine_state = loaded.state;
 
     let result = execute(&mut cfg, req.args);
     let updated_operator_config = operator_config(&cfg);
@@ -498,6 +533,7 @@ fn error_extra(error_kind: &str) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
@@ -587,6 +623,7 @@ fn machine_state_from_config(cfg: &RootConfig) -> RssMachineState {
         .as_ref()
         .map(|section| section.sources.clone())
         .unwrap_or_default();
+    state.pending_categories = cfg.rss.pending_categories.clone();
     state
 }
 
@@ -606,6 +643,12 @@ fn apply_machine_state(cfg: &mut RootConfig, state: &RssMachineState) {
     cfg.rss.deprecated = (!state.deprecated.is_empty()).then(|| DeprecatedSection {
         sources: state.deprecated.clone(),
     });
+    cfg.rss.pending_categories = state
+        .pending_categories
+        .iter()
+        .filter(|(category, _)| !cfg.rss.categories.contains_key(*category))
+        .map(|(category, entry)| (category.clone(), entry.clone()))
+        .collect();
 }
 
 fn operator_config(cfg: &RootConfig) -> RootConfig {
@@ -615,6 +658,7 @@ fn operator_config(cfg: &RootConfig) -> RootConfig {
         category.candidate_entries = None;
     }
     operator.rss.deprecated = None;
+    operator.rss.pending_categories.clear();
     operator
 }
 
@@ -644,6 +688,10 @@ fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, SkillFailur
         "fetch" => fetch_direct_feeds(&obj).map_err(SkillFailure::invalid_input),
         "latest" | "news" => fetch_layered_news(cfg, &obj),
         "source_health" => source_health(cfg, &obj),
+        "list_categories" => list_categories(cfg),
+        "propose_category" => propose_category(cfg, &obj),
+        "preview_category" => preview_category(cfg, &obj),
+        "promote_category" => promote_category(cfg, &obj),
         "discover_sources" => discover_sources(cfg, &obj),
         "refresh_candidates" => refresh_candidates(cfg, &obj),
         "promote_sources" => promote_sources(cfg, &obj),
@@ -893,7 +941,7 @@ fn fetch_layered_news(
         return Err(SkillFailure::category_not_configured(cfg, &category));
     }
 
-    let per_feed_limit = (limit * 3).max(20).min(100);
+    let per_feed_limit = (limit * 3).clamp(20, 100);
     let mut items = Vec::new();
     let mut success_count = 0usize;
     let mut failed_count = 0usize;
@@ -1047,7 +1095,7 @@ fn apply_deprecation_and_state(
     let mut active_urls: Vec<String> = Vec::new();
     let mut entries: Vec<SourceStateEntry> = Vec::new();
 
-    let existing_urls: Vec<String> = cat.sources.as_ref().map(|s| s.clone()).unwrap_or_else(|| {
+    let existing_urls: Vec<String> = cat.sources.clone().unwrap_or_else(|| {
         let mut u = Vec::new();
         u.extend(cat.primary.clone());
         u.extend(cat.secondary.clone());
@@ -1674,15 +1722,19 @@ fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
     None
 }
 
-fn load_root_config() -> RootConfig {
+fn load_root_config() -> Result<RootConfig, String> {
     let root = workspace_root();
     let rss_path = root.join("configs/rss.toml");
-    if let Ok(raw) = std::fs::read_to_string(&rss_path) {
-        if let Ok(parsed) = toml::from_str::<RootConfig>(&raw) {
-            return parsed;
-        }
-    }
-    RootConfig::default()
+    load_root_config_at(&rss_path)
+}
+
+fn load_root_config_at(rss_path: &Path) -> Result<RootConfig, String> {
+    let raw = std::fs::read_to_string(rss_path).map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => "config_not_found".to_string(),
+        io::ErrorKind::PermissionDenied => "config_permission_denied".to_string(),
+        _ => "config_read_failed".to_string(),
+    })?;
+    toml::from_str::<RootConfig>(&raw).map_err(|_| "config_parse_failed".to_string())
 }
 
 fn save_config(cfg: &RootConfig, expected_config: &RootConfig) -> Result<(), String> {
@@ -1698,6 +1750,7 @@ fn save_config_if_unchanged_at(
     let lock_path = path.with_extension("toml.lock");
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)
