@@ -463,13 +463,13 @@ fn storage_capacity_bytes(path: &Path) -> Option<(Option<u64>, Option<u64>)> {
     }
     // SAFETY: statvfs returned success and initialized the output structure.
     let stats = unsafe { stats.assume_init() };
-    let block_size = if stats.f_frsize > 0 {
+    let block_size = (if stats.f_frsize > 0 {
         stats.f_frsize
     } else {
         stats.f_bsize
-    };
-    let total = stats.f_blocks.saturating_mul(block_size);
-    let available = stats.f_bavail.saturating_mul(block_size);
+    }) as u64;
+    let total = (stats.f_blocks as u64).saturating_mul(block_size);
+    let available = (stats.f_bavail as u64).saturating_mul(block_size);
     Some((Some(total), Some(available)))
 }
 
