@@ -28,6 +28,7 @@ REQUIRED_SNIPPETS = {
         "--scope build-excludes --target \"$target\" --format packages",
         "CARGO_WORKSPACE_ARGS+=(--exclude \"$package\")",
         "configure_cargo_build_environment",
+        '--package-root "$SCRIPT_DIR/data/skill-packages"',
     ),
     "install-rustclaw-cmd.sh": (
         "--scope build-excludes --target \"$INSTALL_TARGET\" --format packages",
