@@ -45,6 +45,29 @@ default_macos_deployment_target() {
   return 1
 }
 
+configure_macos_target_rustflags() {
+  local deployment_target="$1"
+  local deployment_flag="-C link-arg=-mmacosx-version-min=${deployment_target}"
+  local rustflags_var=""
+  local current=""
+  local updated=""
+
+  for rustflags_var in \
+    CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS \
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS; do
+    current="$(printenv "$rustflags_var" 2>/dev/null || true)"
+    if [[ "$current" == *"-mmacosx-version-min="* ]]; then
+      continue
+    fi
+    if [[ -n "$current" ]]; then
+      updated="$current $deployment_flag"
+    else
+      updated="$deployment_flag"
+    fi
+    export "$rustflags_var=$updated"
+  done
+}
+
 configure_macos_deployment_target() {
   local host_os="${1:-}"
   local host_version="${2:-}"
@@ -55,18 +78,12 @@ configure_macos_deployment_target() {
   fi
   [[ "$host_os" == "macos" ]] || return 0
 
-  # An explicit standard variable is authoritative. The Rust toolchain used by
-  # that build must provide standard libraries compatible with the requested OS.
   if [[ -n "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
-    return 0
-  fi
-
-  if [[ -n "${RUSTCLAW_MACOS_DEPLOYMENT_TARGET:-}" ]]; then
+    # An explicit standard variable is authoritative. The Rust toolchain used
+    # by that build must provide compatible standard libraries.
+    target="$MACOSX_DEPLOYMENT_TARGET"
+  elif [[ -n "${RUSTCLAW_MACOS_DEPLOYMENT_TARGET:-}" ]]; then
     target="$RUSTCLAW_MACOS_DEPLOYMENT_TARGET"
-    if [[ ! "$target" =~ ^[0-9]+([.][0-9]+){1,2}$ ]]; then
-      echo "Invalid RUSTCLAW_MACOS_DEPLOYMENT_TARGET: $target" >&2
-      return 2
-    fi
   else
     if [[ -z "$host_version" ]]; then
       host_version="$(sw_vers -productVersion 2>/dev/null || true)"
@@ -78,7 +95,17 @@ configure_macos_deployment_target() {
     fi
   fi
 
+  if [[ ! "$target" =~ ^[0-9]+([.][0-9]+){1,2}$ ]]; then
+    echo "Invalid macOS deployment target: $target" >&2
+    return 2
+  fi
+
   export MACOSX_DEPLOYMENT_TARGET="$target"
+  # Cargo does not reliably invalidate already-linked host artifacts when only
+  # MACOSX_DEPLOYMENT_TARGET changes. A target-specific link flag both enforces
+  # the Mach-O minimum version and makes the deployment target part of Cargo's
+  # build fingerprint without affecting Linux targets.
+  configure_macos_target_rustflags "$target"
 }
 
 configure_platform_command_path() {
