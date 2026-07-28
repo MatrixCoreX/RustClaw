@@ -312,10 +312,12 @@ configure_cargo_build_environment() {
   configure_platform_command_path
   configure_cargo_build_jobs_for_small_host
   if cargo_uses_sccache_wrapper; then
-    if [[ "${CARGO_INCREMENTAL:-}" != "0" ]]; then
-      export CARGO_INCREMENTAL=0
-      echo "sccache Rust wrapper detected; disabling Cargo incremental compilation for compatibility."
-    fi
+    unset CARGO_INCREMENTAL
+    export CARGO_PROFILE_DEV_INCREMENTAL=false
+    export CARGO_PROFILE_TEST_INCREMENTAL=false
+    export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+    export CARGO_PROFILE_BENCH_INCREMENTAL=false
+    echo "sccache Rust wrapper detected; disabling Cargo profile incremental compilation for compatibility."
     return 0
   fi
   if [[ -z "${CARGO_INCREMENTAL:-}" && "${CI:-}" != "true" && "${CI:-}" != "1" ]]; then
