@@ -511,7 +511,7 @@ export function DashboardPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h4 className="text-sm font-semibold text-white">
-                      {t("Agent系统对外端口", "Agent system public port")}
+                      {t("Agent系统WEBD组件", "Agent system WEBD component")}
                     </h4>
                     <span className={`rounded-full px-2 py-0.5 text-[11px] ${webdExposureStatus?.externally_accessible ? "bg-amber-400/10 text-amber-100" : "bg-emerald-400/10 text-emerald-100"}`}>
                       {!webdExposureStatus
