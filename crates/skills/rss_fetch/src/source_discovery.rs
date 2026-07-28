@@ -788,6 +788,7 @@ fn discovery_failure(error_kind: &str, retryable: bool, fields: Value) -> SkillF
         "source_skill": super::SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", super::SKILL_NAME, error_kind),
         "retryable": retryable,
         "failure_phase": "source_discovery",

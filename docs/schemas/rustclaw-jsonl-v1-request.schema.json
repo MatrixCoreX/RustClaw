@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/rustclaw-jsonl-v1-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "args", "user_id", "chat_id"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "args": { "type": "object" },
+    "context": { "type": ["object", "null"] },
+    "user_id": { "type": "integer" },
+    "chat_id": { "type": "integer" },
+    "user_key": { "type": "string" }
+  }
+}

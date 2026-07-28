@@ -8,7 +8,7 @@
   "required": [
     "readme_md",
     "interface_md",
-    "main_rs"
+    "entrypoint_source"
   ],
   "properties": {
     "readme_md": {
@@ -19,7 +19,7 @@
       "type": "string",
       "minLength": 1
     },
-    "main_rs": {
+    "entrypoint_source": {
       "type": "string",
       "minLength": 1
     }

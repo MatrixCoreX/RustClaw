@@ -617,10 +617,6 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
     setPageIndex(preferredIsInRoute ? preferred : routePages[0].index);
   }, [audience, lastPageByAudience, pageIndex, pageIndexById, routePages]);
 
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [pageIndex]);
-
   const page = pages[pageIndex];
 
   useEffect(() => {
@@ -707,22 +703,22 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             <div>
               <p className="theme-kicker text-[10px] uppercase">{t("AI 学习", "AI Learning")}</p>
               <h2 className="mt-1 text-lg font-semibold text-[var(--theme-text-strong)]">
-                {t("从使用到架构，分阶段理解 RustClaw", "Learn RustClaw from everyday use to architecture")}
+                {t("从使用到架构，分阶段理解 AI Agent", "Learn AI agents from everyday use to architecture")}
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--theme-text-muted)]">
                 {t("选择适合你的路线，再从具体任务逐步进入 Agent、记忆、安全、技能和开发细节。阅读位置会保存在当前浏览器。", "Choose the route that fits you, then move from practical tasks into the agent, memory, safety, capabilities, and development details. Your reading position is saved in this browser.")}
               </p>
-              <div className="mt-3 inline-flex max-w-full overflow-x-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-card-strong)] p-1">
+              <div className="mt-4 inline-flex max-w-full gap-1 overflow-x-auto rounded-md border border-[var(--theme-border-strong)] bg-[var(--theme-card-strong)] p-1.5 shadow-sm">
                 {audienceOptions.map((option) => {
                   const AudienceIcon = option.icon;
                   return (
                     <button
                       key={option.id}
                       type="button"
-                      className={`flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1.5 text-xs transition ${
+                      className={`flex shrink-0 items-center gap-2 rounded border px-3.5 py-2 text-sm font-semibold transition ${
                         audience === option.id
-                          ? "bg-orange-400/12 font-medium text-[var(--theme-text-strong)]"
-                          : "text-[var(--theme-text-muted)] hover:text-[var(--theme-text-strong)]"
+                          ? "border-orange-300/45 bg-orange-400/15 text-[var(--theme-text-strong)] shadow-sm"
+                          : "border-transparent text-[var(--theme-text-muted)] hover:border-[var(--theme-border)] hover:bg-[var(--theme-card)] hover:text-[var(--theme-text-strong)]"
                       }`}
                       title={option.description}
                       aria-pressed={audience === option.id}
@@ -731,7 +727,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
                         setSearchQuery("");
                       }}
                     >
-                      <AudienceIcon className="h-3.5 w-3.5" />
+                      <AudienceIcon className={`h-4 w-4 ${audience === option.id ? "text-orange-300" : ""}`} />
                       {option.title}
                     </button>
                   );

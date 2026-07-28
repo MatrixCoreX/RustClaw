@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_cargo_build_environment
 print_rustclaw_version "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
@@ -179,68 +183,34 @@ PY
 		profile_flag=(--release)
 	fi
 
-	skill_bin_name() {
-		case "$1" in
-		x) echo "x-skill" ;;
-		system_basic) echo "system-basic-skill" ;;
-		http_basic) echo "http-basic-skill" ;;
-		git_basic) echo "git-basic-skill" ;;
-		install_module) echo "install-module-skill" ;;
-		process_basic) echo "process-basic-skill" ;;
-		package_manager) echo "package-manager-skill" ;;
-		archive_basic) echo "archive-basic-skill" ;;
-		db_basic) echo "db-basic-skill" ;;
-		docker_basic) echo "docker-basic-skill" ;;
-		fs_search) echo "fs-search-skill" ;;
-		rss_fetch) echo "rss-fetch-skill" ;;
-		image_vision) echo "image-vision-skill" ;;
-		image_generate) echo "image-generate-skill" ;;
-		image_edit) echo "image-edit-skill" ;;
-		audio_transcribe) echo "audio-transcribe-skill" ;;
-		audio_synthesize) echo "audio-synthesize-skill" ;;
-		health_check) echo "health-check-skill" ;;
-		log_analyze) echo "log-analyze-skill" ;;
-		service_control) echo "service-control-skill" ;;
-		config_guard) echo "config-guard-skill" ;;
-		crypto) echo "crypto-skill" ;;
-		*) return 1 ;;
-		esac
-	}
-
-	local on_demand_skill_runners=""
-	on_demand_skill_runners="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format runners)"
+	local proactive_skill_specs=""
+	proactive_skill_specs="$(
+		python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+			--scope proactive --target host --format specs
+	)"
 
 	if [[ -n "${SKILLS_LIST:-}" ]]; then
-		IFS=',' read -r -a SKILLS_ARR <<<"$SKILLS_LIST"
-		for skill in "${SKILLS_ARR[@]}"; do
-			skill="$(echo "$skill" | xargs)"
-			[[ -z "$skill" ]] && continue
-			if ! bin_name="$(skill_bin_name "$skill")"; then
-				continue
-			fi
-			if grep -Fqx "$bin_name" <<<"$on_demand_skill_runners"; then
-				continue
-			fi
+		while IFS=$'\t' read -r skill package bin_name _install_mode _supported_os adapter; do
+			[[ -n "$skill" ]] || continue
+			[[ ",${SKILLS_LIST}," == *",${skill},"* ]] || continue
+			[[ "$adapter" == "cargo" ]] || continue
 			if [[ ! -x "$SCRIPT_DIR/$target_dir/$bin_name" ]]; then
-				echo "Skill binary missing: $SCRIPT_DIR/$target_dir/$bin_name (run: cargo build -p <pkg> ${PROFILE:+--release})"
+				echo "Skill binary missing: $SCRIPT_DIR/$target_dir/$bin_name (run: cargo build -p $package ${PROFILE:+--release})"
 				exit 1
 			fi
-		done
+		done <<<"$proactive_skill_specs"
 	fi
 
-	if [[ ",${SKILLS_LIST:-}," == *",x,"* ]] && ! grep -Fqx "x-skill" <<<"$on_demand_skill_runners"; then
-		echo "Checking X skill dependency (xurl)..."
-		if ! command -v npm >/dev/null 2>&1; then
-			echo "npm not found."
-			echo "Suggested install: sudo apt-get install -y npm"
-			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
-		fi
-		if command -v npm >/dev/null 2>&1 && ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
-			echo "xurl binary not found (${XURL_BIN:-xurl})."
-			echo "Suggested install: sudo npm install -g @xdevplatform/xurl"
-			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
-		fi
+	local receipt_cli="$SCRIPT_DIR/$target_dir/rustclaw-skill"
+	if [[ ! -x "$receipt_cli" ]]; then
+		echo "Skill receipt CLI missing: $receipt_cli"
+		exit 1
 	fi
+	python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
+		--target host \
+		--binary-dir "$SCRIPT_DIR/$target_dir" \
+		--sdk-cli "$receipt_cli" \
+		--package-root "$SCRIPT_DIR/data/skill-packages"
 
 	if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
 		echo "Checking WhatsApp Web bridge dependencies..."

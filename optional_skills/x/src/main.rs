@@ -63,10 +63,14 @@ impl XSkillError {
 
     fn extra(&self) -> Value {
         json!({
+            "schema_version": 1,
             "status": "error",
             "action": "post",
             "source_skill": "x",
             "error_kind": self.kind,
+            "error_code": self.kind,
+            "message_key": format!("skill.x.{}", self.kind),
+            "retryable": false,
             "published": false,
             "would_execute": false,
             "external_call_count": self.external_call_count,

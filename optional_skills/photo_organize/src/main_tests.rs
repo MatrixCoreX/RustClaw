@@ -44,6 +44,24 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn installed_runner_resolves_relative_source_against_workspace() {
+    let workspace = Path::new("/workspace/rustclaw");
+    let installed_version = Path::new("/packages/photo/versions/0.1.8");
+    assert_eq!(
+        resolve_source_path(
+            "scripts/nl_tests/fixtures/photo_organize",
+            Some(workspace),
+            installed_version,
+        ),
+        workspace.join("scripts/nl_tests/fixtures/photo_organize")
+    );
+    assert_eq!(
+        resolve_source_path("fixture", None, installed_version),
+        installed_version.join("fixture")
+    );
+}
+
+#[test]
 fn mountinfo_discovery_keeps_real_media_mounts() {
     let raw = "\
 36 24 8:1 / / rw,relatime - ext4 /dev/root rw\n\

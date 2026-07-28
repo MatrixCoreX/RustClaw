@@ -42,24 +42,33 @@ else
 fi
 
 echo "[1/6] Pack only (no build); discover runtime release binaries..."
-WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
-export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
-RUSTCLAW_ON_DEMAND_PACKAGES="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format packages)"
-export RUSTCLAW_ON_DEMAND_PACKAGES
+WORKSPACE_METADATA_FILE="$(mktemp)"
+cargo metadata --no-deps --format-version 1 >"$WORKSPACE_METADATA_FILE"
+HOST_RUST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+if [[ -z "$HOST_RUST_TARGET" ]]; then
+  echo "Unable to determine the host Rust target."
+  exit 1
+fi
+RUSTCLAW_PACKAGE_TARGET="${RUSTCLAW_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
+RUSTCLAW_BUILD_EXCLUDED_PACKAGES="$(
+  python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+    --scope build-excludes --target "$RUSTCLAW_PACKAGE_TARGET" --format packages
+)"
+export RUSTCLAW_BUILD_EXCLUDED_PACKAGES
+echo "Package target: $RUSTCLAW_PACKAGE_TARGET"
 
 REQUIRED_BINS_RAW="$(
-  python3 - <<'PY'
+  python3 - "$WORKSPACE_METADATA_FILE" <<'PY'
 import json
 import os
+import sys
 
-raw = os.environ.get("RUSTCLAW_WORKSPACE_METADATA", "").strip()
-if not raw:
-    raise SystemExit(1)
-data = json.loads(raw)
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
 workspace_members = set(data.get("workspace_members", []))
-on_demand_packages = {
+excluded_packages = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = set()
@@ -67,7 +76,7 @@ bins = set()
 for pkg in data.get("packages", []):
     if pkg.get("id") not in workspace_members:
         continue
-    if pkg.get("name") in on_demand_packages:
+    if pkg.get("name") in excluded_packages:
         continue
     for target in pkg.get("targets", []):
         kinds = target.get("kind", [])
@@ -80,6 +89,7 @@ for name in sorted(bins):
     print(name)
 PY
 )"
+rm -f "$WORKSPACE_METADATA_FILE"
 array_from_string_lines REQUIRED_BINS "$REQUIRED_BINS_RAW"
 
 if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
@@ -130,11 +140,24 @@ copy_if_exists "USAGE.md"
 copy_if_exists "rustclaw"
 copy_if_exists "install-rustclaw-cmd.sh"
 copy_if_exists "build-ui-nginx.sh"
+copy_if_exists "deploy-ui-nginx.sh"
 copy_if_exists "start-all.sh"
 copy_if_exists "start-all-bin.sh"
 copy_if_exists "component_start"
 copy_if_exists "stop-rustclaw.sh"
 copy_if_exists "deploy-github-release.sh"
+while IFS= read -r manifest_path; do
+  [[ -n "$manifest_path" ]] || continue
+  case "$manifest_path" in
+    "$SCRIPT_DIR"/*) manifest_rel="${manifest_path#"$SCRIPT_DIR"/}" ;;
+    *) echo "Manifest path escapes repository: $manifest_path"; exit 1 ;;
+  esac
+  mkdir -p "$STAGE_PROJECT_DIR/$(dirname "$manifest_rel")"
+  cp -R "$manifest_path" "$STAGE_PROJECT_DIR/$manifest_rel"
+done < <(
+  python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+    --scope all-runners --target "$RUSTCLAW_PACKAGE_TARGET" --format manifests
+)
 RUSTCLAW_PACKAGE_VERSION="$(rustclaw_version_from_root "$SCRIPT_DIR")"
 if [[ "$RUSTCLAW_PACKAGE_VERSION" == "unknown" ]]; then
   echo "Unable to resolve RustClaw package version."
@@ -153,6 +176,15 @@ mkdir -p "$STAGE_PROJECT_DIR/target/release"
 for bin in "${REQUIRED_BINS[@]}"; do
   cp -R "$(resolve_release_bin "$bin")" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
+
+RECEIPT_SOURCE_DIR="${RUSTCLAW_SKILL_RECEIPTS_DIR:-$SCRIPT_DIR/target/skill-packages/$RUSTCLAW_PACKAGE_TARGET}"
+if [[ ! -d "$RECEIPT_SOURCE_DIR" ]]; then
+  echo "Missing verified proactive skill receipts: $RECEIPT_SOURCE_DIR"
+  echo "Run the platform build/projection step before packaging."
+  exit 1
+fi
+mkdir -p "$STAGE_PROJECT_DIR/data/skill-packages"
+cp -R "$RECEIPT_SOURCE_DIR/." "$STAGE_PROJECT_DIR/data/skill-packages/"
 
 echo "[5/6] Apply sanitized config as configs/config.toml..."
 cp -R "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"

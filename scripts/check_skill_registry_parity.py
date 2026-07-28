@@ -49,7 +49,7 @@ CORE_KEYS = (
     "timeout_seconds",
     "prompt_file",
     "output_kind",
-    "runner_name",
+    "package_manifest",
     "supported_os",
     "required_bins",
     "optional_bins",

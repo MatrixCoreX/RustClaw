@@ -8,7 +8,12 @@ set -euo pipefail
 PROFILE="release"
 AUTO_BUILD=0
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
+SDK_CLI="$ROOT_DIR/target/release/rustclaw-skill"
+PACKAGE_ROOT="${RUSTCLAW_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
 
 TOTAL=0
 PASS=0
@@ -65,7 +70,10 @@ run_skill_raw() {
       context: null
     }')"
 
-  printf '%s\n' "$req" | "$RUNNER"
+  printf '%s\n' "$req" | \
+    RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+    WORKSPACE_ROOT="$ROOT_DIR" \
+    "$RUNNER"
 }
 
 assert_status() {
@@ -175,36 +183,36 @@ main() {
   need_cmd jq
   need_cmd python3
 
-  if [[ ! -x "$RUNNER" ]]; then
-    log "Runner not found: $RUNNER"
-    if [[ "$AUTO_BUILD" == "1" ]]; then
-      log "[INFO] auto-build enabled, building missing binaries..."
-      (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
-      if [[ ! -x "$RUNNER" ]]; then
-        log "Build completed but runner still missing: $RUNNER"
-        exit 2
-      fi
-    else
-      log "Try: cargo build --release -p skill-runner -p crypto-skill"
-    fi
-    if [[ "$AUTO_BUILD" != "1" ]]; then
-      exit 2
-    fi
+  if [[ "$AUTO_BUILD" == "1" ]]; then
+    log "[INFO] installing the selected optional skill through its manifest adapter..."
+    configure_cargo_build_environment
+    (
+      cd "$ROOT_DIR"
+      cargo build --release -p skill-runner -p rustclaw-skill-sdk
+      "$SDK_CLI" install-local \
+        "$ROOT_DIR/optional_skills/crypto/skill.toml" \
+        "$ROOT_DIR" \
+        "$PACKAGE_ROOT"
+    )
   fi
-
+  [[ -x "$RUNNER" ]] || {
+    log "Runner not found: $RUNNER"
+    log "Run with --auto-build to build core tooling and install crypto."
+    exit 2
+  }
+  [[ -x "$SDK_CLI" ]] || {
+    log "Skill SDK CLI not found: $SDK_CLI"
+    log "Run with --auto-build to build core tooling and install crypto."
+    exit 2
+  }
+  "$SDK_CLI" receipt-verify "$PACKAGE_ROOT" crypto >/dev/null || {
+    log "Verified crypto install receipt is missing."
+    log "Run with --auto-build to install only this optional skill."
+    exit 2
+  }
   if ! runner_knows_crypto; then
-    log "Current runner does not recognize crypto skill."
-    if [[ "$AUTO_BUILD" == "1" ]]; then
-      log "[INFO] rebuilding runner + crypto skill..."
-      (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
-      if ! runner_knows_crypto; then
-        log "Runner still does not recognize crypto after build."
-        exit 2
-      fi
-    else
-      log "Run with --auto-build to rebuild binaries automatically."
-      exit 2
-    fi
+    log "Current runner cannot resolve the verified crypto installation."
+    exit 2
   fi
 
   log "== Crypto regression start (profile=$PROFILE) =="

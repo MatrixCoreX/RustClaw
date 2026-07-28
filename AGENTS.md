@@ -61,10 +61,10 @@ This file is for all agents working in this repository. The goal is to standardi
    `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.
 6. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。
    `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.
-7. `skill-runner` 根据 `skill_name` 按约定推导具体技能二进制（默认 `foo_bar` -> `target/release/foo-bar-skill`；若 registry 配了 `runner_name` 则优先用它）。
-   `skill-runner` derives the concrete skill binary from `skill_name` by convention (default `foo_bar` -> `target/release/foo-bar-skill`; if registry sets `runner_name`, that takes precedence).
-8. 技能进程读取请求 JSON，输出响应 JSON，回传 `clawd` 汇总为任务结果。
-   The skill process reads request JSON, writes response JSON, and returns it to `clawd` for task result aggregation.
+7. `skill-runner` 只通过 `SkillRuntimeResolver` 读取已验证的安装回执并生成 `SkillLaunchSpec`；不得根据技能名、扩展名或 `target/release` 路径猜测入口。
+   `skill-runner` resolves only a verified install receipt through `SkillRuntimeResolver` and produces `SkillLaunchSpec`; it must not guess an entrypoint from a skill name, extension, or `target/release` path.
+8. Cargo、Python、Node、Go、预编译和类型化 HTTP 技能都遵循同一 JSONL 协议与结构化结果合同，再由 `clawd` 汇总为任务结果。
+   Cargo, Python, Node, Go, prebuilt, and typed HTTP skills all use the same JSONL protocol and structured result contract before `clawd` aggregates the task result.
 
 ## 2) Skill Process Protocol (Required) / 技能进程协议（必须遵守）
 
@@ -102,23 +102,17 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
 新增技能 `foo_bar` 时，必须同时改这些点：
 When adding a new skill `foo_bar`, all of the following are required:
 
-外部提交技能（`external_skills/foo_bar`）走 `extension_manager` 时，验证/编译通过后的注册流程必须自动写入工作区、技能 registry，并把 `configs/config.toml` 的 `skill_switches.foo_bar` 记录为 `true`；普通新增 skill 不应再为了接入去改 `clawd` 主流程代码。
-For externally submitted skills (`external_skills/foo_bar`) handled by `extension_manager`, registration after validation/compilation must automatically write the workspace entry, skill registry entry, and `configs/config.toml` `skill_switches.foo_bar = true`; normal new skills should not require changes to the `clawd` main flow.
+外部提交技能（`external_skills/foo_bar`）走 `extension_manager` 时，必须先完成 manifest 校验、隔离 adapter 安装、协议冒烟和回执验证，再写入技能 registry 与 `configs/config.toml` 的 `skill_switches.foo_bar = true`；只有 Cargo adapter 写 workspace。普通新增 skill 不应再为了接入去改 `clawd` 主流程代码。
+For externally submitted skills (`external_skills/foo_bar`) handled by `extension_manager`, registration after manifest validation, isolated adapter installation, protocol smoke, and receipt verification must write the registry entry and `configs/config.toml` `skill_switches.foo_bar = true`; only Cargo adapters may add a workspace entry. Normal new skills should not require changes to the `clawd` main flow.
 
-1. 新建 crate：固定/核心技能使用 `crates/skills/foo_bar`；UI Skill
-   Store 按需安装的 bundled 技能使用 `optional_skills/foo_bar`（二进制名建议
-   `foo-bar-skill`）。`install_mode=on_demand` 的 bundled 技能不得留在
-   `crates/skills`。
-   Create the crate under `crates/skills/foo_bar` for fixed/core skills, or
-   `optional_skills/foo_bar` for bundled skills installed on demand by the UI
-   Skill Store (recommended binary name: `foo-bar-skill`). Bundled
-   `install_mode=on_demand` skills must not remain under `crates/skills`.
-2. 加入工作区：`Cargo.toml` 的 `[workspace].members`。
-   Add to workspace: `[workspace].members` in `Cargo.toml`.
-3. 使用约定式 runner 二进制名：默认将 `foo_bar` 编译为 `foo-bar-skill`；只有当二进制名不符合约定时，才在 `configs/skills_registry.toml` 中配置 `runner_name`。
-   Use the conventional runner binary name: by default `foo_bar` should compile to `foo-bar-skill`; only configure `runner_name` in `configs/skills_registry.toml` when the binary name does not follow the convention.
-4. 注册执行别名（可选但建议）：优先在 `configs/skills_registry.toml` 的 `aliases` 中配置；`crates/clawd/src/main.rs` 的 `canonical_skill_name()` 仅作无 registry 的兼容回退。
-   Register aliases (optional but recommended): prefer `aliases` in `configs/skills_registry.toml`; `canonical_skill_name()` in `crates/clawd/src/main.rs` is compatibility fallback only when no registry is used.
+1. 新建技能包：固定/核心技能使用 `crates/skills/foo_bar`；UI Skill Store 按需安装的 bundled 技能使用 `optional_skills/foo_bar`；外部提交使用 `external_skills/foo_bar`。每个进程技能都必须提供 `skill.toml` 与 `INTERFACE.md`。
+   Create the package under `crates/skills/foo_bar` for fixed/core skills, `optional_skills/foo_bar` for on-demand bundled skills, or `external_skills/foo_bar` for external submissions. Every process skill must provide `skill.toml` and `INTERFACE.md`.
+2. 只有 Cargo adapter 技能加入根 `Cargo.toml` 的 `[workspace].members`；Python、Node、Go、prebuilt、generic-process 和 HTTP 技能不得为了注册而修改 Cargo workspace。
+   Add only Cargo-adapter skills to root `[workspace].members`; Python, Node, Go, prebuilt, generic-process, and HTTP skills must not edit the Cargo workspace merely to register.
+3. 在 `skill.toml` 声明版本、平台、build adapter、锁文件、类型化入口、超时、构建网络策略和沙箱；registry 用 `package_manifest` 引用它。禁止 `runner_name`、任意 shell 构建命令和按扩展名推断运行时。
+   Declare version, platforms, build adapter, lockfile, typed entrypoint, timeout, build-network policy, and sandbox in `skill.toml`; reference it from registry with `package_manifest`. `runner_name`, arbitrary shell build commands, and extension-based runtime inference are forbidden.
+4. 注册执行别名（可选但建议）：只在 `configs/skills_registry.toml` 的 `aliases` 中配置。
+   Register aliases (optional but recommended) only through `aliases` in `configs/skills_registry.toml`.
 5. 如果技能需要进入 planner 常规自然语言执行流，优先在 `configs/skills_registry.toml` 声明 `planner_capabilities`（能力名、action、effect、required/optional、risk_level），让 `call_capability` 通过 resolver/verifier 接入；不要为了接入去改 `clawd` 主流程代码。
    If the skill should be used by the planner for normal natural-language execution, declare `planner_capabilities` in `configs/skills_registry.toml` first (capability name, action, effect, required/optional fields, risk_level) so `call_capability` can flow through resolver/verifier; do not modify the `clawd` main flow just to integrate it.
 6. 加入 agent 技能认知 / Add agent skill awareness:
@@ -216,7 +210,8 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
 PR 合并前至少满足：
 Before merge, at least the following must pass:
 
-1. `cargo check -p clawd -p skill-runner -p <new-skill-crate>`
+1. 运行 `rustclaw-skill validate`、对应 adapter 的 build/protocol smoke；若是 Cargo 技能，再运行 `cargo check -p clawd -p skill-runner -p <new-skill-crate>`。
+   Run `rustclaw-skill validate` plus the selected adapter's build/protocol smoke; for Cargo skills, also run `cargo check -p clawd -p skill-runner -p <new-skill-crate>`.
 2. 若改了 UI：在 `UI/` 下执行 `npm run lint && npm run build`
    If UI changed: run `npm run lint && npm run build` under `UI/`
 3. 能通过 `run_skill` 路径打通（最少一次 happy path）
@@ -224,8 +219,8 @@ Before merge, at least the following must pass:
    - `POST /v1/tasks`，`kind=run_skill`，`payload.skill_name=<skill>`
 4. 失败路径有清晰 `error_text`（不允许静默失败）。
    Failure path must return clear `error_text` (no silent failure).
-5. 外部技能注册动作必须自动完成配置写入：`configs/config.toml` 中出现 `skill_switches.<skill>=true`，且 registry / workspace 映射完整。
-   External skill registration must automatically complete config writing: `configs/config.toml` contains `skill_switches.<skill>=true`, and registry/workspace mappings are complete.
+5. 外部技能注册动作必须自动完成配置写入：`configs/config.toml` 中出现 `skill_switches.<skill>=true`，registry 的 `package_manifest` 映射完整，且有已验证安装回执；只有 Cargo adapter 检查 workspace 映射。
+   External skill registration must automatically complete config writing: `configs/config.toml` contains `skill_switches.<skill>=true`, registry has a complete `package_manifest` mapping, and a verified install receipt exists; workspace mapping applies only to Cargo adapters.
 
 只有当“映射完整 + 编译通过 + 路径可跑通”同时成立，才允许把该技能视为可用。
 A skill is considered available only when “mapping complete + compile pass + runnable path” are all satisfied.

@@ -1579,13 +1579,6 @@ impl AppState {
         }
     }
 
-    pub(crate) fn runner_name_for_skill(&self, canonical_name: &str) -> String {
-        self.get_skills_registry()
-            .as_ref()
-            .map(|r| r.runner_name(canonical_name))
-            .unwrap_or_else(|| crate::canonical_skill_name(canonical_name).to_string())
-    }
-
     pub(crate) fn skill_manifest(&self, canonical_name: &str) -> Option<SkillManifest> {
         self.get_skills_registry()
             .as_ref()

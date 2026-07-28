@@ -23,39 +23,16 @@ WORKDIR /build
 
 COPY . /build
 
-RUN cargo build --release \
-    -p clawd \
-    -p skill-runner \
-    -p webd \
-    -p telegramd \
-    -p wechatd \
-    -p whatsappd \
-    -p whatsapp_webd \
-    -p archive-basic-skill \
-    -p audio-synthesize-skill \
-    -p audio-transcribe-skill \
-    -p browser-web-skill \
-    -p config-guard-skill \
-    -p crypto-skill \
-    -p db-basic-skill \
-    -p docker-basic-skill \
-    -p fs-search-skill \
-    -p git-basic-skill \
-    -p health-check-skill \
-    -p http-basic-skill \
-    -p image-edit-skill \
-    -p image-generate-skill \
-    -p image-vision-skill \
-    -p install-module-skill \
-    -p log-analyze-skill \
-    -p package-manager-skill \
-    -p process-basic-skill \
-    -p rss-fetch-skill \
-    -p service-control-skill \
-    -p stock-skill \
-    -p system-basic-skill \
-    -p web-search-extract-skill \
-    -p x-skill
+# Registry is the single package-selection authority. This builds all runtime
+# and core-tool binaries plus Linux-compatible fixed skills, while every
+# install_mode=on_demand package remains absent until its own install action.
+RUN set -eu; \
+    BUILD_EXCLUDES="$(python3 scripts/skill_store_packages.py \
+      --scope build-excludes --target linux --format cargo-excludes)"; \
+    cargo build --release --workspace ${BUILD_EXCLUDES}; \
+    mkdir -p /build/runtime-release; \
+    find /build/target/release -maxdepth 1 -type f -perm /111 \
+      -exec cp -p '{}' /build/runtime-release/ \;
 
 FROM debian:bookworm-slim
 ARG DEBIAN_MIRROR
@@ -83,15 +60,10 @@ WORKDIR /app
 
 RUN mkdir -p /app/target/release /app/UI/dist /app/docker/config /app/component_start
 
-COPY --from=builder /build/target/release/clawd /app/target/release/
-COPY --from=builder /build/target/release/pty-session-runner /app/target/release/
-COPY --from=builder /build/target/release/skill-runner /app/target/release/
-COPY --from=builder /build/target/release/webd /app/target/release/
-COPY --from=builder /build/target/release/telegramd /app/target/release/
-COPY --from=builder /build/target/release/wechatd /app/target/release/
-COPY --from=builder /build/target/release/whatsappd /app/target/release/
-COPY --from=builder /build/target/release/whatsapp_webd /app/target/release/
-COPY --from=builder /build/target/release/*-skill /app/target/release/
+# The builder staging directory contains every selected executable: core tools,
+# channel services, and fixed Linux runners. It cannot contain on-demand runners
+# because their packages were excluded from the build above.
+COPY --from=builder /build/runtime-release/ /app/target/release/
 
 COPY UI/dist/ /app/UI/dist/
 COPY configs/ /app/configs/
@@ -110,15 +82,7 @@ RUN chmod +x \
     /app/stop-rustclaw.sh \
     /app/docker/docker-entrypoint.sh \
     /app/scripts/auth-key.sh \
-    /app/target/release/clawd \
-    /app/target/release/pty-session-runner \
-    /app/target/release/skill-runner \
-    /app/target/release/webd \
-    /app/target/release/telegramd \
-    /app/target/release/wechatd \
-    /app/target/release/whatsappd \
-    /app/target/release/whatsapp_webd \
-    /app/target/release/*-skill \
+ && find /app/target/release -maxdepth 1 -type f -exec chmod +x '{}' + \
  && mkdir -p /app/.pids /app/data /app/logs /app/image /app/audio /app/document
 
 ENV RUST_LOG=warn

@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/scripts/version_info.sh"
 print_rustclaw_version "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/component_start/common.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/shell_compat.sh"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
@@ -19,6 +21,7 @@ if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
   # shellcheck source=/dev/null
   . "$RUNTIME_ENV_SCRIPT"
 fi
+configure_platform_command_path
 
 # Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
@@ -51,6 +54,7 @@ FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
 LARKD_BIN="$SCRIPT_DIR/target/$PROFILE/larkd"
 WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
+SKILL_RECEIPT_CLI="$SCRIPT_DIR/target/$PROFILE/rustclaw-skill"
 
 read_enabled() {
   local config_path="$1"
@@ -112,6 +116,7 @@ LARK_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/lark.toml" "lark" "0"
 preflight_failed=0
 require_binary "$CLAWD_BIN" "clawd" || preflight_failed=1
 require_binary "$SKILL_RUNNER_ABS" "skill-runner" || preflight_failed=1
+require_binary "$SKILL_RECEIPT_CLI" "skill receipt verifier" || preflight_failed=1
 if [[ "$WEBD_ENABLED" == "1" ]]; then
   require_binary "$WEBD_BIN" "webd" || preflight_failed=1
 fi
@@ -138,6 +143,25 @@ if [[ "$preflight_failed" -ne 0 ]]; then
   echo "Run: ./build-all.sh $PROFILE" >&2
   exit 1
 fi
+
+while IFS=$'\t' read -r skill _package _runner install_mode _supported_os _adapter; do
+  [[ -n "$skill" && "$install_mode" != "on_demand" ]] || continue
+  receipt_json="$($SKILL_RECEIPT_CLI receipt-verify "$SCRIPT_DIR/data/skill-packages" "$skill")" || {
+    echo "Verified skill receipt is unavailable: $skill" >&2
+    exit 1
+  }
+  python3 - "$skill" "$receipt_json" <<'PY'
+import json
+import sys
+skill, raw = sys.argv[1:]
+payload = json.loads(raw)
+if payload.get("ok") is not True:
+    raise SystemExit(f"verified skill receipt is invalid: {skill}")
+PY
+done < <(
+  python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+    --scope proactive --target host --format specs
+)
 
 # Stop managed RustClaw processes only after every enabled component passes
 # preflight. A partial build must never take a healthy deployment offline.

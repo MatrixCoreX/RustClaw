@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/shell_compat.sh"
+configure_platform_command_path
 export LC_ALL=C
 export LANG=C
 
@@ -231,6 +234,9 @@ prepare_temp_workspace() {
   cp -R "$ROOT_DIR/configs" "$workspace_root/configs"
   cp -R "$ROOT_DIR/prompts" "$workspace_root/prompts"
   mkdir -p "$workspace_root/data" "$workspace_root/document" "$workspace_root/external_skills"
+  if [[ ! -e "$workspace_root/data/skill-packages" ]]; then
+    ln -s "$ROOT_DIR/data/skill-packages" "$workspace_root/data/skill-packages"
+  fi
   ln -s "$ROOT_DIR/crates" "$workspace_root/crates"
   ln -s "$ROOT_DIR/scripts" "$workspace_root/scripts"
   ln -s "$ROOT_DIR/target" "$workspace_root/target"
@@ -344,6 +350,7 @@ ensure_binaries() {
     "$ROOT_DIR/Cargo.toml"
     "$ROOT_DIR/Cargo.lock"
     "$ROOT_DIR/crates/skill-runner"
+    "$ROOT_DIR/crates/skill-sdk"
   )
   local health_check_inputs=(
     "$ROOT_DIR/Cargo.toml"
@@ -355,6 +362,8 @@ ensure_binaries() {
   [[ -x "$CLAWD_BIN" ]] || need_build=1
   [[ -x "$ROOT_DIR/target/release/skill-runner" ]] || need_build=1
   [[ -x "$ROOT_DIR/target/release/health-check-skill" ]] || need_build=1
+  [[ -x "$ROOT_DIR/target/release/rustclaw-skill" ]] || need_build=1
+  [[ -f "$ROOT_DIR/data/skill-packages/health_check/current.json" ]] || need_build=1
   if [[ "$AUTO_BUILD" == "1" ]]; then
     stale="$(binary_is_stale "$CLAWD_BIN" "${clawd_inputs[@]}")"
     [[ "$stale" == "1" ]] && need_build=1
@@ -366,7 +375,18 @@ ensure_binaries() {
 
   if [[ "$need_build" == "1" && "$AUTO_BUILD" == "1" ]]; then
     echo "building fresh binaries for long-tail NL regression"
-    (cd "$ROOT_DIR" && cargo build -p clawd && cargo build --release -p skill-runner -p health-check-skill)
+    configure_cargo_build_environment
+    (
+      cd "$ROOT_DIR"
+      cargo build -p clawd
+      cargo build --release \
+        -p skill-runner \
+        -p rustclaw-skill-sdk \
+        -p health-check-skill
+      python3 scripts/project_skill_receipts.py \
+        --package-root "$ROOT_DIR/data/skill-packages" \
+        --skill health_check
+    )
     if [[ -x "$ROOT_DIR/target/debug/clawd" ]]; then
       CLAWD_BIN="$ROOT_DIR/target/debug/clawd"
     fi
@@ -380,8 +400,13 @@ ensure_binaries() {
     echo "skill-runner release binary missing: $ROOT_DIR/target/release/skill-runner" >&2
     exit 2
   }
-  [[ -x "$ROOT_DIR/target/release/health-check-skill" ]] || {
-    echo "health-check-skill release binary missing: $ROOT_DIR/target/release/health-check-skill" >&2
+  [[ -x "$ROOT_DIR/target/release/rustclaw-skill" ]] || {
+    echo "skill SDK CLI missing: $ROOT_DIR/target/release/rustclaw-skill" >&2
+    exit 2
+  }
+  "$ROOT_DIR/target/release/rustclaw-skill" receipt-verify \
+    "$ROOT_DIR/data/skill-packages" health_check >/dev/null || {
+    echo "verified install receipt missing for skill: health_check" >&2
     exit 2
   }
 }

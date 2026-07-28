@@ -220,16 +220,25 @@ fn docker_image_packages_the_durable_pty_runner() {
     let dockerfile =
         fs::read_to_string(workspace_root().join("docker/Dockerfile")).expect("read Dockerfile");
     assert!(
-        dockerfile.contains(
-            "COPY --from=builder /build/target/release/pty-session-runner /app/target/release/"
-        ),
-        "Docker runtime image must copy the durable PTY session runner"
+        dockerfile.contains("cargo build --release --workspace ${BUILD_EXCLUDES}"),
+        "Docker builder must compile all non-on-demand workspace binaries, including the durable PTY runner"
     );
+    /* The Docker image now uses one registry-filtered executable staging directory.
     assert!(
         dockerfile.contains(
             "/app/target/release/clawd \\\n    /app/target/release/pty-session-runner \\"
         ),
         "Docker runtime image must make the durable PTY session runner executable"
+    );
+    */
+    assert!(
+        dockerfile.contains("find /build/target/release -maxdepth 1 -type f -perm /111")
+            && dockerfile
+                .contains("COPY --from=builder /build/runtime-release/ /app/target/release/")
+            && dockerfile.contains(
+                "find /app/target/release -maxdepth 1 -type f -exec chmod +x '{}' +"
+            ),
+        "Docker runtime image must stage, copy, and make every selected executable—including the durable PTY runner—executable"
     );
 }
 
@@ -776,13 +785,17 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
         );
         for name in &actual {
             let entry = registry.get(name).expect("on-demand entry");
-            let package = entry
-                .install_package
+            let manifest_relative = entry
+                .package_manifest
                 .as_deref()
-                .expect("on-demand skill install_package");
+                .expect("on-demand skill package_manifest");
+            let manifest = parse_toml(&root.join(manifest_relative));
+            let package = manifest["build"]["package"]
+                .as_str()
+                .expect("Cargo adapter package");
             assert!(
                 package_names.contains(package),
-                "{}: `{name}` install package `{package}` is not a workspace package",
+                "{}: `{name}` manifest package `{package}` is not a workspace package",
                 registry_path.display()
             );
             assert!(

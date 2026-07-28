@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -180,7 +181,18 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/skills/store", get(get_skill_store_catalog))
         .route("/skills/store/install", post(install_skill_store_item))
+        .route("/skills/store/update", post(update_skill_store_item))
+        .route("/skills/store/repair", post(repair_skill_store_item))
+        .route("/skills/store/rollback", post(rollback_skill_store_item))
         .route("/skills/store/remove", post(remove_skill_store_item))
+        .route(
+            "/skills/store/operations/:operation_id",
+            get(get_skill_store_operation),
+        )
+        .route(
+            "/skills/store/operations/:operation_id/cancel",
+            post(cancel_skill_store_operation),
+        )
         .route(
             "/telegram/config",
             get(get_telegram_config).post(update_telegram_config),
@@ -370,6 +382,7 @@ include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/skill_import_config.rs");
 include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
+include!("ui_routes/skill_store_operations.rs");
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/messaging_login.rs");
 

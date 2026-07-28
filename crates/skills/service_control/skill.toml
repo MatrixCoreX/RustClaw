@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "service_control"
+version = "0.1.8"
+description = "Check, verify, diagnose, and control RustClaw, systemd/service, Homebrew services, and launchd services with structured status evidence."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "crates/skills/service_control"
+
+[registry]
+name = "service_control"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "service-control-skill"
+binary = "service-control-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/service-control-skill"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = ["CLAWD_BASE_URL", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUSTCLAW_UI_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "service_control"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

@@ -799,9 +799,12 @@ need_release_build() {
     return
   fi
   local need
-  local on_demand_packages
-  on_demand_packages="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format packages)"
-  need="$(RUSTCLAW_ON_DEMAND_PACKAGES="$on_demand_packages" python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
+  local build_excluded_packages
+  build_excluded_packages="$(
+    python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+      --scope build-excludes --target "$INSTALL_TARGET" --format packages
+  )"
+  need="$(RUSTCLAW_BUILD_EXCLUDED_PACKAGES="$build_excluded_packages" python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
 import json
 import os
 import subprocess
@@ -850,16 +853,16 @@ except (subprocess.CalledProcessError, FileNotFoundError):
 
 meta = json.loads(metadata_raw)
 workspace_members = set(meta.get("workspace_members", []))
-on_demand_packages = {
+build_excluded_packages = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = set()
 for pkg in meta.get("packages", []):
     if pkg.get("id") not in workspace_members:
         continue
-    if pkg.get("name") in on_demand_packages:
+    if pkg.get("name") in build_excluded_packages:
         continue
     for target in pkg.get("targets", []):
         if "bin" in (target.get("kind", []) or []):
@@ -918,7 +921,7 @@ do_release_build() {
     (cd "$SCRIPT_DIR/UI" && npm run build)
   fi
   echo "Building runtime packages (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
-  configure_cargo_build_jobs_for_small_host
+  configure_cargo_build_environment
   (cd "$SCRIPT_DIR" && SKIP_UI=1 bash ./build-all.sh no-ui --target "$INSTALL_TARGET")
   if [[ ! -x "$BUILD_RELEASE_DIR/clawd" ]]; then
     echo "Build finished but $BUILD_RELEASE_DIR/clawd missing."

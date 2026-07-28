@@ -67,6 +67,7 @@ crates/claw-core/src/skill_registry.rs	secrets capability name must match [a-z0-
 crates/claw-core/src/skill_registry.rs	self-referential planner capability alias `{alias}` for skill `{skill}` in {}	"self-referential planner capability alias `{alias}` for skill `{skill}` in {}",
 crates/claw-core/src/skill_registry.rs	skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)	"skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)"
 crates/claw-core/src/skill_registry.rs	skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)	"skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)"
+crates/claw-core/src/skill_registry.rs	skill `{skill_name}` has unsafe package_manifest `{value}` in {}	"skill `{skill_name}` has unsafe package_manifest `{value}` in {}",
 crates/claw-core/src/skill_registry.rs	skill registry shape consistency check failed in {}:\n  - {}	"skill registry shape consistency check failed in {}:\\n  - {}",
 crates/claw-core/src/skill_registry.rs	unknown capability `{token}` (allowed: llm, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)	"unknown capability `{token}` (allowed: llm, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)"
 crates/claw-core/src/skill_registry.rs	vendor-唯一	/// image / text / vision 等用途各自独立，不要写成 `secrets.openai_api_key` 这种跨用途的"vendor-唯一"命名）。
@@ -391,7 +392,6 @@ crates/clawd/src/http/task_events.rs	read task for event stream failed: {}	traci
 crates/clawd/src/http/task_events.rs	resolve task event artifact viewer failed: {}	tracing::error!("resolve task event artifact viewer failed: {}", source);
 crates/clawd/src/http/task_events.rs	resolve task event viewer failed: {}	tracing::error!("resolve task event viewer failed: {}", source);
 crates/clawd/src/http/ui_routes.rs	Reply with OK only.	const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
-crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	Missing X-RustClaw-Key header	return Err(ui_auth_error("Missing X-RustClaw-Key header"));
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	auth key not found	error: Some("auth key not found".to_string()),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	auth key not found	error: Some("auth key not found".to_string()),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	auth key not found	error: Some("auth key not found".to_string()),
@@ -411,7 +411,6 @@ crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	feishu registration does not
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	finalize feishu bind session failed: {err}	error: Some(format!("finalize feishu bind session failed: {err}")),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	get auth key failed: {err}	error: Some(format!("get auth key failed: {err}")),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	get feishu bind session failed: {err}	error: Some(format!("get feishu bind session failed: {err}")),
-crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	invalid username or password	error: Some("invalid username or password".to_string()),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	key_id or user_key is required	error: Some("key_id or user_key is required".to_string()),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	list auth keys failed: {err}	error: Some(format!("list auth keys failed: {err}")),
 crates/clawd/src/http/ui_routes/auth_feishu_bind.rs	load auth key failed: {err}	error: Some(format!("load auth key failed: {err}")),
@@ -476,13 +475,12 @@ crates/clawd/src/http/ui_routes/factory_reset.rs	scrub config file failed: {}: {
 crates/clawd/src/http/ui_routes/factory_reset.rs	skip symlink config directory: {}	.push(format!("skip symlink config directory: {}", dir.display()));
 crates/clawd/src/http/ui_routes/factory_reset.rs	skip symlink config path: {}	.push(format!("skip symlink config path: {}", path.display()));
 crates/clawd/src/http/ui_routes/factory_reset.rs	skip symlink logs directory: {}	.push(format!("skip symlink logs directory: {}", logs_dir.display()));
-crates/clawd/src/http/ui_routes/health_skills_import.rs	create upload bundle dir failed: {err}	error: Some(format!("create upload bundle dir failed: {err}")),
+crates/clawd/src/http/ui_routes/health_skills_import.rs	create import staging directory failed: {error}	error: Some(format!("create import staging directory failed: {error}")),
+crates/clawd/src/http/ui_routes/health_skills_import.rs	create upload staging directory failed: {error}	error: Some(format!("create upload staging directory failed: {error}")),
 crates/clawd/src/http/ui_routes/health_skills_import.rs	create uploaded subdirectory failed: {err}	error: Some(format!("create uploaded subdirectory failed: {err}")),
 crates/clawd/src/http/ui_routes/health_skills_import.rs	no uploaded files found	error: Some("no uploaded files found".to_string()),
 crates/clawd/src/http/ui_routes/health_skills_import.rs	read uploaded file failed	error: Some("read uploaded file failed".to_string()),
-crates/clawd/src/http/ui_routes/health_skills_import.rs	remove old imported bundle failed: {err}	error: Some(format!("remove old imported bundle failed: {err}")),
-crates/clawd/src/http/ui_routes/health_skills_import.rs	remove old uploaded bundle failed: {err}	error: Some(format!("remove old uploaded bundle failed: {err}")),
-crates/clawd/src/http/ui_routes/health_skills_import.rs	uploaded bundle is missing readable SKILL.md: {err}	"uploaded bundle is missing readable SKILL.md: {err}"
+crates/clawd/src/http/ui_routes/health_skills_import.rs	uploaded bundle is missing readable INTERFACE.md: {err}	"uploaded bundle is missing readable INTERFACE.md: {err}"
 crates/clawd/src/http/ui_routes/health_skills_import.rs	write uploaded file failed: {err}	error: Some(format!("write uploaded file failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	build llm test client failed: {err}	.map_err(|err| format!("build llm test client failed: {err}"))?;
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	llm connectivity test failed: {err}	error: Some(format!("llm connectivity test failed: {err}")),
@@ -497,6 +495,7 @@ crates/clawd/src/http/ui_routes/llm_skill_config.rs	read skills registry failed:
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	reload skill views failed: {err}	error: Some(format!("reload skill views failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	remove imported bundle failed: {err}	error: Some(format!("remove imported bundle failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	remove prompt file failed: {err}	error: Some(format!("remove prompt file failed: {err}")),
+crates/clawd/src/http/ui_routes/llm_skill_config.rs	remove verified skill package failed: {err}	error: Some(format!("remove verified skill package failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	selected_model is required	error: Some("selected_model is required".to_string()),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	selected_model is required	error: Some("selected_model is required".to_string()),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	selected_vendor is required	error: Some("selected_vendor is required".to_string()),
@@ -576,41 +575,39 @@ crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_bad_response: {err
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_request_failed: {err}	"error": format!("nni_remote_request_failed: {err}"),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	signature helper returned error	.unwrap_or_else(|| "signature helper returned error".to_string())
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule Pi App restart: {err}	return Err(format!("failed to schedule Pi App restart: {err}"));
-crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule restart: {err}	error: Some(format!("failed to schedule restart: {err}")),
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule restart: {err}	return Err(format!("failed to schedule restart: {err}"));
-crates/clawd/src/http/ui_routes/service_control.rs	only admin can restart Pi App	error: Some("only admin can restart Pi App".to_string()),
-crates/clawd/src/http/ui_routes/service_control.rs	only admin can restart RustClaw	error: Some("only admin can restart RustClaw".to_string()),
 crates/clawd/src/http/ui_routes/service_control.rs	start-all-bin.sh not found in workspace root	return Err("start-all-bin.sh not found in workspace root".to_string());
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- Avoid adding internal metadata fields yourself; RustClaw will inject its own runtime context.\n	"- Avoid adding internal metadata fields yourself; RustClaw will inject its own runtime context.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Do not invent unsupported CLI flags, JSON fields, shell fragments, or action names that are not grounded in the original `SKILL.md` or the entry file.\n	"- Do not invent unsupported CLI flags, JSON fields, shell fragments, or action names that are not grounded in the original `SKILL.md` or the entry file.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Follow the documented commands, options, examples, and parameter names from the original `SKILL.md` exactly.\n	"- Follow the documented commands, options, examples, and parameter names from the original `SKILL.md` exactly.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- If the original `SKILL.md` shows a concrete command example, mirror that option shape instead of inventing a higher-level parameter.\n	"- If the original `SKILL.md` shows a concrete command example, mirror that option shape instead of inventing a higher-level parameter.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Keep the command close to the examples shown in the original `SKILL.md`.\n	"- Keep the command close to the examples shown in the original `SKILL.md`.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Prefer short, explicit commands. Reuse the documented recipes instead of inventing unrelated shell pipelines.\n	"- Prefer short, explicit commands. Reuse the documented recipes instead of inventing unrelated shell pipelines.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Prefer the original `SKILL.md` below over your own guesses.\n	out.push_str("- Prefer the original `SKILL.md` below over your own guesses.\\n");
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Runtime execution may still require a dedicated executor for this external kind.\n	"- Runtime execution may still require a dedicated executor for this external kind.\\n",
+crates/clawd/src/http/ui_routes/skill_import_config.rs	- Do not infer command-line flags, runtimes, dependencies, or action names from source files.\n	"- Do not infer command-line flags, runtimes, dependencies, or action names from source files.\\n",
+crates/clawd/src/http/ui_routes/skill_import_config.rs	- Follow its actions, parameter names, types, defaults, and response contract exactly.\n	"- Follow its actions, parameter names, types, defaults, and response contract exactly.\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- This is an imported external skill: `{}`.\n	"- This is an imported external skill: `{}`.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- This prompt file lets the imported skill appear in RustClaw immediately.\n	"- This prompt file lets the imported skill appear in RustClaw immediately.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- This skill runs a local script. Stay close to the script's real supported options and examples from the original `SKILL.md`.\n	"- This skill runs a local script. Stay close to the script's real supported options and examples from the original `SKILL.md`.\\n",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- This skill runs shell recipes inside its bundle directory.\n	out.push_str("- This skill runs shell recipes inside its bundle directory.\\n");
+crates/clawd/src/http/ui_routes/skill_import_config.rs	- Treat the `INTERFACE.md` contract below as authoritative.\n	out.push_str("- Treat the `INTERFACE.md` contract below as authoritative.\\n");
 crates/clawd/src/http/ui_routes/skill_import_config.rs	<!-- AUTO-GENERATED: external skill importer -->	if raw.contains("<!-- AUTO-GENERATED: external skill importer -->") {
 crates/clawd/src/http/ui_routes/skill_import_config.rs	<!-- AUTO-GENERATED: external skill importer -->\n	out.push_str("<!-- AUTO-GENERATED: external skill importer -->\\n");
-crates/clawd/src/http/ui_routes/skill_import_config.rs	RustClaw imported external skill wrapper.\n\n	out.push_str("RustClaw imported external skill wrapper.\\n\\n");
+crates/clawd/src/http/ui_routes/skill_import_config.rs	RustClaw verified external skill package.\n\n	out.push_str("RustClaw verified external skill package.\\n\\n");
+crates/clawd/src/http/ui_routes/skill_import_config.rs	\n## Multilingual Reinforcement\n\n<!-- MULTILINGUAL-REINFORCEMENT: Keep language-specific nuance concise; preserve machine fields and action names exactly. -->\n	"\\n## Multilingual Reinforcement\\n\\n<!-- MULTILINGUAL-REINFORCEMENT: Keep language-specific nuance concise; preserve machine fields and action names exactly. -->\\n",
+crates/clawd/src/http/ui_routes/skill_import_config.rs	activate staged imported bundle failed: {error}	return Err(format!("activate staged imported bundle failed: {error}"));
 crates/clawd/src/http/ui_routes/skill_import_config.rs	analyze imported skill failed: {err}	error: Some(format!("analyze imported skill failed: {err}")),
-crates/clawd/src/http/ui_routes/skill_import_config.rs	copy local SKILL.md failed: {err}	.map_err(|err| format!("copy local SKILL.md failed: {err}"))?;
+crates/clawd/src/http/ui_routes/skill_import_config.rs	backup previous imported bundle failed: {error}	.map_err(|error| format!("backup previous imported bundle failed: {error}"))?;
 crates/clawd/src/http/ui_routes/skill_import_config.rs	copy local bundle failed: {err}	.map_err(|err| format!("copy local bundle failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	create import dir failed: {err}	.map_err(|err| format!("create import dir failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	create import dir failed: {err}	std::fs::create_dir_all(dest_dir).map_err(|err| format!("create import dir failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	create prompt directory failed: {err}	error: Some(format!("create prompt directory failed: {err}")),
-crates/clawd/src/http/ui_routes/skill_import_config.rs	download skill source failed: {err}	.map_err(|err| format!("download skill source failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	download skill source returned {status}: {}	"download skill source returned {status}: {}",
-crates/clawd/src/http/ui_routes/skill_import_config.rs	read copied SKILL.md failed: {err}	.map_err(|err| format!("read copied SKILL.md failed: {err}"));
-crates/clawd/src/http/ui_routes/skill_import_config.rs	read copied SKILL.md failed: {err}	.map_err(|err| format!("read copied SKILL.md failed: {err}"));
-crates/clawd/src/http/ui_routes/skill_import_config.rs	read skill source body failed: {err}	.map_err(|err| format!("read skill source body failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	read skills registry failed: {err}	error: Some(format!("read skills registry failed: {err}")),
-crates/clawd/src/http/ui_routes/skill_import_config.rs	write downloaded SKILL.md failed: {err}	.map_err(|err| format!("write downloaded SKILL.md failed: {err}"))?;
-crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed: {err}	error: Some(format!("write prompt file failed: {err}")),
-crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	create prompt directory failed: {err}	format!("create prompt directory failed: {err}"),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	manifest package is missing INTERFACE.md	anyhow::bail!("manifest package is missing INTERFACE.md");
+crates/clawd/src/http/ui_routes/skill_import_config.rs	manifest validation failed: {error}	.map_err(|error| anyhow::anyhow!("manifest validation failed: {error}"))?;
+crates/clawd/src/http/ui_routes/skill_import_config.rs	read copied INTERFACE.md failed: {err}	.map_err(|err| format!("read copied INTERFACE.md failed: {err}"));
+crates/clawd/src/http/ui_routes/skill_import_config.rs	read prompt snapshot failed: {error}	error: Some(format!("read prompt snapshot failed: {error}")),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	read runtime config failed: {error}	error: Some(format!("read runtime config failed: {error}")),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	read runtime config failed: {error}	format!("read runtime config failed: {error}"),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	read skills registry failed: {error}	error: Some(format!("read skills registry failed: {error}")),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	reload disabled imported skill failed: {error}	format!("reload disabled imported skill failed: {error}"),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	remote single-file imports are unsupported; upload a canonical package bundle containing skill.toml and INTERFACE.md	"remote single-file imports are unsupported; upload a canonical package bundle containing skill.toml and INTERFACE.md"
+crates/clawd/src/http/ui_routes/skill_import_config.rs	skill package installer task failed: {error}	error: Some(format!("skill package installer task failed: {error}")),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	skill source must be a canonical package directory containing skill.toml and INTERFACE.md	"skill source must be a canonical package directory containing skill.toml and INTERFACE.md"
+crates/clawd/src/http/ui_routes/skill_import_config.rs	skill store configuration failed	.unwrap_or_else(|| "skill store configuration failed".to_string());
+crates/clawd/src/http/ui_routes/skill_import_config.rs	validate staged skill manifest failed: {error}	.map_err(|error| format!("validate staged skill manifest failed: {error}"))?;
+crates/clawd/src/http/ui_routes/skill_import_config.rs	write disabled runtime config failed: {error}	format!("write disabled runtime config failed: {error}"),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed: {err}	format!("write prompt file failed: {err}"),
+crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	format!("write skills registry failed: {err}"),
+crates/clawd/src/http/ui_routes/skill_store_installation.rs	skill store config semaphore remains open	.expect("skill store config semaphore remains open")
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
 crates/clawd/src/http/ui_routes/workspace_update.rs	RUSTCLAW_SYSTEMD_UNIT contains unsupported characters	return Err("RUSTCLAW_SYSTEMD_UNIT contains unsupported characters".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
@@ -623,10 +620,7 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd res
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule clawd restart: {err}	format!("failed to schedule clawd restart: {err}"),
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to schedule systemd restart: {err}	.map_err(|err| format!("failed to schedule systemd restart: {err}"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to wait for {program}: {err}	Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
-crates/clawd/src/http/ui_routes/workspace_update.rs	git clean conflict files failed: {}	"git clean conflict files failed: {}",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed	"git pull --ff-only failed",
-crates/clawd/src/http/ui_routes/workspace_update.rs	git pull --ff-only failed after resolving conflicts	"git pull --ff-only failed after resolving conflicts",
-crates/clawd/src/http/ui_routes/workspace_update.rs	git restore conflict files failed: {}	"git restore conflict files failed: {}",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse failed	"git rev-parse failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	git rev-parse upstream failed	"git rev-parse upstream failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
@@ -656,14 +650,14 @@ crates/clawd/src/main.rs	Count queued tasks failed: {}	error!("Count queued task
 crates/clawd/src/main.rs	Memory item not found	Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
 crates/clawd/src/main.rs	Memory item not found	Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
 crates/clawd/src/main.rs	Memory settings update failed	"Memory settings update failed",
-crates/clawd/src/main.rs	Missing X-RustClaw-Key header	"Missing X-RustClaw-Key header",
 crates/clawd/src/main.rs	No auth key found in database. Generated initial admin key.	warn!("No auth key found in database. Generated initial admin key.");
+crates/clawd/src/main.rs	RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address	anyhow::anyhow!("RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address")
+crates/clawd/src/main.rs	RUSTCLAW_INTERNAL_LISTEN must use a loopback address	anyhow::bail!("RUSTCLAW_INTERNAL_LISTEN must use a loopback address");
 crates/clawd/src/main.rs	Rate limiter lock poisoned	"Rate limiter lock poisoned",
 crates/clawd/src/main.rs	Resolve task viewer failed: {}	error!("Resolve task viewer failed: {}", err);
 crates/clawd/src/main.rs	Task queue is full	let queue_full = "Task queue is full".to_string();
-crates/clawd/src/main.rs	UI static assets enabled at {}	info!("UI static assets enabled at {}", ui_dist_dir.display());
-crates/clawd/src/main.rs	UI static assets missing: {} (run `cd UI && npm run build`)	"UI static assets missing: {} (run `cd UI && npm run build`)",
 crates/clawd/src/main.rs	chat_id is required when user_key is absent	"chat_id is required when user_key is absent",
+crates/clawd/src/main.rs	clawd internal listener bound to {}	info!("clawd internal listener bound to {}", clawd_listen);
 crates/clawd/src/main.rs	clear memory db failed: {}	error!("clear memory db failed: {}", err);
 crates/clawd/src/main.rs	delete memory db failed: {}	error!("delete memory db failed: {}", err);
 crates/clawd/src/main.rs	expire memory db failed: {}	error!("expire memory db failed: {}", err);
@@ -958,44 +952,10 @@ crates/clawd/src/skills/builtin.rs	skill args must be a JSON object	.ok_or_else(
 crates/clawd/src/skills/builtin.rs	unknown skill: {skill_name}	_ => Err(format!("unknown skill: {skill_name}")),
 crates/clawd/src/skills/builtin.rs	{key} must be string	.ok_or_else(|| format!("{key} must be string"))
 crates/clawd/src/skills/builtin.rs	{operation} failed for {target}: {err}	format!("{operation} failed for {target}: {err}"),
-crates/clawd/src/skills/external.rs	Imported external skill completed with no output.	"Imported external skill completed with no output.".to_string()
-crates/clawd/src/skills/external.rs	Imported shell skill failed: {err}	"error_text": format!("Imported shell skill failed: {err}"),
-crates/clawd/src/skills/external.rs	external bundle directory must stay inside workspace_root	return Err("external bundle directory must stay inside workspace_root".to_string());
-crates/clawd/src/skills/external.rs	external bundle directory not found: {err}	.map_err(|err| format!("external bundle directory not found: {err}"))?;
-crates/clawd/src/skills/external.rs	external entry file must stay inside the imported bundle	return Err("external entry file must stay inside the imported bundle".to_string());
-crates/clawd/src/skills/external.rs	external entry file not found: {err}	.map_err(|err| format!("external entry file not found: {err}"))?;
-crates/clawd/src/skills/external.rs	external http_json read body failed: {}	let msg = format!("external http_json read body failed: {}", e);
-crates/clawd/src/skills/external.rs	external http_json request failed: {}	let msg = format!("external http_json request failed: {}", e);
-crates/clawd/src/skills/external.rs	external http_json response parse failed: {}	let msg = format!("external http_json response parse failed: {}", e);
-crates/clawd/src/skills/external.rs	external http_json skill missing external_endpoint	.ok_or_else(|| "external http_json skill missing external_endpoint".to_string())?;
-crates/clawd/src/skills/external.rs	external skill missing execution config	.ok_or_else(|| "external skill missing execution config".to_string())?;
-crates/clawd/src/skills/external.rs	external skill missing execution config	.ok_or_else(|| "external skill missing execution config".to_string())?;
-crates/clawd/src/skills/external.rs	external skill missing external_bundle_dir	return Err("external skill missing external_bundle_dir".to_string());
-crates/clawd/src/skills/external.rs	external skill missing external_entry_file	.ok_or_else(|| "external skill missing external_entry_file".to_string())?;
-crates/clawd/src/skills/external.rs	external skill missing external_entry_file	return Err("external skill missing external_entry_file".to_string());
-crates/clawd/src/skills/external.rs	external skill missing external_kind in registry	.ok_or_else(|| "external skill missing external_kind in registry".to_string())?;
-crates/clawd/src/skills/external.rs	external skill missing external_kind or external_endpoint in registry	"external skill missing external_kind or external_endpoint in registry".to_string()
-crates/clawd/src/skills/external.rs	external skill missing external_runtime	.ok_or_else(|| "external skill missing external_runtime".to_string())?;
-crates/clawd/src/skills/external.rs	external skill requires registry	.ok_or_else(|| "external skill requires registry".to_string())?;
-crates/clawd/src/skills/external.rs	external skill requires registry	.ok_or_else(|| "external skill requires registry".to_string())?;
-crates/clawd/src/skills/external.rs	external skill requires registry	.ok_or_else(|| "external skill requires registry".to_string())?;
-crates/clawd/src/skills/external.rs	external skill requires registry	.ok_or_else(|| "external skill requires registry".to_string())?;
-crates/clawd/src/skills/external.rs	external_auth_ref env: missing variable name	return Err("external_auth_ref env: missing variable name".to_string());
-crates/clawd/src/skills/external.rs	external_auth_ref env:var:header: missing header name	return Err("external_auth_ref env:var:header: missing header name".to_string());
-crates/clawd/src/skills/external.rs	external_auth_ref env:{} is empty (set the environment variable)	"external_auth_ref env:{} is empty (set the environment variable)",
-crates/clawd/src/skills/external.rs	external_auth_ref env:{} not set or empty (set the environment variable)	"external_auth_ref env:{} not set or empty (set the environment variable)",
-crates/clawd/src/skills/external.rs	external_auth_ref unsupported type: {:?}, only env is supported	"external_auth_ref unsupported type: {:?}, only env is supported",
-crates/clawd/src/skills/external.rs	external_kind not supported by local_script executor: {}	"external_kind not supported by local_script executor: {}",
-crates/clawd/src/skills/external.rs	external_kind not supported by local_shell_recipe executor: {}	"external_kind not supported by local_shell_recipe executor: {}",
-crates/clawd/src/skills/external.rs	external_kind not supported: {}, only http_json is supported	"external_kind not supported: {}, only http_json is supported",
-crates/clawd/src/skills/external.rs	missing Python dependencies for imported skill: {}{}	"missing Python dependencies for imported skill: {}{}",
-crates/clawd/src/skills/external.rs	missing required local command for imported skill: {}	"missing required local command for imported skill: {}",
-crates/clawd/src/skills/external.rs	missing required local command for imported skill: {}	"missing required local command for imported skill: {}",
-crates/clawd/src/skills/external.rs	process exited with code {}	detail = format!("process exited with code {}", exit_code);
 crates/clawd/src/skills/runner.rs	empty skill-runner output	return Err("empty skill-runner output".to_string());
 crates/clawd/src/skills/runner.rs	empty skill-runner output: {detail}	return Err(format!("empty skill-runner output: {detail}"));
 crates/clawd/src/skills/runner.rs	flush skill-runner stdin failed: {err}	.map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
-crates/clawd/src/skills/runner.rs	invalid skill-runner json: {err}	serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
+crates/clawd/src/skills/runner.rs	invalid skill-runner json: {err}	.map_err(|err| format!("invalid skill-runner json: {err}"))?;
 crates/clawd/src/skills/runner.rs	read skill-runner stdout failed: {err}	Ok(Err(err)) => return Err(format!("read skill-runner stdout failed: {err}")),
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)	"skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue internal LLM token: {err}	"skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
@@ -1005,6 +965,11 @@ crates/clawd/src/skills/runner.rs	skill-runner exit wait timeout: {detail}	retur
 crates/clawd/src/skills/runner.rs	wait skill-runner failed: {err}	return Err(format!("wait skill-runner failed: {err}"));
 crates/clawd/src/skills/runner.rs	wait skill-runner failed: {err}; stderr: {detail}	return Err(format!("wait skill-runner failed: {err}; stderr: {detail}"));
 crates/clawd/src/skills/runner.rs	write skill-runner stdin failed: {err}	.map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
+crates/clawd/src/skills_receipt_test_support.rs	Verified clawd test fixture	description = "Verified clawd test fixture"
+crates/clawd/src/skills_receipt_test_support.rs	create receipt fixture source	fs::create_dir_all(&source_root).expect("create receipt fixture source");
+crates/clawd/src/skills_receipt_test_support.rs	install verified receipt fixture	.expect("install verified receipt fixture");
+crates/clawd/src/skills_receipt_test_support.rs	write receipt fixture executable	.expect("write receipt fixture executable");
+crates/clawd/src/skills_receipt_test_support.rs	write receipt fixture manifest	fs::write(&manifest_path, manifest).expect("write receipt fixture manifest");
 crates/clawd/src/system_health.rs	cargo run --package {process_name}	|| args.contains(&format!("cargo run --package {process_name}"))
 crates/clawd/src/system_health.rs	cargo run -p {process_name}	|| args.contains(&format!("cargo run -p {process_name}"))
 crates/clawd/src/system_health.rs	ps command failed with status {}	anyhow::bail!("ps command failed with status {}", output.status);
@@ -1042,7 +1007,6 @@ crates/clawd/src/verifier.rs	unresolved runtime capability before execution	why:
 crates/clawd/src/verifier.rs	unresolved template placeholder in executable step args	why: "unresolved template placeholder in executable step args".to_string(),
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`	"skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` relative creation target anchored to `{anchored}`	"skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
-crates/clawd/src/virtual_tools.rs	unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config	"unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
 crates/clawd/src/virtual_tools.rs	{tool} args must be a JSON object	.ok_or_else(|| format!("{tool} args must be a JSON object"))
 crates/clawd/src/visible_text.rs	valid JSON escaped CSI regex	Regex::new(r"\\\\u001[bB]\\[[0-?]*[ -/]*[@-~]").expect("valid JSON escaped CSI regex")
 crates/clawd/src/visible_text.rs	valid JSON string field regex	.expect("valid JSON string field regex")
@@ -1102,14 +1066,61 @@ crates/larkd/src/main.rs	larkd: task submit no task_id	warn!("larkd: task submit
 crates/larkd/src/main.rs	register_p2_im_message_receive_v1_raw: {}	.map_err(|e| anyhow::anyhow!("register_p2_im_message_receive_v1_raw: {}", e))?
 crates/larkd/src/main.rs	resolve response parse failed: {}	.map_err(|e| format!("resolve response parse failed: {}", e))?;
 crates/larkd/src/main.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())?;
-crates/skill-runner/src/main.rs	child exited with {:?}: {stderr}	"child exited with {:?}: {stderr}",
-crates/skill-runner/src/main.rs	child stdout is empty	return Err("child stdout is empty".to_string());
-crates/skill-runner/src/main.rs	collect child output failed: {err}	Ok(Err(err)) => return Err(format!("collect child output failed: {err}")),
-crates/skill-runner/src/main.rs	flush child stdin failed: {err}	.map_err(|err| format!("flush child stdin failed: {err}"))?;
-crates/skill-runner/src/main.rs	invalid skill name `{raw}`: runner name must be a binary name, not a path	"invalid skill name `{raw}`: runner name must be a binary name, not a path"
-crates/skill-runner/src/main.rs	skill_name is empty	return Err("skill_name is empty".to_string());
-crates/skill-runner/src/main.rs	spawn child failed: {err}	.map_err(|err| format!("spawn child failed: {err}"))?;
-crates/skill-runner/src/main.rs	write child stdin failed: {err}	.map_err(|err| format!("write child stdin failed: {err}"))?;
+crates/skill-runner/src/main.rs	child output exceeds {} bytes	"child output exceeds {} bytes",
+crates/skill-runner/src/main.rs	child stdout is empty	"child stdout is empty",
+crates/skill-runner/src/main.rs	http_json endpoint is missing from the verified launch spec	"http_json endpoint is missing from the verified launch spec",
+crates/skill-runner/src/main.rs	http_json request returned status {status}	format!("http_json request returned status {status}"),
+crates/skill-runner/src/main.rs	http_json response is oversized	ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
+crates/skill-runner/src/main.rs	http_json response is oversized	ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
+crates/skill-runner/src/main.rs	http_json runtime network is not allowed by the receipt	"http_json runtime network is not allowed by the receipt",
+crates/skill-runner/src/main.rs	installed launch working directory is missing	.ok_or_else(|| "installed launch working directory is missing".to_string())?;
+crates/skill-runner/src/main.rs	legacy child emitted multiple stdout records	detail: "legacy child emitted multiple stdout records".to_string(),
+crates/skill-runner/src/main.rs	workspace root is not a directory	return Err("workspace root is not a directory".to_string());
+crates/skill-runner/src/main.rs	workspace root unavailable: {error}	.map_err(|error| format!("workspace root unavailable: {error}"))?;
+crates/skill-runner/src/main.rs	workspace-write receipt requires WORKSPACE_ROOT	.ok_or_else(|| "workspace-write receipt requires WORKSPACE_ROOT".to_string())?;
+crates/skill-sdk/src/adapter.rs	cargo home is unknown	SkillSdkError::new("cargo_source_cache_unavailable", "cargo home is unknown")
+crates/skill-sdk/src/bin/rustclaw-skill.rs	Implement the {skill_name} capability through RustClaw.	capability_summary: format!("Implement the {skill_name} capability through RustClaw."),
+crates/skill-sdk/src/bin/rustclaw-skill.rs	JSON by default; add --human for concise text	"output": "JSON by default; add --human for concise text"
+crates/skill-sdk/src/bin/rustclaw-skill.rs	adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]	"adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	init <rust|python|node|go|prebuilt> <skill_name> <destination>	"init <rust|python|node|go|prebuilt> <skill_name> <destination>",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	package <skill.toml> <output_dir>	"package <skill.toml> <output_dir>",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-validate <request_id> <response.jsonl>	"protocol-validate <request_id> <response.jsonl>",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	receipt-verify <package_root> <skill_name>	"receipt-verify <package_root> <skill_name>",
+crates/skill-sdk/src/bin/rustclaw-skill.rs	rollback <package_root> <skill_name>	"rollback <package_root> <skill_name>"
+crates/skill-sdk/src/installer.rs	http_json endpoint missing	"http_json endpoint missing",
+crates/skill-sdk/src/installer.rs	http_json response exceeds protocol limit	"http_json response exceeds protocol limit",
+crates/skill-sdk/src/installer.rs	manifest and built artifact must stay inside the workspace	"manifest and built artifact must stay inside the workspace",
+crates/skill-sdk/src/manifest.rs	capability_policy_source must be registry	"capability_policy_source must be registry",
+crates/skill-sdk/src/manifest.rs	dependency lifecycle scripts are not supported by schema version 1	"dependency lifecycle scripts are not supported by schema version 1",
+crates/skill-sdk/src/manifest.rs	description and license are required	"description and license are required",
+crates/skill-sdk/src/manifest.rs	prebuilt adapter requires at least one platform artifact	"prebuilt adapter requires at least one platform artifact",
+crates/skill-sdk/src/manifest.rs	provide exactly one relative source_path or https URL	"provide exactly one relative source_path or https URL",
+crates/skill-sdk/src/manifest.rs	remote prebuilt artifacts require size_bytes	"remote prebuilt artifacts require size_bytes",
+crates/skill-sdk/src/manifest.rs	run.smoke_args must be an object	"run.smoke_args must be an object",
+crates/skill-sdk/src/manifest.rs	skills must receive scoped secret references from runtime	"skills must receive scoped secret references from runtime",
+crates/skill-sdk/src/prebuilt.rs	archive links and special files are forbidden	"archive links and special files are forbidden",
+crates/skill-sdk/src/prebuilt.rs	only HTTPS downloads are allowed	"only HTTPS downloads are allowed",
+crates/skill-sdk/src/prebuilt.rs	source_path or url is required	SkillSdkError::new("prebuilt_source_missing", "source_path or url is required")
+crates/skill-sdk/src/protocol.rs	request_id is required	"request_id is required",
+crates/skill-sdk/src/protocol.rs	skill emitted no stdout record	"skill emitted no stdout record",
+crates/skill-sdk/src/protocol.rs	stdout must contain exactly one JSON record	"stdout must contain exactly one JSON record",
+crates/skill-sdk/src/receipt.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
+crates/skill-sdk/src/receipt.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
+crates/skill-sdk/src/runtime.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
+crates/skill-sdk/src/runtime.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
+crates/skill-sdk/src/sandbox.rs	(allow file-write* (subpath "{escaped}"))\n	profile.push_str(&format!("(allow file-write* (subpath \\"{escaped}\\"))\\n"));
+crates/skill-sdk/src/sandbox.rs	(version 1)\n(deny default)\n(import "system.sb")\n(allow process*)\n(allow file-read*)\n	"(version 1)\\n(deny default)\\n(import \\"system.sb\\")\\n(allow process*)\\n(allow file-read*)\\n",
+crates/skill-sdk/src/sandbox.rs	macOS sandbox-exec not found	"macOS sandbox-exec not found",
+crates/skill-sdk/src/secret_scan.rs	-----BEGIN OPENSSH PRIVATE KEY-----	|| upper.contains("-----BEGIN OPENSSH PRIVATE KEY-----")
+crates/skill-sdk/src/secret_scan.rs	-----BEGIN RSA PRIVATE KEY-----	|| upper.contains("-----BEGIN RSA PRIVATE KEY-----")
+crates/skill-sdk/src/templates.rs	# Add hash-pinned dependencies only.\n	"# Add hash-pinned dependencies only.\\n",
+crates/skill-sdk/src/templates.rs	# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\n	const README_TEMPLATE: &str = "# __SKILL_NAME__\\n\\n__SUMMARY__\\n\\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\\n";
+crates/skill-sdk/src/templates.rs	### `{action}`\n\n- Required args: none.\n- Optional args: action-specific values documented by the developer.\n	"### `{action}`\\n\\n- Required args: none.\\n- Optional args: action-specific values documented by the developer.\\n"
+crates/skill-sdk/src/templates.rs	capability_summary is empty	"capability_summary is empty",
+crates/skill-sdk/templates/rust/src/main.rs	request record is required	error_text: Some("request record is required".to_string()),
 crates/skills/archive_basic/src/main.rs	archive member must be a relative path	"archive member must be a relative path",
 crates/skills/archive_basic/src/main.rs	archive member must be a relative path	"archive member must be a relative path",
 crates/skills/archive_basic/src/main.rs	archive member with '..' is not allowed	"archive member with '..' is not allowed",
@@ -1158,14 +1169,15 @@ crates/skills/audio_synthesize/src/main.rs	{vendor_name} tts request failed: {er
 crates/skills/audio_synthesize/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
 crates/skills/audio_transcribe/src/main.rs	Transcribe this audio verbatim. {}	{"text": format!("Transcribe this audio verbatim. {}", prompt)},
 crates/skills/audio_transcribe/src/main.rs	attach audio file failed: {err}	.map_err(|err| format!("attach audio file failed: {err}"))?;
-crates/skills/audio_transcribe/src/main.rs	audio file does not exist	return Err("audio file does not exist".to_string());
+crates/skills/audio_transcribe/src/main.rs	audio file does not exist	"audio file does not exist",
+crates/skills/audio_transcribe/src/main.rs	audio file does not exist	"audio file does not exist",
 crates/skills/audio_transcribe/src/main.rs	audio file does not exist	return Err("audio file does not exist".to_string());
 crates/skills/audio_transcribe/src/main.rs	audio file does not exist	return Err("audio file does not exist".to_string());
 crates/skills/audio_transcribe/src/main.rs	audio path is outside workspace	return Err("audio path is outside workspace".to_string());
 crates/skills/audio_transcribe/src/main.rs	audio_transcribe.oss_access_key_id is required	.ok_or_else(|| "audio_transcribe.oss_access_key_id is required".to_string())?;
 crates/skills/audio_transcribe/src/main.rs	audio_transcribe.oss_access_key_secret is required	.ok_or_else(|| "audio_transcribe.oss_access_key_secret is required".to_string())?;
 crates/skills/audio_transcribe/src/main.rs	audio_transcribe.oss_bucket is required	.ok_or_else(|| "audio_transcribe.oss_bucket is required".to_string())?;
-crates/skills/audio_transcribe/src/main.rs	build {vendor_name} client failed: {err}	.map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	build {vendor_name} client failed: {err}	format!("build {vendor_name} client failed: {err}"),
 crates/skills/audio_transcribe/src/main.rs	compatible adapter requires local audio file path	AudioInput::Url(_) => Err("compatible adapter requires local audio file path".to_string()),
 crates/skills/audio_transcribe/src/main.rs	google transcription request failed: {err}	.map_err(|err| format!("google transcription request failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	google transcription response missing text: {}	"google transcription response missing text: {}",
@@ -1173,19 +1185,26 @@ crates/skills/audio_transcribe/src/main.rs	invalid HMAC key: {err}	.map_err(|err
 crates/skills/audio_transcribe/src/main.rs	parse google transcription response failed: {err}	.map_err(|err| format!("parse google transcription response failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	parse qwen native asr poll response failed: {err}	.map_err(|err| format!("parse qwen native asr poll response failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	parse qwen native asr submit response failed: {err}	.map_err(|err| format!("parse qwen native asr submit response failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	parse qwen transcription response failed: {err}	.map_err(|err| format!("parse qwen transcription response failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	qwen api key is not configured	auth_token.ok_or_else(|| "qwen api key is not configured".to_string())?;
 crates/skills/audio_transcribe/src/main.rs	qwen native ASR requires args.audio.url (public URL), or enable audio_transcribe.local_auto_upload_enabled with OSS settings	"qwen native ASR requires args.audio.url (public URL), or enable audio_transcribe.local_auto_upload_enabled with OSS settings"
 crates/skills/audio_transcribe/src/main.rs	qwen native ASR requires non-empty args.audio.url	return Err("qwen native ASR requires non-empty args.audio.url".to_string());
 crates/skills/audio_transcribe/src/main.rs	qwen native asr poll request failed: {err}	.map_err(|err| format!("qwen native asr poll request failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	qwen native asr submit request failed: {err}	.map_err(|err| format!("qwen native asr submit request failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	qwen native asr task failed: {}	"qwen native asr task failed: {}",
 crates/skills/audio_transcribe/src/main.rs	qwen native asr task succeeded but no text found: {}	"qwen native asr task succeeded but no text found: {}",
+crates/skills/audio_transcribe/src/main.rs	qwen transcription request failed: {err}	.map_err(|err| format!("qwen transcription request failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	qwen transcription response missing text: {}	"qwen transcription response missing text: {}",
 crates/skills/audio_transcribe/src/main.rs	read audio failed: {err}	let bytes = std::fs::read(audio_path).map_err(|err| format!("read audio failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	read audio failed: {err}	let bytes = std::fs::read(local_path).map_err(|err| format!("read audio failed: {err}"))?;
-crates/skills/audio_transcribe/src/main.rs	read audio metadata failed: {err}	.map_err(|err| format!("read audio metadata failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	read audio failed: {err}	let bytes = std::fs::read(path).map_err(|err| format!("read audio failed: {err}"))?;
+crates/skills/audio_transcribe/src/main.rs	read audio metadata failed: {err}	format!("read audio metadata failed: {err}"),
+crates/skills/audio_transcribe/src/main.rs	read qwen transcription response failed: {err}	.map_err(|err| format!("read qwen transcription response failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	read {vendor_name} transcription response failed: {err}	.map_err(|err| format!("read {vendor_name} transcription response failed: {err}"))?;
-crates/skills/audio_transcribe/src/main.rs	transcription result is empty	return Err("transcription result is empty".to_string());
+crates/skills/audio_transcribe/src/main.rs	transcription result is empty	.ok_or_else(|| "transcription result is empty".to_string()),
+crates/skills/audio_transcribe/src/main.rs	transcription result is empty	Err("transcription result is empty".to_string())
 crates/skills/audio_transcribe/src/main.rs	upload audio to OSS failed: {err}	.map_err(|err| format!("upload audio to OSS failed: {err}"))?;
-crates/skills/audio_transcribe/src/main.rs	{vendor_name} native stt adapter is not available	return Err(format!("{vendor_name} native stt adapter is not available"));
+crates/skills/audio_transcribe/src/main.rs	{vendor_name} native stt adapter is not available	return Err(format!("{vendor_name} native stt adapter is not available").into());
 crates/skills/audio_transcribe/src/main.rs	{vendor_name} transcription request failed: {err}	.map_err(|err| format!("{vendor_name} transcription request failed: {err}"))?;
 crates/skills/audio_transcribe/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
 crates/skills/browser_web/src/main.rs	args must be object	SkillFailure::with_message("INVALID_INPUT", "args must be object"),
@@ -1259,50 +1278,44 @@ crates/skills/doc_parse/src/main.rs	unsupported action: {raw_action}	error: Some
 crates/skills/docker_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/docker_basic/src/main.rs	run docker failed: {err}	.map_err(|err| format!("run docker failed: {err}"))?;
 crates/skills/docker_basic/src/main.rs	unsupported action; use ps|images|version|logs|restart|start|stop|inspect	"unsupported action; use ps|images|version|logs|restart|start|stop|inspect".to_string(),
-crates/skills/extension_manager/src/helpers.rs	# {skill_name} External Skill Scaffold	format!("# {skill_name} External Skill Scaffold"),
-crates/skills/extension_manager/src/helpers.rs	- `{action}`: TODO: describe what this action should do.	.map(|action| format!("- `{action}`: TODO: describe what this action should do."))
-crates/skills/extension_manager/src/helpers.rs	1. Complete `INTERFACE.md` with the real action contract.	"1. Complete `INTERFACE.md` with the real action contract.".to_string(),
-crates/skills/extension_manager/src/helpers.rs	4. Register the skill explicitly only after compile and smoke tests pass; registration enables it in config.	"4. Register the skill explicitly only after compile and smoke tests pass; registration enables it in config.".to_string(),
 crates/skills/extension_manager/src/helpers.rs	External skill {skill_name}; see its INTERFACE.md for the capability contract.	description = "External skill {skill_name}; see its INTERFACE.md for the capability contract."
-crates/skills/extension_manager/src/helpers.rs	This scaffold was generated by `extension_manager`.	"This scaffold was generated by `extension_manager`.".to_string(),
+crates/skills/extension_manager/src/helpers.rs	Implement the actual logic in the generated language entrypoint.	"Implement the actual logic in the generated language entrypoint.",
 crates/skills/extension_manager/src/helpers.rs	absolute paths are not allowed	return Err("absolute paths are not allowed".to_string())
 crates/skills/extension_manager/src/helpers.rs	absolute paths are not allowed	return Err("absolute paths are not allowed".to_string());
 crates/skills/extension_manager/src/helpers.rs	actions must be a string or string array	Some(_) => return Err("actions must be a string or string array".to_string()),
 crates/skills/extension_manager/src/helpers.rs	actions must be strings	return Err("actions must be strings".to_string());
-crates/skills/extension_manager/src/helpers.rs	cannot find workspace members block in Cargo.toml	.ok_or_else(|| "cannot find workspace members block in Cargo.toml".to_string())?;
-crates/skills/extension_manager/src/helpers.rs	cannot find workspace members closing bracket in Cargo.toml	.ok_or_else(|| "cannot find workspace members closing bracket in Cargo.toml".to_string())?;
-crates/skills/extension_manager/src/helpers.rs	cargo check for external skill failed: {}	"cargo check for external skill failed: {}",
 crates/skills/extension_manager/src/helpers.rs	cargo is not available. install Rust toolchain first	"rust" => Err("cargo is not available. install Rust toolchain first".to_string()),
 crates/skills/extension_manager/src/helpers.rs	check installer failed: {err}	.map_err(|err| format!("check installer failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	copy file failed: {err}	.map_err(|err| format!("copy file failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	copy release binary failed: {err}	.map_err(|err| format!("copy release binary failed: {err}"))?;
+crates/skills/extension_manager/src/helpers.rs	create external skill scaffold failed: {error}	.map_err(|error| format!("create external skill scaffold failed: {error}"))?;
 crates/skills/extension_manager/src/helpers.rs	create external skill src dir failed: {err}	.map_err(|err| format!("create external skill src dir failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	create release target dir failed: {err}	.map_err(|err| format!("create release target dir failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	create scaffold dirs failed: {err}	fs::create_dir_all(&src_dir).map_err(|err| format!("create scaffold dirs failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	create target dir failed: {err}	fs::create_dir_all(dst).map_err(|err| format!("create target dir failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	create temporary fix dir failed: {err}	.map_err(|err| format!("create temporary fix dir failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	create validation dir failed: {err}	fs::create_dir_all(&root).map_err(|err| format!("create validation dir failed: {err}"))?;
+crates/skills/extension_manager/src/helpers.rs	create validation workspace failed: {error}	.map_err(|error| format!("create validation workspace failed: {error}"))?;
+crates/skills/extension_manager/src/helpers.rs	def respond(request: dict)	BuildAdapter::Python => Ok(("src/main.py", "def respond(request: dict)")),
+crates/skills/extension_manager/src/helpers.rs	export function respond(request)	BuildAdapter::Node => Ok(("src/main.mjs", "export function respond(request)")),
 crates/skills/extension_manager/src/helpers.rs	extension-manager-{prefix}-{}-{}-{nanos}	"extension-manager-{prefix}-{}-{}-{nanos}",
-crates/skills/extension_manager/src/helpers.rs	external skill Cargo.toml does not exist: {}	"external skill Cargo.toml does not exist: {}",
-crates/skills/extension_manager/src/helpers.rs	external skill release build completed without binary: {}	"external skill release build completed without binary: {}",
-crates/skills/extension_manager/src/helpers.rs	external skill release build failed: {}	"external skill release build failed: {}",
+crates/skills/extension_manager/src/helpers.rs	external skill manifest invalid: {error}	.map_err(|error| format!("external skill manifest invalid: {error}"))?;
+crates/skills/extension_manager/src/helpers.rs	external skill manifest invalid: {error}	.map_err(|error| format!("external skill manifest invalid: {error}"))?;
 crates/skills/extension_manager/src/helpers.rs	external skill scaffold is missing required file: {}	"external skill scaffold is missing required file: {}",
-crates/skills/extension_manager/src/helpers.rs	external skill smoke test process failed: {}	"external skill smoke test process failed: {}",
-crates/skills/extension_manager/src/helpers.rs	external skill smoke test returned error without readable error_text	"external skill smoke test returned error without readable error_text".to_string(),
-crates/skills/extension_manager/src/helpers.rs	external skill smoke test returned invalid status	return Err("external skill smoke test returned invalid status".to_string());
-crates/skills/extension_manager/src/helpers.rs	external skill smoke test returned mismatched request_id	return Err("external skill smoke test returned mismatched request_id".to_string());
-crates/skills/extension_manager/src/helpers.rs	external skill smoke test returned non-JSON output: {}	"external skill smoke test returned non-JSON output: {}",
+crates/skills/extension_manager/src/helpers.rs	external skill skill.toml does not exist: {}	"external skill skill.toml does not exist: {}",
+crates/skills/extension_manager/src/helpers.rs	external skill staging parent is unavailable	.ok_or_else(|| "external skill staging parent is unavailable".to_string())?,
+crates/skills/extension_manager/src/helpers.rs	external skill verified install missing: {error}	.map_err(|error| format!("external skill verified install missing: {error}"))?;
+crates/skills/extension_manager/src/helpers.rs	fn respond(request: Request)	BuildAdapter::Cargo => Ok(("src/main.rs", "fn respond(request: Request)")),
+crates/skills/extension_manager/src/helpers.rs	func respond(input request)	BuildAdapter::Go => Ok(("main.go", "func respond(input request)")),
 crates/skills/extension_manager/src/helpers.rs	go is not available. install golang toolchain first	"go" => Err("go is not available. install golang toolchain first".to_string()),
 crates/skills/extension_manager/src/helpers.rs	invalid {label}: {value}; use snake_case with lowercase letters, digits, and underscores only	"invalid {label}: {value}; use snake_case with lowercase letters, digits, and underscores only"
+crates/skills/extension_manager/src/helpers.rs	manifest validation failed: {error}	.map_err(|error| format!("manifest validation failed: {error}"))?;
 crates/skills/extension_manager/src/helpers.rs	path cannot be empty	return Err("path cannot be empty".to_string());
 crates/skills/extension_manager/src/helpers.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/extension_manager/src/helpers.rs	python3 pip is not available. install python3-pip first	"python" => Err("python3 pip is not available. install python3-pip first".to_string()),
-crates/skills/extension_manager/src/helpers.rs	read Cargo.toml failed: {err}	.map_err(|err| format!("read Cargo.toml failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	read config.toml failed: {err}	.map_err(|err| format!("read config.toml failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	read config.toml failed: {err}	.map_err(|err| format!("read config.toml failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	read dir entry failed: {err}	let entry = entry.map_err(|err| format!("read dir entry failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	read dir failed: {err}	for entry in fs::read_dir(src).map_err(|err| format!("read dir failed: {err}"))? {
-crates/skills/extension_manager/src/helpers.rs	read existing scaffold file failed: {err}	.map_err(|err| format!("read existing scaffold file failed: {err}"))?;
+crates/skills/extension_manager/src/helpers.rs	read existing scaffold file failed: {error}	.map_err(|error| format!("read existing scaffold file failed: {error}"))?;
+crates/skills/extension_manager/src/helpers.rs	read external skill manifest failed: {error}	.map_err(|error| format!("read external skill manifest failed: {error}"))?;
 crates/skills/extension_manager/src/helpers.rs	read file type failed: {err}	.map_err(|err| format!("read file type failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	read skills_registry.toml failed: {err}	.map_err(|err| format!("read skills_registry.toml failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	refusing to overwrite non-scaffold file: {}	"refusing to overwrite non-scaffold file: {}",
@@ -1319,31 +1332,27 @@ crates/skills/extension_manager/src/helpers.rs	too many actions; limit is 12	ret
 crates/skills/extension_manager/src/helpers.rs	unsupported ecosystem: {other}; use python|node|rust|go	"unsupported ecosystem: {other}; use python|node|rust|go"
 crates/skills/extension_manager/src/helpers.rs	unsupported runtime: {other}; use python3|bash|sh|node	"unsupported runtime: {other}; use python3|bash|sh|node"
 crates/skills/extension_manager/src/helpers.rs	wait command failed ({program}): {err}	.map_err(|err| format!("wait command failed ({program}): {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write Cargo.toml failed: {err}	.map_err(|err| format!("write Cargo.toml failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write Cargo.toml failed: {err}	.map_err(|err| format!("write Cargo.toml failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write INTERFACE.md failed: {err}	.map_err(|err| format!("write INTERFACE.md failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write README.md failed: {err}	.map_err(|err| format!("write README.md failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	write command stdin failed ({program}): {err}	.map_err(|err| format!("write command stdin failed ({program}): {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write config.toml failed: {err}; rolled back prior workspace metadata changes	"write config.toml failed: {err}; rolled back prior workspace metadata changes"
-crates/skills/extension_manager/src/helpers.rs	write config.toml failed: {err}; rolled back release binary and left the skill disabled	"write config.toml failed: {err}; rolled back release binary and left the skill disabled"
+crates/skills/extension_manager/src/helpers.rs	write config.toml failed: {err}; rolled back installed package and left the skill disabled	"write config.toml failed: {err}; rolled back installed package and left the skill disabled"
+crates/skills/extension_manager/src/helpers.rs	write config.toml failed: {err}; rolled back prior registry metadata changes	"write config.toml failed: {err}; rolled back prior registry metadata changes"
 crates/skills/extension_manager/src/helpers.rs	write external skill INTERFACE.md failed: {err}	.map_err(|err| format!("write external skill INTERFACE.md failed: {err}"))?;
 crates/skills/extension_manager/src/helpers.rs	write external skill README.md failed: {err}	.map_err(|err| format!("write external skill README.md failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	write skills_registry.toml failed: {err}; rolled back prior workspace metadata changes	"write skills_registry.toml failed: {err}; rolled back prior workspace metadata changes"
+crates/skills/extension_manager/src/helpers.rs	write external skill source entrypoint failed: {err}	.map_err(|err| format!("write external skill source entrypoint failed: {err}"))?;
+crates/skills/extension_manager/src/helpers.rs	write skills_registry.toml failed: {err}	return Err(format!("write skills_registry.toml failed: {err}"));
 crates/skills/extension_manager/src/helpers.rs	write temporary fix file failed: {err}	.map_err(|err| format!("write temporary fix file failed: {err}"))?;
-crates/skills/extension_manager/src/helpers.rs	| `{action}` | `action` | yes | string | `{action}` | Fixed action selector. |	"| `{action}` | `action` | yes | string | `{action}` | Fixed action selector. |"
 crates/skills/extension_manager/src/main.rs	Compile and smoke-test the generated skill.	"Compile and smoke-test the generated skill.",
 crates/skills/extension_manager/src/main.rs	Create a bounded temporary-fix plan for this request.\n\nRequest:\n{}\n	"Create a bounded temporary-fix plan for this request.\\n\\nRequest:\\n{}\\n",
 crates/skills/extension_manager/src/main.rs	Create a reusable external skill scaffold plan for this request.\n\nRequest:\n{}\n	"Create a reusable external skill scaffold plan for this request.\\n\\nRequest:\\n{}\\n",
-crates/skills/extension_manager/src/main.rs	Enabled external skill `{skill_name}` in config and built its release binary. Reload skills or restart clawd before using it.	"Enabled external skill `{skill_name}` in config and built its release binary. Reload skills or restart clawd before using it."
+crates/skills/extension_manager/src/main.rs	Enabled external skill `{skill_name}` in config and installed its verified package. Reload skills or restart clawd before using it.	"Enabled external skill `{skill_name}` in config and installed its verified package. Reload skills or restart clawd before using it."
 crates/skills/extension_manager/src/main.rs	Fill INTERFACE.md before registering the skill.	"Fill INTERFACE.md before registering the skill.",
-crates/skills/extension_manager/src/main.rs	Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\n	"Implement the first reusable external skill scaffold for this request.\\n\\nRequest:\\n{}\\n\\nSkill name: {}\\nCapability summary: {}\\nActions: {}\\n",
+crates/skills/extension_manager/src/main.rs	Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\nBuild adapter: {}\nSource entrypoint: {}\n	"Implement the first reusable external skill scaffold for this request.\\n\\nRequest:\\n{}\\n\\nSkill name: {}\\nCapability summary: {}\\nActions: {}\\nBuild adapter: {}\\nSource entrypoint: {}\\n",
 crates/skills/extension_manager/src/main.rs	Keep human review in the loop before normal runtime use.	"Keep human review in the loop before normal runtime use."
 crates/skills/extension_manager/src/main.rs	Need an explicit extension mode before making changes.	"Need an explicit extension mode before making changes.",
 crates/skills/extension_manager/src/main.rs	OPENAI_API_KEY is empty	.ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
 crates/skills/extension_manager/src/main.rs	OPENAI_API_KEY is empty	.ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
 crates/skills/extension_manager/src/main.rs	OPENAI_API_KEY is empty	.ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
 crates/skills/extension_manager/src/main.rs	Recommend a permanent extension: scaffold a new isolated skill, keep it unregistered while testing, then register it after validation.	"Recommend a permanent extension: scaffold a new isolated skill, keep it unregistered while testing, then register it after validation.",
-crates/skills/extension_manager/src/main.rs	Registered external skill `{skill_name}`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it.	"Registered external skill `{skill_name}`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it."
+crates/skills/extension_manager/src/main.rs	Registered external skill `{skill_name}`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it.	"Registered external skill `{skill_name}`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it."
 crates/skills/extension_manager/src/main.rs	Reload skills via admin endpoint or restart clawd.	"Reload skills via admin endpoint or restart clawd.",
 crates/skills/extension_manager/src/main.rs	Reload skills via admin endpoint or restart clawd.	"Reload skills via admin endpoint or restart clawd.",
 crates/skills/extension_manager/src/main.rs	Reusable capability requested.	plan.rationale = "Reusable capability requested.".to_string();
@@ -1379,6 +1388,7 @@ crates/skills/extension_manager/src/main.rs	permanent extension capability_summa
 crates/skills/extension_manager/src/main.rs	permanent extension llm request failed: {e}	.map_err(|e| format!("permanent extension llm request failed: {e}"))?;
 crates/skills/extension_manager/src/main.rs	permanent extension plan shape invalid: {err}	.map_err(|err| format!("permanent extension plan shape invalid: {err}"))
 crates/skills/extension_manager/src/main.rs	permanent_extension_plan schema must be valid JSON	.expect("permanent_extension_plan schema must be valid JSON")
+crates/skills/extension_manager/src/main.rs	read external skill manifest failed: {error}	.map_err(|error| format!("read external skill manifest failed: {error}"))?;
 crates/skills/extension_manager/src/main.rs	resolve OPENAI_API_KEY failed: {err}	.map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
 crates/skills/extension_manager/src/main.rs	resolve OPENAI_API_KEY failed: {err}	.map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
 crates/skills/extension_manager/src/main.rs	resolve OPENAI_API_KEY failed: {err}	.map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
@@ -1489,7 +1499,6 @@ crates/skills/image_edit/src/main.rs	read image bytes failed: {err}	.map_err(|er
 crates/skills/image_edit/src/main.rs	read image failed: {err}	let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
 crates/skills/image_edit/src/main.rs	read image failed: {err}	let bytes = std::fs::read(path).map_err(|err| format!("read image failed: {err}"))?;
 crates/skills/image_edit/src/main.rs	resolver model returned no usable selected_index (output truncated): {}	"resolver model returned no usable selected_index (output truncated): {}",
-crates/skills/image_edit/src/main.rs	unsupported action; use edit|outpaint|restyle|add_remove	return Err("unsupported action; use edit|outpaint|restyle|add_remove".to_string());
 crates/skills/image_edit/src/main.rs	upload image to OSS failed: {err}	.map_err(|err| format!("upload image to OSS failed: {err}"))?;
 crates/skills/image_edit/src/main.rs	{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED	let text = format!("{preface}\\nFILE:{saved_path}\\nEPHEMERAL:IMAGE_SAVED");
 crates/skills/image_edit/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
@@ -2048,7 +2057,6 @@ crates/skills/system_basic/src/main.rs	read_range requires UTF-8 text: {}	"read_
 crates/skills/system_basic/src/main.rs	read_range requires a file, but target is a directory: {}	"read_range requires a file, but target is a directory: {}",
 crates/skills/system_basic/src/main.rs	read_range scan limit exceeded: {} bytes is greater than {}	"read_range scan limit exceeded: {} bytes is greater than {}",
 crates/skills/system_basic/src/main.rs	system info encode failed: {err}	.map_err(|err| SkillError::invalid_data(format!("system info encode failed: {err}")))?;
-crates/skills/system_basic/src/main.rs	unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime	"unknown action: {other}; allowed: info|runtime_status|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|read_artifact_range|compare_paths|path_batch_facts|diagnose_runtime"
 crates/skills/system_basic/src/main.rs	workspace_glance requires a directory: {}	"workspace_glance requires a directory: {}",
 crates/skills/system_basic/src/main.rs	{operation} failed for {path_text}: {err}	Self::new(kind, format!("{operation} failed for {path_text}: {err}")).with_extra(json!({
 crates/skills/system_basic/src/path_helpers.rs	file too large to compare content directly: {} bytes exceeds {}	"file too large to compare content directly: {} bytes exceeds {}",
@@ -2244,12 +2252,9 @@ crates/webd/src/main.rs	[webd].upstream is empty	anyhow::bail!("[webd].upstream 
 crates/webd/src/main.rs	build long-running reqwest client failed	.context("build long-running reqwest client failed")?;
 crates/webd/src/main.rs	build reqwest client failed	.context("build reqwest client failed")?;
 crates/webd/src/main.rs	content-type, x-rustclaw-key	HeaderValue::from_static("content-type, x-rustclaw-key"),
-crates/webd/src/main.rs	invalid JSON from clawd	Json(json!({ "ok": false, "error": "invalid JSON from clawd", "raw": text })),
-crates/webd/src/main.rs	invalid webd upstream URL	"invalid webd upstream URL",
-crates/webd/src/main.rs	missing user_key in clawd response	Json(json!({ "ok": false, "error": "missing user_key in clawd response" })),
-crates/webd/src/main.rs	proxy response build failed	"proxy response build failed",
 crates/webd/src/main.rs	request body over limit or read error: {}	error!("request body over limit or read error: {}", e);
-crates/webd/src/main.rs	request body too large for webd proxy	"request body too large for webd proxy",
+crates/webd/src/main.rs	webd UI static assets enabled at {}	info!("webd UI static assets enabled at {}", ui_dist_dir.display());
+crates/webd/src/main.rs	webd UI static assets missing: {}	warn!("webd UI static assets missing: {}", ui_index_path.display());
 crates/webd/src/main.rs	webd listening on {} -> upstream {}	"webd listening on {} -> upstream {}",
 crates/webd/src/main.rs	webd login upstream error: {}	error!("webd login upstream error: {}", e);
 crates/wechat-ilink/src/cdn.rs	cdn upload: missing x-encrypted-param	.ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;

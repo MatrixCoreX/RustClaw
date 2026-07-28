@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_cargo_build_environment
 LOG_ROOT="${LOG_ROOT:-$ROOT_DIR/scripts/regression_logs/ops_closed_loop}"
 SKIP_CHECK=0
 

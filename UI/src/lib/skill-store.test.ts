@@ -42,25 +42,26 @@ test("keeps only items assigned to the tools and skills other group", () => {
 test("keeps removed skills distinct from disabled installed skills", () => {
   const installedButDisabled = { ...item("weather", true, "information"), enabled: false };
   const removed = item("photo_organize", false, "media");
-  const missingRunner = {
+  const missingPackage = {
     ...item("invest_copy", false, "finance"),
     configured_installed: true,
-    runner_available: false,
-    installation_issue: "runner_missing" as const,
+    package_available: false,
+    installation_issue: "package_missing" as const,
   };
 
   assert.equal(skillStoreInstallState(installedButDisabled), "installed");
   assert.equal(skillStoreInstallState(removed), "not_installed");
-  assert.equal(skillStoreInstallState(missingRunner), "repair_required");
+  assert.equal(skillStoreInstallState(missingPackage), "repair_required");
 });
 
 test("renders structured store errors in the selected UI language", () => {
   const zh = (zhText: string) => zhText;
   const en = (_zhText: string, enText: string) => enText;
 
-  assert.match(skillStoreErrorMessage("skill_store_build_failed", zh), /编译失败/);
-  assert.match(skillStoreErrorMessage("skill_store_build_failed", en), /build failed/i);
+  assert.match(skillStoreErrorMessage("skill_store_install_failed", zh), /安装未完成/);
+  assert.match(skillStoreErrorMessage("skill_store_install_failed", en), /installation did not finish/i);
   assert.match(skillStoreErrorMessage("skill_store_operation_busy", en), /another skill/i);
+  assert.match(skillStoreErrorMessage("skill_store_network_approval_required", en), /network access/i);
   assert.match(skillStoreErrorMessage("future_error_code", en), /try again/i);
 });
 
@@ -69,9 +70,17 @@ test("restores the active skill action from server catalog state after refresh",
     items: [],
     uninstalled_skill_names: [],
     active_operation: {
+      schema_version: 1,
+      operation_id: "8bb19ae2-e0ab-4dab-b0a4-cbdd31112ccc",
       skill_name: "weather",
       action: "install",
-      started_ts: 1_790_000_000,
+      status: "running",
+      stage: "build",
+      created_at_unix: 1_790_000_000,
+      updated_at_unix: 1_790_000_001,
+      heartbeat_at_unix: 1_790_000_001,
+      cancel_requested: false,
+      stages: [{ stage: "queued", recorded_at_unix: 1_790_000_000 }],
     },
   };
 

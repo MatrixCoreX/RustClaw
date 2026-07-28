@@ -1,0 +1,7 @@
+.git
+target
+release-bin
+UI/node_modules
+services/**/node_modules
+*.tar.gz
+*.zip

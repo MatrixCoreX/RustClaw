@@ -75,6 +75,8 @@ fn invalid_flag_combo_returns_structured_error_kind() {
         err.extra().get("published").and_then(Value::as_bool),
         Some(false)
     );
+    assert_eq!(err.extra()["error_code"], "invalid_input");
+    assert_eq!(err.extra()["message_key"], "skill.x.invalid_input");
 }
 
 #[test]

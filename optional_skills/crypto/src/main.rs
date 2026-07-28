@@ -100,6 +100,7 @@ fn crypto_config_error(
         "exchange": exchange.trim(),
         "action": action.trim(),
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": message_key,
         "recoverable": true,
         "status_code": error_kind,
@@ -155,6 +156,11 @@ fn crypto_error_extra_from_text(error_text: &str) -> Option<Value> {
     Some(crypto_error_extra_with_details(&error_kind, Some(details)))
 }
 
+fn crypto_error_extra_for_response(error_text: &str) -> Value {
+    crypto_error_extra_from_text(error_text)
+        .unwrap_or_else(|| crypto_error_extra("execution_failed"))
+}
+
 fn crypto_error_extra(error_kind: &str) -> Value {
     crypto_error_extra_with_details(error_kind, None)
 }
@@ -165,6 +171,7 @@ fn crypto_error_extra_with_details(error_kind: &str, details: Option<Value>) -> 
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     });
@@ -477,7 +484,7 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: crypto_error_extra_from_text(&err),
+                    extra: Some(crypto_error_extra_for_response(&err)),
                     error_text: Some(crypto_error_text_for_response(&err)),
                 },
             },

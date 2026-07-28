@@ -1,0 +1,97 @@
+name: Polyglot Skill macOS CI
+
+"on":
+  pull_request:
+    paths:
+      - ".github/workflows/macos-polyglot-skill-ci.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "configs/skills_registry.toml"
+      - "crates/skill-runner/**"
+      - "crates/skill-sdk/**"
+      - "crates/skills/**/skill.toml"
+      - "docs/schemas/**"
+      - "optional_skills/**/skill.toml"
+      - "scripts/check_on_demand_skill_builds.py"
+      - "scripts/check_polyglot_skill_contracts.py"
+      - "scripts/skill_store_packages.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/macos-polyglot-skill-ci.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "configs/skills_registry.toml"
+      - "crates/skill-runner/**"
+      - "crates/skill-sdk/**"
+      - "crates/skills/**/skill.toml"
+      - "docs/schemas/**"
+      - "optional_skills/**/skill.toml"
+      - "scripts/check_on_demand_skill_builds.py"
+      - "scripts/check_polyglot_skill_contracts.py"
+      - "scripts/skill_store_packages.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  polyglot-skill-macos:
+    name: Resolver, installer, and process supervision
+    runs-on: macos-14
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TERM_COLOR: always
+      RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Validate manifest and build inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_polyglot_skill_contracts.py --self-test
+          python3 scripts/check_polyglot_skill_contracts.py --require-all
+          python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_cross_platform_contracts.py
+
+      - name: Test SDK and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p rustclaw-skill-sdk
+          cargo test -p skill-runner
+
+      - name: Check shared runtime integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check -p claw-core -p clawd -p skill-runner

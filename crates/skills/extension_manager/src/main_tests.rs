@@ -54,6 +54,7 @@ fn scaffold_writes_expected_files() {
         .expect("scaffold should succeed");
     let skill_dir = root.join("external_skills").join("demo_skill");
     assert!(skill_dir.join("README.md").exists());
+    assert!(skill_dir.join("skill.toml").exists());
     assert!(skill_dir.join("Cargo.toml").exists());
     assert!(skill_dir.join("INTERFACE.md").exists());
     assert!(skill_dir.join("src/main.rs").exists());
@@ -65,7 +66,7 @@ fn scaffold_writes_expected_files() {
 fn scaffolded_skill_is_validate_ready_for_single_action() {
     let _guard = WORKSPACE_ROOT_ENV_LOCK.lock().expect("env lock");
     let root = temp_test_root();
-    write_repo_baseline(&root, &["external_skills/demo_skill"], true);
+    write_repo_baseline(&root, &[], true);
     let args = json!({
         "skill_name": "demo_skill",
         "capability_summary": "Return a short success text for action ping.",
@@ -78,7 +79,9 @@ fn scaffolded_skill_is_validate_ready_for_single_action() {
     let report = validate_external_skill(&root, "demo_skill", &["ping".to_string()])
         .expect("default scaffold should validate");
     restore_env_var("CARGO_NET_OFFLINE", previous_offline);
-    assert!(report.cargo_check_ok);
+    assert!(report.manifest_valid);
+    assert!(report.build_ok);
+    assert_eq!(report.adapter, "cargo");
     assert!(report.smoke_test_ok);
     assert_eq!(report.smoke_status, "ok");
 
@@ -259,12 +262,12 @@ fn parse_external_skill_implementation_accepts_json_object() {
     let raw = r##"{
             "readme_md":"# demo\n\nGenerated.",
             "interface_md":"# demo Interface Spec\n\n## Capability Summary\n- demo",
-            "main_rs":"fn main() {}"
+            "entrypoint_source":"fn main() {}"
         }"##;
     let implementation =
         parse_external_skill_implementation_from_text(raw).expect("parse implementation");
     assert!(implementation.readme_md.contains("Generated"));
-    assert!(implementation.main_rs.contains("fn main"));
+    assert!(implementation.entrypoint_source.contains("fn main"));
 }
 
 #[test]
@@ -285,7 +288,7 @@ fn parse_external_skill_implementation_rejects_extra_fields() {
     let raw = r##"{
             "readme_md":"# demo\n\nGenerated.",
             "interface_md":"# demo Interface Spec\n\n## Capability Summary\n- demo",
-            "main_rs":"fn main() {}",
+            "entrypoint_source":"fn main() {}",
             "unexpected":"drift"
         }"##;
     let err = parse_external_skill_implementation_from_text(raw).expect_err("schema should reject");
@@ -307,7 +310,7 @@ fn implement_external_skill_writes_generated_files() {
         readme_md: "# demo_skill\n\nImplemented.".to_string(),
         interface_md: "# demo_skill Interface Spec\n\n## Capability Summary\n- Implemented."
             .to_string(),
-        main_rs: "fn main() {}".to_string(),
+        entrypoint_source: "fn main() {}".to_string(),
     };
     let written = write_external_skill_implementation(
         &skill_dir,
@@ -328,8 +331,57 @@ fn implement_external_skill_writes_generated_files() {
     );
     assert_eq!(
         fs::read_to_string(skill_dir.join("src/main.rs")).expect("read main"),
-        implementation.main_rs
+        implementation.entrypoint_source
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn implement_external_skill_writes_manifest_selected_python_entrypoint() {
+    let root = temp_test_root();
+    let args = json!({
+        "skill_name": "python_demo_skill",
+        "capability_summary": "Return a small structured result.",
+        "actions": ["inspect"],
+        "implementation_language": "python"
+    });
+    scaffold_external_skill(root.clone(), args.as_object().unwrap()).expect("python scaffold");
+
+    let skill_dir = root.join("external_skills").join("python_demo_skill");
+    let implementation = ExternalSkillImplementation {
+        readme_md: "# python_demo_skill\n\nImplemented.\n".to_string(),
+        interface_md:
+            "# python_demo_skill Interface Spec\n\n## Capability Summary\n- Implemented.\n"
+                .to_string(),
+        entrypoint_source: r#"import json
+import sys
+
+def respond(request: dict) -> dict:
+    return {"request_id": request["request_id"], "status": "ok", "text": "", "error_text": None}
+
+request = json.loads(sys.stdin.readline())
+print(json.dumps(respond(request), separators=(",", ":")))
+"#
+        .to_string(),
+    };
+
+    let written = write_external_skill_implementation(
+        &skill_dir,
+        "python_demo_skill",
+        "Return a small structured result.",
+        &["inspect".to_string()],
+        &implementation,
+    )
+    .expect("python implementation should be written");
+
+    assert_eq!(written.len(), 3);
+    assert_eq!(
+        fs::read_to_string(skill_dir.join("src/main.py")).expect("read Python entrypoint"),
+        implementation.entrypoint_source
+    );
+    assert!(!skill_dir.join("src/main.rs").exists());
+    assert!(!skill_dir.join("Cargo.toml").exists());
+    assert!(!root.join("Cargo.toml").exists());
     let _ = fs::remove_dir_all(root);
 }
 
@@ -349,7 +401,7 @@ fn implement_external_skill_refuses_to_overwrite_non_scaffold_files() {
         readme_md: "# demo_skill\n\nImplemented.".to_string(),
         interface_md: "# demo_skill Interface Spec\n\n## Capability Summary\n- Implemented."
             .to_string(),
-        main_rs: "fn main() {}".to_string(),
+        entrypoint_source: "fn main() {}".to_string(),
     };
     let err = write_external_skill_implementation(
         &skill_dir,
@@ -364,42 +416,18 @@ fn implement_external_skill_refuses_to_overwrite_non_scaffold_files() {
 }
 
 #[test]
-fn parse_single_json_line_accepts_single_line_object() {
-    let parsed = parse_single_json_line(r#"{"request_id":"demo","status":"ok","text":"done"}"#)
-        .expect("single json line should parse");
-    assert_eq!(parsed["status"], "ok");
-}
-
-#[test]
-fn parse_single_json_line_rejects_multi_line_noise() {
-    let parsed = parse_single_json_line(
-        "warning: build output\n{\"request_id\":\"demo\",\"status\":\"ok\",\"text\":\"done\"}",
-    );
-    assert!(parsed.is_none());
-}
-
-#[test]
-fn add_workspace_member_text_inserts_external_skill_once() {
-    let raw = "[workspace]\nmembers = [\n    \"crates/clawd\",\n]\n";
-    let (updated, changed) =
-        add_workspace_member_text(raw, "external_skills/demo_skill").expect("insert member");
-    assert!(changed);
-    assert!(updated.contains("\"external_skills/demo_skill\","));
-    let (_, changed_again) =
-        add_workspace_member_text(&updated, "external_skills/demo_skill").expect("idempotent");
-    assert!(!changed_again);
-}
-
-#[test]
 fn add_registry_entry_text_appends_conservative_runner_entry() {
     let raw = "[[skills]]\nname = \"clawd\"\n";
-    let (updated, changed) = add_registry_entry_text(raw, "demo_skill");
+    let (updated, changed) =
+        add_registry_entry_text(raw, "demo_skill", "external_skills/demo_skill/skill.toml");
     assert!(changed);
     assert!(updated.contains("name = \"demo_skill\""));
     assert!(updated.contains("planner_kind = \"skill\""));
     assert!(updated.contains("description = \"External skill demo_skill"));
     assert!(updated.contains("semantic_tags = []"));
     assert!(updated.contains("requires_confirmation = true"));
+    assert!(updated.contains("package_manifest = \"external_skills/demo_skill/skill.toml\""));
+    assert!(!updated.contains("install_receipt_required"));
 }
 
 #[test]
@@ -417,16 +445,17 @@ fn upsert_skill_switches_line_updates_existing_switches() {
 #[test]
 fn validate_external_skill_runs_sync_check_and_smoke_test() {
     let root = temp_test_root();
-    write_repo_baseline(&root, &["external_skills/demo_skill"], true);
+    write_repo_baseline(&root, &[], true);
     write_protocol_smoke_skill(&root, "demo_skill");
 
     let report = validate_external_skill(&root, "demo_skill", &["inspect".to_string()])
         .expect("validate should succeed");
     assert!(report.synced_docs);
-    assert!(report.cargo_check_ok);
+    assert!(report.manifest_valid);
+    assert!(report.build_ok);
     assert!(report.smoke_test_ok);
     assert_eq!(report.smoke_status, "ok");
-    assert_eq!(report.smoke_text, "smoke ok");
+    assert_eq!(report.adapter, "cargo");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -435,15 +464,16 @@ fn validate_external_skill_runs_sync_check_and_smoke_test() {
 fn register_external_skill_updates_workspace_registry_and_switches() {
     let root = temp_test_root();
     write_repo_baseline(&root, &[], false);
+    write_protocol_smoke_skill(&root, "demo_skill");
+    install_external_skill(&root, "demo_skill").expect("install verified package");
 
     let first = register_external_skill(&root, "demo_skill").expect("register should succeed");
-    assert!(first.workspace_member_added);
     assert!(first.registry_entry_added);
     assert!(first.switch_recorded_enabled);
     assert!(!first.matrix_admission_eligible);
 
     let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
-    assert!(cargo_toml.contains("\"external_skills/demo_skill\","));
+    assert!(!cargo_toml.contains("\"external_skills/demo_skill\","));
 
     let registry = fs::read_to_string(root.join("configs/skills_registry.toml"))
         .expect("read skills_registry.toml");
@@ -457,7 +487,6 @@ fn register_external_skill_updates_workspace_registry_and_switches() {
 
     let second =
         register_external_skill(&root, "demo_skill").expect("second register should succeed");
-    assert!(!second.workspace_member_added);
     assert!(!second.registry_entry_added);
     assert!(!second.switch_recorded_enabled);
     assert!(!second.matrix_admission_eligible);
@@ -469,6 +498,8 @@ fn register_external_skill_updates_workspace_registry_and_switches() {
 fn register_external_skill_rolls_back_when_config_write_fails() {
     let root = temp_test_root();
     write_repo_baseline(&root, &[], false);
+    write_protocol_smoke_skill(&root, "demo_skill");
+    install_external_skill(&root, "demo_skill").expect("install verified package");
 
     let config_path = root.join("configs/config.toml");
     let original_config = fs::read_to_string(&config_path).expect("read config");
@@ -480,7 +511,7 @@ fn register_external_skill_rolls_back_when_config_write_fails() {
 
     let err = register_external_skill(&root, "demo_skill")
         .expect_err("register should fail when config write fails");
-    assert!(err.contains("rolled back prior workspace metadata changes"));
+    assert!(err.contains("rolled back prior registry metadata changes"));
 
     let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
     assert!(!cargo_toml.contains("\"external_skills/demo_skill\","));
@@ -499,7 +530,7 @@ fn register_external_skill_rolls_back_when_config_write_fails() {
 fn execute_register_action_prefers_workspace_root_env() {
     let _guard = WORKSPACE_ROOT_ENV_LOCK.lock().expect("env lock");
     let root = temp_test_root();
-    write_repo_baseline(&root, &[], false);
+    write_repo_baseline(&root, &[], true);
     write_protocol_smoke_skill(&root, "env_demo_skill");
 
     let previous = env::var("WORKSPACE_ROOT").ok();
@@ -514,9 +545,10 @@ fn execute_register_action_prefers_workspace_root_env() {
 
     assert_eq!(extra["skill_name"], "env_demo_skill");
     assert_eq!(extra["default_enabled"], true);
-    assert_eq!(extra["release_build_ok"], true);
+    assert_eq!(extra["install_ok"], true);
+    assert_eq!(extra["adapter"], "cargo");
     let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
-    assert!(cargo_toml.contains("\"external_skills/env_demo_skill\","));
+    assert!(!cargo_toml.contains("\"external_skills/env_demo_skill\","));
     let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");
     assert!(config.contains("env_demo_skill = true"));
 
@@ -525,17 +557,18 @@ fn execute_register_action_prefers_workspace_root_env() {
 }
 
 #[test]
-fn enable_external_skill_builds_release_binary_and_enables_switch() {
+fn enable_external_skill_installs_verified_package_and_enables_switch() {
     let root = temp_test_root();
-    write_repo_baseline(&root, &["external_skills/demo_skill"], false);
+    write_repo_baseline(&root, &[], false);
     write_protocol_smoke_skill(&root, "demo_skill");
 
     let report =
         enable_external_skill(&root, "demo_skill").expect("enable should build successfully");
     assert!(report.switch_enabled);
-    assert!(report.release_build_ok);
+    assert!(report.install_ok);
+    assert_eq!(report.adapter, "cargo");
     assert!(report.reload_required);
-    assert!(PathBuf::from(&report.release_binary_path).exists());
+    assert!(PathBuf::from(&report.install_root).exists());
 
     let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");
     assert!(config.contains("demo_skill = true"));
@@ -550,7 +583,7 @@ fn enable_external_skill_builds_release_binary_and_enables_switch() {
 #[test]
 fn enable_external_skill_ignores_workspace_level_patch_noise() {
     let root = temp_test_root();
-    write_repo_baseline(&root, &["external_skills/demo_skill"], false);
+    write_repo_baseline(&root, &[], false);
     let cargo_toml_path = root.join("Cargo.toml");
     let mut cargo_toml = fs::read_to_string(&cargo_toml_path).expect("read Cargo.toml");
     cargo_toml.push_str("\n[patch.crates-io]\nopen-lark = { path = \"patches/open-lark\" }\n");
@@ -559,16 +592,16 @@ fn enable_external_skill_ignores_workspace_level_patch_noise() {
 
     let report = enable_external_skill(&root, "demo_skill")
         .expect("enable should build from isolated staging dir");
-    assert!(report.release_build_ok);
-    assert!(PathBuf::from(&report.release_binary_path).exists());
+    assert!(report.install_ok);
+    assert!(PathBuf::from(&report.install_root).exists());
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn enable_external_skill_rolls_back_binary_when_config_write_fails() {
+fn enable_external_skill_rolls_back_package_when_config_write_fails() {
     let root = temp_test_root();
-    write_repo_baseline(&root, &["external_skills/demo_skill"], false);
+    write_repo_baseline(&root, &[], false);
     write_protocol_smoke_skill(&root, "demo_skill");
 
     let config_path = root.join("configs/config.toml");
@@ -581,14 +614,15 @@ fn enable_external_skill_rolls_back_binary_when_config_write_fails() {
 
     let err = enable_external_skill(&root, "demo_skill")
         .expect_err("enable should fail when config write fails");
-    assert!(err.contains("rolled back release binary"));
+    assert!(err.contains("rolled back installed package"));
 
     let config = fs::read_to_string(&config_path).expect("read config after failure");
     assert_eq!(config, original_config);
     assert!(!config.contains("demo_skill = true"));
 
-    let binary_path = root.join("target/release/demo-skill-skill");
-    assert!(!binary_path.exists());
+    assert!(!root
+        .join("data/skill-packages/demo_skill/current.json")
+        .exists());
 
     let _ = fs::remove_dir_all(root);
 }
@@ -609,7 +643,7 @@ fn external_skill_flow_reaches_enable_after_scaffold_and_implement() {
     let implementation = ExternalSkillImplementation {
             readme_md: "# flow_demo_skill\n\nGenerated ping demo.\n".to_string(),
             interface_md: "# flow_demo_skill Interface Spec\n\n## Capability Summary\n- Reply to ping with a short grounded success message.\n\n## Actions\n### ping\n- Required args: none\n- Optional args: none\n".to_string(),
-            main_rs: protocol_smoke_main_rs("flow enabled ok"),
+            entrypoint_source: protocol_smoke_main_rs("flow enabled ok"),
         };
     write_external_skill_implementation(
         &skill_dir,
@@ -631,23 +665,24 @@ fn external_skill_flow_reaches_enable_after_scaffold_and_implement() {
             panic!("validate should succeed: {err}");
         }
     };
-    assert!(validation.cargo_check_ok);
+    assert!(validation.manifest_valid);
+    assert!(validation.build_ok);
     assert!(validation.smoke_test_ok);
 
+    install_external_skill(&root, "flow_demo_skill").expect("install verified package");
     let registration =
         register_external_skill(&root, "flow_demo_skill").expect("register should succeed");
-    assert!(registration.workspace_member_added);
     assert!(registration.registry_entry_added);
     assert!(registration.switch_recorded_enabled);
 
     let enable_result = enable_external_skill(&root, "flow_demo_skill");
     restore_env_var("CARGO_NET_OFFLINE", previous_offline);
     let enable = enable_result.expect("enable should succeed");
-    assert!(enable.release_build_ok);
-    assert!(PathBuf::from(&enable.release_binary_path).exists());
+    assert!(enable.install_ok);
+    assert!(PathBuf::from(&enable.install_root).exists());
 
     let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
-    assert!(cargo_toml.contains("\"external_skills/flow_demo_skill\","));
+    assert!(!cargo_toml.contains("\"external_skills/flow_demo_skill\","));
     let registry =
         fs::read_to_string(root.join("configs/skills_registry.toml")).expect("read registry");
     assert!(registry.contains("name = \"flow_demo_skill\""));
@@ -694,34 +729,18 @@ fn write_repo_baseline(root: &Path, workspace_members: &[&str], with_sync_script
 }
 
 fn write_protocol_smoke_skill(root: &Path, skill_name: &str) {
-    let binary_name = format!("{}-skill", skill_name.replace('_', "-"));
+    let destination = root.join("external_skills").join(skill_name);
+    rustclaw_skill_sdk::scaffold_skill(&rustclaw_skill_sdk::ScaffoldRequest {
+        destination: destination.clone(),
+        skill_name: skill_name.to_string(),
+        capability_summary: "Protocol smoke-test external skill.".to_string(),
+        actions: vec!["inspect".to_string()],
+        implementation_language: rustclaw_skill_sdk::ImplementationLanguage::Rust,
+        source_root: format!("external_skills/{skill_name}"),
+    })
+    .expect("write protocol smoke scaffold");
     write_text(
-        &root
-            .join("external_skills")
-            .join(skill_name)
-            .join("README.md"),
-        &format!("# {skill_name}\n\nProtocol smoke-test external skill.\n"),
-    );
-    write_text(
-            &root
-                .join("external_skills")
-                .join(skill_name)
-                .join("INTERFACE.md"),
-            &format!(
-                "# {skill_name} Interface Spec\n\n## Capability Summary\n- Protocol smoke-test external skill.\n\n## Actions\n- `inspect`: smoke action.\n"
-            ),
-        );
-    write_text(
-            &root.join("external_skills").join(skill_name).join("Cargo.toml"),
-            &format!(
-                "[package]\nname = \"{binary_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"{binary_name}\"\npath = \"src/main.rs\"\n"
-            ),
-        );
-    write_text(
-        &root
-            .join("external_skills")
-            .join(skill_name)
-            .join("src/main.rs"),
+        &destination.join("src/main.rs"),
         &protocol_smoke_main_rs("smoke ok"),
     );
 }

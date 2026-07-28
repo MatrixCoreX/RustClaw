@@ -35,6 +35,7 @@ component_start_init() {
     # shellcheck source=/dev/null
     source "$runtime_env_script"
   fi
+  configure_platform_command_path
 
   COMPONENT_CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-$COMPONENT_ROOT/configs/config.toml}"
   case "$COMPONENT_CONFIG_PATH" in

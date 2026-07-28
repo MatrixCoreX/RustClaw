@@ -33,6 +33,7 @@ pages with previous/next navigation:
 | CLI exec and replay | [clawcli Exec And Replay](clawcli_exec_replay.md) | [clawcli Exec 与 Replay](clawcli_exec_replay.zh-CN.md) |
 | Code index | [Code Index Contract](code_index_contract.md) | [代码索引合同](code_index_contract.zh-CN.md) |
 | Cross-platform runtime | [Cross-Platform Contract](cross_platform_contract.md) | [跨平台运行时合同](cross_platform_contract.zh-CN.md) |
+| Polyglot Skill SDK | [Skill SDK Contract](skill_sdk_contract.md) | [技能 SDK 合同](skill_sdk_contract.zh-CN.md) |
 
 ## Release / 发布
 

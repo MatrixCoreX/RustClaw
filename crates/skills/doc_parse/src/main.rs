@@ -199,6 +199,10 @@ fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
     let text_length_chars = payload.text.chars().count();
     let content_excerpt = bounded_content_excerpt(&payload.text, EXTRA_CONTENT_EXCERPT_CHARS);
     let content_excerpt_truncated = text_length_chars > EXTRA_CONTENT_EXCERPT_CHARS;
+    let message_key = payload
+        .error_code
+        .as_ref()
+        .map(|code| format!("skill.doc_parse.{}", code.to_ascii_lowercase()));
 
     json!({
         "action": "parse_doc",
@@ -220,6 +224,7 @@ fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
             "page_range_applied": &metadata.page_range_applied,
         })),
         "error_code": &payload.error_code,
+        "message_key": message_key,
     })
 }
 

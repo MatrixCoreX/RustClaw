@@ -423,19 +423,22 @@ load_cargo_metadata() {
 
 workspace_bins_raw() {
 	load_cargo_metadata
-	local on_demand_packages
-	on_demand_packages="$(python3 "${SCRIPT_DIR}/scripts/skill_store_packages.py" --format packages)"
+	local build_excluded_packages
+	build_excluded_packages="$(
+		python3 "${SCRIPT_DIR}/scripts/skill_store_packages.py" \
+			--scope build-excludes --target "${TARGET}" --format packages
+	)"
 	RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" \
-		RUSTCLAW_ON_DEMAND_PACKAGES="${on_demand_packages}" python3 - <<'PY'
+		RUSTCLAW_BUILD_EXCLUDED_PACKAGES="${build_excluded_packages}" python3 - <<'PY'
 import json
 import os
 
 with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
-on_demand_packages = {
+build_excluded_packages = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
+    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = set()
@@ -443,7 +446,7 @@ bins = set()
 for pkg in data.get("packages", []):
     if pkg.get("id") not in workspace_members:
         continue
-    if pkg.get("name") in on_demand_packages:
+    if pkg.get("name") in build_excluded_packages:
         continue
     for target in pkg.get("targets", []):
         if "bin" in target.get("kind", []):
@@ -761,6 +764,7 @@ main() {
 	fi
 
 	prepare_runtime_assets
+	configure_cargo_build_environment
 
 	case "${MODE}" in
 	all)

@@ -117,6 +117,7 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     });

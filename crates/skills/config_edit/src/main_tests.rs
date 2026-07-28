@@ -207,6 +207,35 @@ fn guard_config_does_not_invent_missing_full_access_risk() {
 }
 
 #[test]
+fn guard_config_reports_obsolete_locator_limits_as_deprecations() {
+    let root = temp_root("guard_deprecated_locator_limits");
+    let path = root.join("configs/config.toml");
+    std::fs::write(
+        &path,
+        "[routing]\nlocator_scan_max_depth = 2\nlocator_scan_max_files = 800\n",
+    )
+    .expect("write config");
+
+    let out = guard_config(
+        &root,
+        json!({"path": "configs/config.toml", "format": "toml"})
+            .as_object()
+            .expect("object"),
+        false,
+    )
+    .expect("guard");
+
+    assert_eq!(out["deprecation_count"], 2);
+    assert!(out["deprecations"]
+        .as_array()
+        .is_some_and(|items| items.iter().all(|item| {
+            item["code"] == "obsolete_filesystem_scan_limit"
+                && item["message_key"] == "config.deprecated.filesystem_scan_limit"
+        })));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn guard_config_reports_structured_registry_risks() {
     let root = temp_root("guard_registry");
     let path = root.join("configs/skills_registry.toml");

@@ -56,7 +56,6 @@ For a prompt at `prompts/layers/overlays/<name>.md`:
 | `schedule_intent.schema.json`   | `prompts/layers/overlays/schedule_intent_prompt.md` | `crates/clawd/src/runtime/types.rs::ScheduleIntentOutput` + `crates/clawd/src/schedule_service.rs` (drift test: `schedule_intent_schema_drift`) |
 | `long_term_summary.schema.json` | `prompts/layers/overlays/long_term_summary_prompt.md` | `crates/clawd/src/memory/service.rs::LongTermRefreshLlmOut` + memory fact candidate parser (drift test: `long_term_summary_schema_drift`) |
 | `context_compaction.schema.json` | `prompts/layers/overlays/context_compaction_prompt.md` | `crates/clawd/src/agent_engine/context_compaction.rs::run_model_assisted_context_compaction` + strict normalizer |
-| `voice_mode_intent.schema.json` | `prompts/layers/overlays/voice_mode_intent_prompt.md` | `crates/claw-core/src/hard_rules/voice_mode.rs::VoiceModeIntentDecision` + `crates/telegramd/src/main.rs` (drift test: `voice_mode_intent_schema_drift`) |
 | `image_reference_resolver.schema.json` | `prompts/layers/overlays/image_reference_resolver_prompt.md` | `crates/skills/image_edit/src/main.rs::parse_llm_selected_index` |
 | `language_infer.schema.json` | `prompts/layers/overlays/language_infer_prompt.md` | `crates/skills/image_vision/src/main.rs::parse_language_choice_from_llm` |
 | `stock_alias_choice.schema.json` | inline JSON contract in `optional_skills/stock/src/main.rs::choose_candidate_via_llm` | `optional_skills/stock/src/main.rs::parse_llm_alias_response` |
@@ -75,9 +74,7 @@ hot-path JSON prompts before deserializing into Rust structs, giving more
 actionable failures such as "`mode=oops_status` not in declared enum" instead
 of opaque parser errors. The validator intentionally covers only the subset of
 JSON Schema features used by these in-repo prompt schemas. Parser-backed paths
-outside `clawd` can still consume the same schemas directly; for example
-`claw_core::hard_rules::voice_mode` now validates `voice_mode_intent` JSON
-against its authored schema before Telegram mode-switch routing accepts it.
+outside `clawd` can still consume the same schemas directly.
 
 ## Skill-side parsers
 

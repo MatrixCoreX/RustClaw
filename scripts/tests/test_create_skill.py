@@ -20,13 +20,14 @@ class CreateSkillTest(unittest.TestCase):
             timeout=30,
             output_kind="text",
             enabled=True,
-            runner_name="",
             capabilities=[],
             on_demand=True,
         )
 
         self.assertIn('install_mode = "on_demand"', entry)
-        self.assertIn('install_package = "sample-optional-skill"', entry)
+        self.assertIn(
+            'package_manifest = "optional_skills/sample_optional/skill.toml"', entry
+        )
 
     def test_core_scaffold_omits_skill_store_install_metadata(self) -> None:
         entry = registry_entry_text(
@@ -35,13 +36,14 @@ class CreateSkillTest(unittest.TestCase):
             timeout=30,
             output_kind="text",
             enabled=True,
-            runner_name="",
             capabilities=[],
             on_demand=False,
         )
 
         self.assertNotIn("install_mode", entry)
-        self.assertNotIn("install_package", entry)
+        self.assertIn(
+            'package_manifest = "crates/skills/sample_core/skill.toml"', entry
+        )
 
 
 if __name__ == "__main__":

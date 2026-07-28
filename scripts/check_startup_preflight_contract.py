@@ -42,6 +42,16 @@ def build_fixture(root: Path) -> Path:
         executable=True,
     )
     write(
+        root / "scripts/shell_compat.sh",
+        (ROOT / "scripts/shell_compat.sh").read_text(encoding="utf-8"),
+        executable=True,
+    )
+    write(
+        root / "scripts/skill_store_packages.py",
+        "#!/usr/bin/env python3\n",
+        executable=True,
+    )
+    write(
         root / "stop-rustclaw.sh",
         '#!/usr/bin/env bash\nprintf "stopped\\n" > "$PWD/stop-called"\n',
         executable=True,
@@ -63,6 +73,11 @@ def build_fixture(root: Path) -> Path:
     write(
         root / "target/release/skill-runner",
         "#!/usr/bin/env bash\nexit 0\n",
+        executable=True,
+    )
+    write(
+        root / "target/release/rustclaw-skill",
+        "#!/usr/bin/env bash\nprintf '{\"ok\":true}\\n'\n",
         executable=True,
     )
     return script

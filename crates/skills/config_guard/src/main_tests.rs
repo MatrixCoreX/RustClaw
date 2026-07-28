@@ -87,3 +87,24 @@ fn execute_missing_file_returns_structured_error_kind() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn execute_reports_obsolete_locator_limits_as_structured_deprecations() {
+    let root = temp_root("deprecated_locator_limits");
+    let path = root.join("config.toml");
+    std::fs::write(
+        &path,
+        "[routing]\nlocator_scan_max_depth = 2\nlocator_scan_max_files = 800\n",
+    )
+    .expect("write config");
+    let out = execute(json!({ "path": path.display().to_string() })).expect("execute");
+
+    assert_eq!(out["deprecation_count"], 2);
+    assert!(out["deprecations"]
+        .as_array()
+        .is_some_and(|items| items.iter().all(|item| {
+            item["code"] == "obsolete_filesystem_scan_limit"
+                && item["message_key"] == "config.deprecated.filesystem_scan_limit"
+        })));
+    let _ = std::fs::remove_dir_all(root);
+}

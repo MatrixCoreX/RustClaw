@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/shell_compat.sh"
+configure_platform_command_path
 
 CLAWD_BIN="${CLAWD_BIN:-${ROOT_DIR}/target/debug/clawd}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
@@ -46,6 +49,7 @@ PY
 
 ensure_binary() {
   if [[ "$AUTO_BUILD" == "1" ]]; then
+    configure_cargo_build_environment
     (cd "$ROOT_DIR" && cargo build -p clawd)
   fi
   [[ -x "$CLAWD_BIN" ]] || {

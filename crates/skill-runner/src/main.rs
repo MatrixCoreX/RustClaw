@@ -10,12 +10,19 @@
 //!   再 `wait_with_output` 时\"子进程写满 pipe buffer 阻塞\"的潜在死锁。
 //! - 单进程串行处理多次请求语义保持不变（每条 stdin 行 = 一次请求）。
 
+use std::collections::BTreeMap;
+#[cfg(test)]
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
+use rustclaw_skill_sdk::{
+    prepare_sandboxed_command, validate_response_line, LauncherKind, ProtocolResponse,
+    ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec, SkillRuntimeResolver,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +68,42 @@ struct ChildSkillResponse {
     error_text: Option<String>,
 }
 
+#[derive(Debug)]
+struct ExecutionFailure {
+    error_code: &'static str,
+    detail: String,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    timed_out: bool,
+    truncated: bool,
+    retryable: bool,
+}
+
+impl ExecutionFailure {
+    fn new(error_code: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            error_code,
+            detail: detail.into(),
+            exit_code: None,
+            signal: None,
+            timed_out: false,
+            truncated: false,
+            retryable: false,
+        }
+    }
+
+    fn retryable(mut self, retryable: bool) -> Self {
+        self.retryable = retryable;
+        self
+    }
+}
+
+#[derive(Debug)]
+struct ResponseParseFailure {
+    error_code: String,
+    detail: String,
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
     let stdin = tokio::io::stdin();
@@ -91,7 +134,11 @@ async fn main() -> anyhow::Result<()> {
                 platform: Some(std::env::consts::OS.to_string()),
                 exit_code: None,
                 validation: None,
-                extra: None,
+                extra: Some(serde_json::json!({
+                    "error_code": "invalid_input",
+                    "message_key": "skill_runner.invalid_input",
+                    "retryable": false,
+                })),
                 error_text: Some(format!("invalid request: {err}")),
             },
         };
@@ -112,8 +159,8 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
         .filter(|v| *v > 0)
         .unwrap_or(30);
 
-    let child_bin = match skill_binary_path(&req.skill_name) {
-        Ok(path) => path,
+    let child_launch = match resolve_child_launch(&req.skill_name) {
+        Ok(launch) => launch,
         Err(err) => {
             return SkillResponse {
                 request_id: req.request_id,
@@ -124,7 +171,11 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                 platform: Some(std::env::consts::OS.to_string()),
                 exit_code: None,
                 validation: None,
-                extra: None,
+                extra: Some(serde_json::json!({
+                    "error_code": "runner_resolution_failed",
+                    "message_key": "skill_runner.runner_resolution_failed",
+                    "retryable": false,
+                })),
                 error_text: Some(err),
             }
         }
@@ -139,15 +190,15 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
         "user_key": req.user_key,
     });
 
-    match run_child_skill(
-        &child_bin,
-        &child_req.to_string(),
-        Duration::from_secs(timeout_secs),
-    )
-    .await
-    {
+    let timeout = Duration::from_secs(timeout_secs.min(child_launch.timeout_seconds));
+    let execution = if child_launch.launcher == LauncherKind::HttpJson {
+        run_http_json_skill(&child_launch, &child_req, timeout).await
+    } else {
+        run_child_skill(&child_launch, &child_req.to_string(), timeout).await
+    };
+    match execution {
         Ok(out) => {
-            let parsed: Result<ChildSkillResponse, _> = serde_json::from_str(&out);
+            let parsed = parse_child_response(&out, &req.request_id, child_launch.strict_protocol);
             match parsed {
                 Ok(v) => SkillResponse {
                     request_id: v.request_id.unwrap_or_else(|| "unknown".to_string()),
@@ -162,16 +213,23 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                     error_text: v.error_text,
                 },
                 Err(err) => SkillResponse {
-                    request_id: "unknown".to_string(),
+                    request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
                     buttons: None,
-                    error_kind: Some("invalid_child_response".to_string()),
+                    error_kind: Some(err.error_code.clone()),
                     platform: Some(std::env::consts::OS.to_string()),
                     exit_code: None,
                     validation: None,
-                    extra: None,
-                    error_text: Some(format!("invalid child response: {err}; raw={out}")),
+                    extra: Some(serde_json::json!({
+                        "error_code": err.error_code,
+                        "message_key": "skill_runner.protocol_response_invalid",
+                        "retryable": false,
+                    })),
+                    error_text: Some(format!(
+                        "invalid child response: {err}; output_bytes={}",
+                        out.len()
+                    )),
                 },
             }
         }
@@ -180,96 +238,428 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
             status: "error".to_string(),
             text: String::new(),
             buttons: None,
-            error_kind: Some("child_execution_failed".to_string()),
+            error_kind: Some(err.error_code.to_string()),
             platform: Some(std::env::consts::OS.to_string()),
-            exit_code: None,
+            exit_code: err.exit_code,
             validation: None,
-            extra: None,
-            error_text: Some(err),
+            extra: Some(serde_json::json!({
+                "error_code": err.error_code,
+                "message_key": format!("skill_runner.{}", err.error_code),
+                "retryable": err.retryable,
+                "exit_code": err.exit_code,
+                "signal": err.signal,
+                "timed_out": err.timed_out,
+                "truncated": err.truncated,
+            })),
+            error_text: Some(err.detail),
         },
     }
 }
 
-fn skill_binary_path(skill_name: &str) -> Result<String, String> {
-    let bin_name = runner_bin_name(skill_name)?;
-
-    let release_path = format!("target/release/{bin_name}");
-    if Path::new(&release_path).exists() {
-        return Ok(release_path);
-    }
-
-    Err(format!(
-        "{skill_name} skill binary not found in target/release, build it first"
-    ))
+#[derive(Debug, Clone)]
+struct ChildLaunch {
+    program: PathBuf,
+    args: Vec<String>,
+    working_directory: Option<PathBuf>,
+    environment: BTreeMap<String, String>,
+    environment_allowlist: Vec<String>,
+    strict_protocol: bool,
+    launcher: LauncherKind,
+    remote_endpoint: Option<String>,
+    runtime_network: bool,
+    timeout_seconds: u64,
+    installed: bool,
+    sandbox_profile: SandboxProfile,
 }
 
-fn runner_bin_name(skill_name: &str) -> Result<String, String> {
-    let raw = skill_name.trim();
-    if raw.is_empty() {
-        return Err("skill_name is empty".to_string());
-    }
-    if raw.contains('/') || raw.contains('\\') {
-        return Err(format!(
-            "invalid skill name `{raw}`: runner name must be a binary name, not a path"
-        ));
+impl ChildLaunch {
+    #[cfg(test)]
+    fn legacy(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+            working_directory: None,
+            environment: BTreeMap::new(),
+            environment_allowlist: Vec::new(),
+            strict_protocol: false,
+            launcher: LauncherKind::Process,
+            remote_endpoint: None,
+            runtime_network: false,
+            timeout_seconds: 86_400,
+            installed: false,
+            sandbox_profile: SandboxProfile::Required,
+        }
     }
 
-    let normalized = raw.replace('_', "-");
-    if normalized.ends_with("-skill") {
-        Ok(normalized)
-    } else {
-        Ok(format!("{normalized}-skill"))
+    fn installed(spec: SkillLaunchSpec) -> Self {
+        Self {
+            program: spec.program,
+            args: spec.args,
+            working_directory: Some(spec.working_directory),
+            environment: spec.environment,
+            environment_allowlist: spec.environment_allowlist,
+            strict_protocol: true,
+            launcher: spec.launcher,
+            remote_endpoint: spec.remote_endpoint,
+            runtime_network: spec.runtime_network,
+            timeout_seconds: spec.timeout_seconds,
+            installed: true,
+            sandbox_profile: spec.sandbox_profile,
+        }
+    }
+}
+
+fn resolve_child_launch(skill_name: &str) -> Result<ChildLaunch, String> {
+    let package_root = std::env::var_os("RUSTCLAW_SKILL_PACKAGES_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/skill-packages"));
+    SkillRuntimeResolver::new(&package_root)
+        .resolve(skill_name)
+        .map(ChildLaunch::installed)
+        .map_err(|error| {
+            format!(
+                "installed receipt resolution failed: code={} detail={}",
+                error.code, error.detail
+            )
+        })
+}
+
+fn parse_child_response(
+    output: &[u8],
+    request_id: &str,
+    strict_protocol: bool,
+) -> Result<ChildSkillResponse, ResponseParseFailure> {
+    if strict_protocol {
+        let response =
+            validate_response_line(output, request_id).map_err(|error| ResponseParseFailure {
+                error_code: error.code,
+                detail: error.detail,
+            })?;
+        return Ok(protocol_response_to_child(response));
+    }
+    let text = std::str::from_utf8(output).map_err(|error| ResponseParseFailure {
+        error_code: "legacy_response_utf8_invalid".to_string(),
+        detail: error.to_string(),
+    })?;
+    let trimmed = text.trim_end_matches(['\n', '\r']);
+    if trimmed.contains('\n') || trimmed.contains('\r') {
+        return Err(ResponseParseFailure {
+            error_code: "legacy_multiple_stdout_records".to_string(),
+            detail: "legacy child emitted multiple stdout records".to_string(),
+        });
+    }
+    serde_json::from_str(trimmed).map_err(|error| ResponseParseFailure {
+        error_code: "legacy_response_invalid".to_string(),
+        detail: error.to_string(),
+    })
+}
+
+impl std::fmt::Display for ResponseParseFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+fn protocol_response_to_child(response: ProtocolResponse) -> ChildSkillResponse {
+    ChildSkillResponse {
+        request_id: Some(response.request_id),
+        status: Some(
+            match response.status {
+                ProtocolStatus::Ok => "ok",
+                ProtocolStatus::Error => "error",
+            }
+            .to_string(),
+        ),
+        text: Some(response.text),
+        buttons: response.buttons,
+        error_kind: response.error_kind.or_else(|| {
+            response
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("error_code"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        }),
+        platform: response.platform,
+        exit_code: response.exit_code,
+        validation: response.validation,
+        extra: response.extra,
+        error_text: response.error_text,
     }
 }
 
 async fn run_child_skill(
-    child_bin: &str,
+    launch: &ChildLaunch,
     input_line: &str,
     timeout: Duration,
-) -> Result<String, String> {
-    let mut child = Command::new(child_bin)
+) -> Result<Vec<u8>, ExecutionFailure> {
+    let mut command = child_process_command(launch)
+        .map_err(|detail| ExecutionFailure::new("child_launch_invalid", detail))?;
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|err| format!("spawn child failed: {err}"))?;
+        .map_err(|err| ExecutionFailure::new("child_spawn_failed", err.to_string()))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(format!("{input_line}\n").as_bytes())
             .await
-            .map_err(|err| format!("write child stdin failed: {err}"))?;
+            .map_err(|err| ExecutionFailure::new("child_stdin_write_failed", err.to_string()))?;
         stdin
             .flush()
             .await
-            .map_err(|err| format!("flush child stdin failed: {err}"))?;
+            .map_err(|err| ExecutionFailure::new("child_stdin_flush_failed", err.to_string()))?;
     }
 
-    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => return Err(format!("collect child output failed: {err}")),
+    let child_pid = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ExecutionFailure::new("child_stdout_unavailable", "stdout pipe missing"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ExecutionFailure::new("child_stderr_unavailable", "stderr pipe missing"))?;
+    let stdout_reader = tokio::spawn(read_bounded_output(stdout));
+    let stderr_reader = tokio::spawn(read_bounded_output(stderr));
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(err)) => return Err(ExecutionFailure::new("child_wait_failed", err.to_string())),
         Err(_) => {
-            return Err("child skill timeout".to_string());
+            terminate_child_process_group(child_pid).await;
+            let _ = child.wait().await;
+            stdout_reader.abort();
+            stderr_reader.abort();
+            let mut failure = ExecutionFailure::new("child_timeout", "child skill timeout");
+            failure.timed_out = true;
+            failure.retryable = true;
+            return Err(failure);
         }
     };
+    let stdout = stdout_reader
+        .await
+        .map_err(|error| ExecutionFailure::new("child_stdout_read_failed", error.to_string()))??;
+    let stderr = stderr_reader
+        .await
+        .map_err(|error| ExecutionFailure::new("child_stderr_read_failed", error.to_string()))??;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "child exited with {:?}: {stderr}",
-            output.status.code()
+    if !status.success() {
+        let mut failure = ExecutionFailure::new(
+            "child_nonzero_exit",
+            format!("child process failed; diagnostic_bytes={}", stderr.len()),
+        );
+        failure.exit_code = status.code();
+        failure.signal = exit_signal(&status);
+        return Err(failure);
+    }
+
+    if stdout.is_empty() {
+        return Err(ExecutionFailure::new(
+            "child_stdout_empty",
+            "child stdout is empty",
         ));
     }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.lines().next().unwrap_or_default().trim().to_string();
-    if line.is_empty() {
-        return Err("child stdout is empty".to_string());
-    }
-
-    Ok(line)
+    Ok(stdout)
 }
+
+fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
+    if !launch.installed {
+        let mut command = Command::new(&launch.program);
+        command.args(&launch.args).envs(&launch.environment);
+        if let Some(working_directory) = &launch.working_directory {
+            command.current_dir(working_directory);
+        }
+        return Ok(command);
+    }
+    let working_directory = launch
+        .working_directory
+        .as_deref()
+        .ok_or_else(|| "installed launch working directory is missing".to_string())?;
+    let network = if launch.runtime_network {
+        SandboxNetwork::Allow
+    } else {
+        SandboxNetwork::Deny
+    };
+    let writable_paths = installed_writable_paths(launch)?;
+    let prepared =
+        prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
+            .map_err(|error| {
+                format!(
+                    "sandbox failed closed: code={} detail={}",
+                    error.code, error.detail
+                )
+            })?;
+    let std_command = prepared.command;
+    let mut command = Command::new(std_command.get_program());
+    command.args(std_command.get_args());
+    if let Some(directory) = std_command.get_current_dir() {
+        command.current_dir(directory);
+    }
+    command.env_clear();
+    command.envs(&launch.environment);
+    for key in &launch.environment_allowlist {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command.args(&launch.args);
+    Ok(command)
+}
+
+fn installed_writable_paths(launch: &ChildLaunch) -> Result<Vec<PathBuf>, String> {
+    if launch.sandbox_profile != SandboxProfile::WorkspaceWrite {
+        return Ok(Vec::new());
+    }
+    let workspace = std::env::var_os("WORKSPACE_ROOT")
+        .map(PathBuf::from)
+        .ok_or_else(|| "workspace-write receipt requires WORKSPACE_ROOT".to_string())?;
+    let workspace = std::fs::canonicalize(&workspace)
+        .map_err(|error| format!("workspace root unavailable: {error}"))?;
+    if !workspace.is_dir() {
+        return Err("workspace root is not a directory".to_string());
+    }
+    Ok(vec![workspace])
+}
+
+async fn read_bounded_output(
+    reader: impl tokio::io::AsyncRead + Unpin,
+) -> Result<Vec<u8>, ExecutionFailure> {
+    let mut output = Vec::new();
+    reader
+        .take((rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES + 1) as u64)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| ExecutionFailure::new("child_output_read_failed", error.to_string()))?;
+    if output.len() > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES {
+        let mut failure = ExecutionFailure::new(
+            "child_output_truncated",
+            format!(
+                "child output exceeds {} bytes",
+                rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES
+            ),
+        );
+        failure.truncated = true;
+        return Err(failure);
+    }
+    Ok(output)
+}
+
+async fn run_http_json_skill(
+    launch: &ChildLaunch,
+    request: &Value,
+    timeout: Duration,
+) -> Result<Vec<u8>, ExecutionFailure> {
+    if !launch.runtime_network {
+        return Err(ExecutionFailure::new(
+            "http_runtime_network_denied",
+            "http_json runtime network is not allowed by the receipt",
+        ));
+    }
+    let endpoint = launch.remote_endpoint.as_deref().ok_or_else(|| {
+        ExecutionFailure::new(
+            "http_endpoint_missing",
+            "http_json endpoint is missing from the verified launch spec",
+        )
+    })?;
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| ExecutionFailure::new("http_client_failed", error.to_string()))?;
+    let mut request_builder = client.post(endpoint).json(request);
+    if let Some(idempotency_key) = http_idempotency_header(request)? {
+        request_builder = request_builder.header("Idempotency-Key", idempotency_key);
+    }
+    let mut response = request_builder.send().await.map_err(|error| {
+        ExecutionFailure::new(
+            if error.is_timeout() {
+                "http_request_timeout"
+            } else {
+                "http_request_failed"
+            },
+            error.to_string(),
+        )
+        .retryable(true)
+    })?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let mut failure = ExecutionFailure::new(
+            "http_status_error",
+            format!("http_json request returned status {status}"),
+        );
+        failure.exit_code = Some(i32::from(status));
+        failure.retryable = status >= 500 || status == 429;
+        return Err(failure);
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES as u64)
+    {
+        let mut failure =
+            ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
+        failure.truncated = true;
+        return Err(failure);
+    }
+    let mut output = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        ExecutionFailure::new("http_response_read_failed", error.to_string()).retryable(true)
+    })? {
+        if output.len().saturating_add(chunk.len()) > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES {
+            let mut failure =
+                ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
+            failure.truncated = true;
+            return Err(failure);
+        }
+        output.extend_from_slice(&chunk);
+    }
+    Ok(output)
+}
+
+fn http_idempotency_header(
+    request: &Value,
+) -> Result<Option<reqwest::header::HeaderValue>, ExecutionFailure> {
+    let Some(idempotency_key) = request
+        .pointer("/context/execution/idempotency_key")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    reqwest::header::HeaderValue::from_str(idempotency_key)
+        .map(Some)
+        .map_err(|error| ExecutionFailure::new("http_idempotency_key_invalid", error.to_string()))
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+#[cfg(unix)]
+async fn terminate_child_process_group(pid: Option<u32>) {
+    let Some(pid) = pid else {
+        return;
+    };
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{pid}"))
+        .status()
+        .await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_child_process_group(_pid: Option<u32>) {}
 
 #[cfg(test)]
 #[path = "main_tests.rs"]

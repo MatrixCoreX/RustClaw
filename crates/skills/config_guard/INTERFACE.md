@@ -22,7 +22,7 @@ The skill currently checks:
 - `llm.openai.api_key`, `llm.google.api_key`, `llm.anthropic.api_key`, `llm.grok.api_key`
 - `tools.allow_sudo`
 - `tools.allow_path_outside_workspace`
-- `telegram.sendfile.full_access`
+- Obsolete `[routing]` filesystem scan-limit keys are reported separately in structured `deprecations`; they no longer affect runtime search.
 
 ## Error Contract
 - Read failures return structured `error_kind` values such as `not_found`, `permission_denied`, or `io_error`.
@@ -38,6 +38,7 @@ The skill currently checks:
   - `path`: string config path; evidence role `path`.
   - `risk_count`: integer number of detected risks; evidence role `count`.
   - `risks`: string array of stable risk identifiers/descriptions; evidence role `entries`.
+  - `deprecation_count` and `deprecations[]` with stable `field`, `code`, and `message_key`; evidence roles `count`, `entries`, and `status`.
 - Sensitive fields: secret values are never returned. Risk entries may name secret field paths but must not include secret contents.
 - Error responses include top-level `error_kind` and `platform`, and contextual `extra.error_kind`, `extra.operation`, and `extra.path` when available.
 

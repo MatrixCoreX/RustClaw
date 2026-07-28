@@ -242,14 +242,14 @@ planner_capabilities = [
   { name = "fs_basic.read_range", action = "read_text_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line", "max_bytes", "field_selector"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "fs_basic.read_file", action = "read_text_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line", "max_bytes", "field_selector"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "artifact.read_range", action = "read_artifact_range", effect = "observe", required = ["path"], optional = ["start_byte", "cursor", "max_bytes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
-  { name = "filesystem.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "max_results", "cursor", "max_depth", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
-  { name = "filesystem.find_files", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "max_results", "cursor", "max_depth", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
-  { name = "filesystem.find_paths", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "max_results", "cursor", "max_depth", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
-  { name = "fs.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "max_results", "cursor", "max_depth", "max_files"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
-  { name = "fs_basic.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "max_results", "cursor", "max_depth", "max_files"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
-  { name = "filesystem.grep_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "pattern", "multiline", "context_before", "context_after", "max_results", "cursor", "max_depth", "max_files", "max_line_chars", "max_file_bytes", "max_scan_bytes", "case_insensitive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "filesystem.search_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "pattern", "multiline", "context_before", "context_after", "max_results", "cursor", "max_depth", "max_files", "max_line_chars", "max_file_bytes", "max_scan_bytes", "case_insensitive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "filesystem.find_images", action = "find_images", effect = "observe", optional = ["root", "exts", "max_results", "cursor", "max_depth", "max_files", "max_dirs"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "filesystem.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "filesystem.find_files", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "filesystem.find_paths", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "fs.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "fs_basic.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "exact", "sort_by", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
+  { name = "filesystem.grep_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "pattern", "multiline", "context_before", "context_after", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth", "max_line_chars", "max_file_bytes", "max_scan_bytes", "case_insensitive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.search_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "pattern", "multiline", "context_before", "context_after", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth", "max_line_chars", "max_file_bytes", "max_scan_bytes", "case_insensitive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.find_images", action = "find_images", effect = "observe", optional = ["root", "exts", "include_hidden", "respect_ignore", "max_results", "cursor", "max_depth", "max_dirs"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
   { name = "filesystem.compare_paths", action = "compare_paths", effect = "observe", required = ["left_path|paths", "right_path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
@@ -271,7 +271,7 @@ planner_capabilities = [
   { name = "workspace.apply_child_patch", action = "apply_child_patch", effect = "mutate", required = ["child_task_id"], optional = ["patch_ref"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
   { name = "workspace.reject_child_patch", action = "reject_child_patch", effect = "mutate", required = ["child_task_id"], optional = ["patch_ref"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "list_dir", "count_entries", "read_text_range", "read_artifact_range", "find_entries", "grep_text", "find_images", "compare_paths", "write_text", "append_text", "make_dir", "remove_path", "preview_replace_text", "replace_text", "apply_patch", "diff", "rewind", "review_child_patch", "apply_child_patch", "reject_child_patch"] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, root = { type = "string" }, pattern = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, ext = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, exts = { type = "array", items = { type = "string" } }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, extension = { type = "string" }, extensions = { type = "array", items = { type = "string" } }, query = { type = "string" }, content = { type = "string" }, old_text = { type = "string" }, new_text = { type = "string" }, expected_occurrences = { type = "integer", minimum = 1, maximum = 1 }, expected_sha256 = { type = "string" }, preserve_line_endings = { type = "boolean" }, patch = { type = "string" }, checkpoint_id = { type = "string" }, child_task_id = { type = "string" }, patch_ref = { type = "string" }, precondition_hashes = { type = "object" }, target_kind = { type = "string" }, exact = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, parents = { type = "boolean" }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, names_only = { type = "boolean" }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, max_entries = { type = "integer" }, max_results = { type = "integer", minimum = 1, maximum = 1000 }, cursor = { type = "integer", minimum = 0 }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1, maximum = 64 }, max_files = { type = "integer", minimum = 1, maximum = 500000 }, max_dirs = { type = "integer", minimum = 1, maximum = 2000 }, max_line_chars = { type = "integer", minimum = 40, maximum = 2000 }, max_file_bytes = { type = "integer", minimum = 1, maximum = 67108864 }, max_scan_bytes = { type = "integer", minimum = 1, maximum = 536870912 }, context_before = { type = "integer", minimum = 0, maximum = 20 }, context_after = { type = "integer", minimum = 0, maximum = 20 }, multiline = { type = "boolean" }, case_insensitive = { type = "boolean" }, raw = { type = "boolean" }, mode = { type = "string" }, n = { type = "integer" }, start_line = { type = "integer" }, end_line = { type = "integer" }, field_selector = { type = "string" }, left_path = { type = "string" }, right_path = { type = "string" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "list_dir", "count_entries", "read_text_range", "read_artifact_range", "find_entries", "grep_text", "find_images", "compare_paths", "write_text", "append_text", "make_dir", "remove_path", "preview_replace_text", "replace_text", "apply_patch", "diff", "rewind", "review_child_patch", "apply_child_patch", "reject_child_patch"] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, root = { type = "string" }, pattern = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, ext = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, exts = { type = "array", items = { type = "string" } }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, extension = { type = "string" }, extensions = { type = "array", items = { type = "string" } }, query = { type = "string" }, content = { type = "string" }, old_text = { type = "string" }, new_text = { type = "string" }, expected_occurrences = { type = "integer", minimum = 1, maximum = 1 }, expected_sha256 = { type = "string" }, preserve_line_endings = { type = "boolean" }, patch = { type = "string" }, checkpoint_id = { type = "string" }, child_task_id = { type = "string" }, patch_ref = { type = "string" }, precondition_hashes = { type = "object" }, target_kind = { type = "string" }, exact = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, parents = { type = "boolean" }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, respect_ignore = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, names_only = { type = "boolean" }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, max_entries = { type = "integer" }, max_results = { type = "integer", minimum = 1, maximum = 1000 }, cursor = { anyOf = [ { type = "string" }, { type = "integer", minimum = 0 } ] }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1, maximum = 256 }, max_dirs = { type = "integer", minimum = 1, maximum = 2000 }, max_line_chars = { type = "integer", minimum = 40, maximum = 2000 }, max_file_bytes = { type = "integer", minimum = 1, maximum = 67108864 }, max_scan_bytes = { type = "integer", minimum = 1, maximum = 536870912 }, context_before = { type = "integer", minimum = 0, maximum = 20 }, context_after = { type = "integer", minimum = 0, maximum = 20 }, multiline = { type = "boolean" }, case_insensitive = { type = "boolean" }, raw = { type = "boolean" }, mode = { type = "string" }, n = { type = "integer" }, start_line = { type = "integer" }, end_line = { type = "integer" }, field_selector = { type = "string" }, left_path = { type = "string" }, right_path = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -320,7 +320,7 @@ aliases = ["structured_config", "config_field"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/config_basic.md"
 output_kind = "text"
-description = "config.guard_rustclaw_config owns RustClaw safety and risk checks; config.validate parses syntax only; read_field(s), list_keys, and summarize_structure inspect structured documents."
+description = "config.guard_rustclaw_config owns RustClaw safety and risk checks; config.validate parses syntax only; read_field(s), list_keys, and summarize_structure inspect documents."
 semantic_tags = ["structured_config", "toml", "json", "yaml", "field_read", "key_listing", "structured_keys", "structure_summary", "empty_value_count", "false_boolean_count", "config_validation", "config_guard"]
 risk_level = "low"
 auto_invocable = true
@@ -350,6 +350,7 @@ fixed_on = true
 kind = "runner"
 planner_kind = "tool"
 group = "config"
+package_manifest = "crates/skills/config_edit/skill.toml"
 aliases = ["config_mutation", "config_write", "config_set"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/config_edit.md"
@@ -454,8 +455,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "publishing"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "x-skill"
+package_manifest = "optional_skills/x/skill.toml"
 config_files = ["configs/x.toml"]
 aliases = []
 timeout_seconds = 30
@@ -482,6 +484,7 @@ planner_eager_load = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/system_basic/skill.toml"
 aliases = ["system", "system_query"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/system_basic.md"
@@ -507,7 +510,7 @@ planner_capabilities = [
   { name = "system_basic.extract_field", action = "extract_field", effect = "observe", required = ["path", "field_path"], optional = ["format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "scalar" },
   { name = "system_basic.extract_fields", action = "extract_fields", effect = "observe", required = ["path", "field_paths"], optional = ["format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "read_artifact_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string", enum = ["current_user", "host_name", "kernel_release", "current_time", "current_working_directory"] }, query = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, field_path = { type = "string" }, field_paths = { type = "array", items = { type = "string" } }, field_selector = { type = "string" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, include_hidden = { type = "boolean" }, names_only = { type = "boolean" }, recursive = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, max_entries = { type = "integer", minimum = 1, maximum = 1000 }, cursor = { type = "integer", minimum = 0 }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1 }, max_children_per_dir = { type = "integer", minimum = 1 }, max_nodes = { type = "integer", minimum = 1 }, mode = { type = "string", enum = ["head", "tail", "range", "last_non_empty"] }, n = { type = "integer", minimum = 1 }, start_line = { type = "integer", minimum = 1 }, end_line = { type = "integer", minimum = 1 }, max_line_chars = { type = "integer", minimum = 80, maximum = 4000 }, raw = { type = "boolean" }, format = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "read_artifact_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string", enum = ["current_user", "host_name", "kernel_release", "current_time", "current_working_directory"] }, query = { type = "string" }, name = { type = "string" }, pattern = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, field_path = { type = "string" }, field_paths = { type = "array", items = { type = "string" } }, field_selector = { type = "string" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, include_hidden = { type = "boolean" }, respect_ignore = { type = "boolean" }, names_only = { type = "boolean" }, recursive = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, target_kind = { type = "string", enum = ["any", "file", "dir"] }, match_mode = { type = "string", enum = ["contains", "exact", "starts_with", "ends_with"] }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, max_entries = { type = "integer", minimum = 1, maximum = 1000 }, max_results = { type = "integer", minimum = 1, maximum = 200 }, cursor = { type = "integer", minimum = 0 }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1 }, max_children_per_dir = { type = "integer", minimum = 1 }, max_nodes = { type = "integer", minimum = 1 }, mode = { type = "string", enum = ["head", "tail", "range", "last_non_empty"] }, n = { type = "integer", minimum = 1 }, start_line = { type = "integer", minimum = 1 }, end_line = { type = "integer", minimum = 1 }, max_line_chars = { type = "integer", minimum = 80, maximum = 4000 }, raw = { type = "boolean" }, format = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -516,6 +519,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/http_basic/skill.toml"
 aliases = ["http"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/http_basic.md"
@@ -541,6 +545,7 @@ planner_eager_load = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/git_basic/skill.toml"
 aliases = ["git"]
 description = "Inspect workspace Git repositories and perform confirmation-gated local stage, commit, branch-create, and safe checkout actions. Remote mutations are unavailable."
 semantic_tags = ["repository_status", "repository_history", "repository_diff", "repository_revision", "source_control", "local_stage", "local_commit", "local_branch"]
@@ -598,6 +603,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/install_module/skill.toml"
 aliases = ["module_install", "install_modules"]
 description = "Use module.preview_install for every preview-only request; module.install is the separate high-risk mutating capability."
 timeout_seconds = 30
@@ -624,6 +630,7 @@ fixed_on = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/process_basic/skill.toml"
 aliases = ["process", "process_manager"]
 description = "Inspect local processes and listening ports through structured process actions instead of ad-hoc shell commands."
 semantic_tags = ["service_status", "runtime_health", "runtime_process", "clawd_process", "listening_port"]
@@ -651,6 +658,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/package_manager/skill.toml"
 aliases = ["package_install", "pkg_manager", "packages"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/package_manager.md"
@@ -667,12 +675,12 @@ confirmation_exempt_when = [
 ]
 preferred_over_run_cmd = true
 planner_capabilities = [
-  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager", "path", "root", "project_path", "workspace"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
   { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
   { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string" }, path = { type = "string" }, root = { type = "string" }, project_path = { type = "string" }, workspace = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -682,6 +690,7 @@ fixed_on = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/archive_basic/skill.toml"
 aliases = ["archive", "archive_tool"]
 description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
 semantic_tags = ["archive_catalog", "archive_content", "archive_artifact", "archive_extract"]
@@ -716,6 +725,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/db_basic/skill.toml"
 aliases = ["database", "sqlite_tool"]
 description = "Run read-only SQLite queries and confirmed SQLite mutations through structured database actions."
 semantic_tags = ["sqlite_query", "sqlite_catalog", "sqlite_version"]
@@ -766,6 +776,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/docker_basic/skill.toml"
 aliases = ["docker", "docker_ops"]
 description = "Inspect Docker containers/images/version and perform targeted container lifecycle actions through structured Docker actions."
 semantic_tags = ["docker.list_containers", "docker.list_images", "docker.version", "docker.read_logs", "docker.lifecycle"]
@@ -811,6 +822,7 @@ planner_visible = false
 kind = "runner"
 planner_kind = "tool"
 group = "filesystem"
+package_manifest = "crates/skills/fs_search/skill.toml"
 aliases = ["fs-search", "filesystem_search", "file_search", "search_files", "fs_rearch"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/fs_search.md"
@@ -827,6 +839,8 @@ fixed_on = true
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
+package_manifest = "crates/skills/rss_fetch/skill.toml"
+supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "rss_fetch" }
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
 description = "Fetch configured RSS/Atom feeds and maintain a verified source-candidate lifecycle. The model may propose evidence-backed candidates, but deterministic URL/feed validation and explicit confirmed promotion control active configuration."
@@ -855,6 +869,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "image"
+package_manifest = "crates/skills/image_vision/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
@@ -888,6 +904,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "image"
+package_manifest = "crates/skills/image_generate/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_generate.md"
@@ -930,6 +948,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "image"
+package_manifest = "crates/skills/image_edit/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["image_modify", "image_editor", "edit_image", "image_outpaint"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
@@ -961,6 +981,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "audio"
+package_manifest = "crates/skills/audio_transcribe/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = []
 timeout_seconds = 120
 prompt_file = "prompts/skills/audio_transcribe.md"
@@ -983,6 +1005,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "audio"
+package_manifest = "crates/skills/audio_synthesize/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = []
 timeout_seconds = 90
 prompt_file = "prompts/skills/audio_synthesize.md"
@@ -1005,6 +1029,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "video"
+package_manifest = "crates/skills/video_generate/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["video_generation", "generate_video", "text_to_video", "image_to_video"]
 timeout_seconds = 900
 prompt_file = "prompts/skills/video_generate.md"
@@ -1028,6 +1054,8 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "audio"
+package_manifest = "crates/skills/music_generate/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["music_generation", "generate_music", "song_generate", "text_to_music"]
 timeout_seconds = 360
 prompt_file = "prompts/skills/music_generate.md"
@@ -1051,6 +1079,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/health_check/skill.toml"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
@@ -1079,6 +1108,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/log_analyze/skill.toml"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/log_analyze.md"
@@ -1102,6 +1132,7 @@ fixed_on = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/service_control/skill.toml"
 aliases = []
 description = "Check, verify, diagnose, and control RustClaw, systemd/service, Homebrew services, and launchd services with structured status evidence."
 semantic_tags = ["service_status", "service_logs", "service_start_stop", "runtime_health", "rustclaw_service_status", "clawd_status", "rustclaw_runtime_health"]
@@ -1137,6 +1168,7 @@ planner_eager_load = true
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/task_control/skill.toml"
 aliases = ["task_manager", "task_status", "task_cancel"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/task_control.md"
@@ -1173,6 +1205,7 @@ planner_visible = false
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
+package_manifest = "crates/skills/config_guard/skill.toml"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/config_guard.md"
@@ -1189,8 +1222,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "market/data"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "crypto-skill"
+package_manifest = "optional_skills/crypto/skill.toml"
 config_files = ["configs/crypto.toml"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "crypto" }
 aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
@@ -1225,8 +1259,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "market/data"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "stock-skill"
+package_manifest = "optional_skills/stock/skill.toml"
 config_files = ["configs/stock.toml"]
 aliases = ["a_stock", "stock_quote", "a_share_quote", "cn_stock_quote"]
 timeout_seconds = 15
@@ -1251,8 +1286,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "weather-skill"
+package_manifest = "optional_skills/weather/skill.toml"
 config_files = ["configs/weather.toml"]
 aliases = ["weather"]
 timeout_seconds = 15
@@ -1277,8 +1313,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "map-merchant-skill"
+package_manifest = "optional_skills/map_merchant/skill.toml"
 config_files = ["configs/map_merchant.toml"]
 aliases = ["map_merchant_recommend", "merchant_recommend", "nearby_merchant", "amap_merchant", "google_maps_merchant"]
 timeout_seconds = 20
@@ -1297,15 +1334,13 @@ planner_capabilities = [
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_recommend", "recommend"] }, provider = { type = "string" }, city = { type = "string" }, district = { type = "string" }, address = { type = "string" }, place = { type = "string" }, location = { type = "string" }, q = { type = "string" }, keyword = { type = "string" }, category = { type = "string" }, cuisine = { type = "string" }, price_level = { anyOf = [ { type = "string" }, { type = "number" } ] }, max_distance_meters = { type = "number", minimum = 0 }, radius = { type = "number", minimum = 0 }, sort_by = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 10 }, latitude = { description = "Optional latitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -90, maximum = 90 }, { type = "null" } ] }, longitude = { description = "Optional longitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -180, maximum = 180 }, { type = "null" } ] } } }
 
 # Phase 5 示例（可选）：
-# - runner 技能可配置 runner_name，未配则用 name 作为执行名。
-# - external 技能需配置 external_kind（如 "http_json"）、external_endpoint；可选 external_timeout_seconds、external_auth_ref。
+# - runner 技能必须通过 package_manifest 解析并验证安装回执后执行。
+# - 第三方技能也必须通过 package_manifest 安装并生成验收回执；运行时不读取脚本推断字段。
 # [[skills]]
 # name = "my_external"
 # enabled = false
 # kind = "external"
-# external_kind = "http_json"
-# external_endpoint = "https://example.com/skill"
-# external_timeout_seconds = 60
+# package_manifest = "third_party/example/skill.toml"
 # prompt_file = "prompts/skills/my_external.md"
 # output_kind = "text"
 
@@ -1315,6 +1350,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "filesystem"
+package_manifest = "crates/skills/doc_parse/skill.toml"
 aliases = ["parse_doc", "document_parse", "doc_reader"]
 description = "Extract semantic content from supported local documents for reading, summaries, key points, sections, and tables; not for OOXML package integrity or Office artifact revision inspection."
 timeout_seconds = 20
@@ -1339,6 +1375,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "office"
+package_manifest = "crates/skills/office_workspace/skill.toml"
 aliases = ["office_artifact", "ooxml_workspace"]
 description = "Authoritatively inspect and validate DOCX, XLSX, and PPTX package structure and integrity, including unavailable inputs that require structured Office failures; also read, create, preview, and transactionally edit Office artifacts."
 timeout_seconds = 120
@@ -1641,6 +1678,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
+package_manifest = "crates/skills/transform/skill.toml"
 aliases = ["transform_data", "data_transform", "table_transform"]
 description = "Transform structured records from JSON arrays/objects or CSV: sort, filter, rename, project, group, aggregate, deduplicate, and render JSON, markdown tables, or CSV."
 timeout_seconds = 20
@@ -1663,8 +1701,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "publishing"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "invest-copy-skill"
+package_manifest = "optional_skills/invest_copy/skill.toml"
 config_files = ["configs/invest_copy.toml"]
 aliases = ["investment_copy", "invest_style", "copy_invest"]
 timeout_seconds = 90
@@ -1687,6 +1726,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "news/web"
+package_manifest = "crates/skills/web_search_extract/skill.toml"
 aliases = ["search_extract", "web_search", "web_extract"]
 timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
@@ -1713,6 +1753,8 @@ fixed_on = true
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
+package_manifest = "crates/skills/kb/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["knowledge_base", "kb_ingest", "kb_search"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
@@ -1739,6 +1781,7 @@ enabled = true
 kind = "runner"
 planner_kind = "tool"
 group = "news/web"
+package_manifest = "crates/skills/browser_web/skill.toml"
 aliases = ["browser_fetch", "page_extract"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
@@ -1764,8 +1807,9 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "image"
+supported_os = ["linux", "macos"]
 install_mode = "on_demand"
-install_package = "photo-organize-skill"
+package_manifest = "optional_skills/photo_organize/skill.toml"
 config_files = ["configs/photo_organize.toml"]
 aliases = ["photo_sort", "photo_classifier", "image_organize"]
 timeout_seconds = 180
@@ -1802,6 +1846,8 @@ fixed_on = true
 kind = "runner"
 planner_kind = "workflow"
 group = "workflow"
+package_manifest = "crates/skills/extension_manager/skill.toml"
+supported_os = ["linux", "macos"]
 aliases = ["extension_scaffold", "capability_extension"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/extension_manager.md"

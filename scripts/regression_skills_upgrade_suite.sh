@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="${RUNNER:-$ROOT_DIR/target/release/skill-runner}"
+SDK_CLI="${SDK_CLI:-$ROOT_DIR/target/release/rustclaw-skill}"
+PACKAGE_ROOT="${RUSTCLAW_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
 REPORT_PATH="${REPORT_PATH:-$ROOT_DIR/logs/regression_skills_upgrade_$(date +%Y%m%d_%H%M%S).md}"
 INCLUDE_WRAPPER_SMOKE=1
 WRAPPER_SMOKE_PROFILE="${WRAPPER_SMOKE_PROFILE:-release}"
@@ -37,6 +39,18 @@ if [[ ! -x "$RUNNER" ]]; then
   echo "Build first: cargo build -p skill-runner --release"
   exit 2
 fi
+if [[ ! -x "$SDK_CLI" ]]; then
+  echo "skill SDK CLI not found: $SDK_CLI"
+  echo "Build and project receipts first: bash build-all.sh no-ui"
+  exit 2
+fi
+for required_skill in doc_parse transform kb web_search_extract browser_web; do
+  if ! "$SDK_CLI" receipt-verify "$PACKAGE_ROOT" "$required_skill" >/dev/null; then
+    echo "verified install receipt missing for skill: $required_skill"
+    echo "Build and project receipts first: bash build-all.sh no-ui"
+    exit 2
+  fi
+done
 
 TMP_DIR="$(mktemp -d /tmp/skills-upgrade-regression-XXXXXX)"
 WRAPPER_SMOKE_STDOUT="$TMP_DIR/wrapper_smoke.log"
@@ -126,7 +140,9 @@ run_skill() {
       skill_name: $skill,
       args: $args,
       context: null
-    }' | "$RUNNER"
+    }' | RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+      WORKSPACE_ROOT="$ROOT_DIR" \
+      "$RUNNER"
 }
 
 payload_from_resp() {

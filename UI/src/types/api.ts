@@ -461,10 +461,17 @@ export interface SkillStoreItem {
   source?: string | null;
   installed: boolean;
   configured_installed?: boolean;
-  runner_available?: boolean;
-  installation_issue?: "runner_missing" | null;
+  package_available?: boolean;
+  installation_issue?: "package_missing" | null;
   enabled: boolean;
   install_mode?: string | null;
+  build_adapter?: "cargo" | "python" | "node" | "go" | "prebuilt" | "generic_process" | "http_json" | null;
+  build_network_policy?: "deny" | "approval_required" | null;
+  supported_os?: string[] | null;
+  supported_arch?: string[] | null;
+  package_version?: string | null;
+  installed_version?: string | null;
+  protocol?: string | null;
   config_files?: string[];
   existing_config_files?: string[];
   storage_kind?: string | null;
@@ -475,20 +482,64 @@ export interface SkillStoreItem {
 export interface SkillStoreResponse {
   items: SkillStoreItem[];
   uninstalled_skill_names: string[];
-  active_operation?: {
-    skill_name: string;
-    action: "install" | "remove";
-    started_ts: number;
+  active_operation?: SkillStoreOperation | null;
+  recent_operations?: SkillStoreOperation[];
+}
+
+export type SkillStoreOperationAction = "install" | "update" | "repair" | "rollback" | "remove";
+export type SkillStoreOperationStatus = "queued" | "running" | "success" | "failure" | "cancelled";
+export type SkillStoreOperationStage =
+  | "queued"
+  | "preflight"
+  | "dependencies"
+  | "build"
+  | "smoke"
+  | "activate"
+  | "configure"
+  | "remove"
+  | "rollback"
+  | "success"
+  | "failure"
+  | "cancelled";
+
+export interface SkillStoreOperation {
+  schema_version: number;
+  operation_id: string;
+  skill_name: string;
+  action: SkillStoreOperationAction;
+  status: SkillStoreOperationStatus;
+  stage: SkillStoreOperationStage;
+  created_at_unix: number;
+  updated_at_unix: number;
+  heartbeat_at_unix: number;
+  cancel_requested: boolean;
+  stages: Array<{ stage: SkillStoreOperationStage; recorded_at_unix: number }>;
+  failure?: {
+    error_code: string;
+    message_key: string;
+    phase?: string | null;
+    retryable: boolean;
+    diagnostic?: string | null;
   } | null;
+  result?: SkillStoreMutationResponse | Record<string, unknown> | null;
+}
+
+export interface SkillStoreOperationResponse {
+  operation: SkillStoreOperation;
 }
 
 export interface SkillStoreMutationResponse {
   skill_name: string;
   installed: boolean;
   enabled: boolean;
-  compiled?: boolean;
-  binary_path?: string | null;
-  binary_removed?: boolean;
+  package_installed?: boolean;
+  adapter?: string | null;
+  installed_version?: string | null;
+  receipt_digest?: string | null;
+  install_reused?: boolean;
+  install_phases?: string[] | null;
+  install_root?: string | null;
+  package_removed?: boolean;
   config_preserved?: boolean;
   data_preserved?: boolean;
   reused_config_files?: string[];
@@ -604,14 +655,19 @@ export interface ImportedSkillResponse {
   skill_name: string;
   display_name: string;
   description: string;
-  external_kind: string;
+  build_adapter: string;
+  launcher: string;
+  package_version: string;
+  receipt_digest: string;
+  install_reused: boolean;
   bundle_dir: string;
   entry_file: string;
-  runtime?: string | null;
-  require_bins: string[];
-  require_py_modules: string[];
+  supported_os: string[];
+  supported_arch: string[];
   prompt_file: string;
   source: string;
+  installed: boolean;
+  enabled: boolean;
 }
 
 export interface LlmVendorOption {

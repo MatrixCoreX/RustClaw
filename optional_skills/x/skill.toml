@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "x"
+version = "0.1.8"
+description = "Draft or publish social posts through X/Twitter-like channel tooling. Preview/dry-run requests should call this skill with dry_run=true instead of answering as ordinary chat text."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "optional_skills/x"
+
+[registry]
+name = "x"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "x-skill"
+binary = "x-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/x-skill"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT", "XURL_APP", "XURL_AUTH", "XURL_BIN", "XURL_TIMEOUT_SECONDS", "XURL_USERNAME", "X_CONFIG_PATH", "X_MAX_TEXT_CHARS"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "x"
+
+[lifecycle]
+config_files = ["configs/x.toml"]
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

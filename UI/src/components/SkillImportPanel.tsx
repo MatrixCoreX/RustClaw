@@ -51,8 +51,8 @@ export function SkillImportPanel({
             </h3>
             <p className="mt-2 text-sm text-white/65">
               {t(
-                "你可以贴一个技能链接，也可以上传本地技能文件夹或文件。验证通过后会自动安装并开启。",
-                "Paste a skill link or upload a local skill folder or file. It is installed and enabled after validation passes.",
+                "请选择包含 skill.toml 和 INTERFACE.md 的本地技能包。构建、协议冒烟和回执验证全部通过后才会开启。",
+                "Choose a local package containing skill.toml and INTERFACE.md. It is enabled only after build, protocol smoke, and receipt verification pass.",
               )}
             </p>
           </div>
@@ -60,14 +60,14 @@ export function SkillImportPanel({
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
           <label className="block space-y-2">
-            <span className="text-[10px] uppercase tracking-widest text-sky-100/70">{t("技能链接或文件夹", "Skill link or folder")}</span>
+            <span className="text-[10px] uppercase tracking-widest text-sky-100/70">{t("本地技能包目录", "Local package directory")}</span>
             <input
               className="theme-input"
               value={skillImportSource}
               onChange={(event) => onSkillImportSourceChange(event.target.value)}
               placeholder={t(
-                "例如一个技能链接，或一个本地技能文件夹",
-                "For example, a skill link or a local skill folder",
+                "例如 /path/to/external_skills/my_skill",
+                "For example, /path/to/external_skills/my_skill",
               )}
             />
           </label>
@@ -115,8 +115,8 @@ export function SkillImportPanel({
                   }}
                   className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white/85 hover:bg-white/5"
                 >
-                  <span>{t("从文件导入", "Import File")}</span>
-                  <span className="text-[10px] text-white/40">{t("适合单个 SKILL.md", "Single file")}</span>
+                  <span>{t("选择包内文件", "Select Package Files")}</span>
+                  <span className="text-[10px] text-white/40">{t("必须包含 manifest 和接口", "Manifest + interface required")}</span>
                 </button>
               </div>
             ) : null}
@@ -157,10 +157,9 @@ export function SkillImportPanel({
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-sky-200">{skillImportPreview.skill_name}</span>
-                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.external_kind}</span>
-                {skillImportPreview.runtime ? (
-                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.runtime}</span>
-                ) : null}
+                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.build_adapter}</span>
+                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.launcher}</span>
+                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">v{skillImportPreview.package_version}</span>
               </div>
               <button
                 type="button"
@@ -177,12 +176,12 @@ export function SkillImportPanel({
                 "The skill is installed and listed in Skill Store. Disable it in Tools/Skills, or remove and reinstall it here.",
               )}
             </p>
-            {skillImportPreview.require_bins.length > 0 ? (
-              <p className="mt-2 text-white/55">{t("需要这些本地工具", "Needs these local tools")}: {skillImportPreview.require_bins.join(", ")}</p>
-            ) : null}
-            {skillImportPreview.require_py_modules.length > 0 ? (
-              <p className="mt-1 text-white/55">{t("还需要这些 Python 依赖", "Also needs these Python packages")}: {skillImportPreview.require_py_modules.join(", ")}</p>
-            ) : null}
+            <p className="mt-2 text-white/55">
+              {t("支持平台", "Supported platforms")}: {skillImportPreview.supported_os.join(", ")} / {skillImportPreview.supported_arch.join(", ")}
+            </p>
+            <p className="mt-1 font-mono text-[10px] text-white/40">
+              {t("验收回执", "Verified receipt")}: {skillImportPreview.receipt_digest.slice(0, 16)}…
+            </p>
           </div>
         ) : null}
       </div>

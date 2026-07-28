@@ -3,7 +3,7 @@
 # crypto-cli.sh — crypto-skill 单独调用工具
 # =============================================================================
 # 协议：单行 JSON stdin → 单行 JSON stdout
-# 二进制：target/release/crypto-skill
+# 运行入口：target/release/skill-runner + data/skill-packages/crypto 验证回执
 # 配置：WORKSPACE_ROOT 下的 configs/crypto.toml (或 configs/config.toml)
 # =============================================================================
 
@@ -12,12 +12,15 @@ set -euo pipefail
 # ---------- 路径解析 ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-BIN_RELEASE="$WORKSPACE/target/release/crypto-skill"
+RUNNER="$WORKSPACE/target/release/skill-runner"
+PACKAGE_ROOT="$WORKSPACE/data/skill-packages"
 
-if [[ -x "$BIN_RELEASE" ]]; then
-    BIN="$BIN_RELEASE"
-else
-    echo "错误：未找到 crypto-skill 二进制，请先 cargo build -p crypto-skill --release" >&2
+if [[ ! -x "$RUNNER" ]]; then
+    echo "错误：未找到 skill-runner，请先运行 ./build-all.sh no-ui" >&2
+    exit 1
+fi
+if [[ ! -f "$PACKAGE_ROOT/crypto/current.json" ]]; then
+    echo "错误：未找到 crypto 的验证安装回执，请从 Skill Store 安装，或运行 scripts/skill_calls/call_crypto.sh --auto-build" >&2
     exit 1
 fi
 
@@ -36,9 +39,9 @@ fmt_json() {
 # 核心调用：传入 JSON args 对象，返回格式化响应
 call_crypto() {
     local args="$1"
-    local req="{\"request_id\":\"${REQ_ID}\",\"args\":${args}}"
+    local req="{\"request_id\":\"${REQ_ID}\",\"user_id\":1,\"chat_id\":1,\"skill_name\":\"crypto\",\"args\":${args},\"context\":null}"
     local resp
-    resp=$(echo "$req" | WORKSPACE_ROOT="$WORKSPACE" "$BIN")
+    resp=$(echo "$req" | WORKSPACE_ROOT="$WORKSPACE" RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER")
     local status text err
     status=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','?'))" 2>/dev/null || echo "?")
     text=$(echo "$resp"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('text',''))"   2>/dev/null || echo "")
@@ -63,8 +66,8 @@ call_crypto() {
 # 显示完整 JSON 响应（不解析）
 call_crypto_raw() {
     local args="$1"
-    local req="{\"request_id\":\"${REQ_ID}\",\"args\":${args}}"
-    echo "$req" | WORKSPACE_ROOT="$WORKSPACE" "$BIN" | fmt_json
+    local req="{\"request_id\":\"${REQ_ID}\",\"user_id\":1,\"chat_id\":1,\"skill_name\":\"crypto\",\"args\":${args},\"context\":null}"
+    echo "$req" | WORKSPACE_ROOT="$WORKSPACE" RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER" | fmt_json
 }
 
 # ---------- 使用说明 ----------

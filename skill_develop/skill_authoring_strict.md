@@ -6,26 +6,23 @@
 - 除非明确必要，不要修改 `crates/clawd/src/main.rs`、`crates/clawd/src/agent_engine.rs`、`crates/skill-runner/src/main.rs`。
 
 ## 强约束
-- 默认实现为 `runner` 技能，不要实现成 `builtin`。
+- 默认实现为 manifest 驱动的 `runner` 技能，不要实现成 `builtin`。
 - 固定/核心仓内技能使用 `crates/skills/<skill_name>`；Skill Store 按需
   bundled 技能使用 `optional_skills/<skill_name>`；外部提交技能使用
   `external_skills/<skill_name>`。
 - `<skill_name>` 只允许小写字母、数字、下划线。
-- 二进制名默认遵循约定：`foo_bar -> foo-bar-skill`。
+- 在 `skill.toml` 中显式选择 `cargo`、`python`、`node`、`go`、`prebuilt`、`generic_process` 或 `http_json`；不得根据自然语言或扩展名推断。
 - 优先通过 `configs/skills_registry.toml`、`INTERFACE.md`、prompt 文件和配置文件完成接入。
 - 不要为了新增普通 runner 技能去添加主程序特判、fallback、硬编码映射、兼容分支。
 - 如果你发现自己要修改 `clawd`、`skill-runner`、`agent_engine`，先停止并重新检查：是否其实只需要改 registry、workspace、prompt、接口文档和技能 crate。
 
 ## 仓内 runner 必须完成的接入项
-0. 固定/核心技能先运行 `python3 skill_develop/create_skill.py <skill_name>`；
-   Skill Store 按需技能运行同一命令并增加 `--on-demand`。
-1. 在命令选择的 source root 下新建 `<skill_name>/Cargo.toml`。
-2. 新建 `<source-root>/<skill_name>/src/main.rs`。
-3. 新建 `<source-root>/<skill_name>/INTERFACE.md`。
-4. 将该 crate 加入根 `Cargo.toml` 的 `[workspace].members`。
+0. 使用 `rustclaw-skill init <rust|python|node|go|prebuilt> <skill_name> <destination>` 生成 `skill.toml`、`INTERFACE.md`、源码、锁文件/产物声明和独立测试。
+1. 补全 manifest 的版本、平台、source、类型化 build/run/security/lifecycle 字段。
+2. 只有 Cargo adapter 包加入根 `Cargo.toml` 的 `[workspace].members`；其他语言不得修改 Cargo workspace。
 5. 在 `configs/skills_registry.toml` 中新增一个 `[[skills]]`。
 6. 如需别名，只在 registry 的 `aliases` 中配置，不要优先改主程序 fallback。
-7. 如需自定义 runner 二进制名，只在 registry 中配置 `runner_name`。
+7. registry 必须用 `package_manifest` 引用清单；禁止 `runner_name`、`install_package` 与 `external_*` 执行字段。
 8. 如需调用文本 LLM，在 registry 声明 `capabilities = ["llm"]`；默认走系统 `[llm].selected_vendor` / `selected_model`，不要为每个文本 skill 预设独立模型。
 9. 如确实需要某个 skill 固定走独立文本模型，只在该 skill 的专用配置文件里提供注释态覆盖项（例如 `llm_vendor` / `llm_model`），默认保持注释。
 10. 技能 action 与参数契约写在 `INTERFACE.md`；不要为了单个普通 skill 修改全局 `prompts/layers/overlays/agent_tool_spec.md`。
@@ -36,12 +33,12 @@
 ## 外部提交技能必须完成的接入项
 0. 适用于用户上传或外部目录提交；bundled 按需技能不属于外部技能，
    应使用 `optional_skills`。
-1. 使用 `external_skills/<skill_name>`，目录内必须有 `Cargo.toml`、`README.md`、`INTERFACE.md`、`src/main.rs`。
+1. 使用 `external_skills/<skill_name>`，目录内必须有 `skill.toml`、`README.md`、`INTERFACE.md`、对应语言源码与锁文件/产物声明。
 2. 优先通过 `extension_manager` 的 `scaffold_external_skill` / `implement_external_skill` 补全外部技能。
 3. `INTERFACE.md` 必须写清 action、参数、错误和请求/响应示例，供 LLM 判断和路由使用。
-4. 注册前必须运行 `validate_external_skill`，通过 `sync_skill_docs.py`、`cargo check` 和协议级 smoke test。
+4. 注册前必须运行 `validate_external_skill`，通过 manifest 校验、私有 adapter 安装、`sync_skill_docs.py` 和协议级 smoke test。
 5. 验证/编译通过后，运行 `register_external_skill` 且 `confirm=true`。
-6. `register_external_skill` 成功后会构建 release binary，写入根 `Cargo.toml`、`configs/skills_registry.toml`，并自动把 `configs/config.toml` 的 `skill_switches.<skill_name>` 写成 `true`。
+6. `register_external_skill` 只在验收回执存在后写入 registry/config；只有 Cargo adapter 可写根 workspace，其他 adapter 不修改 Cargo workspace。
 7. reload skills 或重启 `clawd` 后，必须通过 `run_skill` 路径跑一次 happy path。
 8. 不要为外部新技能修改 `clawd` 主流程代码；registry、workspace、prompt、接口文档和技能 crate 应覆盖普通接入需求。
 
@@ -49,12 +46,13 @@
 - `name`
 - `enabled`
 - `kind = "runner"`
+- `package_manifest = "<source-root>/<skill_name>/skill.toml"`
 - `aliases`
 - `timeout_seconds`
 - `prompt_file = "prompts/skills/<skill_name>.md"`
 - `output_kind`
 - 需要调用文本 LLM 时才写 `capabilities = ["llm"]`
-- 仅当二进制名不符合默认约定时，再额外配置 `runner_name`
+- 禁止 `runner_name`、`install_package` 与 `external_*` 执行字段
 - 注意：这里的 `prompt_file` 是逻辑路径；运行时主体内容由 `scripts/sync_skill_docs.py` 生成到 `prompts/layers/generated/skills/<skill_name>.md`
 
 ## 技能进程协议
@@ -109,7 +107,9 @@
 ## 验证步骤
 - `python3 skill_develop/create_skill.py <skill_name> --help`
 - `python3 scripts/sync_skill_docs.py`
-- `cargo check -p clawd -p skill-runner -p <new-skill-package>`
+- `rustclaw-skill validate <skill.toml>`
+- `rustclaw-skill protocol-test <skill.toml> <workspace-root> <package-root>`
+- 仅 Cargo adapter：`cargo check -p clawd -p skill-runner -p <new-skill-package>`
 - 外部 skill 还需要 `validate_external_skill` 通过，并在 `register_external_skill(confirm=true)` 后确认 `configs/config.toml` 出现 `skill_switches.<skill_name>=true`
 
 ## 输出要求

@@ -334,10 +334,6 @@ fn external_skill_admission_trace(state: &AppState, skill_name: &str) -> Option<
     let canonical = state.resolve_canonical_skill_name(skill_name);
     let entry = registry.get(&canonical)?;
     let is_external = entry.kind == claw_core::skill_registry::SkillKind::External
-        || entry
-            .external_bundle_dir
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
         || entry.matrix_admission.is_some();
     if !is_external {
         return None;

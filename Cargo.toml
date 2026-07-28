@@ -7,6 +7,7 @@ members = [
     "crates/webd",
     "crates/clawcli",
     "crates/skill-runner",
+    "crates/skill-sdk",
     "crates/telegramd",
     "crates/wechatd",
     "crates/feishud",
@@ -97,3 +98,12 @@ toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Full debug symbols make the clawd test binary hundreds of MiB and cause slow,
+# memory-heavy links on developer laptops. Level 1 keeps line information for
+# useful backtraces while making iterative development materially lighter.
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1

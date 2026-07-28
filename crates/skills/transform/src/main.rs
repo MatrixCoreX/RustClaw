@@ -122,6 +122,16 @@ fn transform_response_extra(payload: &Value) -> Value {
         object
             .entry("source_skill".to_string())
             .or_insert_with(|| json!("transform"));
+        if object.get("status").and_then(Value::as_str) == Some("error") {
+            let code = object
+                .get("error_code")
+                .and_then(Value::as_str)
+                .unwrap_or("TRANSFORM_FAILED")
+                .to_ascii_lowercase();
+            object
+                .entry("message_key".to_string())
+                .or_insert_with(|| json!(format!("skill.transform.{code}")));
+        }
     }
     extra
 }

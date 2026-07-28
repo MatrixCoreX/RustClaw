@@ -1,0 +1,46 @@
+schema_version = 1
+
+[package]
+name = "__SKILL_NAME__"
+version = "0.1.0"
+description = "__SUMMARY__"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "__SKILL_NAME__"
+capability_policy_source = "registry"
+
+[build]
+adapter = "python"
+source_root = "__SOURCE_ROOT__"
+lockfile = "requirements.lock"
+network = "deny"
+lifecycle_scripts = false
+options = { python = ">=3.10" }
+
+[run]
+launcher = "python"
+entrypoint = "runtime/src/src/main.py"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = []
+smoke_args = { action = "__FIRST_ACTION__" }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "__SKILL_NAME__"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

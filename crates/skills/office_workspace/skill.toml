@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "office_workspace"
+version = "0.1.8"
+description = "Authoritatively inspect and validate DOCX, XLSX, and PPTX package structure and integrity, including unavailable inputs that require structured Office failures; also read, create, preview, and transactionally edit Office artifacts."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "crates/skills/office_workspace"
+
+[registry]
+name = "office_workspace"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "office-workspace-skill"
+binary = "office-workspace-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/office-workspace-skill"
+working_directory = "."
+timeout_seconds = 120
+environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "OFFICE_TEMP_MAX_AGE_SECONDS", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "office_workspace"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

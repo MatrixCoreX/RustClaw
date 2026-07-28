@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "image_vision"
+version = "0.1.8"
+description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "crates/skills/image_vision"
+
+[registry]
+name = "image_vision"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "image-vision-skill"
+binary = "image-vision-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/image-vision-skill"
+working_directory = "."
+timeout_seconds = 90
+environment_allowlist = ["ANTHROPIC_API_KEY", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "MINIMAX_MCP_STARTUP_TIMEOUT_MS", "MINIMAX_MCP_TIMEOUT_MS", "MINIMAX_MCP_UV_PATH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "RUSTCLAW_INTERNAL_LLM_TOKEN", "RUSTCLAW_INTERNAL_LLM_URL", "RUSTCLAW_SELECTED_LLM_PROVIDER_TYPE", "RUSTCLAW_SELECTED_LLM_VENDOR", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = true
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "image_vision"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

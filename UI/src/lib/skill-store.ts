@@ -10,17 +10,20 @@ const SKILL_STORE_ERROR_MESSAGES: Record<string, readonly [string, string]> = {
   skill_store_config_read_failed: ["无法读取技能设置，请检查服务状态后重试。", "RustClaw could not read the skill settings. Check the service status and try again."],
   skill_store_config_write_failed: ["无法保存技能设置，请检查磁盘空间和文件权限后重试。", "RustClaw could not save the skill settings. Check disk space and file permissions, then try again."],
   skill_store_runtime_reload_failed: ["技能设置已更新，但运行状态刷新失败，请重启 RustClaw 后确认。", "The skill settings were updated, but the runtime could not refresh them. Restart RustClaw and check again."],
-  skill_store_invalid_runner_name: ["这个技能的运行文件配置无效，暂时不能安装。", "This skill has an invalid runner configuration and cannot be installed yet."],
   skill_store_install_not_on_demand: ["这个技能不支持从 Skill Store 按需安装。", "This skill does not support on-demand installation from Skill Store."],
-  skill_store_invalid_install_package: ["这个技能的安装包配置无效，暂时不能安装。", "This skill has an invalid package configuration and cannot be installed yet."],
+  skill_store_manifest_missing: ["这个技能缺少安装清单，暂时不能安装。", "This skill is missing its install manifest and cannot be installed yet."],
+  skill_store_manifest_invalid: ["这个技能的安装清单无效，请等待开发者修复。", "This skill has an invalid install manifest. Its developer needs to fix it."],
+  skill_store_network_approval_required: ["这个技能安装时需要联网，请确认联网说明后再安装。", "This skill needs network access during installation. Review the network notice and confirm before installing."],
   skill_store_unsafe_config_path: ["这个技能声明了不安全的配置路径，已停止操作。", "This skill declares an unsafe configuration path, so the operation was stopped."],
-  skill_store_build_start_failed: ["无法启动技能编译，请确认 Rust 工具链可用后重试。", "RustClaw could not start the skill build. Check the Rust toolchain and try again."],
-  skill_store_build_failed: ["技能编译失败，请查看服务日志中的编译详情。", "The skill build failed. Check the service log for build details."],
-  skill_store_build_binary_missing: ["技能编译结束但没有找到运行文件，请查看服务日志。", "The skill build finished without producing its runner. Check the service log."],
-  skill_store_binary_remove_failed: ["技能已停用，但运行文件删除失败，请检查文件权限。", "The skill was disabled, but its runner could not be removed. Check file permissions."],
+  skill_store_install_start_failed: ["无法启动技能安装，请检查服务状态后重试。", "RustClaw could not start the skill installation. Check the service status and try again."],
+  skill_store_install_failed: ["技能安装未完成，请展开诊断信息查看缺少的运行环境或依赖。", "The skill installation did not finish. Open diagnostics to check for a missing runtime or dependency."],
+  skill_store_package_remove_failed: ["技能已停用，但安装包删除失败，请检查文件权限。", "The skill was disabled, but its installed package could not be removed. Check file permissions."],
   skill_store_config_remove_failed: ["技能已停用，但配置文件删除失败，请检查文件权限。", "The skill was disabled, but its configuration could not be removed. Check file permissions."],
   skill_store_data_remove_failed: ["技能已停用，但私有数据删除失败，请检查文件权限和服务状态。", "The skill was disabled, but its private data could not be removed. Check file permissions and service status."],
   skill_store_operation_busy: ["另一个技能正在安装或删除，请等待完成后重试。", "Another skill is being installed or removed. Wait for it to finish, then try again."],
+  skill_store_operation_state_failed: ["无法保存技能操作状态，请检查磁盘空间后重试。", "RustClaw could not save the skill operation state. Check disk space and try again."],
+  skill_store_operation_not_found: ["这个技能操作已不存在，请刷新页面。", "This skill operation no longer exists. Refresh the page."],
+  skill_store_rollback_unavailable: ["没有可恢复的上一版本。", "There is no previous verified version to restore."],
 };
 
 export function filterSkillStoreItems(items: SkillStoreItem[], query: string): SkillStoreItem[] {
@@ -36,7 +39,7 @@ export function filterSkillStoreItems(items: SkillStoreItem[], query: string): S
 
 export function skillStoreInstallState(item: SkillStoreItem): "installed" | "repair_required" | "not_installed" {
   if (item.installed) return "installed";
-  return item.installation_issue === "runner_missing" ? "repair_required" : "not_installed";
+  return item.installation_issue === "package_missing" ? "repair_required" : "not_installed";
 }
 
 export function resolveSkillStoreActionName(

@@ -1152,14 +1152,15 @@ async fn uninstall_external_skill(
     }
 
     let mut removed_bundle = false;
-    if let Some(bundle_rel) = entry.external_bundle_dir.as_deref() {
-        let bundle_path = if Path::new(bundle_rel).is_absolute() {
-            PathBuf::from(bundle_rel)
-        } else {
-            state.skill_rt.workspace_root.join(bundle_rel)
-        };
+    if let Some(manifest_rel) = entry.package_manifest.as_deref() {
+        let manifest_path = Path::new(manifest_rel);
+        let bundle_path = manifest_path
+            .parent()
+            .map(|parent| state.skill_rt.workspace_root.join(parent));
         let allowed_root = state.skill_rt.workspace_root.join("third_party");
-        if bundle_path.starts_with(&allowed_root) && bundle_path.exists() {
+        if let Some(bundle_path) = bundle_path.filter(|path| {
+            !manifest_path.is_absolute() && path.starts_with(&allowed_root) && path.exists()
+        }) {
             match std::fs::remove_dir_all(&bundle_path) {
                 Ok(_) => removed_bundle = true,
                 Err(err) => {
@@ -1175,6 +1176,22 @@ async fn uninstall_external_skill(
             }
         }
     }
+
+    let removed_package = match rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(&state))
+        .remove_installed_versions(&skill_name)
+    {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("remove verified skill package failed: {err}")),
+                }),
+            );
+        }
+    };
 
     let mut removed_prompt = false;
     let registry_prompt_rel_path = entry.prompt_file.trim();
@@ -1249,6 +1266,7 @@ async fn uninstall_external_skill(
             data: Some(json!({
                 "skill_name": skill_name,
                 "removed_bundle": removed_bundle,
+                "removed_package": removed_package,
                 "removed_prompt": removed_prompt,
                 "reload": reload,
             })),

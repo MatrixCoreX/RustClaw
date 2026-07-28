@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
 
 REQUESTED_BASE_URL="${BASE_URL:-}"
 BASE_URL=""
@@ -155,6 +158,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+for numeric_value in "$WAIT_SECONDS" "$POLL_SECONDS" "$START_TIMEOUT_SECONDS"; do
+  if ! [[ "$numeric_value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "wait, poll, and start timeout values must be positive integers" >&2
+    exit 2
+  fi
+done
+
+if [[ "${BUILD_RELEASE}" -eq 1 || "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+  configure_cargo_build_environment
+fi
+
 resolve_user_key() {
   if [[ -n "${USER_KEY_VALUE:-}" ]]; then
     return 0
@@ -190,6 +204,58 @@ if payload.get("ok") is not True:
 ' "$skill_name" "$operation"
 }
 
+wait_for_skill_store_operation() {
+  local skill_name="$1"
+  local operation="$2"
+  local accepted_response="$3"
+  local operation_id status response elapsed=0
+  operation_id="$(jq -er '.data.operation.operation_id' <<<"$accepted_response")" || {
+    echo "skill=${skill_name} operation=${operation} missing durable operation id" >&2
+    echo "$accepted_response" >&2
+    return 1
+  }
+  while (( elapsed <= WAIT_SECONDS )); do
+    response="$(curl -fsS \
+      -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+      "${BASE_URL%/}/v1/skills/store/operations/${operation_id}")" || return 1
+    status="$(jq -r '.data.operation.status // ""' <<<"$response")"
+    case "$status" in
+      success)
+        echo "skill_store_${operation}=ok skill=${skill_name} operation_id=${operation_id}"
+        return 0
+        ;;
+      failure|cancelled)
+        echo "skill_store_${operation}=failed skill=${skill_name} operation_id=${operation_id} status=${status}" >&2
+        jq -c '.data.operation.failure // .error // .' <<<"$response" >&2
+        return 1
+        ;;
+      queued|running|cancelling) ;;
+      *)
+        echo "skill_store_${operation}=invalid_status skill=${skill_name} operation_id=${operation_id} status=${status}" >&2
+        return 1
+        ;;
+    esac
+    sleep "$POLL_SECONDS"
+    elapsed=$((elapsed + POLL_SECONDS))
+  done
+  echo "skill_store_${operation}=timeout skill=${skill_name} operation_id=${operation_id}" >&2
+  return 1
+}
+
+project_proactive_skill_receipts() {
+  local sdk_cli="${ROOT_DIR}/target/release/rustclaw-skill"
+  if [[ ! -x "$sdk_cli" ]]; then
+    echo "skill receipt CLI not found: ${sdk_cli}" >&2
+    echo "Run: ./build-all.sh no-ui" >&2
+    return 1
+  fi
+  python3 "${ROOT_DIR}/scripts/project_skill_receipts.py" \
+    --target host \
+    --binary-dir "${ROOT_DIR}/target/release" \
+    --sdk-cli "$sdk_cli" \
+    --package-root "${ROOT_DIR}/data/skill-packages"
+}
+
 install_on_demand_skill() {
   local skill_name="$1"
   if [[ ! "$skill_name" =~ ^[a-z0-9_]+$ ]]; then
@@ -206,8 +272,8 @@ install_on_demand_skill() {
     echo "$response" >&2
     return 1
   fi
+  wait_for_skill_store_operation "$skill_name" install "$response" || return 1
   INSTALLED_ON_DEMAND_SKILLS+=("$skill_name")
-  echo "skill_store_install=ok skill=${skill_name}"
 }
 
 remove_installed_on_demand_skills() {
@@ -222,8 +288,10 @@ remove_installed_on_demand_skills() {
       -H "Content-Type: application/json" \
       --data "{\"skill_name\":\"${skill_name}\",\"preserve_config\":true,\"preserve_data\":true}" \
       "${BASE_URL%/}/v1/skills/store/remove" 2>/dev/null || true)"
-    if [[ -n "$response" ]] && skill_store_response_ok "$skill_name" remove <<<"$response"; then
-      echo "skill_store_remove=ok skill=${skill_name} config_preserved=true data_preserved=true"
+    if [[ -n "$response" ]] \
+      && skill_store_response_ok "$skill_name" remove <<<"$response" \
+      && wait_for_skill_store_operation "$skill_name" remove "$response"; then
+      echo "skill_store_remove_preservation=ok skill=${skill_name} config_preserved=true data_preserved=true"
     else
       echo "skill_store_remove=failed skill=${skill_name}" >&2
     fi
@@ -332,6 +400,13 @@ if [[ "${BUILD_RELEASE}" -eq 1 ]]; then
   cargo build -p clawd --release
 fi
 
+# Direct NL-suite startup bypasses start-all.sh, so project the same verified
+# proactive receipts before exercising on-demand packages. This performs no
+# compilation and never projects an on-demand Skill Store entry.
+if [[ "${REUSE_SERVER}" -eq 0 && "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+  project_proactive_skill_receipts
+fi
+
 if curl_health >/dev/null 2>&1; then
   if [[ "${REUSE_SERVER}" -ne 1 ]]; then
     echo "A healthy clawd server is already running at isolated URL ${BASE_URL}" >&2
@@ -383,7 +458,6 @@ else
 fi
 
 if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
-  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
   for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
     install_on_demand_skill "$skill_name"
   done
