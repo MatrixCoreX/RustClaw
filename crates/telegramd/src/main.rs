@@ -90,6 +90,8 @@ enum VoiceReplyMode {
 }
 
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
+const TELEGRAM_API_RETRY_BASE_SECONDS: u64 = 5;
+const TELEGRAM_API_RETRY_MAX_SECONDS: u64 = 60;
 
 fn unix_ts() -> u64 {
     SystemTime::now()
@@ -504,6 +506,7 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
             &[("bytes", &current_rss_bytes().unwrap_or(0).to_string())]
         )
     );
+    wait_for_telegram_api(&bot, &state).await;
     write_runtime_statuses(
         &state,
         true,
@@ -550,6 +553,53 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
     .await;
     warn!("telegram bot runtime exited: bot_name={}", state.bot_name);
     Ok(())
+}
+
+fn telegram_api_retry_delay(attempt: u32) -> Duration {
+    let multiplier = 1_u64.checked_shl(attempt.min(6)).unwrap_or(u64::MAX);
+    Duration::from_secs(
+        TELEGRAM_API_RETRY_BASE_SECONDS
+            .saturating_mul(multiplier)
+            .min(TELEGRAM_API_RETRY_MAX_SECONDS),
+    )
+}
+
+async fn wait_for_telegram_api(bot: &Bot, state: &BotState) {
+    let mut attempt = 0_u32;
+    loop {
+        match bot.get_me().send().await {
+            Ok(_) => {
+                if attempt > 0 {
+                    info!(
+                        bot_name = %state.bot_name,
+                        attempts = attempt,
+                        "telegram API connectivity restored"
+                    );
+                }
+                return;
+            }
+            Err(_) => {
+                attempt = attempt.saturating_add(1);
+                let delay = telegram_api_retry_delay(attempt - 1);
+                write_runtime_statuses(
+                    state,
+                    false,
+                    "waiting_provider",
+                    Some(unix_ts() as i64),
+                    Some("telegram_api_unavailable".to_string()),
+                )
+                .await;
+                warn!(
+                    error_code = "telegram_api_unavailable",
+                    bot_name = %state.bot_name,
+                    attempt,
+                    retry_seconds = delay.as_secs(),
+                    "telegram API unavailable; retrying"
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 }
 
 async fn register_telegram_commands_and_menu(
@@ -674,6 +724,9 @@ fn current_rss_bytes() -> Option<u64> {
 #[cfg(test)]
 #[path = "main_bind_gate_tests.rs"]
 mod bind_gate_tests;
+#[cfg(test)]
+#[path = "main_runtime_tests.rs"]
+mod runtime_tests;
 #[cfg(test)]
 #[path = "main_telegram_text_payload_tests.rs"]
 mod telegram_text_payload_tests;
