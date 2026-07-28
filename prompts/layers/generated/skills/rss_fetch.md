@@ -10,7 +10,8 @@
 ## Capability Summary (from interface)
 - `rss_fetch` reads RSS/Atom feeds and returns normalized news items.
 - Successful responses include user-visible `text` plus machine-readable `extra` evidence. Runtime quality checks consume `extra.field_value` / `extra.items`; do not require downstream code to parse localized `text`.
-- **Category guardrails (planner / agent)**: For `latest` and `news`, `category` must be a **table key** under `[rss.categories]` in `configs/rss.toml` at runtime (deployment-specific). **Do not invent** category strings. If user intent does not map clearly to one configured category, use **`general`** (or `rss.default_category` when set). Open `configs/rss.toml` for the authoritative list of keys; example keys in the default config include `general`, `crypto`, `tech`, `web3`, `aggregator`, `china`, `business`, `international`—the file always wins if this list drifts.
+- **Category guardrails (planner / agent)**: For `latest` and `news`, `category` must be a runtime category token returned by `list_categories`. Do not invent a token or maintain language-specific alias tables. When no configured category fits, use `propose_category` with evidence-backed candidates; use `preview_category` for one-time results, and only use `promote_category` after explicit confirmation.
+- **Missing-category workflow**: Call `list_categories` first. If no category fits, use an available browsing/search capability (or user-provided evidence) to collect RSS/Atom candidate URLs and a public `discovered_from` page for each candidate, then call `propose_category`. If evidence cannot be obtained, do not fabricate URLs or silently substitute an unrelated category.
 - **`fetch`** is **direct-feed only**: one or more explicit `http(s)` URLs. It does **not** fall back to category/config sources.
 - **`latest`** and **`news`** use **category mode**: all **active** sources for the category (from config) are fetched by default. Same merge/dedupe/sort behavior; `news` is an alias of `latest` (default category for `news` when omitted follows config / `general` as documented below).
 - **Category semantics**: A category uses a single list of sources; all listed sources are fetched by default (no primary/fallback tiers). Single-source failure is skipped; only when all sources fail (or return no items) does the skill return an error.
@@ -30,28 +31,42 @@
 
 ## Actions (from interface)
 - `fetch` — direct RSS/Atom URL(s) only; requires `url` or `feed_url` or `feed_urls`.
+- `list_categories` — returns configured category tokens, the configured default, and pending category proposals without network access.
 - `latest` — category-based; uses configured sources for `category` (or default category).
 - `news` — same pipeline as `latest` (alias); default `category` when omitted is typically `general` per config.
+- `propose_category` — validates model-proposed `url` + `discovered_from` candidates for a category that does not exist and saves accepted candidates only in skill-private state.
+- `preview_category` — temporarily fetches a pending category's validated feeds without activating the category.
+- `promote_category` — revalidates a pending category and writes it to active config only with `confirm=true` and enough valid sources.
 - `source_health` / `discover_sources` — inspect lifecycle counts, or validate and store evidence-backed proposals without activating them.
 - `refresh_candidates` / `promote_sources` — revalidate candidate state, or activate eligible sources with `confirm=true` plus high-risk runtime approval.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| all | `action` | no* | string | `latest` | One of `fetch`, `latest`, `news`, `source_health`, `discover_sources`, `refresh_candidates`, or `promote_sources`. If omitted, behavior is **`latest`**. |
+| all | `action` | no* | string | `latest` | One of `fetch`, `latest`, `news`, `list_categories`, `source_health`, `propose_category`, `preview_category`, `promote_category`, `discover_sources`, `refresh_candidates`, or `promote_sources`. If omitted, behavior is **`latest`**. |
+| `list_categories` | - | - | - | - | Returns the current machine category catalog; call this when the category token is uncertain. |
 | `fetch` | `url` or `feed_url` or `feed_urls` | yes | string/array | - | **At least one** http(s) feed URL. `feed_urls`: JSON array of strings; empty or all-invalid → error. |
 | `fetch` | `limit` | no | number | impl default | Per-feed item cap (single URL). |
 | `fetch` | `timeout_seconds` | no | number | impl default | Request timeout override. |
 | `fetch` | `topic` / `topic_token` | no | string | `other` | Stable lowercase machine topic token for `extra.items[].topic`; do not pass user-language phrases. |
-| `latest` | `category` | no | string | impl default | Must be a key under `[rss.categories]` in `configs/rss.toml`; all **active** sources for that category are fetched. If unmappable, prefer `general` / `rss.default_category`. Do not invent categories. |
+| `latest` | `category` | no | string | impl default | Must be a token returned by `list_categories`; all **active** sources for that category are fetched. If no category fits, follow the missing-category proposal workflow instead of substituting an unrelated category. |
 | `latest` | `limit` | no | number | impl default | Maximum returned items (applied after merge/dedupe/sort). |
 | `latest` | `timeout_seconds` | no | number | impl default | Request timeout override. |
 | `latest` | `topic` / `topic_token` | no | string | category config / `other` | Stable lowercase machine topic override for `extra.items[].topic`; invalid sentence-like values are ignored. |
 | `latest` | `url` / `feed_url` / `feed_urls` | no | string/array | - | Optional: if provided, fetches **only** these URLs (explicit list) instead of category config; still uses `latest` merge/deprecation rules for **non-explicit** category fetches only — when using explicit URLs, deprecation state is not updated. |
-| `news` | `category` | no | string | `general` | Same as `latest` (category-based); same `[rss.categories]` key rule and no invented category strings. |
+| `news` | `category` | no | string | config default | Same category catalog and missing-category workflow as `latest`. |
 | `news` | `limit` | no | number | impl default | Same as `latest`. |
 | `news` | `timeout_seconds` | no | number | impl default | Same as `latest`. |
 | `news` | `topic` / `topic_token` | no | string | category config / `other` | Same topic-token rule as `latest`. |
+| `propose_category` | `category` | yes | string | - | New lowercase machine token matching `[a-z0-9][a-z0-9_]{0,63}`; never pass user-language prose. |
+| `propose_category` | `candidates` | yes | array<object> | - | Up to 10 `{url, discovered_from}` records. The model proposes; deterministic public-network and feed validation accepts or rejects. |
+| `propose_category` | `topic` / `topic_token` | no | string | category token | Stable machine topic token. |
+| `propose_category` | `output_language` / `bilingual_summary` | no | string/bool | unset | Optional output policy saved with the pending proposal. |
+| `preview_category` | `category` | yes | string | - | Existing pending category token; returns temporary results and does not change active config. |
+| `preview_category` | `limit` / `timeout_seconds` | no | number | impl default | Temporary fetch bounds. |
+| `promote_category` | `category` | yes | string | - | Existing pending category token. |
+| `promote_category` | `confirm` | yes | boolean | `false` | Must be exactly `true`; high-risk runtime approval still applies. |
+| `promote_category` | `urls` | no | array<string> | all validated candidates | Optional validated candidate subset; the final subset must still meet the configured minimum source count. |
 | `source_health` | `category` | no | string | all categories | Configured category token; omission returns all category health records. |
 | discovery mutations | `category` | yes* | string | config default | Existing category token for `discover_sources`, `refresh_candidates`, or `promote_sources`. |
 | `discover_sources` | `candidates` | yes | array<object> | - | Maximum 10 objects per call. Each requires a proposed feed `url` and a public `discovered_from` evidence URL. |
@@ -62,6 +77,10 @@
 
 ## Error Contract (from interface)
 - Unknown or unconfigured `category` (no entry under `[rss.categories]` or no active sources) returns readable `error_text` plus machine fields in `extra`: `error_kind=category_not_configured`, `failure_phase=pre_dispatch`, `side_effect_applied=false`, `recovery_action=replan_arguments`, `invalid_argument=category`, `rejected_value`, `default_category`, and sorted `available_categories`. Runtime recovery must consume these fields, not parse `error_text`.
+- Every `status=error` response includes `extra.error_code` and `extra.message_key`; the strict skill protocol rejects and replaces errors that omit either field.
+- Category proposals require at least one valid feed to persist. `ready_for_promotion` becomes true only at the configured minimum active-source count. Promotion always revalidates and fails without changing active config when too few sources remain valid.
+- If one proposal does not reach the minimum, accepted candidates remain in private state and a later task may add different evidence-backed candidates. Each task gets one bounded proposal batch of at most 10 candidates.
+- Pending category proposals are stored in the `rss_fetch` private SQLite state. They are excluded from `configs/rss.toml` until confirmed promotion.
 - `action` outside the canonical action set returns `rss_fetch.unsupported_action`.
 - **`fetch`** without `url`/`feed_url`/non-empty valid `feed_urls`, or with non-http(s) URLs → clear `error_text` (e.g. `fetch requires url, feed_url, or feed_urls`).
 - Empty/invalid URL values for `fetch`.

@@ -90,9 +90,9 @@ pub(super) struct CandidateSourceEntry {
 }
 
 #[derive(Debug)]
-struct ValidatedFeed {
-    sample_titles: Vec<String>,
-    item_count: usize,
+pub(super) struct ValidatedFeed {
+    pub(super) sample_titles: Vec<String>,
+    pub(super) item_count: usize,
 }
 
 pub(super) fn source_health(
@@ -585,7 +585,7 @@ pub(super) fn validate_public_url_syntax(raw_url: &str) -> Result<(), String> {
     parse_public_url(raw_url).map(|_| ())
 }
 
-fn validate_feed_url(url: &str, timeout_seconds: u64) -> Result<ValidatedFeed, String> {
+pub(super) fn validate_feed_url(url: &str, timeout_seconds: u64) -> Result<ValidatedFeed, String> {
     let body = fetch_public_feed_xml(url, timeout_seconds)?;
     validate_feed_document(&body)
 }
@@ -656,7 +656,7 @@ fn required_category(cfg: &RootConfig, args: &Map<String, Value>) -> Result<Stri
     Ok(category)
 }
 
-fn parse_discovery_candidates(
+pub(super) fn parse_discovery_candidates(
     args: &Map<String, Value>,
 ) -> Result<Vec<(String, String)>, SkillFailure> {
     let candidates = args
@@ -752,11 +752,15 @@ fn optional_url_set(
     Ok(Some(values))
 }
 
-fn request_timeout(args: &Map<String, Value>) -> u64 {
+pub(super) fn request_timeout(args: &Map<String, Value>) -> u64 {
     args.get("timeout_seconds")
         .and_then(Value::as_u64)
         .unwrap_or(15)
         .clamp(3, 60)
+}
+
+pub(super) fn minimum_active_sources(cfg: &RootConfig) -> usize {
+    discovery_settings(cfg).min_active_sources()
 }
 
 fn status_after_success(entry: &CandidateSourceEntry, required_successes: u32) -> String {

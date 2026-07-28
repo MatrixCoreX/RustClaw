@@ -8,6 +8,7 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
     assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["error_code"], "execution_failed");
     assert_eq!(extra["message_key"], "skill.rss_fetch.execution_failed");
     assert_eq!(extra["retryable"], false);
 }
@@ -130,15 +131,38 @@ fn operator_config_strips_machine_owned_fields() {
             deprecated_at: "2".to_string(),
         }],
     });
+    config
+        .rss
+        .pending_categories
+        .insert("robotics".to_string(), PendingCategoryEntry::default());
 
     let operator = operator_config(&config);
 
     assert!(operator.rss.deprecated.is_none());
+    assert!(operator.rss.pending_categories.is_empty());
     assert!(operator.rss.categories["general"].source_entries.is_none());
     assert_eq!(
         operator.rss.categories["general"].sources.as_deref(),
         Some(&["https://example.com/feed".to_string()][..])
     );
+}
+
+#[test]
+fn applying_machine_state_reconciles_pending_categories_already_promoted() {
+    let mut config = make_cfg_with_sources("general", vec!["https://example.com/feed".into()]);
+    let mut state = RssMachineState::default();
+    state
+        .pending_categories
+        .insert("general".to_string(), PendingCategoryEntry::default());
+    state
+        .pending_categories
+        .insert("robotics".to_string(), PendingCategoryEntry::default());
+
+    apply_machine_state(&mut config, &state);
+
+    assert!(!config.rss.pending_categories.contains_key("general"));
+    assert!(config.rss.pending_categories.contains_key("robotics"));
+    assert_ne!(machine_state_from_config(&config), state);
 }
 
 #[test]
@@ -156,6 +180,7 @@ fn unknown_category_returns_bounded_machine_replan_contract_without_state_change
     .expect_err("unknown category must fail before network dispatch");
 
     assert_eq!(failure.extra["error_kind"], "category_not_configured");
+    assert_eq!(failure.extra["error_code"], "category_not_configured");
     assert_eq!(failure.extra["retryable"], true);
     assert_eq!(failure.extra["failure_phase"], "pre_dispatch");
     assert_eq!(failure.extra["side_effect_applied"], false);
@@ -167,8 +192,10 @@ fn unknown_category_returns_bounded_machine_replan_contract_without_state_change
 
 fn make_cfg_with_sources(category: &str, sources: Vec<String>) -> RootConfig {
     let mut categories = HashMap::new();
-    let mut cat = RssCategoryConfig::default();
-    cat.sources = Some(sources);
+    let cat = RssCategoryConfig {
+        sources: Some(sources),
+        ..RssCategoryConfig::default()
+    };
     categories.insert(category.to_string(), cat);
     RootConfig {
         rss: RssConfig {
@@ -179,6 +206,7 @@ fn make_cfg_with_sources(category: &str, sources: Vec<String>) -> RootConfig {
             categories,
             discovery: None,
             deprecated: None,
+            pending_categories: BTreeMap::new(),
         },
     }
 }
@@ -211,6 +239,7 @@ fn make_cfg_legacy_only(
             categories,
             discovery: None,
             deprecated: None,
+            pending_categories: BTreeMap::new(),
         },
     }
 }
@@ -739,6 +768,26 @@ fn persistence_test_path(label: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&directory).expect("create persistence test directory");
     directory.join("rss.toml")
+}
+
+#[test]
+fn config_loading_reports_missing_and_malformed_files() {
+    let missing = persistence_test_path("missing-config");
+    assert_eq!(
+        load_root_config_at(&missing).expect_err("missing config must not use defaults"),
+        "config_not_found"
+    );
+
+    let malformed = persistence_test_path("malformed-config");
+    std::fs::write(&malformed, "[rss\ndefault_limit = 10").expect("write malformed config fixture");
+    assert_eq!(
+        load_root_config_at(&malformed).expect_err("malformed config must not use defaults"),
+        "config_parse_failed"
+    );
+
+    std::fs::remove_dir_all(missing.parent().unwrap()).expect("remove missing-config directory");
+    std::fs::remove_dir_all(malformed.parent().unwrap())
+        .expect("remove malformed-config directory");
 }
 
 #[test]
