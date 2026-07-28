@@ -178,32 +178,18 @@ echo "[remote] environment ready"
 REMOTE_SCRIPT
 }
 
-skill_to_bin() {
-	case "$1" in
-	x) echo "x-skill" ;;
-	system_basic) echo "system-basic-skill" ;;
-	http_basic) echo "http-basic-skill" ;;
-	git_basic) echo "git-basic-skill" ;;
-	install_module) echo "install-module-skill" ;;
-	process_basic) echo "process-basic-skill" ;;
-	package_manager) echo "package-manager-skill" ;;
-	archive_basic) echo "archive-basic-skill" ;;
-	db_basic) echo "db-basic-skill" ;;
-	docker_basic) echo "docker-basic-skill" ;;
-	fs_search) echo "fs-search-skill" ;;
-	rss_fetch) echo "rss-fetch-skill" ;;
-	image_vision) echo "image-vision-skill" ;;
-	image_generate) echo "image-generate-skill" ;;
-	image_edit) echo "image-edit-skill" ;;
-	audio_transcribe) echo "audio-transcribe-skill" ;;
-	audio_synthesize) echo "audio-synthesize-skill" ;;
-	health_check) echo "health-check-skill" ;;
-	log_analyze) echo "log-analyze-skill" ;;
-	service_control) echo "service-control-skill" ;;
-	config_guard) echo "config-guard-skill" ;;
-	crypto) echo "crypto-skill" ;;
-	*) echo "" ;;
-	esac
+skill_build_spec() {
+	python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+		--scope selected --target "$TARGET" --skill "$1" --format records |
+		python3 -c '
+import json, pathlib, sys
+record = json.load(sys.stdin)
+manifest = pathlib.Path(record["manifest_path"]).resolve().relative_to(pathlib.Path(sys.argv[1]).resolve())
+print("\t".join([
+    record["skill_name"], record["adapter"], record.get("package") or "-",
+    record["runner"], manifest.as_posix(), record["install_mode"],
+]))
+' "$SCRIPT_DIR"
 }
 
 usage() {
@@ -285,13 +271,15 @@ skill)
 		echo "Error: skill name is required"
 		usage
 	}
-	BIN_NAME=$(skill_to_bin "$PKG")
-	[[ -z "$BIN_NAME" ]] && {
-		echo "Error: unknown skill name: $PKG"
-		exit 1
-	}
+	SKILL_SPEC="$(skill_build_spec "$PKG")" || exit 1
+	IFS=$'\t' read -r CANONICAL_SKILL ADAPTER PACKAGE_NAME BIN_NAME MANIFEST_PATH _INSTALL_MODE <<<"$SKILL_SPEC"
+	if [[ "$ADAPTER" != "cargo" ]]; then
+		echo "Error: cross pull does not activate adapter=${ADAPTER} skill=${CANONICAL_SKILL}."
+		echo "Install ${MANIFEST_PATH} on the target through Skill Store or rustclaw-skill so its protocol smoke and receipt are verified on that platform."
+		exit 3
+	fi
 	echo "[$(date)] remote cross-building skill ${BIN_NAME} (release only)..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${BIN_NAME} --release --target ${TARGET}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && source scripts/shell_compat.sh && configure_cargo_build_environment && cargo build -p ${PACKAGE_NAME} --release --target ${TARGET}"
 	echo "[$(date)] pulling release: ${BIN_NAME} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${BIN_NAME}" \
@@ -304,7 +292,7 @@ crate)
 		usage
 	}
 	echo "[$(date)] remote cross-building ${PKG} (release only)..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${PKG} --release --target ${TARGET}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && source scripts/shell_compat.sh && configure_cargo_build_environment && cargo build -p ${PKG} --release --target ${TARGET}"
 	echo "[$(date)] pulling release: ${PKG} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${PKG}" \

@@ -100,10 +100,10 @@ target_clang_triple() {
 target_apt_packages() {
 	case "$1" in
 	aarch64-unknown-linux-gnu)
-		printf '%s\n' "gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev protobuf-compiler"
+		printf '%s\n' "gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev protobuf-compiler qemu-user"
 		;;
 	armv7-unknown-linux-gnueabihf)
-		printf '%s\n' "gcc-arm-linux-gnueabihf libc6-dev-armhf-cross pkg-config make perl clang libclang-dev protobuf-compiler"
+		printf '%s\n' "gcc-arm-linux-gnueabihf libc6-dev-armhf-cross pkg-config make perl clang libclang-dev protobuf-compiler qemu-user"
 		;;
 	*)
 		return 1
@@ -384,7 +384,19 @@ main() {
 	TARGET="$(normalize_target "${TARGET}")"
 	ensure_cross_deps
 	setup_cross_env
+	configure_cargo_build_environment
 	run_build
+
+	if [[ "${BUILD_SCOPE}" == "workspace" ]]; then
+		log "building the host receipt projection helper"
+		cargo build --release -p rustclaw-skill-sdk --bin rustclaw-skill
+		log "protocol-testing target skill binaries and projecting verified receipts"
+		python3 "${SCRIPT_DIR}/scripts/project_skill_receipts.py" \
+			--target "${TARGET}" \
+			--binary-dir "$(target_release_dir "${SCRIPT_DIR}" "${TARGET}")" \
+			--sdk-cli "${SCRIPT_DIR}/target/release/rustclaw-skill" \
+			--package-root "${SCRIPT_DIR}/target/skill-packages/${TARGET}"
+	fi
 
 	if [[ "${SYNC_RELEASE_BIN}" == "1" ]]; then
 		log "syncing executables to release-bin"

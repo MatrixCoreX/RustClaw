@@ -24,7 +24,7 @@
 | `web_search_extract` | 搜索后端来自 `args.backend` / `WEB_SEARCH_BACKEND`；`serpapi` 需要 `SERPAPI_API_KEY`；DuckDuckGo HTML 路径可零 key 运行 | 说明它是“搜索后端 + 抽取”型 skill，不是仓库配置文件绑定为主。若用户要更稳的搜索，追问“你要不要配 `SERPAPI_API_KEY`，或者先继续走 DuckDuckGo fallback”。 |
 | `image_generate` `image_edit` `image_vision` | 主要读 `configs/image.toml`；也会继承 `configs/config.toml` 里的 `[llm.*]`；支持环境变量覆盖，如 `OPENAI_API_KEY`、`QWEN_API_KEY`、`MINIMAX_API_KEY`，以及 `IMAGE_GENERATION_*` / `IMAGE_EDIT_*` / `IMAGE_VISION_*` | 回答时要先说当前用哪个 vendor / model，再说 key 放在哪里。下一步追问“你要走哪个 provider，我现在帮你把 key 写进配置还是走环境变量”。 |
 | `audio_transcribe` `audio_synthesize` | 主要读 `configs/audio.toml`；也会继承 `configs/config.toml` 的 `[llm.*]`；支持 `OPENAI_API_KEY`、`QWEN_API_KEY`、`MINIMAX_API_KEY` 等，以及 `AUDIO_TRANSCRIBE_*` / `AUDIO_SYNTHESIZE_*` 覆盖。`audio_transcribe` 还可以通过 `[audio_transcribe.providers.custom]` 接本地 whisper.cpp，`base_url = "http://127.0.0.1:8178/v1"`，仅本机 loopback 允许空 key。 | 回答时要先区分用户要云端 STT/TTS provider key，还是要本地 STT。本地 whisper.cpp 要强调依赖本机 `whisper-server`、专用端口 `8178`，中文语音要用多语言模型。 |
-| `crypto` | 交易策略 / 白名单在 `configs/crypto.toml`；交易所凭据按 `user_key` 存在 `database.skill_data_root` 下的 crypto 私有库；可通过 Telegram `/cryptoapi set ...` 或 `POST /v1/auth/crypto-credentials` 绑定 | 这是最容易答错的地方。要明确说：`configs/crypto.toml` 主要是策略与限制，Binance / OKX 的用户凭据正常路径是写入 crypto 私有库，而不是主运行时数据库或让用户手改 TOML。`/cryptoapi set ...` 和 `POST /v1/auth/crypto-credentials` 都是“当前 key 新增或覆盖自己在该交易所的凭据”，不是替别人修改。对交易所范围明确的操作，如果用户没写交易所，先看 `crypto.execution_mode` / `crypto.default_exchange`；有默认值就按默认值，没有默认值才反问。优先引导用户用 Telegram `/cryptoapi set ...`，因为这条命令在 `telegramd` 侧直接处理，不走普通 `ask` 推理流。若用户需要继续指导，只补命令格式或缺的非敏感字段，不要让用户把 raw secret 发到普通对话。 |
+| `crypto` | 这是 Skill Store 按需安装技能。交易策略 / 白名单在 `configs/crypto.toml`；交易所凭据按 `user_key` 存在 `database.skill_data_root` 下的 crypto 私有库；通过受控的 `POST /v1/auth/crypto-credentials` 管理接口绑定 | `configs/crypto.toml` 只负责策略与限制，Binance / OKX 用户凭据写入 crypto 私有库，不进入主运行时数据库。凭据接口只能新增或覆盖当前 key 自己的记录。Telegram 不提供安装、启停或凭据配置命令；不要引导用户在普通对话中发送 secret。 |
 | `stock` | 主配置在 `configs/stock.toml`；股票名映射在 `[stock.aliases]`；名称纠错可借助 `configs/config.toml` 中已配置的 `[llm.*]` provider | 这不是账号绑定型 skill。若用户问“怎么配”，重点应放在别名映射和名称纠错。下一步追问“你要查具体代码，还是要我把这个公司名补进别名表”。 |
 | `weather` | 主配置在 `configs/weather.toml`；主要是语言 / i18n 路径 | 无账号绑定。若用户问“怎么开通”，应告诉他通常零配置即可用；如果要改输出语言，再改 `configs/weather.toml`。 |
 | `map_merchant` | 主配置在 `configs/map_merchant.toml`；Amap 可走 `AMAP_API_KEY` 或配置文件；Google 可走 `GOOGLE_MAPS_API_KEY` / `GOOGLE_PLACES_API_KEY` 或配置文件 | 这是地图 provider key 型 skill。回答时要先说明当前默认 provider，再说 key 可以放 env 或 TOML。下一步追问“你要用高德还是 Google，要不要我现在把 key 配进去”。 |
@@ -37,15 +37,15 @@
 
 ### 1. 纯解释型
 
-“`crypto` 的交易所凭据不是改 `configs/crypto.toml`，而是按当前 `user_key` 写进 crypto 私有存储。`configs/crypto.toml` 主要管允许的交易所、交易对和风控限制。你可以走 Telegram 的 `/cryptoapi set ...`，也可以走 `POST /v1/auth/crypto-credentials`；这两条路径都是给当前 key 新增或覆盖自己在该交易所的凭据。”
+“`crypto` 是按需安装技能。`configs/crypto.toml` 管理交易策略和限制，交易所凭据按当前 `user_key` 写入 crypto 私有存储。请通过受控的 `POST /v1/auth/crypto-credentials` 管理接口新增或覆盖当前 key 自己的凭据。”
 
 ### 2. 解释 + 顺手接下一步
 
-“`crypto` 的 Binance / OKX 凭据会按当前 key 写进本地数据库，不是直接改 TOML。为了避免把密钥发到普通对话，建议直接在 Telegram 用 `/cryptoapi set ...` 绑定。如果你不确定格式，我可以把 Binance 或 OKX 对应的完整命令写给你。”
+“`crypto` 的 Binance / OKX 凭据会按当前 key 写进技能私有存储，不是直接修改 TOML。请使用受控管理接口绑定，不要把密钥发送到 Telegram 或普通对话。”
 
-“如果你是要修改交易所 API key，不是改全局配置文件，而是更新当前 key 在该交易所下的那条凭据记录。最直接的做法就是重新执行一次 `/cryptoapi set ...`，它会覆盖你自己当前 key 的旧值。” 
+“修改交易所 API key 时，不是改全局配置文件，而是通过受控管理接口更新当前 key 在该交易所下的凭据记录。”
 
-“如果你只说‘帮我修改交易所 API key’，但没说是 Binance 还是 OKX，就先看 `crypto.execution_mode` / `crypto.default_exchange`。如果当前已经配置了默认交易所，就直接按默认值给对应的 `/cryptoapi set ...` 命令；只有默认值也没配置时，才反问一次‘你要改哪个交易所，Binance 还是 OKX？’。” 
+“如果用户只说要修改交易所 API key，但没有指定交易所，先读取 `crypto.execution_mode` / `crypto.default_exchange`。仅在没有默认值时询问交易所；不要让用户在对话中提供 secret。”
 
 ### 3. 配置文件型
 

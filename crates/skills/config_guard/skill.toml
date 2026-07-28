@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "config_guard"
+version = "0.1.8"
+description = "Inspect RustClaw configuration for missing, inconsistent, or risky structured values."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "crates/skills/config_guard"
+
+[registry]
+name = "config_guard"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "config-guard-skill"
+binary = "config-guard-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/config-guard-skill"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "config_guard"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

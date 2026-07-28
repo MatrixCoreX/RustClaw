@@ -110,6 +110,9 @@ RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
     "server_liveness_is_monitored": 'while kill -0 "${suite_pid}" >/dev/null 2>&1; do',
     "server_exit_fails_fast": "clawd exited while NL suite was running",
     "suite_cleanup_is_registered": 'if [[ -n "${suite_pid}" ]]; then',
+    "on_demand_suite_projects_proactive_receipts": "project_proactive_skill_receipts",
+    "receipt_projection_uses_manifest_inventory": "scripts/project_skill_receipts.py",
+    "receipt_projection_uses_host_platform": "--target host",
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {

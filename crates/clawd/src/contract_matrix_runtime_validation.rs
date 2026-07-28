@@ -83,12 +83,8 @@ pub(in crate::contract_matrix) fn collect_external_observation_admission_errors(
         let Some(entry) = registry.get(&action_ref.skill) else {
             continue;
         };
-        let requires_admission = entry.matrix_admission.is_some()
-            || entry.kind == SkillKind::External
-            || entry
-                .external_bundle_dir
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty());
+        let requires_admission =
+            entry.matrix_admission.is_some() || entry.kind == SkillKind::External;
         if !requires_admission {
             continue;
         }

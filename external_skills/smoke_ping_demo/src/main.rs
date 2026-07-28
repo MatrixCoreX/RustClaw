@@ -48,7 +48,11 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(json!({"error_kind": err.kind})),
+                    extra: Some(json!({
+                        "error_code": err.kind,
+                        "error_kind": err.kind,
+                        "message_key": format!("skill.smoke_ping_demo.{}", err.kind)
+                    })),
                     error_text: Some(err.message),
                 },
             },
@@ -56,7 +60,11 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: Some(json!({"error_kind":"invalid_input"})),
+                extra: Some(json!({
+                    "error_code":"invalid_input",
+                    "error_kind":"invalid_input",
+                    "message_key":"skill.smoke_ping_demo.invalid_input"
+                })),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };

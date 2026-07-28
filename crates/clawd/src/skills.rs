@@ -137,19 +137,17 @@ pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
 }
 
 mod builtin;
-mod external;
 mod memory_context;
 mod output_dirs;
 mod result_enrichment;
 mod runner;
 
+pub(crate) use builtin::execute_builtin_skill_for_task;
 #[cfg(test)]
 pub(crate) use builtin::run_safe_command;
-pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command_with_sandbox};
 // `execute_builtin_skill`（无 task 版本）只在 `builtin.rs` 内部测试用，
 // 不再向 crate 外暴露，避免再产生绕过 LLM 预算/日志的调用点。
 // 详见 `builtin.rs` 上对 `execute_builtin_skill` 的注释。
-pub(crate) use external::execute_external_skill;
 pub(crate) use memory_context::inject_skill_memory_context;
 pub(crate) use output_dirs::ensure_default_output_dir_for_skill_args;
 use result_enrichment::enrich_runtime_owned_skill_extra;
@@ -1756,29 +1754,20 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     };
 
     let value = match kind {
-        SkillKind::External => {
-            execute_external_skill(
-                execution_state,
-                task,
-                &skill_name,
-                &args,
-                &source,
-                execution_context,
-            )
-            .await?
-        }
-        SkillKind::Runner => {
-            let runner_name = execution_state.runner_name_for_skill(&skill_name);
+        SkillKind::External | SkillKind::Runner => {
             tracing::info!(
-                "skill_dispatch skill={} runner_name={} kind=runner",
+                "skill_dispatch skill={} kind={} receipt_required=true",
                 skill_name,
-                runner_name
+                if kind == SkillKind::External {
+                    "external"
+                } else {
+                    "runner"
+                }
             );
             run_skill_with_runner_once(
                 execution_state,
                 task,
                 &skill_name,
-                &runner_name,
                 &args,
                 &source,
                 skill_timeout_secs,

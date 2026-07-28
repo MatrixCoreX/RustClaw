@@ -15,12 +15,41 @@ resolve_script_dir() {
   dirname "$(resolve_path_python "$source_path")"
 }
 
+configure_platform_command_path() {
+  local candidate
+  if [[ "$(uname -s 2>/dev/null || true)" != "Darwin" ]]; then
+    return 0
+  fi
+  # GUI launchers, LaunchAgent, and non-login SSH sessions do not reliably
+  # inherit Homebrew paths. Add only existing standard prefixes.
+  for candidate in \
+    /usr/local/sbin \
+    /usr/local/bin \
+    /opt/homebrew/sbin \
+    /opt/homebrew/bin; do
+    [[ -d "$candidate" ]] || continue
+    case ":${PATH:-}:" in
+      *":${candidate}:"*) ;;
+      *) PATH="${candidate}${PATH:+:${PATH}}" ;;
+    esac
+  done
+  export PATH
+}
+
 append_to_array() {
   local array_name="$1"
   local value="$2"
   local length=0
+  local quoted_value
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    echo "invalid array variable name: $array_name" >&2
+    return 2
+  fi
   eval "length=\${#${array_name}[@]}"
-  printf -v "${array_name}[${length}]" '%s' "$value"
+  # Bash 3.2 (the system shell on older macOS releases) cannot use printf -v
+  # with an indexed-array destination. Quote into a scalar, then assign it.
+  printf -v quoted_value '%q' "$value"
+  eval "${array_name}[${length}]=${quoted_value}"
 }
 
 array_from_command_lines() {
@@ -185,34 +214,42 @@ host_rust_target() {
   rust_target_for_platform "$host_os" "$host_arch"
 }
 
+cargo_host_memory_kb() {
+  local host_os bytes
+  host_os="$(detect_host_os 2>/dev/null || printf '%s' "unknown")"
+  case "$host_os" in
+    linux)
+      awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null
+      ;;
+    macos)
+      bytes="$(sysctl -n hw.memsize 2>/dev/null || printf '%s' "0")"
+      case "$bytes" in
+        ''|*[!0-9]*) printf '%s\n' "0" ;;
+        *) awk -v value="$bytes" 'BEGIN { printf "%.0f\n", value / 1024 }' ;;
+      esac
+      ;;
+    *)
+      printf '%s\n' "0"
+      return 1
+      ;;
+  esac
+}
+
 cargo_jobs_for_small_host() {
-  local host_os host_arch mem_kb cpu_count
+  local host_os host_arch mem_kb
   host_os="$(detect_host_os 2>/dev/null || printf '%s' "unknown")"
   host_arch="$(detect_host_arch 2>/dev/null || printf '%s' "unknown")"
-  mem_kb="$(awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || printf '%s' "0")"
-  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '%s' "1")"
-
-  case "$cpu_count" in
-    ''|*[!0-9]*) cpu_count=1 ;;
-  esac
+  mem_kb="$(cargo_host_memory_kb 2>/dev/null || printf '%s' "0")"
   case "$mem_kb" in
     ''|*[!0-9]*) mem_kb=0 ;;
   esac
 
-  if [[ "$host_os" != "linux" ]]; then
-    return 1
-  fi
-
-  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" || ( "$mem_kb" -gt 0 && "$mem_kb" -le 4194304 ) ]]; then
-    if [[ "$mem_kb" -gt 0 && "$mem_kb" -le 3145728 ]]; then
-      printf '%s\n' "1"
-      return 0
-    fi
-    if [[ "$cpu_count" -le 1 ]]; then
-      printf '%s\n' "1"
-    else
-      printf '%s\n' "2"
-    fi
+  # Large RustClaw links can exceed 3 GiB RSS. Follow the repository's
+  # low-memory contract on both Linux and macOS rather than allowing Cargo to
+  # fan out across every CPU on machines with 16 GiB or less.
+  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" \
+    || ( "$mem_kb" -gt 0 && "$mem_kb" -le 16777216 ) ]]; then
+    printf '%s\n' "1"
     return 0
   fi
 
@@ -231,7 +268,16 @@ configure_cargo_build_jobs_for_small_host() {
   fi
 
   export CARGO_BUILD_JOBS="$jobs"
-  echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS on this small/ARM host to reduce build memory pressure."
+  echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS on this <=16 GiB/ARM host to avoid concurrent high-memory Rust links."
+}
+
+configure_cargo_build_environment() {
+  configure_platform_command_path
+  configure_cargo_build_jobs_for_small_host
+  if [[ -z "${CARGO_INCREMENTAL:-}" && "${CI:-}" != "true" && "${CI:-}" != "1" ]]; then
+    export CARGO_INCREMENTAL=1
+    echo "CARGO_INCREMENTAL not set; enabling it for faster repeated local builds."
+  fi
 }
 
 package_flavor_for_target() {

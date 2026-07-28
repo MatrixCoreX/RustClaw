@@ -533,6 +533,7 @@ export default function App() {
     uploadImportedSkillFiles,
     installSkillFromStore,
     removeSkillFromStore,
+    cancelSkillStoreOperation,
     toggleSkillEnabled,
     clearSkillsConfigError,
   } = useSkillsRuntime({ apiFetch, t });
@@ -1808,6 +1809,7 @@ export default function App() {
               onRefresh={fetchSkillStore}
               onInstall={installSkillFromStore}
               onRemove={removeSkillFromStore}
+              onCancel={cancelSkillStoreOperation}
               skillImportSource={skillImportSource}
               skillImportLoading={skillImportLoading}
               skillImportError={skillImportError}

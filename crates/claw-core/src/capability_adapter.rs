@@ -85,10 +85,7 @@ pub fn skill_uses_external_api(entry: &SkillRegistryEntry) -> bool {
             capability,
             Capability::Llm | Capability::Net | Capability::Secrets(_)
         )
-    }) || entry
-        .external_endpoint
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
+    })
 }
 
 pub fn skill_background_job_capable(entry: &SkillRegistryEntry) -> bool {

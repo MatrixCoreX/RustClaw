@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/shell_compat.sh"
+configure_platform_command_path
 export LC_ALL=C
 export LANG=C
 
@@ -178,6 +181,9 @@ prepare_temp_workspace() {
   cp -R "$ROOT_DIR/configs" "$workspace_root/configs"
   cp -R "$ROOT_DIR/prompts" "$workspace_root/prompts"
   mkdir -p "$workspace_root/data" "$workspace_root/external_skills"
+  if [[ ! -e "$workspace_root/data/skill-packages" ]]; then
+    ln -s "$ROOT_DIR/data/skill-packages" "$workspace_root/data/skill-packages"
+  fi
   ln -s "$ROOT_DIR/crates" "$workspace_root/crates"
   ln -s "$ROOT_DIR/scripts" "$workspace_root/scripts"
   ln -s "$ROOT_DIR/target" "$workspace_root/target"
@@ -239,14 +245,25 @@ ensure_binaries() {
     fi
   fi
 
-  local need_build=0
-  [[ -x "$CLAWD_BIN" ]] || need_build=1
-  [[ -x "$ROOT_DIR/target/release/skill-runner" ]] || need_build=1
-  [[ -x "$ROOT_DIR/target/release/crypto-skill" ]] || need_build=1
-  [[ -x "$ROOT_DIR/target/release/extension-manager-skill" ]] || need_build=1
-
-  if [[ "$need_build" == "1" && "$AUTO_BUILD" == "1" ]]; then
-    (cd "$ROOT_DIR" && cargo build -p clawd && cargo build --release -p skill-runner -p crypto-skill -p extension-manager-skill)
+  if [[ "$AUTO_BUILD" == "1" ]]; then
+    configure_cargo_build_environment
+    (
+      cd "$ROOT_DIR"
+      cargo build -p clawd
+      cargo build --release \
+        -p skill-runner \
+        -p rustclaw-skill-sdk \
+        -p config-guard-skill \
+        -p extension-manager-skill
+      python3 scripts/project_skill_receipts.py \
+        --package-root "$ROOT_DIR/data/skill-packages" \
+        --skill config_guard \
+        --skill extension_manager
+      "$ROOT_DIR/target/release/rustclaw-skill" install-local \
+        "$ROOT_DIR/optional_skills/crypto/skill.toml" \
+        "$ROOT_DIR" \
+        "$ROOT_DIR/data/skill-packages"
+    )
     if [[ -x "$ROOT_DIR/target/debug/clawd" ]]; then
       CLAWD_BIN="$ROOT_DIR/target/debug/clawd"
     fi
@@ -260,14 +277,18 @@ ensure_binaries() {
     echo "skill-runner release binary missing: $ROOT_DIR/target/release/skill-runner" >&2
     exit 2
   }
-  [[ -x "$ROOT_DIR/target/release/crypto-skill" ]] || {
-    echo "crypto-skill release binary missing: $ROOT_DIR/target/release/crypto-skill" >&2
+  [[ -x "$ROOT_DIR/target/release/rustclaw-skill" ]] || {
+    echo "skill SDK CLI missing: $ROOT_DIR/target/release/rustclaw-skill" >&2
     exit 2
   }
-  [[ -x "$ROOT_DIR/target/release/extension-manager-skill" ]] || {
-    echo "extension-manager release binary missing: $ROOT_DIR/target/release/extension-manager-skill" >&2
-    exit 2
-  }
+  local skill_name
+  for skill_name in config_guard crypto extension_manager; do
+    "$ROOT_DIR/target/release/rustclaw-skill" receipt-verify \
+      "$ROOT_DIR/data/skill-packages" "$skill_name" >/dev/null || {
+      echo "verified install receipt missing for skill: $skill_name" >&2
+      exit 2
+    }
+  done
 }
 
 wait_for_health() {
@@ -609,12 +630,12 @@ run_direct_case \
 run_direct_case \
   "crypto_binance_direct_unbound" \
   '{"action":"positions","exchange":"binance"}' \
-  '当前 key 还没有绑定 Binance API;;/cryptoapi set binance' \
+  '当前 key 还没有绑定 Binance API;;POST /v1/auth/crypto-credentials' \
   "crypto"
 run_direct_case \
   "crypto_okx_direct_unbound" \
   '{"action":"positions","exchange":"okx"}' \
-  '当前 key 还没有绑定 OKX API;;/cryptoapi set okx' \
+  '当前 key 还没有绑定 OKX API;;POST /v1/auth/crypto-credentials' \
   "crypto"
 
 echo "== Stage 2: NL ask checks =="

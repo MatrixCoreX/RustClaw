@@ -622,3 +622,10 @@ fn private_exchange_action_alias_checks_binding_first() {
     );
     set_current_lang("zh-CN");
 }
+
+#[test]
+fn protocol_errors_always_expose_stable_machine_fields() {
+    let extra = crypto_error_extra_for_response("unsupported action: protocol_smoke");
+    assert_eq!(extra["error_code"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.crypto.execution_failed");
+}

@@ -63,10 +63,11 @@ python3 skill_develop/create_skill.py report_writer --on-demand
 如果是外部提交技能，不使用 `create_skill.py`，走 `extension_manager`：
 
 ```text
-1. scaffold_external_skill / implement_external_skill 生成或补全 external_skills/<skill_name>
-2. validate_external_skill 运行 sync_skill_docs.py、cargo check 和协议 smoke test
-3. register_external_skill(confirm=true) 构建 release binary，并自动写入 workspace、skills_registry.toml、configs/config.toml 的 skill_switches.<skill>=true
-4. reload skills 或重启 clawd 后再跑 run_skill happy path
+1. scaffold_external_skill 显式选择 rust/python/node/go/prebuilt，并生成 external_skills/<skill_name>/skill.toml 与对应语言脚手架
+2. implement_external_skill 可补全 Cargo/Python/Node/Go 的源码入口；prebuilt/generic_process/http_json 由开发者提供产物或配置
+3. validate_external_skill 运行 sync_skill_docs.py、manifest 所选私有 adapter 安装和协议 smoke test
+4. register_external_skill(confirm=true) 只在可信回执存在后写入 skills_registry.toml 与 configs/config.toml 的 skill_switches.<skill>=true；仅 Cargo adapter 需要 Cargo workspace
+5. reload skills 或重启 clawd 后再跑 run_skill happy path
 ```
 
 ## 推荐任务模板
@@ -92,14 +93,14 @@ python3 skill_develop/create_skill.py report_writer --on-demand
 4. 运行 `python3 scripts/sync_skill_docs.py`
 5. 如果该 skill 需要进入 planner 常规自然语言执行流，在 `configs/skills_registry.toml` 声明 `planner_capabilities`
 6. 如有 vendor 特化，再补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
-7. 运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
+7. 运行 `rustclaw-skill validate` 与 `rustclaw-skill protocol-test`；仅 Cargo adapter 额外运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
 ## 外部 skill 标准接入步骤
-1. 准备或生成 `external_skills/<skill_name>`，目录内必须有 `Cargo.toml`、`README.md`、`INTERFACE.md`、`src/main.rs`
+1. 准备或生成 `external_skills/<skill_name>`，目录内必须有 `skill.toml`、`README.md`、`INTERFACE.md`、对应语言源码与锁文件/产物声明
 2. 补全 `INTERFACE.md`，确保 action、参数、错误和请求/响应示例真实可用
-3. 运行 `validate_external_skill`，通过 `sync_skill_docs.py`、`cargo check` 和单行 JSON smoke test
+3. 运行 `validate_external_skill`，通过 `sync_skill_docs.py`、manifest 校验、私有 adapter 安装和单行 JSON smoke test
 4. 验证/编译通过后运行 `register_external_skill` 且 `confirm=true`
-5. `register_external_skill` 成功后会构建 release binary，写入根 `Cargo.toml`、`configs/skills_registry.toml`，并把 `configs/config.toml` 的 `skill_switches.<skill_name>` 自动写成 `true`
+5. `register_external_skill` 成功后会安装经验证的包、写入 `configs/skills_registry.toml`，并把 `configs/config.toml` 的 `skill_switches.<skill_name>` 自动写成 `true`；只有 Cargo adapter 才加入根 Cargo workspace
 6. reload skills 或重启 `clawd`，再用 `run_skill` 路径跑一次 happy path
 
 ## `create_skill.py` 支持项
@@ -114,7 +115,6 @@ python3 skill_develop/create_skill.py report_writer --on-demand
   - `--capabilities`
   - `--uses-llm`
   - `--disabled`
-  - `--runner-name`
   - `--on-demand`
 
 查看帮助：

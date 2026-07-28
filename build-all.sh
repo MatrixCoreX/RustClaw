@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
 
 # ----- Ensure Cargo (Rust) is installed -----
 # zh: 确保本机已有 Rust/Cargo；缺失时尝试自动安装 rustup。
@@ -90,8 +91,10 @@ detect_libclang_dir() {
 		/usr/lib64 \
 		/usr/local/lib \
 		/opt/homebrew/opt/llvm/lib \
-		/usr/local/opt/llvm/lib; do
-		if [[ -e "$candidate/libclang.so" ]]; then
+		/usr/local/opt/llvm/lib \
+		/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib \
+		/Library/Developer/CommandLineTools/usr/lib; do
+		if [[ -e "$candidate/libclang.so" || -e "$candidate/libclang.dylib" ]]; then
 			printf '%s\n' "$candidate"
 			return 0
 		fi
@@ -118,8 +121,11 @@ detect_libclang_dir() {
 		/usr/lib64 \
 		/usr/local/lib \
 		/opt/homebrew/opt/llvm/lib \
-		/usr/local/opt/llvm/lib; do
-		if compgen -G "$candidate/libclang*.so*" >/dev/null 2>&1; then
+		/usr/local/opt/llvm/lib \
+		/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib \
+		/Library/Developer/CommandLineTools/usr/lib; do
+		if compgen -G "$candidate/libclang*.so*" >/dev/null 2>&1 ||
+			compgen -G "$candidate/libclang*.dylib" >/dev/null 2>&1; then
 			printf '%s\n' "$candidate"
 			return 0
 		fi
@@ -360,16 +366,17 @@ echo "Host platform: ${HOST_OS:-unknown}/${HOST_ARCH:-unknown}"
 echo "Primary target: $PRIMARY_TARGET"
 echo "Primary output: $(preferred_release_dir_for_target "$SCRIPT_DIR" "$PRIMARY_TARGET")"
 echo "Flavor tag: $PACKAGE_FLAVOR"
-configure_cargo_build_jobs_for_small_host
+configure_cargo_build_environment
 if [[ "${#TARGETS_TO_BUILD[@]}" -gt 1 ]]; then
 	echo "Extra targets: ${TARGETS_TO_BUILD[*]:1}"
 fi
 
-# Ensure runtime binaries exist for deployment/start scripts. Skill Store
-# entries marked `install_mode = "on_demand"` stay in the workspace for normal
-# development and tests, but release builds must not compile them proactively.
-WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
-export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
+# Ensure runtime/core-tool binaries exist for deployment/start scripts. Runner
+# skill packages are selected from the registry for each target OS. Skill Store
+# entries marked `install_mode = "on_demand"` are never compiled proactively.
+WORKSPACE_METADATA_FILE="$(mktemp)"
+trap 'rm -f "$WORKSPACE_METADATA_FILE"' EXIT
+cargo metadata --no-deps --format-version 1 >"$WORKSPACE_METADATA_FILE"
 
 ON_DEMAND_PACKAGES=()
 while IFS=$'\t' read -r package bin; do
@@ -385,59 +392,71 @@ done < <(
 if [[ "${#ON_DEMAND_PACKAGES[@]}" -gt 0 ]]; then
 	echo "Skill Store packages excluded from proactive build: ${ON_DEMAND_PACKAGES[*]}"
 fi
-RUSTCLAW_ON_DEMAND_PACKAGES="$(printf '%s\n' "${ON_DEMAND_PACKAGES[@]:-}")"
-export RUSTCLAW_ON_DEMAND_PACKAGES
 
-REQUIRED_BINS=()
-while IFS= read -r bin; do
-	[[ -n "$bin" ]] && REQUIRED_BINS+=("$bin")
-done < <(
-	python3 - <<'PY'
-import json
-import os
-import sys
-
-raw = os.environ.get("RUSTCLAW_WORKSPACE_METADATA", "").strip()
-if not raw:
-    raise SystemExit(1)
-data = json.loads(raw)
-workspace_members = set(data.get("workspace_members", []))
-on_demand_packages = {
-    value.strip()
-    for value in os.environ.get("RUSTCLAW_ON_DEMAND_PACKAGES", "").splitlines()
-    if value.strip()
-}
-bins = set()
-
-for pkg in data.get("packages", []):
-    if pkg.get("id") not in workspace_members:
-        continue
-    if pkg.get("name") in on_demand_packages:
-        continue
-    for target in pkg.get("targets", []):
-        kinds = target.get("kind", [])
-        if "bin" in kinds:
-            name = (target.get("name") or "").strip()
-            if name:
-                bins.add(name)
-
-for name in sorted(bins):
-    print(name)
-PY
-)
-
-if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
-	echo "No workspace binary targets discovered via cargo metadata."
-	exit 1
-fi
-
+PRIMARY_REQUIRED_BINS=()
 for target in "${TARGETS_TO_BUILD[@]}"; do
 	if [[ "$target" != "$HOST_TARGET" ]] && command -v rustup >/dev/null 2>&1; then
 		rustup target add "$target" >/dev/null 2>&1 || true
 	fi
 	echo "Building target: $target"
+	BUILD_EXCLUDED_PACKAGES=()
+	while IFS= read -r package; do
+		[[ -n "$package" ]] && BUILD_EXCLUDED_PACKAGES+=("$package")
+	done < <(
+		python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+			--scope build-excludes --target "$target" --format packages
+	)
+	UNSUPPORTED_PACKAGES=()
+	while IFS= read -r package; do
+		[[ -n "$package" ]] && UNSUPPORTED_PACKAGES+=("$package")
+	done < <(
+		python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+			--scope unsupported-proactive --target "$target" --format packages
+	)
+	if [[ "${#UNSUPPORTED_PACKAGES[@]}" -gt 0 ]]; then
+		echo "Runner packages unsupported for target=$target: ${UNSUPPORTED_PACKAGES[*]}"
+	fi
+
+	RUSTCLAW_BUILD_EXCLUDED_PACKAGES="$(printf '%s\n' "${BUILD_EXCLUDED_PACKAGES[@]:-}")"
+	export RUSTCLAW_BUILD_EXCLUDED_PACKAGES
+	REQUIRED_BINS=()
+	while IFS= read -r bin; do
+		[[ -n "$bin" ]] && REQUIRED_BINS+=("$bin")
+	done < <(
+		python3 - "$WORKSPACE_METADATA_FILE" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+workspace_members = set(data.get("workspace_members", []))
+excluded = {
+    value.strip()
+    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
+    if value.strip()
+}
+bins = {
+    target.get("name", "").strip()
+    for package in data.get("packages", [])
+    if package.get("id") in workspace_members and package.get("name") not in excluded
+    for target in package.get("targets", [])
+    if "bin" in target.get("kind", []) and target.get("name", "").strip()
+}
+for name in sorted(bins):
+    print(name)
+PY
+	)
+	if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
+		echo "No workspace binary targets selected for target=$target."
+		exit 1
+	fi
+	if [[ "$target" == "$PRIMARY_TARGET" ]]; then
+		PRIMARY_REQUIRED_BINS=("${REQUIRED_BINS[@]}")
+	fi
+
 	CARGO_WORKSPACE_ARGS=(--workspace --release)
-	for package in "${ON_DEMAND_PACKAGES[@]:-}"; do
+	for package in "${BUILD_EXCLUDED_PACKAGES[@]:-}"; do
 		[[ -n "$package" ]] && CARGO_WORKSPACE_ARGS+=(--exclude "$package")
 	done
 	if [[ "$target" == "$HOST_TARGET" ]]; then
@@ -458,6 +477,14 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 		echo "Try: cargo build ${CARGO_WORKSPACE_ARGS[*]} --target $target"
 		exit 1
 	fi
+	if [[ "$target" == "$HOST_TARGET" ]]; then
+		echo "Projecting proactive skill binaries into verified receipts for $target..."
+		python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
+			--target "$target" \
+			--binary-dir "$OUT_DIR" \
+			--sdk-cli "$OUT_DIR/rustclaw-skill" \
+			--package-root "$SCRIPT_DIR/target/skill-packages/$target"
+	fi
 done
 
 if [[ "$UI_BUILT" == "1" ]]; then
@@ -471,4 +498,4 @@ fi
 
 echo "Build completed."
 echo "Primary output: $(preferred_release_dir_for_target "$SCRIPT_DIR" "$PRIMARY_TARGET")"
-echo "Verified binaries: ${REQUIRED_BINS[*]}"
+echo "Verified binaries: ${PRIMARY_REQUIRED_BINS[*]}"

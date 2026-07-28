@@ -1,0 +1,43 @@
+schema_version = 1
+
+[package]
+name = "reference_go"
+version = "1.0.0"
+description = "Cross-language reference conformance fixture"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "reference_go"
+capability_policy_source = "registry"
+
+[build]
+adapter = "go"
+source_root = "go"
+lockfile = "go.sum"
+network = "deny"
+options = { main = "." }
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/reference-go-skill"
+working_directory = "."
+timeout_seconds = 10
+smoke_args = { action = "calculate", a = 1, b = 2 }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "reference_go"
+
+[lifecycle]
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

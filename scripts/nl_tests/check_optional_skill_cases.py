@@ -104,14 +104,15 @@ def main() -> int:
             except (OSError, UnicodeError, ValueError) as error:
                 file_errors.append(str(error))
         errors.extend(f"{name}: {error}" for error in file_errors)
+        manifest_path = ROOT / str(skill.get("package_manifest", ""))
+        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        build = manifest.get("build", {})
         print(
             "\t".join(
                 (
                     name,
-                    str(skill.get("install_package", "")),
-                    str(skill.get("runner_name", name.replace("_", "-")) + "-skill")
-                    if not skill.get("runner_name")
-                    else str(skill["runner_name"]),
+                    str(build.get("package", "")),
+                    str(build.get("binary", "")),
                     path.relative_to(ROOT).as_posix(),
                     str(row_count),
                     "offline",

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/shell_compat.sh"
 
 SKILL_NAME="${SKILL_NAME:-}"
 DEFAULT_ARGS="${DEFAULT_ARGS:-}"
@@ -11,6 +13,7 @@ fi
 PROFILE="release"
 AUTO_BUILD=0
 RAW=0
+ALLOW_NETWORK=0
 ARGS_JSON=""
 CONTEXT_JSON="${CONTEXT_JSON:-null}"
 USER_ID="${USER_ID:-1}"
@@ -28,6 +31,7 @@ Options:
   --user-id N               Request user_id (default: 1)
   --chat-id N               Request chat_id (default: 1)
   --auto-build              Auto build missing runner/skill binary
+  --network                 Approve manifest-declared install network for this run
   --raw                     Print raw one-line JSON response
   --help, -h                Show help
 
@@ -43,42 +47,6 @@ need_cmd() {
     echo "Missing command: $cmd"
     exit 2
   }
-}
-
-skill_bin_name() {
-  case "$1" in
-    x) echo "x-skill" ;;
-    system_basic) echo "system-basic-skill" ;;
-    http_basic) echo "http-basic-skill" ;;
-    git_basic) echo "git-basic-skill" ;;
-    install_module) echo "install-module-skill" ;;
-    process_basic) echo "process-basic-skill" ;;
-    package_manager) echo "package-manager-skill" ;;
-    archive_basic) echo "archive-basic-skill" ;;
-    db_basic) echo "db-basic-skill" ;;
-    docker_basic) echo "docker-basic-skill" ;;
-    fs_search) echo "fs-search-skill" ;;
-    rss_fetch) echo "rss-fetch-skill" ;;
-    image_vision) echo "image-vision-skill" ;;
-    image_generate) echo "image-generate-skill" ;;
-    image_edit) echo "image-edit-skill" ;;
-    audio_transcribe) echo "audio-transcribe-skill" ;;
-    audio_synthesize) echo "audio-synthesize-skill" ;;
-    health_check) echo "health-check-skill" ;;
-    log_analyze) echo "log-analyze-skill" ;;
-    service_control) echo "service-control-skill" ;;
-    config_guard) echo "config-guard-skill" ;;
-    crypto) echo "crypto-skill" ;;
-    stock) echo "stock-skill" ;;
-    weather) echo "weather-skill" ;;
-    doc_parse) echo "doc-parse-skill" ;;
-    transform) echo "transform-skill" ;;
-    web_search_extract) echo "web-search-extract-skill" ;;
-    kb) echo "kb-skill" ;;
-    browser_web) echo "browser-web-skill" ;;
-    task_control) echo "task-control-skill" ;;
-    *) return 1 ;;
-  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -105,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --auto-build)
       AUTO_BUILD=1
+      shift
+      ;;
+    --network)
+      ALLOW_NETWORK=1
       shift
       ;;
     --raw)
@@ -148,6 +120,14 @@ echo "$CONTEXT_JSON" | jq -e '. == null or type == "object"' >/dev/null 2>&1 || 
 }
 
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
+SKILL_RECORD="$(
+  python3 "$ROOT_DIR/scripts/skill_store_packages.py" \
+    --scope selected --target host --skill "$SKILL_NAME" --format records
+)" || exit 1
+canonical_skill="$(jq -r '.skill_name' <<<"$SKILL_RECORD")"
+manifest_path="$(jq -r '.manifest_path' <<<"$SKILL_RECORD")"
+SDK_CLI="$ROOT_DIR/target/$PROFILE/rustclaw-skill"
+PACKAGE_ROOT="$ROOT_DIR/data/skill-packages"
 
 if [[ ! -x "$RUNNER" ]]; then
   if [[ "$AUTO_BUILD" != "1" ]]; then
@@ -155,16 +135,22 @@ if [[ ! -x "$RUNNER" ]]; then
     echo "Try: ./build-all.sh $PROFILE or rerun with --auto-build"
     exit 1
   fi
+  configure_cargo_build_environment
   (cd "$ROOT_DIR" && cargo build -p skill-runner --release)
 fi
 
 if [[ "$AUTO_BUILD" == "1" ]]; then
-  if bin_name="$(skill_bin_name "$SKILL_NAME")"; then
-    skill_bin="$ROOT_DIR/target/$PROFILE/$bin_name"
-    if [[ ! -x "$skill_bin" ]]; then
-      (cd "$ROOT_DIR" && cargo build --bin "$bin_name" --release)
-    fi
+  if [[ ! -x "$SDK_CLI" ]]; then
+    configure_cargo_build_environment
+    (cd "$ROOT_DIR" && cargo build -p rustclaw-skill-sdk --release)
   fi
+  install_args=(install-local "$manifest_path" "$ROOT_DIR" "$PACKAGE_ROOT")
+  [[ "$ALLOW_NETWORK" == "1" ]] && install_args+=(--network)
+  "$SDK_CLI" "${install_args[@]}" >/dev/null
+elif [[ ! -f "$PACKAGE_ROOT/$canonical_skill/current.json" ]]; then
+  echo "verified skill receipt not found: $canonical_skill"
+  echo "Install it from Skill Store or rerun with --auto-build"
+  exit 1
 fi
 
 request_id="skill-call-${SKILL_NAME}-$(date +%s)-$RANDOM"
@@ -186,7 +172,10 @@ req="$(
     }'
 )"
 
-resp="$(printf '%s\n' "$req" | "$RUNNER")"
+resp="$(printf '%s\n' "$req" | \
+  WORKSPACE_ROOT="$ROOT_DIR" \
+  RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+  "$RUNNER")"
 
 if [[ "$RAW" == "1" ]]; then
   printf '%s\n' "$resp"

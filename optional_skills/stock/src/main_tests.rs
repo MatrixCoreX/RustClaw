@@ -105,3 +105,10 @@ fn preview_quote_keeps_name_resolution_deferred() {
     assert_eq!(extra["resolution_mode"], "configured_alias_or_model");
     assert_eq!(extra["external_call_count"], 0);
 }
+
+#[test]
+fn protocol_errors_always_expose_stable_machine_fields() {
+    let extra = stock_error_extra("unsupported_action");
+    assert_eq!(extra["error_code"], "unsupported_action");
+    assert_eq!(extra["message_key"], "skill.stock.unsupported_action");
+}

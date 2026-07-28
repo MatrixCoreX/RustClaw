@@ -387,6 +387,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 8. [技能独立存储](docs/architecture/08-skill-owned-storage.zh-CN.md)
 9. [交互式编码与输出呈现](docs/architecture/09-interactive-coding.zh-CN.md)
 10. [Web 入口与核心隔离](docs/architecture/10-web-entry-security.zh-CN.md)
+11. [任务产物交付](docs/architecture/11-task-artifact-delivery.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。
@@ -396,7 +397,8 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 ## 主要组件
 
 - `crates/clawd`：核心运行时、HTTP API、任务队列、路由、记忆、鉴权、调度
-- `crates/skill-runner`：启动 runner 技能二进制；`clawd` 会先解析 registry kind / `runner_name` 再调用它
+- `crates/skill-runner`：验证安装回执，解析语言无关的 `SkillLaunchSpec`，再监督技能 JSONL 进程或类型化 HTTPS adapter
+- `crates/skill-sdk`：manifest 校验、隔离的 Cargo/Python/Node/Go/prebuilt 构建、协议检查、回执、回滚及开发者 CLI/模板
 - `crates/clawcli`：面向 `clawd` 的终端 CLI
 - `crates/webd`：浏览器 UI 托管、登录/会话边界，以及到内部核心 API 的鉴权代理
 - `crates/telegramd`、`crates/wechatd`、`crates/feishud`、`crates/larkd`、`crates/whatsappd`、`crates/whatsapp_webd`：通道守护进程
@@ -406,6 +408,22 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 - `external_skills/*`：外部提交技能及其必须提供的 `INTERFACE.md`
 - `UI/`：基于 Vite + React 的本地控制台
 - `pi_app/`：小屏桌面程序和启动脚本
+
+普通源码构建、交叉编译、Docker 和发布打包统一读取技能 registry 的
+`supported_os`：核心运行组件和核心工具始终按目标平台构建，固定 runner
+只构建该平台支持的 package，`install_mode="on_demand"` 技能一律不进入普通
+构建。用户在 Skill Store 安装按需技能时，系统先校验当前平台，再读取该技能
+的 `skill.toml`，只运行其中声明的 adapter，协议冒烟和回执验证通过后才启用；
+脚本不再维护独立的技能名映射。
+
+当前实现链路与编程语言无关：
+
+```text
+skill.toml -> build adapter -> install receipt -> SkillLaunchSpec -> JSONL capability result
+```
+
+Rust、Python、Node、Go、prebuilt、生命周期、安全和发布说明见
+[多语言技能 SDK 合同](docs/skill_sdk_contract.zh-CN.md)。
 
 ## 快速开始
 
@@ -453,6 +471,16 @@ rustclaw -key add rk-xxxx admin
 rustclaw -key disable rk-xxxx
 ```
 
+### Telegram 通信端边界
+
+Telegram 只承担消息传输、身份绑定和任务控制，不再维护技能专属配置或自然语言路由：
+
+- 文字、图片、语音、视频和文件统一提交为 `kind=ask`，由 agent loop 判断回答、澄清或调用能力。
+- 当前命令只有 `/help`（含 `/start`）、`/key`、`/status`、`/cancel` 和 `/voicemode`。
+- `/voicemode` 只控制当前 Telegram 会话的文字/语音交付方式，不参与能力选择。
+- Skill Store 按需技能（包括 `crypto`）的安装、启停和配置由浏览器管理端或受控核心 API 负责；Telegram 不接收技能凭据，也不提供技能配置命令。
+- `telegramd` 启动时会通过 Telegram `setMyCommands` 刷新命令菜单，删除配置中的旧命令后需重启通信端才能更新客户端菜单。
+
 ## UI、API 与 `webd`
 
 主 API 由只监听 loopback 的 `clawd` 提供，所有浏览器流量统一从 `webd` 进入：
@@ -477,14 +505,14 @@ flowchart LR
 - 云服务器：nginx 可以托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`；nginx 不直接连接 `clawd`
 - `webd` 是浏览器安全边界，负责密码登录、会话持久化、凭据注入、请求限制和 API 代理
 - `clawd` 不再托管浏览器资源，也不能绑定非 loopback 地址；本地通道守护进程和 `clawcli` 可以使用其内部 API
-- 首页的“Web 入口”区域显示 nginx 安装、进程、站点和 UI 部署状态；管理员可以启用/修复 nginx、部署当前 UI，并在检查通过后打开入口。
+- 首页把入口管理分成左右两个区域：“webd 对外端口”在设备 IP 直连（`0.0.0.0:<端口>`）与仅本机（`127.0.0.1:<端口>`）之间切换；“WEB服务器配置入口”显示 nginx 安装、进程、站点和 UI 部署状态。本地不配置 nginx 时要保持 webd 对外端口打开；原生部署配置 nginx 后，关闭 webd 对外直连不影响 nginx 页面和 API。
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
 - `AI 学习` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
 - 桌面端点击主操作区域任意位置都会自动收起左侧导航，可用导航开关再次展开；移动端选择页面或点击菜单外部后会关闭导航菜单。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
 
-`clawd` 固定使用内部地址 `127.0.0.1:8787`，不再提供面向用户的监听配置。`webd` 默认常见监听为 `0.0.0.0:8788`，可选 nginx 的上游由部署脚本从 `configs/channels/webd.toml` 推导。Docker 只发布 `8788`，不发布 `8787`。
+`clawd` 固定使用内部地址 `127.0.0.1:8787`，不再提供面向用户的监听配置。`webd` 从 `configs/channels/webd.toml` 读取监听地址，可使用 `0.0.0.0:8788` 提供设备 IP 直连，也可使用 `127.0.0.1:8788` 只允许 nginx/本机访问。首页切换访问范围时会保留原端口，只原子修改监听地址。Docker 只发布 `8788`，不发布 `8787`；容器网络中改为 loopback 前必须单独确认网络拓扑。
 
 常用接口（请求时带上当前 UI/user key 的 `X-RustClaw-Key`）：
 
@@ -500,8 +528,10 @@ flowchart LR
 - `POST /v1/tasks/cancel-one`：按 active-list index 取消
 - `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
 - `GET /v1/admin/nginx`：返回仅管理员可见的 nginx 安装、进程、站点和已部署 UI 状态
-- `POST /v1/admin/workspace-update/nginx-enable`：安装/启动或修复 nginx 入口，并部署已有 UI 资源
-- `POST /v1/admin/workspace-update/nginx-deploy`：源码存在时先构建当前 UI，再部署到 nginx
+- `GET /v1/admin/webd-exposure`：返回 webd 的监听地址、端口、进程和对外直连状态
+- `POST /v1/admin/webd-exposure`：原子切换 webd 的对外/仅本机监听范围，并按平台安排重启
+- `POST /v1/admin/workspace-update/nginx-enable`：按 Linux/macOS 平台检查、安装或更新 nginx，修复并启动入口，再部署已有 UI 资源
+- `POST /v1/admin/workspace-update/nginx-disable`：停止并禁用 nginx，删除 RustClaw 站点和专用 UI 部署；云服务器执行后会失去该 Web 入口
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`：按当前 `X-RustClaw-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
@@ -623,8 +653,8 @@ UI 相关说明：
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
 - `install-rustclaw-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
 - 管理员打开首页时会自动检查源码版本和当前平台可用的 GitHub Release，并显示运行版本与最新 Release 标签
-- Release 包安装只检查和展示 Release 更新，不执行 Git 命令，也不显示源码编译区；管理员可通过“切换到源码模式”先安全克隆、验证并迁移完整源码，成功重启后才启用 Git 拉取与编译入口。源码安装也可选择“切换回 Release 模式”：系统会校验预编译包，保留运行数据和已安装技能，将完整源码移入限量回滚备份，并在重启后隐藏 Git 拉取与本机编译入口
-- 首页系统信息区显示系统/版本、架构、内存、RustClaw 存储、部署类型和运行时长，不暴露主机路径或环境变量；Linux/macOS 缺失的指标会显示为部分数据，不会让整个首页失败
+- Release 包安装只检查和展示 Release 更新，不执行 Git 命令，也不显示源码编译区；管理员可通过“切换到源码模式”先安全克隆、验证并迁移完整源码，成功重启后才启用 Git 拉取与编译入口
+- 首页系统信息区显示系统/版本、架构、内存、系统存储、部署类型和运行时长，不暴露主机路径或环境变量；Linux/macOS 缺失的指标会显示为部分数据，不会让整个首页失败
 - 只有真实构建或部署任务才显示进度；完整编译/部署、仅 UI、仅 clawd 成功完成后会自动刷新一次页面
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
@@ -726,6 +756,7 @@ Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_ap
 ## 开发说明
 
 - 如果你是源码开发者，`build-all.sh` 是最贴近当前仓库脚本行为的统一构建入口
+- Linux 本机构建默认复用当前 Rust 工具链自带的 LLD；内存不高于 16 GiB 时 Cargo 默认单作业，本地重复构建默认保留增量编译。可显式设置 `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` 覆盖默认值，排查 linker 兼容性时可设置 `RUSTCLAW_DISABLE_BUNDLED_LLD=1`。
 - 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
 - 如果只想重建本地 UI，使用 `build-ui-nginx.sh`；只有 nginx 托管的服务器才使用 `deploy-ui-nginx.sh`
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步

@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/shell_compat.sh"
 
 CONFIG_PATH="$SCRIPT_DIR/configs/config.toml"
 
@@ -256,74 +258,30 @@ CARGO_PROFILE_FLAG=(--release)
 TARGET_DIR="target/release"
 
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
+  configure_cargo_build_environment
   echo "skill-runner missing, building..." # zh: 未找到 skill-runner，开始编译...
   cargo build -p skill-runner "${CARGO_PROFILE_FLAG[@]}"
 fi
 
-skill_bin_name() {
-  case "$1" in
-    x) echo "x-skill" ;;
-    system_basic) echo "system-basic-skill" ;;
-    http_basic) echo "http-basic-skill" ;;
-    git_basic) echo "git-basic-skill" ;;
-    install_module) echo "install-module-skill" ;;
-    process_basic) echo "process-basic-skill" ;;
-    package_manager) echo "package-manager-skill" ;;
-    archive_basic) echo "archive-basic-skill" ;;
-    db_basic) echo "db-basic-skill" ;;
-    docker_basic) echo "docker-basic-skill" ;;
-    fs_search) echo "fs-search-skill" ;;
-    rss_fetch) echo "rss-fetch-skill" ;;
-    image_vision) echo "image-vision-skill" ;;
-    image_generate) echo "image-generate-skill" ;;
-    image_edit) echo "image-edit-skill" ;;
-    audio_transcribe) echo "audio-transcribe-skill" ;;
-    audio_synthesize) echo "audio-synthesize-skill" ;;
-    health_check) echo "health-check-skill" ;;
-    log_analyze) echo "log-analyze-skill" ;;
-    service_control) echo "service-control-skill" ;;
-    config_guard) echo "config-guard-skill" ;;
-    crypto) echo "crypto-skill" ;;
-    *) return 1 ;;
-  esac
-}
-
-ON_DEMAND_SKILL_RUNNERS="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" --format runners)"
+PROACTIVE_SKILL_SPECS="$(
+  python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+    --scope proactive --target host --format specs
+)"
 
 if [[ -n "${SKILLS_LIST:-}" ]]; then
-  IFS=',' read -r -a SKILLS_ARR <<< "$SKILLS_LIST"
-  for skill in "${SKILLS_ARR[@]}"; do
-    skill="$(echo "$skill" | xargs)"
-    [[ -z "$skill" ]] && continue
-    if ! bin_name="$(skill_bin_name "$skill")"; then
-      echo "Skip unknown skill in skills_list: $skill" # zh: skills_list 中存在未知技能，已跳过
-      continue
-    fi
-    if grep -Fqx "$bin_name" <<< "$ON_DEMAND_SKILL_RUNNERS"; then
-      echo "Skip on-demand Skill Store binary during setup: $bin_name"
+  while IFS=$'\t' read -r skill package bin_name _install_mode _supported_os adapter; do
+    [[ -n "$skill" ]] || continue
+    [[ ",${SKILLS_LIST}," == *",${skill},"* ]] || continue
+    if [[ "$adapter" != "cargo" ]]; then
+      echo "Skipping direct build for ${skill}: manifest adapter=${adapter}; install it through its adapter."
       continue
     fi
     if [[ ! -x "$SCRIPT_DIR/$TARGET_DIR/$bin_name" ]]; then
+      configure_cargo_build_environment
       echo "Building missing skill binary: $bin_name" # zh: 正在编译缺失的技能二进制
-      cargo build --bin "$bin_name" "${CARGO_PROFILE_FLAG[@]}"
+      cargo build -p "$package" "${CARGO_PROFILE_FLAG[@]}"
     fi
-  done
-fi
-
-if [[ ",${SKILLS_LIST:-}," == *",x,"* ]] && ! grep -Fqx "x-skill" <<< "$ON_DEMAND_SKILL_RUNNERS"; then
-  echo "Checking X skill dependency (xurl)..." # zh: 检查 X 技能依赖（xurl）...
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "npm not found. Please install npm first." # zh: 未找到 npm，请先安装 npm
-    exit 1
-  fi
-  if ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
-    echo "xurl binary not found (${XURL_BIN:-xurl}), installing @xdevplatform/xurl globally..." # zh: 未找到 xurl 命令，开始全局安装 @xdevplatform/xurl
-    npm install -g @xdevplatform/xurl
-  fi
-  if ! "${XURL_BIN:-xurl}" --version >/dev/null 2>&1; then
-    echo "xurl verification failed: ${XURL_BIN:-xurl} --version" # zh: xurl 安装校验失败：无法执行 --version
-    exit 1
-  fi
+  done <<< "$PROACTIVE_SKILL_SPECS"
 fi
 
 if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then

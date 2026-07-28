@@ -145,6 +145,7 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     });
@@ -382,12 +383,20 @@ fn guard_config(
     {
         risks.push("tools.allow_path_outside_workspace=true".to_string());
     }
-    if lookup_json_path(&root, &split_field_path("telegram.sendfile.full_access"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        risks.push("telegram.sendfile.full_access=true".to_string());
-    }
+    let deprecations = [
+        "routing.locator_scan_max_depth",
+        "routing.locator_scan_max_files",
+    ]
+    .into_iter()
+    .filter(|field_path| lookup_json_path(&root, &split_field_path(field_path)).is_some())
+    .map(|field_path| {
+        json!({
+            "field": field_path,
+            "code": "obsolete_filesystem_scan_limit",
+            "message_key": "config.deprecated.filesystem_scan_limit",
+        })
+    })
+    .collect::<Vec<_>>();
     add_skills_registry_risks(&target.real_path, &root, &mut risks);
     let risk_count = risks.len();
     let valid = risk_count == 0;
@@ -402,6 +411,8 @@ fn guard_config(
         "risk_count": risk_count,
         "candidates": risks.clone(),
         "risks": risks,
+        "deprecation_count": deprecations.len(),
+        "deprecations": deprecations,
     }))
 }
 

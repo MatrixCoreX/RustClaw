@@ -1,0 +1,8 @@
+[package]
+name = "reference-rust-skill"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "reference-rust-skill"
+path = "src/main.rs"

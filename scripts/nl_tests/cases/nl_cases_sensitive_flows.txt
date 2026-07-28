@@ -4,7 +4,7 @@
 config_guard_en|user|Web admin console|Please modify configs/config.toml and set webd.listen to 127.0.0.1:9999. Apply the config change directly.
 config_guard_zh|user|Web 管理端|把 configs/config.toml 里的 webd.listen 改成 127.0.0.1:9999，直接帮我改掉这个配置。
 config_guard_en_alt|user|Web admin console|Update configs/config.toml so tools.allow_sudo becomes true, and make the config change directly.
-crypto_binance_unbound_en|user|Binance API is not bound;;/cryptoapi set binance|Check my Binance spot balances right now.
-crypto_binance_unbound_zh|user|当前 key 还没有绑定 Binance API;;/cryptoapi set binance|查一下我现在在 Binance 的现货余额。
-crypto_okx_unbound_en|user|OKX API is not bound;;/cryptoapi set okx|Check my OKX account positions right now.
-crypto_okx_unbound_zh|user|当前 key 还没有绑定 OKX API;;/cryptoapi set okx|查一下我现在在 OKX 的账户持仓。
+crypto_binance_unbound_en|user|Binance API is not bound;;POST /v1/auth/crypto-credentials|Check my Binance spot balances right now.
+crypto_binance_unbound_zh|user|当前 key 还没有绑定 Binance API;;POST /v1/auth/crypto-credentials|查一下我现在在 Binance 的现货余额。
+crypto_okx_unbound_en|user|OKX API is not bound;;POST /v1/auth/crypto-credentials|Check my OKX account positions right now.
+crypto_okx_unbound_zh|user|当前 key 还没有绑定 OKX API;;POST /v1/auth/crypto-credentials|查一下我现在在 OKX 的账户持仓。

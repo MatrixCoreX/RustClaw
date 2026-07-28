@@ -158,11 +158,6 @@ def parse_args() -> argparse.Namespace:
         help="create registry entry with enabled = false",
     )
     parser.add_argument(
-        "--runner-name",
-        default="",
-        help="optional custom runner name if binary does not follow convention",
-    )
-    parser.add_argument(
         "--on-demand",
         action="store_true",
         help="place a bundled Skill Store skill under optional_skills and mark it install_mode=on_demand",
@@ -204,13 +199,66 @@ serde_json.workspace = true
 """
 
 
+def skill_manifest_text(skill_name: str, on_demand: bool, timeout: int) -> str:
+    package_name = skill_name.replace("_", "-") + "-skill"
+    source_root = "optional_skills" if on_demand else "crates/skills"
+    return f"""schema_version = 1
+
+[package]
+name = "{skill_name}"
+version = "0.1.0"
+description = "TODO: describe {skill_name}."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "{source_root}/{skill_name}"
+
+[registry]
+name = "{skill_name}"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "{package_name}"
+binary = "{package_name}"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/{package_name}"
+working_directory = "."
+timeout_seconds = {max(timeout, 1)}
+environment_allowlist = ["LANG", "LC_ALL", "PATH", "SKILL_TIMEOUT_SECONDS", "TEMP", "TMP", "TMPDIR", "TZ", "WORKSPACE_ROOT"]
+smoke_args = {{}}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "{skill_name}"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+"""
+
+
 def registry_entry_text(
     skill_name: str,
     aliases: list[str],
     timeout: int,
     output_kind: str,
     enabled: bool,
-    runner_name: str,
     capabilities: list[str],
     on_demand: bool,
 ) -> str:
@@ -226,19 +274,12 @@ def registry_entry_text(
         f"timeout_seconds = {timeout}",
         f'prompt_file = "prompts/skills/{skill_name}.md"',
         f'output_kind = "{output_kind}"',
+        f'package_manifest = "{"optional_skills" if on_demand else "crates/skills"}/{skill_name}/skill.toml"',
     ]
     if on_demand:
-        package_name = skill_name.replace("_", "-") + "-skill"
-        lines.extend(
-            [
-                'install_mode = "on_demand"',
-                f'install_package = "{package_name}"',
-            ]
-        )
+        lines.append('install_mode = "on_demand"')
     if capabilities:
         lines.append(f"capabilities = [{capability_text}]")
-    if runner_name.strip():
-        lines.append(f'runner_name = "{runner_name.strip()}"')
     lines.append("")
     return "\n".join(lines)
 
@@ -282,7 +323,6 @@ def add_registry_entry(
     timeout: int,
     output_kind: str,
     enabled: bool,
-    runner_name: str,
     capabilities: list[str],
     on_demand: bool,
 ) -> bool:
@@ -296,7 +336,6 @@ def add_registry_entry(
         timeout,
         output_kind,
         enabled,
-        runner_name,
         capabilities,
         on_demand,
     )
@@ -330,6 +369,11 @@ def main() -> int:
 
     if write_if_missing(skill_dir / "Cargo.toml", cargo_toml_text(skill_name)):
         created.append(skill_dir / "Cargo.toml")
+    if write_if_missing(
+        skill_dir / "skill.toml",
+        skill_manifest_text(skill_name, args.on_demand, max(args.timeout, 1)),
+    ):
+        created.append(skill_dir / "skill.toml")
     if write_if_missing(skill_dir / "src" / "main.rs", MAIN_RS_TEMPLATE):
         created.append(skill_dir / "src" / "main.rs")
     if write_if_missing(
@@ -345,7 +389,6 @@ def main() -> int:
         timeout=max(args.timeout, 1),
         output_kind=args.output_kind,
         enabled=not args.disabled,
-        runner_name=args.runner_name,
         capabilities=capabilities,
         on_demand=args.on_demand,
     ):
@@ -360,7 +403,17 @@ def main() -> int:
 
     print("[next] 运行 python3 scripts/sync_skill_docs.py")
     print("[next] 如需 planner 常规自然语言调用，在 configs/skills_registry.toml 补 planner_capabilities")
-    print(f"[next] 运行 cargo check -p clawd -p skill-runner -p {skill_name.replace('_', '-')}-skill")
+    print("[next] 运行 cargo check -p clawd -p skill-runner -p rustclaw-skill-sdk")
+    if args.on_demand:
+        print(
+            "[next] 按需技能只通过 UI Skill Store 安装，或显式运行 "
+            f"target/release/rustclaw-skill install-local {skill_dir.relative_to(REPO_ROOT)}/skill.toml . data/skill-packages"
+        )
+    else:
+        print(
+            f"[next] 运行 cargo check -p {skill_name.replace('_', '-')}-skill，"
+            "再由 build-all.sh 投影验证 receipt"
+        )
     return 0
 
 

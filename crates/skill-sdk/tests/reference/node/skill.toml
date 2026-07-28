@@ -1,0 +1,42 @@
+schema_version = 1
+
+[package]
+name = "reference_node"
+version = "1.0.0"
+description = "Cross-language reference conformance fixture"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "reference_node"
+capability_policy_source = "registry"
+
+[build]
+adapter = "node"
+source_root = "node"
+lockfile = "package-lock.json"
+network = "deny"
+
+[run]
+launcher = "node"
+entrypoint = "runtime/src/main.mjs"
+working_directory = "."
+timeout_seconds = 10
+smoke_args = { action = "calculate", a = 1, b = 2 }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "reference_node"
+
+[lifecycle]
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

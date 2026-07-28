@@ -808,27 +808,26 @@ async fn import_external_skill(
         );
     }
     let enabled = req.enabled.unwrap_or(true);
+    let allow_network = req.allow_network.unwrap_or(false);
 
-    let raw_name = guess_bundle_name_from_path_or_source(source, "external-skill");
-    let canonical_name = slugify_skill_name(&raw_name);
-    let bundle_rel_dir = format!("third_party/clawhub/{canonical_name}");
-    let bundle_dir = state.skill_rt.workspace_root.join(&bundle_rel_dir);
-    if bundle_dir.exists() {
-        if let Err(err) = std::fs::remove_dir_all(&bundle_dir) {
+    let staging_dir = match imported_bundle_staging_dir(&state.skill_rt.workspace_root) {
+        Ok(path) => path,
+        Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("remove old imported bundle failed: {err}")),
+                    error: Some(format!("create import staging directory failed: {error}")),
                 }),
             );
         }
-    }
+    };
 
-    let skill_md = match materialize_import_source(&state, source, &bundle_dir).await {
+    let interface_md = match materialize_import_source(source, &staging_dir).await {
         Ok(v) => v,
         Err(err) => {
+            let _ = std::fs::remove_dir_all(&staging_dir);
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(ApiResponse {
@@ -839,14 +838,34 @@ async fn import_external_skill(
             );
         }
     };
-    finalize_imported_bundle(
+    let activation = match activate_imported_bundle(&state.skill_rt.workspace_root, &staging_dir) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(error),
+                }),
+            );
+        }
+    };
+    let response = finalize_imported_bundle(
         &state,
-        &bundle_dir,
-        &bundle_rel_dir,
+        &activation.bundle_dir,
+        &activation.bundle_rel_dir,
         source,
         enabled,
-        &skill_md,
+        allow_network,
+        &interface_md,
     )
+    .await;
+    if let Err(error) = finish_imported_bundle_activation(&activation, response.1 .0.ok) {
+        tracing::error!(%error, "finish_imported_bundle_activation_failed");
+    }
+    response
 }
 
 async fn import_external_skill_upload(
@@ -860,6 +879,7 @@ async fn import_external_skill_upload(
 
     let mut bundle_name = String::new();
     let mut enabled = true;
+    let mut allow_network = false;
     let mut uploaded_files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -875,11 +895,16 @@ async fn import_external_skill_upload(
                     enabled = text.trim() != "false";
                 }
             }
+            "allow_network" => {
+                if let Ok(text) = field.text().await {
+                    allow_network = text.trim() == "true";
+                }
+            }
             "files" => {
                 let raw_path = field
                     .file_name()
                     .map(str::to_string)
-                    .unwrap_or_else(|| "SKILL.md".to_string());
+                    .unwrap_or_else(|| "INTERFACE.md".to_string());
                 let Some(rel_path) = sanitize_upload_relative_path(&raw_path) else {
                     continue;
                 };
@@ -923,33 +948,21 @@ async fn import_external_skill_upload(
             .unwrap_or("uploaded-skill")
             .to_string()
     };
-    let canonical_name = slugify_skill_name(&guessed_name);
-    let bundle_rel_dir = format!("third_party/clawhub/{canonical_name}");
-    let bundle_dir = state.skill_rt.workspace_root.join(&bundle_rel_dir);
-    if bundle_dir.exists() {
-        if let Err(err) = std::fs::remove_dir_all(&bundle_dir) {
+    let bundle_dir = match imported_bundle_staging_dir(&state.skill_rt.workspace_root) {
+        Ok(path) => path,
+        Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("remove old uploaded bundle failed: {err}")),
+                    error: Some(format!("create upload staging directory failed: {error}")),
                 }),
             );
         }
-    }
-    if let Err(err) = std::fs::create_dir_all(&bundle_dir) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("create upload bundle dir failed: {err}")),
-            }),
-        );
-    }
+    };
 
-    let mut skill_md_path = None;
+    let mut interface_md_path = None;
     for (rel_path, bytes) in uploaded_files {
         let normalized = rel_path
             .strip_prefix(&guessed_name)
@@ -960,6 +973,7 @@ async fn import_external_skill_upload(
         let target_path = bundle_dir.join(&normalized);
         if let Some(parent) = target_path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
+                let _ = std::fs::remove_dir_all(&bundle_dir);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse {
@@ -971,6 +985,7 @@ async fn import_external_skill_upload(
             }
         }
         if let Err(err) = std::fs::write(&target_path, bytes) {
+            let _ = std::fs::remove_dir_all(&bundle_dir);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
@@ -983,38 +998,59 @@ async fn import_external_skill_upload(
         if normalized
             .file_name()
             .and_then(|v| v.to_str())
-            .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
+            .map(|name| name.eq_ignore_ascii_case("INTERFACE.md"))
             .unwrap_or(false)
         {
-            skill_md_path = Some(target_path);
+            interface_md_path = Some(target_path);
         }
     }
 
-    let skill_md_path = skill_md_path.unwrap_or_else(|| bundle_dir.join("SKILL.md"));
-    let skill_md = match std::fs::read_to_string(&skill_md_path) {
+    let interface_md_path = interface_md_path.unwrap_or_else(|| bundle_dir.join("INTERFACE.md"));
+    let interface_md = match std::fs::read_to_string(&interface_md_path) {
         Ok(v) => v,
         Err(err) => {
+            let _ = std::fs::remove_dir_all(&bundle_dir);
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
                     error: Some(format!(
-                        "uploaded bundle is missing readable SKILL.md: {err}"
+                        "uploaded bundle is missing readable INTERFACE.md: {err}"
                     )),
                 }),
             );
         }
     };
 
-    finalize_imported_bundle(
+    let activation = match activate_imported_bundle(&state.skill_rt.workspace_root, &bundle_dir) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&bundle_dir);
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(error),
+                }),
+            );
+        }
+    };
+    let response = finalize_imported_bundle(
         &state,
-        &bundle_dir,
-        &bundle_rel_dir,
+        &activation.bundle_dir,
+        &activation.bundle_rel_dir,
         &format!("upload:{guessed_name}"),
         enabled,
-        &skill_md,
+        allow_network,
+        &interface_md,
     )
+    .await;
+    if let Err(error) = finish_imported_bundle_activation(&activation, response.1 .0.ok) {
+        tracing::error!(%error, "finish_uploaded_bundle_activation_failed");
+    }
+    response
 }
 
 #[derive(Debug, Deserialize)]
@@ -1028,6 +1064,8 @@ struct ImportSkillRequest {
     source: String,
     #[serde(default)]
     enabled: Option<bool>,
+    #[serde(default)]
+    allow_network: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

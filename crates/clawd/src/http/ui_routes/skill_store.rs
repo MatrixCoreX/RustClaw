@@ -2,6 +2,8 @@
 struct SkillStoreMutationRequest {
     skill_name: String,
     #[serde(default)]
+    allow_network: Option<bool>,
+    #[serde(default)]
     preserve_config: Option<bool>,
     #[serde(default)]
     preserve_data: Option<bool>,
@@ -12,14 +14,12 @@ fn collect_uninstalled_skills(value: &toml::Value, state: &AppState) -> BTreeSet
         .get("skills")
         .and_then(|skills| skills.get("uninstalled_skills"))
         .and_then(toml::Value::as_array);
-    let names = configured
-        .cloned()
-        .unwrap_or_else(|| {
-            claw_core::config::skill_store_optional_skill_names()
-                .iter()
-                .map(|name| toml::Value::String((*name).to_string()))
-                .collect()
-        });
+    let names = configured.cloned().unwrap_or_else(|| {
+        claw_core::config::skill_store_optional_skill_names()
+            .iter()
+            .map(|name| toml::Value::String((*name).to_string()))
+            .collect()
+    });
     names
         .iter()
         .filter_map(toml::Value::as_str)
@@ -66,8 +66,7 @@ fn skill_store_item_belongs_to_other_group(state: &AppState, skill_name: &str) -
         registry
             .get(skill_name)
             .is_some_and(|entry| entry.kind == SkillKind::External)
-    })
-    {
+    }) {
         return true;
     }
     let is_base_skill = state.skill_is_fixed_on(skill_name);
@@ -163,6 +162,9 @@ async fn get_skill_store_catalog(
     if let Err(response) = require_ui_identity(&state, &headers) {
         return response;
     }
+    if let Err(error) = initialize_skill_store_operations(&state) {
+        return skill_store_error_response(error);
+    }
     let parsed = match read_skill_config_file(&state) {
         Ok((_, parsed)) => parsed,
         Err(error) => {
@@ -182,13 +184,15 @@ async fn get_skill_store_catalog(
         ));
     };
     let runtime_enabled = state.get_skills_list();
-    let active_operation = skill_store_active_operation(&state).map(|operation| {
-        json!({
-            "skill_name": operation.skill_name,
-            "action": operation.action,
-            "started_ts": operation.started_ts,
-        })
-    });
+    let operation_store = skill_store_operation_store(&state);
+    let active_operation = operation_store.latest_active().ok().flatten();
+    let recent_operations = operation_store
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>();
     let mut names = registry.all_names();
     names.sort_unstable();
     let items = names
@@ -198,24 +202,15 @@ async fn get_skill_store_catalog(
         .filter_map(|name| {
             let entry = registry.get(&name)?;
             let configured_installed = !uninstalled.contains(&name);
-            let runner_available = if entry.kind == SkillKind::Runner {
-                runner_binary_name(&registry.runner_name(&name))
-                    .ok()
-                    .map(|binary| {
-                        state
-                            .skill_rt
-                            .workspace_root
-                            .join("target/release")
-                            .join(binary)
-                            .is_file()
-                    })
-                    .unwrap_or(false)
+            let package_available = if matches!(entry.kind, SkillKind::Runner | SkillKind::External)
+            {
+                skill_store_package_available(&state, &registry, &name)
             } else {
                 true
             };
-            let installed = configured_installed && runner_available;
-            let installation_issue = if configured_installed && !runner_available {
-                Some("runner_missing")
+            let installed = configured_installed && package_available;
+            let installation_issue = if configured_installed && !package_available {
+                Some("package_missing")
             } else {
                 None
             };
@@ -226,6 +221,11 @@ async fn get_skill_store_catalog(
                 .transpose()
                 .ok()
                 .flatten();
+            let manifest = skill_store_manifest_metadata(&state, &registry, &name);
+            let installed_launch =
+                rustclaw_skill_sdk::SkillRuntimeResolver::new(skill_package_root(&state))
+                    .resolve(&name)
+                    .ok();
             Some(json!({
                 "name": name,
                 "description": entry.description,
@@ -239,13 +239,23 @@ async fn get_skill_store_catalog(
                 } else {
                     "bundled_core"
                 },
-                "source": entry.external_source_url,
+                "source": manifest.as_ref().and_then(|value| value.package.source.as_deref()),
                 "installed": installed,
                 "configured_installed": configured_installed,
-                "runner_available": runner_available,
+                "package_available": package_available,
                 "installation_issue": installation_issue,
                 "enabled": installed && runtime_enabled.contains(&entry.name),
                 "install_mode": entry.install_mode,
+                "build_adapter": manifest.as_ref().map(|value| value.build.adapter.as_token()),
+                "build_network_policy": manifest.as_ref().map(|value| match value.build.network {
+                    rustclaw_skill_sdk::BuildNetworkPolicy::Deny => "deny",
+                    rustclaw_skill_sdk::BuildNetworkPolicy::ApprovalRequired => "approval_required",
+                }),
+                "supported_os": manifest.as_ref().map(|value| &value.package.supported_os),
+                "supported_arch": manifest.as_ref().map(|value| &value.package.supported_arch),
+                "package_version": manifest.as_ref().map(|value| value.package.version.as_str()),
+                "installed_version": installed_launch.as_ref().map(|value| value.version.as_str()),
+                "protocol": manifest.as_ref().map(|value| value.package.protocol.as_str()),
                 "config_files": config_files,
                 "existing_config_files": existing_config_files,
                 "storage_kind": storage.map(|value| value.kind.as_str()),
@@ -262,148 +272,9 @@ async fn get_skill_store_catalog(
                 "items": items,
                 "uninstalled_skill_names": uninstalled,
                 "active_operation": active_operation,
+                "recent_operations": recent_operations,
             })),
             error: None,
         }),
     )
-}
-
-async fn install_skill_store_item(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(request): Json<SkillStoreMutationRequest>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_identity(&state, &headers) {
-        return response;
-    }
-    let skill_name = match validate_skill_store_mutation(&state, &request.skill_name) {
-        Ok(name) => name,
-        Err(error) => return skill_store_error_response(error),
-    };
-    let _mutation_guard = match begin_skill_store_mutation(&state, &skill_name, "install") {
-        Ok(permit) => permit,
-        Err(error) => return skill_store_error_response(error),
-    };
-    let spec = match skill_store_install_spec(&state, &skill_name) {
-        Ok(spec) => spec,
-        Err(error) => return skill_store_error_response(error),
-    };
-    let binary_path = match spec.as_ref() {
-        Some(spec) => match compile_skill_store_runner(&state, spec).await {
-            Ok(path) => Some(path),
-            Err(error) => return skill_store_error_response(error),
-        },
-        None => None,
-    };
-    match update_skill_store_installation(&state, &skill_name, true) {
-        Ok(mut data) => {
-            let (_, existing_config_files) = skill_config_state(&state, &skill_name);
-            if let Some(object) = data.as_object_mut() {
-                object.insert("compiled".to_string(), json!(spec.is_some()));
-                object.insert(
-                    "binary_path".to_string(),
-                    json!(binary_path.as_ref().and_then(|path| path
-                        .strip_prefix(&state.skill_rt.workspace_root)
-                        .ok())
-                        .map(|path| path.to_string_lossy().into_owned())),
-                );
-                object.insert(
-                    "reused_config_files".to_string(),
-                    json!(existing_config_files),
-                );
-            }
-            (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(data),
-                error: None,
-            }),
-            )
-        }
-        Err(error) => skill_store_error_response(error),
-    }
-}
-
-async fn remove_skill_store_item(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(request): Json<SkillStoreMutationRequest>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_identity(&state, &headers) {
-        return response;
-    }
-    let skill_name = match validate_skill_store_mutation(&state, &request.skill_name) {
-        Ok(name) => name,
-        Err(error) => return skill_store_error_response(error),
-    };
-    let _mutation_guard = match begin_skill_store_mutation(&state, &skill_name, "remove") {
-        Ok(permit) => permit,
-        Err(error) => return skill_store_error_response(error),
-    };
-    let preserve_config = request.preserve_config.unwrap_or(true);
-    let preserve_data = request.preserve_data.unwrap_or(true);
-    let spec = match skill_store_install_spec(&state, &skill_name) {
-        Ok(spec) => spec,
-        Err(error) => return skill_store_error_response(error),
-    };
-    match update_skill_store_installation(&state, &skill_name, false) {
-        Ok(mut data) => {
-            let binary_removed = match spec.as_ref() {
-                Some(spec) => match remove_skill_store_binary(&state, spec) {
-                    Ok(removed) => removed,
-                    Err(error) => return skill_store_error_response(error),
-                },
-                None => false,
-            };
-            let deleted_config_files = if preserve_config {
-                Vec::new()
-            } else {
-                match delete_declared_skill_configs(&state, &skill_name) {
-                    Ok(paths) => paths,
-                    Err(error) => return skill_store_error_response(error),
-                }
-            };
-            let deleted_data = if preserve_data {
-                None
-            } else {
-                let has_declared_storage = state
-                    .get_skills_registry()
-                    .is_some_and(|registry| registry.storage(&skill_name).is_some());
-                if has_declared_storage {
-                    match state.core.skill_storage.clear_skill_data(&skill_name) {
-                        Ok(result) => Some(result),
-                        Err(error) => {
-                            return skill_store_error_response(SkillStoreOperationError::new(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                SkillStoreErrorCode::DataRemoveFailed,
-                                error,
-                            ));
-                        }
-                    }
-                } else {
-                    None
-                }
-            };
-            if let Some(object) = data.as_object_mut() {
-                object.insert("binary_removed".to_string(), json!(binary_removed));
-                object.insert("config_preserved".to_string(), json!(preserve_config));
-                object.insert("data_preserved".to_string(), json!(preserve_data));
-                object.insert(
-                    "deleted_config_files".to_string(),
-                    json!(deleted_config_files),
-                );
-                object.insert("deleted_private_data".to_string(), json!(deleted_data));
-            }
-            (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(data),
-                error: None,
-            }),
-            )
-        }
-        Err(error) => skill_store_error_response(error),
-    }
 }

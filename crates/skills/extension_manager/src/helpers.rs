@@ -4,6 +4,10 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rustclaw_skill_sdk::{
+    InstallOutcome, InstallReceiptStore, InstallRequest, PackageManifest, SkillInstaller,
+    SkillRuntimeResolver,
+};
 use serde_json::{json, Map, Value};
 
 use super::{
@@ -32,22 +36,28 @@ pub(crate) fn write_plan_files(
 pub(crate) fn write_external_skill_implementation(
     skill_dir: &Path,
     skill_name: &str,
-    capability_summary: &str,
-    actions: &[String],
+    _capability_summary: &str,
+    _actions: &[String],
     implementation: &ExternalSkillImplementation,
 ) -> Result<Vec<String>, String> {
+    let manifest = PackageManifest::load(&skill_dir.join("skill.toml"))
+        .map_err(|error| format!("read external skill manifest failed: {error}"))?;
+    if manifest.package.name != skill_name {
+        return Err(format!(
+            "external skill identity mismatch: expected={skill_name} actual={}",
+            manifest.package.name
+        ));
+    }
+    let (source_entrypoint, scaffold_marker) = implementation_source_target(&manifest)?;
     let readme_path = skill_dir.join("README.md");
     let interface_path = skill_dir.join("INTERFACE.md");
-    let main_path = skill_dir.join("src").join("main.rs");
+    let source_path = skill_dir.join(source_entrypoint);
 
-    ensure_scaffold_or_missing(&readme_path, &readme_template(skill_name, actions))?;
-    ensure_scaffold_or_missing(
-        &interface_path,
-        &interface_template(skill_name, capability_summary, actions),
-    )?;
-    ensure_scaffold_or_missing(&main_path, &main_rs_template(actions))?;
+    ensure_sdk_scaffold_file(&readme_path, "rustclaw-skill validate")?;
+    ensure_sdk_scaffold_file(&interface_path, "## Error Contract")?;
+    ensure_sdk_scaffold_file(&source_path, scaffold_marker)?;
 
-    if let Some(parent) = main_path.parent() {
+    if let Some(parent) = source_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("create external skill src dir failed: {err}"))?;
     }
@@ -56,26 +66,57 @@ pub(crate) fn write_external_skill_implementation(
         .map_err(|err| format!("write external skill README.md failed: {err}"))?;
     fs::write(&interface_path, &implementation.interface_md)
         .map_err(|err| format!("write external skill INTERFACE.md failed: {err}"))?;
-    fs::write(&main_path, &implementation.main_rs)
-        .map_err(|err| format!("write external skill src/main.rs failed: {err}"))?;
+    fs::write(&source_path, &implementation.entrypoint_source)
+        .map_err(|err| format!("write external skill source entrypoint failed: {err}"))?;
 
     Ok(vec![
         path_string(&readme_path),
         path_string(&interface_path),
-        path_string(&main_path),
+        path_string(&source_path),
     ])
+}
+
+pub(crate) fn implementation_source_target(
+    manifest: &PackageManifest,
+) -> Result<(&'static str, &'static str), String> {
+    use rustclaw_skill_sdk::BuildAdapter;
+    match manifest.build.adapter {
+        BuildAdapter::Cargo => Ok(("src/main.rs", "fn respond(request: Request)")),
+        BuildAdapter::Python => Ok(("src/main.py", "def respond(request: dict)")),
+        BuildAdapter::Node => Ok(("src/main.mjs", "export function respond(request)")),
+        BuildAdapter::Go => Ok(("main.go", "func respond(input request)")),
+        adapter => Err(format!(
+            "implement_external_skill requires developer-supplied artifacts for adapter={}",
+            adapter.as_token()
+        )),
+    }
+}
+
+fn ensure_sdk_scaffold_file(path: &Path, marker: &str) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let current = fs::read_to_string(path)
+        .map_err(|error| format!("read existing scaffold file failed: {error}"))?;
+    if current.contains(marker) {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to overwrite non-scaffold file: {}",
+        path.display()
+    ))
 }
 
 pub(crate) fn validate_external_skill(
     repo_root: &Path,
     skill_name: &str,
-    actions: &[String],
+    _actions: &[String],
 ) -> Result<ExternalSkillValidationReport, String> {
     let skill_dir = repo_root.join("external_skills").join(skill_name);
-    let manifest_path = skill_dir.join("Cargo.toml");
+    let manifest_path = skill_dir.join("skill.toml");
     if !manifest_path.exists() {
         return Err(format!(
-            "external skill Cargo.toml does not exist: {}",
+            "external skill skill.toml does not exist: {}",
             manifest_path.display()
         ));
     }
@@ -89,97 +130,50 @@ pub(crate) fn validate_external_skill(
     }
 
     let staging_root = prepare_validation_staging_dir(skill_name)?;
-    copy_dir_recursive(&skill_dir, &staging_root)?;
-    let staged_manifest = staging_root.join("Cargo.toml");
-    let manifest_string = path_string(&staged_manifest);
+    let staged_workspace = staging_root.join("workspace");
+    let staged_skill = staged_workspace.join("external_skills").join(skill_name);
+    fs::create_dir_all(
+        staged_skill
+            .parent()
+            .ok_or_else(|| "external skill staging parent is unavailable".to_string())?,
+    )
+    .map_err(|error| format!("create validation workspace failed: {error}"))?;
+    copy_dir_recursive(&skill_dir, &staged_skill)?;
+    let staged_manifest = staged_skill.join("skill.toml");
 
     let validation_result = (|| -> Result<ExternalSkillValidationReport, String> {
-        let cargo_check = run_command_capture(
-            &staging_root,
-            "cargo",
-            &["check", "--manifest-path", &manifest_string],
-            None,
-        )?;
-        if cargo_check.exit_code != 0 {
+        let manifest = PackageManifest::load(&staged_manifest)
+            .map_err(|error| format!("manifest validation failed: {error}"))?;
+        if manifest.package.name != skill_name || manifest.registry.name != skill_name {
             return Err(format!(
-                "cargo check for external skill failed: {}",
-                best_process_output(&cargo_check)
+                "external skill identity mismatch: directory={skill_name} package={} registry={}",
+                manifest.package.name, manifest.registry.name
             ));
         }
-
-        let smoke_action = actions
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "todo_action".to_string());
-        let request_id = format!("smoke-{}", skill_name);
-        let smoke_request = json!({
-            "request_id": request_id,
-            "context": null,
-            "user_id": 0,
-            "chat_id": 0,
-            "args": {
-                "action": smoke_action
-            }
-        });
-        let smoke = run_command_capture(
-            &staging_root,
-            "cargo",
-            &["run", "--quiet", "--manifest-path", &manifest_string],
-            Some(&format!("{}\n", smoke_request)),
-        )?;
-        if smoke.exit_code != 0 {
-            return Err(format!(
-                "external skill smoke test process failed: {}",
-                best_process_output(&smoke)
-            ));
-        }
-        let smoke_json = parse_single_json_line(&smoke.stdout).ok_or_else(|| {
-            format!(
-                "external skill smoke test returned non-JSON output: {}",
-                smoke.stdout.trim()
-            )
-        })?;
-        let smoke_status = smoke_json
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if smoke_json
-            .get("request_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            != request_id
-        {
-            return Err("external skill smoke test returned mismatched request_id".to_string());
-        }
-        if smoke_status != "ok" && smoke_status != "error" {
-            return Err("external skill smoke test returned invalid status".to_string());
-        }
-        if smoke_status == "error"
-            && smoke_json
-                .get("error_text")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
-        {
-            return Err(
-                "external skill smoke test returned error without readable error_text".to_string(),
-            );
-        }
-        let smoke_text = smoke_json
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        let outcome = SkillInstaller
+            .install(&InstallRequest {
+                manifest_path: staged_manifest,
+                workspace_root: staged_workspace,
+                package_root: staging_root.join("packages"),
+                target: None,
+                allow_network: false,
+                control: None,
+            })
+            .map_err(|error| {
+                format!(
+                    "external skill validation failed: phase={:?} code={} detail={}",
+                    error.phase, error.code, error.detail
+                )
+            })?;
 
         Ok(ExternalSkillValidationReport {
             synced_docs: true,
-            cargo_check_ok: true,
+            manifest_valid: true,
+            adapter: outcome.adapter.as_token().to_string(),
+            build_ok: true,
             smoke_test_ok: true,
-            smoke_status,
-            smoke_text,
+            smoke_status: "ok".to_string(),
+            receipt_digest: outcome.receipt_digest,
         })
     })();
 
@@ -191,18 +185,18 @@ pub(crate) fn register_external_skill(
     repo_root: &Path,
     skill_name: &str,
 ) -> Result<ExternalSkillRegistrationReport, String> {
-    let cargo_toml_path = repo_root.join("Cargo.toml");
     let registry_path = repo_root.join("configs/skills_registry.toml");
     let config_path = repo_root.join("configs/config.toml");
-
-    let cargo_raw = fs::read_to_string(&cargo_toml_path)
-        .map_err(|err| format!("read Cargo.toml failed: {err}"))?;
-    let (cargo_updated, workspace_member_added) =
-        add_workspace_member_text(&cargo_raw, &format!("external_skills/{skill_name}"))?;
+    let manifest_relative = format!("external_skills/{skill_name}/skill.toml");
+    PackageManifest::load(&repo_root.join(&manifest_relative))
+        .map_err(|error| format!("external skill manifest invalid: {error}"))?;
+    SkillRuntimeResolver::new(external_package_root(repo_root))
+        .resolve(skill_name)
+        .map_err(|error| format!("external skill verified install missing: {error}"))?;
     let registry_raw = fs::read_to_string(&registry_path)
         .map_err(|err| format!("read skills_registry.toml failed: {err}"))?;
     let (registry_updated, registry_entry_added) =
-        add_registry_entry_text(&registry_raw, skill_name);
+        add_registry_entry_text(&registry_raw, skill_name, &manifest_relative);
 
     let config_raw = fs::read_to_string(&config_path)
         .map_err(|err| format!("read config.toml failed: {err}"))?;
@@ -216,19 +210,9 @@ pub(crate) fn register_external_skill(
         }
     };
 
-    if workspace_member_added {
-        fs::write(&cargo_toml_path, &cargo_updated)
-            .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
-    }
-
     if registry_entry_added {
         if let Err(err) = fs::write(&registry_path, &registry_updated) {
-            if workspace_member_added {
-                let _ = fs::write(&cargo_toml_path, &cargo_raw);
-            }
-            return Err(format!(
-                "write skills_registry.toml failed: {err}; rolled back prior workspace metadata changes"
-            ));
+            return Err(format!("write skills_registry.toml failed: {err}"));
         }
     }
 
@@ -237,77 +221,46 @@ pub(crate) fn register_external_skill(
             if registry_entry_added {
                 let _ = fs::write(&registry_path, &registry_raw);
             }
-            if workspace_member_added {
-                let _ = fs::write(&cargo_toml_path, &cargo_raw);
-            }
             return Err(format!(
-                "write config.toml failed: {err}; rolled back prior workspace metadata changes"
+                "write config.toml failed: {err}; rolled back prior registry metadata changes"
             ));
         }
     }
 
     Ok(ExternalSkillRegistrationReport {
-        workspace_member_added,
         registry_entry_added,
         switch_recorded_enabled,
+        package_manifest: manifest_relative,
         matrix_admission_eligible: false,
     })
 }
 
-pub(crate) fn external_skill_binary_name(skill_name: &str) -> String {
-    format!("{}-skill", skill_name.replace('_', "-"))
+pub(crate) fn external_package_root(repo_root: &Path) -> PathBuf {
+    repo_root.join("data/skill-packages")
 }
 
-pub(crate) fn external_skill_release_binary_path(repo_root: &Path, skill_name: &str) -> PathBuf {
-    repo_root
-        .join("target/release")
-        .join(external_skill_binary_name(skill_name))
-}
-
-pub(crate) fn build_external_skill_release_binary(
+pub(crate) fn install_external_skill(
     repo_root: &Path,
     skill_name: &str,
-) -> Result<PathBuf, String> {
-    let binary_name = external_skill_binary_name(skill_name);
-    let skill_dir = repo_root.join("external_skills").join(skill_name);
-    let staging_root = prepare_staging_dir("enable", skill_name)?;
-    copy_dir_recursive(&skill_dir, &staging_root)?;
-    let staged_manifest = staging_root.join("Cargo.toml");
-    let manifest_string = path_string(&staged_manifest);
-    let release_binary_path = external_skill_release_binary_path(repo_root, skill_name);
-
-    let build_result = (|| -> Result<(), String> {
-        let build = run_command_capture(
-            &staging_root,
-            "cargo",
-            &["build", "--release", "--manifest-path", &manifest_string],
-            None,
-        )?;
-        if build.exit_code != 0 {
-            return Err(format!(
-                "external skill release build failed: {}",
-                best_process_output(&build)
-            ));
-        }
-        let staged_binary = staging_root.join("target/release").join(&binary_name);
-        if !staged_binary.exists() {
-            return Err(format!(
-                "external skill release build completed without binary: {}",
-                staged_binary.display()
-            ));
-        }
-        if let Some(parent) = release_binary_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("create release target dir failed: {err}"))?;
-        }
-        fs::copy(&staged_binary, &release_binary_path)
-            .map_err(|err| format!("copy release binary failed: {err}"))?;
-        Ok(())
-    })();
-    let _ = fs::remove_dir_all(&staging_root);
-    build_result?;
-
-    Ok(release_binary_path)
+) -> Result<InstallOutcome, String> {
+    SkillInstaller
+        .install(&InstallRequest {
+            manifest_path: repo_root
+                .join("external_skills")
+                .join(skill_name)
+                .join("skill.toml"),
+            workspace_root: repo_root.to_path_buf(),
+            package_root: external_package_root(repo_root),
+            target: None,
+            allow_network: false,
+            control: None,
+        })
+        .map_err(|error| {
+            format!(
+                "external skill install failed: phase={:?} code={} detail={}",
+                error.phase, error.code, error.detail
+            )
+        })
 }
 
 pub(crate) fn enable_external_skill(
@@ -327,52 +280,38 @@ pub(crate) fn enable_external_skill(
         }
     };
 
-    let release_binary_path = external_skill_release_binary_path(repo_root, skill_name);
-    let original_release_binary = fs::read(&release_binary_path).ok();
-    let release_binary_path = build_external_skill_release_binary(repo_root, skill_name)?;
+    let had_verified_install = SkillRuntimeResolver::new(external_package_root(repo_root))
+        .resolve(skill_name)
+        .is_ok();
+    let install = install_external_skill(repo_root, skill_name)?;
 
     if switch_enabled {
         if let Err(err) = fs::write(&config_path, &config_updated) {
-            match original_release_binary {
-                Some(bytes) => {
-                    let _ = fs::write(&release_binary_path, bytes);
-                }
-                None => {
-                    let _ = fs::remove_file(&release_binary_path);
-                }
-            }
+            restore_external_install(repo_root, skill_name, had_verified_install);
             return Err(format!(
-                "write config.toml failed: {err}; rolled back release binary and left the skill disabled"
+                "write config.toml failed: {err}; rolled back installed package and left the skill disabled"
             ));
         }
     }
 
-    let release_binary_path = path_string(&release_binary_path);
-
     Ok(ExternalSkillEnableReport {
         switch_enabled,
-        release_build_ok: true,
-        release_binary_path,
+        install_ok: true,
+        adapter: install.adapter.as_token().to_string(),
+        installed_version: install.version,
+        receipt_digest: install.receipt_digest,
+        install_root: path_string(&install.install_root),
         reload_required: true,
     })
 }
 
-pub(crate) fn ensure_scaffold_or_missing(
-    path: &Path,
-    scaffold_content: &str,
-) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
+fn restore_external_install(repo_root: &Path, skill_name: &str, had_verified_install: bool) {
+    let store = InstallReceiptStore::new(external_package_root(repo_root));
+    if had_verified_install {
+        let _ = store.rollback(skill_name);
+    } else {
+        let _ = store.remove_installed_versions(skill_name);
     }
-    let current = fs::read_to_string(path)
-        .map_err(|err| format!("read existing scaffold file failed: {err}"))?;
-    if current == scaffold_content {
-        return Ok(());
-    }
-    Err(format!(
-        "refusing to overwrite non-scaffold file: {}",
-        path.display()
-    ))
 }
 
 pub(crate) fn prepare_validation_staging_dir(skill_name: &str) -> Result<PathBuf, String> {
@@ -467,46 +406,16 @@ pub(crate) fn best_process_output(output: &ProcessCapture) -> String {
     }
 }
 
-pub(crate) fn parse_single_json_line(raw: &str) -> Option<Value> {
-    let non_empty = raw
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    if non_empty.len() != 1 {
-        return None;
-    }
-    serde_json::from_str::<Value>(non_empty[0]).ok()
-}
-
-pub(crate) fn add_workspace_member_text(
-    raw: &str,
-    member_path: &str,
-) -> Result<(String, bool), String> {
-    let target = format!("    \"{member_path}\",");
-    if raw.contains(&target) {
-        return Ok((raw.to_string(), false));
-    }
-    let members_pos = raw
-        .find("members = [")
-        .ok_or_else(|| "cannot find workspace members block in Cargo.toml".to_string())?;
-    let search = &raw[members_pos..];
-    let insert_rel = search
-        .find("\n]")
-        .ok_or_else(|| "cannot find workspace members closing bracket in Cargo.toml".to_string())?;
-    let insert_at = members_pos + insert_rel;
-    let updated = format!("{}{}\n{}", &raw[..insert_at], target, &raw[insert_at..]);
-    Ok((updated, true))
-}
-
-pub(crate) fn conservative_registry_entry_text(skill_name: &str) -> String {
+pub(crate) fn conservative_registry_entry_text(skill_name: &str, package_manifest: &str) -> String {
     format!(
         r#"
 [[skills]]
 name = "{skill_name}"
 enabled = false
-kind = "runner"
+kind = "external"
 planner_kind = "skill"
+install_mode = "on_demand"
+package_manifest = "{package_manifest}"
 aliases = []
 description = "External skill {skill_name}; see its INTERFACE.md for the capability contract."
 semantic_tags = []
@@ -525,12 +434,19 @@ matrix_admission = {{ eligible = false, declared_actions = [], evidence_sources 
     )
 }
 
-pub(crate) fn add_registry_entry_text(raw: &str, skill_name: &str) -> (String, bool) {
+pub(crate) fn add_registry_entry_text(
+    raw: &str,
+    skill_name: &str,
+    package_manifest: &str,
+) -> (String, bool) {
     if raw.contains(&format!("name = \"{skill_name}\"")) {
         return (raw.to_string(), false);
     }
     let mut updated = raw.trim_end().to_string();
-    updated.push_str(&conservative_registry_entry_text(skill_name));
+    updated.push_str(&conservative_registry_entry_text(
+        skill_name,
+        package_manifest,
+    ));
     updated.push('\n');
     (updated, true)
 }
@@ -716,6 +632,13 @@ pub(crate) fn scaffold_external_skill(
     validate_identifier("skill_name", &skill_name)?;
     let capability_summary = required_string(obj, "capability_summary")?;
     let actions = extract_actions(obj)?;
+    let language_token = obj
+        .get("implementation_language")
+        .or_else(|| obj.get("build_adapter"))
+        .and_then(Value::as_str)
+        .unwrap_or("rust");
+    let implementation_language = rustclaw_skill_sdk::ImplementationLanguage::parse(language_token)
+        .map_err(|error| error.to_string())?;
     let skill_dir = repo_root.join("external_skills").join(&skill_name);
     if skill_dir.exists() {
         return Err(format!(
@@ -724,32 +647,20 @@ pub(crate) fn scaffold_external_skill(
         ));
     }
 
-    let binary_name = format!("{}-skill", skill_name.replace('_', "-"));
-    let readme_path = skill_dir.join("README.md");
-    let cargo_path = skill_dir.join("Cargo.toml");
-    let interface_path = skill_dir.join("INTERFACE.md");
-    let src_dir = skill_dir.join("src");
-    let main_path = src_dir.join("main.rs");
-    fs::create_dir_all(&src_dir).map_err(|err| format!("create scaffold dirs failed: {err}"))?;
-
-    write_new_file(&readme_path, &readme_template(&skill_name, &actions))
-        .map_err(|err| format!("write README.md failed: {err}"))?;
-    write_new_file(&cargo_path, &cargo_toml_template(&binary_name))
-        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
-    write_new_file(
-        &interface_path,
-        &interface_template(&skill_name, &capability_summary, &actions),
-    )
-    .map_err(|err| format!("write INTERFACE.md failed: {err}"))?;
-    write_new_file(&main_path, &main_rs_template(&actions))
-        .map_err(|err| format!("write src/main.rs failed: {err}"))?;
-
-    let created_files = vec![
-        path_string(&readme_path),
-        path_string(&cargo_path),
-        path_string(&interface_path),
-        path_string(&main_path),
-    ];
+    let scaffold = rustclaw_skill_sdk::scaffold_skill(&rustclaw_skill_sdk::ScaffoldRequest {
+        destination: skill_dir.clone(),
+        skill_name: skill_name.clone(),
+        capability_summary,
+        actions: actions.clone(),
+        implementation_language,
+        source_root: format!("external_skills/{skill_name}"),
+    })
+    .map_err(|error| format!("create external skill scaffold failed: {error}"))?;
+    let created_files = scaffold
+        .written_files
+        .iter()
+        .map(|path| path_string(path))
+        .collect::<Vec<_>>();
     Ok((
         format!(
             "Scaffolded external skill `{skill_name}` at external_skills/{skill_name}. It is not registered or enabled."
@@ -757,14 +668,20 @@ pub(crate) fn scaffold_external_skill(
         json!({
             "action": "scaffold_external_skill",
             "skill_name": skill_name,
-            "binary_name": binary_name,
+            "implementation_language": implementation_language.as_token(),
+            "build_adapter": PackageManifest::load(&scaffold.manifest_path)
+                .map_err(|error| error.to_string())?
+                .build
+                .adapter
+                .as_token(),
             "skill_dir": path_string(&skill_dir),
+            "manifest_path": path_string(&scaffold.manifest_path),
             "created_files": created_files,
             "actions": actions,
             "default_enabled": false,
             "next_steps": [
                 "Fill external_skills/<skill>/INTERFACE.md with the real contract.",
-                "Implement the actual logic in src/main.rs.",
+                "Implement the actual logic in the generated language entrypoint.",
                 "Run python3 scripts/sync_skill_docs.py.",
                 "Compile and smoke-test the skill, then register it with confirm=true to enable it in config."
             ]
@@ -838,22 +755,12 @@ pub(crate) fn validate_identifier(label: &str, value: &str) -> Result<(), String
     ))
 }
 
-pub(crate) fn write_new_file(path: &Path, content: &str) -> std::io::Result<()> {
-    if path.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "file already exists",
-        ));
-    }
-    fs::write(path, content)
-}
-
 pub(crate) fn ensure_external_skill_scaffold_ready(
     repo_root: &Path,
     skill_name: &str,
 ) -> Result<(), String> {
     let skill_dir = repo_root.join("external_skills").join(skill_name);
-    for required in ["Cargo.toml", "README.md", "INTERFACE.md", "src/main.rs"] {
+    for required in ["skill.toml", "README.md", "INTERFACE.md"] {
         let path = skill_dir.join(required);
         if !path.exists() {
             return Err(format!(
@@ -862,6 +769,8 @@ pub(crate) fn ensure_external_skill_scaffold_ready(
             ));
         }
     }
+    PackageManifest::load(&skill_dir.join("skill.toml"))
+        .map_err(|error| format!("external skill manifest invalid: {error}"))?;
     Ok(())
 }
 
@@ -1221,95 +1130,4 @@ pub(crate) fn truncate_preview(raw: &str, max_chars: usize) -> String {
 
 pub(crate) fn path_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-pub(crate) fn readme_template(skill_name: &str, actions: &[String]) -> String {
-    let mut lines = vec![
-        format!("# {skill_name} External Skill Scaffold"),
-        String::new(),
-        "This scaffold was generated by `extension_manager`.".to_string(),
-        "It is intentionally isolated under `external_skills/` and stays unregistered until validation passes.".to_string(),
-        String::new(),
-        "## Proposed Actions".to_string(),
-    ];
-    for action in actions {
-        lines.push(format!("- `{action}`"));
-    }
-    lines.extend([
-        String::new(),
-        "## Next Steps".to_string(),
-        "1. Complete `INTERFACE.md` with the real action contract.".to_string(),
-        "2. Implement the action logic in `src/main.rs`.".to_string(),
-        "3. Run `python3 scripts/sync_skill_docs.py`.".to_string(),
-        "4. Register the skill explicitly only after compile and smoke tests pass; registration enables it in config.".to_string(),
-        String::new(),
-    ]);
-    lines.join("\n")
-}
-
-pub(crate) fn cargo_toml_template(binary_name: &str) -> String {
-    format!(
-        "[package]\nname = \"{binary_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"{binary_name}\"\npath = \"src/main.rs\"\n\n[dependencies]\nanyhow = \"1\"\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n"
-    )
-}
-
-pub(crate) fn interface_template(
-    skill_name: &str,
-    capability_summary: &str,
-    actions: &[String],
-) -> String {
-    let action_lines = actions
-        .iter()
-        .map(|action| format!("- `{action}`: TODO: describe what this action should do."))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let param_rows = actions
-        .iter()
-        .map(|action| {
-            format!(
-                "| `{action}` | `action` | yes | string | `{action}` | Fixed action selector. |"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let request_examples = actions
-        .iter()
-        .enumerate()
-        .map(|(idx, action)| {
-            format!(
-                "### Example {}\nRequest:\n```json\n{{\"request_id\":\"demo-{}\",\"context\":null,\"user_id\":1,\"chat_id\":1,\"args\":{{\"action\":\"{}\"}}}}\n```\nResponse:\n```json\n{{\"request_id\":\"demo-{}\",\"status\":\"ok\",\"text\":\"TODO\",\"extra\":{{\"action\":\"{}\"}},\"error_text\":null}}\n```",
-                idx + 1,
-                idx + 1,
-                action,
-                idx + 1,
-                action
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    format!(
-        "# {skill_name} Interface Spec\n\n> This file was scaffolded by `extension_manager`.\n> Keep it aligned with `external_skills/{skill_name}/src/main.rs`.\n\n## Capability Summary\n- {capability_summary}\n- This scaffold stays unregistered until validation passes; registration enables it in config.\n\n## Config Entry Points\n- If this skill has dedicated setup, list the real entry points here: config file, environment variable, local DB/API, login/session state, or dependency.\n- If it does not need dedicated setup, state that explicitly.\n\n## Actions\n{action_lines}\n\n## Parameter Contract\n| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n{param_rows}\n\n## Error Contract\n- Return `status=error` with readable `error_text` when required params are missing.\n- Return `unsupported action: <name>` for unknown actions.\n- Keep request/response payloads as single-line JSON objects over stdin/stdout.\n\n## Structured Evidence Contract\n- Matrix admission status: not eligible by default.\n- To request matrix evidence eligibility, declare stable success `extra` fields per action.\n- For each field, document type, meaning, sensitivity, and which evidence role it can satisfy (`field_value`, `count`, `path`, `results`, `delivery_artifact`, etc.).\n- Error responses should include `extra.error_kind` when feasible.\n- Do not rely on natural-language `text` as strict matrix evidence.\n\n## Request/Response Examples\n{request_examples}\n"
-    )
-}
-
-pub(crate) fn main_rs_template(actions: &[String]) -> String {
-    let supported_actions = actions
-        .iter()
-        .map(|action| format!("\\\"{action}\\\""))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let match_arms = actions
-        .iter()
-        .map(|action| {
-            format!(
-                "        \"{action}\" => Ok((\"TODO: implement {action}\".to_string(), json!({{\"action\":\"{action}\"}}))),"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!(
-        "use std::io::{{self, BufRead, Write}};\n\nuse serde::{{Deserialize, Serialize}};\nuse serde_json::{{json, Value}};\n\n#[derive(Debug, Deserialize)]\nstruct Req {{\n    request_id: String,\n    args: Value,\n    #[serde(default, rename = \"context\")]\n    _context: Option<Value>,\n    #[serde(default, rename = \"user_id\")]\n    _user_id: i64,\n    #[serde(default, rename = \"chat_id\")]\n    _chat_id: i64,\n}}\n\n#[derive(Debug, Serialize)]\nstruct Resp {{\n    request_id: String,\n    status: String,\n    text: String,\n    #[serde(skip_serializing_if = \"Option::is_none\")]\n    extra: Option<Value>,\n    error_text: Option<String>,\n}}\n\nfn main() -> anyhow::Result<()> {{\n    let stdin = io::stdin();\n    let mut stdout = io::stdout();\n\n    for line in stdin.lock().lines() {{\n        let line = line?;\n        let parsed: Result<Req, _> = serde_json::from_str(&line);\n        let resp = match parsed {{\n            Ok(req) => match execute(req.args) {{\n                Ok((text, extra)) => Resp {{\n                    request_id: req.request_id,\n                    status: \"ok\".to_string(),\n                    text,\n                    extra: Some(extra),\n                    error_text: None,\n                }},\n                Err(err) => Resp {{\n                    request_id: req.request_id,\n                    status: \"error\".to_string(),\n                    text: String::new(),\n                    extra: None,\n                    error_text: Some(err),\n                }},\n            }},\n            Err(err) => Resp {{\n                request_id: \"unknown\".to_string(),\n                status: \"error\".to_string(),\n                text: String::new(),\n                extra: None,\n                error_text: Some(format!(\"invalid input: {{err}}\")),\n            }},\n        }};\n        writeln!(stdout, \"{{}}\", serde_json::to_string(&resp)?)?;\n        stdout.flush()?;\n    }}\n\n    Ok(())\n}}\n\nfn execute(args: Value) -> Result<(String, Value), String> {{\n    let obj = args\n        .as_object()\n        .ok_or_else(|| \"args must be object\".to_string())?;\n    let action = obj\n        .get(\"action\")\n        .and_then(|v| v.as_str())\n        .ok_or_else(|| \"action is required\".to_string())?;\n\n    match action {{\n{match_arms}\n        _ => Err(format!(\"unsupported action: {{action}}; use {supported_actions}\")),\n    }}\n}}\n"
-    )
 }

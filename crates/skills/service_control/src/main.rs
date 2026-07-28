@@ -293,9 +293,18 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             if out.target.is_empty() {
                 out.target = out.service_name.clone();
             }
-            let extra = serde_json::to_value(&out).ok();
+            let mut extra = serde_json::to_value(&out).ok();
             let text = serde_json::to_string(&out).unwrap_or_default();
             let is_business_error = out.status == "error";
+            if is_business_error {
+                if let Some(fields) = extra.as_mut().and_then(Value::as_object_mut) {
+                    fields.insert("error_code".to_string(), json!(&out.error_kind));
+                    fields.insert(
+                        "message_key".to_string(),
+                        json!(format!("skill.service_control.{}", out.error_kind)),
+                    );
+                }
+            }
             Resp {
                 request_id,
                 status: if is_business_error {
@@ -327,6 +336,8 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             extra: Some(json!({
                 "status": "error",
                 "error_kind": "skill_execution_failed",
+                "error_code": "skill_execution_failed",
+                "message_key": "skill.service_control.skill_execution_failed",
                 "platform": std::env::consts::OS,
             })),
             error_kind: Some("skill_execution_failed".to_string()),
@@ -377,6 +388,8 @@ fn main() -> anyhow::Result<()> {
                 extra: Some(json!({
                     "status": "error",
                     "error_kind": "invalid_input",
+                    "error_code": "invalid_input",
+                    "message_key": "skill.service_control.invalid_input",
                     "platform": std::env::consts::OS,
                 })),
                 error_kind: Some("invalid_input".to_string()),

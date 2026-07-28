@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/skill-manifest-v1.schema.json",
+  "title": "RustClaw skill.toml v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "package", "registry", "build", "run", "security"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "description", "protocol", "supported_os", "supported_arch", "license"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "version": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "protocol": { "const": "rustclaw-jsonl-v1" },
+        "supported_os": { "type": "array", "minItems": 1, "items": { "enum": ["linux", "macos", "windows", "any"] } },
+        "supported_arch": { "type": "array", "minItems": 1, "items": { "enum": ["x86_64", "aarch64", "armv7", "any"] } },
+        "license": { "type": "string", "minLength": 1 },
+        "source": { "type": "string" },
+        "attribution": { "type": "string" }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "capability_policy_source": { "const": "registry", "default": "registry" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "enum": ["cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"] },
+        "source_root": { "$ref": "#/$defs/relativePath" },
+        "package": { "$ref": "#/$defs/name" },
+        "binary": { "$ref": "#/$defs/name" },
+        "lockfile": { "$ref": "#/$defs/relativePath" },
+        "network": { "enum": ["deny", "approval_required"], "default": "deny" },
+        "lifecycle_scripts": { "const": false, "default": false },
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/platformArtifact" } },
+        "options": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launcher", "entrypoint"],
+      "properties": {
+        "launcher": { "enum": ["native", "python", "node", "java", "dotnet", "process", "http_json"] },
+        "entrypoint": { "$ref": "#/$defs/relativePath" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "working_directory": { "$ref": "#/$defs/relativePath" },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "environment_allowlist": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
+        "smoke_args": { "type": "object", "default": {} }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_policy_source"],
+      "properties": {
+        "capability_policy_source": { "const": "registry" },
+        "sandbox": { "enum": ["required", "read_only", "workspace_write", "networked"] },
+        "runtime_network": { "type": "boolean", "default": false },
+        "inherit_credentials": { "const": false }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schema_version", "migration_owner"],
+      "properties": {
+        "kind": { "type": "string" },
+        "schema_version": { "type": "integer", "minimum": 1 },
+        "migration_owner": { "type": "string" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config_files": { "type": "array", "items": { "$ref": "#/$defs/relativePath" } },
+        "preserve_data_on_uninstall": { "type": "boolean", "default": true },
+        "update_strategy": { "const": "atomic_replace" }
+      }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$" },
+    "relativePath": { "type": "string", "minLength": 1, "not": { "pattern": "(^/|(^|/)\\.\\.(/|$)|\\u0000)" } },
+    "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "platformArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "sha256"],
+      "properties": {
+        "os": { "enum": ["linux", "macos", "windows"] },
+        "arch": { "enum": ["x86_64", "aarch64", "armv7"] },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "source_path": { "$ref": "#/$defs/relativePath" },
+        "url": { "type": "string", "pattern": "^https://" },
+        "executable": { "type": "boolean" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "archive": { "enum": ["zip", "tar_gz"] }
+      },
+      "oneOf": [
+        { "required": ["source_path"], "not": { "required": ["url"] } },
+        { "required": ["url", "size_bytes"], "not": { "required": ["source_path"] } }
+      ]
+    }
+  }
+}

@@ -76,6 +76,10 @@ LOG_ABS="$(cd "$(dirname "$LOG")" && pwd)/$(basename "$LOG")"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_cargo_build_environment
 
 echo "regen_fixture.sh: case=$CASE log=$LOG_ABS force=${FORCE:-0} dry_run=${DRY:-0}"
 

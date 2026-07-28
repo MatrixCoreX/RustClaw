@@ -25,11 +25,7 @@ pub(super) fn matrix_admitted_external_evidence_output(
     let entry = registry.get(canonical)?;
     let admission = entry.matrix_admission.as_ref()?;
     let requires_admission = entry.matrix_admission.is_some()
-        || entry.kind == claw_core::skill_registry::SkillKind::External
-        || entry
-            .external_bundle_dir
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty());
+        || entry.kind == claw_core::skill_registry::SkillKind::External;
     if !requires_admission || !admission.eligible {
         return None;
     }

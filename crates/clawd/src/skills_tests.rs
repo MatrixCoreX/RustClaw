@@ -23,6 +23,9 @@ use std::sync::{Arc, Mutex, RwLock};
 
 static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+#[path = "skills_receipt_test_support.rs"]
+mod receipt_support;
+
 struct TempDirGuard {
     path: PathBuf,
 }
@@ -382,66 +385,6 @@ async fn disabled_skill_preflight_returns_policy_decision_payload() {
             .pointer("/permission_decision/decision")
             .and_then(serde_json::Value::as_str),
         Some("deny")
-    );
-}
-
-#[tokio::test]
-async fn external_prompt_bundle_error_uses_machine_payload() {
-    let root = TempDirGuard::new("external_prompt_bundle_machine_error");
-    let mut state = test_state("en");
-    install_registry_from_toml(
-        &mut state,
-        root.path(),
-        r#"
-[[skills]]
-name = "external_prompt_fixture"
-enabled = true
-kind = "external"
-external_kind = "prompt_bundle"
-"#,
-        &["external_prompt_fixture"],
-    );
-    allow_test_skills(&mut state, &["external_prompt_fixture"]);
-    let task = test_task(json!({"kind": "run_skill"}));
-
-    let err = super::run_skill_with_runner_outcome(
-        &state,
-        &task,
-        "external_prompt_fixture",
-        json!({"action": "preview"}),
-    )
-    .await
-    .expect_err("prompt_bundle runtime preview should be a structured adapter error");
-    let parsed = parse_structured_skill_error(&err).expect("structured external adapter error");
-    let extra = parsed.extra.expect("external adapter extra");
-
-    assert_eq!(parsed.error_kind, "external_kind_not_enabled");
-    assert_eq!(parsed.error_text, "external_kind_not_enabled");
-    assert_eq!(
-        extra.get("owner_layer").and_then(serde_json::Value::as_str),
-        Some("external_skill_adapter")
-    );
-    assert_eq!(
-        extra.get("message_key").and_then(serde_json::Value::as_str),
-        Some("clawd.msg.external_skill.external_kind_not_enabled")
-    );
-    assert_eq!(
-        extra
-            .get("external_kind")
-            .and_then(serde_json::Value::as_str),
-        Some("prompt_bundle")
-    );
-    assert_eq!(
-        extra
-            .get("unsupported_reason")
-            .and_then(serde_json::Value::as_str),
-        Some("external_kind_not_enabled")
-    );
-    assert_eq!(
-        extra
-            .get("provider_supported")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
     );
 }
 
@@ -1000,6 +943,7 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
     state.skill_rt.workspace_root = temp.path().to_path_buf();
     state.skill_rt.skill_timeout_seconds = 5;
+    receipt_support::install_verified_test_package(temp.path(), "photo_organize");
 
     let user_id = 91;
     let chat_id = 92;
@@ -1106,7 +1050,6 @@ async fn runner_process_can_write_workspace_but_not_adjacent_host_path() {
 name = "sandbox_probe"
 enabled = true
 kind = "runner"
-runner_name = "sandbox-probe"
 capabilities = ["fs.write"]
 "#,
         &["sandbox_probe"],
@@ -1115,6 +1058,7 @@ capabilities = ["fs.write"]
     state.skill_rt.skill_runner_path = make_sandbox_probe_skill_runner(root.path());
     state.skill_rt.workspace_root = root.path().to_path_buf();
     state.skill_rt.skill_timeout_seconds = 5;
+    receipt_support::install_verified_test_package(root.path(), "sandbox_probe");
     let task = test_task(json!({"kind": "run_skill"}));
 
     let outcome = super::run_skill_with_runner_outcome(

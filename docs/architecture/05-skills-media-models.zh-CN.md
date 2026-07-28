@@ -10,7 +10,7 @@
 
 <!-- ai-learning-navigation:end -->
 
-Registry 是技能可用状态、capability、effect、risk、schema、安装模式和 runner 元数据的机器事实源。自然语言短语不得进入 alias 或 runtime 派发分支。
+Registry 是技能可用状态、capability、effect、risk、schema、安装模式和 manifest 引用的机器事实源。自然语言短语不得进入 alias 或 runtime 派发分支。
 
 ```mermaid
 flowchart TD
@@ -19,23 +19,27 @@ flowchart TD
     B --> D[CapabilityResolver]
     C --> E[规范化机器 token 查找]
     D --> F
-    E --> F[Skills registry<br/>enabled + kind + runner + policy]
+    E --> F[Skills registry<br/>enabled + kind + manifest + policy]
     F --> P[PlanVerifier<br/>action policy + capability scope]
     P --> G{实现类型}
     G -->|builtin| H[进程内 adapter]
-    G -->|runner| I[skill-runner 子进程]
-    G -->|external| J[External adapter]
+    G -->|runner 或 external| R[已验证安装回执]
+    R --> S[SkillRuntimeResolver<br/>SkillLaunchSpec]
+    S --> I[skill-runner 子进程]
     I --> Q[受限子进程环境<br/>一次性 vendor token + 协议别名]
-    Q --> K[技能二进制<br/>单行 JSON stdin/stdout]
+    Q --> K[Cargo / Python / Node / Go / prebuilt / HTTPS<br/>统一 JSONL 合同]
     H --> L[结构化技能响应]
-    J --> L
     K --> L
     L --> M{结果消费者}
     M -->|agent loop| N[CapabilityResultEnvelope<br/>证据 + 产物 + continuation]
     M -->|直接 run_skill| O[保存直接任务结果]
 ```
 
-固定/核心技能参与常规构建；随仓库提供的可选技能位于 `optional_skills/`，只在需要时构建或安装。外部导入技能必须先通过验证和注册，才能进入可用集合。
+所有进程实现都遵循 `skill.toml -> build adapter -> install receipt ->
+SkillLaunchSpec -> JSONL capability result`。固定/核心技能在普通构建中投影回执；
+随仓库提供的可选技能位于 `optional_skills/`，只在需要时安装。外部导入技能必须
+提供 `skill.toml` 与 `INTERFACE.md`，通过同一 adapter、协议冒烟和回执验证后才
+注册。运行时不得根据扩展名、技能名或 `target/release` 约定推断入口。
 
 长尾多媒体能力使用 start、poll、cancel 合同。Provider 工作继续运行时，前台任务可以先返回 checkpoint。
 Preview 是独立的机器 capability；它的 registry policy 禁止网络、凭据访问、外部发布和文件写入。

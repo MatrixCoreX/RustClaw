@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import {
   baseSkillNamesFromRegistry,
   filterSkillNamesBySearch,
@@ -15,7 +16,7 @@ import type {
   BrowserFileWithPath,
   ImportedSkillResponse,
   SkillListItem,
-  SkillStoreMutationResponse,
+  SkillStoreOperationResponse,
   SkillStoreResponse,
   SkillsConfigResponse,
   SkillsResponse,
@@ -31,6 +32,7 @@ export interface UseSkillsRuntimeParams {
 }
 
 export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const [skillsData, setSkillsData] = useState<SkillsResponse | null>(null);
   const [skillsConfigLoading, setSkillsConfigLoading] = useState(false);
   const [skillsConfigError, setSkillsConfigError] = useState<string | null>(null);
@@ -106,24 +108,38 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       previousSkillStoreOperationRef.current = activeOperation;
       setSkillStoreData(body.data);
       if (previousOperation && !activeOperation) {
-        const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
-        const operationSucceeded = previousOperation.action === "install" ? item?.installed === true : item?.configured_installed === false;
-        setSkillStoreMessage(
-          operationSucceeded
-            ? previousOperation.action === "install"
-              ? t(
-                  `${previousOperation.skill_name} 已完成安装并可以使用。`,
-                  `${previousOperation.skill_name} finished installing and is ready to use.`,
-                )
-              : t(
-                  `${previousOperation.skill_name} 已完成删除。`,
-                  `${previousOperation.skill_name} finished removing.`,
-                )
-            : t(
-                `${previousOperation.skill_name} 的操作已经结束，但未达到预期状态，请重试或查看服务日志。`,
-                `${previousOperation.skill_name} finished processing but did not reach the expected state. Retry or check the service log.`,
-              ),
+        const completedOperation = body.data.recent_operations?.find(
+          (operation) => operation.operation_id === previousOperation.operation_id,
         );
+        if (completedOperation?.status === "failure") {
+          setSkillStoreError(skillStoreErrorMessage(completedOperation.failure?.error_code, t));
+        } else if (completedOperation?.status === "cancelled") {
+          setSkillStoreMessage(
+            t(
+              `${previousOperation.skill_name} 的操作已取消，没有继续执行。`,
+              `The operation for ${previousOperation.skill_name} was cancelled.`,
+            ),
+          );
+        } else {
+          const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
+          const operationSucceeded = previousOperation.action === "remove" ? item?.configured_installed === false : item?.installed === true;
+          setSkillStoreMessage(
+            operationSucceeded
+              ? previousOperation.action !== "remove"
+                ? t(
+                    `${previousOperation.skill_name} 已完成安装并可以使用。`,
+                    `${previousOperation.skill_name} finished installing and is ready to use.`,
+                  )
+                : t(
+                    `${previousOperation.skill_name} 已完成删除。`,
+                    `${previousOperation.skill_name} finished removing.`,
+                  )
+              : t(
+                  `${previousOperation.skill_name} 的操作已经结束，但未达到预期状态，请重试或查看服务日志。`,
+                  `${previousOperation.skill_name} finished processing but did not reach the expected state. Retry or check the service log.`,
+                ),
+          );
+        }
         await fetchSkillsConfig();
         await fetchSkills();
       }
@@ -250,9 +266,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     // The operation identity is the server-owned polling boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    skillStoreData?.active_operation?.operation_id,
+    skillStoreData?.active_operation?.status,
+    skillStoreData?.active_operation?.stage,
     skillStoreData?.active_operation?.action,
     skillStoreData?.active_operation?.skill_name,
-    skillStoreData?.active_operation?.started_ts,
+    skillStoreData?.active_operation?.heartbeat_at_unix,
   ]);
 
   const saveSkillSwitches = async (restartSystem?: RestartSystem) => {
@@ -277,12 +296,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         "Skill switches were saved to config.toml.",
       );
       if (restartRequired) {
-        const confirmed = window.confirm(
-          t(
+        const confirmed = await showConfirm({
+          title: t("重启 RustClaw", "Restart RustClaw"),
+          message: t(
             "这些变更需要重启 RustClaw 才会生效。现在就自动重启吗？",
             "These changes need a RustClaw restart to take effect. Restart now?",
           ),
-        );
+          confirmLabel: t("立即重启", "Restart now"),
+        });
         if (confirmed) {
           savedMessage = t(
             "技能开关已保存，正在重启 RustClaw，请稍候。",
@@ -321,9 +342,18 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const importExternalSkill = async () => {
     const source = skillImportSource.trim();
     if (!source) {
-      setSkillImportError(t("请先输入 skill 链接或本地目录。", "Please enter a skill link or local bundle path first."));
+      setSkillImportError(t("请先输入包含 skill.toml 和 INTERFACE.md 的本地目录。", "Enter a local directory containing skill.toml and INTERFACE.md."));
       return;
     }
+    const allowNetwork = await showConfirm({
+      title: t("导入时是否允许联网？", "Allow network during import?"),
+      message: t(
+        "默认保持离线更安全。如果技能清单声明需要下载锁定依赖或验证远程 HTTPS 端点，可以允许本次隔离安装任务联网；运行时权限不会因此自动放开。",
+        "Offline is safer by default. Allow this isolated install job to use the network only if the manifest needs locked dependencies or HTTPS endpoint validation; runtime permissions are not enabled automatically.",
+      ),
+      confirmLabel: t("允许本次联网", "Allow this time"),
+      cancelLabel: t("保持离线导入", "Import offline"),
+    });
     setSkillImportLoading(true);
     setSkillImportError(null);
     setSkillImportMessage(null);
@@ -331,7 +361,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const res = await apiFetch(`/v1/skills/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, enabled: true }),
+        body: JSON.stringify({ source, enabled: true, allow_network: allowNetwork }),
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!res.ok || !body.ok || !body.data) {
@@ -363,6 +393,15 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     if (files.length === 0) {
       return;
     }
+    const allowNetwork = await showConfirm({
+      title: t("导入时是否允许联网？", "Allow network during import?"),
+      message: t(
+        "默认保持离线更安全。如果技能清单声明需要下载锁定依赖或验证远程 HTTPS 端点，可以允许本次隔离安装任务联网；运行时权限不会因此自动放开。",
+        "Offline is safer by default. Allow this isolated install job to use the network only if the manifest needs locked dependencies or HTTPS endpoint validation; runtime permissions are not enabled automatically.",
+      ),
+      confirmLabel: t("允许本次联网", "Allow this time"),
+      cancelLabel: t("保持离线导入", "Import offline"),
+    });
     const firstFile = files[0];
     const guessedBundleName =
       firstFile.webkitRelativePath?.split("/")[0]?.trim() ||
@@ -371,6 +410,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     const formData = new FormData();
     formData.append("bundle_name", guessedBundleName);
     formData.append("enabled", "true");
+    formData.append("allow_network", String(allowNetwork));
     for (const file of files) {
       const relativePath = file.webkitRelativePath?.trim() || file.name;
       formData.append("files", file, relativePath);
@@ -417,6 +457,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     installed: boolean,
     preserveConfig = true,
     preserveData = true,
+    allowNetwork = false,
   ) => {
     setLocalSkillStoreActionName(skillName);
     setSkillStoreError(null);
@@ -428,55 +469,23 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           skill_name: skillName,
-          ...(installed ? {} : { preserve_config: preserveConfig, preserve_data: preserveData }),
+          ...(installed ? { allow_network: allowNetwork } : { preserve_config: preserveConfig, preserve_data: preserveData }),
         }),
       });
-      const body = (await res.json()) as ApiResponse<SkillStoreMutationResponse>;
+      const body = (await res.json()) as ApiResponse<SkillStoreOperationResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(skillStoreErrorMessage(body.error, t));
       }
-      if (!installed && recentImportedSkillName === skillName) {
-        setRecentImportedSkillName(null);
-      }
-      if (!installed && skillImportPreview?.skill_name === skillName) {
-        setSkillImportPreview(null);
-      }
-      if (!installed && skillsSearchQuery.trim().toLowerCase() === skillName.toLowerCase()) {
-        setSkillsSearchQuery("");
-      }
+      const operation = body.data.operation;
+      previousSkillStoreOperationRef.current = operation;
+      setSkillStoreData((current) =>
+        current ? { ...current, active_operation: operation } : current,
+      );
       setSkillStoreMessage(
         installed
-          ? body.data.reused_config_files?.length
-            ? t(
-                `${skillName} 已编译、安装并开启，原有配置已继续使用。`,
-                `${skillName} was compiled, installed, and enabled with its existing configuration.`,
-              )
-            : t(
-                `${skillName} 已编译、安装并开启。`,
-                `${skillName} was compiled, installed, and enabled.`,
-              )
-          : body.data.config_preserved && body.data.data_preserved !== false
-            ? t(
-                `${skillName} 已删除，配置和私有数据已保留，可在重新安装时继续使用。`,
-                `${skillName} was removed. Its configuration and private data were preserved for reinstallation.`,
-              )
-            : body.data.config_preserved
-              ? t(
-                  `${skillName} 已删除，配置已保留，私有数据已清除。`,
-                  `${skillName} was removed. Its configuration was preserved and its private data was cleared.`,
-                )
-              : body.data.data_preserved !== false
-                ? t(
-                    `${skillName} 已删除，私有数据已保留，独立配置已清除。`,
-                    `${skillName} was removed. Its private data was preserved and its dedicated configuration was cleared.`,
-                  )
-            : t(
-                `${skillName}、独立配置和私有数据已清除，仍可从 Skill Store 重新安装。`,
-                `${skillName}, its dedicated configuration, and its private data were removed. It remains available in Skill Store.`,
-              ),
+          ? t(`${skillName} 已进入安装队列。`, `${skillName} was added to the install queue.`)
+          : t(`${skillName} 已进入删除队列。`, `${skillName} was added to the removal queue.`),
       );
-      await fetchSkillsConfig();
-      await fetchSkills();
       await fetchSkillStore();
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -486,9 +495,44 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const installSkillFromStore = (skillName: string) => mutateSkillStoreItem(skillName, true);
+  const installSkillFromStore = async (skillName: string) => {
+    const item = skillStoreData?.items.find((candidate) => candidate.name === skillName);
+    const allowNetwork = item?.build_network_policy === "approval_required";
+    if (allowNetwork) {
+      const confirmed = await showConfirm({
+        title: t("允许安装时联网", "Allow network during installation"),
+        message: t(
+          `${skillName} 的清单声明安装阶段需要联网。RustClaw 只会在隔离的安装任务中按清单获取依赖或验证端点；运行时联网权限仍单独受控。是否继续？`,
+          `${skillName} declares that installation needs network access. RustClaw will use it only in the isolated install job for declared dependencies or endpoint validation; runtime network access remains separately controlled. Continue?`,
+        ),
+        confirmLabel: t("允许并安装", "Allow and install"),
+      });
+      if (!confirmed) return;
+    }
+    await mutateSkillStoreItem(skillName, true, true, true, allowNetwork);
+  };
   const removeSkillFromStore = (skillName: string, preserveConfig = true, preserveData = true) =>
     mutateSkillStoreItem(skillName, false, preserveConfig, preserveData);
+
+  const cancelSkillStoreOperation = async (operationId: string) => {
+    setSkillStoreError(null);
+    try {
+      const res = await apiFetch(`/v1/skills/store/operations/${operationId}/cancel`, {
+        method: "POST",
+      });
+      const body = (await res.json()) as ApiResponse<SkillStoreOperationResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(skillStoreErrorMessage(body.error, t));
+      }
+      setSkillStoreData((current) =>
+        current ? { ...current, active_operation: body.data?.operation ?? null } : current,
+      );
+      setSkillStoreMessage(t("正在安全取消操作…", "Cancelling the operation safely…"));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setSkillStoreError(message);
+    }
+  };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
     if (isUiHiddenSkill(name)) return;
@@ -558,6 +602,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     uploadImportedSkillFiles,
     installSkillFromStore,
     removeSkillFromStore,
+    cancelSkillStoreOperation,
     toggleSkillEnabled,
     clearSkillsConfigError,
   };

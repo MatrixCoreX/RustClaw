@@ -635,6 +635,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rmcp",
  "rusqlite",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
  "sha2",
@@ -1108,9 +1109,11 @@ dependencies = [
  "anyhow",
  "claw-core",
  "reqwest 0.12.28",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
  "tokio",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -1173,6 +1176,16 @@ dependencies = [
  "libc",
  "thiserror 1.0.69",
  "winapi",
+]
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -3391,6 +3404,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustclaw-skill-sdk"
+version = "0.1.8"
+dependencies = [
+ "flate2",
+ "hex",
+ "libc",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml 0.8.23",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3926,8 +3958,11 @@ name = "skill-runner"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "reqwest 0.12.28",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -4137,6 +4172,17 @@ name = "takecell"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
 
 [[package]]
 name = "task-control-skill"
@@ -5649,6 +5695,16 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
 ]
 
 [[package]]

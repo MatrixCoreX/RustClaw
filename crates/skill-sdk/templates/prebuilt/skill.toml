@@ -1,0 +1,47 @@
+schema_version = 1
+
+[package]
+name = "__SKILL_NAME__"
+version = "0.1.0"
+description = "__SUMMARY__"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "__SKILL_NAME__"
+capability_policy_source = "registry"
+
+[build]
+adapter = "prebuilt"
+source_root = "__SOURCE_ROOT__"
+network = "approval_required"
+lifecycle_scripts = false
+artifacts = [
+  { os = "linux", arch = "x86_64", source_path = "artifacts/replace-me", sha256 = "0000000000000000000000000000000000000000000000000000000000000000", executable = true },
+]
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/__PACKAGE_NAME__"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = []
+smoke_args = { action = "__FIRST_ACTION__" }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "__SKILL_NAME__"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

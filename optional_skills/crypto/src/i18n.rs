@@ -230,22 +230,22 @@ pub(super) fn default_crypto_catalog(lang: &str) -> TextCatalog {
     );
     current.insert(
         "crypto.err.binance_not_bound".to_string(),
-        "Binance API is not bound for the current key yet. Exchange credentials are stored per user_key in the local database, not by directly editing configs/crypto.toml.\nTo avoid sending secrets through normal chat, use Telegram: /cryptoapi set binance <api_key> <api_secret>\nor POST /v1/auth/crypto-credentials.\nIf you want, I can format the exact command for you."
+        "Binance API is not bound for the current key. Exchange credentials are stored per user_key in crypto-owned storage, not by editing configs/crypto.toml. Bind them through the controlled POST /v1/auth/crypto-credentials management API, and do not send secrets in normal chat."
             .to_string(),
     );
     current.insert(
         "crypto.err.binance_credentials_incomplete".to_string(),
-        "Binance API credentials are incomplete for the current key. Exchange credentials are stored per user_key in the local database, not by directly editing configs/crypto.toml.\nTo avoid sending secrets through normal chat, use Telegram: /cryptoapi set binance <api_key> <api_secret>\nor POST /v1/auth/crypto-credentials.\nIf you want, I can format the exact command for you."
+        "Binance API credentials are incomplete for the current key. Update them through the controlled POST /v1/auth/crypto-credentials management API, and do not send secrets in normal chat."
             .to_string(),
     );
     current.insert(
         "crypto.err.okx_not_bound".to_string(),
-        "OKX API is not bound for the current key yet. Exchange credentials are stored per user_key in the local database, not by directly editing configs/crypto.toml.\nTo avoid sending secrets through normal chat, use Telegram: /cryptoapi set okx <api_key> <api_secret> <passphrase>\nor POST /v1/auth/crypto-credentials.\nIf you want, I can format the exact command for you."
+        "OKX API is not bound for the current key. Exchange credentials are stored per user_key in crypto-owned storage, not by editing configs/crypto.toml. Bind them through the controlled POST /v1/auth/crypto-credentials management API, and do not send secrets in normal chat."
             .to_string(),
     );
     current.insert(
         "crypto.err.okx_credentials_incomplete".to_string(),
-        "OKX API credentials are incomplete for the current key. Exchange credentials are stored per user_key in the local database, not by directly editing configs/crypto.toml.\nTo avoid sending secrets through normal chat, use Telegram: /cryptoapi set okx <api_key> <api_secret> <passphrase>\nor POST /v1/auth/crypto-credentials.\nIf you want, I can format the exact command for you."
+        "OKX API credentials are incomplete for the current key. Update them through the controlled POST /v1/auth/crypto-credentials management API, and do not send secrets in normal chat."
             .to_string(),
     );
     current.insert(

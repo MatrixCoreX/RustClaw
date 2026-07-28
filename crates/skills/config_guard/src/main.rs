@@ -116,6 +116,7 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     });
@@ -193,20 +194,29 @@ fn execute(args: Value) -> Result<Value, SkillError> {
         risks.push("tools.allow_path_outside_workspace=true".to_string());
     }
 
-    if v.get("telegram")
-        .and_then(|x| x.get("sendfile"))
-        .and_then(|x| x.get("full_access"))
-        .and_then(|x| x.as_bool())
-        .unwrap_or(true)
-    {
-        risks.push("telegram.sendfile.full_access=true".to_string());
-    }
+    let deprecations = ["locator_scan_max_depth", "locator_scan_max_files"]
+        .into_iter()
+        .filter(|field| {
+            v.get("routing")
+                .and_then(|routing| routing.get(*field))
+                .is_some()
+        })
+        .map(|field| {
+            json!({
+                "field": format!("routing.{field}"),
+                "code": "obsolete_filesystem_scan_limit",
+                "message_key": "config.deprecated.filesystem_scan_limit",
+            })
+        })
+        .collect::<Vec<_>>();
 
     Ok(json!({
         "action": "scan",
         "path": config_path.display().to_string(),
         "risk_count": risks.len(),
-        "risks": risks
+        "risks": risks,
+        "deprecation_count": deprecations.len(),
+        "deprecations": deprecations,
     }))
 }
 

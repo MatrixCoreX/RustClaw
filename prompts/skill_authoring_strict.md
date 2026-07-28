@@ -6,22 +6,20 @@ You are now the "skill integration assistant" inside the RustClaw repository. Yo
 - Unless clearly necessary, do not modify `crates/clawd/src/main.rs`, `crates/clawd/src/agent_engine.rs`, or `crates/skill-runner/src/main.rs`.
 
 ## Hard Constraints
-- By default, implement the skill as a `runner` skill, not a `builtin`.
-- The skill directory must be `crates/skills/<skill_name>`.
+- By default, implement the skill as a manifest-driven `runner` skill, not a `builtin`.
+- Use `crates/skills/<skill_name>` for fixed/core, `optional_skills/<skill_name>` for bundled on-demand, or `external_skills/<skill_name>` for submitted packages.
 - `<skill_name>` may contain only lowercase letters, digits, and underscores.
-- The binary name should follow the default convention: `foo_bar -> foo-bar-skill`.
+- Select `cargo`, `python`, `node`, `go`, `prebuilt`, `generic_process`, or `http_json` explicitly in `skill.toml`; never infer it from prose or file extensions.
 - Prefer completing integration through `configs/skills_registry.toml`, `INTERFACE.md`, prompt files, and config files.
 - Do not add special cases, fallbacks, hardcoded mappings, or compatibility branches in the main program just to support a normal runner skill.
 - If you find yourself wanting to modify `clawd`, `skill-runner`, or `agent_engine`, stop first and re-check whether registry, workspace, prompt files, interface docs, and the skill crate are actually sufficient.
 
 ## Required Integration Items
-1. Create `crates/skills/<skill_name>/Cargo.toml`.
-2. Create `crates/skills/<skill_name>/src/main.rs`.
-3. Create `crates/skills/<skill_name>/INTERFACE.md`.
-4. Add the crate to `[workspace].members` in the root `Cargo.toml`.
-5. Add a new `[[skills]]` entry to `configs/skills_registry.toml`.
-6. If aliases are needed, configure them only in registry `aliases`; do not change main-program fallback first.
-7. If a custom runner binary name is needed, configure it only through registry `runner_name`.
+1. Generate the selected language package with `rustclaw-skill init`, including `skill.toml`, `INTERFACE.md`, source, lockfile/artifact declaration, and separate tests.
+2. Complete the manifest's version, platforms, source, typed build/run/security/lifecycle fields.
+3. Add only Cargo packages to `[workspace].members`; non-Cargo packages must not edit the Cargo workspace.
+4. Add a new `[[skills]]` entry to both registry projections with `package_manifest`.
+5. If aliases are needed, configure them only in registry `aliases`.
 8. Put the skill's action and parameter contract in `INTERFACE.md`; do not add per-skill contracts to the global agent tool spec.
 9. If the skill should be planner-facing for normal natural-language execution, declare `planner_capabilities` in `configs/skills_registry.toml` so `call_capability` can flow through resolver/verifier.
 10. Run `python3 scripts/sync_skill_docs.py` to generate or update `prompts/layers/generated/skills/<skill_name>.md`.
@@ -31,11 +29,12 @@ You are now the "skill integration assistant" inside the RustClaw repository. Yo
 - `name`
 - `enabled`
 - `kind = "runner"`
+- `package_manifest = "<source-root>/<skill_name>/skill.toml"`
 - `aliases`
 - `timeout_seconds`
 - `prompt_file = "prompts/skills/<skill_name>.md"` (this is the registry logical path; runtime loads the canonical body from `prompts/layers/generated/skills/<skill_name>.md`, then overlays optional `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`; `prompts/skills/` is not a runtime prompt directory)
 - `output_kind`
-- Configure `runner_name` only when the binary name does not follow the default convention
+- Do not configure `runner_name`, `install_package`, or `external_*` execution fields
 
 ## Skill Process Protocol
 - Must follow the "single-line JSON stdin -> single-line JSON stdout" protocol.
@@ -79,7 +78,9 @@ If the main program really must be changed, you must first explain:
 
 ## Verification Steps
 - `python3 scripts/sync_skill_docs.py`
-- `cargo check -p clawd -p skill-runner -p <new-skill-package>`
+- `rustclaw-skill validate <skill.toml>`
+- `rustclaw-skill protocol-test <skill.toml> <workspace-root> <package-root>`
+- For Cargo packages only: `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
 ## Output Requirements
 - First output: "Files to be modified in this task".

@@ -316,20 +316,15 @@ pub(super) fn platform_hint_lines(cat: &TextCatalog) -> Vec<String> {
 }
 
 pub(super) fn resolve_existing_dir(raw: &str, cat: &TextCatalog) -> Result<PathBuf, String> {
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                tr_with(
-                    cat,
-                    "photo_organize.err.resolve_current_dir",
-                    &[("error", err.to_string())],
-                )
-            })?
-            .join(path)
-    };
+    let current_dir = std::env::current_dir().map_err(|err| {
+        tr_with(
+            cat,
+            "photo_organize.err.resolve_current_dir",
+            &[("error", err.to_string())],
+        )
+    })?;
+    let workspace_root = std::env::var_os("WORKSPACE_ROOT").map(PathBuf::from);
+    let path = resolve_source_path(raw, workspace_root.as_deref(), &current_dir);
     let canonical = fs::canonicalize(&path).map_err(|err| {
         tr_with(
             cat,
@@ -358,6 +353,19 @@ pub(super) fn resolve_existing_dir(raw: &str, cat: &TextCatalog) -> Result<PathB
         ));
     }
     Ok(canonical)
+}
+
+pub(super) fn resolve_source_path(
+    raw: &str,
+    workspace_root: Option<&Path>,
+    current_dir: &Path,
+) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        workspace_root.unwrap_or(current_dir).join(path)
+    }
 }
 
 pub(super) fn resolve_output_dir(

@@ -1,10 +1,10 @@
 use std::env;
-use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use rustclaw_skill_sdk::{InstallReceiptStore, SkillRuntimeResolver};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -132,31 +132,36 @@ struct PermanentExtensionPlan {
 struct ExternalSkillImplementation {
     readme_md: String,
     interface_md: String,
-    main_rs: String,
+    entrypoint_source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ExternalSkillValidationReport {
     synced_docs: bool,
-    cargo_check_ok: bool,
+    manifest_valid: bool,
+    adapter: String,
+    build_ok: bool,
     smoke_test_ok: bool,
     smoke_status: String,
-    smoke_text: String,
+    receipt_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ExternalSkillRegistrationReport {
-    workspace_member_added: bool,
     registry_entry_added: bool,
     switch_recorded_enabled: bool,
+    package_manifest: String,
     matrix_admission_eligible: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ExternalSkillEnableReport {
     switch_enabled: bool,
-    release_build_ok: bool,
-    release_binary_path: String,
+    install_ok: bool,
+    adapter: String,
+    installed_version: String,
+    receipt_digest: String,
+    install_root: String,
     reload_required: bool,
 }
 
@@ -206,6 +211,7 @@ fn error_extra(error_kind: &str) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
@@ -361,12 +367,18 @@ async fn implement_external_skill_action(
         ));
     }
 
+    let manifest = rustclaw_skill_sdk::PackageManifest::load(&skill_dir.join("skill.toml"))
+        .map_err(|error| format!("read external skill manifest failed: {error}"))?;
+    let (source_entrypoint, _) = implementation_source_target(&manifest)?;
+    let build_adapter = manifest.build.adapter;
     let implementation = build_external_skill_implementation(
         request_id,
         &request,
         &skill_name,
         &capability_summary,
         &actions,
+        build_adapter,
+        source_entrypoint,
     )
     .await?;
     let updated_files = write_external_skill_implementation(
@@ -384,6 +396,8 @@ async fn implement_external_skill_action(
         json!({
             "action": "implement_external_skill",
             "skill_name": skill_name,
+            "build_adapter": build_adapter.as_token(),
+            "source_entrypoint": source_entrypoint,
             "updated_files": updated_files,
             "default_enabled": false,
             "next_steps": [
@@ -403,7 +417,7 @@ fn validate_external_skill_action(obj: &Map<String, Value>) -> Result<(String, V
     let report = validate_external_skill(&repo_root, &skill_name, &actions)?;
     Ok((
         format!(
-            "Validated external_skills/{skill_name}: sync docs ok, cargo check ok, smoke test ok."
+            "Validated external_skills/{skill_name}: manifest, adapter build, and protocol smoke test passed."
         ),
         json!({
             "action": "validate_external_skill",
@@ -427,34 +441,38 @@ fn register_external_skill_action(
     validate_identifier("skill_name", &skill_name)?;
     ensure_external_skill_scaffold_ready(&repo_root, &skill_name)?;
 
-    let release_binary_path = external_skill_release_binary_path(&repo_root, &skill_name);
-    let original_release_binary = fs::read(&release_binary_path).ok();
-    let release_binary_path = build_external_skill_release_binary(&repo_root, &skill_name)?;
+    let actions = extract_actions(obj)?;
+    let _validation = validate_external_skill(&repo_root, &skill_name, &actions)?;
+    let had_verified_install = SkillRuntimeResolver::new(external_package_root(&repo_root))
+        .resolve(&skill_name)
+        .is_ok();
+    let install = install_external_skill(&repo_root, &skill_name)?;
     let report = match register_external_skill(&repo_root, &skill_name) {
         Ok(report) => report,
         Err(err) => {
-            match original_release_binary {
-                Some(bytes) => {
-                    let _ = fs::write(&release_binary_path, bytes);
-                }
-                None => {
-                    let _ = fs::remove_file(&release_binary_path);
-                }
+            let store = InstallReceiptStore::new(external_package_root(&repo_root));
+            if had_verified_install {
+                let _ = store.rollback(&skill_name);
+            } else {
+                let _ = store.remove_installed_versions(&skill_name);
             }
             return Err(err);
         }
     };
     Ok((
         format!(
-            "Registered external skill `{skill_name}`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it."
+            "Registered external skill `{skill_name}`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it."
         ),
         json!({
             "action": "register_external_skill",
             "skill_name": skill_name,
             "report": report,
             "default_enabled": true,
-            "release_build_ok": true,
-            "release_binary_path": path_string(&release_binary_path),
+            "install_ok": true,
+            "adapter": install.adapter.as_token(),
+            "installed_version": install.version,
+            "receipt_digest": install.receipt_digest,
+            "install_root": path_string(&install.install_root),
             "reload_required": true,
             "next_steps": [
                 "Reload skills via admin endpoint or restart clawd.",
@@ -474,7 +492,7 @@ fn enable_external_skill_action(obj: &Map<String, Value>) -> Result<(String, Val
     let report = enable_external_skill(&repo_root, &skill_name)?;
     Ok((
         format!(
-            "Enabled external skill `{skill_name}` in config and built its release binary. Reload skills or restart clawd before using it."
+            "Enabled external skill `{skill_name}` in config and installed its verified package. Reload skills or restart clawd before using it."
         ),
         json!({
             "action": "enable_external_skill",
@@ -625,12 +643,16 @@ async fn build_external_skill_implementation(
     skill_name: &str,
     capability_summary: &str,
     actions: &[String],
+    build_adapter: rustclaw_skill_sdk::BuildAdapter,
+    source_entrypoint: &str,
 ) -> Result<ExternalSkillImplementation, String> {
     let raw = llm_generate_external_skill_implementation(
         request,
         skill_name,
         capability_summary,
         actions,
+        build_adapter,
+        source_entrypoint,
     )
     .await?;
     let parsed = parse_external_skill_implementation_from_text(&raw)?;
@@ -794,14 +816,18 @@ async fn llm_generate_external_skill_implementation(
     skill_name: &str,
     capability_summary: &str,
     actions: &[String],
+    build_adapter: rustclaw_skill_sdk::BuildAdapter,
+    source_entrypoint: &str,
 ) -> Result<String, String> {
     let timeout_secs = extension_manager_timeout_seconds(90);
     let user_prompt = format!(
-        "Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\n",
+        "Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\nBuild adapter: {}\nSource entrypoint: {}\n",
         request.trim(),
         skill_name,
         capability_summary.trim(),
-        actions.join(", ")
+        actions.join(", "),
+        build_adapter.as_token(),
+        source_entrypoint,
     );
     if let Some(result) = internal_llm_generate(
         "skills/extension_manager/external_skill_implementation",
@@ -1245,7 +1271,11 @@ fn normalize_external_skill_implementation(
             &mut implementation.interface_md,
             48_000usize,
         ),
-        ("main_rs", &mut implementation.main_rs, 120_000usize),
+        (
+            "entrypoint_source",
+            &mut implementation.entrypoint_source,
+            120_000usize,
+        ),
     ] {
         let trimmed = content.trim();
         if trimmed.is_empty() {

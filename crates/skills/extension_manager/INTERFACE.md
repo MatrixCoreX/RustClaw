@@ -4,177 +4,112 @@
 > Keep this spec aligned with `crates/skills/extension_manager/src/main.rs`.
 
 ## Capability Summary
-- `extension_manager` is a guarded developer-facing skill for extension planning, scaffold generation, and first-pass external skill implementation.
-- It keeps new skills unregistered while they are being scaffolded and tested; after validation, `register_external_skill` builds the release binary and writes the config switch enabled.
-- The current MVP supports safe gap assessment, bounded temporary-fix planning/execution, and external skill scaffold generation under `external_skills/`.
+
+- `extension_manager` is a guarded developer-facing skill for capability-gap assessment, bounded temporary fixes, and manifest-driven external skill lifecycle management.
+- Permanent packages stay unregistered while scaffolded and validated. Registration is allowed only after the selected adapter builds in private staging and the JSONL protocol smoke test produces a trusted install receipt.
+- External scaffolds may select Rust/Cargo, Python, Node, Go, or prebuilt explicitly. Source generation supports Cargo, Python, Node, and Go; prebuilt, generic-process, and HTTP packages require developer-supplied artifacts or configuration.
+- Registration writes `package_manifest` registry metadata and `skill_switches.<skill>=true` atomically. Only Cargo packages may require Cargo-workspace membership; non-Cargo packages do not edit the workspace.
 
 ## Actions
-- `assess_gap`: summarize whether a request should stay a one-off temporary fix or become a reusable new capability.
-- `enable_external_skill`: after explicit confirmation, rebuild the release binary and ensure `skill_switches` is on for an already registered external skill.
-- `implement_external_skill`: fill an already scaffolded external skill with the first generated `README.md`, `INTERFACE.md`, and `src/main.rs`.
-- `register_external_skill`: after explicit confirmation and release build success, add an existing external skill scaffold into `Cargo.toml`, `configs/skills_registry.toml`, and enabled `skill_switches`.
-- `validate_external_skill`: run `sync_skill_docs.py`, `cargo check`, and a protocol-level smoke test against an existing external skill scaffold.
-- `permanent_extension_plan`: ask the configured LLM to turn a reusable capability request into a scaffold-ready external skill plan.
-- `temporary_fix_plan`: ask the configured LLM to produce a bounded temporary script/package plan for the current task.
-- `temporary_fix_execute`: execute a bounded temporary-fix plan after explicit confirmation.
-- `scaffold_external_skill`: create an isolated external skill scaffold under `external_skills/<skill_name>`.
+
+- `assess_gap`: recommend a temporary fix, permanent extension, or manual review.
+- `temporary_fix_plan`: produce a bounded one-off script/package plan without registering a skill.
+- `temporary_fix_execute`: execute such a plan only after explicit confirmation.
+- `permanent_extension_plan`: turn a reusable request into a scaffold-ready skill plan.
+- `scaffold_external_skill`: create `external_skills/<skill_name>` in an explicitly selected implementation language.
+- `implement_external_skill`: replace untouched scaffold docs and the manifest-selected source entrypoint with a first implementation.
+- `validate_external_skill`: synchronize docs, validate the manifest, install with its private adapter in staging, and run the protocol smoke test.
+- `register_external_skill`: validate and install the verified package, then atomically add registry/config metadata and enable it.
+- `enable_external_skill`: reinstall an already registered external package from its manifest and enable its config switch.
 
 ## Parameter Contract
+
 | Action | Param | Required | Type | Default | Description |
-|---|---|---|---|---|---|
-| `assess_gap` | `action` | no | string | `assess_gap` | Defaults to `assess_gap` when omitted. |
-| `assess_gap` | `request` | yes | string | - | Natural-language description of the missing capability or task. |
-| `assess_gap` | `mode_hint` | no | string(enum) | `auto` | One of `auto`, `temporary_fix`, `permanent_extension`, `manual_review`. `auto` stays conservative and returns `manual_review`. |
-| `enable_external_skill` | `action` | yes | string | - | Must be `enable_external_skill`. |
-| `enable_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing registered external skill directory name under `external_skills/`. |
-| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before rebuilding the release binary and touching config. |
-| `implement_external_skill` | `action` | yes | string | - | Must be `implement_external_skill`. |
-| `implement_external_skill` | `request` | yes | string | - | Original reusable capability request used to generate the first implementation bundle. |
-| `implement_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing scaffold directory name under `external_skills/`. |
-| `implement_external_skill` | `capability_summary` | yes | string | - | Reusable capability summary used to align generated docs and code. |
-| `implement_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Action list that the generated implementation must support. |
-| `register_external_skill` | `action` | yes | string | - | Must be `register_external_skill`. |
-| `register_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing external skill directory name under `external_skills/`. |
-| `register_external_skill` | `confirm` | yes | bool | - | Must be `true` before building the release binary and touching workspace/config files. |
-| `validate_external_skill` | `action` | yes | string | - | Must be `validate_external_skill`. |
-| `validate_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing external skill directory name under `external_skills/`. |
-| `validate_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Candidate action names used for the smoke-test request. |
-| `permanent_extension_plan` | `action` | yes | string | - | Must be `permanent_extension_plan`. |
-| `permanent_extension_plan` | `request` | yes | string | - | Natural-language request that should be converted into a reusable external skill scaffold plan. |
-| `temporary_fix_plan` | `action` | yes | string | - | Must be `temporary_fix_plan`. |
-| `temporary_fix_plan` | `request` | yes | string | - | Natural-language request that the LLM should solve with a bounded temporary plan. |
-| `temporary_fix_execute` | `action` | yes | string | - | Must be `temporary_fix_execute`. |
-| `temporary_fix_execute` | `confirm` | yes | bool | - | Must be `true` before any file/package/command side effects are allowed. |
-| `temporary_fix_execute` | `plan` | conditional | object | - | Previously generated plan object. Required unless `request` is supplied for inline plan+execute. |
-| `temporary_fix_execute` | `request` | conditional | string | - | Optional shorthand to generate a plan and execute it in one call. |
-| `temporary_fix_execute` | `allow_package_install` | no | bool | `false` | Must be `true` to allow language-level package installs from the plan. |
-| `scaffold_external_skill` | `action` | yes | string | - | Must be `scaffold_external_skill`. |
-| `scaffold_external_skill` | `skill_name` | yes | string(snake_case) | - | New external skill directory name. Only lowercase letters, digits, and underscores are allowed. |
-| `scaffold_external_skill` | `capability_summary` | yes | string | - | Short summary written into the scaffolded `INTERFACE.md`. |
-| `scaffold_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Proposed action names to prefill in the scaffold. |
+|---|---|---:|---|---|---|
+| `assess_gap` | `request` | yes | string | - | Missing capability or task. |
+| `assess_gap` | `mode_hint` | no | enum | `auto` | `auto`, `temporary_fix`, `permanent_extension`, or `manual_review`; `auto` remains conservative. |
+| `temporary_fix_plan` | `request` | yes | string | - | Request for a bounded one-off plan. |
+| `temporary_fix_execute` | `confirm` | yes | bool | - | Must be `true`. |
+| `temporary_fix_execute` | `plan` | conditional | object | - | Previously generated plan; required unless `request` is supplied. |
+| `temporary_fix_execute` | `request` | conditional | string | - | Generate and execute a plan in one call. |
+| `temporary_fix_execute` | `allow_package_install` | no | bool | `false` | Separately authorizes temporary language-level package installation. |
+| `permanent_extension_plan` | `request` | yes | string | - | Reusable capability request. |
+| `scaffold_external_skill` | `skill_name` | yes | snake_case string | - | New external skill name. |
+| `scaffold_external_skill` | `capability_summary` | yes | string | - | Short reusable capability summary. |
+| `scaffold_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Initial action names. |
+| `scaffold_external_skill` | `implementation_language` | no | enum | `rust` | `rust`, `python`, `node`, `go`, or `prebuilt`; aliases accepted by the SDK parser. |
+| `scaffold_external_skill` | `build_adapter` | no | enum | - | Compatibility input for the same language selection when `implementation_language` is absent. |
+| `implement_external_skill` | `request` | yes | string | - | Original reusable request used for generation. |
+| `implement_external_skill` | `skill_name` | yes | snake_case string | - | Existing scaffold name. |
+| `implement_external_skill` | `capability_summary` | yes | string | - | Contract summary. |
+| `implement_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Actions the generated source must support. |
+| `validate_external_skill` | `skill_name` | yes | snake_case string | - | Existing scaffold name. |
+| `validate_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Smoke-test request actions. |
+| `register_external_skill` | `skill_name` | yes | snake_case string | - | Validated external package. |
+| `register_external_skill` | `confirm` | yes | bool | - | Must be `true` before installation and metadata writes. |
+| `register_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Validation smoke actions. |
+| `enable_external_skill` | `skill_name` | yes | snake_case string | - | Existing registered external package. |
+| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before installation/config writes. |
+
+Every action also accepts `action`; it defaults to `assess_gap` only when omitted.
 
 ## Error Contract
-- Input/shape errors:
-  - `args must be object`
-  - `<key> is required`
-- Validation errors:
-  - `invalid mode_hint: <value>; use auto|temporary_fix|permanent_extension|manual_review`
-  - `invalid skill_name: <value>; use snake_case with lowercase letters, digits, and underscores only`
-  - `temporary_fix_execute requires confirm=true`
-  - `register_external_skill requires confirm=true`
-  - `enable_external_skill requires confirm=true`
-  - `skill scaffold does not exist yet: <path>`
-  - `external skill scaffold is missing required file: <path>`
-  - `external skill Cargo.toml does not exist: <path>`
-  - `refusing to overwrite non-scaffold file: <path>`
-  - `temporary_fix_execute plan requires package installation; rerun with allow_package_install=true`
-  - `permanent extension plan is not valid JSON`
-  - `external skill implementation is not valid JSON`
-  - `sync_skill_docs.py failed: <detail>`
-  - `cargo check for external skill failed: <detail>`
-  - `external skill release build failed: <detail>`
-  - `external skill smoke test process failed: <detail>`
-  - `external skill smoke test returned non-JSON output: <detail>`
-- `unsupported runtime: <value>; use python3|bash|sh|node`
-  - `unsupported ecosystem: <value>; use python|node|rust|go`
-  - `temporary fix command must reference a generated script file: <path>`
-  - `actions must be strings`
-  - `actions must be a string or string array`
-  - `too many actions; limit is 12`
-- Runtime/file errors:
-  - `temporary fix llm request failed: <error>`
-  - `temporary fix llm failed status=<status>: <body>`
-  - `temporary fix plan is not valid JSON`
-  - `run temporary fix command failed: <error>`
-  - `temporary fix install failed: ecosystem=<ecosystem>, module=<module>; <detail>`
-  - `resolve repo root failed: <error>`
-  - `skill directory already exists: <path>`
-  - `create scaffold dirs failed: <error>`
-  - `write <file> failed: <error>`
-- Malformed stdin JSON:
-  - `invalid input: <serde error>`
+
+- Shape/confirmation: `args must be object`, `<key> is required`, `<action> requires confirm=true`, `actions must be a string or string array`.
+- Identity: `invalid skill_name: ...`, `skill directory already exists: ...`, `skill scaffold does not exist yet: ...`, `external skill identity mismatch: ...`.
+- Source generation: `refusing to overwrite non-scaffold file: ...`; adapters without a source scaffold return `implement_external_skill requires developer-supplied artifacts for adapter=<adapter>`.
+- Validation/install: failures include structured phase, code, and detail from manifest validation, adapter build, protocol smoke, or verified receipt resolution. Package builds use private dependency/cache roots and `allow_network=false` by default.
+- Registration/config writes roll back the newly installed package or prior metadata when a later atomic step fails.
+- Temporary fixes are separate from permanent packaging. Package installation requires both `confirm=true` and `allow_package_install=true`; command failures include runtime, script, exit code, and bounded stderr.
+- Malformed stdin returns `status="error"`, readable `error_text`, and structured `extra.error_code`/`message_key`.
 
 ## Config Entry Points
-- Text LLM generation goes through the internal text LLM gateway when called by `clawd`, using the system default `[llm].selected_vendor` / `selected_model`.
-- Legacy standalone fallback still accepts `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` and optional `EXTENSION_MANAGER_MODEL`, but normal runtime should not require a dedicated model override.
+
+- Text generation normally uses the internal LLM gateway and the system `[llm].selected_vendor` / `selected_model`.
+- Standalone fallback accepts `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, and optional `EXTENSION_MANAGER_MODEL`.
+- Permanent build/run behavior comes only from `external_skills/<skill>/skill.toml`; registry registration stores its `package_manifest` path and does not derive an executor from prose or file extensions.
+- Verified packages and receipts live under the runtime skill-package root. Disabling/uninstalling preserves skill-owned data by default.
 
 ## Request/Response Examples
-### Example 1
+
+### Scaffold a Python package
+
 Request:
+
 ```json
-{"request_id":"demo-1","context":null,"user_id":1,"chat_id":1,"args":{"request":"Add a reusable PDF compare skill","mode_hint":"permanent_extension"}}
-```
-Response:
-```json
-{"request_id":"demo-1","status":"ok","text":"Recommend a permanent extension: scaffold a new isolated skill, keep it unregistered while testing, then register it after validation.","extra":{"action":"assess_gap","request":"Add a reusable PDF compare skill","recommended_mode":"permanent_extension","default_enabled":false},"error_text":null}
+{"request_id":"demo-1","context":null,"user_id":1,"chat_id":1,"args":{"action":"scaffold_external_skill","skill_name":"text_probe","capability_summary":"Inspect text locally.","actions":["inspect"],"implementation_language":"python"}}
 ```
 
-### Example 2
-Request:
-```json
-{"request_id":"demo-2","context":null,"user_id":1,"chat_id":1,"args":{"action":"temporary_fix_plan","request":"Write a temporary Python script to parse tmp/input.json and print the top 3 keys."}}
-```
 Response:
+
 ```json
-{"request_id":"demo-2","status":"ok","text":"Temporary fix plan created with 1 file(s), 1 command(s), and 0 package group(s).","extra":{"action":"temporary_fix_plan","plan":{"summary":"Use one temporary Python script to parse the JSON file.","plan_root":"tmp/extension_manager/demo2-1234567890","files":[{"path":"tmp/extension_manager/demo2-1234567890/runner.py","content":"print('TODO')"}],"commands":[{"runtime":"python3","script_path":"tmp/extension_manager/demo2-1234567890/runner.py","args":[],"cwd":"."}],"packages":[],"notes":[]}},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"Scaffolded external skill `text_probe` at external_skills/text_probe. It is not registered or enabled.","extra":{"action":"scaffold_external_skill","skill_name":"text_probe","implementation_language":"python","build_adapter":"python","default_enabled":false},"error_text":null}
 ```
 
-### Example 3
+### Validate the manifest-selected adapter
+
 Request:
+
 ```json
-{"request_id":"demo-3","context":null,"user_id":1,"chat_id":1,"args":{"action":"permanent_extension_plan","request":"Add a reusable PDF compare skill that can compare two files and summarize the differences."}}
-```
-Response:
-```json
-{"request_id":"demo-3","status":"ok","text":"Permanent extension scaffold plan created for external_skills/pdf_compare with 2 action(s).","extra":{"action":"permanent_extension_plan","plan":{"skill_name":"pdf_compare","capability_summary":"Compare two PDF files and summarize grounded differences.","actions":["compare","summarize"],"rationale":"This is reusable functionality rather than a one-off task."}},"error_text":null}
+{"request_id":"demo-2","context":null,"user_id":1,"chat_id":1,"args":{"action":"validate_external_skill","skill_name":"text_probe","actions":["inspect"]}}
 ```
 
-### Example 4
-Request:
-```json
-{"request_id":"demo-4","context":null,"user_id":1,"chat_id":1,"args":{"action":"scaffold_external_skill","skill_name":"pdf_compare","capability_summary":"Compare two PDF files and summarize differences.","actions":["compare","summarize"]}}
-```
 Response:
+
 ```json
-{"request_id":"demo-4","status":"ok","text":"Scaffolded external skill `pdf_compare` at external_skills/pdf_compare. It is not registered or enabled.","extra":{"action":"scaffold_external_skill","skill_name":"pdf_compare","default_enabled":false},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"Validated external_skills/text_probe: manifest, adapter build, and protocol smoke test passed.","extra":{"action":"validate_external_skill","skill_name":"text_probe","report":{"synced_docs":true,"manifest_valid":true,"adapter":"python","build_ok":true,"smoke_test_ok":true,"smoke_status":"ok","receipt_digest":"sha256:..."},"default_enabled":false},"error_text":null}
 ```
 
-### Example 5
+### Register after verification
+
 Request:
+
 ```json
-{"request_id":"demo-5","context":null,"user_id":1,"chat_id":1,"args":{"action":"implement_external_skill","request":"Add a reusable PDF compare skill that can compare two files and summarize the differences.","skill_name":"pdf_compare","capability_summary":"Compare two PDF files and summarize grounded differences.","actions":["compare","summarize"]}}
-```
-Response:
-```json
-{"request_id":"demo-5","status":"ok","text":"Implemented initial files for external_skills/pdf_compare. The skill is still unregistered and unavailable at runtime.","extra":{"action":"implement_external_skill","skill_name":"pdf_compare","default_enabled":false},"error_text":null}
+{"request_id":"demo-3","context":null,"user_id":1,"chat_id":1,"args":{"action":"register_external_skill","skill_name":"text_probe","actions":["inspect"],"confirm":true}}
 ```
 
-### Example 6
-Request:
-```json
-{"request_id":"demo-6","context":null,"user_id":1,"chat_id":1,"args":{"action":"validate_external_skill","skill_name":"pdf_compare","actions":["compare","summarize"]}}
-```
 Response:
-```json
-{"request_id":"demo-6","status":"ok","text":"Validated external_skills/pdf_compare: sync docs ok, cargo check ok, smoke test ok.","extra":{"action":"validate_external_skill","skill_name":"pdf_compare","report":{"synced_docs":true,"cargo_check_ok":true,"smoke_test_ok":true,"smoke_status":"error","smoke_text":""},"default_enabled":false},"error_text":null}
-```
 
-### Example 7
-Request:
 ```json
-{"request_id":"demo-7","context":null,"user_id":1,"chat_id":1,"args":{"action":"register_external_skill","skill_name":"pdf_compare","confirm":true}}
-```
-Response:
-```json
-{"request_id":"demo-7","status":"ok","text":"Registered external skill `pdf_compare`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it.","extra":{"action":"register_external_skill","skill_name":"pdf_compare","default_enabled":true,"release_build_ok":true,"reload_required":true},"error_text":null}
-```
-
-### Example 8
-Request:
-```json
-{"request_id":"demo-8","context":null,"user_id":1,"chat_id":1,"args":{"action":"enable_external_skill","skill_name":"pdf_compare","confirm":true}}
-```
-Response:
-```json
-{"request_id":"demo-8","status":"ok","text":"Enabled external skill `pdf_compare` in config and built its release binary. Reload skills or restart clawd before using it.","extra":{"action":"enable_external_skill","skill_name":"pdf_compare","default_enabled":true},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"Registered external skill `text_probe`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it.","extra":{"action":"register_external_skill","skill_name":"text_probe","default_enabled":true,"install_ok":true,"adapter":"python","receipt_digest":"sha256:...","reload_required":true},"error_text":null}
 ```

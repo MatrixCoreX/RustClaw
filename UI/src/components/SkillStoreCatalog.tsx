@@ -30,6 +30,7 @@ import {
   Video,
   Volume2,
   Wrench,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -87,6 +88,7 @@ export interface SkillStoreCatalogProps {
   onRefresh: () => unknown | Promise<unknown>;
   onInstall: (name: string) => unknown | Promise<unknown>;
   onRemove: (name: string, preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
+  onCancel: (operationId: string) => unknown | Promise<unknown>;
 }
 
 export function SkillStoreCatalog({
@@ -100,6 +102,7 @@ export function SkillStoreCatalog({
   onRefresh,
   onInstall,
   onRemove,
+  onCancel,
 }: SkillStoreCatalogProps) {
   const [query, setQuery] = useState("");
   const [pendingRemoval, setPendingRemoval] = useState<SkillStoreItem | null>(null);
@@ -108,6 +111,25 @@ export function SkillStoreCatalog({
   }, [data?.items, query]);
   const mutationRunning = actionName !== null;
   const activeOperation = data?.active_operation ?? null;
+  const recentFailure = data?.recent_operations?.find(
+    (operation) => operation.status === "failure" && operation.failure?.diagnostic,
+  );
+
+  const operationStageLabel = (stage: string) => {
+    const labels: Record<string, readonly [string, string]> = {
+      queued: ["等待开始", "Queued"],
+      preflight: ["检查运行环境", "Checking prerequisites"],
+      dependencies: ["准备独立依赖", "Preparing private dependencies"],
+      build: ["构建运行文件", "Building runtime files"],
+      smoke: ["验证技能协议", "Validating the skill protocol"],
+      activate: ["安全启用新版本", "Activating the verified version"],
+      configure: ["保存技能设置", "Saving skill settings"],
+      remove: ["删除技能运行文件", "Removing skill runtime files"],
+      rollback: ["恢复上一版本", "Restoring the previous version"],
+    };
+    const label = labels[stage];
+    return label ? t(label[0], label[1]) : stage;
+  };
 
   const confirmRemoval = async (preserveConfig: boolean, preserveData: boolean) => {
     if (!pendingRemoval) return;
@@ -169,8 +191,35 @@ export function SkillStoreCatalog({
         {repairRequired ? (
           <p className="mt-3 text-xs leading-5 text-amber-200/85">
             {t(
-              "技能设置仍在，但运行文件缺失。修复安装会重新编译并继续使用原有配置。",
-              "The skill settings remain, but its runner is missing. Repairing recompiles it and keeps the existing configuration.",
+              "技能设置仍在，但运行文件缺失。修复安装会重新验证运行文件，并继续使用原有配置。",
+              "The skill settings remain, but its runtime files are missing. Repair verifies them again and keeps the existing configuration.",
+            )}
+          </p>
+        ) : null}
+        <details className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/50">
+          <summary className="cursor-pointer text-white/60">{t("安装信息", "Install details")}</summary>
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt>{t("构建方式", "Adapter")}</dt>
+            <dd className="break-all text-white/75">{item.build_adapter ?? t("无需构建", "No build")}</dd>
+            <dt>{t("支持系统", "Platforms")}</dt>
+            <dd className="break-all text-white/75">{item.supported_os?.join(", ") || t("跟随运行环境", "Runtime default")}</dd>
+            <dt>{t("可用架构", "Architectures")}</dt>
+            <dd className="break-all text-white/75">{item.supported_arch?.join(", ") || t("当前架构", "Current architecture")}</dd>
+            <dt>{t("版本", "Version")}</dt>
+            <dd className="break-all text-white/75">{item.installed_version ?? item.package_version ?? "—"}</dd>
+            <dt>{t("安装联网", "Install network")}</dt>
+            <dd className="break-all text-white/75">
+              {item.build_network_policy === "approval_required"
+                ? t("需要你确认", "Requires your approval")
+                : t("不联网", "Offline")}
+            </dd>
+          </dl>
+        </details>
+        {!item.installed && item.build_network_policy === "approval_required" ? (
+          <p className="mt-3 text-xs leading-5 text-amber-200/85">
+            {t(
+              "安装会联网获取已声明的依赖或验证远程端点；点击安装后仍会再次确认。",
+              "Installation accesses the network for declared dependencies or endpoint validation; you will be asked to confirm.",
             )}
           </p>
         ) : null}
@@ -242,20 +291,39 @@ export function SkillStoreCatalog({
       </div>
       {error ? <p className="mt-4 border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-200 rounded">{error}</p> : null}
       {activeOperation ? (
-        <p className="mt-4 flex items-center gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
-          {activeOperation.action === "install"
-            ? t(
-                `${activeOperation.skill_name} 正在编译并安装，刷新页面后仍会继续显示进度。`,
-                `${activeOperation.skill_name} is compiling and installing. Its progress remains visible after a page refresh.`,
-              )
-            : t(
-                `${activeOperation.skill_name} 正在删除，请稍候。`,
-                `${activeOperation.skill_name} is being removed. Please wait.`,
-              )}
-        </p>
+        <div className="mt-4 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              {activeOperation.skill_name}：{operationStageLabel(activeOperation.stage)}
+            </span>
+            <button
+              type="button"
+              onClick={() => void onCancel(activeOperation.operation_id)}
+              disabled={activeOperation.cancel_requested}
+              className="inline-flex items-center gap-1 rounded border border-amber-200/25 px-2 py-1 text-xs hover:bg-amber-100/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              {activeOperation.cancel_requested ? t("正在取消", "Cancelling") : t("取消", "Cancel")}
+            </button>
+          </div>
+          <p className="mt-1 pl-6 text-xs text-amber-100/70">
+            {t("可以离开或刷新此页面，任务状态会保留。", "You can leave or refresh this page; the operation state is preserved.")}
+          </p>
+        </div>
       ) : null}
       {message ? <p className="mt-4 border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200 rounded">{message}</p> : null}
+      {recentFailure?.failure?.diagnostic ? (
+        <details className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/55">
+          <summary className="cursor-pointer text-white/65">{t("诊断信息", "Diagnostics")}</summary>
+          <p className="mt-2 text-white/60">
+            {recentFailure.skill_name} · {recentFailure.failure.error_code}
+          </p>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 text-[11px] text-white/55">
+            {recentFailure.failure.diagnostic}
+          </pre>
+        </details>
+      ) : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{items.map(renderItem)}</div>
       {!loading && items.length === 0 ? (
         <p className="mt-4 border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-white/50 rounded-lg">

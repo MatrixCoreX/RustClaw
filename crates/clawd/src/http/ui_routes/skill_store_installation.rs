@@ -1,7 +1,9 @@
 #[derive(Debug, Clone)]
 struct SkillStoreInstallSpec {
-    package: String,
-    binary: String,
+    skill_name: String,
+    manifest_path: PathBuf,
+    adapter: rustclaw_skill_sdk::BuildAdapter,
+    network_policy: rustclaw_skill_sdk::BuildNetworkPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -13,18 +15,22 @@ enum SkillStoreErrorCode {
     ConfigReadFailed,
     ConfigWriteFailed,
     RuntimeReloadFailed,
-    InvalidRunnerName,
     InstallNotOnDemand,
-    InvalidInstallPackage,
+    UnsupportedOs,
+    ManifestMissing,
+    ManifestInvalid,
+    NetworkApprovalRequired,
     UnsafeConfigPath,
-    BuildStartFailed,
-    BuildFailed,
     #[cfg(not(test))]
-    BuildBinaryMissing,
-    BinaryRemoveFailed,
+    InstallStartFailed,
+    InstallFailed,
+    PackageRemoveFailed,
     ConfigRemoveFailed,
     DataRemoveFailed,
     OperationBusy,
+    OperationStateFailed,
+    OperationNotFound,
+    RollbackUnavailable,
 }
 
 impl SkillStoreErrorCode {
@@ -37,18 +43,22 @@ impl SkillStoreErrorCode {
             Self::ConfigReadFailed => "skill_store_config_read_failed",
             Self::ConfigWriteFailed => "skill_store_config_write_failed",
             Self::RuntimeReloadFailed => "skill_store_runtime_reload_failed",
-            Self::InvalidRunnerName => "skill_store_invalid_runner_name",
             Self::InstallNotOnDemand => "skill_store_install_not_on_demand",
-            Self::InvalidInstallPackage => "skill_store_invalid_install_package",
+            Self::UnsupportedOs => "skill_store_unsupported_os",
+            Self::ManifestMissing => "skill_store_manifest_missing",
+            Self::ManifestInvalid => "skill_store_manifest_invalid",
+            Self::NetworkApprovalRequired => "skill_store_network_approval_required",
             Self::UnsafeConfigPath => "skill_store_unsafe_config_path",
-            Self::BuildStartFailed => "skill_store_build_start_failed",
-            Self::BuildFailed => "skill_store_build_failed",
             #[cfg(not(test))]
-            Self::BuildBinaryMissing => "skill_store_build_binary_missing",
-            Self::BinaryRemoveFailed => "skill_store_binary_remove_failed",
+            Self::InstallStartFailed => "skill_store_install_start_failed",
+            Self::InstallFailed => "skill_store_install_failed",
+            Self::PackageRemoveFailed => "skill_store_package_remove_failed",
             Self::ConfigRemoveFailed => "skill_store_config_remove_failed",
             Self::DataRemoveFailed => "skill_store_data_remove_failed",
             Self::OperationBusy => "skill_store_operation_busy",
+            Self::OperationStateFailed => "skill_store_operation_state_failed",
+            Self::OperationNotFound => "skill_store_operation_not_found",
+            Self::RollbackUnavailable => "skill_store_rollback_unavailable",
         }
     }
 }
@@ -58,6 +68,7 @@ struct SkillStoreOperationError {
     status: StatusCode,
     code: SkillStoreErrorCode,
     diagnostic: String,
+    phase: Option<String>,
 }
 
 impl SkillStoreOperationError {
@@ -70,38 +81,29 @@ impl SkillStoreOperationError {
             status,
             code,
             diagnostic: diagnostic.to_string(),
+            phase: None,
         }
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    fn with_phase(mut self, phase: Option<String>) -> Self {
+        self.phase = phase;
+        self
     }
 }
 
 type SkillStoreOperationResult<T> = Result<T, SkillStoreOperationError>;
 
-#[derive(Debug, Clone)]
-struct SkillStoreActiveOperation {
-    skill_name: String,
-    action: &'static str,
-    started_ts: u64,
-}
-
 struct SkillStoreMutationSlot {
-    semaphore: Arc<Semaphore>,
-    active: Mutex<Option<SkillStoreActiveOperation>>,
+    build_semaphore: Arc<Semaphore>,
+    config_semaphore: Arc<Semaphore>,
+    skill_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
+    controls: Mutex<HashMap<String, rustclaw_skill_sdk::InstallControl>>,
+    recovered: AtomicBool,
 }
 
 struct SkillStoreMutationGuard {
     _permit: OwnedSemaphorePermit,
-    slot: Arc<SkillStoreMutationSlot>,
-}
-
-impl Drop for SkillStoreMutationGuard {
-    fn drop(&mut self) {
-        let mut active = self
-            .slot
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *active = None;
-    }
 }
 
 fn skill_store_mutation_slot(state: &AppState) -> Arc<SkillStoreMutationSlot> {
@@ -113,8 +115,11 @@ fn skill_store_mutation_slot(state: &AppState) -> Arc<SkillStoreMutationSlot> {
         .entry(state.skill_rt.workspace_root.clone())
         .or_insert_with(|| {
             Arc::new(SkillStoreMutationSlot {
-                semaphore: Arc::new(Semaphore::new(1)),
-                active: Mutex::new(None),
+                build_semaphore: Arc::new(Semaphore::new(1)),
+                config_semaphore: Arc::new(Semaphore::new(1)),
+                skill_semaphores: Mutex::new(HashMap::new()),
+                controls: Mutex::new(HashMap::new()),
+                recovered: AtomicBool::new(false),
             })
         })
         .clone()
@@ -123,11 +128,16 @@ fn skill_store_mutation_slot(state: &AppState) -> Arc<SkillStoreMutationSlot> {
 fn begin_skill_store_mutation(
     state: &AppState,
     skill_name: &str,
-    action: &'static str,
 ) -> SkillStoreOperationResult<SkillStoreMutationGuard> {
     let slot = skill_store_mutation_slot(state);
-    let permit = slot
-        .semaphore
+    let skill_semaphore = slot
+        .skill_semaphores
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(skill_name.to_string())
+        .or_insert_with(|| Arc::new(Semaphore::new(1)))
+        .clone();
+    let permit = skill_semaphore
         .clone()
         .try_acquire_owned()
         .map_err(|error| {
@@ -137,32 +147,92 @@ fn begin_skill_store_mutation(
                 error,
             )
         })?;
-    let operation = SkillStoreActiveOperation {
-        skill_name: skill_name.to_string(),
-        action,
-        started_ts: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0),
-    };
-    let mut active = slot
-        .active
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *active = Some(operation);
-    drop(active);
-    Ok(SkillStoreMutationGuard {
-        _permit: permit,
-        slot,
-    })
+    Ok(SkillStoreMutationGuard { _permit: permit })
 }
 
-fn skill_store_active_operation(state: &AppState) -> Option<SkillStoreActiveOperation> {
+async fn skill_store_build_permit(
+    state: &AppState,
+    control: &rustclaw_skill_sdk::InstallControl,
+) -> Option<OwnedSemaphorePermit> {
+    let semaphore = skill_store_mutation_slot(state).build_semaphore.clone();
+    loop {
+        if control.is_cancelled() {
+            return None;
+        }
+        match semaphore.clone().try_acquire_owned() {
+            Ok(permit) => return Some(permit),
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => return None,
+        }
+    }
+}
+
+async fn skill_store_config_permit(state: &AppState) -> OwnedSemaphorePermit {
     skill_store_mutation_slot(state)
-        .active
+        .config_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("skill store config semaphore remains open")
+}
+
+fn skill_store_operation_store(state: &AppState) -> rustclaw_skill_sdk::SkillOperationStore {
+    rustclaw_skill_sdk::SkillOperationStore::new(skill_package_root(state))
+}
+
+fn initialize_skill_store_operations(state: &AppState) -> SkillStoreOperationResult<()> {
+    let slot = skill_store_mutation_slot(state);
+    if slot
+        .recovered
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        skill_store_operation_store(state)
+            .recover_interrupted()
+            .map_err(|error| {
+                slot.recovered.store(false, Ordering::Release);
+                SkillStoreOperationError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    SkillStoreErrorCode::OperationStateFailed,
+                    error,
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn register_skill_store_control(
+    state: &AppState,
+    operation_id: &str,
+    control: rustclaw_skill_sdk::InstallControl,
+) {
+    skill_store_mutation_slot(state)
+        .controls
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
+        .insert(operation_id.to_string(), control);
+}
+
+fn remove_skill_store_control(state: &AppState, operation_id: &str) {
+    skill_store_mutation_slot(state)
+        .controls
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(operation_id);
+}
+
+fn request_live_skill_store_cancel(state: &AppState, operation_id: &str) {
+    if let Some(control) = skill_store_mutation_slot(state)
+        .controls
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(operation_id)
+        .cloned()
+    {
+        control.request_cancel();
+    }
 }
 
 fn skill_store_error_response(
@@ -183,42 +253,41 @@ fn skill_store_error_response(
     )
 }
 
-fn runner_binary_name(raw_name: &str) -> SkillStoreOperationResult<String> {
-    let raw_name = raw_name.trim();
-    if raw_name.is_empty()
-        || raw_name.contains('/')
-        || raw_name.contains('\\')
-        || !raw_name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-    {
-        return Err(SkillStoreOperationError::new(
-            StatusCode::BAD_REQUEST,
-            SkillStoreErrorCode::InvalidRunnerName,
-            format!("runner={raw_name}"),
-        ));
-    }
-    let normalized = raw_name.replace('_', "-");
-    Ok(if normalized.ends_with("-skill") {
-        normalized
-    } else {
-        format!("{normalized}-skill")
-    })
+fn skill_package_root(state: &AppState) -> PathBuf {
+    state.skill_rt.workspace_root.join("data/skill-packages")
+}
+
+fn skill_store_package_available(
+    state: &AppState,
+    registry: &claw_core::skill_registry::SkillsRegistry,
+    skill_name: &str,
+) -> bool {
+    let _ = registry;
+    rustclaw_skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
+        .resolve(skill_name)
+        .is_ok()
+}
+
+fn skill_store_manifest_metadata(
+    state: &AppState,
+    registry: &claw_core::skill_registry::SkillsRegistry,
+    skill_name: &str,
+) -> Option<rustclaw_skill_sdk::PackageManifest> {
+    let relative = registry.package_manifest_path(skill_name)?;
+    rustclaw_skill_sdk::PackageManifest::load(&state.skill_rt.workspace_root.join(relative)).ok()
 }
 
 fn skill_store_install_spec(
     state: &AppState,
     skill_name: &str,
 ) -> SkillStoreOperationResult<Option<SkillStoreInstallSpec>> {
-    let registry = state
-        .get_skills_registry()
-        .ok_or_else(|| {
-            SkillStoreOperationError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                SkillStoreErrorCode::RegistryUnavailable,
-                "registry=unavailable",
-            )
-        })?;
+    let registry = state.get_skills_registry().ok_or_else(|| {
+        SkillStoreOperationError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            SkillStoreErrorCode::RegistryUnavailable,
+            "registry=unavailable",
+        )
+    })?;
     let entry = registry.get(skill_name).ok_or_else(|| {
         SkillStoreOperationError::new(
             StatusCode::NOT_FOUND,
@@ -226,7 +295,7 @@ fn skill_store_install_spec(
             format!("skill={skill_name}"),
         )
     })?;
-    if entry.kind != SkillKind::Runner {
+    if !matches!(entry.kind, SkillKind::Runner | SkillKind::External) {
         return Ok(None);
     }
     if entry.install_mode.as_deref() != Some("on_demand") {
@@ -236,25 +305,52 @@ fn skill_store_install_spec(
             format!("skill={skill_name} install_mode={:?}", entry.install_mode),
         ));
     }
-    let binary = runner_binary_name(&registry.runner_name(skill_name))?;
-    let package = entry
-        .install_package
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(binary.as_str())
-        .to_string();
-    if !package
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-    {
+    let availability = crate::skill_availability::evaluate_entry_availability(entry);
+    if let Some(supported_os) = availability.unsupported_os {
         return Err(SkillStoreOperationError::new(
-            StatusCode::BAD_REQUEST,
-            SkillStoreErrorCode::InvalidInstallPackage,
-            format!("package={package}"),
+            StatusCode::CONFLICT,
+            SkillStoreErrorCode::UnsupportedOs,
+            format!(
+                "skill={skill_name} current_os={} supported_os={}",
+                availability.current_os,
+                supported_os.join(",")
+            ),
         ));
     }
-    Ok(Some(SkillStoreInstallSpec { package, binary }))
+    let relative_manifest = registry.package_manifest_path(skill_name).ok_or_else(|| {
+        SkillStoreOperationError::new(
+            StatusCode::CONFLICT,
+            SkillStoreErrorCode::ManifestMissing,
+            format!("skill={skill_name}"),
+        )
+    })?;
+    let manifest_path = state.skill_rt.workspace_root.join(relative_manifest);
+    let manifest = rustclaw_skill_sdk::PackageManifest::load(&manifest_path).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::CONFLICT,
+            SkillStoreErrorCode::ManifestInvalid,
+            format!(
+                "skill={skill_name} code={} detail={}",
+                error.code, error.detail
+            ),
+        )
+    })?;
+    if manifest.package.name != skill_name || manifest.registry.name != skill_name {
+        return Err(SkillStoreOperationError::new(
+            StatusCode::CONFLICT,
+            SkillStoreErrorCode::ManifestInvalid,
+            format!(
+                "registry={skill_name} package={} projection={}",
+                manifest.package.name, manifest.registry.name
+            ),
+        ));
+    }
+    Ok(Some(SkillStoreInstallSpec {
+        skill_name: skill_name.to_string(),
+        manifest_path,
+        adapter: manifest.build.adapter,
+        network_policy: manifest.build.network,
+    }))
 }
 
 fn declared_skill_config_paths(
@@ -314,113 +410,246 @@ fn skill_config_state(state: &AppState, skill_name: &str) -> (Vec<String>, Vec<S
 }
 
 #[cfg(not(test))]
-fn bounded_command_error(bytes: &[u8]) -> String {
-    const MAX_CHARS: usize = 4_000;
-    let text = String::from_utf8_lossy(bytes);
-    let chars = text.chars().count();
-    if chars <= MAX_CHARS {
-        return text.into_owned();
-    }
-    text.chars().skip(chars - MAX_CHARS).collect()
-}
-
-#[cfg(not(test))]
-async fn compile_skill_store_runner(
+async fn install_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-) -> SkillStoreOperationResult<PathBuf> {
-    let output = Command::new("cargo")
-        .args(["build", "--release", "-p", spec.package.as_str()])
-        .current_dir(&state.skill_rt.workspace_root)
-        .env(
-            "CARGO_TARGET_DIR",
-            state.skill_rt.workspace_root.join("target"),
-        )
-        .output()
+    control: rustclaw_skill_sdk::InstallControl,
+    allow_network: bool,
+) -> SkillStoreOperationResult<rustclaw_skill_sdk::InstallOutcome> {
+    let request = rustclaw_skill_sdk::InstallRequest {
+        manifest_path: spec.manifest_path.clone(),
+        workspace_root: state.skill_rt.workspace_root.clone(),
+        package_root: skill_package_root(state),
+        target: None,
+        allow_network,
+        control: Some(control),
+    };
+    tokio::task::spawn_blocking(move || rustclaw_skill_sdk::SkillInstaller.install(&request))
         .await
         .map_err(|error| {
             SkillStoreOperationError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                SkillStoreErrorCode::BuildStartFailed,
-                format!("package={} error={error}", spec.package),
+                SkillStoreErrorCode::InstallStartFailed,
+                format!("skill={} error={error}", spec.skill_name),
             )
-        })?;
-    if !output.status.success() {
-        return Err(SkillStoreOperationError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            SkillStoreErrorCode::BuildFailed,
-            format!(
-                "package={} stderr={}",
-                spec.package,
-                bounded_command_error(&output.stderr)
-            ),
-        ));
-    }
-    let binary_path = state
-        .skill_rt
-        .workspace_root
-        .join("target/release")
-        .join(&spec.binary);
-    if !binary_path.is_file() {
-        return Err(SkillStoreOperationError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            SkillStoreErrorCode::BuildBinaryMissing,
-            format!("path={}", binary_path.display()),
-        ));
-    }
-    Ok(binary_path)
+        })?
+        .map_err(|error| {
+            let phase = error.phase.clone();
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                format!(
+                    "skill={} adapter={} phase={:?} code={} detail={}",
+                    spec.skill_name,
+                    spec.adapter.as_token(),
+                    error.phase,
+                    error.code,
+                    error.detail
+                ),
+            )
+            .with_phase(phase)
+        })
 }
 
 #[cfg(test)]
-async fn compile_skill_store_runner(
+async fn install_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-) -> SkillStoreOperationResult<PathBuf> {
-    let _package = &spec.package;
-    let binary_path = state
-        .skill_rt
-        .workspace_root
-        .join("target/release")
-        .join(&spec.binary);
-    if let Some(parent) = binary_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
+    control: rustclaw_skill_sdk::InstallControl,
+    _allow_network: bool,
+) -> SkillStoreOperationResult<rustclaw_skill_sdk::InstallOutcome> {
+    use rustclaw_skill_sdk::receipt::{LaunchProgramScope, ReceiptLaunch};
+    use rustclaw_skill_sdk::{
+        ArtifactReceipt, HostPlatform, InstallReceipt, InstallReceiptStore, PackageManifest,
+        ProtocolSmokeReceipt, INSTALL_RECEIPT_SCHEMA_VERSION,
+    };
+
+    for phase in ["dependencies", "build", "protocol_smoke", "activate"] {
+        control.phase(phase).map_err(|error| {
             SkillStoreOperationError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                SkillStoreErrorCode::BuildStartFailed,
+                StatusCode::CONFLICT,
+                SkillStoreErrorCode::InstallFailed,
                 error,
             )
         })?;
     }
-    fs::write(&binary_path, b"skill-store-test-binary").map_err(|error| {
+    let manifest = PackageManifest::load(&spec.manifest_path).map_err(|error| {
         SkillStoreOperationError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            SkillStoreErrorCode::BuildFailed,
+            SkillStoreErrorCode::InstallFailed,
             error,
         )
     })?;
-    Ok(binary_path)
+    let store = InstallReceiptStore::new(skill_package_root(state));
+    let identity = manifest.digest().map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    let destination = store
+        .version_dir(&spec.skill_name, &manifest.package.version, &identity)
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?;
+    fs::create_dir_all(&destination).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    let program_rel = "runtime/bin/skill-test-runner";
+    let program = destination.join(program_rel);
+    fs::create_dir_all(program.parent().expect("test runner parent")).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    fs::write(&program, b"#!/bin/sh\nexit 0\n").map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?;
+    }
+    fs::write(
+        destination.join("skill.toml"),
+        manifest.to_toml_string().map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?,
+    )
+    .map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    let metadata = fs::metadata(&program).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    let artifact_digest = rustclaw_skill_sdk::receipt::digest_file(&program).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    let receipt = InstallReceipt {
+        schema_version: INSTALL_RECEIPT_SCHEMA_VERSION,
+        skill_name: spec.skill_name.clone(),
+        version: manifest.package.version.clone(),
+        manifest_digest: identity,
+        source_digest: artifact_digest.clone(),
+        lockfile_digests: BTreeMap::new(),
+        adapter: spec.adapter,
+        adapter_version: "skill-store-test-adapter-v1".to_string(),
+        platform: HostPlatform::current(),
+        artifacts: vec![ArtifactReceipt {
+            path: program_rel.to_string(),
+            sha256: artifact_digest,
+            size_bytes: metadata.len(),
+            executable: true,
+        }],
+        launch: ReceiptLaunch {
+            launcher: manifest.run.launcher,
+            program: program_rel.to_string(),
+            program_scope: LaunchProgramScope::Package,
+            args: Vec::new(),
+            working_directory: ".".to_string(),
+            environment: BTreeMap::new(),
+            environment_allowlist: manifest.run.environment_allowlist.clone(),
+            trusted_runtime_sha256: None,
+            trusted_runtime_version: None,
+            remote_endpoint: None,
+        },
+        sandbox_profile: manifest.security.sandbox,
+        runtime_network: manifest.security.runtime_network,
+        protocol_smoke: ProtocolSmokeReceipt {
+            protocol: rustclaw_skill_sdk::RUSTCLAW_JSONL_PROTOCOL.to_string(),
+            passed: true,
+            request_id: "skill-store-test-smoke".to_string(),
+            checked_at_unix: 1,
+        },
+        installed_at_unix: 1,
+    };
+    store
+        .write_receipt(&destination, &receipt)
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?;
+    store.activate(&destination, &receipt).map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallFailed,
+            error,
+        )
+    })?;
+    Ok(rustclaw_skill_sdk::InstallOutcome {
+        skill_name: spec.skill_name.clone(),
+        version: manifest.package.version,
+        install_root: destination,
+        receipt_digest: receipt.digest().map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?,
+        adapter: spec.adapter,
+        reused: false,
+        phases: vec![
+            "preflight".to_string(),
+            "protocol_smoke".to_string(),
+            "activate".to_string(),
+        ],
+    })
 }
 
-fn remove_skill_store_binary(
+fn remove_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
 ) -> SkillStoreOperationResult<bool> {
-    let path = state
-        .skill_rt
-        .workspace_root
-        .join("target/release")
-        .join(&spec.binary);
-    if !path.exists() {
-        return Ok(false);
-    }
-    fs::remove_file(&path).map_err(|error| {
-        SkillStoreOperationError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            SkillStoreErrorCode::BinaryRemoveFailed,
-            format!("path={} error={error}", path.display()),
-        )
-    })?;
-    Ok(true)
+    rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(state))
+        .remove_installed_versions(&spec.skill_name)
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::PackageRemoveFailed,
+                format!("skill={} error={error}", spec.skill_name),
+            )
+        })
 }
 
 fn delete_declared_skill_configs(

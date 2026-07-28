@@ -1,0 +1,49 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 1
+
+[package]
+name = "photo_organize"
+version = "0.1.8"
+description = "Front-door routing contract: photo organization without source_dir is executable, not a clarification. Call photo_organize with action=organize and mode=plan so the skill can discover external drive / USB candidates and preview a unique candidate or return observed candidates."
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "optional_skills/photo_organize"
+
+[registry]
+name = "photo_organize"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "photo-organize-skill"
+binary = "photo-organize-skill"
+lockfile = "Cargo.lock"
+network = "deny"
+lifecycle_scripts = false
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/photo-organize-skill"
+working_directory = "."
+timeout_seconds = 180
+environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "photo_organize"
+
+[lifecycle]
+config_files = ["configs/photo_organize.toml"]
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

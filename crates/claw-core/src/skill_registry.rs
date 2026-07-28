@@ -2,7 +2,7 @@
 //! Phase 1：仅做“发现/启用/别名/超时”从 registry 读取，执行层与 planner 仍用现有逻辑。
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Component, Path};
 
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -662,10 +662,10 @@ pub struct SkillRegistryEntry {
     /// when an operator installs them from Skill Store.
     #[serde(default)]
     pub install_mode: Option<String>,
-    /// Cargo package built for an on-demand runner skill. When omitted, the
-    /// conventional runner binary name is used as the package name.
+    /// Canonical package/build/runtime manifest. Planner semantics remain
+    /// registry-owned; the manifest references this exact registry entry.
     #[serde(default)]
-    pub install_package: Option<String>,
+    pub package_manifest: Option<String>,
     /// Workspace-relative, user-editable configuration files owned by this
     /// skill. Removing a skill may preserve or delete only these declared files.
     #[serde(default)]
@@ -709,43 +709,6 @@ pub struct SkillRegistryEntry {
     #[serde(default)]
     pub memory_policy: Option<SkillMemoryPolicyConfig>,
 
-    // ---------- Phase 5: 执行配置 ----------
-    /// Runner 技能：在 runner 侧的执行名；未设则用 name。
-    /// skill-runner 会将该值按约定解析为二进制名：
-    /// 例如 foo_bar -> foo-bar-skill，若已以 -skill 结尾则直接使用。
-    #[serde(default)]
-    pub runner_name: Option<String>,
-    /// External 技能：执行方式，如 "http_json"
-    #[serde(default)]
-    pub external_kind: Option<String>,
-    /// External 技能：调用地址（如 HTTP URL）
-    #[serde(default)]
-    pub external_endpoint: Option<String>,
-    /// External 技能：本地 bundle 目录（相对 workspace 或绝对路径）
-    #[serde(default)]
-    pub external_bundle_dir: Option<String>,
-    /// External 技能：入口文件（如 SKILL.md、scripts/stock_cli.py）
-    #[serde(default)]
-    pub external_entry_file: Option<String>,
-    /// External 技能：运行时（如 python3、node）
-    #[serde(default)]
-    pub external_runtime: Option<String>,
-    /// External 技能：依赖的二进制命令
-    #[serde(default)]
-    pub external_require_bins: Vec<String>,
-    /// External 技能：依赖的 Python 模块
-    #[serde(default)]
-    pub external_require_py_modules: Vec<String>,
-    /// External 技能：来源链接或本地来源描述
-    #[serde(default)]
-    pub external_source_url: Option<String>,
-    /// External 技能：专用超时（秒）；未设则用 timeout_seconds
-    #[serde(default)]
-    pub external_timeout_seconds: Option<u64>,
-    /// External 技能：鉴权引用（预留，本轮不实现完整 secret 管理）
-    #[serde(default)]
-    pub external_auth_ref: Option<String>,
-
     // ---------- Phase 4.1 主体：能力声明 ----------
     /// 该技能对外声明的能力集（TOML 写法示例：
     /// `capabilities = ["llm", "net", "secrets.image_generation_minimax_api_key"]`。
@@ -774,6 +737,36 @@ fn trim_optional_string(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(ToString::to_string)
+}
+
+fn normalize_package_manifest_path(
+    value: Option<&str>,
+    skill_name: &str,
+    registry_path: &Path,
+) -> Result<Option<String>, String> {
+    let Some(value) = trim_optional_string(value) else {
+        return Ok(None);
+    };
+    let candidate = Path::new(&value);
+    if candidate.is_absolute()
+        || candidate
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("toml")
+        || candidate.file_name().and_then(|name| name.to_str()) != Some("skill.toml")
+        || candidate.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "skill `{skill_name}` has unsafe package_manifest `{value}` in {}",
+            registry_path.display()
+        ));
+    }
+    Ok(Some(value))
 }
 
 fn normalize_metadata_tokens(values: &[String]) -> Vec<String> {
@@ -1387,6 +1380,11 @@ impl SkillsRegistry {
                 normalize_schema_tokens(&entry.runtime_rewrite_arg_keys);
             entry.confirmation_exempt_when =
                 normalize_confirmation_exempt_when(&entry.confirmation_exempt_when);
+            entry.package_manifest = normalize_package_manifest_path(
+                entry.package_manifest.as_deref(),
+                &canonical,
+                path,
+            )?;
             entry.supported_os = normalize_metadata_tokens(&entry.supported_os);
             entry.required_bins = normalize_metadata_tokens(&entry.required_bins);
             entry.optional_bins = normalize_metadata_tokens(&entry.optional_bins);
@@ -1588,70 +1586,13 @@ impl SkillsRegistry {
         self.get(canonical_name)?.storage.as_ref()
     }
 
-    /// Phase 5: Runner 执行名；未配置则用 canonical_name。返回 String 避免混合借用来源的 lifetime 问题。
-    pub fn runner_name(&self, canonical_name: &str) -> String {
-        self.get(canonical_name)
-            .and_then(|e| e.runner_name.as_deref())
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| canonical_name.to_string())
-    }
-
-    /// Phase 5: External 执行配置（仅当 kind=External 且配置完整时返回）
-    pub fn external_config(&self, canonical_name: &str) -> Option<ExternalSkillConfig<'_>> {
-        let e = self.get(canonical_name)?;
-        if e.kind != SkillKind::External {
-            return None;
-        }
-        let kind = e
-            .external_kind
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())?;
-        Some(ExternalSkillConfig {
-            kind,
-            endpoint: e
-                .external_endpoint
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-            bundle_dir: e
-                .external_bundle_dir
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-            entry_file: e
-                .external_entry_file
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-            runtime: e
-                .external_runtime
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-            require_bins: &e.external_require_bins,
-            require_py_modules: &e.external_require_py_modules,
-            source_url: e
-                .external_source_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty()),
-            timeout_seconds: e
-                .external_timeout_seconds
-                .filter(|&t| t > 0)
-                .or_else(|| (e.timeout_seconds > 0).then_some(e.timeout_seconds)),
-            auth_ref: e.external_auth_ref.as_deref(),
-        })
+    pub fn package_manifest_path(&self, canonical_name: &str) -> Option<&str> {
+        self.get(canonical_name)?.package_manifest.as_deref()
     }
 
     pub fn manifest(&self, canonical_name: &str) -> Option<SkillManifest> {
         let entry = self.get(canonical_name)?;
-        let timeout_seconds = entry
-            .external_timeout_seconds
-            .filter(|&t| t > 0)
-            .or_else(|| (entry.timeout_seconds > 0).then_some(entry.timeout_seconds));
+        let timeout_seconds = (entry.timeout_seconds > 0).then_some(entry.timeout_seconds);
         Some(SkillManifest {
             name: entry.name.clone(),
             kind: entry.kind,
@@ -1907,21 +1848,6 @@ impl SkillsRegistry {
         violations.sort();
         violations
     }
-}
-
-/// Phase 5: External 技能执行配置（只读引用）
-#[derive(Debug, Clone)]
-pub struct ExternalSkillConfig<'a> {
-    pub kind: &'a str,
-    pub endpoint: Option<&'a str>,
-    pub bundle_dir: Option<&'a str>,
-    pub entry_file: Option<&'a str>,
-    pub runtime: Option<&'a str>,
-    pub require_bins: &'a [String],
-    pub require_py_modules: &'a [String],
-    pub source_url: Option<&'a str>,
-    pub timeout_seconds: Option<u64>,
-    pub auth_ref: Option<&'a str>,
 }
 
 fn to_canonical_key(s: &str) -> String {

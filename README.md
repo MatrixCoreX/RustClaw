@@ -448,6 +448,7 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 8. [Skill-owned storage](docs/architecture/08-skill-owned-storage.md)
 9. [Interactive coding and presentation](docs/architecture/09-interactive-coding.md)
 10. [Web entry and core isolation](docs/architecture/10-web-entry-security.md)
+11. [Task artifact delivery](docs/architecture/11-task-artifact-delivery.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.
@@ -457,7 +458,8 @@ The [full documentation index](docs/README.md) links every engineering document 
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
-- `crates/skill-runner`: launches runner skill binaries; `clawd` resolves registry kind / `runner_name` before invoking it
+- `crates/skill-runner`: verifies an installed receipt, resolves a language-neutral `SkillLaunchSpec`, and supervises the skill's JSONL process or typed HTTPS adapter
+- `crates/skill-sdk`: manifest validation, isolated Cargo/Python/Node/Go/prebuilt builders, protocol checks, receipts, rollback, and developer CLI/templates
 - `crates/clawcli`: terminal CLI for talking to `clawd`
 - `crates/webd`: browser UI host, login/session boundary, and authenticated proxy to the internal core API
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
@@ -514,6 +516,16 @@ rustclaw -key add rk-xxxx admin
 rustclaw -key disable rk-xxxx
 ```
 
+### Telegram Transport Boundary
+
+Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:
+
+- Text, images, audio, video, and files are submitted uniformly as `kind=ask`; the agent loop decides whether to answer, clarify, or call a capability.
+- The command surface is limited to `/help` (including `/start`), `/key`, `/status`, `/cancel`, and `/voicemode`.
+- `/voicemode` controls only text/voice delivery for the current Telegram chat and does not select capabilities.
+- Installation, enablement, and configuration of on-demand Skill Store skills, including `crypto`, belong to the browser management surface or controlled core APIs. Telegram does not accept skill credentials or expose skill configuration commands.
+- On startup, `telegramd` refreshes the Telegram command menu through `setMyCommands`; restart the channel daemon after removing old commands from configuration.
+
 ## UI, API, and `webd`
 
 The main API is provided by the loopback-only `clawd`, while all browser traffic enters through `webd`:
@@ -538,7 +550,7 @@ flowchart LR
 - cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`; nginx never proxies to `clawd`
 - `webd` is the browser security boundary and provides password login, session persistence, credential injection, request limits, and API proxying
 - `clawd` does not serve browser assets and cannot bind a non-loopback address; local channel daemons and `clawcli` may use its internal API
-- The dashboard's **Web Entry** section reports nginx installation, process, site, and UI deployment status. Admins can enable or repair nginx, deploy the current UI, and open the checked entry.
+- The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep the webd public port open when local use omits nginx. Closing direct webd access does not interrupt a configured native nginx deployment because nginx continues proxying over loopback.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the RustClaw host itself.
 - The `AI Learning` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
@@ -546,7 +558,7 @@ flowchart LR
 - On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
 
-`clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` commonly listens on `0.0.0.0:8788`, and deploy scripts derive the optional nginx upstream from `configs/channels/webd.toml`. Docker publishes `8788`, not `8787`.
+`clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` uses `configs/channels/webd.toml` and can listen on either `0.0.0.0:8788` for direct device-IP access or `127.0.0.1:8788` for nginx-only/local access. The dashboard preserves the configured port when switching scope and atomically updates only the listener address. Docker publishes `8788`, not `8787`; container networking must be evaluated before changing the listener to loopback.
 
 Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 
@@ -564,8 +576,10 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/tasks/cancel-one`: cancels by active-list index
 - `POST /v1/services/{service}/{action}`: browser-console service start/stop/restart; failures return machine fields such as `error_code`, `status_code`, `message_key`, `service`, and `action`
 - `GET /v1/admin/nginx`: returns admin-only nginx installation, process, site, and deployed-UI status
-- `POST /v1/admin/workspace-update/nginx-enable`: installs/starts or repairs the nginx entry and deploys existing UI assets
-- `POST /v1/admin/workspace-update/nginx-deploy`: builds current UI source when available, then deploys it to nginx
+- `GET /v1/admin/webd-exposure`: returns the configured webd listener, port, process state, and direct-access state
+- `POST /v1/admin/webd-exposure`: atomically switches webd between direct and loopback-only access, then schedules a platform-appropriate restart
+- `POST /v1/admin/workspace-update/nginx-enable`: checks, installs, or updates nginx on Linux/macOS, repairs and starts the entry, then deploys existing UI assets
+- `POST /v1/admin/workspace-update/nginx-disable`: stops and disables nginx, then removes the RustClaw site and dedicated UI deployment; cloud servers lose this web entry immediately
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
@@ -734,9 +748,9 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
 - the dashboard checks source and compatible GitHub Release versions when an admin opens it; it shows the running package version and latest platform-specific Release tag
-- packaged Release installations check and show only Release updates: they do not run Git commands or show source-build controls. An admin can explicitly choose Switch to source mode, which clones and validates the complete repository, migrates persistent runtime state, and enables Git pull/build controls only after a successful restart. A source checkout can use Switch back to Release mode to verify a prebuilt package, preserve runtime state and installed skills, move the complete source tree into a bounded rollback backup, and hide Git/build controls after restart
+- packaged Release installations check and show only Release updates: they do not run Git commands or show source-build controls. An admin can explicitly choose Switch to source mode, which clones and validates the complete repository, migrates persistent runtime state, and enables Git pull/build controls only after a successful restart
 - the dashboard system-information section shows OS/version, architecture,
-  memory, RustClaw storage, deployment type, and uptime without exposing host
+  memory, system storage, deployment type, and uptime without exposing host
   paths or environment values; missing Linux/macOS facts remain partial data
   rather than breaking the page
 - build progress is only shown for a real build/deploy session, and full build/deploy, UI-only, and clawd-only modes refresh the page once after successful completion
@@ -764,13 +778,29 @@ and the normal Tools/Skills inventory while keeping it discoverable in Skill Sto
 Bundled entries marked `install_mode="on_demand"` are excluded from the normal
 `build-all.sh` release build. The default on-demand set is `crypto`, `invest_copy`,
 `map_merchant`, `photo_organize`, `stock`, `weather`, and `x`; clicking Install
-builds only that registry-declared Cargo package before enabling and reloading it.
-Removing one of these skills deletes its compiled runner and asks whether its
+reads that skill's `skill.toml`, runs only its declared adapter, performs a
+protocol smoke test, writes a verified receipt, and only then enables/reloads it.
+Normal source, cross-target, Docker, and release-package flows use the registry's
+`supported_os` declarations to build all core/runtime tools plus only the fixed
+runner packages supported by the target platform. An on-demand install is rejected
+before installation when the current platform is unsupported; package manifests
+come from the registry rather than script-local skill maps.
+Removing one of these skills deletes its versioned runtime/receipts and asks whether its
 registry-declared dedicated configuration files should be preserved. Reinstalling
 never overwrites configuration files that still exist. Core skills and registry
 entries whose `planner_kind=tool` are always available and cannot be removed through
-Skill Store. Third-party import validates and registers the bundle, clears stale
-uninstall state, enables it, and then exposes it in both Skill Store and Tools/Skills.
+Skill Store. Third-party import requires `skill.toml` plus `INTERFACE.md`, installs
+through the same adapter/receipt boundary, clears stale uninstall state, and only
+then exposes the verified package in Skill Store and Tools/Skills.
+
+The implementation flow is language-neutral:
+
+```text
+skill.toml -> build adapter -> install receipt -> SkillLaunchSpec -> JSONL capability result
+```
+
+See [Polyglot Skill SDK contract](docs/skill_sdk_contract.md) for Rust, Python,
+Node, Go, prebuilt, lifecycle, security, and publishing guidance.
 
 If you need to answer “how is this skill configured / bound / enabled, and what prerequisite is missing”, start with `prompts/references/skill_setup_guide.md`.
 
@@ -865,6 +895,7 @@ The Pi App also carries the NNI device-signing helper used by the backend and br
 ## Developer Notes
 
 - `build-all.sh` is the most accurate repo-level build entry if you are building from source
+- Native Linux builds use the active Rust toolchain's bundled LLD; hosts with no more than 16 GiB RAM default to one Cargo job, and repeated local builds keep incremental compilation enabled. Set `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` explicitly to override those defaults, or `RUSTCLAW_DISABLE_BUNDLED_LLD=1` to diagnose linker compatibility.
 - `install-rustclaw-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
 - if you only want to rebuild the local UI, use `build-ui-nginx.sh`; use `deploy-ui-nginx.sh` only for an nginx-hosted server
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you

@@ -7,9 +7,10 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use super::{
-    begin_skill_store_mutation, build_ui_router, imported_skill_machine_alias,
+    activate_imported_bundle, begin_skill_store_mutation, build_ui_router,
+    finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
     remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
-    write_runtime_config_to_paths,
+    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -40,6 +41,23 @@ fn isolated_skill_store_state() -> (AppState, PathBuf) {
         configs.join("weather.toml"),
     )
     .expect("copy weather config");
+    for root in ["crates/skills", "optional_skills"] {
+        let source_root = repository.join(root);
+        for entry in std::fs::read_dir(&source_root).expect("read skill manifest root") {
+            let entry = entry.expect("read skill manifest entry");
+            let source = entry.path().join("skill.toml");
+            if !source.is_file() {
+                continue;
+            }
+            let destination = workspace
+                .join(root)
+                .join(entry.file_name())
+                .join("skill.toml");
+            std::fs::create_dir_all(destination.parent().expect("manifest parent"))
+                .expect("create manifest parent");
+            std::fs::copy(source, destination).expect("copy skill manifest");
+        }
+    }
 
     let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.skill_rt.workspace_root = workspace.clone();
@@ -59,7 +77,62 @@ fn isolated_skill_store_state() -> (AppState, PathBuf) {
     (state, workspace)
 }
 
+fn installed_package_pointer(workspace: &Path, skill_name: &str) -> PathBuf {
+    workspace
+        .join("data/skill-packages")
+        .join(skill_name)
+        .join("current.json")
+}
+
 async fn call_skill_store_api(
+    router: axum::Router,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let (status, payload) = call_skill_store_api_raw(router.clone(), method, path, body).await;
+    if status != StatusCode::ACCEPTED {
+        return (status, payload);
+    }
+    let Some(operation_id) = payload["data"]["operation"]["operation_id"].as_str() else {
+        return (status, payload);
+    };
+    let operation = wait_for_skill_store_operation(router, operation_id).await;
+    match operation["status"].as_str() {
+        Some("success") => (
+            StatusCode::OK,
+            serde_json::json!({
+                "ok": true,
+                "data": operation["result"].clone()
+            }),
+        ),
+        Some("failure") => panic!("operation failed: {operation}"),
+        Some("cancelled") => panic!("operation cancelled: {operation}"),
+        status => panic!("operation did not terminate: {status:?}"),
+    }
+}
+
+async fn wait_for_skill_store_operation(router: axum::Router, operation_id: &str) -> Value {
+    for _ in 0..500 {
+        let (poll_status, polled) = call_skill_store_api_raw(
+            router.clone(),
+            Method::GET,
+            &format!("/v1/skills/store/operations/{operation_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(poll_status, StatusCode::OK, "poll operation {operation_id}");
+        match polled["data"]["operation"]["status"].as_str() {
+            Some("success" | "failure" | "cancelled") => {
+                return polled["data"]["operation"].clone();
+            }
+            _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+        }
+    }
+    panic!("operation did not complete: {operation_id}");
+}
+
+async fn call_skill_store_api_raw(
     router: axum::Router,
     method: Method,
     path: &str,
@@ -131,21 +204,65 @@ async fn set_managed_skill_enabled(router: axum::Router, skill_name: &str, enabl
     updated
 }
 
-fn register_external_skill_fixture(state: &AppState, workspace: &Path, skill_name: &str) {
+async fn register_external_skill_fixture(state: &AppState, workspace: &Path, skill_name: &str) {
     let bundle_dir = workspace.join("third_party").join(skill_name);
     std::fs::create_dir_all(&bundle_dir).expect("create external skill bundle");
-    let skill_md = format!(
+    let interface_md = format!(
         "---\nname: {skill_name}\ndescription: External fixture\n---\n# External fixture\n"
     );
-    std::fs::write(bundle_dir.join("SKILL.md"), &skill_md).expect("write external skill fixture");
+    std::fs::write(bundle_dir.join("INTERFACE.md"), &interface_md)
+        .expect("write external skill interface");
+    std::fs::write(
+        bundle_dir.join("run.sh"),
+        "#!/bin/sh\nIFS= read -r line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '{\"request_id\":\"%s\",\"status\":\"ok\",\"text\":\"fixture ok\",\"error_text\":null}\\n' \"$request_id\"\n",
+    )
+    .expect("write external skill runner");
+    let platform = rustclaw_skill_sdk::HostPlatform::current();
+    std::fs::write(
+        bundle_dir.join("skill.toml"),
+        format!(
+            r#"schema_version = 1
+[package]
+name = "{skill_name}"
+version = "1.0.0"
+description = "External fixture"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["{os}"]
+supported_arch = ["{arch}"]
+license = "MIT"
+source = "local-test"
+[registry]
+name = "{skill_name}"
+[build]
+adapter = "generic_process"
+source_root = "."
+network = "deny"
+[run]
+launcher = "process"
+entrypoint = "runtime/src/run.sh"
+working_directory = "runtime/src"
+timeout_seconds = 10
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+"#,
+            os = platform.os,
+            arch = platform.arch,
+        ),
+    )
+    .expect("write external skill manifest");
     let (status, response) = super::finalize_imported_bundle(
         state,
         &bundle_dir,
         &format!("third_party/{skill_name}"),
         "local-test",
         true,
-        &skill_md,
-    );
+        false,
+        &interface_md,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(response.0.ok);
     assert_eq!(
@@ -249,11 +366,42 @@ fn imported_skill_aliases_remain_language_neutral_machine_tokens() {
     );
 }
 
+#[test]
+fn failed_import_bundle_activation_restores_the_previous_package_directory() {
+    let workspace =
+        std::env::temp_dir().join(format!("rustclaw-import-atomic-{}", uuid::Uuid::new_v4()));
+    let existing = workspace.join("third_party/clawhub/weather");
+    std::fs::create_dir_all(&existing).expect("existing package");
+    std::fs::write(existing.join("old-version.txt"), "keep me").expect("old sentinel");
+    let staging = imported_bundle_staging_dir(&workspace).expect("staging");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    std::fs::copy(
+        repository.join("optional_skills/weather/skill.toml"),
+        staging.join("skill.toml"),
+    )
+    .expect("staged manifest");
+    std::fs::write(staging.join("INTERFACE.md"), "# replacement\n").expect("interface");
+
+    let activation = activate_imported_bundle(&workspace, &staging).expect("activate staging");
+    assert!(!activation.bundle_dir.join("old-version.txt").exists());
+    assert!(activation.bundle_dir.join("skill.toml").is_file());
+    finish_imported_bundle_activation(&activation, false).expect("restore previous");
+    assert_eq!(
+        std::fs::read_to_string(existing.join("old-version.txt")).expect("restored sentinel"),
+        "keep me"
+    );
+    assert!(!staging.exists());
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
 #[tokio::test]
 async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
     let (state, workspace) = isolated_skill_store_state();
     let skill_name = "image_partner";
-    register_external_skill_fixture(&state, &workspace, skill_name);
+    register_external_skill_fixture(&state, &workspace, skill_name).await;
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state.clone());
@@ -312,7 +460,7 @@ async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
     assert!(workspace
         .join("third_party")
         .join(skill_name)
-        .join("SKILL.md")
+        .join("INTERFACE.md")
         .is_file());
 
     let (status, removed_config) =
@@ -336,7 +484,11 @@ async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(reinstalled["data"]["installed"], true);
-    assert_eq!(reinstalled["data"]["compiled"], false);
+    assert_eq!(reinstalled["data"]["package_installed"], true);
+    assert_eq!(reinstalled["data"]["adapter"], "generic_process");
+    assert!(reinstalled["data"]["receipt_digest"]
+        .as_str()
+        .is_some_and(|value| value.len() == 64));
 
     let (status, restored_config) =
         call_skill_store_api(router, Method::GET, "/v1/skills/config", None).await;
@@ -397,12 +549,14 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(installed["data"]["installed"], true);
     assert_eq!(installed["data"]["enabled"], true);
-    assert_eq!(installed["data"]["compiled"], true);
+    assert_eq!(installed["data"]["package_installed"], true);
+    assert_eq!(installed["data"]["adapter"], "cargo");
+    assert_eq!(installed["data"]["installed_version"], "0.1.8");
     assert_eq!(
         installed["data"]["reused_config_files"][0],
         "configs/weather.toml"
     );
-    assert!(workspace.join("target/release/weather-skill").is_file());
+    assert!(installed_package_pointer(&workspace, "weather").is_file());
 
     let (status, after_install) =
         call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
@@ -435,10 +589,10 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(removed["data"]["installed"], false);
-    assert_eq!(removed["data"]["binary_removed"], true);
+    assert_eq!(removed["data"]["package_removed"], true);
     assert_eq!(removed["data"]["config_preserved"], true);
     assert_eq!(removed["data"]["data_preserved"], true);
-    assert!(!workspace.join("target/release/weather-skill").exists());
+    assert!(!installed_package_pointer(&workspace, "weather").exists());
     assert!(workspace.join("configs/weather.toml").is_file());
 
     let (status, reinstalled) = call_skill_store_api(
@@ -481,6 +635,81 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
         parsed["skills"]["skill_switches"]["weather"].as_bool(),
         Some(false)
     );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_install_returns_a_durable_operation_and_records_every_stage() {
+    let (state, workspace) = isolated_skill_store_state();
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+    let (status, _) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, accepted) = call_skill_store_api_raw(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "weather"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let operation_id = accepted["data"]["operation"]["operation_id"]
+        .as_str()
+        .expect("durable operation id");
+    assert_eq!(accepted["data"]["operation"]["status"], "queued");
+
+    let completed = wait_for_skill_store_operation(router, operation_id).await;
+    assert_eq!(completed["status"], "success");
+    let stages = completed["stages"]
+        .as_array()
+        .expect("operation stages")
+        .iter()
+        .filter_map(|record| record["stage"].as_str())
+        .collect::<BTreeSet<_>>();
+    for expected in [
+        "queued",
+        "preflight",
+        "dependencies",
+        "build",
+        "smoke",
+        "activate",
+        "configure",
+        "success",
+    ] {
+        assert!(
+            stages.contains(expected),
+            "missing stage {expected}: {stages:?}"
+        );
+    }
+    assert!(installed_package_pointer(&workspace, "weather").is_file());
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_store_recovers_interrupted_operations_from_disk() {
+    let (state, workspace) = isolated_skill_store_state();
+    let interrupted = skill_store_operation_store(&state)
+        .create("weather", rustclaw_skill_sdk::OperationAction::Install)
+        .expect("persist interrupted operation");
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+
+    let (status, catalog) =
+        call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(catalog["data"]["active_operation"].is_null());
+    let recovered = catalog["data"]["recent_operations"]
+        .as_array()
+        .expect("recent operations")
+        .iter()
+        .find(|operation| operation["operation_id"] == interrupted.operation_id)
+        .expect("recovered operation");
+    assert_eq!(recovered["status"], "failure");
+    assert_eq!(recovered["failure"]["error_code"], "operation_interrupted");
     let _ = std::fs::remove_dir_all(workspace);
 }
 
@@ -648,6 +877,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         let spec = skill_store_install_spec(&state, &skill_name)
             .expect("read install spec")
             .expect("runner install spec");
+        assert_eq!(spec.skill_name, skill_name);
         let (status, installed) = call_skill_store_api(
             router.clone(),
             Method::POST,
@@ -657,22 +887,24 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         .await;
         assert_eq!(status, StatusCode::OK, "install {skill_name}");
         assert_eq!(installed["data"]["installed"], true, "install {skill_name}");
-        assert_eq!(installed["data"]["compiled"], true, "compile {skill_name}");
-        let binary = workspace.join("target/release").join(&spec.binary);
-        let binary_before = std::fs::read(&binary).expect("read installed runner");
+        assert_eq!(
+            installed["data"]["package_installed"], true,
+            "install package {skill_name}"
+        );
+        assert_eq!(installed["data"]["adapter"], spec.adapter.as_token());
+        let pointer = installed_package_pointer(&workspace, &skill_name);
+        let pointer_before = std::fs::read(&pointer).expect("read installed package pointer");
         assert!(state.get_skills_list().contains(&skill_name));
 
         for candidate in registry_names.iter() {
-            let candidate_spec = skill_store_install_spec(&state, candidate)
-                .expect("candidate install spec")
-                .expect("candidate runner spec");
             assert_eq!(
-                workspace
-                    .join("target/release")
-                    .join(candidate_spec.binary)
-                    .is_file(),
+                rustclaw_skill_sdk::SkillRuntimeResolver::new(
+                    workspace.join("data/skill-packages")
+                )
+                .resolve(candidate)
+                .is_ok(),
                 candidate == &skill_name,
-                "only the selected runner may exist while installing {skill_name}"
+                "only the selected package may resolve while installing {skill_name}"
             );
         }
 
@@ -682,9 +914,9 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         reload_skill_views(&state).expect("apply disabled skill state after restart");
         assert!(!state.get_skills_list().contains(&skill_name));
         assert_eq!(
-            std::fs::read(&binary).expect("read disabled runner"),
-            binary_before,
-            "disable must not recompile {skill_name}"
+            std::fs::read(&pointer).expect("read disabled package pointer"),
+            pointer_before,
+            "disable must not reinstall {skill_name}"
         );
         let enabled = set_managed_skill_enabled(router.clone(), &skill_name, true).await;
         assert_eq!(enabled["data"]["skill_switches"][&skill_name], true);
@@ -692,9 +924,9 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         reload_skill_views(&state).expect("apply enabled skill state after restart");
         assert!(state.get_skills_list().contains(&skill_name));
         assert_eq!(
-            std::fs::read(&binary).expect("read re-enabled runner"),
-            binary_before,
-            "re-enable must not recompile {skill_name}"
+            std::fs::read(&pointer).expect("read re-enabled package pointer"),
+            pointer_before,
+            "re-enable must not reinstall {skill_name}"
         );
 
         let (status, preserved) = call_skill_store_api(
@@ -712,7 +944,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         assert_eq!(preserved["data"]["installed"], false);
         assert_eq!(preserved["data"]["config_preserved"], true);
         assert_eq!(preserved["data"]["data_preserved"], true);
-        assert!(!binary.exists());
+        assert!(!pointer.exists());
         for relative in &config_files {
             assert_eq!(
                 std::fs::read_to_string(workspace.join(relative)).expect("retained config"),
@@ -836,6 +1068,43 @@ async fn skill_store_mutates_the_active_runtime_config_path() {
     let _ = std::fs::remove_dir_all(workspace);
 }
 
+#[test]
+fn skill_store_rejects_install_when_registry_excludes_the_host_platform() {
+    let (state, workspace) = isolated_skill_store_state();
+    let registry_path = workspace.join("configs/skills_registry.toml");
+    let raw = std::fs::read_to_string(&registry_path).expect("read isolated registry");
+    let current_os = std::env::consts::OS;
+    let unsupported_os = if current_os == "linux" {
+        "macos"
+    } else {
+        "linux"
+    };
+    let weather_header = "name = \"weather\"\nenabled = true\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"linux\", \"macos\"]";
+    let unsupported_header = format!(
+        "name = \"weather\"\nenabled = true\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"{unsupported_os}\"]"
+    );
+    assert!(
+        raw.contains(weather_header),
+        "weather registry fixture changed"
+    );
+    std::fs::write(
+        &registry_path,
+        raw.replacen(&weather_header, &unsupported_header, 1),
+    )
+    .expect("write unsupported weather registry");
+    reload_skill_views(&state).expect("reload unsupported weather registry");
+
+    let error = skill_store_install_spec(&state, "weather")
+        .expect_err("unsupported host install must fail");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.code.as_str(), "skill_store_unsupported_os");
+    assert!(error
+        .diagnostic
+        .contains(&format!("current_os={current_os}")));
+
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
 #[tokio::test]
 async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
     let (state, workspace) = isolated_skill_store_state();
@@ -857,10 +1126,10 @@ async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
     assert_eq!(status, StatusCode::OK);
     let weather = store_item(&before_repair, "weather");
     assert_eq!(weather["configured_installed"], true);
-    assert_eq!(weather["runner_available"], false);
+    assert_eq!(weather["package_available"], false);
     assert_eq!(weather["installed"], false);
     assert_eq!(weather["enabled"], false);
-    assert_eq!(weather["installation_issue"], "runner_missing");
+    assert_eq!(weather["installation_issue"], "package_missing");
 
     let (status, repaired) = call_skill_store_api(
         router.clone(),
@@ -871,14 +1140,14 @@ async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(repaired["data"]["installed"], true);
-    assert!(workspace.join("target/release/weather-skill").is_file());
+    assert!(installed_package_pointer(&workspace, "weather").is_file());
 
     let (status, after_repair) =
         call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
     let weather = store_item(&after_repair, "weather");
     assert_eq!(weather["configured_installed"], true);
-    assert_eq!(weather["runner_available"], true);
+    assert_eq!(weather["package_available"], true);
     assert_eq!(weather["installed"], true);
     assert_eq!(weather["enabled"], true);
     assert!(weather["installation_issue"].is_null());
@@ -889,8 +1158,8 @@ async fn skill_store_repairs_configured_skill_when_runner_is_missing() {
 #[tokio::test]
 async fn skill_store_rejects_overlapping_mutations() {
     let (state, workspace) = isolated_skill_store_state();
-    let _permit = begin_skill_store_mutation(&state, "weather", "install")
-        .expect("hold skill-store mutation permit");
+    let _permit =
+        begin_skill_store_mutation(&state, "weather").expect("hold skill-store mutation permit");
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state);
@@ -909,12 +1178,73 @@ async fn skill_store_rejects_overlapping_mutations() {
 }
 
 #[tokio::test]
+async fn skill_store_requires_explicit_network_approval_from_the_install_request() {
+    let (state, workspace) = isolated_skill_store_state();
+    let manifest_path = workspace.join("optional_skills/weather/skill.toml");
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .expect("read weather manifest")
+        .replace("network = \"deny\"", "network = \"approval_required\"");
+    std::fs::write(&manifest_path, manifest).expect("write approval-required manifest");
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+
+    let (status, catalog) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        store_item(&catalog, "weather")["build_network_policy"],
+        "approval_required"
+    );
+
+    let (status, denied) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({"skill_name": "weather"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(denied["error"], "skill_store_network_approval_required");
+
+    let (status, approved) = call_skill_store_api(
+        router,
+        Method::POST,
+        "/v1/skills/store/install",
+        Some(serde_json::json!({
+            "skill_name": "weather",
+            "allow_network": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["data"]["adapter"], "cargo");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn skill_store_locks_are_per_skill_while_builds_use_a_separate_global_limit() {
+    let (state, workspace) = isolated_skill_store_state();
+    let weather = begin_skill_store_mutation(&state, "weather").expect("lock weather");
+    let crypto = begin_skill_store_mutation(&state, "crypto").expect("lock crypto separately");
+    assert!(begin_skill_store_mutation(&state, "weather").is_err());
+    drop(crypto);
+    drop(weather);
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn skill_store_catalog_publishes_and_clears_active_operation() {
     let (state, workspace) = isolated_skill_store_state();
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state.clone());
-    let operation = begin_skill_store_mutation(&state, "weather", "install")
+    let (status, initial) =
+        call_skill_store_api(router.clone(), Method::GET, "/v1/skills/store", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(initial["data"]["active_operation"].is_null());
+    let operation = skill_store_operation_store(&state)
+        .create("weather", rustclaw_skill_sdk::OperationAction::Install)
         .expect("begin visible skill-store operation");
 
     let (status, active) =
@@ -922,11 +1252,18 @@ async fn skill_store_catalog_publishes_and_clears_active_operation() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(active["data"]["active_operation"]["skill_name"], "weather");
     assert_eq!(active["data"]["active_operation"]["action"], "install");
-    assert!(active["data"]["active_operation"]["started_ts"]
+    assert!(active["data"]["active_operation"]["created_at_unix"]
         .as_u64()
         .is_some_and(|timestamp| timestamp > 0));
 
-    drop(operation);
+    transition_skill_store_operation(
+        &skill_store_operation_store(&state),
+        &operation.operation_id,
+        rustclaw_skill_sdk::OperationStatus::Success,
+        rustclaw_skill_sdk::OperationStage::Success,
+        None,
+        Some(serde_json::json!({"done": true})),
+    );
     let (status, idle) = call_skill_store_api(router, Method::GET, "/v1/skills/store", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(idle["data"]["active_operation"].is_null());

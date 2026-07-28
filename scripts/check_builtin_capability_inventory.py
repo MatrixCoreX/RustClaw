@@ -231,7 +231,7 @@ def inventory(skills: list[dict[str, Any]], root: Path = ROOT) -> dict[str, Any]
                 "runtime_action": skill.get("runtime_action"),
                 "runtime_default_args": skill.get("runtime_default_args") or {},
                 "runtime_rewrite_arg_keys": skill.get("runtime_rewrite_arg_keys") or [],
-                "runner_name": skill.get("runner_name"),
+                "package_manifest": skill.get("package_manifest"),
             },
             "evidence_owner": skill.get("evidence_owner"),
             "input_fields": sorted(properties),

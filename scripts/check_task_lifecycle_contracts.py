@@ -213,10 +213,10 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"idempotency_key"',
         '"attempt_no"',
     ),
-    "crates/clawd/src/skills/external.rs": (
+    "crates/skill-runner/src/main.rs": (
         '"Idempotency-Key"',
-        '"RUSTCLAW_IDEMPOTENCY_KEY"',
-        '"execution"',
+        'pointer("/context/execution/idempotency_key")',
+        '"http_idempotency_key_invalid"',
     ),
     "crates/clawd/src/worker/run_skill_mutation.rs": (
         "prepare_direct_run_skill_mutation",

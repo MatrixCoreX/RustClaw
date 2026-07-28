@@ -1,5 +1,76 @@
 use super::*;
 
+#[test]
+fn package_manifest_projection_is_typed() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "weather"
+kind = "runner"
+package_manifest = "optional_skills/weather/skill.toml"
+"#,
+    )
+    .expect("registry");
+    assert_eq!(
+        registry.package_manifest_path("weather"),
+        Some("optional_skills/weather/skill.toml")
+    );
+}
+
+#[test]
+fn package_manifest_projection_rejects_path_escape() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "weather"
+kind = "runner"
+package_manifest = "../weather/skill.toml"
+"#,
+    )
+    .expect_err("path escape rejected");
+    assert!(error.contains("unsafe package_manifest"), "{error}");
+}
+
+#[test]
+fn implementation_manifest_is_not_part_of_the_planner_contract() {
+    fn registry_for(package_manifest: &str) -> SkillsRegistry {
+        SkillsRegistry::load_from_str(&format!(
+            r#"
+[[skills]]
+name = "reference_calculator"
+kind = "runner"
+package_manifest = "{package_manifest}"
+description = "Reference calculation capability"
+semantic_tags = ["reference_calculation"]
+input_schema = {{ type = "object", properties = {{ a = {{ type = "number" }}, b = {{ type = "number" }} }} }}
+planner_capabilities = [
+  {{ name = "reference.calculate", action = "calculate", effect = "observe", required = ["a", "b"], risk_level = "low" }},
+]
+"#
+        ))
+        .expect("registry")
+    }
+
+    let rust = registry_for("tests/reference/rust/skill.toml");
+    let python = registry_for("tests/reference/python/skill.toml");
+    assert_eq!(
+        rust.planner_capabilities("reference_calculator"),
+        python.planner_capabilities("reference_calculator")
+    );
+    let rust_manifest = rust
+        .manifest("reference_calculator")
+        .expect("planner manifest");
+    let python_manifest = python
+        .manifest("reference_calculator")
+        .expect("planner manifest");
+    assert_eq!(rust_manifest.description, python_manifest.description);
+    assert_eq!(rust_manifest.semantic_tags, python_manifest.semantic_tags);
+    assert_eq!(
+        rust_manifest.planner_capabilities,
+        python_manifest.planner_capabilities
+    );
+}
+
 /// Registry stores `prompt_file` as a logical path
 /// (e.g. prompts/skills/run_cmd.md).
 /// Runtime in clawd assembles skill prompts from

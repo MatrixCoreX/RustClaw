@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/skill-launch-spec-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_name", "version", "adapter", "launcher", "program", "args", "working_directory", "environment", "environment_allowlist", "timeout_seconds", "sandbox_profile", "runtime_network", "install_root", "manifest_digest", "receipt_digest"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "skill_name": { "type": "string" },
+    "version": { "type": "string" },
+    "adapter": { "enum": ["cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"] },
+    "launcher": { "enum": ["native", "python", "node", "java", "dotnet", "process", "http_json"] },
+    "program": { "type": "string" },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "working_directory": { "type": "string" },
+    "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+    "environment_allowlist": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
+    "remote_endpoint": { "type": ["string", "null"], "pattern": "^https://" },
+    "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+    "sandbox_profile": { "enum": ["required", "read_only", "workspace_write", "networked"] },
+    "runtime_network": { "type": "boolean" },
+    "install_root": { "type": "string" },
+    "manifest_digest": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "receipt_digest": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+  }
+}

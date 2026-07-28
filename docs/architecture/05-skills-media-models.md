@@ -11,7 +11,7 @@ Next: [Release validation](06-release-validation.md)
 <!-- ai-learning-navigation:end -->
 
 The registry is the machine source for skill availability, capabilities,
-effects, risk, schema, install mode, and runner metadata. Natural-language
+effects, risk, schema, install mode, and manifest reference. Natural-language
 phrases do not belong in aliases or runtime dispatch branches.
 
 ```mermaid
@@ -21,25 +21,29 @@ flowchart TD
     B --> D[CapabilityResolver]
     C --> E[Canonical machine-token lookup]
     D --> F
-    E --> F[Skills registry<br/>enabled + kind + runner + policy]
+    E --> F[Skills registry<br/>enabled + kind + manifest + policy]
     F --> P[PlanVerifier<br/>action policy + capability scope]
     P --> G{Implementation}
     G -->|builtin| H[In-process adapter]
-    G -->|runner| I[skill-runner subprocess]
-    G -->|external| J[External adapter]
+    G -->|runner or external| R[Verified install receipt]
+    R --> S[SkillRuntimeResolver<br/>SkillLaunchSpec]
+    S --> I[skill-runner subprocess]
     I --> Q[Scoped child environment<br/>one-use vendor token + protocol alias]
-    Q --> K[Skill binary<br/>one-line JSON stdin/stdout]
+    Q --> K[Cargo / Python / Node / Go / prebuilt / HTTPS<br/>one JSONL contract]
     H --> L[Structured skill response]
-    J --> L
     K --> L
     L --> M{Result consumer}
     M -->|agent loop| N[CapabilityResultEnvelope<br/>evidence + artifacts + continuation]
     M -->|direct run_skill| O[Persist direct task result]
 ```
 
-Fixed/core skills are part of the normal build. Bundled optional skills live
-under `optional_skills/` and are built or installed on demand; imported external
-skills must pass validation and registration before they become available.
+Every process implementation follows `skill.toml -> build adapter -> install
+receipt -> SkillLaunchSpec -> JSONL capability result`. Fixed/core skills are
+projected into receipts by the normal build. Bundled optional skills live under
+`optional_skills/` and are installed on demand. Imported external skills require
+`skill.toml` plus `INTERFACE.md` and pass the same adapter, protocol-smoke, and
+receipt verification before registration. No runtime is inferred from a file
+extension, skill name, or `target/release` convention.
 
 Long-tail media capabilities use start, poll, and cancel contracts. The
 foreground task can return a checkpoint while provider work continues.

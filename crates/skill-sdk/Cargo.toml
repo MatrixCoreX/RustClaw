@@ -1,0 +1,30 @@
+[package]
+name = "rustclaw-skill-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "rustclaw_skill_sdk"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rustclaw-skill"
+path = "src/bin/rustclaw-skill.rs"
+
+[dependencies]
+hex.workspace = true
+libc.workspace = true
+flate2 = "1"
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

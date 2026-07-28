@@ -105,12 +105,21 @@ pub(crate) async fn run_skill_with_runner_once(
     state: &AppState,
     task: &ClaimedTask,
     canonical_skill_name: &str,
-    runner_name: &str,
     args: &serde_json::Value,
     source: &str,
     skill_timeout_secs: u64,
     execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<serde_json::Value, String> {
+    let dispatch_started = std::time::Instant::now();
+    let package_root = state.skill_rt.workspace_root.join("data/skill-packages");
+    let installed_launch = rustclaw_skill_sdk::SkillRuntimeResolver::new(&package_root)
+        .resolve(canonical_skill_name)
+        .map_err(|error| {
+            format!(
+                "verified skill package unavailable: skill={canonical_skill_name} code={} detail={}",
+                error.code, error.detail
+            )
+        })?;
     let credential_context = if canonical_skill_name == "crypto" {
         exchange_credential_context_for_task(state, task)
     } else {
@@ -137,7 +146,7 @@ pub(crate) async fn run_skill_with_runner_once(
         "user_key": user_key_for_skill,
         "external_user_id": task.external_user_id,
         "external_chat_id": crate::task_external_chat_id(task),
-        "skill_name": runner_name,
+        "skill_name": canonical_skill_name,
         "args": args,
         "context": skill_context
     })
@@ -367,16 +376,12 @@ pub(crate) async fn run_skill_with_runner_once(
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env("CLAWD_BASE_URL", &local_clawd_base_url)
         .env(
+            "RUSTCLAW_SKILL_PACKAGES_ROOT",
+            package_root.display().to_string(),
+        )
+        .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
-        )
-        .env(
-            "RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH",
-            state.skill_rt.locator_scan_max_depth.to_string(),
-        )
-        .env(
-            "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
-            state.skill_rt.locator_scan_max_files.to_string(),
         );
     if let Some(token_store_dir) = sandbox_token_store_dir {
         cmd.env(
@@ -509,7 +514,21 @@ pub(crate) async fn run_skill_with_runner_once(
         return Err(format!("empty skill-runner output: {detail}"));
     }
 
-    serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
+    let response: serde_json::Value = serde_json::from_str(out_line.trim())
+        .map_err(|err| format!("invalid skill-runner json: {err}"))?;
+    tracing::info!(
+        skill = canonical_skill_name,
+        version = installed_launch.version,
+        adapter = installed_launch.adapter.as_token(),
+        receipt_digest = installed_launch.receipt_digest,
+        duration_ms = dispatch_started.elapsed().as_millis() as u64,
+        status = response
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("invalid"),
+        "verified_skill_execution_completed"
+    );
+    Ok(response)
 }
 
 fn action_scoped_runner_capabilities(
