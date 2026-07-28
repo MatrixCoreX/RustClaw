@@ -390,6 +390,7 @@ include!("ui_routes/task_debug_trace.rs");
 include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/slo_metrics.rs");
 include!("ui_routes/service_control.rs");
+include!("ui_routes/workspace_update_git.rs");
 include!("ui_routes/workspace_update.rs");
 include!("ui_routes/workspace_nginx.rs");
 include!("ui_routes/workspace_webd.rs");

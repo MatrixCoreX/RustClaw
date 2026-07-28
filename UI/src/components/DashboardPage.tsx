@@ -669,7 +669,7 @@ export function DashboardPage({
                 )}
                 {t("启用/修复 nginx", "Enable/Repair nginx")}
               </button>
-              {nginxStatus?.installed || nginxStatus?.configured || nginxStatus?.ui_deployed ? (
+              {nginxStatus?.running || nginxStatus?.configured || nginxStatus?.ui_deployed ? (
                 <button
                   type="button"
                   onClick={() => void onStartWorkspaceUpdate("nginx_disable")}
@@ -775,7 +775,7 @@ export function DashboardPage({
         {workspaceUpdateProgressVisible ? (
           <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-white/85">{t("编译进度", "Build Progress")}</p>
+              <p className="text-sm font-medium text-white/85">{t("操作进度", "Operation Progress")}</p>
               <span className="font-mono text-xs text-white/55">{workspaceUpdateProgressPercent}%</span>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">

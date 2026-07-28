@@ -1096,6 +1096,66 @@ fn run_workspace_update_test_git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+#[test]
+fn workspace_update_upstream_candidate_prefers_origin_and_rejects_ambiguity() {
+    assert_eq!(
+        workspace_update_upstream_candidate("main", "backup/main\norigin/main\nupstream/main\n",)
+            .as_deref(),
+        Some("origin/main")
+    );
+    assert_eq!(
+        workspace_update_upstream_candidate("stable", "company/stable\n").as_deref(),
+        Some("company/stable")
+    );
+    assert_eq!(
+        workspace_update_upstream_candidate("main", "backup/main\nupstream/main\n"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn workspace_update_resolves_missing_upstream_from_matching_origin_branch() {
+    let root = temp_workspace_root();
+    run_workspace_update_test_git(&root, &["init"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    std::fs::write(root.join("README.md"), "fixture\n").expect("write fixture");
+    run_workspace_update_test_git(&root, &["add", "README.md"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "fixture"]);
+
+    let branch = run_workspace_update_test_git(&root, &["branch", "--show-current"]);
+    let commit = run_workspace_update_test_git(&root, &["rev-parse", "--short", "HEAD"]);
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    run_workspace_update_test_git(&root, &["update-ref", &remote_ref, "HEAD"]);
+    run_workspace_update_test_git(&root, &["config", "remote.origin.url", "."]);
+    run_workspace_update_test_git(
+        &root,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+
+    let resolved = resolve_workspace_update_remote_commit(&root)
+        .await
+        .expect("resolve upstream");
+    assert_eq!(resolved.as_deref(), Some(commit.as_str()));
+    assert_eq!(
+        run_workspace_update_test_git(
+            &root,
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ],
+        ),
+        format!("origin/{branch}")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp repo");
+}
+
 #[tokio::test]
 async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists() {
     let root = temp_workspace_root();

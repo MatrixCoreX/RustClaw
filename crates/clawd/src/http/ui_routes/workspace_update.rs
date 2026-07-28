@@ -739,16 +739,9 @@ async fn run_workspace_update_job(
         return;
     }
 
-    let remote_commit = match run_workspace_update_command(
-        "git",
-        &["rev-parse", "--short", "@{upstream}"],
-        &workspace_root,
-        30,
-    )
-    .await
-    {
-        Ok(out) if out.exit_code == Some(0) => first_output_line(&out.stdout_tail),
-        Ok(out) => {
+    let remote_commit = match resolve_workspace_update_remote_commit(&workspace_root).await {
+        Ok(remote_commit) => remote_commit,
+        Err(WorkspaceUpdateUpstreamError::Command(out)) => {
             fail_workspace_update(
                 &shared,
                 "git rev-parse upstream failed",
@@ -757,7 +750,7 @@ async fn run_workspace_update_job(
             );
             return;
         }
-        Err(err) => {
+        Err(WorkspaceUpdateUpstreamError::Runtime(err)) => {
             fail_workspace_update_with_error(&shared, err, "workspace_update.upstream_missing");
             return;
         }
