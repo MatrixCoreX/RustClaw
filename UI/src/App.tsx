@@ -1479,6 +1479,8 @@ export default function App() {
               piAppRestarting={piAppRestarting}
               piAppRestartMessage={piAppRestartMessage}
               dashboardCommunicationRows={dashboardCommunicationRows}
+              serviceActionLoading={serviceActionLoading}
+              serviceActionMessage={serviceActionMessage}
               queuePressureHigh={queuePressureHigh}
               runningTooOld={runningTooOld}
               isOnline={isOnline}
@@ -1493,6 +1495,7 @@ export default function App() {
               onCancelWorkspaceUpdate={cancelWorkspaceUpdate}
               onRestartSystem={restartSystem}
               onRestartPiApp={restartPiApp}
+              onControlService={controlService}
               onFetchHostSystemSummary={fetchHostSystemSummary}
               onFetchHostDependencies={() => fetchHostDependencies(false)}
               onInstallHostDependency={installHostDependency}
