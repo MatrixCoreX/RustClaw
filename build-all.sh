@@ -498,6 +498,12 @@ PY
 			--binary-dir "$OUT_DIR" \
 			--sdk-cli "$OUT_DIR/rustclaw-skill" \
 			--package-root "$SCRIPT_DIR/target/skill-packages/$target"
+		echo "Activating verified proactive skill receipts for the local runtime..."
+		python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
+			--target host \
+			--binary-dir "$OUT_DIR" \
+			--sdk-cli "$OUT_DIR/rustclaw-skill" \
+			--package-root "$SCRIPT_DIR/data/skill-packages"
 	fi
 done
 
