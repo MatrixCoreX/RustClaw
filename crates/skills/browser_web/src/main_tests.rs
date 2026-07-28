@@ -33,7 +33,7 @@ fn non_object_args_return_outer_error() {
     let response = handle(Request {
         request_id: "test-1".to_string(),
         args: json!("not an object"),
-        _context: None,
+        context: None,
         _user_id: 1,
         _chat_id: 1,
     });
@@ -54,7 +54,7 @@ fn browser_only_accepts_explicit_page_extraction_action() {
     let response = handle(Request {
         request_id: "test-search".to_string(),
         args: json!({"action": "search_page", "query": "rust"}),
-        _context: None,
+        context: None,
         _user_id: 1,
         _chat_id: 1,
     });
@@ -270,11 +270,11 @@ fn workspace_paths_reject_traversal_and_symlink_escape() {
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&workspace).expect("workspace");
 
-    let directory =
-        resolve_workspace_directory(&workspace, "skills_output/browser").expect("inside dir");
+    let directory = resolve_workspace_directory(&workspace, "skills_output/browser", false)
+        .expect("inside dir");
     assert!(directory.starts_with(workspace.canonicalize().expect("canonical test workspace")));
     assert_eq!(
-        resolve_workspace_directory(&workspace, "../outside")
+        resolve_workspace_directory(&workspace, "../outside", false)
             .unwrap_err()
             .code,
         "WORKSPACE_PATH_OUTSIDE"
@@ -283,9 +283,41 @@ fn workspace_paths_reject_traversal_and_symlink_escape() {
     let config = workspace.join("wait-map.json");
     std::fs::write(&config, "{}").expect("config");
     assert_eq!(
-        resolve_workspace_file(&workspace, "wait-map.json").expect("inside file"),
+        resolve_workspace_file(&workspace, "wait-map.json", false).expect("inside file"),
         config.canonicalize().expect("canonical config")
     );
 
     let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn admin_browser_paths_accept_service_account_visible_locations() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-browser-web-admin-test-{}",
+        std::process::id()
+    ));
+    let workspace = root.join("workspace");
+    let outside_dir = root.join("outside").join("screenshots");
+    let outside_file = root.join("outside").join("wait-map.json");
+    std::fs::create_dir_all(&workspace).expect("workspace");
+    std::fs::create_dir_all(outside_file.parent().expect("outside parent"))
+        .expect("outside parent");
+    std::fs::write(&outside_file, "{}").expect("outside wait map");
+
+    assert_eq!(
+        resolve_workspace_directory(&workspace, outside_dir.to_str().expect("outside dir"), true,)
+            .expect("admin screenshot dir"),
+        outside_dir.canonicalize().expect("canonical outside dir")
+    );
+    assert_eq!(
+        resolve_workspace_file(
+            &workspace,
+            outside_file.to_str().expect("outside file"),
+            true,
+        )
+        .expect("admin wait map"),
+        outside_file.canonicalize().expect("canonical outside file")
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }

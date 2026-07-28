@@ -8,6 +8,7 @@ mod action_batch_contract;
 mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
+mod capability_catalog;
 mod capability_discovery;
 mod capability_result_synthesis;
 mod checkpoint_resume_state;

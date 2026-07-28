@@ -8,7 +8,8 @@ use serde::Deserialize;
 
 use crate::{
     repo::conversation_history::{
-        ConversationArchiveUpdate, ConversationHistoryPage, ConversationTitleUpdate,
+        ConversationArchiveUpdate, ConversationBodyField, ConversationBodyPage,
+        ConversationHistoryPage, ConversationTitleUpdate,
     },
     resolve_auth_identity_by_key, AppState,
 };
@@ -17,6 +18,13 @@ use crate::{
 pub(crate) struct ConversationHistoryQuery {
     limit: Option<usize>,
     cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ConversationBodyQuery {
+    start_byte: Option<usize>,
+    limit_bytes: Option<usize>,
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +72,71 @@ pub(crate) async fn list_conversation_history(
             crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "conversation_history_query_failed",
+            )
+        }
+    }
+}
+
+pub(crate) async fn get_conversation_body_range(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path((task_id, field)): axum::extract::Path<(String, String)>,
+    Query(query): Query<ConversationBodyQuery>,
+) -> (StatusCode, Json<ApiResponse<ConversationBodyPage>>) {
+    let Some(raw_key) = headers
+        .get("x-rustclaw-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return crate::api_err(StatusCode::UNAUTHORIZED, "auth_key_required");
+    };
+    let identity = match resolve_auth_identity_by_key(&state, raw_key) {
+        Ok(Some(identity)) => identity,
+        Ok(None) => return crate::api_err(StatusCode::UNAUTHORIZED, "auth_key_invalid"),
+        Err(error) => {
+            tracing::error!("conversation_body_auth_lookup_failed error={error}");
+            return crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "conversation_body_auth_lookup_failed",
+            );
+        }
+    };
+    let field = match ConversationBodyField::parse(&field) {
+        Ok(field) => field,
+        Err(error) => return crate::api_err(StatusCode::BAD_REQUEST, error.to_string()),
+    };
+    match crate::repo::conversation_history::read_conversation_body_range(
+        &state,
+        &identity,
+        &task_id,
+        field,
+        query.start_byte,
+        query.limit_bytes,
+        query.sha256.as_deref(),
+    ) {
+        Ok(page) => crate::api_ok(page),
+        Err(error)
+            if matches!(
+                error.to_string().as_str(),
+                "conversation_body_task_id_invalid"
+                    | "conversation_body_sha256_invalid"
+                    | "conversation_body_range_invalid"
+            ) =>
+        {
+            crate::api_err(StatusCode::BAD_REQUEST, error.to_string())
+        }
+        Err(error) if error.to_string() == "conversation_body_not_found" => {
+            crate::api_err(StatusCode::NOT_FOUND, "conversation_body_not_found")
+        }
+        Err(error) if error.to_string() == "conversation_body_stale_snapshot" => {
+            crate::api_err(StatusCode::CONFLICT, "conversation_body_stale_snapshot")
+        }
+        Err(error) => {
+            tracing::error!("conversation_body_query_failed error={error}");
+            crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "conversation_body_query_failed",
             )
         }
     }

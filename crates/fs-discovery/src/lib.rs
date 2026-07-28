@@ -9,6 +9,7 @@ mod types;
 mod walker;
 
 pub use backend::{discover, ripgrep_status};
+pub use matcher::fuzzy_name_score;
 pub use root::{relative_path, resolve_root};
 pub use text_backend::ripgrep_text_search;
 pub use text_types::{RipgrepTextMatch, RipgrepTextReport, RipgrepTextRequest, TextPatternKind};

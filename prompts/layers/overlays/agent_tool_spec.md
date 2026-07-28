@@ -27,12 +27,15 @@ observation first. Do not simulate a runtime result in a well-formed response.
 
 ## Capability Discovery
 
-The capability map is a bounded active working set. When it advertises
-`loadable_capability_groups`, load one or two exact group tokens with
-`load_capability_groups`, observe the structured scope update, and select the
-domain action on the next turn. Loading a group is not completion of the user
-request. Explicitly unload or replace groups when the active working set no
-longer needs them.
+The capability map exposes an initial working set plus a complete catalog of
+loadable registry groups. When it advertises `loadable_capability_groups`, load
+the non-empty set of exact group tokens required by the active plan with
+`load_capability_groups` with `op=search` for a typed catalog lookup,
+`op=expand` with exact `capability_refs` for canonical contracts, or
+`op=load_groups` for already-known registry groups; observe the structured
+scope update and select the
+domain actions on the next turn. Loading a group is not completion of the user
+request. Selected scopes remain queryable for the task.
 
 For MCP, call `mcp.catalog.search` first. Use only exact capability tokens,
 schemas, and permission metadata returned by that observation. Never select a

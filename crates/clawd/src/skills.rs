@@ -1040,7 +1040,10 @@ fn task_is_admin(state: &AppState, task: &ClaimedTask) -> bool {
 }
 
 pub(crate) fn task_allows_sudo(state: &AppState, task: Option<&ClaimedTask>) -> bool {
-    state.policy.allow_sudo && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
+    task.is_some_and(|task| {
+        crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
+            || (state.policy.allow_sudo && task_is_admin(state, task))
+    })
 }
 
 pub(crate) fn command_requests_sudo(command: &str) -> bool {
@@ -1051,8 +1054,10 @@ pub(crate) fn task_allows_path_outside_workspace(
     state: &AppState,
     task: Option<&ClaimedTask>,
 ) -> bool {
-    state.policy.allow_path_outside_workspace
-        && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
+    task.is_some_and(|task| {
+        crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
+            || (state.policy.allow_path_outside_workspace && task_is_admin(state, task))
+    })
 }
 
 fn request_reply_language(user_text: &str) -> RequestReplyLanguage {
@@ -1378,6 +1383,9 @@ fn prepare_skill_execution_isolation(
     skill_name: &str,
     args: &Value,
 ) -> Result<Option<SkillExecutionIsolation>, String> {
+    if crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task) {
+        return Ok(None);
+    }
     let Some(profile) = action_scoped_isolation_profile(state, skill_name, args) else {
         return Ok(None);
     };

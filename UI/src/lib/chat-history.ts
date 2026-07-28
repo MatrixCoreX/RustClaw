@@ -1,5 +1,7 @@
 import type {
   ChatMessage,
+  ConversationBodyDescriptor,
+  ConversationBodyPage,
   ConversationHistoryPage,
   ConversationHistoryTurn,
   TaskQueryResponse,
@@ -7,6 +9,9 @@ import type {
 import { normalizeTaskArtifacts } from "./task-artifacts";
 
 type Translate = (zh: string, en: string) => string;
+type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export const CONVERSATION_HISTORY_PAGE_SIZE = 60;
 
 export function conversationHistoryScope(
   authReady: boolean,
@@ -64,6 +69,44 @@ export function projectConversationHistory(
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
+export async function fetchAllConversationHistory(
+  apiFetch: ApiFetch,
+): Promise<ConversationHistoryPage[]> {
+  const pages: ConversationHistoryPage[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const page = await fetchConversationHistoryPage(apiFetch, cursor);
+    pages.push(page);
+    const next = page.truncated ? page.next_cursor?.trim() || null : null;
+    if (!next) return pages;
+    if (seenCursors.has(next)) {
+      throw new Error("conversation_history_cursor_cycle");
+    }
+    seenCursors.add(next);
+    cursor = next;
+  }
+}
+
+export async function fetchConversationHistoryPage(
+  apiFetch: ApiFetch,
+  cursor: string | null = null,
+): Promise<ConversationHistoryPage> {
+  const query = new URLSearchParams({ limit: String(CONVERSATION_HISTORY_PAGE_SIZE) });
+  if (cursor) query.set("cursor", cursor);
+  const response = await apiFetch(`/v1/tasks/conversation-history?${query}`);
+  const body = (await response.json()) as {
+    ok?: boolean;
+    data?: ConversationHistoryPage | null;
+    error?: string | null;
+  };
+  if (!response.ok || !body.ok || !body.data) {
+    throw new Error(body.error || `conversation_history_http_${response.status}`);
+  }
+  await verifyConversationHistoryPage(body.data);
+  return body.data;
+}
+
 export async function verifyConversationHistoryPage(
   page: ConversationHistoryPage,
 ): Promise<void> {
@@ -92,6 +135,9 @@ export async function verifyConversationHistoryPage(
       !Number.isSafeInteger(turn.attachment_count) ||
       turn.attachment_count < 0 ||
       !Array.isArray(turn.attachment_kinds) ||
+      !validConversationBodyDescriptor(turn.user_text_result) ||
+      !validConversationBodyDescriptor(turn.assistant_text_result) ||
+      !validConversationBodyDescriptor(turn.error_text_result) ||
       (turn.artifacts != null && !Array.isArray(turn.artifacts)) ||
       !Number.isSafeInteger(turn.created_at) ||
       !Number.isSafeInteger(turn.updated_at)
@@ -104,6 +150,66 @@ export async function verifyConversationHistoryPage(
   if (digest !== page.content_sha256.toLowerCase()) {
     throw new Error("conversation_history_digest_mismatch");
   }
+}
+
+export async function fetchNextConversationBodyPage(
+  apiFetch: ApiFetch,
+  descriptor: ConversationBodyDescriptor,
+): Promise<ConversationBodyPage> {
+  const rawUrl = descriptor.continuation?.url?.trim();
+  if (descriptor.complete || !rawUrl || !safeConversationBodyUrl(rawUrl)) {
+    throw new Error("conversation_body_continuation_invalid");
+  }
+  const response = await apiFetch(rawUrl);
+  const body = (await response.json()) as {
+    ok?: boolean;
+    data?: ConversationBodyPage | null;
+    error?: string | null;
+  };
+  if (!response.ok || !body.ok || !body.data) {
+    throw new Error(body.error || `conversation_body_http_${response.status}`);
+  }
+  const page = body.data;
+  if (
+    page.schema_version !== 1 ||
+    page.status !== "ok" ||
+    !machineRef(page.task_id) ||
+    !["user", "assistant", "error"].includes(page.field) ||
+    typeof page.text !== "string" ||
+    !Number.isSafeInteger(page.start_byte) ||
+    !Number.isSafeInteger(page.end_byte) ||
+    !Number.isSafeInteger(page.total_size_bytes) ||
+    page.start_byte !== descriptor.returned_size_bytes ||
+    page.end_byte < page.start_byte ||
+    new TextEncoder().encode(page.text).byteLength !== page.end_byte - page.start_byte ||
+    page.total_size_bytes !== descriptor.original_size_bytes ||
+    page.content_sha256.toLowerCase() !== descriptor.content_sha256.toLowerCase() ||
+    (!page.complete && !Number.isSafeInteger(page.next_start_byte))
+  ) {
+    throw new Error("conversation_body_page_invalid");
+  }
+  return page;
+}
+
+export function advanceConversationBodyDescriptor(
+  descriptor: ConversationBodyDescriptor,
+  page: ConversationBodyPage,
+): ConversationBodyDescriptor {
+  const nextStart = page.complete ? null : page.next_start_byte ?? null;
+  const previousUrl = descriptor.continuation?.url ?? "";
+  return {
+    ...descriptor,
+    complete: page.complete,
+    returned_size_bytes: page.end_byte,
+    continuation:
+      nextStart == null
+        ? null
+        : {
+            kind: "conversation_body_range",
+            url: withConversationBodyStart(previousUrl, nextStart),
+            next_start_byte: nextStart,
+          },
+  };
 }
 
 function deduplicateTurns(turns: ConversationHistoryTurn[]): ConversationHistoryTurn[] {
@@ -148,6 +254,7 @@ function projectThread(
       role: "user",
       text: userText,
       ts: startedAt,
+      bodyResult: turn.user_text_result ?? null,
     });
     const assistantText = turn.assistant_text?.trim() || turn.error_text?.trim() || null;
     if (assistantMessageId && assistantText) {
@@ -157,6 +264,9 @@ function projectThread(
         text: assistantText,
         ts: completedAt ?? timestampMs(turn.updated_at),
         artifacts: normalizeTaskArtifacts(turn.artifacts),
+        bodyResult: turn.assistant_text
+          ? (turn.assistant_text_result ?? null)
+          : (turn.error_text_result ?? null),
       });
     }
     teachingRuns.push({
@@ -215,6 +325,40 @@ function machineRef(value: string): boolean {
     value.length <= 128 &&
     /^[A-Za-z0-9_.:-]+$/.test(value)
   );
+}
+
+function validConversationBodyDescriptor(
+  value: ConversationBodyDescriptor | null | undefined,
+): boolean {
+  if (value == null) return true;
+  return (
+    value.schema_version === 1 &&
+    typeof value.complete === "boolean" &&
+    Number.isSafeInteger(value.original_size_bytes) &&
+    Number.isSafeInteger(value.returned_size_bytes) &&
+    value.original_size_bytes >= value.returned_size_bytes &&
+    /^[0-9a-f]{64}$/i.test(value.content_sha256) &&
+    (value.complete ||
+      (value.continuation?.kind === "conversation_body_range" &&
+        Number.isSafeInteger(value.continuation.next_start_byte) &&
+        value.continuation.next_start_byte === value.returned_size_bytes &&
+        safeConversationBodyUrl(value.continuation.url)))
+  );
+}
+
+function safeConversationBodyUrl(value: string): boolean {
+  return /^\/v1\/tasks\/[A-Za-z0-9-]+\/conversation-body\/(user|assistant|error)\?/.test(
+    value,
+  );
+}
+
+function withConversationBodyStart(value: string, startByte: number): string {
+  if (!safeConversationBodyUrl(value)) {
+    throw new Error("conversation_body_continuation_invalid");
+  }
+  const url = new URL(value, "http://rustclaw.local");
+  url.searchParams.set("start_byte", String(startByte));
+  return `${url.pathname}?${url.searchParams.toString()}`;
 }
 
 async function sha256Hex(value: string): Promise<string> {

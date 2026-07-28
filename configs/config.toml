@@ -263,9 +263,8 @@ input_modalities = ["text", "image", "video"]
 output_modalities = ["text"]
 supports_tools = true
 expected_latency_ms = 5000
-# MiniMax text routing/model calls can be slow under load; keep the per-request
-# window aligned with worker.llm_total_timeout_seconds instead of cutting off
-# normal responses at 60s.
+# MiniMax text routing/model calls can be slow under load. This is a per-call
+# transport timeout; total task resources are owned by [agent.task_budget].
 timeout_seconds = 180
 
 # 用途/Purpose: Xiaomi MiMo 提供商连接与模型池（OpenAI-compatible，兼容 Anthropic 协议）.
@@ -286,8 +285,8 @@ input_modalities = ["text"]
 output_modalities = ["text"]
 supports_tools = true
 expected_latency_ms = 5000
-# MiMo 在 planner / synthesis 长上下文下响应可能超过 60s；
-# 单次请求超时调高，整体任务仍由 [worker].llm_total_timeout_seconds 兜底。
+# MiMo 在 planner / synthesis 长上下文下响应可能超过 60s；这是单次链路超时，
+# 整体任务资源由 configs/agent_guard.toml 的 [agent.task_budget] 管理。
 timeout_seconds = 180
 
 # 用途/Purpose: 自定义 OpenAI-compatible 提供商.
@@ -335,9 +334,9 @@ audit_max_rows = 10000
 audit_retention_days = 14
 # 清理任务执行周期（秒） / Cleanup interval in seconds.
 cleanup_interval_seconds = 300
-# 任务表保留最大行数 / Max rows retained for tasks table.
+# 非对话任务表保留最大行数；ask 对话由用户显式删除控制 / Max non-conversation task rows; ask history is user-controlled.
 tasks_max_rows = 2000
-# 任务保留天数 / Task retention days.
+# 非对话任务保留天数；ask 对话不会自动过期 / Non-conversation task retention; ask history does not expire automatically.
 tasks_retention_days = 7
 
 # 用途/Purpose: 记忆模块独立配置入口.
@@ -548,7 +547,7 @@ queue_limit = 128
 # - API/channel 请求超时只影响调用方等待，不代表后台任务失败；
 # - worker heartbeat/lease 用于判断 running 任务是否失联；
 # - tool/skill 自身 timeout 判断单个工具是否超时；
-# - LLM total timeout 判断 provider 窗口是否不可用；
+# - provider timeout / retry / circuit breaker 判断单次链路是否可用；
 # - agent loop soft budget 应 checkpoint 后进入 waiting/background，而不是无限循环。
 # 运行中心跳间隔（秒）：执行长任务时周期刷新 updated_at，避免误判“卡死”。
 task_heartbeat_seconds = 30
@@ -562,12 +561,8 @@ running_recovery_check_interval_seconds = 60
 # 多轮 agent 任务一般 5–15 min；超过 1h 通常是循环卡死，应当被 hard timeout 切断。
 # 真有"长跑批处理"需求请按 task 级别在创建时单独提 timeout，不要把全局调回大值。
 task_timeout_seconds = 3600
-# 单任务 LLM 逻辑调用次数预算 / Per-task logical LLM call budget.
-# 用来阻断异常循环，不限制单个 provider 内部重试次数。
-llm_max_calls_per_task = 40
-# 单任务 LLM 累计耗时预算（秒）/ Per-task cumulative LLM wall-clock budget in seconds.
-# Mimo 等慢模型 normalizer + planner + synthesis + verifier 可能接近 8-10 分钟，默认给 15 分钟。
-llm_total_timeout_seconds = 900
+# 模型 turn、工具调用、累计时长、token/cost 和 continuation 的管理员上限
+# 统一配置在 configs/agent_guard.toml 的 [agent.task_budget]。
 
 [nni]
 remote_nodes = ["https://api.matrixai.one"]

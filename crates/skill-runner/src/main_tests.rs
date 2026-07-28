@@ -123,6 +123,14 @@ fn inherited_parent_sandbox_accepts_only_runtime_backend_tokens() {
 }
 
 #[test]
+fn unrestricted_admin_flag_is_exact_and_server_owned() {
+    assert!(!super::environment_flag_value_is_enabled(None));
+    assert!(!super::environment_flag_value_is_enabled(Some("true")));
+    assert!(!super::environment_flag_value_is_enabled(Some("0")));
+    assert!(super::environment_flag_value_is_enabled(Some("1")));
+}
+
+#[test]
 fn declared_private_storage_is_writable_for_a_read_only_installed_skill() {
     let storage = tempfile::tempdir().expect("storage tempdir");
     let mut launch = ChildLaunch::legacy("/bin/true");

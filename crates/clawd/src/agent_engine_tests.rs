@@ -120,6 +120,37 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
     }
 }
 
+fn test_planner_capability(name: &str, action: &str, preferred: bool) -> PlannerCapabilityMapping {
+    PlannerCapabilityMapping {
+        name: name.to_string(),
+        action: Some(action.to_string()),
+        description: Some(format!(
+            "Owns the {action} result without raw primitive reconstruction"
+        )),
+        semantic_tags: vec![format!("{action}_result")],
+        effect: Some(PlannerCapabilityEffect::Observe),
+        required: vec!["path".to_string()],
+        optional: Vec::new(),
+        risk_level: Some(SkillRiskLevel::Low),
+        preferred,
+        once_per_task: None,
+        dedup_scope: Some(RegistryDedupScope::Args),
+        dedup_fields: Vec::new(),
+        idempotent: Some(true),
+        execution_mode: Some(CapabilityExecutionMode::SyncShort),
+        async_adapter_kind: None,
+        isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
+        network_access: Some(false),
+        filesystem_write: Some(false),
+        external_publish: Some(false),
+        credential_access: Some(false),
+        subprocess: Some(false),
+        package_install: Some(false),
+        privilege_escalation: Some(false),
+        final_answer_shape: None,
+    }
+}
+
 #[test]
 fn quick_index_includes_planner_capability_metadata() {
     let mut manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
@@ -187,42 +218,14 @@ fn quick_index_includes_planner_capability_metadata() {
 
 #[test]
 fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
-    let capability = |name: &str, action: &str, preferred: bool| PlannerCapabilityMapping {
-        name: name.to_string(),
-        action: Some(action.to_string()),
-        description: Some(format!(
-            "Owns the {action} result without raw primitive reconstruction"
-        )),
-        semantic_tags: vec![format!("{action}_result")],
-        effect: Some(PlannerCapabilityEffect::Observe),
-        required: vec!["path".to_string()],
-        optional: Vec::new(),
-        risk_level: Some(SkillRiskLevel::Low),
-        preferred,
-        once_per_task: None,
-        dedup_scope: Some(RegistryDedupScope::Args),
-        dedup_fields: Vec::new(),
-        idempotent: Some(true),
-        execution_mode: Some(CapabilityExecutionMode::SyncShort),
-        async_adapter_kind: None,
-        isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
-        network_access: Some(false),
-        filesystem_write: Some(false),
-        external_publish: Some(false),
-        credential_access: Some(false),
-        subprocess: Some(false),
-        package_install: Some(false),
-        privilege_escalation: Some(false),
-        final_answer_shape: None,
-    };
     let manifest = test_skill_manifest(vec![
-        capability("filesystem.stat_path_alias", "stat_paths", false),
-        capability("filesystem.stat_paths", "stat_paths", true),
-        capability("filesystem.list_entries", "list_dir", true),
-        capability("filesystem.list_dir", "list_dir", true),
-        capability("filesystem.list_names", "list_dir", true),
-        capability("filesystem.list_file_names", "list_dir", true),
-        capability("filesystem.read_text_range", "read_text_range", true),
+        test_planner_capability("filesystem.stat_path_alias", "stat_paths", false),
+        test_planner_capability("filesystem.stat_paths", "stat_paths", true),
+        test_planner_capability("filesystem.list_entries", "list_dir", true),
+        test_planner_capability("filesystem.list_dir", "list_dir", true),
+        test_planner_capability("filesystem.list_names", "list_dir", true),
+        test_planner_capability("filesystem.list_file_names", "list_dir", true),
+        test_planner_capability("filesystem.read_text_range", "read_text_range", true),
     ]);
 
     let candidates = skill_quick_index::planner_capability_candidates(&manifest);
@@ -235,6 +238,80 @@ fn quick_index_discloses_distinct_actions_instead_of_alias_prefixes() {
     assert!(!candidates.contains("filesystem.stat_path_alias"));
     assert!(!candidates.contains("filesystem.list_dir(action=list_dir"));
     assert!(!candidates.contains("+"));
+}
+
+#[test]
+fn quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable() {
+    let optional_fields = (0..12)
+        .map(|index| format!("field_{index}"))
+        .collect::<Vec<_>>();
+    let capabilities = (0..30)
+        .map(|index| PlannerCapabilityMapping {
+            name: format!("fixture.capability_{index}"),
+            action: Some(format!("action_{index}")),
+            description: Some(format!("Fixture capability {index}")),
+            semantic_tags: vec![format!("tag_{index}")],
+            effect: Some(PlannerCapabilityEffect::Observe),
+            required: Vec::new(),
+            optional: optional_fields.clone(),
+            risk_level: Some(SkillRiskLevel::Low),
+            preferred: true,
+            once_per_task: None,
+            dedup_scope: Some(RegistryDedupScope::Args),
+            dedup_fields: Vec::new(),
+            idempotent: Some(true),
+            execution_mode: Some(CapabilityExecutionMode::SyncShort),
+            async_adapter_kind: None,
+            isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
+            network_access: Some(false),
+            filesystem_write: Some(false),
+            external_publish: Some(false),
+            credential_access: Some(false),
+            subprocess: Some(false),
+            package_install: Some(false),
+            privilege_escalation: Some(false),
+            final_answer_shape: None,
+        })
+        .collect::<Vec<_>>();
+    let mut properties = serde_json::Map::new();
+    for field in &optional_fields {
+        properties.insert(field.clone(), json!({"type": "string", "enum": ["a", "b"]}));
+    }
+    let mut manifest = test_skill_manifest(capabilities);
+    manifest.input_schema = Some(json!({"type": "object", "properties": properties.clone()}));
+    manifest.output_schema = Some(json!({"type": "object", "properties": properties}));
+
+    let ids = skill_quick_index::planner_capability_ids(&manifest);
+    let candidates = skill_quick_index::planner_capability_candidates(&manifest);
+    let output = skill_quick_index::output_contract_metadata(&manifest);
+
+    assert_eq!(ids.len(), 30);
+    assert!(ids.contains(&"fixture.capability_24".to_string()));
+    assert!(ids.contains(&"fixture.capability_29".to_string()));
+    assert!(candidates.contains("fixture.capability_29(action=action_29"));
+    assert!(candidates.contains("field_11"));
+    assert!(candidates.contains("allowed_field_11=a|b"));
+    assert!(!candidates.contains("+"));
+    assert!(output.contains("field_8"));
+    assert!(output.contains("field_11"));
+}
+
+#[test]
+fn quick_index_catalog_keeps_every_alias_id_even_when_actions_overlap() {
+    let manifest = test_skill_manifest(vec![
+        test_planner_capability("fixture.preferred", "shared_action", true),
+        test_planner_capability("fixture.alias_one", "shared_action", false),
+        test_planner_capability("fixture.alias_two", "shared_action", false),
+    ]);
+
+    assert_eq!(
+        skill_quick_index::planner_capability_ids(&manifest),
+        vec![
+            "fixture.alias_one".to_string(),
+            "fixture.alias_two".to_string(),
+            "fixture.preferred".to_string(),
+        ]
+    );
 }
 
 #[test]

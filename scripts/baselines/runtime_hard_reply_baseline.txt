@@ -633,17 +633,11 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {t
 crates/clawd/src/http/ui_routes/workspace_webd.rs	failed to schedule webd restart and restore listener config	"failed to schedule webd restart and restore listener config"
 crates/clawd/src/http/ui_routes/workspace_webd.rs	failed to schedule webd restart: {error}	.map_err(|error| format!("failed to schedule webd restart: {error}"))
 crates/clawd/src/http/ui_routes/workspace_webd.rs	webd config has no parent	std::io::Error::new(std::io::ErrorKind::InvalidInput, "webd config has no parent")
-crates/clawd/src/llm_gateway.rs	HTTP 请求总量	/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
 crates/clawd/src/llm_gateway.rs	No available LLM provider configured	return Err("No available LLM provider configured".to_string());
 crates/clawd/src/llm_gateway.rs	Provider override not found in config: {}	warn!("Provider override not found in config: {}", name);
 crates/clawd/src/llm_gateway.rs	all llm providers in circuit-breaker cooldown: {detail}	"all llm providers in circuit-breaker cooldown: {detail}"
 crates/clawd/src/llm_gateway.rs	哪个 prompt 把单任务额度烧光了	/// 这套 label 是诊断维度（"哪个 prompt 把单任务额度烧光了"），不参与
-crates/clawd/src/llm_gateway.rs	成功 provider 的纯耗时	/// "成功 provider 的纯耗时"。这样能更准确反映任务对 LLM 链路施加的真实压力。
-crates/clawd/src/llm_gateway.rs	次数	/// **预算的"次数"语义**（重要）：
 crates/clawd/src/llm_gateway.rs	短时间集中失败	// "短时间集中失败"信号，而不是含糊的 "unknown llm error"。
-crates/clawd/src/llm_gateway.rs	耗时	/// **预算的"耗时"语义**：累加的是每次 `run_with_fallback_*` 入口的
-crates/clawd/src/llm_gateway.rs	逻辑调用	/// 因此**最坏情况**一个"逻辑调用"可能放大成 `N_providers × (1 + LLM_RETRY_TIMES)`
-crates/clawd/src/llm_gateway.rs	逻辑调用过多	/// 次 HTTP 请求，但只占 1 个预算名额。预算的目的是挡"逻辑调用过多"
 crates/clawd/src/log_utils.rs	create act plan logs dir failed: {err}	warn!("create act plan logs dir failed: {err}");
 crates/clawd/src/log_utils.rs	open act plan log file failed: {err}	warn!("open act plan log file failed: {err}");
 crates/clawd/src/log_utils.rs	subtask#{index} {action_label}: {status}	let header = format!("subtask#{index} {action_label}: {status}");
@@ -874,7 +868,6 @@ crates/clawd/src/runtime/state.rs	reload_skill_views: load config failed: {}	.ma
 crates/clawd/src/runtime/state.rs	rustclaw_test_minimal_registry_{}.toml	"rustclaw_test_minimal_registry_{}.toml",
 crates/clawd/src/runtime/state.rs	write minimal skills_registry.toml for test	std::fs::write(&path, &toml_buf).expect("write minimal skills_registry.toml for test");
 crates/clawd/src/runtime/state.rs	加一个字段动 13 个 test fixture	///   Slack / 企微）只动这一个子 struct，不再"加一个字段动 13 个 test fixture"。
-crates/clawd/src/runtime/state.rs	单任务 LLM 预算	/// "单任务 LLM 预算"。在 `llm_gateway::run_with_fallback_with_prompt_source`
 crates/clawd/src/runtime/state.rs	启动时从 config.toml 装配出来、运行期只读	/// 拆分动机：这一簇是"启动时从 config.toml 装配出来、运行期只读"的策略
 crates/clawd/src/runtime/state.rs	哪个 prompt 把单任务预算烧光了	/// 让"哪个 prompt 把单任务预算烧光了"一眼可见，作为后续 prompt-level
 crates/clawd/src/runtime/state.rs	哪个 prompt 把额度烧光了	/// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
@@ -1033,7 +1026,6 @@ crates/clawd/src/worker/run_skill_finalize.rs	run-skill:{}:async-job:{}	let chec
 crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}:async_job:{}	"run_skill:{skill_name}:async_job:{}",
 crates/clawd/src/worker/run_skill_mutation.rs	run-skill:{}:mutation-reconciliation	let checkpoint_id = format!("run-skill:{}:mutation-reconciliation", task.task_id);
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1	"DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
-crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1	"DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	Schedule worker tick failed: {}	error!("Schedule worker tick failed: {}", err);
 crates/clawd/src/worker/runtime_support/background_workers.rs	cleanup task delivery artifacts failed: {error}	warn!("cleanup task delivery artifacts failed: {error}");
 crates/clawd/src/worker/runtime_support/background_workers.rs	refresh long-term memory summary failed: {err}	warn!("refresh long-term memory summary failed: {err}");
@@ -1103,6 +1095,11 @@ crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-test <skill.toml> <workspace
 crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-validate <request_id> <response.jsonl>	"protocol-validate <request_id> <response.jsonl>",
 crates/skill-sdk/src/bin/rustclaw-skill.rs	receipt-verify <package_root> <skill_name>	"receipt-verify <package_root> <skill_name>",
 crates/skill-sdk/src/bin/rustclaw-skill.rs	rollback <package_root> <skill_name>	"rollback <package_root> <skill_name>"
+crates/skill-sdk/src/bounded_result.rs	artifact namespace and label must be safe path components	"artifact namespace and label must be safe path components",
+crates/skill-sdk/src/bounded_result.rs	artifact path has no parent	SkillSdkError::new("artifact_spill_path_invalid", "artifact path has no parent")
+crates/skill-sdk/src/bounded_result.rs	artifact spill root must be a real directory	"artifact spill root must be a real directory",
+crates/skill-sdk/src/bounded_result.rs	large result requires declared skill storage for artifact recovery	"large result requires declared skill storage for artifact recovery",
+crates/skill-sdk/src/bounded_result.rs	skill storage database path has no parent	"skill storage database path has no parent",
 crates/skill-sdk/src/installer.rs	http_json endpoint missing	"http_json endpoint missing",
 crates/skill-sdk/src/installer.rs	http_json response exceeds protocol limit	"http_json response exceeds protocol limit",
 crates/skill-sdk/src/installer.rs	manifest and built artifact must stay inside the workspace	"manifest and built artifact must stay inside the workspace",
@@ -1125,7 +1122,7 @@ crates/skill-sdk/src/receipt.rs	only http_json launch may declare remote_endpoin
 crates/skill-sdk/src/runtime.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
 crates/skill-sdk/src/runtime.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
 crates/skill-sdk/src/sandbox.rs	(allow file-write* (subpath "{escaped}"))\n	profile.push_str(&format!("(allow file-write* (subpath \\"{escaped}\\"))\\n"));
-crates/skill-sdk/src/sandbox.rs	(version 1)\n(deny default)\n(import "system.sb")\n(allow process*)\n(allow file-read*)\n(allow mach-lookup (global-name "com.apple.sysmond"))\n	"(version 1)\\n(deny default)\\n(import \\"system.sb\\")\\n(allow process*)\\n(allow file-read*)\\n(allow mach-lookup (global-name \\"com.apple.sysmond\\"))\\n",
+crates/skill-sdk/src/sandbox.rs	(version 1)\n(allow default)\n(deny file-write*)\n	let mut profile = String::from("(version 1)\\n(allow default)\\n(deny file-write*)\\n");
 crates/skill-sdk/src/sandbox.rs	macOS sandbox-exec not found	"macOS sandbox-exec not found",
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN OPENSSH PRIVATE KEY-----	|| upper.contains("-----BEGIN OPENSSH PRIVATE KEY-----")
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN RSA PRIVATE KEY-----	|| upper.contains("-----BEGIN RSA PRIVATE KEY-----")
@@ -1430,6 +1427,7 @@ crates/skills/extension_manager/src/main.rs	{path}: schema missing properties	.o
 crates/skills/fs_search/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/fs_search/src/main.rs	unsupported action; use find_name|find_ext|grep_text|find_images	"unsupported action; use find_name|find_ext|grep_text|find_images".to_string(),
 crates/skills/fs_search/src/workspace_traversal.rs	path resolution failed: {io_error}	.map_err(|io_error| format!("path resolution failed: {io_error}"));
+crates/skills/fs_search/src/workspace_traversal.rs	path resolution failed: {io_error}	.map_err(|io_error| format!("path resolution failed: {io_error}"));
 crates/skills/fs_search/src/workspace_traversal.rs	path with '..' is not allowed	return Err("path with '..' is not allowed".to_string());
 crates/skills/git_basic/src/main.rs	args must be object	"args must be object".to_string(),
 crates/skills/git_basic/src/main.rs	current directory is not a git repository. Please use git_basic in a git repo.	"current directory is not a git repository. Please use git_basic in a git repo."
@@ -1451,9 +1449,11 @@ crates/skills/http_basic/src/main.rs	https redirect cannot downgrade to http	"ht
 crates/skills/http_basic/src/main.rs	only http and https URLs are supported	"only http and https URLs are supported",
 crates/skills/http_basic/src/main.rs	output path cannot be a symlink	"output path cannot be a symlink",
 crates/skills/http_basic/src/main.rs	output path cannot be a symlink	"output path cannot be a symlink",
+crates/skills/http_basic/src/main.rs	output path cannot be a symlink	"output path cannot be a symlink",
 crates/skills/http_basic/src/main.rs	output path has no parent	.ok_or_else(|| HttpBasicError::new("output_path_invalid", "output path has no parent"))?;
 crates/skills/http_basic/src/main.rs	output path is invalid	"output path is invalid",
 crates/skills/http_basic/src/main.rs	output path is invalid	"output path is invalid",
+crates/skills/http_basic/src/main.rs	output path must not contain parent traversal	"output path must not contain parent traversal",
 crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
 crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
 crates/skills/http_basic/src/main.rs	output_path is outside workspace	"output_path is outside workspace",
@@ -1960,13 +1960,12 @@ crates/skills/package_manager/src/main.rs	invalid package name: {package}	return
 crates/skills/package_manager/src/main.rs	open install log failed: {err}	eprintln!("open install log failed: {err}");
 crates/skills/package_manager/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/package_manager/src/main.rs	run package install failed: {err}	.map_err(|err| format!("run package install failed: {err}"))?;
-crates/skills/package_manager/src/main.rs	unsupported action; use detect|install|smart_install|uninstall	_ => Err("unsupported action; use detect|install|smart_install|uninstall".to_string()),
+crates/skills/package_manager/src/main.rs	unsupported action; use detect|install|smart_install|uninstall	"unsupported action; use detect|install|smart_install|uninstall"
 crates/skills/package_manager/src/main.rs	write install log failed: {err}	eprintln!("write install log failed: {err}");
-crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
+crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	"PID PPID %CPU %MEM COMM",
 crates/skills/process_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/process_basic/src/main.rs	create service logs dir failed: {err}	eprintln!("create service logs dir failed: {err}");
-crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	lines.push(format!("no matching processes for filter: {filter}"));
-crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	lines.push(format!("no matching processes for filter: {filter}"));
+crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	output.push(format!("no matching processes for filter: {filter}"));
 crates/skills/process_basic/src/main.rs	no matching rows for filter: {filter}	kept.push(format!("no matching rows for filter: {filter}"));
 crates/skills/process_basic/src/main.rs	open service log failed: {err}	eprintln!("open service log failed: {err}");
 crates/skills/process_basic/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
@@ -2144,6 +2143,10 @@ crates/skills/web_search_extract/src/main.rs	backend redirect limit exceeded	ret
 crates/skills/web_search_extract/src/main.rs	backend redirect target blocked	attempt.error("backend redirect target blocked")
 crates/skills/web_search_extract/src/main.rs	bing non-success response	.context("bing non-success response")?;
 crates/skills/web_search_extract/src/main.rs	build search client failed	.context("build search client failed")
+crates/skills/web_search_extract/src/main.rs	continuation token does not belong to this query	"continuation token does not belong to this query",
+crates/skills/web_search_extract/src/main.rs	continuation token is invalid	"continuation token is invalid",
+crates/skills/web_search_extract/src/main.rs	continuation token is invalid	.ok_or_else(|| SearchError::new("INVALID_CONTINUATION", "continuation token is invalid"))?;
+crates/skills/web_search_extract/src/main.rs	cursor must be integer	.ok_or_else(|| SearchError::new("INVALID_INPUT", "cursor must be integer"))
 crates/skills/web_search_extract/src/main.rs	docs.rs search non-success response	.context("docs.rs search non-success response")?;
 crates/skills/web_search_extract/src/main.rs	docs.rs search request failed	.context("docs.rs search request failed")?
 crates/skills/web_search_extract/src/main.rs	domain filter is invalid	"domain filter is invalid",
@@ -2180,6 +2183,8 @@ crates/telegramd/src/main.rs	read setChatMenuButton response failed	.context("re
 crates/telegramd/src/main.rs	read setMyCommands response failed	.context("read setMyCommands response failed")?;
 crates/telegramd/src/main.rs	setChatMenuButton returned not ok: {}	return Err(anyhow!("setChatMenuButton returned not ok: {}", menu_body));
 crates/telegramd/src/main.rs	setMyCommands returned not ok: {}	return Err(anyhow!("setMyCommands returned not ok: {}", cmd_body));
+crates/telegramd/src/main.rs	telegram API connectivity restored	"telegram API connectivity restored"
+crates/telegramd/src/main.rs	telegram API unavailable; retrying	"telegram API unavailable; retrying"
 crates/telegramd/src/media_handlers.rs	create telegram media inbox dir failed	.context("create telegram media inbox dir failed")?;
 crates/telegramd/src/media_handlers.rs	download telegram file request failed	.context("download telegram file request failed")?
 crates/telegramd/src/media_handlers.rs	read telegram file bytes failed	.context("read telegram file bytes failed")?;

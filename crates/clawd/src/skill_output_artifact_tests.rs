@@ -137,3 +137,33 @@ fn existing_async_output_is_published_without_losing_source() {
         Value::String("stdout".to_string())
     );
 }
+
+#[test]
+fn sensitive_json_keeps_hashes_but_never_exposes_secret_values_to_the_model() {
+    let source = json!({
+        "endpoint": "https://example.com",
+        "api_key": "sk-secret-value",
+        "nested": {"authorization": "Bearer private-token", "count": 3},
+    });
+    let (model_view, redacted) = sensitivity_aware_json_model_view(&source);
+
+    assert!(redacted);
+    assert_eq!(model_view["endpoint"], "https://example.com");
+    assert_eq!(model_view["nested"]["count"], 3);
+    assert_eq!(model_view["api_key"]["redacted"], true);
+    assert!(!model_view.to_string().contains("sk-secret-value"));
+    assert!(!model_view.to_string().contains("private-token"));
+}
+
+#[test]
+fn sensitive_text_redacts_assignments_bearer_tokens_and_private_keys() {
+    let source = "api_key=secret\nAuthorization: Bearer token\n-----BEGIN PRIVATE KEY-----\nbody\n-----END PRIVATE KEY-----\nsafe=value\n";
+    let (model_view, redacted) = sensitivity_aware_text_model_view(source);
+
+    assert!(redacted);
+    assert!(model_view.contains("api_key=[REDACTED sha256:"));
+    assert!(!model_view.contains("secret"));
+    assert!(!model_view.contains("Bearer token"));
+    assert!(!model_view.contains("body"));
+    assert!(model_view.contains("safe=value"));
+}

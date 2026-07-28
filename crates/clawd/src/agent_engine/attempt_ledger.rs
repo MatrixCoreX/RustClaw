@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use super::LoopState;
 
-const MAX_ATTEMPT_LEDGER_STEPS: usize = 10;
+const ATTEMPT_LEDGER_PROMPT_VIEW_ITEMS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AttemptLedgerEntry {
@@ -163,30 +164,48 @@ pub(super) fn record_attempt_with_retry_instruction(
 
 pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
     build_attempt_ledger_snapshot(loop_state)
-        .and_then(|snapshot| serde_json::to_string_pretty(&snapshot).ok())
+        .map(|snapshot| {
+            let prompt_view = snapshot
+                .as_array()
+                .filter(|entries| entries.len() > ATTEMPT_LEDGER_PROMPT_VIEW_ITEMS)
+                .map(|entries| {
+                    let start = entries
+                        .len()
+                        .saturating_sub(ATTEMPT_LEDGER_PROMPT_VIEW_ITEMS);
+                    let canonical_bytes = serde_json::to_vec(&snapshot).unwrap_or_default();
+                    json!({
+                        "schema_version": 1,
+                        "complete": false,
+                        "partial_reason": "provider_prompt_view",
+                        "original_count": entries.len(),
+                        "returned_count": entries.len() - start,
+                        "canonical_sha256": format!("sha256:{:x}", Sha256::digest(canonical_bytes)),
+                        "canonical_location": "task_checkpoint.attempt_ledger",
+                        "recent_attempts": &entries[start..],
+                    })
+                })
+                .unwrap_or(snapshot);
+            serde_json::to_string_pretty(&prompt_view).ok()
+        })
+        .flatten()
         .unwrap_or_else(|| "(empty)".to_string())
 }
 
 pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Value> {
     if !loop_state.attempt_ledger_entries.is_empty() {
-        let mut entries = loop_state
+        let entries = loop_state
             .attempt_ledger_entries
             .iter()
-            .rev()
-            .take(MAX_ATTEMPT_LEDGER_STEPS)
             .map(attempt_entry_json)
             .collect::<Vec<_>>();
-        entries.reverse();
         return Some(Value::Array(entries));
     }
     if loop_state.executed_step_results.is_empty() {
         return None;
     }
-    let mut entries = loop_state
+    let entries = loop_state
         .executed_step_results
         .iter()
-        .rev()
-        .take(MAX_ATTEMPT_LEDGER_STEPS)
         .enumerate()
         .map(|(idx, step)| {
             let error_text = step.error.as_deref().unwrap_or_default();
@@ -284,7 +303,6 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
             })
         })
         .collect::<Vec<_>>();
-    entries.reverse();
     Some(Value::Array(entries))
 }
 

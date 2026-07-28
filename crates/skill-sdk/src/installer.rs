@@ -43,6 +43,16 @@ pub struct AdoptBuiltRequest {
 }
 
 #[derive(Clone)]
+pub struct PrecompiledInstallRequest {
+    pub manifest_path: PathBuf,
+    pub workspace_root: PathBuf,
+    pub package_root: PathBuf,
+    pub precompiled_root: PathBuf,
+    pub target: Option<String>,
+    pub control: Option<InstallControl>,
+}
+
+#[derive(Clone)]
 pub struct InstallControl {
     cancelled: Arc<AtomicBool>,
     progress: Option<Arc<dyn Fn(&str) + Send + Sync>>,
@@ -109,8 +119,17 @@ pub struct InstallOutcome {
     pub install_root: PathBuf,
     pub receipt_digest: String,
     pub adapter: BuildAdapter,
+    pub origin: InstallOrigin,
     pub reused: bool,
     pub phases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallOrigin {
+    SourceBuild,
+    BuiltArtifact,
+    PlatformPrecompiled,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -220,6 +239,7 @@ impl SkillInstaller {
             &manifest_digest,
             &source_digest,
             phases,
+            InstallOrigin::SourceBuild,
             request.control.as_ref(),
         )
     }
@@ -368,6 +388,156 @@ impl SkillInstaller {
                 "protocol_smoke".to_string(),
                 "activate".to_string(),
             ],
+            InstallOrigin::BuiltArtifact,
+            request.control.as_ref(),
+        )
+    }
+
+    /// Import a release-bundled, platform-specific Cargo skill after checking
+    /// its immutable receipt, manifest identity, platform, size, and digest.
+    /// No compiler or network access is used on this path.
+    pub fn install_precompiled(
+        &self,
+        request: &PrecompiledInstallRequest,
+    ) -> SkillSdkResult<InstallOutcome> {
+        let _install_guard = install_process_slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        emit_phase(request.control.as_ref(), "preflight")?;
+        let workspace_root = fs::canonicalize(&request.workspace_root).map_err(|error| {
+            SkillSdkError::new(
+                "workspace_root_unavailable",
+                format!("path={} error={error}", request.workspace_root.display()),
+            )
+            .phase("preflight")
+        })?;
+        let manifest_path = fs::canonicalize(&request.manifest_path).map_err(|error| {
+            SkillSdkError::new(
+                "manifest_read_failed",
+                format!("path={} error={error}", request.manifest_path.display()),
+            )
+            .phase("manifest")
+        })?;
+        if !manifest_path.starts_with(&workspace_root) {
+            return Err(SkillSdkError::new(
+                "manifest_path_escape",
+                manifest_path.display().to_string(),
+            )
+            .phase("preflight"));
+        }
+        let manifest = PackageManifest::load(&manifest_path)?;
+        if manifest.build.adapter != BuildAdapter::Cargo {
+            return Err(SkillSdkError::new(
+                "precompiled_adapter_unsupported",
+                format!("adapter={}", manifest.build.adapter.as_token()),
+            )
+            .phase("preflight"));
+        }
+        let platform = match request.target.as_deref() {
+            Some(target) => HostPlatform::from_target(target)?,
+            None => HostPlatform::current(),
+        };
+        manifest.validate_for_platform(&platform)?;
+        let source_store = InstallReceiptStore::new(&request.precompiled_root);
+        let pointer = source_store
+            .current_pointer(&manifest.package.name)
+            .map_err(|error| {
+                SkillSdkError::new(
+                    "precompiled_package_unavailable",
+                    format!("skill={} detail={}", manifest.package.name, error.detail),
+                )
+                .phase("preflight")
+            })?;
+        let source_versions = source_store
+            .skill_root(&manifest.package.name)?
+            .join("versions");
+        let canonical_versions = fs::canonicalize(&source_versions).map_err(|error| {
+            SkillSdkError::new(
+                "precompiled_package_unavailable",
+                format!("path={} error={error}", source_versions.display()),
+            )
+            .phase("preflight")
+        })?;
+        let source_install = fs::canonicalize(source_versions.join(&pointer.install_dir))?;
+        if !source_install.starts_with(&canonical_versions) {
+            return Err(SkillSdkError::new(
+                "precompiled_install_root_escape",
+                source_install.display().to_string(),
+            )
+            .phase("precompiled_verify"));
+        }
+        let bundled_manifest = PackageManifest::load(&source_install.join("skill.toml"))?;
+        let receipt: InstallReceipt =
+            serde_json::from_slice(&fs::read(source_install.join("install-receipt.json"))?)?;
+        receipt.validate()?;
+        if receipt.digest()? != pointer.receipt_digest {
+            return Err(SkillSdkError::new(
+                "precompiled_receipt_digest_mismatch",
+                format!("skill={}", manifest.package.name),
+            )
+            .phase("precompiled_verify"));
+        }
+        receipt.verifies_manifest(&bundled_manifest)?;
+        receipt.verifies_manifest(&manifest).map_err(|error| {
+            SkillSdkError::new("precompiled_manifest_mismatch", error.detail)
+                .phase("precompiled_verify")
+        })?;
+        if receipt.platform.os != platform.os || receipt.platform.arch != platform.arch {
+            return Err(SkillSdkError::new(
+                "precompiled_platform_mismatch",
+                format!(
+                    "expected={}/{} actual={}/{}",
+                    platform.os, platform.arch, receipt.platform.os, receipt.platform.arch
+                ),
+            )
+            .phase("precompiled_verify"));
+        }
+        emit_phase(request.control.as_ref(), "precompiled_verify")?;
+        fs::create_dir_all(&request.package_root)?;
+        let destination_store = InstallReceiptStore::new(&request.package_root);
+        let staging = destination_store.create_staging_dir(&manifest.package.name)?;
+        let mut guard = StagingGuard::new(staging.clone());
+        fs::write(staging.join("skill.toml"), manifest.to_toml_string()?)?;
+        for artifact in &receipt.artifacts {
+            let source = fs::canonicalize(source_install.join(&artifact.path))?;
+            let metadata = fs::metadata(&source)?;
+            if !source.starts_with(&source_install)
+                || !metadata.is_file()
+                || metadata.len() != artifact.size_bytes
+                || digest_file(&source)? != artifact.sha256
+            {
+                return Err(SkillSdkError::new(
+                    "precompiled_artifact_mismatch",
+                    format!("path={}", artifact.path),
+                )
+                .phase("precompiled_verify"));
+            }
+            let destination = staging.join(&artifact.path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(source, &destination)?;
+            if artifact.executable {
+                set_executable(&destination)?;
+            }
+        }
+        fs::create_dir_all(staging.join(&receipt.launch.working_directory))?;
+        emit_phase(request.control.as_ref(), "precompiled_copy")?;
+        let manifest_digest = manifest.digest()?;
+        let source_digest = receipt.source_digest.clone();
+        finish_install(
+            &destination_store,
+            &staging,
+            &mut guard,
+            receipt,
+            &manifest_digest,
+            &source_digest,
+            vec![
+                "precompiled_verify".to_string(),
+                "precompiled_copy".to_string(),
+                "activate".to_string(),
+            ],
+            InstallOrigin::PlatformPrecompiled,
             request.control.as_ref(),
         )
     }
@@ -382,6 +552,7 @@ fn finish_install(
     manifest_digest: &str,
     source_digest: &str,
     phases: Vec<String>,
+    origin: InstallOrigin,
     control: Option<&InstallControl>,
 ) -> SkillSdkResult<InstallOutcome> {
     emit_phase(control, "activate")?;
@@ -426,6 +597,7 @@ fn finish_install(
         install_root: fs::canonicalize(destination)?,
         receipt_digest: receipt.digest()?,
         adapter: receipt.adapter,
+        origin,
         reused,
         phases,
     })

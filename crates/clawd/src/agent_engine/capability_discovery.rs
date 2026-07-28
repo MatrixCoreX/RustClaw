@@ -4,8 +4,6 @@ use std::collections::BTreeSet;
 use super::{register_step_output, ActionLoopDecision, AppState, ClaimedTask, LoopState};
 
 pub(super) const RUNTIME_CAPABILITY_LOADER_TOOL: &str = "load_capability_groups";
-pub(super) const MAX_GROUPS_PER_LOAD: usize = 2;
-pub(super) const MAX_ACTIVE_CAPABILITY_SCOPES: usize = 4;
 
 const REGISTRY_SCOPE_PREFIX: &str = "registry.";
 const MCP_SCOPE_PREFIX: &str = "mcp_capability.";
@@ -42,6 +40,58 @@ pub(super) fn handle_capability_group_load(
     step_in_round: usize,
     executed_actions: &mut usize,
 ) -> Result<ActionLoopDecision, String> {
+    if args.get("op").and_then(Value::as_str) == Some("search") {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .ok_or_else(|| "capability_catalog_search_query_missing".to_string())?;
+        let output = super::capability_catalog::search_catalog(state, task, query);
+        return record_catalog_observation(
+            loop_state,
+            output,
+            fingerprint,
+            global_step,
+            step_in_round,
+            executed_actions,
+            "capability_catalog_searched",
+        );
+    }
+    if args.get("op").and_then(Value::as_str) == Some("expand") {
+        let references = args
+            .get("capability_refs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let (mut output, groups) =
+            super::capability_catalog::expand_catalog(state, task, &references)?;
+        let evicted_scopes = activate_registry_groups(loop_state, &groups);
+        if let Some(object) = output.as_object_mut() {
+            object.insert("loaded_groups".to_string(), json!(groups));
+            object.insert("evicted_scopes".to_string(), json!(evicted_scopes));
+            object.insert(
+                "active_scopes".to_string(),
+                json!(loop_state.active_capability_scopes),
+            );
+            object.insert(
+                "next_action".to_string(),
+                json!("replan_with_expanded_contracts"),
+            );
+        }
+        return record_catalog_observation(
+            loop_state,
+            output,
+            fingerprint,
+            global_step,
+            step_in_round,
+            executed_actions,
+            "capability_contracts_expanded",
+        );
+    }
     let groups = parse_requested_groups(args)?;
     let loadable = crate::capability_map::planner_loadable_capability_group_names_for_task(
         state,
@@ -128,6 +178,51 @@ pub(super) fn handle_capability_group_load(
     ))
 }
 
+fn record_catalog_observation(
+    loop_state: &mut LoopState,
+    output: Value,
+    fingerprint: &str,
+    global_step: usize,
+    step_in_round: usize,
+    executed_actions: &mut usize,
+    stop_signal: &'static str,
+) -> Result<ActionLoopDecision, String> {
+    let output = output.to_string();
+    crate::append_subtask_result(
+        &mut loop_state.subtask_results,
+        global_step,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        true,
+        &output,
+    );
+    register_step_output(
+        loop_state,
+        global_step,
+        step_in_round,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        &output,
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: format!("step_{global_step}"),
+            skill: RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(output),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    *loop_state
+        .successful_action_fingerprints
+        .entry(fingerprint.to_string())
+        .or_insert(0) += 1;
+    loop_state.tool_calls_total += 1;
+    loop_state.total_steps_executed += 1;
+    *executed_actions += 1;
+    Ok(ActionLoopDecision::StopRound(stop_signal.to_string()))
+}
+
 pub(super) fn activate_mcp_search_results(
     state: &AppState,
     task: &ClaimedTask,
@@ -148,7 +243,6 @@ pub(super) fn activate_mcp_search_results(
                     state, task, capability,
                 )
         })
-        .take(MAX_ACTIVE_CAPABILITY_SCOPES)
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     if capabilities.is_empty() {
@@ -245,14 +339,8 @@ fn touch_scope(loop_state: &mut LoopState, scope: String) -> Vec<String> {
         .active_capability_scopes
         .retain(|existing| existing != &scope);
     loop_state.active_capability_scopes.push(scope);
-    let mut evicted = Vec::new();
-    while loop_state.active_capability_scopes.len() > MAX_ACTIVE_CAPABILITY_SCOPES {
-        let removed = loop_state.active_capability_scopes.remove(0);
-        remove_scope_membership(loop_state, &removed);
-        evicted.push(removed);
-    }
     rebuild_scope_membership(loop_state);
-    evicted
+    Vec::new()
 }
 
 fn rebuild_scope_membership(loop_state: &mut LoopState) {
@@ -271,20 +359,12 @@ fn rebuild_scope_membership(loop_state: &mut LoopState) {
     }
 }
 
-fn remove_scope_membership(loop_state: &mut LoopState, scope: &str) {
-    if let Some(group) = scope.strip_prefix(REGISTRY_SCOPE_PREFIX) {
-        loop_state.loaded_capability_skills.remove(group);
-    } else if let Some(capability) = scope.strip_prefix(MCP_SCOPE_PREFIX) {
-        loop_state.loaded_mcp_capabilities.remove(capability);
-    }
-}
-
 fn parse_requested_groups(args: &Value) -> Result<Vec<String>, String> {
     let groups = args
         .get("groups")
         .and_then(Value::as_array)
         .ok_or_else(|| "capability_group_load_groups_missing".to_string())?;
-    if groups.is_empty() || groups.len() > MAX_GROUPS_PER_LOAD {
+    if groups.is_empty() {
         return Err("capability_group_load_count_invalid".to_string());
     }
     let mut normalized = BTreeSet::new();

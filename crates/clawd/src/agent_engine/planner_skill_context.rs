@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use tracing::{debug, info, warn};
 
+const CATALOG_PROMPT_SHARE_PERCENT: usize = 25;
+
 use crate::{AppState, ClaimedTask};
 
 use super::skill_quick_index::{
@@ -9,17 +11,11 @@ use super::skill_quick_index::{
     output_contract_metadata as quick_index_output_contract_metadata,
     planner_capabilities as quick_index_planner_capabilities,
     planner_capabilities_metadata as quick_index_planner_capabilities_metadata,
-    planner_capability_candidates as quick_index_planner_capability_candidates,
 };
 
 const SKILL_QUICK_INDEX_EMPTY_TOKEN: &str = "__RC_SKILL_QUICK_INDEX_EMPTY__";
 const SKILL_SUMMARY_FALLBACK_TOKEN: &str = "__RC_SKILL_SUMMARY_FALLBACK__";
 const SKILL_PROMPT_FILE_MISSING_TOKEN: &str = "__RC_SKILL_PROMPT_FILE_MISSING__";
-const SKILL_QUICK_INDEX_CHAR_BUDGET: usize = 32_000;
-const SKILL_QUICK_INDEX_LINE_CHAR_BUDGET: usize = 720;
-const SKILL_PLAYBOOK_CHAR_BUDGET: usize = 72_000;
-const SKILL_PLAYBOOK_SINGLE_CHAR_LIMIT: usize = 40_000;
-const MAX_SCOPED_SKILL_PLAYBOOKS: usize = 2;
 
 #[derive(Debug, Clone)]
 pub(super) struct PlannerSkillContext {
@@ -32,11 +28,15 @@ pub(super) struct PlannerSkillContext {
     pub(super) playbook_chars: usize,
 }
 
+struct ProviderFittedCatalog {
+    text: String,
+    mode: &'static str,
+}
+
 #[derive(Debug, Default)]
 struct SkillPlaybookBundle {
     text: String,
     included_skills: Vec<String>,
-    omitted_count: usize,
 }
 
 /// Phase 2+: Planner-visible skills are dynamically narrowed by
@@ -74,8 +74,6 @@ fn build_skill_playbooks_bundle_scoped(
     let mut sections = Vec::new();
     let mut included_skills = Vec::new();
     let mut skipped_no_prompt: Vec<String> = Vec::new();
-    let mut used_chars = 0usize;
-    let mut omitted_count = 0usize;
 
     for skill in &enabled {
         let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) else {
@@ -121,19 +119,6 @@ fn build_skill_playbooks_bundle_scoped(
         } else {
             format!("### {skill}\n{trimmed}\n{metadata}")
         };
-        let section_chars = section.chars().count();
-        let separator_chars = usize::from(!sections.is_empty()) * 2;
-        if section_chars > SKILL_PLAYBOOK_SINGLE_CHAR_LIMIT
-            || used_chars + separator_chars + section_chars > SKILL_PLAYBOOK_CHAR_BUDGET
-        {
-            omitted_count += 1;
-            warn!(
-                "planner skill playbook omitted by budget: skill={} section_chars={} used_chars={} total_budget={}",
-                skill, section_chars, used_chars, SKILL_PLAYBOOK_CHAR_BUDGET
-            );
-            continue;
-        }
-        used_chars += separator_chars + section_chars;
         included_skills.push(skill.clone());
         sections.push(section);
     }
@@ -158,7 +143,6 @@ fn build_skill_playbooks_bundle_scoped(
     SkillPlaybookBundle {
         text,
         included_skills,
-        omitted_count,
     }
 }
 
@@ -189,11 +173,7 @@ fn first_summary_line<'a>(lines: impl Iterator<Item = &'a str>) -> Option<String
 }
 
 fn compact_summary(value: &str) -> String {
-    if value.chars().count() > 90 {
-        value.chars().take(90).collect::<String>() + "..."
-    } else {
-        value.to_string()
-    }
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// First-round route hint: give the LLM a compact skill index so ordinary
@@ -210,6 +190,7 @@ pub(super) fn build_skill_quick_index_text_scoped(
         return line;
     }
     let registry = state.get_skills_registry();
+    let catalog_entries = super::capability_catalog::catalog_entries_for_task(state, task);
     enabled.sort_by(|left, right| {
         let eager = |skill: &str| {
             registry
@@ -219,7 +200,8 @@ pub(super) fn build_skill_quick_index_text_scoped(
         };
         eager(right).cmp(&eager(left)).then_with(|| left.cmp(right))
     });
-    let mut candidate_lines = Vec::new();
+    let mut detail_lines = Vec::new();
+    let mut catalog_lines = Vec::new();
     for skill in &enabled {
         let Some(manifest) = state.skill_manifest(skill) else {
             warn!(
@@ -248,10 +230,17 @@ pub(super) fn build_skill_quick_index_text_scoped(
             .strip_prefix("; planner_capabilities: ")
             .unwrap_or_default()
             .to_string();
-        let compact_capabilities = quick_index_planner_capability_candidates(&manifest)
-            .strip_prefix("; capability_candidates=")
-            .unwrap_or_default()
-            .to_string();
+        let capability_entries = catalog_entries
+            .iter()
+            .filter(|entry| entry.skill_id == *skill)
+            .map(super::capability_catalog::compact_catalog_line)
+            .collect::<Vec<_>>();
+        if !capability_entries.is_empty() {
+            catalog_lines.push(format!(
+                "- catalog_skill={skill}; capabilities={}",
+                capability_entries.join("|")
+            ));
+        }
         if detailed_capabilities.is_empty() {
             warn!(
                 "planner skill quick index omitted skill without callable capability: skill={}",
@@ -259,45 +248,25 @@ pub(super) fn build_skill_quick_index_text_scoped(
             );
             continue;
         }
-        let detailed = format!(
+        detail_lines.push(format!(
             "- callable_capabilities={detailed_capabilities}; summary={summary}; planner_layer={}{}",
             manifest.planner_kind.as_token(),
             quick_index_output_contract(&manifest)
-        );
-        let compact = format!(
-            "- callable_capabilities={compact_capabilities}; summary={summary}; planner_layer={}{}",
-            manifest.planner_kind.as_token(),
-            quick_index_output_contract(&manifest)
-        );
-        candidate_lines.push(
-            if detailed.chars().count() <= SKILL_QUICK_INDEX_LINE_CHAR_BUDGET {
-                detailed
-            } else {
-                compact
-            },
-        );
+        ));
     }
-    let mut lines = Vec::new();
-    let mut used_chars = 0usize;
-    let mut omitted_count = 0usize;
-    for line in candidate_lines {
-        let separator_chars = usize::from(!lines.is_empty());
-        let line_chars = line.chars().count();
-        if used_chars + separator_chars + line_chars > SKILL_QUICK_INDEX_CHAR_BUDGET {
-            omitted_count += 1;
-            continue;
-        }
-        used_chars += separator_chars + line_chars;
-        lines.push(line);
+    let mut sections = vec![format!(
+        "capability_catalog_v1 complete=true skill_count={}\n{}",
+        catalog_lines.len(),
+        catalog_lines.join("\n")
+    )];
+    if !detail_lines.is_empty() {
+        sections.push(format!(
+            "capability_detail_views_v1 complete=true skill_count={}\n{}",
+            detail_lines.len(),
+            detail_lines.join("\n")
+        ));
     }
-    if omitted_count > 0 {
-        let marker = format!("- omitted_skill_details={omitted_count}; reason=prompt_budget");
-        let marker_chars = marker.chars().count() + usize::from(!lines.is_empty());
-        if used_chars + marker_chars <= SKILL_QUICK_INDEX_CHAR_BUDGET {
-            lines.push(marker);
-        }
-    }
-    lines.join("\n")
+    sections.join("\n\n")
 }
 
 fn candidate_skill_scope_from_loop_state(
@@ -318,10 +287,6 @@ fn candidate_skill_scope_from_loop_state(
         .filter(|skill| available.contains(*skill))
         .cloned()
         .collect::<Vec<_>>();
-    selected.truncate(MAX_SCOPED_SKILL_PLAYBOOKS);
-    if selected.len() >= MAX_SCOPED_SKILL_PLAYBOOKS {
-        return selected.into_iter().collect();
-    }
     for round in loop_state.round_traces.iter().rev() {
         let Some(plan) = round.plan_result.as_ref() else {
             continue;
@@ -344,9 +309,6 @@ fn candidate_skill_scope_from_loop_state(
             if available.contains(&canonical) && !selected.contains(&canonical) {
                 selected.push(canonical);
             }
-            if selected.len() >= MAX_SCOPED_SKILL_PLAYBOOKS {
-                return selected.into_iter().collect();
-            }
         }
     }
     selected.into_iter().collect()
@@ -357,7 +319,10 @@ pub(super) fn build_planner_skill_context(
     task: &ClaimedTask,
     loop_state: &super::LoopState,
 ) -> PlannerSkillContext {
-    let quick_index = build_skill_quick_index_text_scoped(state, task, None);
+    let canonical_quick_index = build_skill_quick_index_text_scoped(state, task, None);
+    let catalog_entries = super::capability_catalog::catalog_entries_for_task(state, task);
+    let fitted = fit_catalog_to_provider_window(state, &canonical_quick_index, &catalog_entries);
+    let quick_index = fitted.text;
     let quick_index_chars = quick_index.chars().count();
     let scope = candidate_skill_scope_from_loop_state(state, task, loop_state);
     let playbooks = if scope.is_empty() {
@@ -366,7 +331,7 @@ pub(super) fn build_planner_skill_context(
         build_skill_playbooks_bundle_scoped(state, task, Some(&scope))
     };
     let disclosure_mode = if playbooks.included_skills.is_empty() {
-        "compact_index"
+        fitted.mode
     } else {
         "scoped_playbooks"
     };
@@ -378,24 +343,17 @@ pub(super) fn build_planner_skill_context(
     let playbook_chars = playbooks.text.chars().count();
     let selected_skills = playbooks.included_skills;
     let playbook_text = playbooks.text;
-    let omitted_playbook_count = playbooks.omitted_count;
     let selected_token = if selected_skills.is_empty() {
         "none".to_string()
     } else {
         selected_skills.join(",")
     };
     let mut text = format!(
-        "runtime_skill_context_v2\ndisclosure_mode={disclosure_mode}\ncandidate_source={candidate_source}\nselected_skills={selected_token}\nquick_index_budget_chars={SKILL_QUICK_INDEX_CHAR_BUDGET}\nplaybook_budget_chars={SKILL_PLAYBOOK_CHAR_BUDGET}\nmcp_disclosure=bounded_catalog_with_search\n\nCompact skill index:\n{quick_index}"
+        "runtime_skill_context_v3\ndisclosure_mode={disclosure_mode}\ncandidate_source={candidate_source}\nselected_skills={selected_token}\nregistry_disclosure=complete_catalog_and_selected_playbooks\nmcp_disclosure=complete_catalog_with_search\n\nCompact skill index:\n{quick_index}"
     );
     if !selected_skills.is_empty() {
         text.push_str("\n\nSelected skill playbooks:\n");
         text.push_str(&playbook_text);
-    }
-    if omitted_playbook_count > 0 {
-        text.push_str(&format!(
-            "\n\nomitted_selected_playbooks={}; reason=prompt_budget",
-            omitted_playbook_count
-        ));
     }
     info!(
         "planner skill context: mode={} selected_skills=[{}] quick_index_chars={} playbook_chars={} total_chars={}",
@@ -413,6 +371,59 @@ pub(super) fn build_planner_skill_context(
         selected_skills,
         quick_index_chars,
         playbook_chars,
+    }
+}
+
+fn fit_catalog_to_provider_window(
+    state: &AppState,
+    canonical: &str,
+    entries: &[super::capability_catalog::CapabilityCatalogEntry],
+) -> ProviderFittedCatalog {
+    let descriptor = state
+        .core
+        .llm_providers
+        .iter()
+        .map(|provider| provider.model_descriptor())
+        .filter_map(|descriptor| {
+            descriptor
+                .context_window_tokens
+                .map(|window| (window, descriptor.output_reserve_tokens))
+        })
+        .min_by_key(|(window, _)| *window);
+    let Some((context_window, output_reserve)) = descriptor else {
+        return ProviderFittedCatalog {
+            text: canonical.to_string(),
+            mode: "compact_index",
+        };
+    };
+    let prompt_capacity = context_window.saturating_sub(output_reserve);
+    let catalog_budget = prompt_capacity
+        .saturating_mul(CATALOG_PROMPT_SHARE_PERCENT)
+        .saturating_div(100)
+        .max(1);
+    let estimate = crate::token_estimator::estimate_generic_tokens(canonical).provider_tokens;
+    if estimate <= catalog_budget {
+        return ProviderFittedCatalog {
+            text: canonical.to_string(),
+            mode: "compact_index",
+        };
+    }
+    let canonical_sha256 = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(canonical.as_bytes()))
+    };
+    let skills = entries
+        .iter()
+        .map(|entry| entry.skill_id.clone())
+        .collect::<BTreeSet<_>>();
+    ProviderFittedCatalog {
+        text: format!(
+            "capability_catalog_view_v1 complete=false canonical_complete=true canonical_ref=catalog:{canonical_sha256} canonical_capability_count={} skill_count={} provider_context_window_tokens={context_window} provider_catalog_budget_tokens={catalog_budget} recovery=load_capability_groups(op=search|expand)\n- catalog_skills={}",
+            entries.len(),
+            skills.len(),
+            skills.into_iter().collect::<Vec<_>>().join("|")
+        ),
+        mode: "provider_fitted_catalog",
     }
 }
 

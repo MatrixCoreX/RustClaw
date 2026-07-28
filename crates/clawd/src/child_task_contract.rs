@@ -3,8 +3,6 @@
 use serde_json::{json, Value};
 
 pub(crate) const CHILD_TASK_SCHEMA_VERSION: u64 = 1;
-pub(crate) const DEFAULT_MAX_CHILDREN_PER_PARENT: usize = 16;
-pub(crate) const DEFAULT_MAX_CHILD_DEPTH: usize = 1;
 
 #[path = "child_task_contract_policy.rs"]
 mod child_task_contract_policy;
@@ -87,6 +85,7 @@ impl ChildTaskMergePolicy {
 pub(crate) struct ChildTaskBudget {
     pub(crate) max_rounds: u64,
     pub(crate) max_tool_calls: u64,
+    pub(crate) max_tokens: u64,
     pub(crate) timeout_ms: u64,
 }
 
@@ -95,6 +94,7 @@ impl ChildTaskBudget {
         Self {
             max_rounds: 2,
             max_tool_calls: 8,
+            max_tokens: 1_000_000,
             timeout_ms: 120_000,
         }
     }
@@ -103,6 +103,7 @@ impl ChildTaskBudget {
         json!({
             "max_rounds": self.max_rounds,
             "max_tool_calls": self.max_tool_calls,
+            "max_tokens": self.max_tokens,
             "timeout_ms": self.timeout_ms,
         })
     }

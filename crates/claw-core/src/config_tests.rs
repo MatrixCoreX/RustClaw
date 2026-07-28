@@ -61,6 +61,35 @@ busy_timeout_ms = 2000
 }
 
 #[test]
+fn removed_worker_model_budget_fields_are_ignored_without_becoming_runtime_authority() {
+    let dir = unique_temp_config_dir("legacy-worker-model-budget");
+    fs::create_dir_all(&dir).expect("create temp config dir");
+    let config_path = dir.join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[server]
+request_timeout_seconds = 30
+
+[database]
+sqlite_path = "data/test.db"
+busy_timeout_ms = 2000
+
+[worker]
+llm_max_calls_per_task = 40
+llm_total_timeout_seconds = 900
+"#,
+    )
+    .expect("write temp config");
+
+    let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
+        .expect("legacy worker model-budget fields remain readable");
+    assert_eq!(cfg.worker.task_timeout_seconds, 3600);
+
+    fs::remove_dir_all(dir).expect("remove temp config dir");
+}
+
+#[test]
 fn app_config_load_defaults_mcp_boundary_closed() {
     let dir = unique_temp_config_dir("mcp-default");
     fs::create_dir_all(&dir).expect("create temp config dir");

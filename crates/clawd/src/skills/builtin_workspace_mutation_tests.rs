@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    atomic_write_file, rewind_structured_mutation, run_checkpointed_workspace_mutation,
-    structured_mutation_diff,
+    atomic_write_file, rewind_structured_mutation, run_authorized_mutation,
+    run_checkpointed_workspace_mutation, structured_mutation_diff,
 };
 
 struct TestWorkspace {
@@ -254,6 +254,63 @@ fn identical_file_write_is_recorded_as_no_op() {
         value.get("reversible").and_then(Value::as_bool),
         Some(false)
     );
+}
+
+#[test]
+fn authorized_host_scope_mutation_is_applied_without_workspace_checkpoint() {
+    let workspace = TestWorkspace::new("host-scope-workspace");
+    let outside = TestWorkspace::new("host-scope-outside");
+    let path = outside.path().join("nested/result.txt");
+
+    let output = run_authorized_mutation(
+        workspace.path(),
+        "task-host-scope",
+        "write_text",
+        &path,
+        true,
+        || {
+            fs::create_dir_all(path.parent().expect("parent"))
+                .map_err(|error| error.to_string())?;
+            atomic_write_file(&path, b"host scope").map_err(|error| error.to_string())
+        },
+    )
+    .expect("host-scope mutation");
+
+    let value: Value = serde_json::from_str(&output).expect("output json");
+    assert_eq!(
+        value.get("source").and_then(Value::as_str),
+        Some("host_scope_mutation")
+    );
+    assert_eq!(
+        value.get("authority_scope").and_then(Value::as_str),
+        Some("unrestricted_admin")
+    );
+    assert_eq!(
+        value.get("reversible").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(value.get("checkpoint_id").is_none());
+    assert_eq!(fs::read_to_string(path).expect("host file"), "host scope");
+}
+
+#[test]
+fn host_scope_mutation_requires_server_authorization() {
+    let workspace = TestWorkspace::new("denied-host-scope-workspace");
+    let outside = TestWorkspace::new("denied-host-scope-outside");
+    let path = outside.path().join("denied.txt");
+
+    let error = run_authorized_mutation(
+        workspace.path(),
+        "task-denied-host-scope",
+        "write_text",
+        &path,
+        false,
+        || fs::write(&path, "must not run").map_err(|error| error.to_string()),
+    )
+    .expect_err("host scope must require authorization");
+
+    assert!(error.contains("invalid_target"));
+    assert!(!path.exists());
 }
 
 #[cfg(unix)]

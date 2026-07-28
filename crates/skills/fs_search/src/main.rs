@@ -5,7 +5,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use rustclaw_fs_discovery::{
-    BackendPreference, CaseMode, Completeness, DiscoverySelector, MatchMode, TargetKind,
+    fuzzy_name_score, BackendPreference, CaseMode, Completeness, DiscoverySelector, MatchMode,
+    TargetKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -22,7 +23,10 @@ use grep_search::{
     find_matches, GrepOptions, PatternKind, MAX_CONTEXT_LINES, MAX_REGEX_PATTERN_BYTES,
 };
 use image_search::{collect_images, default_image_extensions, directory_counts, ImageEntry};
-use result_pagination::{cursor_from_args, cursor_snapshot_identity, paginate, query_sha256};
+use result_pagination::{
+    cursor_from_args, cursor_snapshot_identity, encode_scan_continuation, paginate, query_sha256,
+    scan_offset_from_args,
+};
 use snapshot_cache::{render_cached, render_missing_snapshot, SnapshotCache};
 use workspace_traversal::{
     resolve_path, to_rel, walk_collect_selected, workspace_root, ScanLimits, WalkStats,
@@ -72,6 +76,7 @@ fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
         .max(1);
     ScanLimits {
         max_depth,
+        start_after_entries: 0,
         hard_entry_limit,
         include_hidden: obj
             .get("include_hidden")
@@ -98,7 +103,18 @@ fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
                 BackendPreference::Auto
             }
         },
+        allow_path_outside_workspace: false,
     }
+}
+
+fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
+    context.is_some_and(|context| {
+        context
+            .pointer("/permissions/allow_path_outside_workspace")
+            .or_else(|| context.get("allow_path_outside_workspace"))
+            .and_then(Value::as_bool)
+            == Some(true)
+    })
 }
 
 fn effective_completeness(
@@ -130,6 +146,8 @@ fn scan_report(stats: &WalkStats, completeness: Completeness) -> Value {
         "backend_version": stats.backend_version,
         "backend_fallback_reason": stats.backend_fallback_reason,
         "backend_elapsed_ms": stats.backend_elapsed_ms,
+        "traversal_start": stats.traversal_start,
+        "traversal_next": stats.traversal_next,
     })
 }
 
@@ -173,6 +191,7 @@ fn match_mode_from_args(
         "prefix" | "starts_with" => Ok((MatchMode::StartsWith, "prefix")),
         "suffix" | "ends_with" => Ok((MatchMode::EndsWith, "suffix")),
         "contains" => Ok((MatchMode::Contains, "contains")),
+        "fuzzy" | "approximate" | "typo_tolerant" => Ok((MatchMode::Fuzzy, "fuzzy")),
         "glob" => Ok((MatchMode::Glob, "glob")),
         _ => Err("match_mode_unsupported".to_string()),
     }
@@ -236,11 +255,17 @@ fn effective_policy(scan_limits: ScanLimits) -> Value {
         "include_hidden": scan_limits.include_hidden,
         "respect_ignore": scan_limits.respect_ignore,
         "max_depth": scan_limits.max_depth,
+        "traversal_start": scan_limits.start_after_entries,
         "follow_symlinks": false,
     })
 }
 
-fn continuation_from_page(page: &Value, completeness: Completeness) -> Value {
+fn continuation_from_page(
+    page: &Value,
+    completeness: Completeness,
+    stats: &WalkStats,
+    query_sha256: &str,
+) -> Value {
     if completeness == Completeness::StaleSnapshot {
         return json!({
             "kind": "new_snapshot",
@@ -256,6 +281,15 @@ fn continuation_from_page(page: &Value, completeness: Completeness) -> Value {
         });
     }
     if !completeness.is_complete() {
+        if let Some(offset) = stats.traversal_next {
+            return json!({
+                "kind": "scan_frontier",
+                "safe_to_continue": true,
+                "reason_code": completeness.as_str(),
+                "token": encode_scan_continuation(query_sha256, offset),
+                "traversal_offset": offset,
+            });
+        }
         return json!({
             "kind": "narrow_search",
             "safe_to_continue": true,
@@ -509,6 +543,21 @@ fn sort_entry_results(results: &mut [String], root: &Path, mode: &str) {
     }
 }
 
+fn sort_fuzzy_results(results: &mut [String], patterns: &[String], case_mode: CaseMode) {
+    let score = |path: &str| {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(path);
+        patterns
+            .iter()
+            .filter_map(|pattern| fuzzy_name_score(name, pattern, case_mode))
+            .min()
+            .unwrap_or(usize::MAX)
+    };
+    results.sort_by(|left, right| score(left).cmp(&score(right)).then_with(|| left.cmp(right)));
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -604,6 +653,7 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
     let query_sha256 = query_sha256(obj);
 
     let root = workspace_root();
+    let allow_path_outside_workspace = context_allows_path_outside_workspace(context);
     let search_root = resolve_path(
         &root,
         obj.get("root")
@@ -611,8 +661,11 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             .or_else(|| obj.get("dir"))
             .and_then(|v| v.as_str())
             .unwrap_or("."),
+        allow_path_outside_workspace,
     )?;
-    let scan_limits = scan_limits_from_args(obj);
+    let mut scan_limits = scan_limits_from_args(obj);
+    scan_limits.start_after_entries = scan_offset_from_args(obj, &query_sha256)?;
+    scan_limits.allow_path_outside_workspace = allow_path_outside_workspace;
     let snapshot_cache = SnapshotCache::from_context(context)?;
     if let (Some(cache), Some((cursor_query, cursor_snapshot))) =
         (snapshot_cache.as_ref(), cursor_snapshot_identity(&cursor)?)
@@ -680,7 +733,12 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             let stats = walk_collect_selected(&search_root, scan_limits, selector, &mut collect)?;
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
             results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
-            sort_entry_results(&mut results, &root, sort_by);
+            let fuzzy_relevance = match_mode == MatchMode::Fuzzy && !obj.contains_key("sort_by");
+            if fuzzy_relevance {
+                sort_fuzzy_results(&mut results, &pattern_norms, case_mode);
+            } else {
+                sort_entry_results(&mut results, &root, sort_by);
+            }
             results.dedup();
             let page = paginate(
                 &results,
@@ -691,7 +749,8 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             )?;
             let completeness =
                 effective_completeness(&stats, result_limit_reached, page.stale_snapshot);
-            let continuation = continuation_from_page(&page.metadata, completeness);
+            let continuation =
+                continuation_from_page(&page.metadata, completeness, &stats, &query_sha256);
             let primary_items = results.iter().cloned().map(Value::String).collect();
             let response = json!({
                 "schema_version": 2,
@@ -705,7 +764,7 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
                 "exact": exact_name,
                 "match_mode": match_mode_label,
                 "case_mode": case_mode_label,
-                "sort_by": sort_by,
+                "sort_by": if fuzzy_relevance { "relevance" } else { sort_by },
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
@@ -766,7 +825,14 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             })?;
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
             results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
-            sort_entry_results(&mut results, &root, sort_by);
+            let fuzzy_relevance = match_mode == MatchMode::Fuzzy
+                && !pattern_norms.is_empty()
+                && !obj.contains_key("sort_by");
+            if fuzzy_relevance {
+                sort_fuzzy_results(&mut results, &pattern_norms, case_mode);
+            } else {
+                sort_entry_results(&mut results, &root, sort_by);
+            }
             results.dedup();
             let page = paginate(
                 &results,
@@ -777,7 +843,8 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             )?;
             let completeness =
                 effective_completeness(&stats, result_limit_reached, page.stale_snapshot);
-            let continuation = continuation_from_page(&page.metadata, completeness);
+            let continuation =
+                continuation_from_page(&page.metadata, completeness, &stats, &query_sha256);
             let ext = exts.first().cloned().unwrap_or_default();
             let primary_items = results.iter().cloned().map(Value::String).collect();
             let response = json!({
@@ -793,7 +860,7 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
                 "globs": globs,
                 "match_mode": match_mode_label,
                 "case_mode": case_mode_label,
-                "sort_by": sort_by,
+                "sort_by": if fuzzy_relevance { "relevance" } else { sort_by },
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
@@ -994,7 +1061,7 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
             let continuation = if output_mode == "count" && completeness.is_complete() {
                 Value::Null
             } else {
-                continuation_from_page(&page_metadata, completeness)
+                continuation_from_page(&page_metadata, completeness, &stats, &query_sha256)
             };
             let observation_bytes = serde_json::to_vec(&page_result_paths)
                 .map(|value| value.len())
@@ -1107,7 +1174,12 @@ fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, S
                 snapshot.scan_truncated,
                 page.stale_snapshot,
             );
-            let continuation = continuation_from_page(&page.metadata, completeness);
+            let continuation = continuation_from_page(
+                &page.metadata,
+                completeness,
+                &snapshot.stats,
+                &query_sha256,
+            );
             let results = page
                 .items
                 .iter()

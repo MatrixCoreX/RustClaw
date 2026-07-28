@@ -541,6 +541,10 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   if (schedulerStatus) meta.push(`scheduler_status=${schedulerStatus}`);
   const schedulerReasonCode = stringAt(payload, ["scheduler", "reason_code"]);
   if (schedulerReasonCode) meta.push(`scheduler_reason_code=${schedulerReasonCode}`);
+  const limitReasonCode = stringAt(payload, ["limit_hit", "reason_code"]);
+  if (limitReasonCode) meta.push(`limit_reason_code=${limitReasonCode}`);
+  const limitOwner = stringAt(payload, ["limit_hit", "owner"]);
+  if (limitOwner) meta.push(`limit_owner=${limitOwner}`);
   const mergeStrategy = stringAt(payload, ["merge_contract", "strategy"]);
   if (mergeStrategy) meta.push(`merge_strategy=${mergeStrategy}`);
   const mergeStatus = stringAt(payload, ["merge_contract", "child_trace_merge_status"]);
@@ -675,8 +679,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
 
   if (eventType === "budget_decision") {
     const decision = field("decision");
-    const profile = field("profile");
-    const continuation = field("continuation_index") || "0";
+    const limitReason = stringAt(payload, ["limit_hit", "reason_code"]);
     const budgetTone: TaskTraceEventView["tone"] =
       decision === "terminal"
         ? "failed"
@@ -687,11 +690,24 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
             : "running";
     return {
       eventType,
-      title: tLocal("任务预算决策", "Task budget decision"),
-      detail: tLocal(
-        `${profile || "general"} · ${decision || "continue"} · 续跑 ${continuation}`,
-        `${profile || "general"} · ${decision || "continue"} · continuation ${continuation}`,
-      ),
+      title: tLocal("任务进度", "Task progress"),
+      detail:
+        decision === "finish"
+          ? tLocal("任务已完成。", "The task is complete.")
+          : decision === "checkpoint_requeue"
+            ? tLocal("已保存进度，系统会安全继续。", "Progress is saved and RustClaw will continue safely.")
+            : decision === "waiting"
+              ? tLocal("已保存进度，正在等待外部服务。", "Progress is saved while RustClaw waits for an external service.")
+              : decision === "needs_user"
+                ? tLocal("需要你的确认或补充后才能继续。", "RustClaw needs your confirmation or more information to continue.")
+                : decision === "terminal" && limitReason
+                  ? tLocal(
+                      "已达到管理员设置的安全边界，任务已安全停止。",
+                      "The task reached an administrator safety boundary and stopped safely.",
+                    )
+                  : decision === "terminal"
+                    ? tLocal("任务已安全停止，请查看原因。", "The task stopped safely. Check the reason for details.")
+                    : tLocal("仍在处理，当前进度正常。", "RustClaw is still working and making normal progress."),
       tone: budgetTone,
       meta,
     };

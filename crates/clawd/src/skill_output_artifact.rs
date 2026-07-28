@@ -14,6 +14,86 @@ pub(crate) struct PublishedArtifact {
     pub(crate) range_handle: Value,
 }
 
+pub(crate) fn sensitivity_aware_json_model_view(value: &Value) -> (Value, bool) {
+    fn redact(value: &Value, sensitive_parent: bool, redacted: &mut bool) -> Value {
+        match value {
+            Value::Object(object) => Value::Object(
+                object
+                    .iter()
+                    .map(|(key, child)| {
+                        let sensitive = sensitive_parent || sensitive_field_name(key);
+                        let child = if sensitive {
+                            *redacted = true;
+                            redacted_value(child)
+                        } else {
+                            redact(child, false, redacted)
+                        };
+                        (key.clone(), child)
+                    })
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|item| redact(item, sensitive_parent, redacted))
+                    .collect(),
+            ),
+            Value::String(text) => {
+                let (safe, changed) = sensitivity_aware_text_model_view(text);
+                *redacted |= changed;
+                Value::String(safe)
+            }
+            _ => value.clone(),
+        }
+    }
+
+    let mut redacted = false;
+    (redact(value, false, &mut redacted), redacted)
+}
+
+pub(crate) fn sensitivity_aware_text_model_view(value: &str) -> (String, bool) {
+    let mut output = Vec::new();
+    let mut redacted = false;
+    let mut private_key = false;
+    for line in value.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("begin ") && lower.contains("private key") {
+            private_key = true;
+            redacted = true;
+            output.push("[REDACTED private_key]".to_string());
+            continue;
+        }
+        if private_key {
+            redacted = true;
+            if lower.contains("end ") && lower.contains("private key") {
+                private_key = false;
+            }
+            continue;
+        }
+        if let Some(boundary) = sensitive_assignment_boundary(line) {
+            redacted = true;
+            let secret = line[boundary..].trim();
+            output.push(format!(
+                "{}[REDACTED sha256:{:x}]",
+                &line[..boundary],
+                Sha256::digest(secret.as_bytes())
+            ));
+            continue;
+        }
+        if let Some(start) = lower.find("bearer ") {
+            redacted = true;
+            output.push(format!("{}Bearer [REDACTED]", &line[..start]));
+            continue;
+        }
+        output.push(line.to_string());
+    }
+    let mut safe = output.join("\n");
+    if value.ends_with('\n') {
+        safe.push('\n');
+    }
+    (safe, redacted)
+}
+
 pub(crate) fn spill_skill_text_if_needed(
     workspace_root: &Path,
     task_id: &str,
@@ -163,6 +243,131 @@ pub(crate) fn publish_existing_task_artifact(
         artifact_ref,
         range_handle,
     }))
+}
+
+pub(crate) fn publish_canonical_evidence_artifact(
+    workspace_root: &Path,
+    task_id: &str,
+    evidence_id: &str,
+    bytes: &[u8],
+) -> io::Result<PublishedArtifact> {
+    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    let task_key = machine_path_component(task_id, "task");
+    let relative_path = PathBuf::from(".rustclaw")
+        .join("artifacts")
+        .join("canonical-evidence")
+        .join(task_key)
+        .join(format!("{sha256}.json"));
+    let artifact_path = workspace_root.join(&relative_path);
+    if !artifact_path.is_file() {
+        atomic_write(&artifact_path, bytes)?;
+        restrict_evidence_permissions(&artifact_path)?;
+    }
+    let relative_path = relative_path.to_string_lossy().replace('\\', "/");
+    let artifact_ref = json!({
+        "id": evidence_id,
+        "path": relative_path,
+        "media_type": "application/json",
+        "sha256": sha256,
+        "metadata": {
+            "size_bytes": bytes.len(),
+            "task_id": task_id,
+            "provenance": "canonical_capability_result",
+            "sensitivity": "task_owner_restricted",
+            "retention": "task_retention_policy",
+            "storage_protection": {
+                "access_control": "task_owner_and_runtime",
+                "private_file_mode": "0600",
+                "private_directory_mode": "0700",
+                "at_rest_encryption": "deployment_storage_policy",
+            },
+        },
+    });
+    let range_handle = json!({
+        "artifact_ref": evidence_id,
+        "path": artifact_ref["path"],
+        "start_byte": 0,
+        "end_byte": bytes.len(),
+        "read_capability": "artifact.read_range",
+    });
+    Ok(PublishedArtifact {
+        artifact_ref,
+        range_handle,
+    })
+}
+
+fn sensitive_field_name(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase().replace(['-', '.'], "_");
+    [
+        "api_key",
+        "apikey",
+        "access_token",
+        "refresh_token",
+        "authorization",
+        "password",
+        "passwd",
+        "secret",
+        "client_secret",
+        "private_key",
+        "cookie",
+        "set_cookie",
+        "user_key",
+    ]
+    .iter()
+    .any(|candidate| normalized == *candidate || normalized.ends_with(&format!("_{candidate}")))
+}
+
+fn sensitive_assignment_boundary(line: &str) -> Option<usize> {
+    let lower = line.to_ascii_lowercase();
+    let sensitive = [
+        "api_key",
+        "apikey",
+        "access_token",
+        "refresh_token",
+        "authorization",
+        "password",
+        "passwd",
+        "client_secret",
+        "private_key",
+        "user_key",
+    ];
+    if !sensitive.iter().any(|key| lower.contains(key)) {
+        return None;
+    }
+    line.find('=')
+        .or_else(|| line.find(':'))
+        .map(|index| index + 1)
+}
+
+fn redacted_value(value: &Value) -> Value {
+    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    json!({
+        "redacted": true,
+        "sha256": format!("{:x}", Sha256::digest(&bytes)),
+        "value_kind": match value {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        },
+    })
+}
+
+#[cfg(unix)]
+fn restrict_evidence_permissions(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    if let Some(parent) = path.parent() {
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_evidence_permissions(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn preview_limit_bytes() -> usize {

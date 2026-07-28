@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{SecondsFormat, Utc};
 use rustclaw_fs_discovery::{
-    discover, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector, MatchMode,
-    TargetKind,
+    discover, fuzzy_name_score, CaseMode, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest,
+    DiscoverySelector, MatchMode, TargetKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -1394,6 +1394,7 @@ fn find_path(
             "exact" => MatchMode::Exact,
             "starts_with" => MatchMode::StartsWith,
             "ends_with" => MatchMode::EndsWith,
+            "fuzzy" => MatchMode::Fuzzy,
             _ => MatchMode::Contains,
         },
         ..DiscoverySelector::default()
@@ -1421,9 +1422,24 @@ fn find_path(
         discover(&request).map_err(|error| SkillError::new(error.code(), error.to_string()))?;
     let known_match_count = report.entries.len();
     let has_more = known_match_count > max_results;
-    let matches = report
-        .entries
-        .iter()
+    let mut ranked_entries = report.entries.iter().collect::<Vec<_>>();
+    if match_mode == "fuzzy" {
+        ranked_entries.sort_by(|left, right| {
+            let score = |entry: &&rustclaw_fs_discovery::DiscoveryEntry| {
+                entry
+                    .path
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .and_then(|name| fuzzy_name_score(name, needle, CaseMode::Insensitive))
+                    .unwrap_or(usize::MAX)
+            };
+            score(left)
+                .cmp(&score(right))
+                .then_with(|| left.relative_path.cmp(&right.relative_path))
+        });
+    }
+    let matches = ranked_entries
+        .into_iter()
         .take(max_results)
         .map(|entry| {
             json!({

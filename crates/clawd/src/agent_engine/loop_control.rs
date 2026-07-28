@@ -568,6 +568,7 @@ fn task_budget_profile(
 struct ChildLoopBudgetLimits {
     max_rounds: u64,
     max_tool_calls: u64,
+    max_tokens: u64,
     timeout_ms: u64,
 }
 
@@ -578,9 +579,14 @@ fn child_loop_budget_limits(payload_json: &str) -> Option<ChildLoopBudgetLimits>
     }
     let budget = payload.pointer("/child_task_contract/budget")?;
     Some(ChildLoopBudgetLimits {
-        max_rounds: budget.get("max_rounds")?.as_u64()?.clamp(1, 256),
-        max_tool_calls: budget.get("max_tool_calls")?.as_u64()?.clamp(1, 512),
-        timeout_ms: budget.get("timeout_ms")?.as_u64()?.clamp(1_000, 86_400_000),
+        max_rounds: budget.get("max_rounds")?.as_u64()?.max(1),
+        max_tool_calls: budget.get("max_tool_calls")?.as_u64()?.max(1),
+        max_tokens: budget
+            .get("max_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(1_000_000)
+            .max(1),
+        timeout_ms: budget.get("timeout_ms")?.as_u64()?.max(1_000),
     })
 }
 
@@ -603,6 +609,7 @@ fn clamp_child_task_budget_policy(
     };
     policy.hard_ceilings.model_turns = policy.hard_ceilings.model_turns.min(limits.max_rounds);
     policy.hard_ceilings.tool_calls = policy.hard_ceilings.tool_calls.min(limits.max_tool_calls);
+    policy.hard_ceilings.total_tokens = policy.hard_ceilings.total_tokens.min(limits.max_tokens);
     policy.hard_ceilings.elapsed_ms = policy.hard_ceilings.elapsed_ms.min(limits.timeout_ms);
 }
 
@@ -732,7 +739,8 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
     round.stop_signal.as_deref().is_some_and(|signal| {
         matches!(
             signal,
-            "action_result_continue_round"
+            "action_observation_boundary"
+                | "action_result_continue_round"
                 | "recoverable_failure_continue_round"
                 | "capability_groups_loaded"
                 | "mcp_capabilities_loaded"
@@ -927,6 +935,7 @@ fn observe_task_budget(
         "hard_elapsed_ms": slice.hard_ceilings.elapsed_ms,
         "hard_continuations": slice.hard_ceilings.continuations,
         "hard_non_resumable_tool_runtime_ms": slice.hard_ceilings.non_resumable_tool_runtime_ms,
+        "limit_hit": slice.last_limit_hit,
     });
     if let Err(err) = crate::task_event_transport::publish_claimed_event(
         state,
@@ -1426,6 +1435,48 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                     break;
                 }
                 super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
+                let allocation_id = format!("turn:{}", round);
+                let model_turns_before = state.task_llm_call_count(&task.task_id) as u64;
+                let tool_calls_before = loop_state.tool_calls_total as u64;
+                let elapsed_before = loop_started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64;
+                let cost_before = state.task_llm_cost_summary(&task.task_id);
+                let turn_allocated = loop_state
+                    .task_budget_slice
+                    .as_mut()
+                    .and_then(|slice| {
+                        let remaining_turns = slice
+                            .hard_ceilings
+                            .model_turns
+                            .saturating_sub(slice.cumulative_model_turns)
+                            .max(1);
+                        let remaining_tokens = slice.hard_ceilings.total_tokens.saturating_sub(
+                            slice
+                                .cumulative_input_tokens
+                                .saturating_add(slice.cumulative_output_tokens),
+                        );
+                        slice.allocate(
+                            allocation_id.clone(),
+                            format!("round:{round}"),
+                            crate::task_budget_contract::BudgetAllocationKind::ModelTurn,
+                            crate::task_budget_contract::BudgetUnits {
+                                model_turns: 1,
+                                tool_calls: policy.max_actions_per_turn as u64,
+                                tokens: remaining_tokens.saturating_add(remaining_turns - 1)
+                                    / remaining_turns,
+                                elapsed_ms: slice.soft_slice_ms,
+                            },
+                        )
+                    })
+                    .is_some();
+                if !turn_allocated {
+                    observe_task_budget(state, task, &mut loop_state, None, loop_started_at, false);
+                    loop_state.last_stop_signal =
+                        Some("task_budget_allocation_exhausted".to_string());
+                    break;
+                }
                 let outcome = run_agent_round(
                     state,
                     task,
@@ -1437,7 +1488,33 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                     agent_run_context,
                     (round == 1).then_some(initial_plan).flatten(),
                 )
-                .await?;
+                .await;
+                let cost_after = state.task_llm_cost_summary(&task.task_id);
+                let elapsed_after = loop_started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64;
+                if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+                    slice.settle_allocation(
+                        &allocation_id,
+                        crate::task_budget_contract::BudgetUnits {
+                            model_turns: (state.task_llm_call_count(&task.task_id) as u64)
+                                .saturating_sub(model_turns_before),
+                            tool_calls: (loop_state.tool_calls_total as u64)
+                                .saturating_sub(tool_calls_before),
+                            tokens: cost_after
+                                .input_tokens
+                                .saturating_add(cost_after.output_tokens)
+                                .saturating_sub(
+                                    cost_before
+                                        .input_tokens
+                                        .saturating_add(cost_before.output_tokens),
+                                ),
+                            elapsed_ms: elapsed_after.saturating_sub(elapsed_before),
+                        },
+                    );
+                }
+                let outcome = outcome?;
                 loop_state.last_stop_signal = outcome.stop_signal.clone();
                 if outcome.no_progress {
                     loop_state.consecutive_no_progress =

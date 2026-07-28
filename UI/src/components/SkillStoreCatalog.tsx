@@ -120,7 +120,7 @@ export function SkillStoreCatalog({
       queued: ["等待开始", "Queued"],
       preflight: ["检查运行环境", "Checking prerequisites"],
       dependencies: ["准备独立依赖", "Preparing private dependencies"],
-      build: ["构建运行文件", "Building runtime files"],
+      build: ["准备运行文件", "Preparing runtime files"],
       smoke: ["验证技能协议", "Validating the skill protocol"],
       activate: ["安全启用新版本", "Activating the verified version"],
       configure: ["保存技能设置", "Saving skill settings"],
@@ -199,7 +199,7 @@ export function SkillStoreCatalog({
         <details className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/50">
           <summary className="cursor-pointer text-white/60">{t("安装信息", "Install details")}</summary>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt>{t("构建方式", "Adapter")}</dt>
+            <dt>{t("安装适配器", "Install adapter")}</dt>
             <dd className="break-all text-white/75">{item.build_adapter ?? t("无需构建", "No build")}</dd>
             <dt>{t("支持系统", "Platforms")}</dt>
             <dd className="break-all text-white/75">{item.supported_os?.join(", ") || t("跟随运行环境", "Runtime default")}</dd>
@@ -266,7 +266,10 @@ export function SkillStoreCatalog({
         <div>
           <h2 className="text-base font-semibold text-white">Skill Store</h2>
           <p className="mt-1 text-sm text-white/55">
-            {t("安装、删除或重新安装可选技能。", "Install, remove, or reinstall optional skills.")}
+            {t(
+              "安装、删除或重新安装可选技能。当前平台有预编译版本时会直接验证并启用；没有匹配版本时才单独构建这个技能。",
+              "Install, remove, or reinstall optional skills. RustClaw verifies and activates a matching platform precompile when available, and builds only this skill when no compatible precompile exists.",
+            )}
           </p>
         </div>
         <div className="flex min-w-0 gap-2 sm:w-auto">

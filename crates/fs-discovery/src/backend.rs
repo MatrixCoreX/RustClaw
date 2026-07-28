@@ -6,6 +6,18 @@ use crate::{
 };
 
 pub fn discover(request: &DiscoveryRequest) -> Result<DiscoveryReport, DiscoveryError> {
+    if request.budget.start_after_entries > 0 {
+        return match request.backend {
+            BackendPreference::Ripgrep => Err(DiscoveryError::BackendFailed(
+                "traversal_continuation_requires_rust_backend".to_string(),
+            )),
+            BackendPreference::Auto | BackendPreference::Rust => walker::discover_rust(
+                request,
+                (request.backend == BackendPreference::Auto)
+                    .then(|| "traversal_continuation_requires_rust_backend".to_string()),
+            ),
+        };
+    }
     match request.backend {
         BackendPreference::Rust => walker::discover_rust(request, None),
         BackendPreference::Ripgrep => ripgrep::discover(request).map_err(|failure| {

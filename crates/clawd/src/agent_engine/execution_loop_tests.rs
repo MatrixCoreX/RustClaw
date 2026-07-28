@@ -1,7 +1,8 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
-    active_tool_event_payload, capture_round_progress_snapshot, check_repeat_action_guard,
-    finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
+    action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
+    check_repeat_action_guard, finalize_execute_round_outcome,
+    prior_structured_observation_satisfies_read_only_action,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
@@ -27,6 +28,21 @@ fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuar
         multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     }
+}
+
+#[test]
+fn action_count_is_an_explicit_replan_boundary_not_a_terminal_drop() {
+    let observation = action_observation_boundary(12, 8, 8).expect("soft boundary");
+    assert_eq!(observation["state"], "continue");
+    assert_eq!(observation["complete"], false);
+    assert_eq!(observation["planned_action_count"], 12);
+    assert_eq!(observation["executed_action_count"], 8);
+    assert_eq!(observation["remaining_action_count"], 4);
+    assert_eq!(
+        observation["recovery_action"],
+        "replan_from_latest_observation"
+    );
+    assert!(action_observation_boundary(8, 8, 8).is_none());
 }
 
 fn task_fixture(id: &str) -> crate::ClaimedTask {

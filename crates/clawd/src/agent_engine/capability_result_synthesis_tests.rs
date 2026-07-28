@@ -4,7 +4,10 @@ use claw_core::capability_result::{
 };
 use serde_json::json;
 
-use super::{bounded_result, eligible_for_capability_result_synthesis, MAX_RESULT_JSON_CHARS};
+use super::{
+    bounded_result, eligible_for_capability_result_synthesis, synthesis_evidence_catalog,
+    MAX_RESULT_JSON_CHARS,
+};
 use crate::agent_engine::{AgentRunContext, LoopState};
 
 #[test]
@@ -767,4 +770,74 @@ fn explicit_model_observation_keeps_deep_evidence_and_drops_bulk_metadata() {
         Some(&json!("SUM(B2:B3)"))
     );
     assert!(bounded.data.pointer("/extra/package").is_none());
+}
+
+#[test]
+fn result_nine_and_large_result_remain_content_addressed_and_recoverable() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-evidence-catalog-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    state.skill_rt.workspace_root = root.clone();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: uuid::Uuid::new_v4().to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut results = (0..9)
+        .map(|index| {
+            CapabilityResultEnvelope::ok(
+                format!("fixture.capability_{index}"),
+                Some("observe".to_string()),
+                json!({"index": index, "complete": true}),
+            )
+        })
+        .collect::<Vec<_>>();
+    results.push(CapabilityResultEnvelope::ok(
+        "fixture.large",
+        Some("observe".to_string()),
+        json!({"content": "x".repeat(256_000), "complete": true}),
+    ));
+
+    let catalog = synthesis_evidence_catalog(&state, &task, &results).unwrap();
+    let entries = catalog["entries"].as_array().unwrap();
+    assert_eq!(catalog["result_count"], 10);
+    assert_eq!(entries.len(), 10);
+    assert_eq!(
+        entries[8]["evidence_id"],
+        results[8].canonical_evidence_identity().evidence_id
+    );
+    let large = &entries[9];
+    assert_eq!(large["model_view"]["complete"], false);
+    assert_eq!(
+        large["model_view"]["continuation"]["kind"],
+        "artifact_range"
+    );
+    let relative = large["model_view"]["continuation"]["range_handle"]["path"]
+        .as_str()
+        .unwrap();
+    let artifact = root.join(relative);
+    assert!(artifact.is_file());
+    assert_eq!(
+        large["sha256"],
+        results[9].canonical_evidence_identity().sha256
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            artifact.metadata().unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
 }

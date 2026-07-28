@@ -386,13 +386,18 @@ fn inline_child_budget(child_input: &Value, timeout_ms: u64) -> ChildTaskBudget 
             .get("max_rounds")
             .and_then(Value::as_u64)
             .unwrap_or(8)
-            .clamp(1, 12),
+            .max(1),
         max_tool_calls: budget
             .get("max_tool_calls")
             .and_then(Value::as_u64)
             .unwrap_or(16)
-            .clamp(1, 64),
-        timeout_ms: timeout_ms.clamp(1_000, 3_600_000),
+            .max(1),
+        max_tokens: budget
+            .get("max_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(1_000_000)
+            .max(1),
+        timeout_ms: timeout_ms.max(1_000),
     }
 }
 

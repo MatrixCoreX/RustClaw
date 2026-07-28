@@ -13,9 +13,11 @@ name: Polyglot Skill macOS CI
       - "crates/skill-sdk/**"
       - "crates/skills/**/skill.toml"
       - "docs/schemas/**"
-      - "optional_skills/**/skill.toml"
+      - "optional_skills/**"
       - "scripts/check_on_demand_skill_builds.py"
       - "scripts/check_polyglot_skill_contracts.py"
+      - "scripts/precompile_skill_store.sh"
+      - "scripts/project_skill_receipts.py"
       - "scripts/skill_store_packages.py"
   push:
     branches:
@@ -31,9 +33,11 @@ name: Polyglot Skill macOS CI
       - "crates/skill-sdk/**"
       - "crates/skills/**/skill.toml"
       - "docs/schemas/**"
-      - "optional_skills/**/skill.toml"
+      - "optional_skills/**"
       - "scripts/check_on_demand_skill_builds.py"
       - "scripts/check_polyglot_skill_contracts.py"
+      - "scripts/precompile_skill_store.sh"
+      - "scripts/project_skill_receipts.py"
       - "scripts/skill_store_packages.py"
   workflow_dispatch:
 
@@ -99,3 +103,16 @@ jobs:
         run: |
           set -euo pipefail
           cargo check -p claw-core -p clawd -p skill-runner
+
+      - name: Precompile native Skill Store packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/precompile_skill_store.sh host
+
+      - name: Upload native Skill Store packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustclaw-skill-store-macos-${{ runner.arch }}
+          path: target/prebuilt-skill-packages/*
+          if-no-files-found: error

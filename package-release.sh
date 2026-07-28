@@ -186,6 +186,33 @@ fi
 mkdir -p "$STAGE_PROJECT_DIR/data/skill-packages"
 cp -R "$RECEIPT_SOURCE_DIR/." "$STAGE_PROJECT_DIR/data/skill-packages/"
 
+PRECOMPILED_SOURCE_DIR="${RUSTCLAW_PRECOMPILED_SKILLS_DIR:-$SCRIPT_DIR/target/prebuilt-skill-packages/$RUSTCLAW_PACKAGE_TARGET}"
+SKILL_VERIFY_CLI="${RUSTCLAW_SKILL_VERIFY_CLI:-$SCRIPT_DIR/target/release/rustclaw-skill}"
+PLATFORM_PRECOMPILED_SKILLS=()
+while IFS= read -r skill_name; do
+  [[ -n "$skill_name" ]] && PLATFORM_PRECOMPILED_SKILLS+=("$skill_name")
+done < <(
+  python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
+    --scope platform-precompiled --target "$RUSTCLAW_PACKAGE_TARGET" --format skills
+)
+if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
+  if [[ ! -d "$PRECOMPILED_SOURCE_DIR" ]]; then
+    echo "Missing platform Skill Store precompiles: $PRECOMPILED_SOURCE_DIR"
+    echo "Run scripts/precompile_skill_store.sh $RUSTCLAW_PACKAGE_TARGET before packaging."
+    exit 1
+  fi
+  if [[ ! -x "$SKILL_VERIFY_CLI" ]]; then
+    echo "Missing host skill receipt verifier: $SKILL_VERIFY_CLI"
+    exit 1
+  fi
+  for skill_name in "${PLATFORM_PRECOMPILED_SKILLS[@]}"; do
+    "$SKILL_VERIFY_CLI" receipt-verify "$PRECOMPILED_SOURCE_DIR" "$skill_name" >/dev/null
+  done
+  mkdir -p "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
+  cp -R "$PRECOMPILED_SOURCE_DIR/." "$STAGE_PROJECT_DIR/prebuilt/skill-packages/"
+  echo "Included platform Skill Store precompiles: ${PLATFORM_PRECOMPILED_SKILLS[*]}"
+fi
+
 echo "[5/6] Apply sanitized config as configs/config.toml..."
 cp -R "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"
 rm -f "$STAGE_PROJECT_DIR/configs/config.release.sanitized.toml"

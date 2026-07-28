@@ -1,3 +1,4 @@
+pub mod adaptive_limits;
 pub mod capability_adapter;
 pub mod capability_result;
 pub mod channel_chunk;

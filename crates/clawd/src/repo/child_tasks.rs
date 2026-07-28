@@ -605,6 +605,7 @@ fn refresh_parent_child_task_merge_from_db(
     }
 
     let merge = merge_child_task_results(parent_task_id, &child_results);
+    settle_parent_child_budget_allocations(&mut parent_result, &child_results);
     let pending_count = pending_child_ids.len();
     let missing_count = missing_child_ids.len();
     let continuation_status = if pending_count > 0 || missing_count > 0 {
@@ -677,9 +678,7 @@ fn parent_child_task_ids(parent_result: &Value) -> Vec<String> {
 }
 
 fn append_nested_child_task_ids(value: &Value, output: &mut Vec<String>, depth: usize) {
-    if depth > 8 || output.len() >= crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT {
-        return;
-    }
+    let _ = depth;
     match value {
         Value::Object(map) => {
             append_child_task_id_array(map.get("child_task_ids"), output);
@@ -705,10 +704,7 @@ fn append_child_task_id_array(value: Option<&Value>, output: &mut Vec<String>) {
     let Some(items) = value.and_then(Value::as_array) else {
         return;
     };
-    for item in items
-        .iter()
-        .take(crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT)
-    {
+    for item in items {
         let Some(task_id) = item.as_str().and_then(machine_task_id) else {
             continue;
         };
@@ -767,6 +763,9 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let status = child_terminal_status(status);
+    let budget_allocation_id = contract
+        .pointer("/scope/budget_allocation_id")
+        .and_then(Value::as_str);
     let mut evidence_refs = vec![format!("task:{child_task_id}:result_json")];
     let mut artifact_refs = Vec::new();
     let verification_artifact = child_verification_artifact(child_task_id, result_json);
@@ -816,12 +815,82 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         "evidence_refs": evidence_refs,
         "artifact_refs": artifact_refs,
         "verification_artifact": verification_artifact,
+        "budget_allocation_id": budget_allocation_id,
+        "budget_consumed": child_budget_consumed(result_json),
         "finding_refs": if status == "succeeded" {
             json!([format!("child_task:{child_task_id}:structured_result")])
         } else {
             json!([])
         },
     })
+}
+
+fn child_budget_consumed(result_json: &Value) -> Value {
+    let summary = result_json
+        .pointer("/task_journal/summary")
+        .or_else(|| result_json.pointer("/final_result_json/task_journal/summary"))
+        .unwrap_or(result_json);
+    let metrics = summary.get("task_metrics").unwrap_or(&Value::Null);
+    let model_turns = metrics
+        .get("llm_calls_per_task")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let tool_calls = summary
+        .get("step_results")
+        .and_then(Value::as_array)
+        .map_or(0, |steps| steps.len() as u64);
+    let llm_cost = metrics.get("llm_cost").unwrap_or(&Value::Null);
+    let tokens = llm_cost
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .saturating_add(
+            llm_cost
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        );
+    let elapsed_ms = metrics
+        .get("llm_elapsed_ms_per_task")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    json!({
+        "model_turns": model_turns,
+        "tool_calls": tool_calls,
+        "tokens": tokens,
+        "elapsed_ms": elapsed_ms,
+    })
+}
+
+fn settle_parent_child_budget_allocations(parent_result: &mut Value, child_results: &[Value]) {
+    let pointer = if parent_result
+        .pointer("/task_checkpoint/boundary_context/task_budget_slice")
+        .is_some()
+    {
+        "/task_checkpoint/boundary_context/task_budget_slice"
+    } else {
+        "/final_result_json/task_checkpoint/boundary_context/task_budget_slice"
+    };
+    let Some(slice_value) = parent_result.pointer_mut(pointer) else {
+        return;
+    };
+    let Some(mut slice) =
+        crate::task_budget_contract::TaskBudgetSlice::from_machine_json(slice_value)
+    else {
+        return;
+    };
+    for result in child_results {
+        let Some(allocation_id) = result.get("budget_allocation_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(consumed) = result.get("budget_consumed").cloned().and_then(|value| {
+            serde_json::from_value::<crate::task_budget_contract::BudgetUnits>(value).ok()
+        }) else {
+            continue;
+        };
+        slice.settle_allocation(allocation_id, consumed);
+    }
+    *slice_value = slice.to_machine_json();
 }
 
 fn child_verification_artifact(child_task_id: &str, result_json: &Value) -> Option<Value> {

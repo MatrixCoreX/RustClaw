@@ -1,13 +1,41 @@
 use std::path::{Component, Path};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::AppState;
 
-const MAX_UI_ATTACHMENTS: usize = 10;
-const MAX_UI_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-const MAX_UI_TOTAL_ATTACHMENT_BYTES: usize = 60 * 1024 * 1024;
+pub(crate) const MAX_UI_ATTACHMENTS: usize = 10;
+pub(crate) const MAX_UI_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+pub(crate) const MAX_UI_TOTAL_ATTACHMENT_BYTES: usize = 60 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct UiAttachmentConstraints {
+    schema_version: u32,
+    status: &'static str,
+    channel: &'static str,
+    max_attachments: usize,
+    max_attachment_bytes: usize,
+    max_total_attachment_bytes: usize,
+    error_codes: [&'static str; 3],
+}
+
+pub(crate) fn ui_attachment_constraints() -> UiAttachmentConstraints {
+    UiAttachmentConstraints {
+        schema_version: 1,
+        status: "ok",
+        channel: "ui_base64",
+        max_attachments: MAX_UI_ATTACHMENTS,
+        max_attachment_bytes: MAX_UI_ATTACHMENT_BYTES,
+        max_total_attachment_bytes: MAX_UI_TOTAL_ATTACHMENT_BYTES,
+        error_codes: [
+            "ui_attachments_too_many",
+            "ui_attachment_too_large",
+            "ui_attachments_total_too_large",
+        ],
+    }
+}
 
 #[derive(Debug, Clone)]
 struct UiAttachmentInput {

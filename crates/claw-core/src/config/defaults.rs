@@ -351,16 +351,6 @@ pub(super) fn default_worker_task_timeout_seconds() -> u64 {
     3600
 }
 
-pub(super) fn default_worker_llm_max_calls_per_task() -> u64 {
-    40
-}
-
-pub(super) fn default_worker_llm_total_timeout_seconds() -> u64 {
-    // Mimo 等慢模型经常需要 normalizer + planner + synthesis 连续调用；
-    // 900s 仍低于单任务硬超时，但能覆盖长文 synthesis + verifier 的慢调用组合。
-    900
-}
-
 pub(super) fn default_worker_poll_interval_ms() -> u64 {
     500
 }

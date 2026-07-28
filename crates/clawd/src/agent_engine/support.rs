@@ -537,11 +537,9 @@ fn agent_loop_checkpoint_id(
 }
 
 fn checkpoint_step_observations(loop_state: &super::LoopState) -> Vec<Value> {
-    let mut observations = loop_state
+    loop_state
         .executed_step_results
         .iter()
-        .rev()
-        .take(8)
         .map(|step| {
             json!({
                 "step_id": step.step_id,
@@ -551,9 +549,7 @@ fn checkpoint_step_observations(loop_state: &super::LoopState) -> Vec<Value> {
                 "has_error": step.error.as_deref().is_some_and(|value| !value.trim().is_empty()),
             })
         })
-        .collect::<Vec<_>>();
-    observations.reverse();
-    observations
+        .collect()
 }
 
 fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {

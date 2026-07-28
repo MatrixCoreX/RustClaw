@@ -1,9 +1,13 @@
 fn skill_store_operation_stage(phase: &str) -> rustclaw_skill_sdk::OperationStage {
     use rustclaw_skill_sdk::OperationStage;
     match phase {
-        "preflight" | "manifest" | "toolchain" => OperationStage::Preflight,
+        "preflight" | "manifest" | "toolchain" | "precompiled_verify" => {
+            OperationStage::Preflight
+        }
         "dependencies" | "prepare_environment" => OperationStage::Dependencies,
-        "build" | "artifact" | "copy_source" | "source_digest" => OperationStage::Build,
+        "build" | "artifact" | "copy_source" | "source_digest" | "precompiled_copy" => {
+            OperationStage::Build
+        }
         "protocol_smoke" => OperationStage::Smoke,
         "activate" => OperationStage::Activate,
         "configure" => OperationStage::Configure,
@@ -377,6 +381,10 @@ async fn run_skill_store_install_operation_inner(
             json!(install_outcome
                 .as_ref()
                 .map(|value| value.adapter.as_token())),
+        );
+        object.insert(
+            "install_origin".to_string(),
+            json!(install_outcome.as_ref().map(|value| value.origin)),
         );
         object.insert(
             "installed_version".to_string(),

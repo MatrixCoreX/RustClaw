@@ -960,6 +960,8 @@ pub(crate) fn verify_plan(
         .planner_available_skills_for_task(task)
         .into_iter()
         .collect();
+    let unrestricted_admin = execution_policy.has_unrestricted_admin_authority();
+    let enabled_execution_skills = state.get_skills_list();
     let all_step_ids: HashSet<String> = effective_plan_result
         .steps
         .iter()
@@ -1009,6 +1011,7 @@ pub(crate) fn verify_plan(
         } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill)
+                && !(unrestricted_admin && enabled_execution_skills.contains(&normalized_skill))
                 && !crate::agent_engine::planner_internal_tool_is_visible(&normalized_skill)
                 && state.mcp_tool(&normalized_skill).is_none()
             {

@@ -27,7 +27,8 @@ It is search-only:
 - `action` (required, string): `search|search_extract`
 - `query` (required, string)
 - `top_k` (optional, integer, default `5`, range `1..20`)
-- `cursor` (optional, integer, default `0`, range `0..100`)
+- `cursor` (optional, integer, default `0`): backend offset; no artificial cursor-100 terminal window
+- `continuation` (optional, string): opaque query-bound token returned in `page.next_continuation`; preferred to a raw cursor
 - `lang` (optional, string)
 - `time_range` (optional, string): backend-dependent passthrough
 - `domains_allow` (optional, string[])
@@ -40,6 +41,8 @@ It is search-only:
 - `INVALID_INPUT`: required fields like `query` are missing or malformed.
 - `INVALID_ACTION`: `action` is not one of `search` or `search_extract`.
 - `SEARCH_FAILED`: configured backend failed or no fallback backend can complete the request.
+- `INVALID_CONTINUATION`: malformed continuation.
+- `STALE_SNAPSHOT`: continuation belongs to a different query.
 - Skill protocol errors use outer `status=error` with matching `extra.error_code`; they are not wrapped as successful observations.
 - Never return fake empty success when backend configuration is missing.
 
@@ -103,13 +106,14 @@ Returned JSON inside `text` contains:
   - `snippet` (nullable by `include_snippet`)
   - `source` (standardized host)
   - `rank`
+  - `field_truncations` when a backend title/snippet exceeded its inline metadata allowance; the recovery is to open the result URL rather than treating the prefix as complete
 - `extract_urls[]`: URL list ready for `browser.open_extract`
 - `summary`: stable machine token `search_result_set`; use `result_count` and `page` for counts
 - `citations[]`: same as result URLs
 - `extra.items` / `extra.candidates`: same normalized result array, present even when empty
 - `extra.field_value.result_count`: stable result count for evidence checks
 - `extra.source_refs[]`: candidate URL/title/rank/source objects for citation-aware synthesis
-- `extra.page`: bounded cursor metadata. Search engines are mutable, so page stability is explicitly `backend_best_effort`.
+- `extra.page`: bounded cursor metadata with `next_continuation`. Search engines are mutable, so page stability is explicitly `backend_best_effort`.
 - `extra.snapshot_id`: SHA-256 over query, backend, and observed candidate identity
 - `extra.trust`: candidate metadata is untrusted and never executable
 

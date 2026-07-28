@@ -22,15 +22,98 @@ use super::{
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
+#[path = "planning/native_capability_catalog_tool.rs"]
+mod native_capability_catalog_tool;
+use native_capability_catalog_tool::native_capability_loader_tool_definition;
+
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
 const NATIVE_RESPOND_TOOL: &str = "respond";
-const MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS: usize = 3;
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
 const MAX_NATIVE_RESPONSE_SOURCE_PATH: usize = 160;
 const MAX_NATIVE_TOOL_NAME_BYTES: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NativeRepairDecision {
+    Retry { digest: String, new_evidence: bool },
+    Stagnated { digest: String },
+    BudgetExhausted,
+}
+
+#[derive(Debug)]
+struct NativeRepairProgress {
+    seen_digests: BTreeSet<String>,
+    consecutive_stagnant: u32,
+    stagnation_tolerance: u32,
+    attempts: u64,
+    max_repair_calls: u64,
+}
+
+impl NativeRepairProgress {
+    fn from_loop_state(loop_state: &LoopState) -> Self {
+        let (stagnation_tolerance, max_repair_calls) = loop_state
+            .task_budget_slice
+            .as_ref()
+            .map(|slice| {
+                (
+                    slice.stagnation_tolerance.max(1),
+                    slice.remaining_units().model_turns,
+                )
+            })
+            .unwrap_or((3, u64::MAX));
+        Self {
+            seen_digests: BTreeSet::new(),
+            consecutive_stagnant: 0,
+            stagnation_tolerance,
+            attempts: 0,
+            max_repair_calls,
+        }
+    }
+
+    fn observe(&mut self, error_code: &str, turn: &ModelTurnResponse) -> NativeRepairDecision {
+        if self.attempts >= self.max_repair_calls {
+            return NativeRepairDecision::BudgetExhausted;
+        }
+        let digest = native_repair_progress_digest(error_code, turn);
+        self.attempts = self.attempts.saturating_add(1);
+        let new_evidence = self.seen_digests.insert(digest.clone());
+        if new_evidence {
+            self.consecutive_stagnant = 0;
+            NativeRepairDecision::Retry {
+                digest,
+                new_evidence: true,
+            }
+        } else {
+            self.consecutive_stagnant = self.consecutive_stagnant.saturating_add(1);
+            if self.consecutive_stagnant > self.stagnation_tolerance {
+                NativeRepairDecision::Stagnated { digest }
+            } else {
+                NativeRepairDecision::Retry {
+                    digest,
+                    new_evidence: false,
+                }
+            }
+        }
+    }
+}
+
+fn native_repair_progress_digest(error_code: &str, turn: &ModelTurnResponse) -> String {
+    let tool_calls = turn
+        .tool_calls
+        .iter()
+        .map(|call| json!({"name": call.name, "arguments": call.arguments}))
+        .collect::<Vec<_>>();
+    let evidence = json!({
+        "error_code": error_code,
+        "text": turn.text,
+        "tool_calls": tool_calls,
+        "finish_reason": turn.finish_reason,
+    });
+    let bytes = serde_json::to_vec(&evidence).unwrap_or_default();
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
     super::observed_output::latest_structured_capability_observation(loop_state)
@@ -128,7 +211,7 @@ pub(super) async fn plan_round_actions(
     goal: &str,
     user_text: &str,
     policy: &AgentLoopGuardPolicy,
-    loop_state: &LoopState,
+    loop_state: &mut LoopState,
     turn_analysis_for_prompt: Option<&crate::turn_context::TurnAnalysis>,
     boundary_envelope_for_prompt: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
     _auto_locator_path: Option<&str>,
@@ -349,6 +432,7 @@ pub(super) async fn plan_round_actions(
     {
         let mut native_turn = native_turn;
         let mut repair_reason_codes = Vec::new();
+        let mut repair_progress = NativeRepairProgress::from_loop_state(loop_state);
         loop {
             match actions_from_native_turn_with_schemas(
                 &native_turn,
@@ -359,8 +443,45 @@ pub(super) async fn plan_round_actions(
             ) {
                 Ok(_) => break,
                 Err(error_code) => {
-                    if repair_reason_codes.len() >= MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS {
-                        return Err(error_code);
+                    let repair_decision = repair_progress.observe(&error_code, &native_turn);
+                    let (progress_digest, new_evidence) = match repair_decision {
+                        NativeRepairDecision::Retry {
+                            digest,
+                            new_evidence,
+                        } => (digest, new_evidence),
+                        NativeRepairDecision::Stagnated { digest } => {
+                            loop_state.task_observations.push(json!({
+                                "owner_layer": "planner",
+                                "state": "terminal",
+                                "reason_code": "native_plan_contract_repair_stagnated",
+                                "source_error_code": error_code,
+                                "repair_attempts": repair_progress.attempts,
+                                "progress_digest": digest,
+                                "stagnation_tolerance": repair_progress.stagnation_tolerance,
+                            }));
+                            return Err("native_plan_contract_repair_stagnated".to_string());
+                        }
+                        NativeRepairDecision::BudgetExhausted => {
+                            loop_state.task_observations.push(json!({
+                                "owner_layer": "planner",
+                                "state": "checkpoint_required",
+                                "reason_code": "native_plan_contract_repair_budget_exhausted",
+                                "source_error_code": error_code,
+                                "repair_attempts": repair_progress.attempts,
+                                "budget_owner": "task_budget_manager",
+                            }));
+                            return Err("native_plan_contract_repair_budget_exhausted".to_string());
+                        }
+                    };
+                    if new_evidence {
+                        loop_state.task_observations.push(json!({
+                            "owner_layer": "planner",
+                            "state": "progress",
+                            "reason_code": "native_plan_contract_repair_progress",
+                            "source_error_code": error_code,
+                            "repair_attempt": repair_progress.attempts,
+                            "progress_digest": progress_digest,
+                        }));
                     }
                     crate::assistant_presentation::abort_active_answer(
                         state,
@@ -769,30 +890,6 @@ fn native_planner_request(
     }
 }
 
-fn native_capability_loader_tool_definition(group_names: &[String]) -> ModelToolDefinition {
-    ModelToolDefinition {
-        name: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
-        description: "runtime_capability_scope_loader_v2; effect=observe; selection=exact_group_token; active_set=bounded_lru; next_action=replan".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "required": ["groups"],
-            "properties": {
-                "groups": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": super::capability_discovery::MAX_GROUPS_PER_LOAD,
-                    "items": {
-                        "type": "string",
-                        "enum": group_names
-                    }
-                }
-            },
-            "additionalProperties": false
-        }),
-        strict: true,
-    }
-}
-
 fn native_capability_tool_definition(
     tool_name: &str,
     description: &str,
@@ -1016,7 +1113,6 @@ fn native_contract_repair_signal_for_turn(
                             })
                     })
                     .map(|group| group.skill_name.clone())
-                    .take(super::capability_discovery::MAX_GROUPS_PER_LOAD)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
@@ -1208,8 +1304,7 @@ fn native_contract_repair_signal_with_context(
             json!({
                 "type": "array",
                 "allowed_exact_tokens": suggested_capability_groups,
-                "minItems": 1,
-                "maxItems": super::capability_discovery::MAX_GROUPS_PER_LOAD
+                "minItems": 1
             }),
         );
     }
@@ -1437,12 +1532,41 @@ fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<Agen
         .arguments
         .as_object()
         .ok_or_else(|| "native_capability_group_load_arguments_not_object".to_string())?;
+    let operation = arguments.get("op").and_then(Value::as_str);
+    if operation == Some("search") {
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .ok_or_else(|| "native_capability_catalog_search_query_invalid".to_string())?;
+        return Ok(AgentAction::CallTool {
+            tool: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+            args: json!({"op": "search", "query": query}),
+        });
+    }
+    if operation == Some("expand") {
+        let references = arguments
+            .get("capability_refs")
+            .and_then(Value::as_array)
+            .filter(|references| !references.is_empty())
+            .ok_or_else(|| "native_capability_catalog_expand_refs_invalid".to_string())?;
+        if references.iter().any(|reference| {
+            reference
+                .as_str()
+                .is_none_or(|value| value.trim().is_empty())
+        }) {
+            return Err("native_capability_catalog_expand_ref_invalid".to_string());
+        }
+        return Ok(AgentAction::CallTool {
+            tool: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+            args: json!({"op": "expand", "capability_refs": references}),
+        });
+    }
     let groups = arguments
         .get("groups")
         .and_then(Value::as_array)
-        .filter(|groups| {
-            !groups.is_empty() && groups.len() <= super::capability_discovery::MAX_GROUPS_PER_LOAD
-        })
+        .filter(|groups| !groups.is_empty())
         .ok_or_else(|| "native_capability_group_load_groups_invalid".to_string())?;
     if groups.iter().any(|group| {
         group
@@ -1453,7 +1577,7 @@ fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<Agen
     }
     Ok(AgentAction::CallTool {
         tool: super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
-        args: json!({"groups": groups}),
+        args: json!({"op": "load_groups", "groups": groups}),
     })
 }
 

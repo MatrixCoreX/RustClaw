@@ -332,13 +332,16 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     let task_cutoff = now - (state.policy.maintenance.tasks_retention_days as i64 * 86400);
     db.execute(
-        "DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
+        "DELETE FROM tasks
+         WHERE kind != 'ask'
+           AND CAST(created_at AS INTEGER) < ?1",
         rusqlite::params![task_cutoff],
     )?;
 
     db.execute(
         "DELETE FROM tasks WHERE task_id IN (
              SELECT task_id FROM tasks
+             WHERE kind != 'ask'
              ORDER BY CAST(created_at AS INTEGER) DESC
              LIMIT -1 OFFSET ?1
          )",

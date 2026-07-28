@@ -9,12 +9,31 @@ use tower::ServiceExt;
 use super::{
     activate_imported_bundle, begin_skill_store_mutation, build_ui_router,
     finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
-    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
-    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
+    precompiled_source_fallback_allowed, remove_skill_registry_block, render_skill_store_config,
+    skill_store_install_spec, skill_store_operation_store, transition_skill_store_operation,
+    write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
+
+#[test]
+fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
+    for code in [
+        "precompiled_package_unavailable",
+        "precompiled_platform_mismatch",
+        "precompiled_manifest_mismatch",
+    ] {
+        assert!(precompiled_source_fallback_allowed(code), "code={code}");
+    }
+    for code in [
+        "precompiled_receipt_digest_mismatch",
+        "precompiled_artifact_mismatch",
+        "precompiled_install_root_escape",
+    ] {
+        assert!(!precompiled_source_fallback_allowed(code), "code={code}");
+    }
+}
 
 fn isolated_skill_store_state() -> (AppState, PathBuf) {
     let workspace =

@@ -13,7 +13,67 @@ const MAX_PAGE_LIMIT: usize = 200;
 const MAX_USER_TEXT_BYTES: usize = 16 * 1024;
 const MAX_ASSISTANT_TEXT_BYTES: usize = 64 * 1024;
 const MAX_ERROR_TEXT_BYTES: usize = 8 * 1024;
+const DEFAULT_BODY_RANGE_BYTES: usize = 64 * 1024;
+const MAX_BODY_RANGE_BYTES: usize = 256 * 1024;
 const MAX_CONVERSATION_TITLE_CHARS: usize = 120;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConversationBodyField {
+    User,
+    Assistant,
+    Error,
+}
+
+impl ConversationBodyField {
+    pub(crate) fn parse(value: &str) -> anyhow::Result<Self> {
+        match value.trim() {
+            "user" => Ok(Self::User),
+            "assistant" => Ok(Self::Assistant),
+            "error" => Ok(Self::Error),
+            _ => anyhow::bail!("conversation_body_field_invalid"),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConversationBodyContinuation {
+    pub(crate) kind: String,
+    pub(crate) url: String,
+    pub(crate) next_start_byte: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConversationBodyDescriptor {
+    pub(crate) schema_version: u32,
+    pub(crate) complete: bool,
+    pub(crate) original_size_bytes: usize,
+    pub(crate) returned_size_bytes: usize,
+    pub(crate) content_sha256: String,
+    pub(crate) continuation: Option<ConversationBodyContinuation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConversationBodyPage {
+    pub(crate) schema_version: u32,
+    pub(crate) status: String,
+    pub(crate) task_id: String,
+    pub(crate) field: String,
+    pub(crate) text: String,
+    pub(crate) start_byte: usize,
+    pub(crate) end_byte: usize,
+    pub(crate) total_size_bytes: usize,
+    pub(crate) complete: bool,
+    pub(crate) next_start_byte: Option<usize>,
+    pub(crate) content_sha256: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ConversationHistoryTurn {
@@ -26,6 +86,9 @@ pub(crate) struct ConversationHistoryTurn {
     pub(crate) user_text: Option<String>,
     pub(crate) assistant_text: Option<String>,
     pub(crate) error_text: Option<String>,
+    pub(crate) user_text_result: Option<ConversationBodyDescriptor>,
+    pub(crate) assistant_text_result: Option<ConversationBodyDescriptor>,
+    pub(crate) error_text_result: Option<ConversationBodyDescriptor>,
     pub(crate) attachment_count: usize,
     pub(crate) attachment_kinds: Vec<String>,
     pub(crate) artifacts: Vec<TaskArtifactManifest>,
@@ -100,17 +163,17 @@ pub(crate) fn list_conversation_history(
            )
            AND (
                 ?3 IS NULL
-                OR CAST(COALESCE(NULLIF(tasks.updated_at, ''), tasks.created_at, '0') AS INTEGER) < ?3
+                OR CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) < ?3
                 OR (
-                    CAST(COALESCE(NULLIF(tasks.updated_at, ''), tasks.created_at, '0') AS INTEGER) = ?3
+                    CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) = ?3
                     AND tasks.task_id < ?4
                 )
            )
-         ORDER BY CAST(COALESCE(NULLIF(tasks.updated_at, ''), tasks.created_at, '0') AS INTEGER) DESC,
+         ORDER BY CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) DESC,
                   tasks.task_id DESC
          LIMIT ?5",
     )?;
-    let cursor_ts = cursor.as_ref().map(|cursor| cursor.updated_at);
+    let cursor_ts = cursor.as_ref().map(|cursor| cursor.created_at);
     let cursor_task_id = cursor.as_ref().map(|cursor| cursor.task_id.as_str());
     let rows = stmt.query_map(
         params![
@@ -140,7 +203,7 @@ pub(crate) fn list_conversation_history(
     let next_cursor = if truncated {
         collected
             .last()
-            .map(|row| format!("{}:{}", row.updated_at, row.task_id))
+            .map(|row| format!("{}:{}", row.created_at, row.task_id))
     } else {
         None
     };
@@ -155,6 +218,93 @@ pub(crate) fn list_conversation_history(
         turns,
         next_cursor,
         truncated,
+        content_sha256,
+    })
+}
+
+pub(crate) fn read_conversation_body_range(
+    state: &AppState,
+    identity: &AuthIdentity,
+    task_id: &str,
+    field: ConversationBodyField,
+    start_byte: Option<usize>,
+    limit_bytes: Option<usize>,
+    expected_sha256: Option<&str>,
+) -> anyhow::Result<ConversationBodyPage> {
+    let task_id = uuid::Uuid::parse_str(task_id.trim())
+        .map_err(|_| anyhow::anyhow!("conversation_body_task_id_invalid"))?
+        .to_string();
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("conversation_body_db_pool_failed:{error}"))?;
+    let row = db.query_row(
+        "SELECT payload_json, result_json, error_text
+         FROM tasks
+         WHERE task_id = ?1
+           AND kind = 'ask'
+           AND (user_key = ?2 OR (user_key IS NULL AND user_id = ?3))",
+        params![task_id, identity.user_key, identity.user_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        },
+    );
+    let (payload_json, result_json, error_text) = match row {
+        Ok(row) => row,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            anyhow::bail!("conversation_body_not_found")
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let payload = serde_json::from_str::<Value>(&payload_json)?;
+    let result = result_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+    let body = match field {
+        ConversationBodyField::User => payload.get("text").and_then(Value::as_str),
+        ConversationBodyField::Assistant => result.as_ref().and_then(visible_result_text),
+        ConversationBodyField::Error => error_text.as_deref(),
+    }
+    .map(str::trim)
+    .filter(|text| !text.is_empty())
+    .ok_or_else(|| anyhow::anyhow!("conversation_body_not_found"))?;
+    let content_sha256 = format!("{:x}", Sha256::digest(body.as_bytes()));
+    if let Some(expected) = expected_sha256
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if !valid_sha256(expected) {
+            anyhow::bail!("conversation_body_sha256_invalid");
+        }
+        if !expected.eq_ignore_ascii_case(&content_sha256) {
+            anyhow::bail!("conversation_body_stale_snapshot");
+        }
+    }
+    let start_byte = start_byte.unwrap_or(0);
+    if start_byte > body.len() || !body.is_char_boundary(start_byte) {
+        anyhow::bail!("conversation_body_range_invalid");
+    }
+    let limit_bytes = limit_bytes
+        .unwrap_or(DEFAULT_BODY_RANGE_BYTES)
+        .clamp(1, MAX_BODY_RANGE_BYTES);
+    let end_byte = range_end(body, start_byte, limit_bytes);
+    let complete = end_byte == body.len();
+    Ok(ConversationBodyPage {
+        schema_version: 1,
+        status: "ok".to_string(),
+        task_id,
+        field: field.as_str().to_string(),
+        text: body[start_byte..end_byte].to_string(),
+        start_byte,
+        end_byte,
+        total_size_bytes: body.len(),
+        complete,
+        next_start_byte: (!complete).then_some(end_byte),
         content_sha256,
     })
 }
@@ -292,28 +442,50 @@ struct HistoryRow {
 fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
     let payload = serde_json::from_str::<Value>(&row.payload_json).ok()?;
     let conversation_id = bounded_machine_ref(payload.get("conversation_id")?.as_str()?)?;
-    let user_text = payload
+    let user_body = payload
         .get("text")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(|text| bounded_text(text, MAX_USER_TEXT_BYTES));
+        .filter(|text| !text.is_empty());
+    let user_text = user_body.map(|text| bounded_text(text, MAX_USER_TEXT_BYTES));
+    let user_text_result = user_body.map(|text| {
+        body_descriptor(
+            &row.task_id,
+            ConversationBodyField::User,
+            text,
+            MAX_USER_TEXT_BYTES,
+        )
+    });
     let (attachment_count, attachment_kinds) = attachment_projection(&payload);
     let result = row
         .result_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-    let assistant_text = result
-        .as_ref()
-        .and_then(visible_result_text)
-        .map(|text| bounded_text(text, MAX_ASSISTANT_TEXT_BYTES));
+    let assistant_body = result.as_ref().and_then(visible_result_text);
+    let assistant_text = assistant_body.map(|text| bounded_text(text, MAX_ASSISTANT_TEXT_BYTES));
+    let assistant_text_result = assistant_body.map(|text| {
+        body_descriptor(
+            &row.task_id,
+            ConversationBodyField::Assistant,
+            text,
+            MAX_ASSISTANT_TEXT_BYTES,
+        )
+    });
     let artifacts = crate::task_artifacts::manifests_from_result(result.as_ref());
-    let error_text = row
+    let error_body = row
         .error_text
         .as_deref()
         .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(|text| bounded_text(text, MAX_ERROR_TEXT_BYTES));
+        .filter(|text| !text.is_empty());
+    let error_text = error_body.map(|text| bounded_text(text, MAX_ERROR_TEXT_BYTES));
+    let error_text_result = error_body.map(|text| {
+        body_descriptor(
+            &row.task_id,
+            ConversationBodyField::Error,
+            text,
+            MAX_ERROR_TEXT_BYTES,
+        )
+    });
     Some(ConversationHistoryTurn {
         schema_version: 1,
         conversation_id,
@@ -330,6 +502,9 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         user_text,
         assistant_text,
         error_text,
+        user_text_result,
+        assistant_text_result,
+        error_text_result,
         attachment_count,
         attachment_kinds,
         artifacts,
@@ -403,25 +578,71 @@ fn bounded_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
+fn body_descriptor(
+    task_id: &str,
+    field: ConversationBodyField,
+    body: &str,
+    preview_bytes: usize,
+) -> ConversationBodyDescriptor {
+    let returned_size_bytes = range_end(body, 0, preview_bytes);
+    let complete = returned_size_bytes == body.len();
+    let content_sha256 = format!("{:x}", Sha256::digest(body.as_bytes()));
+    let continuation = (!complete).then(|| ConversationBodyContinuation {
+        kind: "conversation_body_range".to_string(),
+        url: format!(
+            "/v1/tasks/{task_id}/conversation-body/{}?start_byte={returned_size_bytes}&sha256={content_sha256}",
+            field.as_str()
+        ),
+        next_start_byte: returned_size_bytes,
+    });
+    ConversationBodyDescriptor {
+        schema_version: 1,
+        complete,
+        original_size_bytes: body.len(),
+        returned_size_bytes,
+        content_sha256,
+        continuation,
+    }
+}
+
+fn range_end(value: &str, start: usize, max_bytes: usize) -> usize {
+    let mut end = start.saturating_add(max_bytes).min(value.len());
+    while end > start && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == start && start < value.len() {
+        end = value[start..]
+            .char_indices()
+            .nth(1)
+            .map(|(offset, _)| start + offset)
+            .unwrap_or(value.len());
+    }
+    end
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[derive(Debug)]
 struct HistoryCursor {
-    updated_at: i64,
+    created_at: i64,
     task_id: String,
 }
 
 fn parse_cursor(raw: &str) -> anyhow::Result<HistoryCursor> {
-    let (updated_at, task_id) = raw
+    let (created_at_raw, task_id) = raw
         .trim()
         .split_once(':')
         .ok_or_else(|| anyhow::anyhow!("conversation_history_cursor_invalid"))?;
-    let updated_at = updated_at
+    let created_at = created_at_raw
         .parse::<i64>()
         .map_err(|_| anyhow::anyhow!("conversation_history_cursor_invalid"))?;
     if uuid::Uuid::parse_str(task_id).is_err() {
         anyhow::bail!("conversation_history_cursor_invalid");
     }
     Ok(HistoryCursor {
-        updated_at,
+        created_at,
         task_id: task_id.to_string(),
     })
 }

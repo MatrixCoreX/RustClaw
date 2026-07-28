@@ -581,6 +581,27 @@ async fn try_execute_independent_read_batch(
     )))
 }
 
+fn action_observation_boundary(
+    planned_action_count: usize,
+    executed_action_count: usize,
+    observation_boundary: usize,
+) -> Option<Value> {
+    (planned_action_count > observation_boundary
+        && executed_action_count >= observation_boundary)
+        .then(|| {
+            serde_json::json!({
+                "owner_layer": "execution_scheduler",
+                "state": "continue",
+                "reason_code": "action_observation_boundary",
+                "complete": false,
+                "planned_action_count": planned_action_count,
+                "executed_action_count": executed_action_count,
+                "remaining_action_count": planned_action_count.saturating_sub(executed_action_count),
+                "recovery_action": "replan_from_latest_observation",
+            })
+        })
+}
+
 pub(super) async fn execute_actions_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -779,6 +800,15 @@ pub(super) async fn execute_actions_once(
                 break;
             }
         }
+    }
+    let observation_boundary = policy.max_actions_per_turn.max(1);
+    if let Some(observation) = stop_signal
+        .is_none()
+        .then(|| action_observation_boundary(actions.len(), executed_actions, observation_boundary))
+        .flatten()
+    {
+        loop_state.task_observations.push(observation);
+        stop_signal = Some("action_observation_boundary".to_string());
     }
     Ok(finalize_execute_round_outcome(
         loop_state,

@@ -134,6 +134,49 @@ where
     checkpoint.finish()
 }
 
+pub(super) fn run_authorized_mutation<F>(
+    workspace_root: &Path,
+    task_id: &str,
+    action: &str,
+    target: &Path,
+    host_scope_authorized: bool,
+    operation: F,
+) -> Result<String, String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    let root = canonical_workspace_root(workspace_root)?;
+    if target.starts_with(&root) {
+        return run_checkpointed_workspace_mutation(
+            workspace_root,
+            task_id,
+            action,
+            target,
+            operation,
+        );
+    }
+    if !host_scope_authorized {
+        return Err(invalid_target_error(target));
+    }
+    operation()?;
+    encode_result(json!({
+        "schema_version": 1,
+        "source": "host_scope_mutation",
+        "status": "ok",
+        "action": action,
+        "message_key": "host.mutation.applied",
+        "task_id": task_id,
+        "state": "applied",
+        "target_path": target.display().to_string(),
+        "isolation_root": "host://service-account",
+        "authority_scope": "unrestricted_admin",
+        "reversible": false,
+        "rollback_unavailable_reason": "outside_workspace_checkpoint_scope",
+        "changed_files": [target.display().to_string()],
+        "artifact_refs": [],
+    }))
+}
+
 pub(super) fn checkpoint_is_structured_mutation(checkpoint_dir: &Path) -> Result<bool, String> {
     let value = read_manifest_value(checkpoint_dir)?;
     Ok(value.get("checkpoint_kind").and_then(Value::as_str) == Some(CHECKPOINT_KIND))

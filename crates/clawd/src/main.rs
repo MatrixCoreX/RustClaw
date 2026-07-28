@@ -773,16 +773,6 @@ async fn run() -> anyhow::Result<()> {
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
             worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
-            llm_max_calls_per_task: if config.worker.llm_max_calls_per_task == 0 {
-                crate::llm_gateway::DEFAULT_MAX_LLM_CALLS_PER_TASK
-            } else {
-                config.worker.llm_max_calls_per_task
-            },
-            llm_total_timeout_ms: if config.worker.llm_total_timeout_seconds == 0 {
-                crate::llm_gateway::DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK
-            } else {
-                config.worker.llm_total_timeout_seconds.saturating_mul(1000)
-            },
             worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
             worker_running_no_progress_timeout_seconds: config
                 .worker
@@ -867,6 +857,14 @@ async fn run() -> anyhow::Result<()> {
         .route(
             "/tasks/conversation-history",
             get(http::conversation_history::list_conversation_history),
+        )
+        .route(
+            "/ui/attachment-constraints",
+            get(http::ui_attachment_constraints::get_ui_attachment_constraints),
+        )
+        .route(
+            "/tasks/:task_id/conversation-body/:field",
+            get(http::conversation_history::get_conversation_body_range),
         )
         .route(
             "/tasks/conversations/:conversation_id/title",

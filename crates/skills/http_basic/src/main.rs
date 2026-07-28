@@ -79,7 +79,13 @@ fn main() -> anyhow::Result<()> {
         let resp = match parsed {
             Ok(req) => {
                 let req_ui_key = request_ui_key(&req);
-                match execute(req.args, req_ui_key.as_deref()) {
+                let allow_path_outside_workspace =
+                    request_allows_path_outside_workspace(req.context.as_ref());
+                match execute_with_permissions(
+                    req.args,
+                    req_ui_key.as_deref(),
+                    allow_path_outside_workspace,
+                ) {
                     Ok((text, extra)) => Resp {
                         request_id: req.request_id,
                         status: "ok".to_string(),
@@ -149,6 +155,20 @@ fn request_ui_key(req: &Req) -> Option<String> {
         })
 }
 
+fn request_allows_path_outside_workspace(context: Option<&Value>) -> bool {
+    context
+        .and_then(Value::as_object)
+        .and_then(|ctx| {
+            ctx.get("permissions")
+                .and_then(Value::as_object)
+                .and_then(|permissions| permissions.get("allow_path_outside_workspace"))
+                .or_else(|| ctx.get("allow_path_outside_workspace"))
+        })
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+}
+
 fn is_loopback_url(url: &Url) -> bool {
     url.host_str().is_some_and(|host| {
         let host = host.trim_start_matches('[').trim_end_matches(']');
@@ -207,6 +227,14 @@ enum RequestMethod {
 }
 
 fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), HttpBasicError> {
+    execute_with_permissions(args, req_user_key, false)
+}
+
+fn execute_with_permissions(
+    args: Value,
+    req_user_key: Option<&str>,
+    allow_path_outside_workspace: bool,
+) -> Result<(String, Value), HttpBasicError> {
     let obj = args
         .as_object()
         .ok_or_else(|| HttpBasicError::new("invalid_args", "args must be object"))?;
@@ -382,8 +410,18 @@ fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), H
     let artifact = if output_requested {
         let workspace = workspace_root()
             .map_err(|error| HttpBasicError::new("workspace_unavailable", error.to_string()))?;
-        let output_path = resolve_output_path(&workspace, "document/http/download", output_path)?;
-        write_workspace_artifact(&workspace, &output_path, &body)?;
+        let output_path = resolve_output_path_with_permissions(
+            &workspace,
+            "document/http/download",
+            output_path,
+            allow_path_outside_workspace,
+        )?;
+        write_workspace_artifact(
+            &workspace,
+            &output_path,
+            &body,
+            allow_path_outside_workspace,
+        )?;
         Some(HttpArtifact {
             output_path: output_path.to_string_lossy().to_string(),
             size_bytes: body.len() as u64,
@@ -962,8 +1000,17 @@ fn resolve_output_path(
     default_dir: &str,
     requested: Option<&str>,
 ) -> Result<PathBuf, HttpBasicError> {
+    resolve_output_path_with_permissions(workspace_root, default_dir, requested, false)
+}
+
+fn resolve_output_path_with_permissions(
+    workspace_root: &Path,
+    default_dir: &str,
+    requested: Option<&str>,
+    allow_path_outside_workspace: bool,
+) -> Result<PathBuf, HttpBasicError> {
     if let Some(path) = requested.map(str::trim).filter(|value| !value.is_empty()) {
-        let out = normalize_workspace_path(workspace_root, path)?;
+        let out = normalize_workspace_path(workspace_root, path, allow_path_outside_workspace)?;
         return Ok(out);
     }
     Ok(workspace_root
@@ -974,6 +1021,7 @@ fn resolve_output_path(
 fn normalize_workspace_path(
     workspace_root: &Path,
     raw_path: &str,
+    allow_path_outside_workspace: bool,
 ) -> Result<PathBuf, HttpBasicError> {
     if raw_path.is_empty() || raw_path.len() > 4096 {
         return Err(HttpBasicError::new(
@@ -985,6 +1033,27 @@ fn normalize_workspace_path(
         .canonicalize()
         .map_err(|error| HttpBasicError::new("workspace_unavailable", error.to_string()))?;
     let path = Path::new(raw_path);
+    if allow_path_outside_workspace && path.is_absolute() {
+        if path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(HttpBasicError::new(
+                "output_path_invalid",
+                "output path must not contain parent traversal",
+            ));
+        }
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(HttpBasicError::new(
+                "output_path_symlink_blocked",
+                "output path cannot be a symlink",
+            ));
+        }
+        return Ok(path.to_path_buf());
+    }
     let relative = if path.is_absolute() {
         path.strip_prefix(&workspace).map_err(|_| {
             HttpBasicError::new(
@@ -1041,6 +1110,7 @@ fn write_workspace_artifact(
     workspace_root: &Path,
     path: &Path,
     bytes: &[u8],
+    allow_path_outside_workspace: bool,
 ) -> Result<(), HttpBasicError> {
     let workspace = workspace_root
         .canonicalize()
@@ -1053,7 +1123,7 @@ fn write_workspace_artifact(
     let canonical_parent = parent
         .canonicalize()
         .map_err(|error| HttpBasicError::new("artifact_write_failed", error.to_string()))?;
-    if !canonical_parent.starts_with(&workspace) {
+    if !allow_path_outside_workspace && !canonical_parent.starts_with(&workspace) {
         return Err(HttpBasicError::new(
             "output_path_outside_workspace",
             "output_path is outside workspace",

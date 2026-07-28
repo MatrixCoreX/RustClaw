@@ -106,6 +106,14 @@ fn routing_filters_incompatible_modality_context_and_tool_contracts() {
 
     assert_eq!(plan.providers.len(), 1);
     assert_eq!(plan.providers[0].config.name, "eligible");
+    let eligible_evaluation = plan
+        .evaluations
+        .iter()
+        .find(|evaluation| evaluation.provider == "eligible")
+        .expect("eligible provider evaluation");
+    assert_eq!(eligible_evaluation.output_reserve_tokens, 4_096);
+    assert_eq!(eligible_evaluation.request_timeout_seconds, 30);
+    assert_eq!(eligible_evaluation.estimator_confidence, "conservative");
     assert!(plan.evaluations.iter().any(|evaluation| {
         evaluation.provider == "text-only"
             && evaluation

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const CAPABILITY_RESULT_SCHEMA_VERSION: u16 = 1;
@@ -92,12 +93,56 @@ pub struct ArtifactRef {
     pub metadata: JsonValue,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultCompleteness {
+    pub complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_total: Option<u64>,
+    #[serde(default)]
+    pub terminal: bool,
+}
+
+impl ResultCompleteness {
+    pub fn complete(returned_count: Option<u64>) -> Self {
+        Self {
+            complete: true,
+            reason_code: None,
+            returned_count,
+            known_total: returned_count,
+            terminal: false,
+        }
+    }
+
+    pub fn partial(
+        reason_code: impl Into<String>,
+        returned_count: Option<u64>,
+        known_total: Option<u64>,
+        terminal: bool,
+    ) -> Self {
+        Self {
+            complete: false,
+            reason_code: Some(reason_code.into()),
+            returned_count,
+            known_total,
+            terminal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContinuationKind {
     Poll,
     Checkpoint,
     AwaitUser,
+    Opaque,
+    ArtifactRange,
+    VerifiedShard,
+    RetryAfter,
 }
 
 impl ContinuationKind {
@@ -106,6 +151,10 @@ impl ContinuationKind {
             Self::Poll => "poll",
             Self::Checkpoint => "checkpoint",
             Self::AwaitUser => "await_user",
+            Self::Opaque => "opaque",
+            Self::ArtifactRange => "artifact_range",
+            Self::VerifiedShard => "verified_shard",
+            Self::RetryAfter => "retry_after",
         }
     }
 }
@@ -153,6 +202,8 @@ pub struct CapabilityResultEnvelope {
     #[serde(default)]
     pub artifacts: Vec<ArtifactRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub completeness: Option<ResultCompleteness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<JsonValue>,
     #[serde(default)]
     pub truncated: bool,
@@ -183,6 +234,7 @@ impl CapabilityResultEnvelope {
             action,
             data,
             artifacts: Vec::new(),
+            completeness: None,
             page: None,
             truncated: false,
             provenance: empty_object(),
@@ -208,6 +260,7 @@ impl CapabilityResultEnvelope {
             action,
             data: JsonValue::Object(JsonMap::new()),
             artifacts: Vec::new(),
+            completeness: None,
             page: None,
             truncated: false,
             provenance: empty_object(),
@@ -286,6 +339,34 @@ impl CapabilityResultEnvelope {
                 return Err(CapabilityResultValidationError::UnaddressableArtifact);
             }
         }
+        if let Some(completeness) = self.completeness.as_ref() {
+            if completeness.complete {
+                if completeness.reason_code.is_some() || completeness.terminal {
+                    return Err(CapabilityResultValidationError::InvalidCompleteness);
+                }
+            } else {
+                if completeness
+                    .reason_code
+                    .as_deref()
+                    .is_none_or(|reason| !is_machine_ref(reason))
+                {
+                    return Err(CapabilityResultValidationError::InvalidCompleteness);
+                }
+                if !completeness.terminal
+                    && self.continuation.is_none()
+                    && self.artifacts.is_empty()
+                {
+                    return Err(CapabilityResultValidationError::MissingPartialRecovery);
+                }
+            }
+            if completeness
+                .known_total
+                .zip(completeness.returned_count)
+                .is_some_and(|(total, returned)| returned > total)
+            {
+                return Err(CapabilityResultValidationError::InvalidCompleteness);
+            }
+        }
         if self.page.as_ref().is_some_and(|page| !page.is_object()) {
             return Err(CapabilityResultValidationError::InvalidPage);
         }
@@ -315,6 +396,26 @@ impl CapabilityResultEnvelope {
         }
         Ok(())
     }
+
+    /// Stable identity shared by planner, synthesizer, verifier and journal.
+    /// The canonical envelope remains immutable; model views cite this digest
+    /// instead of inventing layer-specific prefixes.
+    pub fn canonical_evidence_identity(&self) -> CanonicalEvidenceIdentity {
+        let bytes = serde_json::to_vec(self).unwrap_or_default();
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        CanonicalEvidenceIdentity {
+            evidence_id: format!("evidence:capability_result:{sha256}"),
+            sha256,
+            size_bytes: bytes.len() as u64,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalEvidenceIdentity {
+    pub evidence_id: String,
+    pub sha256: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -341,6 +442,10 @@ pub enum CapabilityResultValidationError {
     DuplicateEvidenceRef,
     #[error("capability_result_artifact_unaddressable")]
     UnaddressableArtifact,
+    #[error("capability_result_completeness_invalid")]
+    InvalidCompleteness,
+    #[error("capability_result_partial_recovery_missing")]
+    MissingPartialRecovery,
     #[error("capability_result_page_invalid")]
     InvalidPage,
     #[error("capability_result_provenance_invalid")]

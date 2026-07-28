@@ -42,6 +42,13 @@ pub(crate) struct TaskExecutionPolicy {
 }
 
 impl TaskExecutionPolicy {
+    pub(crate) fn has_unrestricted_admin_authority(self) -> bool {
+        self.mode == TaskExecutionMode::Yolo
+            && self.actor_role == Some("admin")
+            && self.approval_policy == ToolApprovalPolicy::Never
+            && self.sandbox_mode == ToolSandboxMode::DangerFull
+    }
+
     pub(crate) fn approval_required(
         self,
         risk_requires_approval: bool,
@@ -64,6 +71,7 @@ impl TaskExecutionPolicy {
     }
 
     pub(crate) fn to_machine_json(self) -> Value {
+        let unrestricted_admin = self.has_unrestricted_admin_authority();
         json!({
             "schema_version": 1,
             "mode": self.mode.as_token(),
@@ -71,6 +79,8 @@ impl TaskExecutionPolicy {
             "actor_role": self.actor_role,
             "approval_policy": self.approval_policy.as_token(),
             "sandbox_mode": self.sandbox_mode.as_token(),
+            "authority_scope": if unrestricted_admin { "unrestricted_admin" } else { "configured" },
+            "host_scope": if unrestricted_admin { "system" } else { "workspace" },
         })
     }
 }
@@ -264,6 +274,10 @@ pub(crate) fn configured_policy(state: &AppState) -> TaskExecutionPolicy {
         derivation: "configured_tools_policy",
         actor_role: None,
     }
+}
+
+pub(crate) fn task_has_unrestricted_admin_authority(state: &AppState, task: &ClaimedTask) -> bool {
+    effective_policy_for_task(state, task).has_unrestricted_admin_authority()
 }
 
 pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> Option<Value> {

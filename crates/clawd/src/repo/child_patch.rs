@@ -133,10 +133,6 @@ pub(crate) fn record_child_patch_disposition(
     let list = dispositions.as_array_mut().expect("normalized array");
     list.retain(|item| item.get("child_task_id").and_then(Value::as_str) != Some(child_task_id));
     list.push(disposition.clone());
-    if list.len() > crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT {
-        let remove_count = list.len() - crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT;
-        list.drain(0..remove_count);
-    }
     transaction.execute(
         "UPDATE tasks
          SET result_json = ?2, updated_at = ?3

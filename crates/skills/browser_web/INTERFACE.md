@@ -63,8 +63,10 @@ removed before execution.
 - Image responses must use an image media type and are capped at 6 MiB each.
 - Screenshot, wait-map, raw HTML, processed text, image, manifest, and chunk
   paths are constrained to the configured workspace.
-- Browser page text is capped by `max_text_chars`; captured raw HTML is capped
-  at 4 MiB and reports truncation explicitly.
+- Browser page text keeps a small inline `max_text_chars` view. The complete
+  cleaned text and raw HTML are written to capture artifacts; an inline text
+  prefix reports exact sizes and an `artifact_range` continuation. The 4 MiB
+  raw-HTML threshold limits the diagnostic preview, not the canonical capture.
 - Runtime artifacts are writes, so the registry declares
   `filesystem_write=true` even though the external operation is observational.
 
@@ -100,7 +102,9 @@ Each successful `items[]` entry includes:
 - `fetch_method=browser`
 - `response_status`, `content_type`, `extracted_at`, `latency_ms`
 - `nav_wait_until`, `nav_attempts`, `nav_attempt_trace`
-- `text_truncated`, `text_chars_before_limit`, `content_sha256`
+- `text_truncated`, `text_chars_before_limit`, `text_chars_returned`, `content_sha256`
+- `text_result` when the inline page is partial, including original/returned
+  character counts and either an artifact range or a safe rerun continuation
 - `screenshot_path`, `capture_artifacts`
 - `provenance`, `trust`, `wait_strategy`, `runtime`
 

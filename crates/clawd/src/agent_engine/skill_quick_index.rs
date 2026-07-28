@@ -4,15 +4,6 @@ use claw_core::skill_registry::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-const QUICK_INDEX_MAX_PLANNER_CAPABILITIES: usize = 24;
-const QUICK_INDEX_MAX_SCHEMA_FIELDS: usize = 8;
-const QUICK_INDEX_MAX_OPTIONAL_FIELDS: usize = 8;
-const QUICK_INDEX_MAX_ENUM_FIELDS: usize = 3;
-const QUICK_INDEX_MAX_ENUM_VALUES: usize = 8;
-const QUICK_INDEX_PURPOSE_CHAR_BUDGET: usize = 160;
-const QUICK_INDEX_COMPACT_PURPOSE_CHAR_BUDGET: usize = 96;
-const QUICK_INDEX_MAX_SEMANTIC_TAGS: usize = 8;
-
 fn skill_risk_level_token(risk_level: SkillRiskLevel) -> &'static str {
     match risk_level {
         SkillRiskLevel::Unknown => "unknown",
@@ -31,7 +22,7 @@ fn output_kind_token(kind: OutputKind) -> &'static str {
     }
 }
 
-fn compact_token_list(values: Vec<String>, limit: usize) -> String {
+fn compact_token_list(values: Vec<String>) -> String {
     let mut unique = BTreeSet::new();
     for value in values {
         let trimmed = value.trim();
@@ -39,39 +30,22 @@ fn compact_token_list(values: Vec<String>, limit: usize) -> String {
             unique.insert(trimmed.to_string());
         }
     }
-    let total = unique.len();
-    let mut kept = unique.into_iter().take(limit).collect::<Vec<_>>();
-    if total > kept.len() {
-        kept.push(format!("+{}more", total - kept.len()));
-    }
-    kept.join("|")
+    unique.into_iter().collect::<Vec<_>>().join("|")
 }
 
-fn compact_declared_fields(values: &[String], limit: usize) -> String {
-    let values = values
+#[cfg(test)]
+fn compact_declared_fields(values: &[String]) -> String {
+    values
         .iter()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    let mut kept = values
-        .iter()
-        .take(limit)
-        .map(|value| (*value).to_string())
-        .collect::<Vec<_>>();
-    if values.len() > kept.len() {
-        kept.push(format!("+{}more", values.len() - kept.len()));
-    }
-    kept.join("|")
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
-fn compact_capability_purpose(description: &str, char_budget: usize) -> String {
-    description
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(char_budget)
-        .collect()
+fn compact_capability_purpose(description: &str) -> String {
+    description.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn schema_string_array(schema: &Value, key: &str) -> Vec<String> {
@@ -96,6 +70,7 @@ fn schema_property_names(schema: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn capability_enum_constraints(
     schema: Option<&Value>,
     required: &[String],
@@ -107,7 +82,6 @@ fn capability_enum_constraints(
     else {
         return Vec::new();
     };
-
     required
         .iter()
         .chain(optional)
@@ -122,10 +96,9 @@ fn capability_enum_constraints(
                 .filter_map(Value::as_str)
                 .map(ToString::to_string)
                 .collect::<Vec<_>>();
-            let values = compact_token_list(values, QUICK_INDEX_MAX_ENUM_VALUES);
+            let values = compact_token_list(values);
             (!values.is_empty()).then(|| format!("allowed_{field}={values}"))
         })
-        .take(QUICK_INDEX_MAX_ENUM_FIELDS)
         .collect()
 }
 
@@ -156,15 +129,11 @@ fn representative_planner_capabilities(manifest: &SkillManifest) -> Vec<&Planner
 pub(super) fn output_contract_metadata(manifest: &SkillManifest) -> String {
     let mut attrs = vec![format!("kind={}", output_kind_token(manifest.output_kind))];
     if let Some(schema) = manifest.output_schema.as_ref() {
-        let required = compact_token_list(
-            schema_string_array(schema, "required"),
-            QUICK_INDEX_MAX_SCHEMA_FIELDS,
-        );
+        let required = compact_token_list(schema_string_array(schema, "required"));
         if !required.is_empty() {
             attrs.push(format!("required={required}"));
         }
-        let fields =
-            compact_token_list(schema_property_names(schema), QUICK_INDEX_MAX_SCHEMA_FIELDS);
+        let fields = compact_token_list(schema_property_names(schema));
         if !fields.is_empty() {
             attrs.push(format!("fields={fields}"));
         }
@@ -179,7 +148,6 @@ pub(super) fn output_contract(manifest: &SkillManifest) -> String {
 fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
     representative_planner_capabilities(manifest)
         .into_iter()
-        .take(QUICK_INDEX_MAX_PLANNER_CAPABILITIES)
         .map(|capability| {
             let name = capability.name.trim();
             let mut attrs = Vec::new();
@@ -189,8 +157,7 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
                 }
             }
             if let Some(description) = capability.description.as_deref() {
-                let compact =
-                    compact_capability_purpose(description, QUICK_INDEX_PURPOSE_CHAR_BUDGET);
+                let compact = compact_capability_purpose(description);
                 if !compact.is_empty() {
                     attrs.push(format!("purpose={compact}"));
                 }
@@ -198,13 +165,7 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
             if !capability.semantic_tags.is_empty() {
                 attrs.push(format!(
                     "semantic_tags={}",
-                    capability
-                        .semantic_tags
-                        .iter()
-                        .take(QUICK_INDEX_MAX_SEMANTIC_TAGS)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("|")
+                    capability.semantic_tags.join("|")
                 ));
             }
             if let Some(effect) = capability.effect {
@@ -291,12 +252,10 @@ pub(super) fn planner_capabilities(manifest: &SkillManifest) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String {
-    let representatives = representative_planner_capabilities(manifest);
-    let total = representatives.len();
-    let mut candidates = representatives
+    let candidates = representative_planner_capabilities(manifest)
         .into_iter()
-        .take(QUICK_INDEX_MAX_PLANNER_CAPABILITIES)
         .map(|capability| {
             let mut attrs = Vec::new();
             if let Some(action) = capability.action.as_deref().map(str::trim) {
@@ -305,10 +264,7 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
                 }
             }
             if let Some(description) = capability.description.as_deref() {
-                let compact = compact_capability_purpose(
-                    description,
-                    QUICK_INDEX_COMPACT_PURPOSE_CHAR_BUDGET,
-                );
+                let compact = compact_capability_purpose(description);
                 if !compact.is_empty() {
                     attrs.push(format!("purpose={compact}"));
                 }
@@ -316,13 +272,7 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             if !capability.semantic_tags.is_empty() {
                 attrs.push(format!(
                     "semantic_tags={}",
-                    capability
-                        .semantic_tags
-                        .iter()
-                        .take(QUICK_INDEX_MAX_SEMANTIC_TAGS)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("|")
+                    capability.semantic_tags.join("|")
                 ));
             }
             if !capability.required.is_empty() {
@@ -331,7 +281,7 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             if !capability.optional.is_empty() {
                 attrs.push(format!(
                     "optional={}",
-                    compact_declared_fields(&capability.optional, QUICK_INDEX_MAX_OPTIONAL_FIELDS)
+                    compact_declared_fields(&capability.optional)
                 ));
             }
             attrs.extend(capability_enum_constraints(
@@ -360,12 +310,22 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
             }
         })
         .collect::<Vec<_>>();
-    if total > candidates.len() {
-        candidates.push(format!("+{}more", total - candidates.len()));
-    }
     if candidates.is_empty() {
         String::new()
     } else {
         format!("; capability_candidates={}", candidates.join(";"))
     }
+}
+
+#[cfg(test)]
+pub(super) fn planner_capability_ids(manifest: &SkillManifest) -> Vec<String> {
+    manifest
+        .planner_capabilities
+        .iter()
+        .map(|capability| capability.name.trim())
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }

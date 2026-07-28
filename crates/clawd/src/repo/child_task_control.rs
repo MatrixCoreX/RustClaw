@@ -301,9 +301,6 @@ fn record_parent_retry(
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(|| anyhow::anyhow!("child_task_retries_invalid"))?;
-    if retries.len() >= crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT {
-        anyhow::bail!("child_retry_history_limit_exceeded");
-    }
     retries.push(json!({
         "previous_child_task_id": previous_child_task_id,
         "child_task_id": child_task_id,

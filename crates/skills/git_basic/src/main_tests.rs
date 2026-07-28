@@ -1,7 +1,7 @@
 use super::{
-    error_extra, execute_with_workspace_root, git_success_extra, normalize_action,
-    parse_branch_list, parse_git_log_commits, parse_git_status_summary, parse_remote_list,
-    SKILL_NAME,
+    error_extra, execute_with_workspace_root, execute_with_workspace_root_and_permissions,
+    git_success_extra, normalize_action, parse_branch_list, parse_git_log_commits,
+    parse_git_status_summary, parse_remote_list, SKILL_NAME,
 };
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -456,6 +456,22 @@ fn execute_accepts_absolute_repository_path_inside_workspace() {
             .expect("canonical repository")
             .to_str()
     );
+}
+
+#[test]
+fn admin_permission_accepts_repository_visible_to_the_service_account() {
+    let fixture = TestRepository::new();
+    let isolated_workspace = fixture.workspace.join("isolated-workspace");
+    std::fs::create_dir_all(&isolated_workspace).expect("create isolated workspace");
+
+    let (_, extra) = execute_with_workspace_root_and_permissions(
+        &isolated_workspace,
+        json!({"action": "status", "repo": fixture.repository}),
+        true,
+    )
+    .expect("admin may inspect a repository outside the RustClaw workspace");
+
+    assert_eq!(extra["action"], "status");
 }
 
 #[test]

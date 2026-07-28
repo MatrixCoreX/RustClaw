@@ -6,12 +6,7 @@ use super::{
 use crate::memory;
 use crate::{AppState, ClaimedTask};
 
-const CONTEXT_COMPACTION_THRESHOLD_CHARS: usize = 24_000;
-const TRANSCRIPT_COMPACTION_THRESHOLD_CHARS: usize = 12_000;
 const PROVIDER_CONTEXT_COMPACTION_PERCENT: usize = 75;
-const COMPACTED_LAST_TURN_SEGMENT_CHARS: usize = 800;
-const COMPACTED_LAST_TURN_TOTAL_CHARS: usize = 1_600;
-const MAX_CONTINUITY_REFS: usize = 128;
 const CONTINUITY_REF_NAMESPACES: &[&str] = &[
     "artifact",
     "child",
@@ -104,12 +99,6 @@ fn plan_context_compaction(
     .map(|value| value.chars().count())
     .sum::<usize>();
     let mut trigger_codes = Vec::new();
-    if before_char_count > CONTEXT_COMPACTION_THRESHOLD_CHARS {
-        trigger_codes.push("context_budget_exceeded");
-    }
-    if transcript_char_count > TRANSCRIPT_COMPACTION_THRESHOLD_CHARS {
-        trigger_codes.push("transcript_budget_exceeded");
-    }
     let provider_compaction_threshold_tokens = provider_context_window_tokens
         .filter(|tokens| *tokens > 0)
         .map(|tokens| {
@@ -145,7 +134,9 @@ fn plan_context_compaction(
         before_char_count,
         before_token_estimate,
         transcript_char_count,
-        threshold_chars: CONTEXT_COMPACTION_THRESHOLD_CHARS,
+        threshold_chars: provider_compaction_threshold_tokens
+            .map(|tokens| tokens.saturating_mul(4))
+            .unwrap_or(usize::MAX),
         provider_context_window_tokens,
         provider_compaction_threshold_tokens,
         trigger_codes,
@@ -317,13 +308,21 @@ pub(crate) fn apply_agent_loop_context_compaction(
         &planner_memory_decision,
         &chat_memory_decision,
     );
+    let compacted_last_turn_total_chars = plan
+        .provider_compaction_threshold_tokens
+        .unwrap_or(plan.before_token_estimate.max(1))
+        .saturating_mul(4)
+        .saturating_div(5)
+        .max(1);
+    let compacted_last_turn_segment_chars =
+        compacted_last_turn_total_chars.saturating_div(2).max(1);
     let compacted_last_turn = memory::build_last_turn_full_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
-        COMPACTED_LAST_TURN_SEGMENT_CHARS,
-        COMPACTED_LAST_TURN_TOTAL_CHARS,
+        compacted_last_turn_segment_chars,
+        compacted_last_turn_total_chars,
     );
     apply_context_compaction_with_inputs(
         &task.task_id,
@@ -497,9 +496,6 @@ fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Valu
                 "source_ref": source_ref,
                 "provenance": source_provenance(source_ref),
             }));
-            if refs.len() >= MAX_CONTINUITY_REFS {
-                return refs;
-            }
         }
     }
     refs

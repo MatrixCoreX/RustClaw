@@ -8,6 +8,7 @@ use anyhow::Context;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -59,6 +60,17 @@ struct InvestCopyConfig {
 struct PolicyMatch {
     term_index: usize,
     reason_code: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DataPage {
+    complete: bool,
+    original_chars: usize,
+    returned_chars: usize,
+    start_char: usize,
+    end_char: usize,
+    snapshot_sha256: String,
+    continuation: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -403,7 +415,19 @@ fn draft(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let (owned_body, truncated) = truncate_owned(pdata);
+    let (owned_body, data_page) =
+        match page_owned(pdata, args.get("continuation").and_then(Value::as_str)) {
+            Ok(page) => page,
+            Err(code) => {
+                return error_resp(
+                    request_id,
+                    code,
+                    format!("code={code}"),
+                    Some(json!({"recovery_action": "restart_from_current_data"})),
+                );
+            }
+        };
+    let truncated = !data_page.complete;
     let body_for_summary = owned_body.as_str();
 
     if use_heuristic {
@@ -426,6 +450,7 @@ fn draft(
                 "person_slug": p.slug,
                 "summary_mode": "heuristic",
                 "data_truncated": truncated,
+                "data_page": &data_page,
                 "summary_bullet_count": bullets.len(),
                 "summary_bullets": bullets,
                 "brief": brief,
@@ -500,6 +525,7 @@ fn draft(
                 "model": generated.model,
             },
             "data_truncated": truncated,
+            "data_page": &data_page,
             "compliance": compliance,
             "disclaimer_required": true,
             "word_count": word_count
@@ -556,12 +582,61 @@ fn build_llm_user_prompt(
     )
 }
 
-fn truncate_owned(s: &str) -> (String, bool) {
-    let count = s.chars().count();
-    if count <= MAX_DATA_CHARS {
-        return (s.to_string(), false);
+fn page_owned(value: &str, continuation: Option<&str>) -> Result<(String, DataPage), &'static str> {
+    let original_chars = value.chars().count();
+    let snapshot_sha256 = format!("{:x}", Sha256::digest(value.as_bytes()));
+    let start_char = continuation
+        .map(|token| decode_data_continuation(token, &snapshot_sha256))
+        .transpose()?
+        .unwrap_or(0)
+        .min(original_chars);
+    let body = value
+        .chars()
+        .skip(start_char)
+        .take(MAX_DATA_CHARS)
+        .collect::<String>();
+    let returned_chars = body.chars().count();
+    let end_char = start_char.saturating_add(returned_chars);
+    let next =
+        (end_char < original_chars).then(|| encode_data_continuation(end_char, &snapshot_sha256));
+    let complete = next.is_none();
+    Ok((
+        body,
+        DataPage {
+            complete,
+            original_chars,
+            returned_chars,
+            start_char,
+            end_char,
+            snapshot_sha256,
+            continuation: next.map(|token| {
+                json!({
+                    "kind": "opaque",
+                    "token": token,
+                    "state": {"start_char": end_char},
+                })
+            }),
+        },
+    ))
+}
+
+fn encode_data_continuation(start_char: usize, snapshot_sha256: &str) -> String {
+    format!("invest_copy_v1:{start_char}:sha256:{snapshot_sha256}")
+}
+
+fn decode_data_continuation(token: &str, snapshot_sha256: &str) -> Result<usize, &'static str> {
+    let mut parts = token.splitn(4, ':');
+    if parts.next() != Some("invest_copy_v1") {
+        return Err("invalid_continuation");
     }
-    (s.chars().take(MAX_DATA_CHARS).collect::<String>(), true)
+    let start_char = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or("invalid_continuation")?;
+    if parts.next() != Some("sha256") || parts.next() != Some(snapshot_sha256) {
+        return Err("stale_snapshot");
+    }
+    Ok(start_char)
 }
 
 fn draft_machine_text(

@@ -229,7 +229,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("packages", "runners", "pairs", "specs", "manifests", "records", "cargo-excludes"),
+        choices=("skills", "packages", "runners", "pairs", "specs", "manifests", "records", "cargo-excludes"),
         default="packages",
     )
     parser.add_argument(
@@ -239,6 +239,7 @@ def parse_args() -> argparse.Namespace:
             "proactive",
             "unsupported-proactive",
             "build-excludes",
+            "platform-precompiled",
             "all-runners",
             "selected",
         ),
@@ -277,6 +278,14 @@ def select_specs(args: argparse.Namespace) -> list[SkillBuildSpec]:
             for spec in specs
             if spec.adapter == "cargo"
             and (spec.install_mode == "on_demand" or not supports_platform(spec, platform_name, arch_name))
+        ]
+    if args.scope == "platform-precompiled":
+        return [
+            spec
+            for spec in specs
+            if spec.install_mode == "on_demand"
+            and spec.adapter == "cargo"
+            and supports_platform(spec, platform_name, arch_name)
         ]
     if args.scope == "all-runners":
         return specs
@@ -321,7 +330,9 @@ def main() -> int:
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
-        if args.format == "packages":
+        if args.format == "skills":
+            print(spec.skill_name)
+        elif args.format == "packages":
             print(spec.package)
         elif args.format == "runners":
             print(spec.runner)

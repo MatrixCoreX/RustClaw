@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::result_pagination::{paginate, CursorInput};
+use crate::result_pagination::{encode_scan_continuation, paginate, CursorInput};
 
 const CACHE_TTL_SECONDS: i64 = 60;
 const CACHE_MAX_ENTRIES: i64 = 16;
@@ -235,6 +235,19 @@ pub(super) fn render_cached(
         .and_then(Value::as_str)
         .unwrap_or("content")
         .to_string();
+    let frontier_continuation = cached
+        .template
+        .pointer("/scan/traversal_next")
+        .and_then(Value::as_u64)
+        .map(|offset| {
+            json!({
+                "kind": "scan_frontier",
+                "safe_to_continue": true,
+                "reason_code": cached.template.get("completeness").cloned().unwrap_or(Value::Null),
+                "token": encode_scan_continuation(query_sha256, offset as usize),
+                "traversal_offset": offset,
+            })
+        });
     let object = cached
         .template
         .as_object_mut()
@@ -246,14 +259,14 @@ pub(super) fn render_cached(
     );
     object.insert("has_more".to_string(), Value::Bool(page.has_more));
     object.insert("truncated".to_string(), Value::Bool(page.has_more));
-    object.insert(
-        "continuation".to_string(),
-        page.metadata
-            .get("next_cursor")
-            .and_then(Value::as_str)
-            .map(|cursor| json!({"kind":"next_page","safe_to_continue":true,"cursor":cursor}))
-            .unwrap_or(Value::Null),
-    );
+    let continuation = page
+        .metadata
+        .get("next_cursor")
+        .and_then(Value::as_str)
+        .map(|cursor| json!({"kind":"next_page","safe_to_continue":true,"cursor":cursor}))
+        .or_else(|| scan_truncated.then(|| frontier_continuation.unwrap_or(Value::Null)))
+        .unwrap_or(Value::Null);
+    object.insert("continuation".to_string(), continuation);
     match action.as_str() {
         "find_name" | "find_ext" => {
             object.insert("results".to_string(), Value::Array(page.items));

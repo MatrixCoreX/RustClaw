@@ -158,6 +158,86 @@ fn slo_failure_classes_use_structured_machine_fields_only() {
 }
 
 #[test]
+fn slo_adaptive_outcomes_distinguish_recovery_and_terminal_states() {
+    let rows = vec![
+        row("succeeded", 1, json!({}), json!({})),
+        SloTaskRow {
+            status: "running".to_string(),
+            claim_attempt: 1,
+            result_parse_error: false,
+            result: Some(json!({
+                "complete": false,
+                "partial_reason": "page_boundary",
+                "continuation": {"kind": "opaque", "token": "next"},
+                "artifacts": [{"id": "artifact-1", "size_bytes": 4096}],
+                "task_lifecycle": {
+                    "state": "waiting",
+                    "task_checkpoint": {"checkpoint_id": "checkpoint-1"}
+                },
+                "stagnation_count": 2
+            })),
+        },
+        SloTaskRow {
+            status: "failed".to_string(),
+            claim_attempt: 1,
+            result_parse_error: false,
+            result: Some(json!({"complete": false, "partial_reason": "unsafe_continuation"})),
+        },
+        SloTaskRow {
+            status: "running".to_string(),
+            claim_attempt: 1,
+            result_parse_error: false,
+            result: Some(json!({
+                "task_lifecycle": {
+                    "state": "needs_user",
+                    "resume_entrypoint": "await_user_input"
+                }
+            })),
+        },
+        SloTaskRow {
+            status: "failed".to_string(),
+            claim_attempt: 1,
+            result_parse_error: false,
+            result: Some(json!({"denied_by_policy": true})),
+        },
+        SloTaskRow {
+            status: "failed".to_string(),
+            claim_attempt: 1,
+            result_parse_error: false,
+            result: Some(json!({
+                "limit_hit": {
+                    "reason_code": "administrator_tool_call_budget_exhausted"
+                }
+            })),
+        },
+    ];
+
+    let aggregate = aggregate_slo_rows(&rows);
+    let report = slo_metrics_json(
+        &aggregate,
+        24,
+        100,
+        rows.len(),
+        100,
+        false,
+        &LocalAsyncJobHealth::default(),
+    );
+    let outcomes = &report["adaptive_outcomes"];
+
+    assert_eq!(outcomes["complete"], 1);
+    assert_eq!(outcomes["partial_resumable"], 1);
+    assert_eq!(outcomes["partial_terminal"], 1);
+    assert_eq!(outcomes["checkpointed"], 1);
+    assert_eq!(outcomes["user_input_blocked"], 1);
+    assert_eq!(outcomes["policy_denied"], 1);
+    assert_eq!(outcomes["continuation_descriptors"], 1);
+    assert_eq!(outcomes["stagnation_events"], 1);
+    assert_eq!(outcomes["administrator_budget_exhaustions"], 1);
+    assert_eq!(outcomes["artifact_descriptors"], 1);
+    assert_eq!(outcomes["artifact_bytes"], 4096);
+}
+
+#[test]
 fn slo_aggregate_uses_machine_recovery_records_without_text_matching() {
     let rows = vec![SloTaskRow {
         status: "timeout".to_string(),

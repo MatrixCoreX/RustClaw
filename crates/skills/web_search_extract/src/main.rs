@@ -16,8 +16,6 @@ use url::Url;
 const SKILL_NAME: &str = "web_search_extract";
 const DEFAULT_LIMIT: usize = 5;
 const MAX_LIMIT: usize = 20;
-const MAX_CURSOR: usize = 100;
-const MAX_CANDIDATE_WINDOW: usize = 101;
 const MAX_BACKEND_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_QUERY_CHARS: usize = 2_000;
 const MAX_OPTION_CHARS: usize = 128;
@@ -70,6 +68,8 @@ struct SearchItem {
     snippet: Option<String>,
     source: String,
     rank: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field_truncations: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -285,7 +285,7 @@ fn parse_input(req: &Value) -> std::result::Result<SearchInput, SearchError> {
         MAX_LIMIT,
         "top_k",
     )?;
-    let cursor = bounded_usize(args.get("cursor"), 0, 0, MAX_CURSOR, "cursor")?;
+    let cursor = parse_search_cursor(args, &query)?;
     let lang = optional_string(args.get("lang"), "lang")?;
     let time_range = optional_string(args.get("time_range"), "time_range")?;
     let mut domains_allow = get_string_array(args.get("domains_allow"), "domains_allow")?;
@@ -451,7 +451,7 @@ fn handle(input: &SearchInput) -> std::result::Result<Value, SearchError> {
             }
         }
     }
-    Ok(build_search_payload(input, &backend_label, items))
+    Ok(build_backend_page_payload(input, &backend_label, items))
 }
 
 fn search_selected_backend(
@@ -482,12 +482,8 @@ fn search_selected_backend(
     }
 }
 
-fn build_search_payload(
-    input: &SearchInput,
-    backend_label: &str,
-    mut items: Vec<SearchItem>,
-) -> Value {
-    items.truncate(candidate_window(input));
+#[cfg(test)]
+fn build_search_payload(input: &SearchInput, backend_label: &str, items: Vec<SearchItem>) -> Value {
     let snapshot_id = search_snapshot_id(input, backend_label, &items);
     let observed_count = items.len();
     let page_start = input.cursor.min(observed_count);
@@ -532,16 +528,106 @@ fn build_search_payload(
     })
 }
 
+fn build_backend_page_payload(
+    input: &SearchInput,
+    backend_label: &str,
+    mut items: Vec<SearchItem>,
+) -> Value {
+    let observed_candidate_count = items.len();
+    let has_more = observed_candidate_count > input.top_k;
+    items.truncate(input.top_k);
+    if !input.include_snippet {
+        items.iter_mut().for_each(|item| item.snippet = None);
+    }
+    for (index, item) in items.iter_mut().enumerate() {
+        item.rank = input.cursor + index + 1;
+    }
+    let returned_count = items.len();
+    let next_cursor = has_more.then(|| input.cursor.saturating_add(returned_count));
+    let snapshot_id = search_snapshot_id(input, backend_label, &items);
+    let extract_urls = items
+        .iter()
+        .map(|item| item.url.clone())
+        .collect::<Vec<_>>();
+    json!({
+        "status": "ok",
+        "error_code": Value::Null,
+        "error": Value::Null,
+        "backend": backend_label,
+        "items": items,
+        "extract_urls": extract_urls,
+        "summary": "search_result_set",
+        "result_count": returned_count,
+        "observed_candidate_count": observed_candidate_count,
+        "citations": extract_urls,
+        "snapshot_id": snapshot_id,
+        "page": {
+            "cursor": input.cursor,
+            "limit": input.top_k,
+            "returned_count": returned_count,
+            "total_count": Value::Null,
+            "observed_candidate_count": observed_candidate_count,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "next_continuation": next_cursor.map(|offset| encode_search_continuation(&input.query, offset)),
+            "previous_cursor": (input.cursor > 0)
+                .then_some(input.cursor.saturating_sub(input.top_k)),
+            "stability": "backend_best_effort"
+        }
+    })
+}
+
 fn search_failure(error: anyhow::Error) -> SearchError {
     SearchError::new("SEARCH_FAILED", error.to_string()).retryable()
 }
 
 fn candidate_window(input: &SearchInput) -> usize {
-    input
-        .cursor
-        .saturating_add(input.top_k)
-        .saturating_add(1)
-        .min(MAX_CANDIDATE_WINDOW)
+    input.top_k.saturating_add(1)
+}
+
+fn parse_search_cursor(
+    args: &serde_json::Map<String, Value>,
+    query: &str,
+) -> std::result::Result<usize, SearchError> {
+    if let Some(token) = args.get("continuation").and_then(Value::as_str) {
+        return decode_search_continuation(query, token);
+    }
+    let Some(value) = args.get("cursor") else {
+        return Ok(0);
+    };
+    value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| SearchError::new("INVALID_INPUT", "cursor must be integer"))
+}
+
+fn search_query_sha256(query: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(query.trim().as_bytes()))
+}
+
+fn encode_search_continuation(query: &str, offset: usize) -> String {
+    format!("web_search_v1:{offset}:{}", search_query_sha256(query))
+}
+
+fn decode_search_continuation(query: &str, token: &str) -> std::result::Result<usize, SearchError> {
+    let mut parts = token.splitn(3, ':');
+    if parts.next() != Some("web_search_v1") {
+        return Err(SearchError::new(
+            "INVALID_CONTINUATION",
+            "continuation token is invalid",
+        ));
+    }
+    let offset = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| SearchError::new("INVALID_CONTINUATION", "continuation token is invalid"))?;
+    if parts.next().unwrap_or_default() != search_query_sha256(query) {
+        return Err(SearchError::new(
+            "STALE_SNAPSHOT",
+            "continuation token does not belong to this query",
+        ));
+    }
+    Ok(offset)
 }
 
 fn search_snapshot_id(input: &SearchInput, backend: &str, items: &[SearchItem]) -> String {
@@ -640,6 +726,7 @@ fn search_serpapi(input: &SearchInput) -> Result<Vec<SearchItem>> {
         q.append_pair("engine", "google");
         q.append_pair("q", &input.query);
         q.append_pair("num", &candidate_window(input).to_string());
+        q.append_pair("start", &input.cursor.to_string());
         q.append_pair("api_key", &api_key);
         if let Some(lang) = &input.lang {
             q.append_pair("hl", lang);
@@ -693,6 +780,7 @@ fn search_serpapi(input: &SearchInput) -> Result<Vec<SearchItem>> {
             snippet,
             source,
             rank: out.len() + 1,
+            field_truncations: None,
         });
     }
     Ok(out)
@@ -704,6 +792,7 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("q", &input.query);
+        q.append_pair("s", &input.cursor.to_string());
         if let Some(lang) = &input.lang {
             q.append_pair("kl", lang);
         }
@@ -771,6 +860,7 @@ fn parse_duckduckgo_html_results(html: &str, input: &SearchInput) -> Vec<SearchI
             snippet,
             source: "duckduckgo".to_string(),
             rank: out.len() + 1,
+            field_truncations: None,
         });
         if out.len() >= candidate_window(input).saturating_mul(3) {
             break;
@@ -826,6 +916,7 @@ fn search_github_repositories(input: &SearchInput) -> Result<Vec<SearchItem>> {
         let mut q = url.query_pairs_mut();
         q.append_pair("q", &query_without_site_operators(&input.query));
         q.append_pair("per_page", &candidate_window(input).min(100).to_string());
+        q.append_pair("page", &(input.cursor / input.top_k.max(1) + 1).to_string());
     }
     let res = client
         .get(url)
@@ -875,6 +966,7 @@ fn search_github_repositories(input: &SearchInput) -> Result<Vec<SearchItem>> {
             snippet,
             source: "github.com".to_string(),
             rank: out.len() + 1,
+            field_truncations: None,
         });
     }
     Ok(out)
@@ -886,6 +978,7 @@ fn search_docs_rs(input: &SearchInput) -> Result<Vec<SearchItem>> {
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("query", &query_without_site_operators(&input.query));
+        q.append_pair("page", &(input.cursor / input.top_k.max(1) + 1).to_string());
     }
     let response = client
         .get(url)
@@ -936,6 +1029,7 @@ fn parse_docs_rs_results(html: &str, max_items: usize) -> Vec<SearchItem> {
             snippet,
             source: "docs.rs".to_string(),
             rank: out.len() + 1,
+            field_truncations: None,
         });
         if out.len() >= max_items {
             break;
@@ -951,6 +1045,7 @@ fn search_bing_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
         let mut q = url.query_pairs_mut();
         q.append_pair("q", &input.query);
         q.append_pair("count", &candidate_window(input).to_string());
+        q.append_pair("first", &input.cursor.saturating_add(1).to_string());
         if let Some(lang) = &input.lang {
             q.append_pair("setlang", lang);
         }
@@ -1006,6 +1101,7 @@ fn parse_bing_html_results(html: &str, max_items: usize) -> Vec<SearchItem> {
             snippet,
             source: "bing".to_string(),
             rank: out.len() + 1,
+            field_truncations: None,
         });
         if out.len() >= max_items {
             break;
@@ -1099,6 +1195,26 @@ fn normalize_and_filter(items: &mut Vec<SearchItem>, input: &SearchInput) {
             continue;
         }
         if seen.insert(norm_url.clone()) {
+            let title_chars = it.title.chars().count();
+            let snippet_chars = it.snippet.as_deref().map(str::chars).map(Iterator::count);
+            let field_truncations = json!({
+                "title": (title_chars > MAX_TITLE_CHARS).then(|| json!({
+                    "truncated": true,
+                    "original_chars": title_chars,
+                    "returned_chars": MAX_TITLE_CHARS,
+                    "recovery": "open_result_url",
+                })),
+                "snippet": snippet_chars.filter(|count| *count > MAX_SNIPPET_CHARS).map(|count| json!({
+                    "truncated": true,
+                    "original_chars": count,
+                    "returned_chars": MAX_SNIPPET_CHARS,
+                    "recovery": "open_result_url",
+                })),
+            });
+            let has_field_truncation = field_truncations
+                .as_object()
+                .is_some_and(|fields| fields.values().any(|value| !value.is_null()));
+            let field_truncations = has_field_truncation.then_some(field_truncations);
             out.push(SearchItem {
                 title: bounded_text(&it.title, MAX_TITLE_CHARS),
                 snippet: it
@@ -1109,6 +1225,7 @@ fn normalize_and_filter(items: &mut Vec<SearchItem>, input: &SearchInput) {
                 source: normalize_source_from_url(&norm_url),
                 url: norm_url,
                 rank: it.rank,
+                field_truncations,
             });
         }
     }

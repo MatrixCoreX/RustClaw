@@ -13,8 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/agent_engine/context_compaction.rs": (
         "run_model_assisted_context_compaction",
-        "MIN_RESERVED_LLM_CALLS_AFTER_COMPACTION",
-        "MAX_CONTEXT_SOURCE_TOTAL_CHARS",
+        "context_compaction_output_tokens",
+        "model_descriptor().output_reserve_tokens",
+        "provider_compaction_threshold_tokens",
+        "materialize_context_source_artifacts",
+        '"canonical_ref"',
         "tokio::time::timeout",
         "PromptSchemaId::ContextCompaction",
         "contains_forbidden_instruction_field",

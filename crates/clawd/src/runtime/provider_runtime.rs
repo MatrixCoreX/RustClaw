@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use claw_core::config::AgentConfig;
-use claw_core::model_turn::ProviderModelCapabilities;
+use claw_core::model_turn::{ProviderModelCapabilities, ProviderModelDescriptor};
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
@@ -20,14 +20,14 @@ pub(crate) struct LlmProviderRuntime {
 }
 
 impl LlmProviderRuntime {
-    pub(crate) fn model_capabilities(&self) -> ProviderModelCapabilities {
+    pub(crate) fn model_descriptor(&self) -> ProviderModelDescriptor {
         let protocol = self.config.provider_type.trim();
         let adapter_supports_tools = matches!(
             protocol,
             "openai_compat" | "anthropic_claude" | "google_gemini"
         );
         let native_tools = self.config.supports_tools && adapter_supports_tools;
-        ProviderModelCapabilities {
+        let capabilities = ProviderModelCapabilities {
             native_tools,
             parallel_tools: native_tools,
             structured_output: protocol == "google_gemini",
@@ -39,7 +39,25 @@ impl LlmProviderRuntime {
                 .iter()
                 .any(|modality| modality.eq_ignore_ascii_case("image")),
             prompt_cache: false,
+        };
+        ProviderModelDescriptor {
+            capabilities,
+            context_window_tokens: self.config.context_window_tokens,
+            output_reserve_tokens: usize::try_from(
+                self.config.params.default_max_tokens.unwrap_or(4_096),
+            )
+            .unwrap_or(usize::MAX),
+            request_timeout_seconds: self.config.timeout_seconds.max(1),
+            estimator_confidence: crate::token_estimator::estimator_confidence(
+                &self.config.name,
+                &self.config.provider_type,
+                &self.config.model,
+            ),
         }
+    }
+
+    pub(crate) fn model_capabilities(&self) -> ProviderModelCapabilities {
+        self.model_descriptor().capabilities
     }
 
     /// §P4.4 E3.a：根据 vendor 从 `provider.config.name` 推断 secret name 形式。

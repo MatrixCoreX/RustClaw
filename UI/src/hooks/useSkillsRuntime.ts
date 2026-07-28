@@ -123,13 +123,22 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         } else {
           const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
           const operationSucceeded = previousOperation.action === "remove" ? item?.configured_installed === false : item?.installed === true;
+          const installOrigin =
+            completedOperation?.result && typeof completedOperation.result === "object"
+              ? completedOperation.result.install_origin
+              : null;
           setSkillStoreMessage(
             operationSucceeded
               ? previousOperation.action !== "remove"
-                ? t(
-                    `${previousOperation.skill_name} 已完成安装并可以使用。`,
-                    `${previousOperation.skill_name} finished installing and is ready to use.`,
-                  )
+                ? installOrigin === "platform_precompiled"
+                  ? t(
+                      `${previousOperation.skill_name} 已使用当前平台的预编译版本安装完成，可以直接使用。`,
+                      `${previousOperation.skill_name} was installed from the precompiled package for this platform and is ready to use.`,
+                    )
+                  : t(
+                      `${previousOperation.skill_name} 已完成安装并可以使用。`,
+                      `${previousOperation.skill_name} finished installing and is ready to use.`,
+                    )
                 : t(
                     `${previousOperation.skill_name} 已完成删除。`,
                     `${previousOperation.skill_name} finished removing.`,

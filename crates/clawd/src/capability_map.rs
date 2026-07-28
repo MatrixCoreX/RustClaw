@@ -885,7 +885,7 @@ fn build_capability_map_for_task_with_scope(
         if !loadable.is_empty() {
             lines.push(format!("loadable_capability_groups={}", loadable.join(",")));
             lines.push(
-                "capability_group_loader=call_tool:load_capability_groups; args=groups[]; max_items=2"
+                "capability_group_loader=call_tool:load_capability_groups; args=nonempty_groups[]; selected_scopes_persist=true"
                     .to_string(),
             );
         }

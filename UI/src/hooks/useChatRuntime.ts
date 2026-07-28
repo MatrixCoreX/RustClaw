@@ -2,10 +2,14 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
+  assertChatAttachmentConstraints,
   attachmentIsAudio,
   attachmentIsImage,
-  CHAT_MAX_ATTACHMENTS,
+  ChatAttachmentConstraintError,
+  DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS,
+  fetchChatAttachmentConstraints,
   fileToChatAttachment,
+  formatAttachmentSize,
   formatVisionResultText,
 } from "../lib/chat-attachments";
 import {
@@ -13,9 +17,11 @@ import {
   decodeAssistantPresentationEvent,
 } from "../lib/assistant-presentation";
 import {
+  advanceConversationBodyDescriptor,
   conversationHistoryStorageKey,
+  fetchConversationHistoryPage,
+  fetchNextConversationBodyPage,
   projectConversationHistory,
-  verifyConversationHistoryPage,
   type ServerChatThreadProjection,
 } from "../lib/chat-history";
 import { followTaskEventStream } from "../lib/task-event-stream";
@@ -38,10 +44,10 @@ import type {
   ChatMessage,
   SubmitTaskResponse,
   ConversationArchiveUpdate,
-  ConversationHistoryPage,
   ConversationTitleUpdate,
   TaskLlmDebugResponse,
   TaskQueryResponse,
+  UiAttachmentConstraints,
 } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -75,7 +81,7 @@ export interface ChatTeachingRunSummary {
   selected: boolean;
 }
 
-interface ChatTeachingRunRecord {
+export interface ChatTeachingRunRecord {
   id: string;
   taskId: string | null;
   userMessageId: string;
@@ -91,7 +97,7 @@ interface ChatTeachingRunRecord {
   callCount?: number | null;
 }
 
-interface ChatThreadRecord {
+export interface ChatThreadRecord {
   id: string;
   title: string;
   messages: ChatMessage[];
@@ -108,16 +114,12 @@ interface ChatThreadRecord {
   teachingRuns?: ChatTeachingRunRecord[];
 }
 
-interface ChatThreadState {
+export interface ChatThreadState {
   activeThreadId: string;
   threads: ChatThreadRecord[];
 }
 
 const LEGACY_CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
-const MAX_CHAT_THREADS = 30;
-const MAX_PERSISTED_MESSAGES_PER_THREAD = 120;
-const MAX_TEACHING_RUNS_PER_THREAD = 80;
-
 export interface UseChatRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
@@ -188,6 +190,11 @@ export function useChatRuntime({
     loadSelectedVoiceInputDeviceId,
   );
   const [chatError, setChatError] = useState<string | null>(null);
+  const [chatHistoryCursor, setChatHistoryCursor] = useState<string | null>(null);
+  const [chatHistoryLoading, setChatHistoryLoading] = useState(false);
+  const [chatBodyLoadingMessageId, setChatBodyLoadingMessageId] = useState<string | null>(null);
+  const [chatAttachmentConstraints, setChatAttachmentConstraints] =
+    useState<UiAttachmentConstraints>(DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const chatVoiceRecorderRef = useRef<PcmWavRecordingSession | null>(null);
   const chatInputValueRef = useRef("");
@@ -199,7 +206,11 @@ export function useChatRuntime({
   const activeChatThreadRef = useRef(activeChatThread);
   const apiFetchRef = useRef(apiFetch);
   const conversationHistoryScopeRef = useRef("");
+  const chatHistoryLoadingRef = useRef(false);
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
+  const liveChatTaskIdsRef = useRef<Set<string>>(new Set());
+  const suspendedChatTaskIdsRef = useRef<Set<string>>(new Set());
+  const recoveryAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const voiceStopRequestedRef = useRef(false);
 
   chatInputValueRef.current = chatInput;
@@ -216,6 +227,10 @@ export function useChatRuntime({
       const recorder = chatVoiceRecorderRef.current;
       chatVoiceRecorderRef.current = null;
       if (recorder) void recorder.cancel().catch(() => undefined);
+      for (const controller of recoveryAbortControllersRef.current.values()) {
+        controller.abort();
+      }
+      recoveryAbortControllersRef.current.clear();
     },
     [],
   );
@@ -232,39 +247,28 @@ export function useChatRuntime({
       if (conversationHistoryScopeRef.current) {
         conversationHistoryScopeRef.current = "";
         setChatThreadState(emptyChatThreadState(t));
+        setChatHistoryCursor(null);
       }
       return;
     }
     if (conversationHistoryScopeRef.current !== scope) {
       conversationHistoryScopeRef.current = scope;
       setChatThreadState(loadChatThreadState(t, scope));
+      setChatHistoryCursor(null);
       window.localStorage.removeItem(LEGACY_CHAT_THREAD_STORAGE_KEY);
     }
     let cancelled = false;
     const restore = async () => {
+      chatHistoryLoadingRef.current = true;
+      setChatHistoryLoading(true);
       try {
-        const pages: ConversationHistoryPage[] = [];
-        let cursor: string | null = null;
-        for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
-          const query = new URLSearchParams({ limit: "200" });
-          if (cursor) query.set("cursor", cursor);
-          const response = await apiFetchRef.current(
-            `/v1/tasks/conversation-history?${query}`,
-          );
-          const body = (await response.json()) as ApiResponse<ConversationHistoryPage>;
-          if (!response.ok || !body.ok || !body.data) {
-            throw new Error(body.error || `conversation_history_http_${response.status}`);
-          }
-          await verifyConversationHistoryPage(body.data);
-          pages.push(body.data);
-          cursor = body.data.truncated ? body.data.next_cursor?.trim() || null : null;
-          if (!cursor) break;
-        }
+        const page = await fetchConversationHistoryPage(apiFetchRef.current);
         if (cancelled) return;
-        const restored = projectConversationHistory(pages, t);
+        const restored = projectConversationHistory([page], t);
         setChatThreadState((current) =>
-          mergeServerConversationHistory(current, restored, t),
+          mergeServerConversationHistory(retainLocalDraftsForPagedRestore(current), restored, t),
         );
+        setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       } catch (error) {
         if (!cancelled) {
           console.warn(
@@ -273,12 +277,88 @@ export function useChatRuntime({
           );
         }
       }
+      finally {
+        if (!cancelled) setChatHistoryLoading(false);
+        chatHistoryLoadingRef.current = false;
+      }
     };
     void restore();
     return () => {
       cancelled = true;
     };
   }, [conversationHistoryScope, lang]);
+
+  useEffect(() => {
+    if (!conversationHistoryScope.trim()) return;
+    let active = true;
+    void fetchChatAttachmentConstraints(apiFetchRef.current)
+      .then((constraints) => {
+        if (active) setChatAttachmentConstraints(constraints);
+      })
+      .catch(() => {
+        if (active) setChatAttachmentConstraints(DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS);
+      });
+    return () => {
+      active = false;
+    };
+  }, [conversationHistoryScope]);
+
+  const loadEarlierConversationHistory = async () => {
+    const cursor = chatHistoryCursor?.trim();
+    if (!cursor || chatHistoryLoadingRef.current) return;
+    chatHistoryLoadingRef.current = true;
+    setChatHistoryLoading(true);
+    try {
+      const page = await fetchConversationHistoryPage(apiFetchRef.current, cursor);
+      const restored = projectConversationHistory([page], t);
+      setChatThreadState((current) => mergeServerConversationHistory(current, restored, t));
+      setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
+      setChatError(null);
+    } catch (error) {
+      setChatError(
+        error instanceof Error
+          ? error.message
+          : t("加载更早的任务失败。", "Failed to load earlier tasks."),
+      );
+    } finally {
+      chatHistoryLoadingRef.current = false;
+      setChatHistoryLoading(false);
+    }
+  };
+
+  const loadNextChatMessageBody = async (messageId: string) => {
+    if (chatBodyLoadingMessageId) return;
+    const thread = activeChatThreadRef.current;
+    const message = thread.messages.find((item) => item.id === messageId);
+    const descriptor = message?.bodyResult;
+    if (!message || !descriptor || descriptor.complete || !descriptor.continuation) return;
+    setChatBodyLoadingMessageId(messageId);
+    try {
+      const page = await fetchNextConversationBodyPage(apiFetchRef.current, descriptor);
+      const text = `${message.text}${page.text}`;
+      const bodyResult = advanceConversationBodyDescriptor(descriptor, page);
+      updateChatThreadById(thread.id, (current) => ({
+        ...current,
+        messages: current.messages.map((item) =>
+          item.id === messageId ? { ...item, text, bodyResult } : item,
+        ),
+        teachingRuns: (current.teachingRuns ?? []).map((run) => ({
+          ...run,
+          ...(run.userMessageId === messageId ? { userText: text } : {}),
+          ...(run.assistantMessageId === messageId ? { assistantText: text } : {}),
+        })),
+      }));
+      setChatError(null);
+    } catch (error) {
+      setChatError(
+        error instanceof Error
+          ? error.message
+          : t("继续读取完整内容失败。", "Failed to load more of this message."),
+      );
+    } finally {
+      setChatBodyLoadingMessageId(null);
+    }
+  };
 
   useEffect(() => {
     if (!chatVoiceRecordingSupported || !navigator.mediaDevices?.enumerateDevices) return;
@@ -317,9 +397,9 @@ export function useChatRuntime({
   ) => {
     setChatThreadState((prev) => ({
       ...prev,
-      threads: prev.threads
-        .map((thread) => (thread.id === threadId ? updater(thread) : thread))
-        .slice(0, MAX_CHAT_THREADS),
+      threads: prev.threads.map((thread) =>
+        thread.id === threadId ? updater(thread) : thread,
+      ),
     }));
   };
 
@@ -382,7 +462,7 @@ export function useChatRuntime({
     const nextThread = createChatThread(t);
     setChatThreadState((prev) => ({
       activeThreadId: nextThread.id,
-      threads: [nextThread, ...prev.threads].slice(0, MAX_CHAT_THREADS),
+      threads: [nextThread, ...prev.threads],
     }));
     chatInputValueRef.current = "";
     chatAttachmentsValueRef.current = [];
@@ -533,9 +613,9 @@ export function useChatRuntime({
       const replacement = createChatThread(t);
       setChatThreadState((prev) => ({
         activeThreadId: replacement.id,
-        threads: prev.threads
-          .map((item) => (item.id === thread.id ? replacement : item))
-          .slice(0, MAX_CHAT_THREADS),
+        threads: prev.threads.map((item) =>
+          item.id === thread.id ? replacement : item,
+        ),
       }));
       chatInputValueRef.current = "";
       chatAttachmentsValueRef.current = [];
@@ -646,6 +726,129 @@ export function useChatRuntime({
     chatTeachingLlmDebugLoading,
   ]);
 
+  const recoverPendingChatTask = async (
+    threadId: string,
+    teachingRunId: string,
+    taskId: string,
+  ) => {
+    if (
+      liveChatTaskIdsRef.current.has(taskId) ||
+      suspendedChatTaskIdsRef.current.has(taskId)
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    liveChatTaskIdsRef.current.add(taskId);
+    recoveryAbortControllersRef.current.set(taskId, controller);
+    chatSendingValueRef.current = true;
+    setChatSending(true);
+    setChatWorking(true);
+    try {
+      const presentation = new AssistantPresentationReducer();
+      let streamedAssistantMessageId: string | null = null;
+      await followTaskEventStream(
+        apiFetch,
+        taskId,
+        async (event) => {
+          const decoded = decodeAssistantPresentationEvent(event);
+          if (!decoded) {
+            if (event.event_kind === "task_final") setChatWorking(false);
+            return;
+          }
+          const stream = await presentation.apply(decoded);
+          if (!stream || (!stream.content && stream.status === "streaming")) return;
+          setChatWorking(false);
+          streamedAssistantMessageId ??= `a-${taskId}`;
+          const streamedMessage: ChatMessage = {
+            id: streamedAssistantMessageId,
+            role: "assistant",
+            text: stream.content,
+            ts: Date.now(),
+          };
+          updateChatThreadById(threadId, (thread) => ({
+            ...thread,
+            messages: upsertThreadMessage(thread.messages, streamedMessage),
+            teachingRuns: updateTeachingRunById(
+              thread.teachingRuns,
+              teachingRunId,
+              (run) => ({
+                ...run,
+                assistantMessageId: streamedMessage.id,
+                assistantText: streamedMessage.text,
+              }),
+            ),
+            updatedAt: Date.now(),
+          }));
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      const result = await fetchTaskById(taskId);
+      onTaskResult(taskId, result);
+      const terminal = terminalTaskStatus(result.status);
+      const resultText = terminal ? extractTaskText(result) : "";
+      const assistantMessage = resultText
+        ? {
+            id: streamedAssistantMessageId ?? `a-${taskId}`,
+            role: "assistant" as const,
+            text: resultText,
+            ts: Date.now(),
+            artifacts: extractTaskArtifacts(result),
+          }
+        : null;
+      updateChatThreadById(threadId, (thread) => ({
+        ...thread,
+        lastTaskId: taskId,
+        messages: assistantMessage
+          ? upsertThreadMessage(thread.messages, assistantMessage)
+          : thread.messages,
+        teachingTaskResult: result,
+        teachingRuns: updateTeachingRunById(
+          thread.teachingRuns,
+          teachingRunId,
+          (run) => ({
+            ...run,
+            status: result.status,
+            completedAt: terminal ? Date.now() : null,
+            taskResult: result,
+            assistantMessageId: assistantMessage?.id ?? run.assistantMessageId ?? null,
+            assistantText: assistantMessage?.text ?? run.assistantText ?? null,
+          }),
+        ),
+        updatedAt: Date.now(),
+      }));
+      if (!terminal) suspendedChatTaskIdsRef.current.add(taskId);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setChatError(
+          error instanceof Error
+            ? error.message
+            : t("恢复未完成任务失败。", "Failed to resume the unfinished task."),
+        );
+        suspendedChatTaskIdsRef.current.add(taskId);
+      }
+    } finally {
+      recoveryAbortControllersRef.current.delete(taskId);
+      liveChatTaskIdsRef.current.delete(taskId);
+      if (liveChatTaskIdsRef.current.size === 0) {
+        chatSendingValueRef.current = false;
+        setChatSending(false);
+        setChatWorking(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    for (const thread of chatThreadState.threads) {
+      for (const run of thread.teachingRuns ?? []) {
+        const taskId = run.taskId?.trim();
+        if (taskId && activeTaskStatus(run.status)) {
+          void recoverPendingChatTask(thread.id, run.id, taskId);
+        }
+      }
+    }
+  }, [chatThreadState]);
+
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     try {
@@ -653,24 +856,25 @@ export function useChatRuntime({
       if (selected.length === 0) {
         return;
       }
-      const nextAttachments = await Promise.all(selected.map((file) => fileToChatAttachment(file)));
+      assertChatAttachmentConstraints(
+        [...chatAttachmentsValueRef.current, ...selected],
+        chatAttachmentConstraints,
+      );
+      const nextAttachments = await Promise.all(
+        selected.map((file) => fileToChatAttachment(file, undefined, chatAttachmentConstraints)),
+      );
       setChatAttachments((prev) => {
         const merged = [...prev, ...nextAttachments];
-        const next = merged.slice(0, CHAT_MAX_ATTACHMENTS);
-        if (merged.length > CHAT_MAX_ATTACHMENTS) {
-          setChatError(t("最多只能一次发送 6 个附件。", "You can send up to 6 attachments at once."));
-        } else {
-          setChatError(null);
-        }
-        chatAttachmentsValueRef.current = next;
-        return next;
+        setChatError(null);
+        chatAttachmentsValueRef.current = merged;
+        return merged;
       });
       if (chatAttachmentInputRef.current) {
         chatAttachmentInputRef.current.value = "";
       }
     } catch (err) {
       setChatError(
-        err instanceof Error ? err.message : t("读取文件失败。", "Failed to read files."),
+        formatChatAttachmentError(err, chatAttachmentConstraints, t),
       );
     }
   };
@@ -778,11 +982,9 @@ export function useChatRuntime({
     try {
       const blob = await recorder.stop();
       const file = new File([blob], `voice-${Date.now()}.wav`, { type: "audio/wav" });
-      const attachment = await fileToChatAttachment(file, "audio");
-      const attached = [...chatAttachmentsValueRef.current, attachment].slice(
-        0,
-        CHAT_MAX_ATTACHMENTS,
-      );
+      const attachment = await fileToChatAttachment(file, "audio", chatAttachmentConstraints);
+      const attached = [...chatAttachmentsValueRef.current, attachment];
+      assertChatAttachmentConstraints(attached, chatAttachmentConstraints);
       setChatError(null);
       await submitChatMessageSnapshot(chatInputValueRef.current, attached, {
         clearInput: true,
@@ -792,7 +994,9 @@ export function useChatRuntime({
       setChatError(
         err instanceof PcmWavRecordingError && err.code === "empty"
           ? t("没有录到声音，请重新尝试。", "No audio was recorded. Please try again.")
-          : t("读取录音失败，请重新尝试。", "Failed to read the recording. Please try again."),
+          : err instanceof ChatAttachmentConstraintError
+            ? formatChatAttachmentError(err, chatAttachmentConstraints, t)
+            : t("读取录音失败，请重新尝试。", "Failed to read the recording. Please try again."),
       );
     }
   };
@@ -803,7 +1007,13 @@ export function useChatRuntime({
     options: { clearInput: boolean; clearAttachments: boolean },
   ) => {
     const text = rawText.trim();
-    const attached = rawAttachments.slice(0, CHAT_MAX_ATTACHMENTS);
+    try {
+      assertChatAttachmentConstraints(rawAttachments, chatAttachmentConstraints);
+    } catch (error) {
+      setChatError(formatChatAttachmentError(error, chatAttachmentConstraints, t));
+      return;
+    }
+    const attached = rawAttachments;
     if ((!text && attached.length === 0) || chatSendingValueRef.current) return;
     const attachedImages = attached.filter(attachmentIsImage);
     const attachedAudios = attached.filter(attachmentIsAudio);
@@ -881,6 +1091,7 @@ export function useChatRuntime({
       chatAttachmentInputRef.current.value = "";
     }
 
+    let submittedTaskId: string | null = null;
     try {
       const adapterName = interactionAdapter.trim();
       const explicitExternalChatId = interactionExternalChatId.trim();
@@ -943,7 +1154,8 @@ export function useChatRuntime({
         throw new Error(submitData.error || `chat task submit failed (${submitRes.status})`);
       }
 
-      const submittedTaskId = submitData.data.task_id;
+      submittedTaskId = submitData.data.task_id;
+      liveChatTaskIdsRef.current.add(submittedTaskId);
       onTaskSubmitted(submittedTaskId);
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
@@ -1086,9 +1298,12 @@ export function useChatRuntime({
         updatedAt: Date.now(),
       }));
     } finally {
-      chatSendingValueRef.current = false;
-      setChatSending(false);
-      setChatWorking(false);
+      if (submittedTaskId) liveChatTaskIdsRef.current.delete(submittedTaskId);
+      if (liveChatTaskIdsRef.current.size === 0) {
+        chatSendingValueRef.current = false;
+        setChatSending(false);
+        setChatWorking(false);
+      }
     }
   };
 
@@ -1126,6 +1341,9 @@ export function useChatRuntime({
     chatAudioInputDevices,
     chatAudioInputDeviceId,
     chatError,
+    chatHistoryHasMore: Boolean(chatHistoryCursor),
+    chatHistoryLoading,
+    chatBodyLoadingMessageId,
     chatAttachmentInputRef,
     setChatTeachingMode,
     selectChatTeachingRun,
@@ -1146,6 +1364,8 @@ export function useChatRuntime({
     selectChatThread,
     renameChatThread,
     deleteChatThread,
+    loadEarlierConversationHistory,
+    loadNextChatMessageBody,
   };
 }
 
@@ -1161,7 +1381,7 @@ function emptyChatThreadState(t: Translate): ChatThreadState {
   return { activeThreadId: fallback.id, threads: [fallback] };
 }
 
-function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
+export function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
   const fallback = emptyChatThreadState(t);
   if (typeof window === "undefined") {
     return fallback;
@@ -1177,7 +1397,6 @@ function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
       ? parsed.threads
           .map((thread) => normalizeStoredChatThread(thread, t))
           .filter((thread): thread is ChatThreadRecord => Boolean(thread))
-          .slice(0, MAX_CHAT_THREADS)
       : [];
     if (threads.length === 0) {
       return fallback;
@@ -1193,14 +1412,14 @@ function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
   }
 }
 
-function persistChatThreadState(state: ChatThreadState, scope: string) {
+export function persistChatThreadState(state: ChatThreadState, scope: string) {
   if (typeof window === "undefined") return;
   try {
     const storageKey = conversationHistoryStorageKey(scope);
     if (!storageKey) return;
     const payload: ChatThreadState = {
       activeThreadId: state.activeThreadId,
-      threads: state.threads.slice(0, MAX_CHAT_THREADS).map((thread) => ({
+      threads: state.threads.map((thread) => ({
         ...thread,
         teachingTaskResult: thread.teachingTaskResult
           ? compactTaskResultForChatStorage(thread.teachingTaskResult)
@@ -1208,12 +1427,8 @@ function persistChatThreadState(state: ChatThreadState, scope: string) {
         teachingLlmDebug: null,
         teachingLlmDebugError: null,
         activeTeachingRunId: thread.activeTeachingRunId ?? null,
-        teachingRuns: (thread.teachingRuns ?? [])
-          .slice(-MAX_TEACHING_RUNS_PER_THREAD)
-          .map(compactTeachingRunForChatStorage),
-        messages: thread.messages
-          .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
-          .map(stripAttachmentPayloadsFromMessage),
+        teachingRuns: (thread.teachingRuns ?? []).map(compactTeachingRunForChatStorage),
+        messages: thread.messages.map(stripAttachmentPayloadsFromMessage),
       })),
     };
     window.localStorage.setItem(storageKey, JSON.stringify(payload));
@@ -1222,20 +1437,20 @@ function persistChatThreadState(state: ChatThreadState, scope: string) {
   }
 }
 
-function mergeServerConversationHistory(
+export function mergeServerConversationHistory(
   current: ChatThreadState,
   restored: ServerChatThreadProjection[],
   t: Translate,
 ): ChatThreadState {
   const existingById = new Map(current.threads.map((thread) => [thread.id, thread]));
-  const serverThreads = restored.slice(0, MAX_CHAT_THREADS).map((thread) => {
+  const serverThreads = restored.map((thread) => {
     const existing = existingById.get(thread.id);
     const existingRunsByTask = new Map(
       (existing?.teachingRuns ?? [])
         .filter((run) => run.taskId)
         .map((run) => [run.taskId as string, run]),
     );
-    const teachingRuns = thread.teachingRuns.map((run) => {
+    const restoredRuns = thread.teachingRuns.map((run) => {
       const local = existingRunsByTask.get(run.taskId);
       return {
         ...run,
@@ -1244,6 +1459,16 @@ function mergeServerConversationHistory(
         callCount: local?.callCount ?? debugCallCount(local?.llmDebug),
       };
     });
+    const restoredTaskIds = new Set(restoredRuns.map((run) => run.taskId));
+    const teachingRuns = [
+      ...(existing?.teachingRuns ?? []).filter((run) => !restoredTaskIds.has(run.taskId)),
+      ...restoredRuns,
+    ].sort((left, right) => left.startedAt - right.startedAt);
+    const restoredMessageIds = new Set(thread.messages.map((message) => message.id));
+    const messages = [
+      ...(existing?.messages ?? []).filter((message) => !restoredMessageIds.has(message.id)),
+      ...thread.messages,
+    ].sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id));
     const latestRun = teachingRuns[teachingRuns.length - 1] ?? null;
     const activeTeachingRunId =
       existing?.activeTeachingRunId &&
@@ -1253,13 +1478,16 @@ function mergeServerConversationHistory(
     return {
       id: thread.id,
       title: thread.title || t("未命名任务", "Untitled task"),
-      messages: thread.messages.slice(-MAX_PERSISTED_MESSAGES_PER_THREAD),
+      messages,
       input: existing?.input ?? "",
-      createdAt: thread.createdAt,
-      updatedAt: thread.updatedAt,
+      createdAt: Math.min(existing?.createdAt ?? thread.createdAt, thread.createdAt),
+      updatedAt: Math.max(existing?.updatedAt ?? thread.updatedAt, thread.updatedAt),
       teachingMode: existing?.teachingMode ?? false,
       externalChatId: thread.externalChatId,
-      lastTaskId: thread.lastTaskId,
+      lastTaskId:
+        !existing || thread.updatedAt >= existing.updatedAt
+          ? thread.lastTaskId
+          : existing.lastTaskId ?? thread.lastTaskId,
       teachingTaskResult: latestRun?.taskResult ?? null,
       teachingLlmDebug: null,
       teachingLlmDebugError: null,
@@ -1267,13 +1495,12 @@ function mergeServerConversationHistory(
       teachingRuns,
     } satisfies ChatThreadRecord;
   });
-  const localDrafts = current.threads.filter(
-    (thread) =>
-      !restored.some((candidate) => candidate.id === thread.id) &&
-      !thread.lastTaskId &&
-      !(thread.teachingRuns ?? []).some((run) => run.taskId),
+  const retainedThreads = current.threads.filter(
+    (thread) => !restored.some((candidate) => candidate.id === thread.id),
   );
-  const threads = [...localDrafts, ...serverThreads].slice(0, MAX_CHAT_THREADS);
+  const threads = [...retainedThreads, ...serverThreads].sort(
+    (left, right) => right.updatedAt - left.updatedAt,
+  );
   if (threads.length === 0) {
     const fallback = createChatThread(t);
     return { activeThreadId: fallback.id, threads: [fallback] };
@@ -1282,6 +1509,18 @@ function mergeServerConversationHistory(
     ? current.activeThreadId
     : threads[0].id;
   return { activeThreadId, threads };
+}
+
+export function retainLocalDraftsForPagedRestore(
+  current: ChatThreadState,
+): ChatThreadState {
+  const threads = current.threads.filter(
+    (thread) => !threadHasServerHistory(thread) || threadHasPendingTask(thread),
+  );
+  return {
+    activeThreadId: current.activeThreadId,
+    threads,
+  };
 }
 
 function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord | null {
@@ -1293,7 +1532,6 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
     ? record.messages
         .map(normalizeStoredChatMessage)
         .filter((message): message is ChatMessage => Boolean(message))
-        .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
     : [];
   return {
     id: record.id,
@@ -1320,7 +1558,6 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
       ? record.teachingRuns
           .map(normalizeStoredTeachingRun)
           .filter((run): run is ChatTeachingRunRecord => Boolean(run))
-          .slice(-MAX_TEACHING_RUNS_PER_THREAD)
       : [],
   };
 }
@@ -1387,6 +1624,49 @@ function isTaskStatusOrRunning(value: unknown): value is ChatTeachingRunRecord["
   return ["queued", "running", "succeeded", "failed", "canceled", "timeout"].includes(String(value));
 }
 
+function activeTaskStatus(status: ChatTeachingRunRecord["status"]): boolean {
+  return status === "queued" || status === "running";
+}
+
+function terminalTaskStatus(status: TaskQueryResponse["status"]): boolean {
+  return !activeTaskStatus(status);
+}
+
+function formatChatAttachmentError(
+  error: unknown,
+  constraints: UiAttachmentConstraints,
+  t: Translate,
+): string {
+  if (!(error instanceof ChatAttachmentConstraintError)) {
+    return error instanceof Error ? error.message : t("读取文件失败。", "Failed to read files.");
+  }
+  switch (error.code) {
+    case "ui_attachments_too_many":
+      return t(
+        `一次最多发送 ${constraints.max_attachments} 个附件。`,
+        `You can send up to ${constraints.max_attachments} attachments at once.`,
+      );
+    case "ui_attachment_too_large":
+      return t(
+        `单个附件不能超过 ${formatAttachmentSize(constraints.max_attachment_bytes)}。`,
+        `Each attachment must be no larger than ${formatAttachmentSize(constraints.max_attachment_bytes)}.`,
+      );
+    case "ui_attachments_total_too_large":
+      return t(
+        `附件总大小不能超过 ${formatAttachmentSize(constraints.max_total_attachment_bytes)}。`,
+        `The total attachment size must not exceed ${formatAttachmentSize(constraints.max_total_attachment_bytes)}.`,
+      );
+    default:
+      return t("附件不符合上传要求。", "The attachments do not meet the upload requirements.");
+  }
+}
+
+export function threadHasPendingTask(thread: ChatThreadRecord): boolean {
+  return (thread.teachingRuns ?? []).some(
+    (run) => Boolean(run.taskId) && activeTaskStatus(run.status),
+  );
+}
+
 function normalizeStoredTaskResult(raw: unknown): TaskQueryResponse | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<TaskQueryResponse>;
@@ -1417,6 +1697,7 @@ function normalizeStoredChatMessage(raw: unknown): ChatMessage | null {
     text: record.text,
     ts: record.ts,
     artifacts: normalizeTaskArtifacts(record.artifacts),
+    bodyResult: normalizeStoredConversationBodyDescriptor(record.bodyResult),
   };
 }
 
@@ -1427,7 +1708,34 @@ function stripAttachmentPayloadsFromMessage(message: ChatMessage): ChatMessage {
     text: message.text,
     ts: message.ts,
     artifacts: normalizeTaskArtifacts(message.artifacts),
+    bodyResult: normalizeStoredConversationBodyDescriptor(message.bodyResult),
   };
+}
+
+function normalizeStoredConversationBodyDescriptor(
+  raw: ChatMessage["bodyResult"],
+): ChatMessage["bodyResult"] {
+  if (!raw || typeof raw !== "object") return null;
+  if (
+    raw.schema_version !== 1 ||
+    typeof raw.complete !== "boolean" ||
+    !Number.isSafeInteger(raw.original_size_bytes) ||
+    !Number.isSafeInteger(raw.returned_size_bytes) ||
+    raw.original_size_bytes < raw.returned_size_bytes ||
+    !/^[0-9a-f]{64}$/i.test(raw.content_sha256)
+  ) {
+    return null;
+  }
+  if (
+    !raw.complete &&
+    (!raw.continuation ||
+      raw.continuation.kind !== "conversation_body_range" ||
+      typeof raw.continuation.url !== "string" ||
+      !Number.isSafeInteger(raw.continuation.next_start_byte))
+  ) {
+    return null;
+  }
+  return raw;
 }
 
 function createChatThread(t: Translate): ChatThreadRecord {
@@ -1541,7 +1849,7 @@ function appendTeachingRun(
   runs: ChatTeachingRunRecord[] | undefined,
   run: ChatTeachingRunRecord,
 ): ChatTeachingRunRecord[] {
-  return [...(runs ?? []), run].slice(-MAX_TEACHING_RUNS_PER_THREAD);
+  return [...(runs ?? []), run];
 }
 
 function updateTeachingRunById(
@@ -1591,7 +1899,7 @@ function titleForThreadAfterUserMessage(
 }
 
 function appendThreadMessages(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  return [...messages, message].slice(-MAX_PERSISTED_MESSAGES_PER_THREAD);
+  return [...messages, message];
 }
 
 function upsertThreadMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {

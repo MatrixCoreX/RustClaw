@@ -234,19 +234,35 @@ fn execute(args: Value) -> Result<(String, Value), GitBasicError> {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    execute_with_workspace_root(&workspace_root, args)
+    execute_with_workspace_root_and_permissions(
+        &workspace_root,
+        args,
+        env_permission_enabled("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE"),
+    )
 }
 
 fn execute_with_workspace_root(
     workspace_root: &Path,
     args: Value,
 ) -> Result<(String, Value), GitBasicError> {
+    execute_with_workspace_root_and_permissions(workspace_root, args, false)
+}
+
+fn execute_with_workspace_root_and_permissions(
+    workspace_root: &Path,
+    args: Value,
+    allow_path_outside_workspace: bool,
+) -> Result<(String, Value), GitBasicError> {
     let obj = args
         .as_object()
         .ok_or_else(|| GitBasicError::new("invalid_args", tr("git_basic.err.args_object")))?;
     let raw_action = optional_string(obj, "action", "git_action_invalid")?.unwrap_or("status");
     let action = normalize_action(raw_action);
-    let root = resolve_repository_root(workspace_root, obj.get("repo"))?;
+    let root = resolve_repository_root(
+        workspace_root,
+        obj.get("repo"),
+        allow_path_outside_workspace,
+    )?;
     if local_write::is_local_write_action(&action) {
         return local_write::execute_local_write(&root, obj, &action);
     }
@@ -456,6 +472,7 @@ fn optional_string<'a>(
 fn resolve_repository_root(
     workspace_root: &Path,
     repo: Option<&Value>,
+    allow_path_outside_workspace: bool,
 ) -> Result<PathBuf, GitBasicError> {
     let workspace = workspace_root
         .canonicalize()
@@ -480,7 +497,7 @@ fn resolve_repository_root(
     let candidate = candidate
         .canonicalize()
         .map_err(|error| GitBasicError::new("git_repository_path_invalid", error.to_string()))?;
-    if !candidate.starts_with(&workspace) {
+    if !allow_path_outside_workspace && !candidate.starts_with(&workspace) {
         return Err(GitBasicError::new(
             "git_repository_outside_workspace",
             "git_basic.repository_outside_workspace",
@@ -501,13 +518,19 @@ fn resolve_repository_root(
     let root = root
         .canonicalize()
         .map_err(|error| GitBasicError::new("git_repository_path_invalid", error.to_string()))?;
-    if !root.starts_with(&workspace) {
+    if !allow_path_outside_workspace && !root.starts_with(&workspace) {
         return Err(GitBasicError::new(
             "git_repository_outside_workspace",
             "git_basic.repository_outside_workspace",
         ));
     }
     Ok(root)
+}
+
+fn env_permission_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
 pub(crate) fn normalize_repo_relative_path(value: &str) -> Result<String, GitBasicError> {

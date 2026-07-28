@@ -239,7 +239,7 @@ fn parse_docs_rs_results_extracts_release_rows() {
 }
 
 #[test]
-fn strict_input_rejects_wrong_types_and_out_of_range_pages() {
+fn strict_input_rejects_wrong_types_but_allows_continuation_beyond_100() {
     let wrong_query = parse_input(&json!({
         "request_id": "bad-query",
         "args": {"action": "search", "query": 42}
@@ -254,12 +254,51 @@ fn strict_input_rejects_wrong_types_and_out_of_range_pages() {
     .expect_err("limit must not be silently clamped");
     assert_eq!(excessive_limit.code, "INVALID_INPUT");
 
-    let excessive_cursor = parse_input(&json!({
-        "request_id": "bad-cursor",
+    let continued = parse_input(&json!({
+        "request_id": "continued-cursor",
         "args": {"action": "search", "query": "rust", "cursor": 101}
     }))
-    .expect_err("cursor must remain bounded");
-    assert_eq!(excessive_cursor.code, "INVALID_INPUT");
+    .expect("cursor is no longer a terminal search window");
+    assert_eq!(continued.cursor, 101);
+
+    let token = encode_search_continuation("rust", 140);
+    let opaque = parse_input(&json!({
+        "request_id": "opaque-cursor",
+        "args": {"action": "search", "query": "rust", "continuation": token}
+    }))
+    .expect("query-bound continuation");
+    assert_eq!(opaque.cursor, 140);
+    let stale = parse_input(&json!({
+        "request_id": "stale-cursor",
+        "args": {"action": "search", "query": "different", "continuation": encode_search_continuation("rust", 140)}
+    }))
+    .expect_err("continuation must remain query-bound");
+    assert_eq!(stale.code, "STALE_SNAPSHOT");
+}
+
+#[test]
+fn backend_page_payload_continues_after_former_cursor_100() {
+    let input = SearchInput {
+        top_k: 2,
+        cursor: 101,
+        ..input_for_test()
+    };
+    let items = (0..3)
+        .map(|index| SearchItem {
+            title: format!("Candidate {index}"),
+            url: format!("https://example{index}.com/"),
+            snippet: None,
+            source: format!("example{index}.com"),
+            rank: 0,
+            field_truncations: None,
+        })
+        .collect();
+    let payload = build_backend_page_payload(&input, "fixture", items);
+    assert_eq!(payload["items"][0]["rank"], 102);
+    assert_eq!(payload["page"]["next_cursor"], 103);
+    assert!(payload["page"]["next_continuation"]
+        .as_str()
+        .is_some_and(|token| token.starts_with("web_search_v1:103:")));
 }
 
 #[test]
@@ -305,6 +344,7 @@ fn candidate_pages_are_bounded_ranked_and_snapshot_identified() {
             snippet: None,
             source: "one.example".to_string(),
             rank: 1,
+            field_truncations: None,
         },
         SearchItem {
             title: "Two".to_string(),
@@ -312,6 +352,7 @@ fn candidate_pages_are_bounded_ranked_and_snapshot_identified() {
             snippet: Some("second".to_string()),
             source: "two.example".to_string(),
             rank: 2,
+            field_truncations: None,
         },
         SearchItem {
             title: "Three".to_string(),
@@ -319,6 +360,7 @@ fn candidate_pages_are_bounded_ranked_and_snapshot_identified() {
             snippet: None,
             source: "three.example".to_string(),
             rank: 3,
+            field_truncations: None,
         },
     ];
 
@@ -379,6 +421,7 @@ fn candidate_metadata_is_bounded_before_model_exposure() {
         snippet: Some("s".repeat(MAX_SNIPPET_CHARS + 20)),
         source: String::new(),
         rank: 1,
+        field_truncations: None,
     }];
 
     normalize_and_filter(&mut items, &input);
@@ -391,6 +434,18 @@ fn candidate_metadata_is_bounded_before_model_exposure() {
             .expect("snippet")
             .chars()
             .count(),
+        MAX_SNIPPET_CHARS
+    );
+    let field_truncations = items[0]
+        .field_truncations
+        .as_ref()
+        .expect("field truncation metadata");
+    assert_eq!(
+        field_truncations["title"]["original_chars"],
+        MAX_TITLE_CHARS + 20
+    );
+    assert_eq!(
+        field_truncations["snippet"]["returned_chars"],
         MAX_SNIPPET_CHARS
     );
 }
@@ -422,6 +477,7 @@ fn response_extra_marks_search_metadata_as_untrusted() {
             snippet: Some("metadata".to_string()),
             source: "example.com".to_string(),
             rank: 1,
+            field_truncations: None,
         }],
     );
     let extra = build_response_extra(&input_for_test(), &payload);

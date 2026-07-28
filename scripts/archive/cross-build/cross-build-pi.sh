@@ -15,6 +15,7 @@ DO_CLEAN=0
 SKIP_UI=1
 INSTALL_DEPS="${INSTALL_DEPS:-1}"
 SYNC_RELEASE_BIN=0
+PRECOMPILE_SKILL_STORE=0
 CARGO_EXTRA_ARGS=()
 
 log() {
@@ -48,6 +49,7 @@ Options:
   --no-ui                                skip UI build when building workspace (default)
   --skip-deps                            do not install cross-build dependencies
   --sync-release-bin                     copy target/<triple>/release executables to release-bin/
+  --precompile-skill-store               build verified on-demand skills for this release target
   -h, --help                             show this help
 
 Environment:
@@ -328,6 +330,10 @@ parse_args() {
 			SYNC_RELEASE_BIN=1
 			shift
 			;;
+		--precompile-skill-store)
+			PRECOMPILE_SKILL_STORE=1
+			shift
+			;;
 		-h|--help)
 			usage
 			exit 0
@@ -397,6 +403,10 @@ main() {
 			--binary-dir "$(target_release_dir "${SCRIPT_DIR}" "${TARGET}")" \
 			--sdk-cli "${SCRIPT_DIR}/target/release/rustclaw-skill" \
 			--package-root "${SCRIPT_DIR}/target/skill-packages/${TARGET}"
+		if [[ "${PRECOMPILE_SKILL_STORE}" == "1" ]]; then
+			log "precompiling platform-compatible Skill Store packages"
+			bash "${SCRIPT_DIR}/scripts/precompile_skill_store.sh" "${TARGET}"
+		fi
 	fi
 
 	if [[ "${SYNC_RELEASE_BIN}" == "1" ]]; then

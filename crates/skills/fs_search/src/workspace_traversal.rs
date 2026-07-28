@@ -9,11 +9,13 @@ use rustclaw_fs_discovery::{
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScanLimits {
     pub(super) max_depth: Option<usize>,
+    pub(super) start_after_entries: usize,
     pub(super) hard_entry_limit: usize,
     pub(super) include_hidden: bool,
     pub(super) respect_ignore: bool,
     pub(super) deadline: Option<Duration>,
     pub(super) backend: BackendPreference,
+    pub(super) allow_path_outside_workspace: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,8 @@ pub(super) struct WalkStats {
     pub(super) backend_version: Option<String>,
     pub(super) backend_fallback_reason: Option<String>,
     pub(super) backend_elapsed_ms: u64,
+    pub(super) traversal_start: usize,
+    pub(super) traversal_next: Option<usize>,
 }
 
 impl WalkStats {
@@ -40,16 +44,18 @@ impl WalkStats {
     }
 }
 
-fn discovery_boundary(path: &Path) -> PathBuf {
+fn discovery_boundary(path: &Path, allow_path_outside_workspace: bool) -> PathBuf {
     let workspace = workspace_root();
     if path.starts_with(&workspace) {
         return workspace;
     }
     #[cfg(test)]
-    {
+    if path.starts_with(std::env::temp_dir()) {
         return path.to_path_buf();
     }
-    #[cfg(not(test))]
+    if allow_path_outside_workspace {
+        return path.to_path_buf();
+    }
     workspace
 }
 
@@ -70,7 +76,7 @@ fn walk_with_selector(
     selector: DiscoverySelector,
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<WalkStats, String> {
-    let boundary = discovery_boundary(path);
+    let boundary = discovery_boundary(path, limits.allow_path_outside_workspace);
     let mut request = DiscoveryRequest::new(&boundary, path);
     request.selector = selector;
     request.policy = DiscoveryPolicy {
@@ -79,6 +85,7 @@ fn walk_with_selector(
     };
     request.budget = DiscoveryBudget {
         max_depth: limits.max_depth,
+        start_after_entries: limits.start_after_entries,
         hard_entry_limit: limits.hard_entry_limit,
         match_snapshot_limit: limits.hard_entry_limit,
         deadline: limits.deadline,
@@ -109,6 +116,8 @@ fn walk_with_selector(
         backend_version: report.backend.version,
         backend_fallback_reason: report.backend.fallback_reason,
         backend_elapsed_ms: report.backend.elapsed_ms,
+        traversal_start: report.traversal_start,
+        traversal_next: report.traversal_next,
     };
     if stopped && inspected < report.entries.len() {
         stats.mark_hard_limit();
@@ -146,13 +155,28 @@ pub(super) fn workspace_root() -> PathBuf {
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-pub(super) fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_path(
+    workspace_root: &Path,
+    input: &str,
+    allow_path_outside_workspace: bool,
+) -> Result<PathBuf, String> {
     let raw = Path::new(input);
-    if raw
-        .components()
-        .any(|component| component == Component::ParentDir)
+    if !allow_path_outside_workspace
+        && raw
+            .components()
+            .any(|component| component == Component::ParentDir)
     {
         return Err("path with '..' is not allowed".to_string());
+    }
+    if allow_path_outside_workspace {
+        let candidate = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            workspace_root.join(raw)
+        };
+        return candidate
+            .canonicalize()
+            .map_err(|io_error| format!("path resolution failed: {io_error}"));
     }
     match resolve_root(workspace_root, raw) {
         Ok((_, root)) => Ok(root),

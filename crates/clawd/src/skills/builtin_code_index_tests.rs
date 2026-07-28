@@ -244,4 +244,21 @@ fn max_file_budget_is_reported_as_incomplete_index_evidence() {
     assert_eq!(refreshed["summary"]["file_count"], 1);
     assert_eq!(refreshed["summary"]["scan_complete"], false);
     assert_eq!(refreshed["summary"]["scan_truncated"], true);
+    assert_eq!(refreshed["summary"]["complete"], false);
+    let continuation = refreshed["summary"]["continuation"]["token"]
+        .as_str()
+        .expect("opaque scan continuation");
+    let completed = execute_json(
+        &repo,
+        json!({
+            "action": "refresh",
+            "max_files": 1,
+            "scan_continuation": continuation
+        }),
+    );
+    assert_eq!(completed["summary"]["file_count"], 2);
+    assert_eq!(completed["summary"]["scan_complete"], true);
+    assert_eq!(completed["summary"]["scan_start"], 1);
+    assert_eq!(completed["summary"]["scan_end"], 2);
+    assert!(completed["summary"]["continuation"].is_null());
 }

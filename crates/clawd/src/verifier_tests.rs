@@ -241,6 +241,14 @@ group = "reader"
 	  { action = "prepare" },
 	  { action = "organize", mode = "plan" },
 	]
+
+	[[skills]]
+	name = "admin_hidden_probe"
+	enabled = true
+	planner_visible = false
+	kind = "runner"
+	output_kind = "text"
+	side_effect = false
 	"#;
     let path = std::env::temp_dir().join(format!(
         "verifier_registry_{}_{}_{}.toml",
@@ -274,6 +282,7 @@ pub(super) fn test_state() -> AppState {
             "primary_reader",
             "fallback_reader",
             "photo_organize",
+            "admin_hidden_probe",
         ]
         .into_iter()
         .map(str::to_string)
@@ -1981,3 +1990,6 @@ mod direct_capability;
 
 #[path = "verifier_tests/config_read_contract.rs"]
 mod config_read_contract;
+
+#[path = "verifier_tests/admin_authority.rs"]
+mod admin_authority;

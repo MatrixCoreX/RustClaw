@@ -1,6 +1,6 @@
 use super::{
-    bounded_content_excerpt, normalize_action, parse_doc_extra, parse_docx, Metadata, ParsePayload,
-    TableMode, EXTRA_CONTENT_EXCERPT_CHARS,
+    bounded_content_excerpt, handle_parse_doc, normalize_action, parse_doc_extra, parse_docx,
+    Metadata, ParsePayload, TableMode, EXTRA_CONTENT_EXCERPT_CHARS,
 };
 use serde_json::json;
 use std::fs::File;
@@ -85,6 +85,12 @@ fn parse_doc_extra_exposes_path_and_content_excerpt() {
             truncated: false,
             truncation_notice: None,
             page_range_applied: None,
+            original_chars: 33,
+            returned_chars: 33,
+            start_char: 0,
+            end_char: 33,
+            snapshot_sha256: "fixture".to_string(),
+            next_continuation: None,
         }),
         status: "ok".to_string(),
         error_code: None,
@@ -148,6 +154,57 @@ fn bounded_content_excerpt_limits_long_text_without_suffix() {
 
     assert_eq!(excerpt.len(), EXTRA_CONTENT_EXCERPT_CHARS);
     assert!(excerpt.chars().all(|ch| ch == 'x'));
+}
+
+#[test]
+fn document_text_pages_continue_without_losing_the_canonical_range() {
+    let path = std::env::temp_dir().join(format!(
+        "rustclaw-doc-parse-page-{}-{}.txt",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    let source = (0..260)
+        .map(|index| char::from(b'a' + (index % 26) as u8))
+        .collect::<String>();
+    std::fs::write(&path, &source).expect("write fixture");
+
+    let first = handle_parse_doc(&json!({
+        "args": {"path": path, "max_chars": 100, "mode": "text_only"}
+    }));
+    assert_eq!(first.text.chars().count(), 100);
+    let metadata = first.metadata.as_ref().expect("metadata");
+    assert_eq!(metadata.original_chars, 260);
+    assert_eq!(metadata.start_char, 0);
+    let continuation = metadata.next_continuation.clone().expect("continuation");
+
+    let second = handle_parse_doc(&json!({
+        "args": {
+            "path": path,
+            "max_chars": 100,
+            "mode": "text_only",
+            "continuation": continuation,
+        }
+    }));
+    assert_eq!(second.metadata.as_ref().expect("metadata").start_char, 100);
+    assert_eq!(
+        second.text,
+        source.chars().skip(100).take(100).collect::<String>()
+    );
+
+    std::fs::write(&path, format!("{source}changed")).expect("change snapshot");
+    let stale = handle_parse_doc(&json!({
+        "args": {
+            "path": path,
+            "max_chars": 100,
+            "mode": "text_only",
+            "continuation": continuation,
+        }
+    }));
+    assert_eq!(stale.error_code.as_deref(), Some("stale_snapshot"));
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]

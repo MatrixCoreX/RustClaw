@@ -114,6 +114,9 @@ export default function App() {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
     return saved === "en" ? "en" : "zh";
   });
+  const [themeMode, setThemeMode] = useState<"light" | "dark">(() =>
+    window.localStorage.getItem(STORAGE_KEYS.themeMode) === "light" ? "light" : "dark",
+  );
   const [baseUrl, setBaseUrl] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
     return preferredBrowserApiBaseUrl(saved, window.location);
@@ -668,6 +671,9 @@ export default function App() {
     chatAudioInputDevices,
     chatAudioInputDeviceId,
     chatError,
+    chatHistoryHasMore,
+    chatHistoryLoading,
+    chatBodyLoadingMessageId,
     chatAttachmentInputRef,
     setChatTeachingMode,
     selectChatTeachingRun,
@@ -675,6 +681,8 @@ export default function App() {
     selectChatThread,
     renameChatThread,
     deleteChatThread,
+    loadEarlierConversationHistory,
+    loadNextChatMessageBody,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
@@ -1275,9 +1283,9 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEYS.themeMode, "dark");
-    document.documentElement.dataset.theme = "dark";
-  }, []);
+    window.localStorage.setItem(STORAGE_KEYS.themeMode, themeMode);
+    document.documentElement.dataset.theme = themeMode;
+  }, [themeMode]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.currentPage, currentPage);
@@ -1393,6 +1401,7 @@ export default function App() {
       <SignInPage
         t={t}
         lang={lang}
+        themeMode={themeMode}
         loginTab={loginTab}
         baseUrl={baseUrl}
         uiKey={uiKey}
@@ -1416,6 +1425,7 @@ export default function App() {
           setUiAuthError(null);
         }}
         onToggleLanguage={() => setLang((value) => (value === "zh" ? "en" : "zh"))}
+        onToggleTheme={() => setThemeMode((value) => (value === "dark" ? "light" : "dark"))}
       />
     );
   }
@@ -1425,6 +1435,7 @@ export default function App() {
     <ConsoleLayout
       t={t}
       lang={lang}
+      themeMode={themeMode}
       authMode={authMode}
       authIdentity={authIdentity}
       isAdminIdentity={isAdminIdentity}
@@ -1435,6 +1446,7 @@ export default function App() {
       factoryResetModal={factoryResetModal}
       onCurrentPageChange={setCurrentPage}
       onToggleLanguage={() => setLang((value) => (value === "zh" ? "en" : "zh"))}
+      onToggleTheme={() => setThemeMode((value) => (value === "dark" ? "light" : "dark"))}
       onLogout={logout}
       onOpenFactoryReset={openFactoryResetDialog}
     >
@@ -1529,6 +1541,9 @@ export default function App() {
               chatAudioInputDevices={chatAudioInputDevices}
               chatAudioInputDeviceId={chatAudioInputDeviceId}
               chatError={chatError}
+              chatHistoryHasMore={chatHistoryHasMore}
+              chatHistoryLoading={chatHistoryLoading}
+              chatBodyLoadingMessageId={chatBodyLoadingMessageId}
               chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}
               onChatTeachingModeChange={setChatTeachingMode}
@@ -1537,6 +1552,8 @@ export default function App() {
               onSelectChatThread={selectChatThread}
               onRenameChatThread={renameChatThread}
               onDeleteChatThread={deleteChatThread}
+              onLoadEarlierConversationHistory={loadEarlierConversationHistory}
+              onLoadNextChatMessageBody={loadNextChatMessageBody}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}

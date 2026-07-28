@@ -77,31 +77,36 @@ fn parent_cancel_directive_targets_child_task_ids_only() {
 }
 
 #[test]
-fn fanout_policy_blocks_recursive_or_excessive_children() {
+fn fanout_policy_allows_depth_two_and_child_seventeen_for_dag_validation() {
     let allowed = child_fanout_policy(1, 4);
-    let too_deep = child_fanout_policy(2, 4);
-    let too_many = child_fanout_policy(1, 17);
+    let depth_two = child_fanout_policy(2, 4);
+    let child_seventeen = child_fanout_policy(1, 17);
 
     assert_eq!(allowed["decision"], "allowed");
-    assert_eq!(too_deep["decision"], "rejected");
-    assert_eq!(too_deep["reason_code"], "child_recursion_depth_exceeded");
-    assert_eq!(too_many["decision"], "rejected");
-    assert_eq!(too_many["reason_code"], "child_fanout_limit_exceeded");
+    assert_eq!(depth_two["decision"], "allowed");
+    assert_eq!(child_seventeen["decision"], "allowed");
+    assert_eq!(child_seventeen["requested_child_count"], 17);
+    assert_eq!(
+        child_seventeen["topology_guard"],
+        "dependency_dag_cycle_and_conflict_validation"
+    );
 }
 
 #[test]
 fn scheduler_decision_bounds_parallel_children() {
     let scheduled = child_scheduler_decision(3, 4, 1);
     let bounded = child_scheduler_decision(6, 4, 1);
-    let rejected = child_scheduler_decision(2, 4, 2);
+    let nested = child_scheduler_decision(2, 4, 2);
 
     assert_eq!(scheduled["decision"], "scheduled");
     assert_eq!(scheduled["scheduled_child_count"], 3);
-    assert_eq!(bounded["decision"], "bounded_partial");
-    assert_eq!(bounded["scheduled_child_count"], 4);
-    assert_eq!(bounded["skipped_child_count"], 2);
-    assert_eq!(rejected["decision"], "rejected");
-    assert_eq!(rejected["scheduled_child_count"], 0);
+    assert_eq!(bounded["decision"], "scheduled");
+    assert_eq!(bounded["scheduled_child_count"], 6);
+    assert_eq!(bounded["ready_child_count"], 4);
+    assert_eq!(bounded["queued_child_count"], 2);
+    assert_eq!(bounded["skipped_child_count"], 0);
+    assert_eq!(nested["decision"], "scheduled");
+    assert_eq!(nested["scheduled_child_count"], 2);
 }
 
 #[test]

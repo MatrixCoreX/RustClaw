@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install proactive skills into verified, platform-specific receipts.
+"""Project selected skills into verified, platform-specific receipts.
 
 Cargo skills adopt exactly the binary produced by the ordinary workspace
 build, avoiding a second compilation. Other adapters run only their manifest-
@@ -29,6 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sdk-cli", type=Path, default=ROOT / "target/release/rustclaw-skill")
     parser.add_argument("--skill", action="append", default=[])
     parser.add_argument("--target", default="host")
+    parser.add_argument(
+        "--scope",
+        choices=("proactive", "platform-precompiled"),
+        default="proactive",
+    )
     return parser.parse_args()
 
 
@@ -88,9 +93,12 @@ def main() -> int:
     failures: list[str] = []
     try:
         for spec in runner_specs(args.registry):
-            if spec.install_mode == "on_demand" or (
-                selected and spec.skill_name not in selected
-            ):
+            in_scope = (
+                spec.install_mode != "on_demand"
+                if args.scope == "proactive"
+                else spec.install_mode == "on_demand" and spec.adapter == "cargo"
+            )
+            if not in_scope or (selected and spec.skill_name not in selected):
                 continue
             if not supports_platform(spec, os_name, arch):
                 skipped += 1

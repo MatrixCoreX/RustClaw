@@ -25,6 +25,7 @@
 | analyze | `tail_lines` | no | number | 0 | Return the last N log lines as bounded `tail_lines` / `tail_excerpt` evidence; use a small bounded value for log health/anomaly judgment when recent evidence is needed. |
 | analyze | `tail` | no | number | 0 | Alias for `tail_lines`. |
 | analyze | `n` | no | number | 0 | Alias for `tail_lines` when planner has a generic count. |
+| analyze | `continuation` | no | string | - | Opaque token from `bounded_results.*.continuation.token`; continues toward older matching lines and rejects a changed log as `stale_snapshot`. |
 
 ## Output Fields
 - `requested_path`: path requested by the caller.
@@ -39,12 +40,15 @@
 - `tail_lines_requested`: requested bounded tail line count.
 - `tail_lines`: last N log lines with line numbers when `tail_lines` / `tail` / `n` is provided.
 - `tail_excerpt`: newline-joined form of `tail_lines`.
+- `bounded_results.matches|notable_lines|recovery_lines`: shared bounded-result envelopes with original/returned counts and an opaque continuation while older rows remain.
+- `snapshot_sha256`: binds continuation to the scanned log contents. Each displayed line carries its source line number; `line_excerpt.recovery` points to `filesystem.read_range` for the complete line.
 
 ## Error Contract
 - Invalid/missing log path when path is provided.
 - Directory path with no readable files should return a clear error.
 - Read/parse errors should return clear filesystem/runtime details.
 - Oversized/unbounded scans should be summarized safely.
+- Invalid continuation returns `invalid_continuation`; a changed log returns `stale_snapshot` and never silently restarts at the newest page.
 
 ## Request/Response Examples
 ### Example 1

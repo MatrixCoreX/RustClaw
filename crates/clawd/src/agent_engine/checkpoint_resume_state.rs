@@ -2,15 +2,6 @@ use serde_json::{json, Value};
 
 use super::LoopState;
 
-const MAX_LAST_OUTPUT_CHARS: usize = 8_192;
-const MAX_HISTORY_ITEMS: usize = 24;
-const MAX_HISTORY_ITEM_CHARS: usize = 2_048;
-const MAX_OBSERVATION_ITEMS: usize = 24;
-const MAX_OBSERVATION_BYTES: usize = 8_192;
-const MAX_VALIDATION_BYTES: usize = 16_384;
-const MAX_DELIVERY_ITEMS: usize = 4;
-const MAX_DELIVERY_ITEM_CHARS: usize = 8_192;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentCheckpointStage {
     Planning,
@@ -47,24 +38,6 @@ pub(crate) fn build_checkpoint_resume_state(
     loop_state: &LoopState,
     stage: AgentCheckpointStage,
 ) -> Value {
-    let history_compact = bounded_recent_strings(
-        &loop_state.history_compact,
-        MAX_HISTORY_ITEMS,
-        MAX_HISTORY_ITEM_CHARS,
-    );
-    let task_observations =
-        bounded_recent_values(&loop_state.task_observations, MAX_OBSERVATION_ITEMS);
-    let delivery_messages = bounded_recent_strings(
-        &loop_state.delivery_messages,
-        MAX_DELIVERY_ITEMS,
-        MAX_DELIVERY_ITEM_CHARS,
-    );
-    let latest_validation_result = loop_state
-        .latest_validation_result
-        .as_ref()
-        .filter(|value| bounded_json_value(value, MAX_VALIDATION_BYTES))
-        .cloned();
-
     json!({
         "schema_version": 1,
         "stage": stage.as_str(),
@@ -79,26 +52,14 @@ pub(crate) fn build_checkpoint_resume_state(
             .cloned()
             .collect::<Vec<_>>(),
         "active_capability_scopes": loop_state.active_capability_scopes,
-        "last_output": loop_state
-            .last_output
-            .as_deref()
-            .map(|value| bounded_chars(value, MAX_LAST_OUTPUT_CHARS)),
-        "history_compact": history_compact,
-        "task_observations": task_observations,
-        "latest_validation_result": latest_validation_result,
-        "delivery_messages": delivery_messages,
-        "last_user_visible_respond": loop_state
-            .last_user_visible_respond
-            .as_deref()
-            .map(|value| bounded_chars(value, MAX_DELIVERY_ITEM_CHARS)),
-        "last_publishable_synthesis_output": loop_state
-            .last_publishable_synthesis_output
-            .as_deref()
-            .map(|value| bounded_chars(value, MAX_DELIVERY_ITEM_CHARS)),
-        "last_capability_synthesis_output": loop_state
-            .last_capability_synthesis_output
-            .as_deref()
-            .map(|value| bounded_chars(value, MAX_DELIVERY_ITEM_CHARS)),
+        "last_output": loop_state.last_output,
+        "history_compact": loop_state.history_compact,
+        "task_observations": loop_state.task_observations,
+        "latest_validation_result": loop_state.latest_validation_result,
+        "delivery_messages": loop_state.delivery_messages,
+        "last_user_visible_respond": loop_state.last_user_visible_respond,
+        "last_publishable_synthesis_output": loop_state.last_publishable_synthesis_output,
+        "last_capability_synthesis_output": loop_state.last_capability_synthesis_output,
     })
 }
 
@@ -123,12 +84,12 @@ pub(crate) fn restore_checkpoint_resume_state(
     );
     super::capability_discovery::restore_capability_scope_state(
         loop_state,
-        bounded_string_array(resume_state, "active_capability_scopes"),
-        bounded_string_array(resume_state, "loaded_capability_skills"),
-        bounded_string_array(resume_state, "loaded_mcp_capabilities"),
+        string_array(resume_state, "active_capability_scopes"),
+        string_array(resume_state, "loaded_capability_skills"),
+        string_array(resume_state, "loaded_mcp_capabilities"),
     );
 
-    if let Some(last_output) = bounded_string_field(resume_state, "last_output") {
+    if let Some(last_output) = string_field(resume_state, "last_output") {
         loop_state.last_output = Some(last_output.clone());
         loop_state
             .output_vars
@@ -136,83 +97,54 @@ pub(crate) fn restore_checkpoint_resume_state(
     }
     extend_unique_strings(
         &mut loop_state.history_compact,
-        bounded_string_array(resume_state, "history_compact"),
+        string_array(resume_state, "history_compact"),
     );
     extend_unique_values(
         &mut loop_state.task_observations,
-        bounded_value_array(resume_state, "task_observations"),
+        value_array(resume_state, "task_observations"),
     );
     loop_state.latest_validation_result = resume_state
         .get("latest_validation_result")
-        .filter(|value| !value.is_null() && bounded_json_value(value, MAX_VALIDATION_BYTES))
+        .filter(|value| !value.is_null())
         .cloned();
     extend_unique_strings(
         &mut loop_state.delivery_messages,
-        bounded_string_array(resume_state, "delivery_messages"),
+        string_array(resume_state, "delivery_messages"),
     );
-    loop_state.last_user_visible_respond =
-        bounded_string_field(resume_state, "last_user_visible_respond");
+    loop_state.last_user_visible_respond = string_field(resume_state, "last_user_visible_respond");
     loop_state.last_publishable_synthesis_output =
-        bounded_string_field(resume_state, "last_publishable_synthesis_output");
+        string_field(resume_state, "last_publishable_synthesis_output");
     loop_state.last_capability_synthesis_output =
-        bounded_string_field(resume_state, "last_capability_synthesis_output");
+        string_field(resume_state, "last_capability_synthesis_output");
     stage
 }
 
-fn bounded_recent_strings(values: &[String], limit: usize, char_limit: usize) -> Vec<String> {
-    let start = values.len().saturating_sub(limit);
-    values[start..]
-        .iter()
-        .map(|value| bounded_chars(value, char_limit))
-        .collect()
-}
-
-fn bounded_recent_values(values: &[Value], limit: usize) -> Vec<Value> {
-    let start = values.len().saturating_sub(limit);
-    values[start..]
-        .iter()
-        .filter(|value| bounded_json_value(value, MAX_OBSERVATION_BYTES))
-        .cloned()
-        .collect()
-}
-
-fn bounded_chars(value: &str, limit: usize) -> String {
-    value.chars().take(limit).collect()
-}
-
-fn bounded_json_value(value: &Value, byte_limit: usize) -> bool {
-    serde_json::to_vec(value)
-        .map(|encoded| encoded.len() <= byte_limit)
-        .unwrap_or(false)
-}
-
-fn bounded_string_field(value: &Value, key: &str) -> Option<String> {
+fn string_field(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|item| !item.is_empty())
-        .map(|item| bounded_chars(item, MAX_DELIVERY_ITEM_CHARS))
+        .map(str::to_string)
 }
 
-fn bounded_string_array(value: &Value, key: &str) -> Vec<String> {
+fn string_array(value: &Value, key: &str) -> Vec<String> {
     value
         .get(key)
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .map(|item| bounded_chars(item, MAX_DELIVERY_ITEM_CHARS))
+        .map(str::to_string)
         .collect()
 }
 
-fn bounded_value_array(value: &Value, key: &str) -> Vec<Value> {
+fn value_array(value: &Value, key: &str) -> Vec<Value> {
     value
         .get(key)
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|item| bounded_json_value(item, MAX_OBSERVATION_BYTES))
         .cloned()
         .collect()
 }

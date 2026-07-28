@@ -1,7 +1,36 @@
-import type { ChatAttachment, ChatAttachmentKind } from "../types/api";
+import type {
+  ApiResponse,
+  ChatAttachment,
+  ChatAttachmentKind,
+  UiAttachmentConstraints,
+} from "../types/api";
 
-export const CHAT_MAX_ATTACHMENTS = 6;
+export const CHAT_MAX_ATTACHMENTS = 10;
 export const CHAT_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const CHAT_MAX_TOTAL_ATTACHMENT_BYTES = 60 * 1024 * 1024;
+
+export const DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS: UiAttachmentConstraints = {
+  schema_version: 1,
+  status: "ok",
+  channel: "ui_base64",
+  max_attachments: CHAT_MAX_ATTACHMENTS,
+  max_attachment_bytes: CHAT_MAX_ATTACHMENT_BYTES,
+  max_total_attachment_bytes: CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+  error_codes: [
+    "ui_attachments_too_many",
+    "ui_attachment_too_large",
+    "ui_attachments_total_too_large",
+  ],
+};
+
+type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export class ChatAttachmentConstraintError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = "ChatAttachmentConstraintError";
+  }
+}
 
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -22,9 +51,13 @@ export function chatAttachmentKindForFile(file: File, forcedKind?: ChatAttachmen
   return "file";
 }
 
-export async function fileToChatAttachment(file: File, forcedKind?: ChatAttachmentKind): Promise<ChatAttachment> {
-  if (file.size > CHAT_MAX_ATTACHMENT_BYTES) {
-    throw new Error(`文件过大：${formatAttachmentSize(file.size)}，单个文件上限 ${formatAttachmentSize(CHAT_MAX_ATTACHMENT_BYTES)}`);
+export async function fileToChatAttachment(
+  file: File,
+  forcedKind?: ChatAttachmentKind,
+  constraints = DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS,
+): Promise<ChatAttachment> {
+  if (file.size > constraints.max_attachment_bytes) {
+    throw new ChatAttachmentConstraintError("ui_attachment_too_large");
   }
   return {
     name: file.name || defaultAttachmentName(chatAttachmentKindForFile(file, forcedKind), file.type),
@@ -33,6 +66,50 @@ export async function fileToChatAttachment(file: File, forcedKind?: ChatAttachme
     size: file.size,
     kind: chatAttachmentKindForFile(file, forcedKind),
   };
+}
+
+export function assertChatAttachmentConstraints(
+  attachments: ReadonlyArray<{ size: number }>,
+  constraints = DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS,
+): void {
+  if (attachments.length > constraints.max_attachments) {
+    throw new ChatAttachmentConstraintError("ui_attachments_too_many");
+  }
+  if (attachments.some((attachment) => attachment.size > constraints.max_attachment_bytes)) {
+    throw new ChatAttachmentConstraintError("ui_attachment_too_large");
+  }
+  const total = attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size), 0);
+  if (total > constraints.max_total_attachment_bytes) {
+    throw new ChatAttachmentConstraintError("ui_attachments_total_too_large");
+  }
+}
+
+export async function fetchChatAttachmentConstraints(
+  apiFetch: ApiFetch,
+): Promise<UiAttachmentConstraints> {
+  const response = await apiFetch("/v1/ui/attachment-constraints");
+  const body = (await response.json()) as ApiResponse<UiAttachmentConstraints>;
+  const value = body.data;
+  if (
+    !response.ok ||
+    !body.ok ||
+    !value ||
+    value.schema_version !== 1 ||
+    value.status !== "ok" ||
+    value.channel !== "ui_base64" ||
+    !positiveSafeInteger(value.max_attachments) ||
+    !positiveSafeInteger(value.max_attachment_bytes) ||
+    !positiveSafeInteger(value.max_total_attachment_bytes) ||
+    value.max_total_attachment_bytes < value.max_attachment_bytes ||
+    !Array.isArray(value.error_codes)
+  ) {
+    throw new Error(body.error || "ui_attachment_constraints_invalid");
+  }
+  return value;
+}
+
+function positiveSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 export function formatAttachmentSize(bytes: number | null | undefined): string {
