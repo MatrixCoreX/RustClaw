@@ -648,12 +648,30 @@ fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: 
     if *method == axum::http::Method::POST && path == "/v1/skills/store/install" {
         return true;
     }
-    if *method != axum::http::Method::GET {
+    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return false;
     }
-    path.strip_prefix("/v1/tasks/")
+    let task_suffix = path.strip_prefix("/v1/tasks/");
+    let is_event_stream = task_suffix
         .and_then(|suffix| suffix.strip_suffix("/events"))
-        .is_some_and(|task_id| !task_id.is_empty() && !task_id.contains('/'))
+        .is_some_and(|task_id| !task_id.is_empty() && !task_id.contains('/'));
+    let is_artifact_content = task_suffix.is_some_and(|suffix| {
+        let parts = suffix.split('/').collect::<Vec<_>>();
+        parts.len() == 5
+            && !parts[0].is_empty()
+            && parts[1] == "artifacts"
+            && !parts[2].is_empty()
+            && parts[3] == "content"
+            && parts[4].is_empty()
+    }) || task_suffix.is_some_and(|suffix| {
+        let parts = suffix.split('/').collect::<Vec<_>>();
+        parts.len() == 4
+            && !parts[0].is_empty()
+            && parts[1] == "artifacts"
+            && !parts[2].is_empty()
+            && parts[3] == "content"
+    });
+    is_event_stream || is_artifact_content
 }
 
 fn plain_error(status: StatusCode, error_code: &str, origin: Option<&HeaderValue>) -> Response {

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 前台直接启动小屏（pi_app 版），适合终端调试
 
-PI_APP_DIR="$(dirname "$(readlink -f "$0")")"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PI_APP_DIR" || exit 1
 
 if [[ -z "${DISPLAY}" ]]; then

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 上传 RustClaw 到高配机，远程交叉编译 aarch64，结束后取回
-# 用法: ./cross-build-upload.sh [all|skill <name>|crate <name>|dir]
+# 用法: ./scripts/archive/cross-build/cross-build-upload-cloud.sh [all|skill <name>|crate <name>|dir]
 #  dir 模式用环境变量指定上传/拉回：UPLOAD_PATHS BUILD_CMD PULL_REMOTE PULL_LOCAL
 # 依赖: 远程为 Linux，脚本会自动检测并安装 rustup/target/gcc-aarch64-linux-gnu
 
@@ -10,7 +10,8 @@ CROSS_PULL_ALL_ARTIFACTS="${CROSS_PULL_ALL_ARTIFACTS:-}"
 CLEAN_REMOTE_TMP_FIRST="${CLEAN_REMOTE_TMP_FIRST:-0}"
 SHOW_RSYNC_PROGRESS="${SHOW_RSYNC_PROGRESS:-1}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHIVE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${ARCHIVE_DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 REMOTE_USER="${REMOTE_USER:-root}"
@@ -70,7 +71,7 @@ pull_remote_file_direct() {
 
 	local_dir="$(dirname "$local_path")"
 	mkdir -p "$local_dir"
-	remote_bytes=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "stat -c %s $(printf '%q' "$remote_path")" 2>/dev/null || echo 0)
+	remote_bytes=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "wc -c < $(printf '%q' "$remote_path") | tr -d '[:space:]'" 2>/dev/null || echo 0)
 	echo "[$(date)] ${label} estimated download size: $(format_mib "$remote_bytes") MiB"
 
 	tmp_local_path="${local_path}.tmp.$$"
@@ -92,7 +93,7 @@ pull_remote_release_executables() {
 
 	mkdir -p "$local_release_dir"
 	remote_entries_raw="$(
-		ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "find '$(printf "%q" "$remote_release_dir")' -maxdepth 1 -type f -executable -printf '%f\t%s\n' | sort"
+		ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "REMOTE_RELEASE_DIR=$(printf '%q' "$remote_release_dir"); for f in \"\$REMOTE_RELEASE_DIR\"/*; do [ -f \"\$f\" ] && [ -x \"\$f\" ] || continue; size=\$(wc -c < \"\$f\" | tr -d '[:space:]'); printf '%s\t%s\n' \"\$(basename \"\$f\")\" \"\$size\"; done | sort"
 	)"
 	array_from_string_lines remote_entries "$remote_entries_raw"
 
@@ -255,7 +256,7 @@ all)
 	mkdir -p "${RELEASE_DIR}"
 	if [[ -n "${CROSS_PULL_ALL_ARTIFACTS}" ]]; then
 		RSYNC_EXCLUDE=(--exclude='deps/' --exclude='build/' --exclude='incremental/' --exclude='*.rlib' --exclude='*.d')
-		REMOTE_RELEASE_BYTES=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "du -sb $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | cut -f1" 2>/dev/null || echo 0)
+		REMOTE_RELEASE_BYTES=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "du -sk $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | awk '{print \$1 * 1024}'" 2>/dev/null || echo 0)
 		echo "[$(date)] release estimated download size: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
 			echo "[$(date)] pulling full release directory (slower)..."
 			rsync -az -e "${RSYNC_SSH}" "${RSYNC_PROGRESS_OPTS[@]}" "${RSYNC_EXCLUDE[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/target/${TARGET}/release/" "${RELEASE_DIR}/"

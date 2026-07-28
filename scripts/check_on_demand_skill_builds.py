@@ -40,23 +40,23 @@ REQUIRED_SNIPPETS = {
         'RUSTCLAW_PACKAGE_TARGET="${RUSTCLAW_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
         "target/skill-packages/$RUSTCLAW_PACKAGE_TARGET",
     ),
-    "cross-build-upload.sh": (
+    "scripts/archive/cross-build/cross-build-upload.sh": (
         "bash ./build-all.sh no-ui --target",
         "--scope selected --target \"$TARGET\" --skill \"$1\" --format records",
         'if [[ "$ADAPTER" != "cargo" ]]',
         "configure_cargo_build_environment",
     ),
-    "cross-build-upload-cloud.sh": (
+    "scripts/archive/cross-build/cross-build-upload-cloud.sh": (
         "bash ./build-all.sh no-ui --target",
         "--scope selected --target \"$TARGET\" --skill \"$1\" --format records",
         'if [[ "$ADAPTER" != "cargo" ]]',
         "configure_cargo_build_environment",
     ),
-    "cross-build-pi.sh": (
+    "scripts/archive/cross-build/cross-build-pi.sh": (
         "bash \"${SCRIPT_DIR}/build-all.sh\"",
         "configure_cargo_build_environment",
     ),
-    "local-cross-build-upload-pi.sh": (
+    "scripts/archive/cross-build/local-cross-build-upload-pi.sh": (
         "--scope build-excludes --target \"${TARGET}\" --format packages",
         "build-all.sh\" no-ui --target",
         "configure_cargo_build_environment",
@@ -100,16 +100,15 @@ REQUIRED_SNIPPETS = {
 
 DIRECT_WORKSPACE_BUILD_FORBIDDEN = (
     "install-rustclaw-cmd.sh",
-    "cross-build-upload.sh",
-    "cross-build-upload-cloud.sh",
-    "local-cross-build-upload-pi.sh",
+    "scripts/archive/cross-build/cross-build-upload.sh",
+    "scripts/archive/cross-build/cross-build-upload-cloud.sh",
+    "scripts/archive/cross-build/local-cross-build-upload-pi.sh",
 )
 
 PROACTIVE_BUILD_ENTRYPOINTS = (
     "build-all.sh",
     "install-rustclaw-cmd.sh",
     "package-release.sh",
-    "local-cross-build-upload-pi.sh",
     "setup-config.sh",
     "start-all.sh",
     "docker/Dockerfile",

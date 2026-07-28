@@ -5,15 +5,14 @@ import {
   ChevronUp,
   Cpu,
   Download,
-  ExternalLink,
   GitBranch,
   LayoutDashboard,
   Loader2,
-  PackageCheck,
+  PowerOff,
   RefreshCw,
   ServerCog,
+  ShieldCheck,
   Settings2,
-  Upload,
   X,
 } from "lucide-react";
 
@@ -26,13 +25,17 @@ import {
   buildWorkspaceVersionDisplay,
   type WorkspaceUpdateNotice,
 } from "../lib/workspace-update";
+import { useUiDialog } from "./UiDialogProvider";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
+import { SystemDependenciesPanel } from "./SystemDependenciesPanel";
 import type {
   ConsolePage,
   DashboardCommunicationRow,
   HostSystemSummary,
+  HostDependenciesSnapshot,
   NginxUiStatus,
   PiAppStatusResponse,
+  WebdExposureStatus,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
 } from "../types/api";
@@ -56,6 +59,10 @@ export interface DashboardPageProps {
   hostSystemSummary: HostSystemSummary | null;
   hostSystemLoading: boolean;
   hostSystemErrorCode: string | null;
+  hostDependencies: HostDependenciesSnapshot | null;
+  hostDependenciesLoading: boolean;
+  hostDependenciesErrorCode: string | null;
+  dependencyInstallingId: string | null;
   isAdminIdentity: boolean;
   workspaceUpdateLoading: boolean;
   workspaceUpdateRunning: boolean;
@@ -66,6 +73,11 @@ export interface DashboardPageProps {
   nginxStatus: NginxUiStatus | null;
   nginxStatusLoading: boolean;
   nginxStatusError: string | null;
+  webdExposureStatus: WebdExposureStatus | null;
+  webdExposureLoading: boolean;
+  webdExposureUpdating: boolean;
+  webdExposureError: string | null;
+  webdExposureMessage: string | null;
   workspaceUpdateRestarting: boolean;
   workspaceUpdateDisplayStatus: string | undefined;
   workspaceUpdateProgressVisible: boolean;
@@ -88,11 +100,15 @@ export interface DashboardPageProps {
   onSetCurrentPage: (page: ConsolePage) => void;
   onFetchWorkspaceUpdateStatus: () => unknown | Promise<unknown>;
   onFetchNginxStatus: () => unknown | Promise<unknown>;
+  onFetchWebdExposureStatus: () => unknown | Promise<unknown>;
+  onSetWebdExternalAccess: (externallyAccessible: boolean) => unknown | Promise<unknown>;
   onStartWorkspaceUpdate: (mode: WorkspaceUpdateMode) => unknown | Promise<unknown>;
   onCancelWorkspaceUpdate: () => unknown | Promise<unknown>;
   onRestartSystem: () => unknown | Promise<unknown>;
   onRestartPiApp: () => unknown | Promise<unknown>;
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
+  onFetchHostDependencies: () => unknown | Promise<unknown>;
+  onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
   workspaceUpdateStepLabel: (step?: string) => string;
   workspaceUpdateStatusLabel: (status?: string) => string;
   workspaceUpdateTimeLabel: (ts?: number | null) => string;
@@ -105,6 +121,10 @@ export function DashboardPage({
   hostSystemSummary,
   hostSystemLoading,
   hostSystemErrorCode,
+  hostDependencies,
+  hostDependenciesLoading,
+  hostDependenciesErrorCode,
+  dependencyInstallingId,
   isAdminIdentity,
   workspaceUpdateLoading,
   workspaceUpdateRunning,
@@ -115,6 +135,11 @@ export function DashboardPage({
   nginxStatus,
   nginxStatusLoading,
   nginxStatusError,
+  webdExposureStatus,
+  webdExposureLoading,
+  webdExposureUpdating,
+  webdExposureError,
+  webdExposureMessage,
   workspaceUpdateRestarting,
   workspaceUpdateDisplayStatus,
   workspaceUpdateProgressVisible,
@@ -137,19 +162,23 @@ export function DashboardPage({
   onSetCurrentPage,
   onFetchWorkspaceUpdateStatus,
   onFetchNginxStatus,
+  onFetchWebdExposureStatus,
+  onSetWebdExternalAccess,
   onStartWorkspaceUpdate,
   onCancelWorkspaceUpdate,
   onRestartSystem,
   onRestartPiApp,
   onFetchHostSystemSummary,
+  onFetchHostDependencies,
+  onInstallHostDependency,
   workspaceUpdateStepLabel,
   workspaceUpdateStatusLabel,
   workspaceUpdateTimeLabel,
 }: DashboardPageProps) {
+  const { confirm: showConfirm } = useUiDialog();
   const latestReleaseStatus = workspaceUpdateStatus?.latest_release_check_status;
   const sourceUpdateAvailable = workspaceUpdateStatus?.source_update_available === true;
   const canEnableSourceCheckout = workspaceUpdateStatus?.installation_kind === "release_package";
-  const canEnableReleasePackage = workspaceUpdateStatus?.installation_kind === "source_checkout";
   const latestReleaseDisplay =
     workspaceUpdateStatus?.latest_release_tag ||
     (latestReleaseStatus === "unavailable"
@@ -160,7 +189,6 @@ export function DashboardPage({
   const [completedSetupExpanded, setCompletedSetupExpanded] = useState(false);
   const showOnboarding = !requiredSetupComplete || completedSetupExpanded;
   const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
-  const nginxEntryUrl = `${window.location.protocol}//${window.location.hostname}`;
 
   return (
     <>
@@ -266,6 +294,17 @@ export function DashboardPage({
         loading={hostSystemLoading}
         errorCode={hostSystemErrorCode}
         onRefresh={onFetchHostSystemSummary}
+      />
+
+      <SystemDependenciesPanel
+        t={t}
+        snapshot={hostDependencies}
+        loading={hostDependenciesLoading}
+        errorCode={hostDependenciesErrorCode}
+        isAdmin={isAdminIdentity}
+        installingId={dependencyInstallingId}
+        onRefresh={onFetchHostDependencies}
+        onInstall={onInstallHostDependency}
       />
 
       <section className="space-y-4">
@@ -396,27 +435,6 @@ export function DashboardPage({
                     : t("切换到源码模式", "Switch to source mode")}
                 </button>
               ) : null}
-              {canEnableReleasePackage ? (
-                <button
-                  type="button"
-                  onClick={() => void onStartWorkspaceUpdate("release_package")}
-                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                  className="theme-secondary-btn mt-2 px-3 py-2 text-sm"
-                  title={t(
-                    "使用预编译包替换源码工作区，并把当前源码完整保留为回滚备份",
-                    "Replace the source workspace with a prebuilt package while retaining the complete source tree as a rollback backup",
-                  )}
-                >
-                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_package" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <PackageCheck className="h-4 w-4" />
-                  )}
-                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_package"
-                    ? t("切换中", "Switching")
-                    : t("切换回 Release 模式", "Switch back to Release mode")}
-                </button>
-              ) : null}
             </div>
 
             {sourceUpdateAvailable ? (
@@ -483,6 +501,91 @@ export function DashboardPage({
         ) : null}
 
         {isAdminIdentity ? (
+          <div className="grid items-stretch gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="rounded-lg bg-emerald-400/10 p-2 text-emerald-200">
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold text-white">
+                      {t("Agent系统对外端口", "Agent system public port")}
+                    </h4>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${webdExposureStatus?.externally_accessible ? "bg-amber-400/10 text-amber-100" : "bg-emerald-400/10 text-emerald-100"}`}>
+                      {!webdExposureStatus
+                        ? t("读取中", "Checking")
+                        : webdExposureStatus.externally_accessible
+                          ? t("允许直接访问", "Direct access on")
+                          : t("仅本机", "Local only")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    {t(
+                      "关闭后 webd 只接受本机连接，nginx 仍可通过回环地址转发 UI 和 API。需要直接使用设备 IP 访问时再开放。",
+                      "When closed, webd accepts local connections only while nginx continues proxying the UI and API over loopback. Expose it only when direct device-IP access is required.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onFetchWebdExposureStatus()}
+                disabled={webdExposureLoading || webdExposureUpdating || workspaceUpdateRunning}
+                className="theme-topbar-btn shrink-0 px-3 py-2 text-sm"
+                title={t("刷新 webd 状态", "Refresh webd status")}
+              >
+                {webdExposureLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t("刷新状态", "Refresh status")}
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              <span className={`rounded-full border px-2.5 py-1 ${webdExposureStatus?.running ? "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-100" : "border-white/10 bg-black/15 text-white/50"}`}>
+                {!webdExposureStatus
+                  ? t("状态未知", "Unknown")
+                  : webdExposureStatus.running
+                    ? t("运行中", "Running")
+                    : t("未运行", "Not running")}
+              </span>
+              <span className="rounded-full border border-white/10 bg-black/15 px-2.5 py-1 text-white/65">
+                {t("端口", "Port")} {webdExposureStatus?.port ?? 8788}
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-4 rounded-md border border-white/10 bg-black/10 px-3 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white/85">{t("监听地址", "Listen address")}</p>
+                <p className="mt-1 text-xs leading-5 text-white/50">
+                  {webdExposureStatus?.externally_accessible ? "IP" : "127.0.0.1"}
+                  {`:${webdExposureStatus?.port ?? 8788}`}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="text-sm font-medium text-white/70">
+                  {webdExposureStatus?.externally_accessible ? t("开启", "On") : t("关闭", "Off")}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={webdExposureStatus?.externally_accessible === true}
+                  aria-label={t("切换 webd 对外端口", "Toggle the public webd port")}
+                  onClick={() => void onSetWebdExternalAccess(!webdExposureStatus?.externally_accessible)}
+                  disabled={!webdExposureStatus || webdExposureUpdating || workspaceUpdateRunning || systemRestarting || webdExposureStatus.supported === false}
+                  className={`relative h-6 w-11 shrink-0 overflow-hidden rounded-full border p-0 transition ${webdExposureStatus?.externally_accessible ? "border-amber-300/50 bg-amber-400/35" : "border-white/15 bg-white/10"} disabled:cursor-not-allowed disabled:opacity-45`}
+                >
+                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${webdExposureStatus?.externally_accessible ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
+            </div>
+
+            {webdExposureError ? (
+              <p className="mt-3 text-sm text-amber-100">{t("状态读取或修改失败", "Status read or update failed")}: {webdExposureError}</p>
+            ) : null}
+            {webdExposureMessage ? <p className="mt-3 text-sm text-emerald-100">{webdExposureMessage}</p> : null}
+          </div>
+
           <div className="rounded-lg border border-sky-400/20 bg-sky-400/[0.06] p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex max-w-3xl items-start gap-3">
@@ -491,7 +594,12 @@ export function DashboardPage({
                 </span>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-sm font-semibold text-white">{t("Web 入口（nginx）", "Web Entry (nginx)")}</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      {t(
+                        "WEB服务器配置入口（本地运行可以不配置，但是要保持webd对外端口打开）",
+                        "Web server entry configuration (optional for local use; keep the webd public port open when omitted)",
+                      )}
+                    </h4>
                     <span className={`rounded-full px-2 py-0.5 text-[11px] ${nginxReady ? "bg-emerald-400/10 text-emerald-200" : "bg-white/8 text-white/60"}`}>
                       {nginxReady ? t("已就绪", "Ready") : t("待配置", "Setup needed")}
                     </span>
@@ -561,26 +669,23 @@ export function DashboardPage({
                 )}
                 {t("启用/修复 nginx", "Enable/Repair nginx")}
               </button>
-              <button
-                type="button"
-                onClick={() => void onStartWorkspaceUpdate("nginx_deploy")}
-                disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting || nginxStatus?.supported === false}
-                className="theme-secondary-btn px-3 py-2 text-sm"
-              >
-                {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "nginx_deploy" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                {sourceUpdateAvailable ? t("构建并部署最新 UI", "Build and Deploy Latest UI") : t("部署当前 UI", "Deploy Current UI")}
-              </button>
-              {nginxReady ? (
-                <a href={nginxEntryUrl} className="theme-secondary-btn px-3 py-2 text-sm">
-                  <ExternalLink className="h-4 w-4" />
-                  {t("打开 nginx 入口", "Open nginx entry")}
-                </a>
+              {nginxStatus?.installed || nginxStatus?.configured || nginxStatus?.ui_deployed ? (
+                <button
+                  type="button"
+                  onClick={() => void onStartWorkspaceUpdate("nginx_disable")}
+                  disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting || nginxStatus?.supported === false}
+                  className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
+                >
+                  {workspaceUpdateRunning && workspaceUpdateStatus?.mode === "nginx_disable" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PowerOff className="h-4 w-4" />
+                  )}
+                  {t("关闭 nginx", "Disable nginx")}
+                </button>
               ) : null}
             </div>
+          </div>
           </div>
         ) : null}
 
@@ -602,20 +707,22 @@ export function DashboardPage({
                   ? t("停止中", "Stopping")
                   : workspaceUpdateStatus.mode === "release_deploy"
                     ? t("停止更新", "Stop Update")
-                    : workspaceUpdateStatus.mode === "nginx_enable" || workspaceUpdateStatus.mode === "nginx_deploy"
+                    : workspaceUpdateStatus.mode === "nginx_enable" || workspaceUpdateStatus.mode === "nginx_disable"
                       ? t("停止 nginx 操作", "Stop nginx operation")
                     : t("停止编译", "Stop Build")}
               </button>
             ) : null}
             <button
               type="button"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  t(
+              onClick={async () => {
+                const confirmed = await showConfirm({
+                  title: t("重启 RustClaw", "Restart RustClaw"),
+                  message: t(
                     "现在重启 RustClaw？重启期间页面会短暂断开，稍后会自动恢复。",
                     "Restart RustClaw now? The page may disconnect briefly and then recover.",
                   ),
-                );
+                  confirmLabel: t("重启", "Restart"),
+                });
                 if (confirmed) void onRestartSystem();
               }}
               disabled={workspaceUpdateLoading || workspaceUpdateStatus?.status === "running" || systemRestarting}
@@ -627,13 +734,15 @@ export function DashboardPage({
             {piAppStatus?.available ? (
               <button
                 type="button"
-                onClick={() => {
-                  const confirmed = window.confirm(
-                    t(
+                onClick={async () => {
+                  const confirmed = await showConfirm({
+                    title: t("重启 Pi App", "Restart Pi App"),
+                    message: t(
                       "现在重启 Pi App 小程序？小屏界面会短暂关闭后重新打开。",
                       "Restart the Pi App now? The small-screen app will close briefly and reopen.",
                     ),
-                  );
+                    confirmLabel: t("重启", "Restart"),
+                  });
                   if (confirmed) void onRestartPiApp();
                 }}
                 disabled={piAppRestarting || systemRestarting}

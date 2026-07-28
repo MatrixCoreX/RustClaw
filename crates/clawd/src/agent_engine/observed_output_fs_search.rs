@@ -113,31 +113,6 @@ fn fs_search_grep_text_results(
     Some((matches, match_count, query))
 }
 
-fn fs_search_grep_text_name_results(value: &serde_json::Value) -> Option<(Vec<String>, usize)> {
-    let action = value.get("action").and_then(|v| v.as_str())?;
-    if !action.eq_ignore_ascii_case("grep_text") {
-        return None;
-    }
-    let results = value
-        .get("name_results")
-        .and_then(|v| v.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|v| v.as_str())
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let count = value
-        .get("name_count")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(results.len() as u64) as usize;
-    Some((results, count))
-}
-
 pub(super) fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let (matches, match_count, query) = fs_search_grep_text_results(value)?;
     let file_count = value
@@ -156,22 +131,11 @@ pub(super) fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) 
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let (name_results, name_count) =
-        fs_search_grep_text_name_results(value).unwrap_or((Vec::new(), 0));
     let mut lines = vec![format!(
         "grep_text query={query} file_count={file_count} match_count={match_count}"
     )];
     if !patterns.is_empty() {
         lines.push(format!("file_patterns={}", patterns.join(", ")));
-    }
-    if name_count > 0 && !name_results.is_empty() {
-        lines.push(format!("name_count={name_count}"));
-        lines.extend(
-            name_results
-                .into_iter()
-                .take(16)
-                .map(|path| format!("name_match path={path}")),
-        );
     }
     if matches.is_empty() {
         lines.push("matches: none".to_string());
@@ -519,20 +483,6 @@ fn fs_search_grep_text_direct_answer_candidate(
 ) -> Option<String> {
     let (matches, match_count, _query) = fs_search_grep_text_results(value)?;
     if match_count == 0 || matches.is_empty() {
-        if let Some((name_results, name_count)) = fs_search_grep_text_name_results(value) {
-            if name_count > 0 && !name_results.is_empty() {
-                if name_results.len() == 1 {
-                    return name_results.into_iter().next();
-                }
-                return allow_multi_result_list.then(|| {
-                    name_results
-                        .into_iter()
-                        .take(16)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                });
-            }
-        }
         return Some(fs_search_no_match_machine_answer("grep_text", None));
     }
     if allow_multi_result_list && !prefer_path_only {

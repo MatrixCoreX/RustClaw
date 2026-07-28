@@ -5,7 +5,6 @@ mod message_handler;
 mod task_delivery;
 mod telegram_buttons;
 mod telegram_formatting;
-mod telegram_prompts;
 
 use binding_voice::*;
 use commands::*;
@@ -13,14 +12,12 @@ use media_handlers::*;
 use message_handler::*;
 use task_delivery::*;
 use telegram_formatting::*;
-use telegram_prompts::*;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::IsTerminal;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,14 +25,10 @@ use anyhow::{anyhow, Context};
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
-use claw_core::hard_rules::voice_mode::parse_voice_mode_intent_decision;
-use claw_core::prompt_layers;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DirectClassifyRequest,
-    DirectClassifyResponse, ExchangeCredentialStatus, GatewayInstanceRuntimeStatus, HealthResponse,
-    ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, GatewayInstanceRuntimeStatus,
+    HealthResponse, ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
     SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus,
-    UpsertExchangeCredentialRequest,
 };
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
@@ -55,29 +48,19 @@ struct BotState {
     allowlist: Arc<HashSet<i64>>,
     access_mode: String,
     allowed_usernames: Arc<HashSet<String>>,
-    skills_list: Arc<Vec<String>>,
     clawd_base_url: String,
     client: Client,
     poll_interval_ms: u64,
     task_wait_seconds: u64,
-    queue_limit: usize,
-    auto_vision_on_image_only: bool,
-    pending_image_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     bot_token: String,
     image_inbox_dir: String,
     video_inbox_dir: String,
     file_inbox_dir: String,
     audio_inbox_dir: String,
     voice_reply_mode: String,
-    voice_mode_nl_intent_enabled: bool,
     voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     max_audio_input_bytes: usize,
-    sendfile_admin_only: bool,
-    sendfile_full_access: bool,
-    sendfile_allowed_dirs: Arc<Vec<String>>,
     ephemeral_image_saved_seconds: u64,
-    voice_chat_prompt_template: String,
-    voice_mode_intent_prompt_template: String,
     pending_resume_by_chat: Arc<Mutex<HashMap<i64, PendingResumeContext>>>,
     pending_key_bind_by_chat: Arc<Mutex<HashSet<i64>>>,
     bound_identity_by_chat: Arc<Mutex<HashMap<i64, AuthIdentity>>>,
@@ -106,13 +89,14 @@ enum VoiceReplyMode {
     Both,
 }
 
-const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/voice_chat_prompt.md");
-const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/voice_mode_intent_prompt.md");
-const VOICE_CHAT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_chat_prompt.md";
-const VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_mode_intent_prompt.md";
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
+
+fn unix_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
 
 impl TextCatalog {
     fn load(path: &str) -> anyhow::Result<Self> {
@@ -182,21 +166,10 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.server.request_timeout_seconds))
         .build()
         .context("build reqwest client failed")?;
-    let workspace_root = workspace_root();
-    let prompt_vendor =
-        prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
-    let voice_chat_prompt_template = load_prompt_template(
-        &workspace_root,
-        &prompt_vendor,
-        VOICE_CHAT_PROMPT_LOGICAL_PATH,
-        DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
-    );
-    let voice_mode_intent_prompt_template = load_prompt_template(
-        &workspace_root,
-        &prompt_vendor,
-        VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH,
-        DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
-    );
+    let workspace_root = std::env::var("WORKSPACE_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let mut telegram_runtime_bots = config.telegram_runtime_bots();
     if telegram_runtime_bots.is_empty() {
         return Err(anyhow!("no telegram bot configured"));
@@ -217,14 +190,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let selected_bot = telegram_runtime_bots.remove(0);
-    let state = build_bot_state(
-        &config,
-        &selected_bot,
-        client,
-        &workspace_root,
-        &voice_chat_prompt_template,
-        &voice_mode_intent_prompt_template,
-    );
+    let state = build_bot_state(&config, &selected_bot, client, &workspace_root);
     run_telegram_bot_runtime(state).await
 }
 
@@ -233,8 +199,6 @@ fn build_bot_state(
     bot_config: &ResolvedTelegramBotConfig,
     client: Client,
     workspace_root: &Path,
-    voice_chat_prompt_template: &str,
-    voice_mode_intent_prompt_template: &str,
 ) -> BotState {
     let i18n_path = resolve_i18n_path(&bot_config.language, &bot_config.i18n_path);
     let i18n = match TextCatalog::load(&i18n_path) {
@@ -272,29 +236,19 @@ fn build_bot_state(
             _ => "public".to_string(),
         },
         allowed_usernames: Arc::new(allowed_usernames),
-        skills_list: Arc::new(config.skills.skills_list.clone()),
         clawd_base_url: clawd_base_url_from_config(config),
         client,
         poll_interval_ms: config.worker.poll_interval_ms,
         task_wait_seconds: bot_config.task_delivery_timeout_seconds.max(1),
-        queue_limit: config.worker.queue_limit,
-        auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
-        pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
         bot_token: bot_config.bot_token.clone(),
         image_inbox_dir: config.telegram.image_inbox_dir.clone(),
         video_inbox_dir: config.telegram.video_inbox_dir.clone(),
         file_inbox_dir: config.telegram.file_inbox_dir.clone(),
         audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
-        voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
         voice_reply_mode_by_chat: Arc::new(Mutex::new(load_voice_reply_mode_by_chat(config))),
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
-        sendfile_admin_only: config.telegram.sendfile.admin_only,
-        sendfile_full_access: config.telegram.sendfile.full_access,
-        sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
         ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
-        voice_chat_prompt_template: voice_chat_prompt_template.to_string(),
-        voice_mode_intent_prompt_template: voice_mode_intent_prompt_template.to_string(),
         pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
         pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
         bound_identity_by_chat: Arc::new(Mutex::new(HashMap::new())),
@@ -539,7 +493,6 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
                 ("allowlist", &format!("{allowlist_list:?}")),
                 ("access_mode", &state.access_mode),
                 ("allowed_usernames", &format!("{allowed_usernames_list:?}")),
-                ("skills", &state.skills_list.join(",")),
             ],
         )
     );
@@ -721,9 +674,6 @@ fn current_rss_bytes() -> Option<u64> {
 #[cfg(test)]
 #[path = "main_bind_gate_tests.rs"]
 mod bind_gate_tests;
-#[cfg(test)]
-#[path = "main_model_config_tests.rs"]
-mod model_config_tests;
 #[cfg(test)]
 #[path = "main_telegram_text_payload_tests.rs"]
 mod telegram_text_payload_tests;

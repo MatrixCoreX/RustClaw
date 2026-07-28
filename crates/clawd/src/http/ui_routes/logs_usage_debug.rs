@@ -1,25 +1,48 @@
-fn normalize_log_file_name(raw: Option<&str>) -> String {
-    let fallback = "agent_trace.log".to_string();
+fn is_log_file_name(file_name: &str) -> bool {
+    if file_name.is_empty() || file_name.starts_with('.') {
+        return false;
+    }
+    if file_name.ends_with(".log") {
+        return true;
+    }
+    file_name
+        .split_once(".log.")
+        .is_some_and(|(_, suffix)| !suffix.is_empty() && suffix != "lock")
+}
+
+fn available_log_file_names(log_dir: &std::path::Path) -> anyhow::Result<Vec<String>> {
+    if !log_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(log_dir)? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if is_log_file_name(&file_name) {
+            files.push(file_name);
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn select_available_log_file(files: &[String], raw: Option<&str>) -> Option<String> {
     let candidate = raw.unwrap_or("").trim();
     if candidate.is_empty() {
-        return fallback;
+        return files.first().cloned();
     }
-    let allowed = [
-        "agent_trace.log",
-        "model_io.log",
-        "routing.log",
-        "act_plan.log",
-        "clawd.log",
-        "nni.log",
-        "channel-gateway.log",
-        "telegramd.log",
-        "whatsappd.log",
-        "whatsapp_webd.log",
-    ];
-    if allowed.iter().any(|v| v.eq_ignore_ascii_case(candidate)) {
-        return candidate.to_string();
-    }
-    fallback
+    files.iter().find(|file| file.as_str() == candidate).cloned()
 }
 
 fn read_last_lines(path: &std::path::Path, limit_lines: usize) -> anyhow::Result<String> {
@@ -105,9 +128,40 @@ async fn logs_latest(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
-    let file_name = normalize_log_file_name(query.file.as_deref());
+    let log_dir = state.skill_rt.workspace_root.join("logs");
+    let files = match available_log_file_names(&log_dir) {
+        Ok(files) => files,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("log_directory_read_failed".to_string()),
+                }),
+            );
+        }
+    };
+    let file_name = match select_available_log_file(&files, query.file.as_deref()) {
+        Some(file_name) => file_name,
+        None => {
+            let error = if files.is_empty() {
+                "log_files_empty"
+            } else {
+                "log_file_not_found"
+            };
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(error.to_string()),
+                }),
+            );
+        }
+    };
     let lines = query.lines.unwrap_or(200).clamp(20, 2000);
-    let path = state.skill_rt.workspace_root.join("logs").join(&file_name);
+    let path = log_dir.join(&file_name);
     let raw = match read_last_lines(&path, lines) {
         Ok(v) => v,
         Err(err) => {
@@ -133,6 +187,34 @@ async fn logs_latest(
             error: None,
         }),
     )
+}
+
+async fn logs_files(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let log_dir = state.skill_rt.workspace_root.join("logs");
+    match available_log_file_names(&log_dir) {
+        Ok(files) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "files": files })),
+                error: None,
+            }),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("log_directory_read_failed".to_string()),
+            }),
+        ),
+    }
 }
 
 fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
@@ -1229,19 +1311,10 @@ fn extract_memory_trace_for_debug(result_json: &Value) -> Option<Value> {
 #[cfg(test)]
 mod logs_usage_debug_tests {
     use super::{
-        build_task_debug_flow_summary, extract_memory_trace_for_debug, normalize_log_file_name,
-        numbered_task_debug_calls, task_debug_trace_task_ids, TaskDebugEntry,
+        build_task_debug_flow_summary, extract_memory_trace_for_debug, numbered_task_debug_calls,
+        task_debug_trace_task_ids, TaskDebugEntry,
     };
     use serde_json::json;
-
-    #[test]
-    fn logs_latest_allows_device_side_nni_log_only() {
-        assert_eq!(normalize_log_file_name(Some("nni.log")), "nni.log");
-        assert_eq!(
-            normalize_log_file_name(Some("nni-server.log")),
-            "agent_trace.log"
-        );
-    }
 
     #[test]
     fn teaching_trace_task_set_includes_nested_child_tasks() {

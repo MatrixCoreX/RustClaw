@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cross-platform build toolchain reporting, update, and minimum-version checks.
 
-RUSTCLAW_MIN_RUST_VERSION="${RUSTCLAW_MIN_RUST_VERSION:-1.85.0}"
+RUSTCLAW_MIN_RUST_VERSION="${RUSTCLAW_MIN_RUST_VERSION:-1.97.0}"
 RUSTCLAW_MIN_CLANG_VERSION="${RUSTCLAW_MIN_CLANG_VERSION:-14.0.0}"
 RUSTCLAW_MIN_PROTOC_VERSION="${RUSTCLAW_MIN_PROTOC_VERSION:-3.12.0}"
 RUSTCLAW_MIN_NODE_VERSION="${RUSTCLAW_MIN_NODE_VERSION:-20.19.0}"
@@ -338,6 +338,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   # shellcheck source=/dev/null
   source "$SCRIPT_DIR/scripts/shell_compat.sh"
+  configure_platform_command_path
   case "${1:-report}" in
     self-test)
       rustclaw_toolchain_manager_self_test

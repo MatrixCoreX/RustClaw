@@ -15,16 +15,11 @@ pub enum ChannelCommandKind {
 #[serde(rename_all = "snake_case")]
 pub enum CoreCommandAction {
     Start,
-    Ask,
     BindKey,
     Status,
     Cancel,
-    Skills,
     RunSkill,
-    SendFile,
     VoiceMode,
-    RustclawConfig,
-    CryptoApi,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -460,38 +460,6 @@ pub(super) fn resolve_path(
     Ok(normalized_candidate)
 }
 
-pub(super) fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> SkillResult<()> {
-    let meta =
-        std::fs::symlink_metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
-    if meta.file_type().is_symlink() || meta.is_file() {
-        let _ = f(path);
-        return Ok(());
-    }
-    if meta.is_dir() && f(path) {
-        return Ok(());
-    }
-    if !meta.is_dir() {
-        return Err(SkillError::not_a_directory(format!(
-            "path search requires a directory: {}",
-            path.display()
-        )));
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| SkillError::io("read_dir", path, err))?;
-    for entry in iter {
-        let entry = entry.map_err(|err| SkillError::io("dir_entry", path, err))?;
-        let p = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| SkillError::io("file_type", &p, err))?;
-        if file_type.is_dir() && !file_type.is_symlink() {
-            walk_collect(&p, f)?;
-        } else if f(&p) {
-            return Ok(());
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn to_rel(root: &Path, p: &Path) -> String {
     p.strip_prefix(root)
         .unwrap_or(p)

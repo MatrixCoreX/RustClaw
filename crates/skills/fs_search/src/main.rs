@@ -1,21 +1,31 @@
+#![recursion_limit = "256"]
+
 use std::io::{self, BufRead, Write};
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
+use rustclaw_fs_discovery::{
+    BackendPreference, CaseMode, Completeness, DiscoverySelector, MatchMode, TargetKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod content_backend;
 mod grep_search;
 mod image_search;
 mod result_pagination;
+mod snapshot_cache;
 mod workspace_traversal;
 
-use grep_search::{find_matches, GrepOptions, MAX_CONTEXT_LINES};
+use content_backend::{search_content, ContentSearchOptions};
+use grep_search::{
+    find_matches, GrepOptions, PatternKind, MAX_CONTEXT_LINES, MAX_REGEX_PATTERN_BYTES,
+};
 use image_search::{collect_images, default_image_extensions, directory_counts, ImageEntry};
-use result_pagination::{cursor_from_args, paginate};
+use result_pagination::{cursor_from_args, cursor_snapshot_identity, paginate, query_sha256};
+use snapshot_cache::{render_cached, render_missing_snapshot, SnapshotCache};
 use workspace_traversal::{
-    path_kind, resolve_path, to_rel, walk_collect, walk_collect_dirs, walk_collect_nodes,
-    workspace_root, ScanLimits,
+    resolve_path, to_rel, walk_collect_selected, workspace_root, ScanLimits, WalkStats,
 };
 
 const SKILL_NAME: &str = "fs_search";
@@ -30,6 +40,7 @@ const MAX_GREP_SCAN_BYTES: usize = 512 * 1024 * 1024;
 struct Req {
     request_id: String,
     args: Value,
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,46 +52,220 @@ struct Resp {
     error_text: Option<String>,
 }
 
-fn parse_env_usize(name: &str) -> Option<usize> {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-}
-
-fn scan_limits_from_env() -> ScanLimits {
-    let max_depth = parse_env_usize("RUSTCLAW_FS_SEARCH_MAX_DEPTH")
-        .or_else(|| parse_env_usize("RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH").map(|v| v.max(8)))
-        .unwrap_or(8)
-        .max(1);
-    let max_files = parse_env_usize("RUSTCLAW_FS_SEARCH_MAX_FILES")
-        .or_else(|| parse_env_usize("RUSTCLAW_LOCATOR_SCAN_MAX_FILES").map(|v| v.max(20_000)))
-        .unwrap_or(20_000)
-        .max(1);
-    ScanLimits {
-        max_depth,
-        max_files,
-    }
-}
-
 fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
-    let defaults = scan_limits_from_env();
     let max_depth = obj
         .get("max_depth")
         .and_then(|v| v.as_u64())
-        .map(|v| (v as usize).clamp(1, 64))
-        .unwrap_or(defaults.max_depth);
-    let max_files = obj
-        .get("max_files")
-        .and_then(|v| v.as_u64())
-        .map(|v| (v as usize).clamp(1, 500_000))
-        .unwrap_or(defaults.max_files);
+        .map(|v| (v as usize).clamp(1, 256));
+    #[cfg(test)]
+    let hard_entry_limit = obj
+        .get("__test_hard_entry_limit")
+        .and_then(Value::as_u64)
+        .map(|value| (value as usize).max(1))
+        .unwrap_or(rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT);
+    #[cfg(not(test))]
+    let hard_entry_limit = rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT;
+    let timeout_seconds = std::env::var("SKILL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(30)
+        .max(1);
     ScanLimits {
         max_depth,
-        max_files,
+        hard_entry_limit,
+        include_hidden: obj
+            .get("include_hidden")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        respect_ignore: obj
+            .get("respect_ignore")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        deadline: Some(Duration::from_secs(
+            timeout_seconds.saturating_sub(1).max(1),
+        )),
+        backend: {
+            #[cfg(test)]
+            {
+                match obj.get("__test_backend").and_then(Value::as_str) {
+                    Some("rust") => BackendPreference::Rust,
+                    Some("ripgrep") => BackendPreference::Ripgrep,
+                    _ => BackendPreference::Auto,
+                }
+            }
+            #[cfg(not(test))]
+            {
+                BackendPreference::Auto
+            }
+        },
     }
 }
 
-fn normalize_locator_text(text: &str) -> String {
+fn effective_completeness(
+    stats: &WalkStats,
+    additional_hard_limit: bool,
+    stale_snapshot: bool,
+) -> Completeness {
+    if stale_snapshot {
+        return Completeness::StaleSnapshot;
+    }
+    if additional_hard_limit && stats.completeness.is_complete() {
+        return Completeness::PartialHardLimit;
+    }
+    stats.completeness
+}
+
+fn scan_report(stats: &WalkStats, completeness: Completeness) -> Value {
+    json!({
+        "completeness": completeness.as_str(),
+        "visited_files": stats.visited_files,
+        "visited_directories": stats.visited_directories,
+        "visited_entries": stats.visited_files.saturating_add(stats.visited_directories),
+        "skipped_ignored": stats.skipped_ignored,
+        "skipped_hidden": stats.skipped_hidden,
+        "skipped_symlinks": stats.skipped_symlinks,
+        "permission_denied": stats.permission_denied,
+        "skipped_counts_complete": stats.skipped_counts_complete,
+        "backend": stats.backend.as_str(),
+        "backend_version": stats.backend_version,
+        "backend_fallback_reason": stats.backend_fallback_reason,
+        "backend_elapsed_ms": stats.backend_elapsed_ms,
+    })
+}
+
+fn case_mode_from_args(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(CaseMode, &'static str), String> {
+    if bool_arg(obj, "case_insensitive") || bool_arg(obj, "ignore_case") {
+        return Ok((CaseMode::Insensitive, "insensitive"));
+    }
+    match obj
+        .get("case_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("smart")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "smart" => Ok((CaseMode::Smart, "smart")),
+        "sensitive" | "case_sensitive" => Ok((CaseMode::Sensitive, "sensitive")),
+        "insensitive" | "ignore_case" => Ok((CaseMode::Insensitive, "insensitive")),
+        _ => Err("case_mode_unsupported".to_string()),
+    }
+}
+
+fn match_mode_from_args(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(MatchMode, &'static str), String> {
+    if bool_arg(obj, "exact") || bool_arg(obj, "exact_name") {
+        return Ok((MatchMode::Exact, "exact"));
+    }
+    match obj
+        .get("match_mode")
+        .or_else(|| obj.get("mode"))
+        .and_then(Value::as_str)
+        .unwrap_or("contains")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "exact" | "basename_exact" | "name_exact" => Ok((MatchMode::Exact, "exact")),
+        "prefix" | "starts_with" => Ok((MatchMode::StartsWith, "prefix")),
+        "suffix" | "ends_with" => Ok((MatchMode::EndsWith, "suffix")),
+        "contains" => Ok((MatchMode::Contains, "contains")),
+        "glob" => Ok((MatchMode::Glob, "glob")),
+        _ => Err("match_mode_unsupported".to_string()),
+    }
+}
+
+fn glob_values_from_args(obj: &serde_json::Map<String, Value>) -> Vec<String> {
+    string_values_from_args(obj, &["glob", "globs"])
+}
+
+fn pattern_kind_from_args(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(PatternKind, &'static str), String> {
+    match obj
+        .get("pattern_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("literal")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "literal" | "fixed" => Ok((PatternKind::Literal, "literal")),
+        "regex" | "regexp" => Ok((PatternKind::Regex, "regex")),
+        _ => Err("pattern_kind_unsupported".to_string()),
+    }
+}
+
+fn output_mode_from_args(obj: &serde_json::Map<String, Value>) -> Result<&'static str, String> {
+    match obj
+        .get("output_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("content")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "content" | "matches" => Ok("content"),
+        "paths" | "files" => Ok("paths"),
+        "count" | "counts" => Ok("count"),
+        _ => Err("output_mode_unsupported".to_string()),
+    }
+}
+
+fn smart_case_is_insensitive(mode: CaseMode, pattern: &str) -> bool {
+    match mode {
+        CaseMode::Sensitive => false,
+        CaseMode::Insensitive => true,
+        CaseMode::Smart => !pattern.chars().any(char::is_uppercase),
+    }
+}
+
+fn target_kind_selector(value: &str) -> TargetKind {
+    match value {
+        "file" => TargetKind::File,
+        "dir" => TargetKind::Directory,
+        _ => TargetKind::Any,
+    }
+}
+
+fn effective_policy(scan_limits: ScanLimits) -> Value {
+    json!({
+        "include_hidden": scan_limits.include_hidden,
+        "respect_ignore": scan_limits.respect_ignore,
+        "max_depth": scan_limits.max_depth,
+        "follow_symlinks": false,
+    })
+}
+
+fn continuation_from_page(page: &Value, completeness: Completeness) -> Value {
+    if completeness == Completeness::StaleSnapshot {
+        return json!({
+            "kind": "new_snapshot",
+            "safe_to_continue": true,
+            "reason_code": "stale_snapshot",
+        });
+    }
+    if let Some(cursor) = page.get("next_cursor").and_then(Value::as_str) {
+        return json!({
+            "kind": "next_page",
+            "safe_to_continue": true,
+            "cursor": cursor,
+        });
+    }
+    if !completeness.is_complete() {
+        return json!({
+            "kind": "narrow_search",
+            "safe_to_continue": true,
+            "reason_code": completeness.as_str(),
+        });
+    }
+    Value::Null
+}
+
+fn normalize_locator_shape(text: &str) -> String {
     text.trim()
         .chars()
         .map(|ch| match ch {
@@ -98,7 +283,6 @@ fn normalize_locator_text(text: &str) -> String {
             _ => ch,
         })
         .collect::<String>()
-        .to_lowercase()
 }
 
 fn string_values_from_args(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
@@ -144,8 +328,8 @@ fn extension_values_from_args(obj: &serde_json::Map<String, Value>, keys: &[&str
     out
 }
 
-fn expand_name_pattern(raw: &str) -> Vec<String> {
-    let normalized = normalize_locator_text(raw);
+fn expand_name_pattern_preserving_case(raw: &str) -> Vec<String> {
+    let normalized = normalize_locator_shape(raw);
     let stripped = normalized.trim_matches(|ch: char| {
         ch == '*' || ch == '?' || ch == '"' || ch == '\'' || ch.is_whitespace()
     });
@@ -188,60 +372,11 @@ fn expand_name_pattern(raw: &str) -> Vec<String> {
     out
 }
 
-fn strip_glob_wildcards(text: &str) -> String {
-    text.chars()
-        .filter(|ch| !matches!(ch, '*' | '?'))
-        .collect::<String>()
-}
-
-fn pattern_stem(pattern: &str) -> Option<&str> {
-    let path = Path::new(pattern);
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(str::trim)
-        .filter(|stem| !stem.is_empty() && *stem != pattern)
-}
-
-fn pattern_extension(pattern: &str) -> Option<String> {
-    Path::new(pattern)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::trim)
-        .filter(|ext| !ext.is_empty())
-        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
-}
-
-fn path_extension_matches_pattern(path: &Path, pattern_norm: &str) -> bool {
-    let Some(pattern_ext) = pattern_extension(pattern_norm) else {
-        return true;
-    };
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .is_some_and(|ext| ext == pattern_ext)
-}
-
-fn name_matches_pattern(name_norm: &str, pattern_norm: &str) -> bool {
-    if name_norm.contains(pattern_norm) {
-        return true;
-    }
-    pattern_stem(pattern_norm).is_some_and(|stem| name_norm.contains(stem))
-}
-
-fn path_name_matches_pattern(
-    path: &Path,
-    name_norm: &str,
-    pattern_norm: &str,
-    exact: bool,
-) -> bool {
-    if exact {
-        return name_norm == pattern_norm;
-    }
-    path_extension_matches_pattern(path, pattern_norm)
-        && name_matches_pattern(name_norm, pattern_norm)
-}
-
-fn name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>, String> {
+fn typed_name_patterns_from_args(
+    obj: &serde_json::Map<String, Value>,
+    match_mode: MatchMode,
+    required: bool,
+) -> Result<Vec<String>, String> {
     let raw_patterns = string_values_from_args(
         obj,
         &[
@@ -257,44 +392,27 @@ fn name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Result<Vec<S
             "queries",
         ],
     );
-    if raw_patterns.is_empty() {
-        return Err("pattern is required".to_string());
+    let patterns = if match_mode == MatchMode::Glob {
+        raw_patterns
+    } else {
+        raw_patterns
+            .iter()
+            .flat_map(|raw| expand_name_pattern_preserving_case(raw))
+            .filter(|pattern| !pattern.is_empty())
+            .collect::<Vec<_>>()
+    };
+    if required && patterns.is_empty() {
+        Err("pattern is required".to_string())
+    } else {
+        Ok(patterns)
     }
-    let patterns = raw_patterns
-        .iter()
-        .flat_map(|raw| expand_name_pattern(raw))
-        .filter(|pattern| !pattern.is_empty())
-        .collect::<Vec<_>>();
-    if patterns.is_empty() {
-        return Err("pattern is required".to_string());
-    }
-    Ok(patterns)
 }
 
-fn optional_name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec<String> {
-    string_values_from_args(
-        obj,
-        &[
-            "pattern",
-            "patterns",
-            "name",
-            "names",
-            "entry_name",
-            "entry_names",
-            "keyword",
-            "keywords",
-            "query",
-            "queries",
-        ],
-    )
-    .iter()
-    .flat_map(|raw| expand_name_pattern(raw))
-    .filter(|pattern| !pattern.is_empty())
-    .collect::<Vec<_>>()
-}
-
-fn optional_file_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec<String> {
-    string_values_from_args(
+fn typed_file_patterns_from_args(
+    obj: &serde_json::Map<String, Value>,
+    match_mode: MatchMode,
+) -> Vec<String> {
+    let raw_patterns = string_values_from_args(
         obj,
         &[
             "pattern",
@@ -306,70 +424,35 @@ fn optional_file_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec
             "file_pattern",
             "file_patterns",
         ],
-    )
-    .iter()
-    .flat_map(|raw| expand_name_pattern(raw))
-    .filter(|pattern| !pattern.is_empty())
-    .collect::<Vec<_>>()
+    );
+    if match_mode == MatchMode::Glob {
+        raw_patterns
+    } else {
+        raw_patterns
+            .iter()
+            .flat_map(|raw| expand_name_pattern_preserving_case(raw))
+            .filter(|pattern| !pattern.is_empty())
+            .collect()
+    }
 }
 
-fn grep_text_name_fallback_matches(
-    workspace_root: &Path,
-    search_root: &Path,
-    query: &str,
-    scan_limits: ScanLimits,
-    snapshot_limit: usize,
-) -> Result<(Vec<String>, Vec<String>, bool), String> {
-    let patterns = expand_name_pattern(query)
-        .into_iter()
-        .filter(|pattern| !pattern.is_empty())
-        .collect::<Vec<_>>();
-    if patterns.is_empty() {
-        return Ok((Vec::new(), Vec::new(), false));
-    }
-    let mut results = Vec::new();
-    let stats = walk_collect_nodes(search_root, scan_limits, &mut |p| {
-        let name = p
-            .file_name()
-            .map(|s| normalize_locator_text(&s.to_string_lossy()))
-            .unwrap_or_default();
-        if patterns
-            .iter()
-            .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm, false))
-        {
-            results.push(to_rel(workspace_root, p));
-        }
-        results.len() > snapshot_limit
-    })?;
-    let result_limit_reached = results.len() > snapshot_limit;
-    results.truncate(snapshot_limit);
-    results.sort();
-    results.dedup();
-    Ok((
-        patterns,
-        results,
-        stats.limit_reached || result_limit_reached,
-    ))
+fn strip_glob_wildcards(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !matches!(ch, '*' | '?'))
+        .collect::<String>()
+}
+
+fn pattern_extension(pattern: &str) -> Option<String> {
+    Path::new(pattern)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
 }
 
 fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool).unwrap_or(false)
-}
-
-fn exact_name_match_requested(obj: &serde_json::Map<String, Value>) -> bool {
-    if bool_arg(obj, "exact") || bool_arg(obj, "exact_name") {
-        return true;
-    }
-    obj.get("match_mode")
-        .or_else(|| obj.get("mode"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .is_some_and(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "exact" | "basename_exact" | "name_exact"
-            )
-        })
 }
 
 fn normalize_target_kind(value: &str) -> &str {
@@ -433,7 +516,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args) {
+            Ok(req) => match execute_with_context(req.args, req.context.as_ref()) {
                 Ok(extra) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -465,10 +548,11 @@ fn main() -> anyhow::Result<()> {
 
 fn error_extra(error_kind: &str) -> Value {
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
@@ -476,12 +560,22 @@ fn error_extra(error_kind: &str) -> Value {
 
 fn execution_error_kind(error: &str) -> &str {
     match error {
-        "multiline_query_invalid" | "query_empty" | "sort_by_unsupported" => error,
+        "multiline_query_invalid"
+        | "query_empty"
+        | "sort_by_unsupported"
+        | "invalid_cursor"
+        | "cursor_query_mismatch"
+        | "cursor_out_of_range" => error,
         _ => "execution_failed",
     }
 }
 
+#[cfg(test)]
 fn execute(args: Value) -> Result<Value, String> {
+    execute_with_context(args, None)
+}
+
+fn execute_with_context(args: Value, context: Option<&Value>) -> Result<Value, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -506,7 +600,8 @@ fn execute(args: Value) -> Result<Value, String> {
         .and_then(|v| v.as_u64())
         .unwrap_or(100)
         .clamp(1, 1000) as usize;
-    let cursor = cursor_from_args(obj);
+    let cursor = cursor_from_args(obj)?;
+    let query_sha256 = query_sha256(obj);
 
     let root = workspace_root();
     let search_root = resolve_path(
@@ -518,12 +613,36 @@ fn execute(args: Value) -> Result<Value, String> {
             .unwrap_or("."),
     )?;
     let scan_limits = scan_limits_from_args(obj);
+    let snapshot_cache = SnapshotCache::from_context(context)?;
+    if let (Some(cache), Some((cursor_query, cursor_snapshot))) =
+        (snapshot_cache.as_ref(), cursor_snapshot_identity(&cursor)?)
+    {
+        if cursor_query != query_sha256 {
+            return Err("cursor_query_mismatch".to_string());
+        }
+        match cache.load(&action, &query_sha256, &cursor_snapshot)? {
+            Some(cached) => {
+                return render_cached(cached, &cursor, max_results, &query_sha256);
+            }
+            None => {
+                return Ok(render_missing_snapshot(
+                    &action,
+                    &query_sha256,
+                    &cursor_snapshot,
+                    max_results,
+                ));
+            }
+        }
+    }
 
     let mut results = Vec::new();
     match action.as_str() {
         "find_name" => {
-            let pattern_norms = name_patterns_from_args(obj)?;
-            let exact_name = exact_name_match_requested(obj);
+            let (match_mode, match_mode_label) = match_mode_from_args(obj)?;
+            let (case_mode, case_mode_label) = case_mode_from_args(obj)?;
+            let globs = glob_values_from_args(obj);
+            let pattern_norms = typed_name_patterns_from_args(obj, match_mode, globs.is_empty())?;
+            let exact_name = match_mode == MatchMode::Exact;
             let sort_by = entry_sort_mode(obj)?;
             let target_kind = obj
                 .get("target_kind")
@@ -540,58 +659,82 @@ fn execute(args: Value) -> Result<Value, String> {
             } else {
                 normalize_target_kind(&target_kind)
             };
+            let mut selector = DiscoverySelector {
+                patterns: pattern_norms.clone(),
+                globs: globs.clone(),
+                extensions: pattern_norms
+                    .iter()
+                    .filter_map(|pattern| pattern_extension(pattern))
+                    .collect(),
+                target_kind: target_kind_selector(target_kind),
+                match_mode,
+                case_mode,
+            };
+            if match_mode == MatchMode::Glob {
+                selector.extensions.clear();
+            }
             let mut collect = |p: &Path| {
-                let name = p
-                    .file_name()
-                    .map(|s| normalize_locator_text(&s.to_string_lossy()))
-                    .unwrap_or_default();
-                if !pattern_norms.iter().any(|pattern_norm| {
-                    path_name_matches_pattern(p, &name, pattern_norm, exact_name)
-                }) {
-                    return false;
-                }
-                let kind = path_kind(p);
-                if target_kind == "any" || target_kind == kind {
-                    results.push(to_rel(&root, p));
-                }
+                results.push(to_rel(&root, p));
                 results.len() > MAX_RESULT_SNAPSHOT_ITEMS
             };
-            let stats = if target_kind == "dir" {
-                walk_collect_dirs(&search_root, scan_limits, &mut collect)?
-            } else {
-                walk_collect_nodes(&search_root, scan_limits, &mut collect)?
-            };
+            let stats = walk_collect_selected(&search_root, scan_limits, selector, &mut collect)?;
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
             results.truncate(MAX_RESULT_SNAPSHOT_ITEMS);
             sort_entry_results(&mut results, &root, sort_by);
             results.dedup();
             let page = paginate(
                 &results,
-                cursor,
+                &cursor,
                 max_results,
                 stats.limit_reached || result_limit_reached,
-            );
-            Ok(json!({
-                "schema_version": 1,
+                &query_sha256,
+            )?;
+            let completeness =
+                effective_completeness(&stats, result_limit_reached, page.stale_snapshot);
+            let continuation = continuation_from_page(&page.metadata, completeness);
+            let primary_items = results.iter().cloned().map(Value::String).collect();
+            let response = json!({
+                "schema_version": 2,
                 "source_skill": SKILL_NAME,
                 "status": "ok",
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "patterns": pattern_norms,
+                "globs": globs,
                 "exact": exact_name,
+                "match_mode": match_mode_label,
+                "case_mode": case_mode_label,
                 "sort_by": sort_by,
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
+                "known_match_count": page.total_count,
+                "total_count_is_complete": completeness.is_complete(),
+                "completeness": completeness.as_str(),
+                "has_more": page.has_more,
                 "result_limit": max_results,
                 "truncated": page.has_more,
+                "effective_policy": effective_policy(scan_limits),
+                "scan": scan_report(&stats, completeness),
+                "continuation": continuation,
                 "snapshot_sha256": page.snapshot_sha256,
                 "page": page.metadata,
                 "results": page.items,
-            }))
+            });
+            Ok(finalize_with_cache(
+                response,
+                snapshot_cache.as_ref(),
+                "find_name",
+                &query_sha256,
+                &search_root,
+                &root,
+                primary_items,
+            ))
         }
         "find_ext" => {
+            let (match_mode, match_mode_label) = match_mode_from_args(obj)?;
+            let (case_mode, case_mode_label) = case_mode_from_args(obj)?;
             let sort_by = entry_sort_mode(obj)?;
             let exts = extension_values_from_args(
                 obj,
@@ -607,23 +750,18 @@ fn execute(args: Value) -> Result<Value, String> {
             if exts.is_empty() {
                 return Err("ext is required".to_string());
             }
-            let pattern_norms = optional_name_patterns_from_args(obj);
-            let stats = walk_collect(&search_root, scan_limits, &mut |p| {
-                let got = p
-                    .extension()
-                    .map(|s| s.to_string_lossy().to_ascii_lowercase())
-                    .unwrap_or_default();
-                let name = p
-                    .file_name()
-                    .map(|s| normalize_locator_text(&s.to_string_lossy()))
-                    .unwrap_or_default();
-                let name_matches = pattern_norms.is_empty()
-                    || pattern_norms
-                        .iter()
-                        .any(|pattern_norm| name_matches_pattern(&name, pattern_norm));
-                if exts.iter().any(|ext| ext == &got) && name_matches {
-                    results.push(to_rel(&root, p));
-                }
+            let pattern_norms = typed_name_patterns_from_args(obj, match_mode, false)?;
+            let globs = glob_values_from_args(obj);
+            let selector = DiscoverySelector {
+                patterns: pattern_norms.clone(),
+                globs: globs.clone(),
+                extensions: exts.clone(),
+                target_kind: TargetKind::File,
+                match_mode,
+                case_mode,
+            };
+            let stats = walk_collect_selected(&search_root, scan_limits, selector, &mut |p| {
+                results.push(to_rel(&root, p));
                 results.len() > MAX_RESULT_SNAPSHOT_ITEMS
             })?;
             let result_limit_reached = results.len() > MAX_RESULT_SNAPSHOT_ITEMS;
@@ -632,13 +770,18 @@ fn execute(args: Value) -> Result<Value, String> {
             results.dedup();
             let page = paginate(
                 &results,
-                cursor,
+                &cursor,
                 max_results,
                 stats.limit_reached || result_limit_reached,
-            );
+                &query_sha256,
+            )?;
+            let completeness =
+                effective_completeness(&stats, result_limit_reached, page.stale_snapshot);
+            let continuation = continuation_from_page(&page.metadata, completeness);
             let ext = exts.first().cloned().unwrap_or_default();
-            Ok(json!({
-                "schema_version": 1,
+            let primary_items = results.iter().cloned().map(Value::String).collect();
+            let response = json!({
+                "schema_version": 2,
                 "source_skill": SKILL_NAME,
                 "status": "ok",
                 "action": "find_ext",
@@ -647,16 +790,35 @@ fn execute(args: Value) -> Result<Value, String> {
                 "ext": ext,
                 "exts": exts,
                 "patterns": pattern_norms,
+                "globs": globs,
+                "match_mode": match_mode_label,
+                "case_mode": case_mode_label,
                 "sort_by": sort_by,
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
+                "known_match_count": page.total_count,
+                "total_count_is_complete": completeness.is_complete(),
+                "completeness": completeness.as_str(),
+                "has_more": page.has_more,
                 "result_limit": max_results,
                 "truncated": page.has_more,
+                "effective_policy": effective_policy(scan_limits),
+                "scan": scan_report(&stats, completeness),
+                "continuation": continuation,
                 "snapshot_sha256": page.snapshot_sha256,
                 "page": page.metadata,
                 "results": page.items,
-            }))
+            });
+            Ok(finalize_with_cache(
+                response,
+                snapshot_cache.as_ref(),
+                "find_ext",
+                &query_sha256,
+                &search_root,
+                &root,
+                primary_items,
+            ))
         }
         "grep_text" => {
             let query = obj
@@ -666,10 +828,24 @@ fn execute(args: Value) -> Result<Value, String> {
             if query.is_empty() {
                 return Err("query_empty".to_string());
             }
-            let case_insensitive =
-                bool_arg(obj, "case_insensitive") || bool_arg(obj, "ignore_case");
+            let (case_mode, case_mode_label) = case_mode_from_args(obj)?;
+            let case_insensitive = smart_case_is_insensitive(case_mode, query);
+            let (pattern_kind, pattern_kind_label) = pattern_kind_from_args(obj)?;
+            if pattern_kind == PatternKind::Regex && query.len() > MAX_REGEX_PATTERN_BYTES {
+                return Err("regex_pattern_too_large".to_string());
+            }
+            let output_mode = output_mode_from_args(obj)?;
             let multiline = bool_arg(obj, "multiline");
-            let pattern_norms = optional_file_patterns_from_args(obj);
+            let (file_match_mode, _) = match obj.get("file_match_mode") {
+                Some(value) => {
+                    let mut file_args = obj.clone();
+                    file_args.insert("match_mode".to_string(), value.clone());
+                    match_mode_from_args(&file_args)?
+                }
+                None => (MatchMode::Contains, "contains"),
+            };
+            let pattern_norms = typed_file_patterns_from_args(obj, file_match_mode);
+            let globs = glob_values_from_args(obj);
             let context_before = obj
                 .get("context_before")
                 .and_then(Value::as_u64)
@@ -695,161 +871,204 @@ fn execute(args: Value) -> Result<Value, String> {
                 .and_then(Value::as_u64)
                 .unwrap_or(DEFAULT_GREP_MAX_SCAN_BYTES as u64)
                 .clamp(1, MAX_GREP_SCAN_BYTES as u64) as usize;
-            let mut matches = Vec::new();
-            let mut scanned_bytes = 0usize;
-            let mut skipped_large_files = 0usize;
-            let mut skipped_non_utf8_files = 0usize;
-            let mut scan_byte_limit_reached = false;
-            let stats = walk_collect(&search_root, scan_limits, &mut |p| {
-                if !pattern_norms.is_empty() {
-                    let name = p
-                        .file_name()
-                        .map(|s| normalize_locator_text(&s.to_string_lossy()))
-                        .unwrap_or_default();
-                    if !pattern_norms.iter().any(|pattern_norm| {
-                        path_name_matches_pattern(p, &name, pattern_norm, false)
-                    }) {
-                        return false;
-                    }
-                }
-                let file_bytes = std::fs::metadata(p)
-                    .map(|metadata| metadata.len().min(usize::MAX as u64) as usize)
-                    .unwrap_or(0);
-                if file_bytes > max_file_bytes {
-                    skipped_large_files = skipped_large_files.saturating_add(1);
-                    return false;
-                }
-                if scanned_bytes.saturating_add(file_bytes) > max_scan_bytes {
-                    scan_byte_limit_reached = true;
-                    return true;
-                }
-                if let Ok(bytes) = std::fs::read(p) {
-                    scanned_bytes = scanned_bytes.saturating_add(bytes.len());
-                    let Ok(text) = String::from_utf8(bytes) else {
-                        skipped_non_utf8_files = skipped_non_utf8_files.saturating_add(1);
-                        return false;
-                    };
-                    let rel = to_rel(&root, p);
-                    let options = GrepOptions {
-                        query,
-                        case_insensitive,
-                        multiline,
-                        context_before,
-                        context_after,
-                        max_line_chars,
-                    };
-                    let file_matches = match find_matches(&text, options) {
-                        Ok(file_matches) => file_matches,
-                        Err(_) => return false,
-                    };
-                    if !file_matches.is_empty() {
-                        results.push(rel.clone());
-                    }
-                    for matched in file_matches {
-                        let mut value = serde_json::to_value(matched).unwrap_or_default();
-                        if let Some(object) = value.as_object_mut() {
-                            object.insert("path".to_string(), Value::String(rel.clone()));
-                        }
-                        matches.push(value);
-                        if matches.len() > MAX_GREP_SNAPSHOT_MATCHES {
-                            return true;
-                        }
-                    }
-                }
-                matches.len() > MAX_GREP_SNAPSHOT_MATCHES
-            })?;
-            let match_limit_reached = matches.len() > MAX_GREP_SNAPSHOT_MATCHES;
-            matches.truncate(MAX_GREP_SNAPSHOT_MATCHES);
-            matches.sort_by(|left, right| {
-                let left_path = left.get("path").and_then(Value::as_str).unwrap_or_default();
-                let right_path = right
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                left_path.cmp(right_path).then_with(|| {
-                    left.get("line")
-                        .and_then(Value::as_u64)
-                        .cmp(&right.get("line").and_then(Value::as_u64))
-                })
-            });
-            results.sort();
-            results.dedup();
-            let content_scan_truncated = stats.limit_reached
-                || match_limit_reached
-                || scan_byte_limit_reached
-                || skipped_large_files > 0;
-            let (name_patterns, name_results, name_scan_truncated) = if results.is_empty() {
-                grep_text_name_fallback_matches(
-                    &root,
-                    &search_root,
-                    query,
-                    scan_limits,
-                    MAX_RESULT_SNAPSHOT_ITEMS,
-                )?
-            } else {
-                (Vec::new(), Vec::new(), false)
+            let grep_options = GrepOptions {
+                query,
+                pattern_kind,
+                case_insensitive,
+                multiline,
+                context_before,
+                context_after,
+                max_line_chars,
             };
-            let match_page = paginate(&matches, cursor, max_results, content_scan_truncated);
-            let name_page = paginate(&name_results, cursor, max_results, name_scan_truncated);
-            let page_result_paths = match_page
-                .items
-                .iter()
-                .filter_map(|item| item.get("path").and_then(Value::as_str))
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            let mut page_result_paths = page_result_paths;
+            find_matches("pattern preflight", grep_options)?;
+            let selector = DiscoverySelector {
+                patterns: pattern_norms.clone(),
+                globs: globs.clone(),
+                extensions: Vec::new(),
+                target_kind: TargetKind::File,
+                match_mode: file_match_mode,
+                case_mode,
+            };
+            let mut candidate_paths = Vec::new();
+            let stats = walk_collect_selected(&search_root, scan_limits, selector, &mut |path| {
+                candidate_paths.push(path.to_path_buf());
+                false
+            })?;
+            let outcome = search_content(
+                &candidate_paths,
+                ContentSearchOptions {
+                    workspace_root: &root,
+                    search_root: &search_root,
+                    query,
+                    pattern_kind,
+                    case_mode,
+                    case_insensitive,
+                    multiline,
+                    context_before,
+                    context_after,
+                    max_line_chars,
+                    max_file_bytes,
+                    max_scan_bytes,
+                    max_matches: MAX_GREP_SNAPSHOT_MATCHES,
+                    deadline: scan_limits.deadline,
+                },
+            )?;
+            let matches = outcome.matches;
+            let results = outcome.results;
+            let content_scan_truncated = stats.limit_reached
+                || outcome.match_limit_reached
+                || outcome.scan_byte_limit_reached
+                || outcome.skipped_large_files > 0;
+            let match_page = paginate(
+                &matches,
+                &cursor,
+                max_results,
+                content_scan_truncated,
+                &query_sha256,
+            )?;
+            let path_page = paginate(
+                &results,
+                &cursor,
+                max_results,
+                content_scan_truncated,
+                &query_sha256,
+            )?;
+            let mut page_result_paths = if output_mode == "content" {
+                match_page
+                    .items
+                    .iter()
+                    .filter_map(|item| item.get("path").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            } else if output_mode == "paths" {
+                path_page.items.clone()
+            } else {
+                Vec::new()
+            };
             page_result_paths.sort();
             page_result_paths.dedup();
-            let use_name_page = matches.is_empty();
-            let page_metadata = if use_name_page {
-                name_page.metadata
+            let mut page_metadata = if output_mode == "paths" {
+                path_page.metadata.clone()
             } else {
-                match_page.metadata
+                match_page.metadata.clone()
             };
-            let truncated = if use_name_page {
-                name_page.has_more
+            if output_mode == "count" {
+                if let Some(metadata) = page_metadata.as_object_mut() {
+                    metadata.insert("returned_count".to_string(), json!(0));
+                    metadata.insert("has_more".to_string(), Value::Bool(false));
+                    metadata.insert("next_cursor".to_string(), Value::Null);
+                    metadata.insert("previous_cursor".to_string(), Value::Null);
+                    metadata.insert("legacy_next_offset".to_string(), Value::Null);
+                }
+            }
+            let truncated = if output_mode == "paths" {
+                path_page.has_more
+            } else if output_mode == "count" {
+                content_scan_truncated
             } else {
                 match_page.has_more
             };
-            let snapshot_sha256 = if use_name_page {
-                name_page.snapshot_sha256
+            let snapshot_sha256 = if output_mode == "paths" {
+                path_page.snapshot_sha256.clone()
             } else {
-                match_page.snapshot_sha256
+                match_page.snapshot_sha256.clone()
             };
-            Ok(json!({
-                "schema_version": 1,
+            let (known_match_count, selected_has_more, selected_stale_snapshot) =
+                if output_mode == "paths" {
+                    (
+                        path_page.total_count,
+                        path_page.has_more,
+                        path_page.stale_snapshot,
+                    )
+                } else if output_mode == "count" {
+                    (match_page.total_count, false, match_page.stale_snapshot)
+                } else {
+                    (
+                        match_page.total_count,
+                        match_page.has_more,
+                        match_page.stale_snapshot,
+                    )
+                };
+            let completeness =
+                effective_completeness(&stats, content_scan_truncated, selected_stale_snapshot);
+            let continuation = if output_mode == "count" && completeness.is_complete() {
+                Value::Null
+            } else {
+                continuation_from_page(&page_metadata, completeness)
+            };
+            let observation_bytes = serde_json::to_vec(&page_result_paths)
+                .map(|value| value.len())
+                .unwrap_or(0)
+                .saturating_add(if output_mode == "content" {
+                    serde_json::to_vec(&match_page.items)
+                        .map(|value| value.len())
+                        .unwrap_or(0)
+                } else {
+                    0
+                });
+            let primary_items = if output_mode == "paths" {
+                results.iter().cloned().map(Value::String).collect()
+            } else {
+                matches.clone()
+            };
+            let response = json!({
+                "schema_version": 2,
                 "source_skill": SKILL_NAME,
                 "status": "ok",
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
                 "workspace_root": root.display().to_string(),
                 "query": query,
+                "pattern_kind": pattern_kind_label,
+                "output_mode": output_mode,
+                "case_mode": case_mode_label,
                 "case_insensitive": case_insensitive,
                 "multiline": multiline,
                 "context_before": context_before,
                 "context_after": context_after,
                 "patterns": pattern_norms,
-                "count": page_result_paths.len(),
+                "globs": globs,
+                "count": if output_mode == "count" { matches.len() } else { page_result_paths.len() },
                 "total_file_count": results.len(),
                 "match_count": match_page.returned_count,
                 "total_match_count": match_page.total_count,
+                "known_match_count": known_match_count,
+                "total_count_is_complete": completeness.is_complete(),
+                "completeness": completeness.as_str(),
+                "has_more": selected_has_more,
                 "results": page_result_paths,
-                "matches": match_page.items,
-                "name_patterns": name_patterns,
-                "name_count": name_page.returned_count,
-                "total_name_count": name_page.total_count,
-                "name_results": name_page.items,
-                "scanned_bytes": scanned_bytes,
+                "matches": if output_mode == "content" { match_page.items } else { Vec::<Value>::new() },
+                "name_fallback_used": false,
+                "scanned_bytes": outcome.scanned_bytes,
                 "max_file_bytes": max_file_bytes,
                 "max_scan_bytes": max_scan_bytes,
-                "scan_byte_limit_reached": scan_byte_limit_reached,
-                "skipped_large_files": skipped_large_files,
-                "skipped_non_utf8_files": skipped_non_utf8_files,
+                "scan_byte_limit_reached": outcome.scan_byte_limit_reached,
+                "skipped_large_files": outcome.skipped_large_files,
+                "skipped_non_utf8_files": outcome.skipped_non_utf8_files,
+                "skipped_binary_files": outcome.skipped_binary_files,
+                "skipped_encoding_counts_complete": outcome.skipped_encoding_counts_complete,
+                "content_backend": outcome.backend,
+                "content_backend_version": outcome.backend_version,
+                "content_backend_fallback_reason": outcome.backend_fallback_reason,
+                "content_backend_elapsed_ms": outcome.backend_elapsed_ms,
                 "result_limit": max_results,
                 "truncated": truncated,
+                "effective_policy": effective_policy(scan_limits),
+                "scan": scan_report(&stats, completeness),
+                "continuation": continuation,
                 "snapshot_sha256": snapshot_sha256,
                 "page": page_metadata,
-            }))
+                "observation_bytes": observation_bytes,
+            });
+            Ok(finalize_with_cache(
+                response,
+                snapshot_cache.as_ref(),
+                "grep_text",
+                &query_sha256,
+                &search_root,
+                &root,
+                primary_items,
+            ))
         }
         "find_images" | "images" | "image_search" => {
             let max_dirs = obj
@@ -878,10 +1097,17 @@ fn execute(args: Value) -> Result<Value, String> {
             )?;
             let page = paginate(
                 &snapshot.entries,
-                cursor,
+                &cursor,
                 max_results,
                 snapshot.scan_truncated,
+                &query_sha256,
+            )?;
+            let completeness = effective_completeness(
+                &snapshot.stats,
+                snapshot.scan_truncated,
+                page.stale_snapshot,
             );
+            let continuation = continuation_from_page(&page.metadata, completeness);
             let results = page
                 .items
                 .iter()
@@ -889,8 +1115,13 @@ fn execute(args: Value) -> Result<Value, String> {
                 .collect::<Vec<_>>();
             let (directories_by_count, directories_truncated) =
                 directory_counts(&snapshot.entries, max_dirs);
-            return Ok(json!({
-                "schema_version": 1,
+            let primary_items = snapshot
+                .entries
+                .iter()
+                .map(|entry| serde_json::to_value(entry).unwrap_or(Value::Null))
+                .collect();
+            let response = json!({
+                "schema_version": 2,
                 "source_skill": SKILL_NAME,
                 "status": "ok",
                 "action": "find_images",
@@ -900,14 +1131,30 @@ fn execute(args: Value) -> Result<Value, String> {
                 "count": page.returned_count,
                 "returned_count": page.returned_count,
                 "total_count": page.total_count,
+                "known_match_count": page.total_count,
+                "total_count_is_complete": completeness.is_complete(),
+                "completeness": completeness.as_str(),
+                "has_more": page.has_more,
                 "results": results,
                 "images": page.items,
                 "directories_by_count": directories_by_count,
                 "directories_truncated": directories_truncated,
                 "truncated": page.has_more,
+                "effective_policy": effective_policy(scan_limits),
+                "scan": scan_report(&snapshot.stats, completeness),
+                "continuation": continuation,
                 "snapshot_sha256": page.snapshot_sha256,
                 "page": page.metadata,
-            }));
+            });
+            return Ok(finalize_with_cache(
+                response,
+                snapshot_cache.as_ref(),
+                "find_images",
+                &query_sha256,
+                &search_root,
+                &root,
+                primary_items,
+            ));
         }
         _ => {
             return Err(
@@ -915,6 +1162,51 @@ fn execute(args: Value) -> Result<Value, String> {
             )
         }
     }
+}
+
+fn finalize_with_cache(
+    mut response: Value,
+    cache: Option<&SnapshotCache>,
+    action: &str,
+    query_sha256: &str,
+    search_root: &Path,
+    workspace_root: &Path,
+    primary_items: Vec<Value>,
+) -> Value {
+    let snapshot_sha256 = response
+        .get("snapshot_sha256")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let cache_status = cache
+        .map(|cache| {
+            cache
+                .store(
+                    action,
+                    query_sha256,
+                    snapshot_sha256,
+                    search_root,
+                    workspace_root,
+                    &response,
+                    &primary_items,
+                )
+                .unwrap_or("store_failed")
+        })
+        .unwrap_or("disabled");
+    if let Some(object) = response.as_object_mut() {
+        object.insert("cache_reused".to_string(), Value::Bool(false));
+        object.insert(
+            "cache_status".to_string(),
+            Value::String(cache_status.to_string()),
+        );
+        if let Some(scan) = object.get_mut("scan").and_then(Value::as_object_mut) {
+            scan.insert("cache_reused".to_string(), Value::Bool(false));
+            scan.insert(
+                "cache_status".to_string(),
+                Value::String(cache_status.to_string()),
+            );
+        }
+    }
+    response
 }
 
 #[cfg(test)]

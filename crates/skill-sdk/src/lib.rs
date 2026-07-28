@@ -38,7 +38,10 @@ pub use receipt::{
     ProtocolSmokeReceipt, INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 pub use runtime::{SkillLaunchSpec, SkillRuntimeResolver, SKILL_LAUNCH_SCHEMA_VERSION};
-pub use sandbox::{prepare_sandboxed_command, PreparedSandboxCommand, SandboxNetwork};
+pub use sandbox::{
+    prepare_sandboxed_command, PreparedSandboxCommand, SandboxNetwork, PARENT_SANDBOX_BACKEND_ENV,
+    SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+};
 pub use secret_scan::redact_diagnostics;
 pub use templates::{scaffold_skill, ImplementationLanguage, ScaffoldOutcome, ScaffoldRequest};
 

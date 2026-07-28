@@ -113,8 +113,6 @@ pub struct TelegramConfig {
     pub quick_result_wait_seconds: u64,
     #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
     pub task_delivery_timeout_seconds: u64,
-    #[serde(default = "default_telegram_auto_vision_on_image_only")]
-    pub auto_vision_on_image_only: bool,
     #[serde(default = "default_telegram_image_inbox_dir")]
     pub image_inbox_dir: String,
     #[serde(default = "default_telegram_video_inbox_dir")]
@@ -125,16 +123,12 @@ pub struct TelegramConfig {
     pub audio_inbox_dir: String,
     #[serde(default = "default_telegram_voice_reply_mode")]
     pub voice_reply_mode: String,
-    #[serde(default = "default_telegram_voice_mode_nl_intent_enabled")]
-    pub voice_mode_nl_intent_enabled: bool,
     #[serde(default)]
     pub voice_reply_mode_by_chat: HashMap<String, String>,
     #[serde(default = "default_telegram_max_audio_input_bytes")]
     pub max_audio_input_bytes: usize,
     #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
     pub ephemeral_image_saved_seconds: u64,
-    #[serde(default)]
-    pub sendfile: SendfileConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,17 +237,14 @@ impl Default for TelegramConfig {
             i18n_path: default_telegram_i18n_path(),
             quick_result_wait_seconds: default_telegram_quick_result_wait_seconds(),
             task_delivery_timeout_seconds: default_telegram_task_delivery_timeout_seconds(),
-            auto_vision_on_image_only: default_telegram_auto_vision_on_image_only(),
             image_inbox_dir: default_telegram_image_inbox_dir(),
             video_inbox_dir: default_telegram_video_inbox_dir(),
             file_inbox_dir: default_telegram_file_inbox_dir(),
             audio_inbox_dir: default_telegram_audio_inbox_dir(),
             voice_reply_mode: default_telegram_voice_reply_mode(),
-            voice_mode_nl_intent_enabled: default_telegram_voice_mode_nl_intent_enabled(),
             voice_reply_mode_by_chat: HashMap::new(),
             max_audio_input_bytes: default_telegram_max_audio_input_bytes(),
             ephemeral_image_saved_seconds: default_telegram_ephemeral_image_saved_seconds(),
-            sendfile: SendfileConfig::default(),
         }
     }
 }
@@ -843,26 +834,6 @@ fn default_mcp_reconnect_base_seconds() -> u64 {
 
 fn default_mcp_reconnect_max_seconds() -> u64 {
     60
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SendfileConfig {
-    #[serde(default = "default_sendfile_admin_only")]
-    pub admin_only: bool,
-    #[serde(default = "default_sendfile_full_access")]
-    pub full_access: bool,
-    #[serde(default = "default_sendfile_allowed_dirs")]
-    pub allowed_dirs: Vec<String>,
-}
-
-impl Default for SendfileConfig {
-    fn default() -> Self {
-        Self {
-            admin_only: default_sendfile_admin_only(),
-            full_access: default_sendfile_full_access(),
-            allowed_dirs: default_sendfile_allowed_dirs(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1617,10 +1588,6 @@ pub struct RoutingConfig {
     pub debug_log_ask_state: bool,
     #[serde(default = "default_routing_default_locator_search_dir")]
     pub default_locator_search_dir: String,
-    #[serde(default = "default_routing_locator_scan_max_depth")]
-    pub locator_scan_max_depth: usize,
-    #[serde(default = "default_routing_locator_scan_max_files")]
-    pub locator_scan_max_files: usize,
 }
 
 fn default_routing_debug_log_ask_state() -> bool {
@@ -1633,8 +1600,6 @@ impl Default for RoutingConfig {
             debug_log_prompt: false,
             debug_log_ask_state: default_routing_debug_log_ask_state(),
             default_locator_search_dir: default_routing_default_locator_search_dir(),
-            locator_scan_max_depth: default_routing_locator_scan_max_depth(),
-            locator_scan_max_files: default_routing_locator_scan_max_files(),
         }
     }
 }

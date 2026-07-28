@@ -76,6 +76,51 @@ fn local_clawd_base_url_from_internal_listen(internal_listen: Option<&str>) -> S
         .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string())
 }
 
+fn inherited_sandbox_backend(backend: &'static str) -> Option<&'static str> {
+    (backend != "direct").then_some(backend)
+}
+
+fn runner_additional_writable_paths(
+    secret_store_directory: Option<&std::path::Path>,
+    skill_storage_directory: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    secret_store_directory
+        .into_iter()
+        .chain(skill_storage_directory)
+        .map(std::path::Path::to_path_buf)
+        .collect()
+}
+
+fn sandbox_target_for_source(
+    source: Option<&std::path::Path>,
+    sources: &[std::path::PathBuf],
+    targets: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
+    let source = source?;
+    sources
+        .iter()
+        .position(|candidate| candidate == source)
+        .and_then(|index| targets.get(index))
+        .cloned()
+}
+
+fn map_storage_descriptor_to_sandbox(
+    mut descriptor: Option<crate::skill_storage::SkillStorageDescriptor>,
+    sandbox_directory: Option<&std::path::Path>,
+) -> Result<Option<crate::skill_storage::SkillStorageDescriptor>, String> {
+    let Some(storage_descriptor) = descriptor.as_mut() else {
+        return Ok(None);
+    };
+    let Some(sandbox_directory) = sandbox_directory else {
+        return Err("skill storage sandbox target unavailable".to_string());
+    };
+    let file_name = std::path::Path::new(&storage_descriptor.database_path)
+        .file_name()
+        .ok_or_else(|| "skill storage database path has no file name".to_string())?;
+    storage_descriptor.database_path = sandbox_directory.join(file_name).display().to_string();
+    Ok(descriptor)
+}
+
 pub(crate) async fn run_skill_with_runner(
     state: &AppState,
     task: &ClaimedTask,
@@ -131,27 +176,10 @@ pub(crate) async fn run_skill_with_runner_once(
         .map(Value::String)
         .unwrap_or(Value::Null);
     let storage_descriptor = storage_descriptor_for_skill(state, canonical_skill_name)?;
-    let skill_context = build_runner_skill_context(
-        state,
-        task,
-        source,
-        credential_context,
-        storage_descriptor,
-        execution_context,
-    );
-    let req_line = serde_json::json!({
-        "request_id": task.task_id,
-        "user_id": task.user_id,
-        "chat_id": task.chat_id,
-        "user_key": user_key_for_skill,
-        "external_user_id": task.external_user_id,
-        "external_chat_id": crate::task_external_chat_id(task),
-        "skill_name": canonical_skill_name,
-        "args": args,
-        "context": skill_context
-    })
-    .to_string();
-
+    let storage_writable_directory = storage_descriptor
+        .as_ref()
+        .and_then(|descriptor| std::path::Path::new(&descriptor.database_path).parent())
+        .map(std::path::Path::to_path_buf);
     if !state.skill_rt.skill_runner_path.exists() {
         return Err(format!(
             "skill-runner binary not found: path={} (workspace_root={})",
@@ -316,10 +344,10 @@ pub(crate) async fn run_skill_with_runner_once(
             }
         }
     }
-    let additional_writable_paths = secret_token_scope
-        .as_ref()
-        .map(|scope| vec![scope.store_dir().to_path_buf()])
-        .unwrap_or_default();
+    let additional_writable_paths = runner_additional_writable_paths(
+        secret_token_scope.as_ref().map(|scope| scope.store_dir()),
+        storage_writable_directory.as_deref(),
+    );
     let network = if caps.iter().any(|cap| {
         matches!(
             cap,
@@ -358,7 +386,41 @@ pub(crate) async fn run_skill_with_runner_once(
         network_policy = ?network,
         "skill_runner_process_sandbox_prepared"
     );
-    let sandbox_token_store_dir = prepared.additional_writable_targets.first().cloned();
+    let sandbox_token_store_dir = sandbox_target_for_source(
+        secret_token_scope.as_ref().map(|scope| scope.store_dir()),
+        &additional_writable_paths,
+        &prepared.additional_writable_targets,
+    );
+    let sandbox_storage_directory = sandbox_target_for_source(
+        storage_writable_directory.as_deref(),
+        &additional_writable_paths,
+        &prepared.additional_writable_targets,
+    );
+    let storage_descriptor = map_storage_descriptor_to_sandbox(
+        storage_descriptor,
+        sandbox_storage_directory.as_deref(),
+    )?;
+    let skill_context = build_runner_skill_context(
+        state,
+        task,
+        source,
+        credential_context,
+        storage_descriptor,
+        execution_context,
+    );
+    let req_line = serde_json::json!({
+        "request_id": task.task_id,
+        "user_id": task.user_id,
+        "chat_id": task.chat_id,
+        "user_key": user_key_for_skill,
+        "external_user_id": task.external_user_id,
+        "external_chat_id": crate::task_external_chat_id(task),
+        "skill_name": canonical_skill_name,
+        "args": args,
+        "context": skill_context
+    })
+    .to_string();
+    let inherited_sandbox_backend = inherited_sandbox_backend(prepared.backend);
     let internal_listen = std::env::var("RUSTCLAW_INTERNAL_LISTEN").ok();
     let local_clawd_base_url =
         local_clawd_base_url_from_internal_listen(internal_listen.as_deref());
@@ -387,6 +449,14 @@ pub(crate) async fn run_skill_with_runner_once(
         cmd.env(
             "RUSTCLAW_SECRET_TOKEN_DIR",
             token_store_dir.display().to_string(),
+        );
+    }
+    if let Some(backend) = inherited_sandbox_backend {
+        cmd.env(rustclaw_skill_sdk::PARENT_SANDBOX_BACKEND_ENV, backend);
+    } else if let Some(storage_directory) = sandbox_storage_directory {
+        cmd.env(
+            rustclaw_skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+            storage_directory,
         );
     }
     if let Some(token) = &internal_llm_token {

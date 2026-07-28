@@ -1,11 +1,19 @@
-use regex::RegexBuilder;
-use serde::Serialize;
+use regex::{Regex, RegexBuilder};
+use serde::{Deserialize, Serialize};
 
 pub(super) const MAX_CONTEXT_LINES: usize = 20;
+pub(super) const MAX_REGEX_PATTERN_BYTES: usize = 32 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PatternKind {
+    Literal,
+    Regex,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GrepOptions<'a> {
     pub(super) query: &'a str,
+    pub(super) pattern_kind: PatternKind,
     pub(super) case_insensitive: bool,
     pub(super) multiline: bool,
     pub(super) context_before: usize,
@@ -13,19 +21,22 @@ pub(super) struct GrepOptions<'a> {
     pub(super) max_line_chars: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ContextLine {
     line: usize,
     text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct GrepMatch {
     pub(super) line: usize,
     pub(super) end_line: usize,
     pub(super) start_byte: usize,
     pub(super) end_byte: usize,
     pub(super) text: String,
+    pub(super) matched_text: String,
+    pub(super) line_start_byte: usize,
+    pub(super) line_end_byte: usize,
     pub(super) context_before: Vec<ContextLine>,
     pub(super) context_after: Vec<ContextLine>,
 }
@@ -42,27 +53,57 @@ pub(super) fn find_matches(text: &str, options: GrepOptions<'_>) -> Result<Vec<G
     if options.query.is_empty() {
         return Err("query_empty".to_string());
     }
+    if options.pattern_kind == PatternKind::Regex && options.query.len() > MAX_REGEX_PATTERN_BYTES {
+        return Err("regex_pattern_too_large".to_string());
+    }
     let lines = line_views(text);
+    let matcher = build_matcher(options)?;
     if options.multiline {
-        find_multiline_matches(text, &lines, options)
+        Ok(find_multiline_matches(text, &lines, options, &matcher))
     } else {
-        Ok(find_line_matches(&lines, options))
+        Ok(find_line_matches(&lines, options, &matcher))
     }
 }
 
-fn find_line_matches(lines: &[LineView<'_>], options: GrepOptions<'_>) -> Vec<GrepMatch> {
+fn build_matcher(options: GrepOptions<'_>) -> Result<Regex, String> {
+    let pattern = match options.pattern_kind {
+        PatternKind::Literal => regex::escape(options.query),
+        PatternKind::Regex => options.query.to_string(),
+    };
+    RegexBuilder::new(&pattern)
+        .case_insensitive(options.case_insensitive)
+        .multi_line(options.multiline)
+        .dot_matches_new_line(options.multiline)
+        .size_limit(4 * 1024 * 1024)
+        .dfa_size_limit(8 * 1024 * 1024)
+        .build()
+        .map_err(|_| "regex_pattern_invalid".to_string())
+}
+
+fn find_line_matches(
+    lines: &[LineView<'_>],
+    options: GrepOptions<'_>,
+    matcher: &Regex,
+) -> Vec<GrepMatch> {
     lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| line_matches_query(line.text, options))
-        .map(|(index, line)| GrepMatch {
-            line: line.number,
-            end_line: line.number,
-            start_byte: line.start_byte,
-            end_byte: line.end_byte,
-            text: truncate_chars(line.text.trim(), options.max_line_chars),
-            context_before: context_before(lines, index, options),
-            context_after: context_after(lines, index, options),
+        .flat_map(|(index, line)| {
+            matcher
+                .find_iter(line.text)
+                .filter(|matched| matched.start() != matched.end())
+                .map(move |matched| GrepMatch {
+                    line: line.number,
+                    end_line: line.number,
+                    start_byte: line.start_byte.saturating_add(matched.start()),
+                    end_byte: line.start_byte.saturating_add(matched.end()),
+                    text: truncate_chars(line.text.trim(), options.max_line_chars),
+                    matched_text: truncate_chars(matched.as_str(), options.max_line_chars),
+                    line_start_byte: line.start_byte,
+                    line_end_byte: line.end_byte,
+                    context_before: context_before(lines, index, options),
+                    context_after: context_after(lines, index, options),
+                })
         })
         .collect()
 }
@@ -71,16 +112,9 @@ fn find_multiline_matches(
     text: &str,
     lines: &[LineView<'_>],
     options: GrepOptions<'_>,
-) -> Result<Vec<GrepMatch>, String> {
-    let pattern = multiline_pattern(options.query);
-    let matcher = RegexBuilder::new(&pattern)
-        .case_insensitive(options.case_insensitive)
-        .multi_line(true)
-        .dot_matches_new_line(true)
-        .build()
-        .map_err(|_| "multiline_query_invalid".to_string())?;
-
-    Ok(matcher
+    matcher: &Regex,
+) -> Vec<GrepMatch> {
+    matcher
         .find_iter(text)
         .filter(|matched| matched.start() != matched.end())
         .map(|matched| {
@@ -93,54 +127,17 @@ fn find_multiline_matches(
                 start_byte: matched.start(),
                 end_byte: matched.end(),
                 text: truncate_chars(matched.as_str(), options.max_line_chars),
+                matched_text: truncate_chars(matched.as_str(), options.max_line_chars),
+                line_start_byte: lines
+                    .get(start_index)
+                    .map(|line| line.start_byte)
+                    .unwrap_or(0),
+                line_end_byte: lines.get(end_index).map(|line| line.end_byte).unwrap_or(0),
                 context_before: context_before(lines, start_index, options),
                 context_after: context_after(lines, end_index, options),
             }
         })
-        .collect())
-}
-
-fn multiline_pattern(query: &str) -> String {
-    if !query.contains(".*") {
-        return regex::escape(query);
-    }
-    query
-        .split(".*")
-        .map(regex::escape)
-        .collect::<Vec<_>>()
-        .join("(?s:.*?)")
-}
-
-fn line_matches_query(line: &str, options: GrepOptions<'_>) -> bool {
-    if options.case_insensitive {
-        let line_folded = line.to_lowercase();
-        let query_folded = options.query.to_lowercase();
-        return line_folded.contains(&query_folded)
-            || ordered_wildcard_query_matches(&line_folded, &query_folded);
-    }
-    line.contains(options.query) || ordered_wildcard_query_matches(line, options.query)
-}
-
-fn ordered_wildcard_query_matches(line: &str, query: &str) -> bool {
-    if !query.contains(".*") {
-        return false;
-    }
-    let parts = query
-        .split(".*")
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return false;
-    }
-    let mut rest = line;
-    for part in parts {
-        let Some(index) = rest.find(part) else {
-            return false;
-        };
-        rest = &rest[index + part.len()..];
-    }
-    true
+        .collect()
 }
 
 fn line_views(text: &str) -> Vec<LineView<'_>> {

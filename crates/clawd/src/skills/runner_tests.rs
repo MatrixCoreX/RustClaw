@@ -33,6 +33,65 @@ fn local_clawd_base_url_rejects_non_loopback_override() {
 }
 
 #[test]
+fn only_an_active_runtime_sandbox_is_inherited_by_the_skill_child() {
+    assert_eq!(inherited_sandbox_backend("bubblewrap"), Some("bubblewrap"));
+    assert_eq!(
+        inherited_sandbox_backend("macos_seatbelt"),
+        Some("macos_seatbelt")
+    );
+    assert_eq!(inherited_sandbox_backend("direct"), None);
+}
+
+#[test]
+fn declared_skill_storage_directory_is_an_explicit_sandbox_write_target() {
+    let secret_directory = std::path::Path::new("/runtime/secret-tokens");
+    let storage_directory = std::path::Path::new("/runtime/skill-data/fs_search");
+    let paths = runner_additional_writable_paths(Some(secret_directory), Some(storage_directory));
+
+    assert_eq!(
+        paths,
+        vec![
+            secret_directory.to_path_buf(),
+            storage_directory.to_path_buf()
+        ]
+    );
+    assert_eq!(
+        runner_additional_writable_paths(None, Some(storage_directory)),
+        vec![storage_directory.to_path_buf()]
+    );
+}
+
+#[test]
+fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
+    let secret_directory = std::path::PathBuf::from("/runtime/secret-tokens");
+    let storage_directory = std::path::PathBuf::from("/runtime/skill-data/fs_search");
+    let sources = vec![secret_directory, storage_directory.clone()];
+    let targets = vec![
+        std::path::PathBuf::from("/run/rustclaw-writable/0"),
+        std::path::PathBuf::from("/run/rustclaw-writable/1"),
+    ];
+    let sandbox_storage = sandbox_target_for_source(Some(&storage_directory), &sources, &targets)
+        .expect("mapped storage target");
+    let descriptor = crate::skill_storage::SkillStorageDescriptor {
+        schema_version: 1,
+        skill_name: "fs_search".to_string(),
+        storage_kind: "sqlite",
+        database_path: storage_directory.join("state.db").display().to_string(),
+        database_busy_timeout_ms: 5_000,
+    };
+
+    let mapped = map_storage_descriptor_to_sandbox(Some(descriptor), Some(&sandbox_storage))
+        .expect("map descriptor")
+        .expect("descriptor");
+
+    assert_eq!(mapped.database_path, "/run/rustclaw-writable/1/state.db");
+    assert_eq!(
+        sandbox_target_for_source(Some(&sources[0]), &sources, &targets),
+        Some(std::path::PathBuf::from("/run/rustclaw-writable/0"))
+    );
+}
+
+#[test]
 fn selected_provider_credentials_include_vendor_and_protocol_aliases() {
     assert_eq!(
         selected_provider_api_key_env_names("minimax", "openai_compat"),

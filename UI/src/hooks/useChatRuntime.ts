@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import {
   attachmentIsAudio,
   attachmentIsImage,
@@ -19,6 +20,7 @@ import {
 } from "../lib/chat-history";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
+import { extractTaskArtifacts, normalizeTaskArtifacts } from "../lib/task-artifacts";
 import {
   PcmWavRecordingError,
   shouldRetryVoiceCaptureWithDefault,
@@ -147,6 +149,7 @@ export function useChatRuntime({
   onTaskSubmitted,
   onTaskResult,
 }: UseChatRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const [chatThreadState, setChatThreadState] = useState<ChatThreadState>(() =>
     emptyChatThreadState(t),
   );
@@ -429,12 +432,15 @@ export function useChatRuntime({
     const thread = chatThreadState.threads.find((candidate) => candidate.id === threadId);
     if (!thread) return false;
     if (
-      !window.confirm(
-        t(
+      !(await showConfirm({
+        title: t("删除任务记录", "Remove task history"),
+        message: t(
           "删除这个任务及其对话记录？任务执行证据会安全保留，但不会再显示在对话列表中。",
           "Remove this task and its conversation history? Execution evidence will be retained safely but hidden from the conversation list.",
         ),
-      )
+        confirmLabel: t("删除", "Remove"),
+        tone: "danger",
+      }))
     ) {
       return false;
     }
@@ -510,12 +516,15 @@ export function useChatRuntime({
   const clearChatMessages = async (): Promise<boolean> => {
     const thread = activeChatThreadRef.current;
     if (
-      !window.confirm(
-        t(
+      !(await showConfirm({
+        title: t("清空当前对话", "Clear current conversation"),
+        message: t(
           "清空当前对话并开始一个新任务？任务执行证据会安全保留。",
           "Clear this conversation and start a new task? Execution evidence will be retained safely.",
         ),
-      )
+        confirmLabel: t("清空并新建", "Clear and start new"),
+        tone: "danger",
+      }))
     ) {
       return false;
     }
@@ -1033,6 +1042,7 @@ export function useChatRuntime({
         role: "assistant",
         text: attachedImages.length > 0 ? formatVisionResultText(finalTaskText) : finalTaskText,
         ts: Date.now(),
+        artifacts: extractTaskArtifacts(finalResult),
       };
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
@@ -1263,9 +1273,7 @@ function mergeServerConversationHistory(
       !thread.lastTaskId &&
       !(thread.teachingRuns ?? []).some((run) => run.taskId),
   );
-  const threads = [...localDrafts, ...serverThreads]
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_CHAT_THREADS);
+  const threads = [...localDrafts, ...serverThreads].slice(0, MAX_CHAT_THREADS);
   if (threads.length === 0) {
     const fallback = createChatThread(t);
     return { activeThreadId: fallback.id, threads: [fallback] };
@@ -1408,6 +1416,7 @@ function normalizeStoredChatMessage(raw: unknown): ChatMessage | null {
     role: record.role as ChatMessage["role"],
     text: record.text,
     ts: record.ts,
+    artifacts: normalizeTaskArtifacts(record.artifacts),
   };
 }
 
@@ -1417,6 +1426,7 @@ function stripAttachmentPayloadsFromMessage(message: ChatMessage): ChatMessage {
     role: message.role,
     text: message.text,
     ts: message.ts,
+    artifacts: normalizeTaskArtifacts(message.artifacts),
   };
 }
 
@@ -1469,9 +1479,7 @@ function buildChatThreadSummaries(
   threads: ChatThreadRecord[],
   t: Translate,
 ): ChatThreadSummary[] {
-  return [...threads]
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .map((thread) => {
+  return threads.map((thread) => {
       const latestRun = latestTeachingRun(thread);
       const taskResult = latestRun?.taskResult ?? thread.teachingTaskResult ?? null;
       return {

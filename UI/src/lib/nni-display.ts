@@ -14,6 +14,8 @@ export interface NniRuntimeTile {
   idleOpacity: number;
 }
 
+export type NniSimulationControlMode = "enable" | "disable" | null;
+
 function copy(lang: UiLanguage, zh: string, en: string): string {
   return lang === "zh" ? zh : en;
 }
@@ -76,6 +78,22 @@ export function nniDeviceNextStep(
   return message ?? value?.next_step ?? null;
 }
 
+export function nniSimulationControlMode(
+  status: NniDeviceStatusResponse | null | undefined,
+  statusLoading: boolean,
+): NniSimulationControlMode {
+  if (statusLoading || !status) return null;
+  if (status.simulated === true) return "disable";
+  if (
+    status.signature_chip_present === false &&
+    status.status === "signature_chip_missing" &&
+    status.simulation_available === true
+  ) {
+    return "enable";
+  }
+  return null;
+}
+
 function messageForNniKey(key: string | null | undefined, lang: UiLanguage): string | null {
   switch (key) {
     case "nni.device_status.helper_missing":
@@ -88,6 +106,14 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
       );
     case "nni.device_status.ready":
       return copy(lang, "已检测到设备签名芯片，NNI 设备签名可用。", "A device signature chip was detected, and NNI device signing is available.");
+    case "nni.device_status.simulated":
+      return copy(lang, "软件模拟芯片正在运行，可用于本机协议测试。", "The software-simulated chip is running and can be used for local protocol testing.");
+    case "nni.device_status.simulated.next_step":
+      return copy(
+        lang,
+        "这是测试身份，不代表已连接真实芯片，也不具备硬件级密钥保护。远程节点仍可能拒绝未加入白名单的模拟公钥。",
+        "This is a test identity, not a real hardware chip, and it has no hardware key protection. Remote nodes may still reject a simulated public key that is not allowlisted.",
+      );
     case "nni.device_status.signature_chip_missing":
       return copy(
         lang,
@@ -97,11 +123,23 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_status.signature_chip_missing.next_step":
       return copy(
         lang,
-        "参与网络原生智能需要购买并使用带设备签名芯片的 MatrixAI 硬件设备。",
-        "Participation in Network Native Intelligence requires a MatrixAI hardware device with a device signature chip.",
+        "正式参与网络原生智能需要带签名芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
+        "Production participation in Network Native Intelligence requires MatrixAI hardware with a signature chip. For local protocol testing only, simulation becomes available after detection is confirmed.",
       );
     case "nni.device_action.completed":
       return copy(lang, "NNI 设备签名操作完成。", "NNI device signing action completed.");
+    case "nni.device_action.simulation_enabled":
+      return copy(lang, "模拟芯片已启动。", "The simulated chip is now running.");
+    case "nni.device_action.simulation_disabled":
+      return copy(lang, "模拟芯片已停止。", "The simulated chip has stopped.");
+    case "nni.device_action.simulation_failed":
+      return copy(
+        lang,
+        "无法启动模拟芯片。请确认 RustClaw 的 data 目录可写，然后重试。",
+        "The simulated chip could not start. Confirm that RustClaw can write to its data directory, then try again.",
+      );
+    case "nni.device_action.simulation_not_needed":
+      return copy(lang, "已检测到真实签名芯片，无需启用模拟。", "A real signature chip was detected, so simulation is not needed.");
     case "nni.device_action.signature_chip_missing":
       return copy(lang, "未检测到设备签名芯片，无法完成本次 NNI 签名操作。", "No device signature chip was detected, so this NNI signing action cannot be completed.");
     default:

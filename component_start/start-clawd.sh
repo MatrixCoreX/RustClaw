@@ -167,10 +167,11 @@ else:
     print("")
 PY
   )"
+  ENV_API_KEY="$(component_vendor_api_key_from_env "$ACTIVE_VENDOR")"
 
-  if [[ -z "${CURRENT_API_KEY}" || "${CURRENT_API_KEY}" == REPLACE_ME* ]]; then
+  if [[ ( -z "${CURRENT_API_KEY}" || "${CURRENT_API_KEY}" == REPLACE_ME* ) && -z "${ENV_API_KEY}" ]]; then
     if [[ ! -t 0 || ! -t 1 || "${RUSTCLAW_MODEL_SELECT:-1}" == "0" ]]; then
-      echo "The api_key for current vendor (${ACTIVE_VENDOR}) is empty. Interactive input is required before startup." # zh: 当前厂商(${ACTIVE_VENDOR})的 api_key 为空，必须交互填写后才能启动。
+      echo "The api_key for current vendor (${ACTIVE_VENDOR}) is missing from config and environment. Interactive input is required before startup." # zh: 当前厂商(${ACTIVE_VENDOR})的配置和环境变量中都缺少 api_key，必须交互填写后才能启动。
       exit 1
     fi
 

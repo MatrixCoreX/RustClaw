@@ -39,6 +39,14 @@ test("local frontend development ports resolve both backend services", () => {
   const local = location("http://localhost:3000/");
   assert.equal(defaultBrowserApiBaseUrl(local), "http://localhost:8788");
   assert.equal(defaultWebdBaseUrl(local), "http://localhost:8788");
+  assert.equal(
+    preferredBrowserApiBaseUrl("http://localhost:3000", local),
+    "http://localhost:8788",
+  );
+  assert.equal(
+    preferredWebdBaseUrl("http://localhost:3000", local),
+    "http://localhost:8788",
+  );
 });
 
 test("standard HTTP ports do not gain explicit backend ports", () => {

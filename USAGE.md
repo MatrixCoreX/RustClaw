@@ -30,7 +30,7 @@
 
 源码构建还需要：
 
-- Rust/Cargo
+- Rust/Cargo 1.97 或更高版本
 - Clang 和 libclang
 - Protocol Buffers 编译器 `protoc`
 - Node.js 22 与 npm
@@ -46,6 +46,13 @@ bash scripts/build_toolchain_manager.sh check
 ```bash
 bash scripts/build_toolchain_manager.sh update
 ```
+
+登录 UI 后，首页“系统依赖检查”也会检查运行环境、源码/UI 构建工具以及内置工具和
+技能的本机依赖，并显示已安装版本。管理员可以对支持自动处理的缺失项点击“安装”；
+后端只接受固定依赖编号并使用当前 Linux 包管理器或 macOS Homebrew，不执行浏览器
+传入的任意命令，也不会要求浏览器提交系统密码。Linux 服务需以 root 运行或已具备
+无交互 sudo 权限才会启用自动安装；否则页面只显示缺失状态和手动配置提示。安装在
+后台运行，刷新页面不会丢失进行中状态。
 
 构建脚本会按 CPU 和可用内存调整并发；树莓派等低内存设备不应手工提高 Cargo
 或 Node.js 并发。
@@ -163,17 +170,9 @@ bash uninstall-rustclaw-cmd.sh --user
 CARGO_BUILD_JOBS=1 cargo check --workspace
 ```
 
-树莓派 64 位交叉构建：
-
-```bash
-./cross-build-pi.sh --target pi64 --workspace
-```
-
-树莓派 32 位交叉构建：
-
-```bash
-./cross-build-pi.sh --target pi32 --workspace
-```
+旧的四套 cross 编译入口已归档到 `scripts/archive/cross-build/`，当前部署流程
+不再主动使用它们。需要恢复旧流程时，先阅读该目录的 `README.md` 并重新做
+工具链与目标设备验证；日常构建继续使用 `build-all.sh` 或发布包部署。
 
 按需安装的 Skill Store 技能不会被普通全量构建主动编译；它们只在 UI 安装或
 开发者明确指定单个 package 时编译。

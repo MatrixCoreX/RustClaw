@@ -17,6 +17,7 @@ pub(crate) struct PlannerNativeCapabilityGroup {
     pub(crate) description: String,
     pub(crate) capability_names: Vec<String>,
     pub(crate) capability_argument_schemas: BTreeMap<String, Value>,
+    pub(crate) capability_descriptions: BTreeMap<String, String>,
 }
 
 fn registry_group_token(entry: &SkillRegistryEntry) -> Option<String> {
@@ -125,15 +126,37 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     }
 }
 
-fn compact_leaf_description(description: &str) -> String {
-    let compact = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = compact.chars();
-    let prefix = chars.by_ref().take(160).collect::<String>();
-    if chars.next().is_some() {
-        format!("{prefix}...")
-    } else {
-        prefix
+fn planner_capability_leaf_description(skill: &str, mapping: &PlannerCapabilityMapping) -> String {
+    let mut parts = vec![format!(
+        "runtime_capability_leaf_v1; source_group={skill}; capability={}; dispatch=resolver_verifier",
+        mapping.name
+    )];
+    if let Some(description) = mapping.description.as_deref() {
+        parts.push(format!("purpose={}", compact_leaf_description(description)));
     }
+    if !mapping.semantic_tags.is_empty() {
+        parts.push(format!(
+            "semantic_tags={}",
+            mapping
+                .semantic_tags
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("|")
+        ));
+    }
+    if let Some(effect) = mapping.effect {
+        parts.push(format!("effect={}", effect.as_token()));
+    }
+    if mapping.preferred {
+        parts.push("preferred=true".to_string());
+    }
+    parts.join("; ")
+}
+
+fn compact_leaf_description(description: &str) -> String {
+    description.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn risk_level_token(risk_level: claw_core::skill_registry::SkillRiskLevel) -> &'static str {
@@ -368,6 +391,16 @@ fn planner_native_capability_groups_for_task_filtered(
             })
             .cloned()
             .collect::<Vec<_>>();
+        let capability_descriptions = exposed_capabilities
+            .iter()
+            .filter(|mapping| capability_names.contains(&mapping.name))
+            .map(|mapping| {
+                (
+                    mapping.name.clone(),
+                    planner_capability_leaf_description(&skill, mapping),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         if capability_names.is_empty() {
             continue;
         }
@@ -411,6 +444,7 @@ fn planner_native_capability_groups_for_task_filtered(
             description,
             capability_names,
             capability_argument_schemas,
+            capability_descriptions,
         });
     }
     groups

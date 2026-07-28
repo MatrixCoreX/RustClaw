@@ -14,6 +14,7 @@ base64.workspace = true
 chrono = "0.4.44"
 serde.workspace = true
 serde_json.workspace = true
+rustclaw-fs-discovery = { path = "../../fs-discovery" }
 sha2 = "0.10"
 toml.workspace = true
 uuid.workspace = true

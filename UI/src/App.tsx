@@ -301,6 +301,7 @@ export default function App() {
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
     runNniDeviceAction,
+    setNniDeviceSimulation,
   } = useNniRuntime({ apiFetch, t, lang });
   const {
     memoryOverview,
@@ -323,6 +324,9 @@ export default function App() {
   const {
     selectedLogFile,
     setSelectedLogFile,
+    logFiles,
+    logFilesLoading,
+    logFilesError,
     logTailLines,
     setLogTailLines,
     logLoading,
@@ -331,7 +335,7 @@ export default function App() {
     logLastUpdated,
     logFollowTail,
     setLogFollowTail,
-    fetchLatestLog,
+    refreshLogs,
   } = useLogsRuntime({
     apiFetch,
     t,
@@ -924,6 +928,10 @@ export default function App() {
     hostSystemSummary,
     hostSystemLoading,
     hostSystemErrorCode,
+    hostDependencies,
+    hostDependenciesLoading,
+    hostDependenciesErrorCode,
+    dependencyInstallingId,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -935,12 +943,21 @@ export default function App() {
     nginxStatusLoading,
     nginxStatusError,
     fetchNginxStatus,
+    webdExposureStatus,
+    webdExposureLoading,
+    webdExposureUpdating,
+    webdExposureError,
+    webdExposureMessage,
+    fetchWebdExposureStatus,
+    setWebdExternalAccess,
     fetchWorkspaceUpdateStatus,
     startWorkspaceUpdate,
     cancelWorkspaceUpdate,
     restartSystem,
     restartPiApp,
     fetchHostSystemSummary,
+    fetchHostDependencies,
+    installHostDependency,
   } = useSystemRuntime({
     apiFetch,
     t,
@@ -1429,6 +1446,10 @@ export default function App() {
               hostSystemSummary={hostSystemSummary}
               hostSystemLoading={hostSystemLoading}
               hostSystemErrorCode={hostSystemErrorCode}
+              hostDependencies={hostDependencies}
+              hostDependenciesLoading={hostDependenciesLoading}
+              hostDependenciesErrorCode={hostDependenciesErrorCode}
+              dependencyInstallingId={dependencyInstallingId}
               isAdminIdentity={isAdminIdentity}
               workspaceUpdateLoading={workspaceUpdateLoading}
               workspaceUpdateRunning={workspaceUpdateRunning}
@@ -1439,6 +1460,11 @@ export default function App() {
               nginxStatus={nginxStatus}
               nginxStatusLoading={nginxStatusLoading}
               nginxStatusError={nginxStatusError}
+              webdExposureStatus={webdExposureStatus}
+              webdExposureLoading={webdExposureLoading}
+              webdExposureUpdating={webdExposureUpdating}
+              webdExposureError={webdExposureError}
+              webdExposureMessage={webdExposureMessage}
               workspaceUpdateRestarting={workspaceUpdateRestarting}
               workspaceUpdateDisplayStatus={workspaceUpdateDisplayStatus}
               workspaceUpdateProgressVisible={workspaceUpdateProgressVisible}
@@ -1461,11 +1487,15 @@ export default function App() {
               onSetCurrentPage={setCurrentPage}
               onFetchWorkspaceUpdateStatus={() => fetchWorkspaceUpdateStatus(false)}
               onFetchNginxStatus={() => fetchNginxStatus(false)}
+              onFetchWebdExposureStatus={() => fetchWebdExposureStatus(false)}
+              onSetWebdExternalAccess={setWebdExternalAccess}
               onStartWorkspaceUpdate={startWorkspaceUpdate}
               onCancelWorkspaceUpdate={cancelWorkspaceUpdate}
               onRestartSystem={restartSystem}
               onRestartPiApp={restartPiApp}
               onFetchHostSystemSummary={fetchHostSystemSummary}
+              onFetchHostDependencies={() => fetchHostDependencies(false)}
+              onInstallHostDependency={installHostDependency}
               workspaceUpdateStepLabel={workspaceUpdateStepLabel}
               workspaceUpdateStatusLabel={workspaceUpdateStatusLabel}
               workspaceUpdateTimeLabel={workspaceUpdateTimeLabel}
@@ -1583,6 +1613,7 @@ export default function App() {
               onFetchHeartbeatErrors={fetchNniHeartbeatErrors}
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
               onRunDeviceAction={runNniDeviceAction}
+              onSetDeviceSimulation={setNniDeviceSimulation}
               onActionMessageChange={setNniActionMessage}
               onActionErrorChange={setNniActionError}
             />
@@ -1854,6 +1885,9 @@ export default function App() {
             <LogsPage
               t={t}
               tSlash={tSlash}
+              logFiles={logFiles}
+              logFilesLoading={logFilesLoading}
+              logFilesError={logFilesError}
               selectedLogFile={selectedLogFile}
               logTailLines={logTailLines}
               logFollowTail={logFollowTail}
@@ -1866,7 +1900,7 @@ export default function App() {
               onSelectedLogFileChange={setSelectedLogFile}
               onLogTailLinesChange={setLogTailLines}
               onLogFollowTailChange={setLogFollowTail}
-              onFetchLatestLog={fetchLatestLog}
+              onRefreshLogs={refreshLogs}
             />
           ) : null}
 

@@ -14,9 +14,8 @@ enum WorkspaceUpdateMode {
     UiOnly,
     ClawdOnly,
     NginxEnable,
-    NginxDeploy,
+    NginxDisable,
     ReleaseDeploy,
-    ReleasePackage,
     SourceCheckout,
 }
 
@@ -27,9 +26,8 @@ impl WorkspaceUpdateMode {
             Self::UiOnly => "ui_only",
             Self::ClawdOnly => "clawd_only",
             Self::NginxEnable => "nginx_enable",
-            Self::NginxDeploy => "nginx_deploy",
+            Self::NginxDisable => "nginx_disable",
             Self::ReleaseDeploy => "release_deploy",
-            Self::ReleasePackage => "release_package",
             Self::SourceCheckout => "source_checkout",
         }
     }
@@ -451,13 +449,6 @@ async fn start_workspace_update_release_deploy(
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleaseDeploy).await
 }
 
-async fn start_workspace_update_release_package(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
-    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleasePackage).await
-}
-
 async fn start_workspace_update_source_checkout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -490,10 +481,7 @@ async fn start_workspace_update_with_mode(
             None,
         );
     }
-    if matches!(
-        mode,
-        WorkspaceUpdateMode::ReleaseDeploy | WorkspaceUpdateMode::ReleasePackage
-    ) && release_platform_prefixes().is_none()
+    if mode == WorkspaceUpdateMode::ReleaseDeploy && release_platform_prefixes().is_none()
     {
         return workspace_update_api_error(
             StatusCode::PRECONDITION_FAILED,
@@ -534,13 +522,6 @@ async fn start_workspace_update_with_mode(
                 return workspace_update_api_error(
                     StatusCode::CONFLICT,
                     "workspace_update_source_checkout_already_enabled",
-                    Some(guard.clone()),
-                );
-            }
-            WorkspaceUpdateMode::ReleasePackage if !source_update_available => {
-                return workspace_update_api_error(
-                    StatusCode::CONFLICT,
-                    "workspace_update_release_package_already_enabled",
                     Some(guard.clone()),
                 );
             }
@@ -668,19 +649,15 @@ async fn run_workspace_update_job(
             return;
         }
         WorkspaceUpdateMode::NginxEnable => {
-            run_workspace_update_nginx_job(workspace_root, shared, control, false).await;
+            run_workspace_update_nginx_job(workspace_root, shared, control).await;
             return;
         }
-        WorkspaceUpdateMode::NginxDeploy => {
-            run_workspace_update_nginx_job(workspace_root, shared, control, true).await;
+        WorkspaceUpdateMode::NginxDisable => {
+            run_workspace_update_nginx_disable_job(workspace_root, shared, control).await;
             return;
         }
         WorkspaceUpdateMode::ReleaseDeploy => {
             run_workspace_update_release_deploy_job(workspace_root, shared, control).await;
-            return;
-        }
-        WorkspaceUpdateMode::ReleasePackage => {
-            run_workspace_update_release_package_job(workspace_root, shared, control).await;
             return;
         }
         WorkspaceUpdateMode::SourceCheckout => {
@@ -1165,23 +1142,6 @@ async fn run_workspace_update_release_deploy_job(
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
     control: Arc<Mutex<WorkspaceUpdateControl>>,
 ) {
-    run_workspace_update_release_job(workspace_root, shared, control, false).await;
-}
-
-async fn run_workspace_update_release_package_job(
-    workspace_root: PathBuf,
-    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
-    control: Arc<Mutex<WorkspaceUpdateControl>>,
-) {
-    run_workspace_update_release_job(workspace_root, shared, control, true).await;
-}
-
-async fn run_workspace_update_release_job(
-    workspace_root: PathBuf,
-    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
-    control: Arc<Mutex<WorkspaceUpdateControl>>,
-    switch_to_package_mode: bool,
-) {
     record_workspace_update_current_version(&workspace_root, &shared).await;
     if finish_workspace_update_if_canceled(&shared, &control) {
         return;
@@ -1193,26 +1153,10 @@ async fn run_workspace_update_release_job(
         let mut guard = workspace_update_status_lock(shared.as_ref());
         set_workspace_update_next_step(
             &mut guard,
-            if switch_to_package_mode {
-                "workspace_update.release_package_downloading"
-            } else {
-                "workspace_update.release_deploy_downloading"
-            },
+            "workspace_update.release_deploy_downloading",
         );
     }
-    let deploy_args = if switch_to_package_mode {
-        vec![
-            "./deploy-github-release.sh",
-            "--root",
-            ".",
-            "--no-restart",
-            "--package-mode",
-            "--keep-backups",
-            "1",
-        ]
-    } else {
-        vec!["./deploy-github-release.sh", "--root", ".", "--no-restart"]
-    };
+    let deploy_args = ["./deploy-github-release.sh", "--root", ".", "--no-restart"];
     match run_workspace_update_command_streaming(
         "bash",
         &deploy_args,
@@ -1227,24 +1171,12 @@ async fn run_workspace_update_release_job(
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
-            if switch_to_package_mode {
-                guard.installation_kind = "release_package".to_string();
-                guard.source_update_available = false;
-            }
         }
         Ok(out) => {
             fail_workspace_update(
                 &shared,
-                if switch_to_package_mode {
-                    "release_package_migration_failed"
-                } else {
-                    "release deploy failed"
-                },
-                if switch_to_package_mode {
-                    "workspace_update.release_package_failed"
-                } else {
-                    "workspace_update.release_deploy_check_network_or_permissions"
-                },
+                "release deploy failed",
+                "workspace_update.release_deploy_check_network_or_permissions",
                 out,
             );
             return;
@@ -1258,11 +1190,7 @@ async fn run_workspace_update_release_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                if switch_to_package_mode {
-                    "workspace_update.release_package_failed"
-                } else {
-                    "workspace_update.release_deploy_check_network_or_permissions"
-                },
+                "workspace_update.release_deploy_check_network_or_permissions",
             );
             return;
         }
@@ -1276,31 +1204,19 @@ async fn run_workspace_update_release_job(
         Ok(()) => {
             let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.status = "restarting".to_string();
-            guard.step = if switch_to_package_mode {
-                "release_package_restart_scheduled".to_string()
-            } else {
-                "release_restart_scheduled".to_string()
-            };
+            guard.step = "release_restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
             guard.error = None;
             set_workspace_update_next_step(
                 &mut guard,
-                if switch_to_package_mode {
-                    "workspace_update.release_package_restart_scheduled"
-                } else {
-                    "workspace_update.release_deploy_restart_scheduled"
-                },
+                "workspace_update.release_deploy_restart_scheduled",
             );
         }
         Err(err) => {
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                if switch_to_package_mode {
-                    "workspace_update.release_package_restart_failed"
-                } else {
-                    "workspace_update.release_deploy_restart_failed"
-                },
+                "workspace_update.release_deploy_restart_failed",
             );
         }
     }

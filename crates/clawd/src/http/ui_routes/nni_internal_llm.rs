@@ -10,6 +10,15 @@ fn nni_supported_actions() -> Vec<&'static str> {
     ]
 }
 
+const NNI_SIMULATION_ENABLE_ACTION: &str = "simulation_enable";
+const NNI_SIMULATION_DISABLE_ACTION: &str = "simulation_disable";
+
+fn nni_accepted_actions() -> Vec<&'static str> {
+    let mut actions = nni_supported_actions();
+    actions.extend([NNI_SIMULATION_ENABLE_ACTION, NNI_SIMULATION_DISABLE_ACTION]);
+    actions
+}
+
 fn nni_signature_helper_path(state: &AppState) -> PathBuf {
     state
         .skill_rt
@@ -24,6 +33,30 @@ fn nni_signature_helper_python() -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "python3".to_string())
+}
+
+fn nni_signature_simulator_state_path(state: &AppState) -> PathBuf {
+    state
+        .skill_rt
+        .workspace_root
+        .join("data")
+        .join("nni")
+        .join("signature-simulator.json")
+}
+
+fn nni_helper_payload_simulated(payload: &Value) -> bool {
+    payload
+        .get("simulated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn nni_action_message_key(action: &str) -> &'static str {
+    match action {
+        NNI_SIMULATION_ENABLE_ACTION => "nni.device_action.simulation_enabled",
+        NNI_SIMULATION_DISABLE_ACTION => "nni.device_action.simulation_disabled",
+        _ => "nni.device_action.completed",
+    }
 }
 
 fn nni_hex_fingerprint(hex: &str) -> Option<String> {
@@ -83,6 +116,10 @@ async fn run_nni_signature_helper(
         .args(args)
         .current_dir(&state.skill_rt.workspace_root)
         .env("PYTHONUNBUFFERED", "1")
+        .env(
+            "RUSTCLAW_SIGNATURE_SIMULATOR_STATE",
+            nni_signature_simulator_state_path(state),
+        )
         .stdin(StdProcessStdio::null())
         .stdout(StdProcessStdio::piped())
         .stderr(StdProcessStdio::piped())
@@ -182,6 +219,47 @@ async fn run_nni_signature_helper(
     })
 }
 
+fn nni_detection_retry_delay(remaining: Duration) -> Duration {
+    remaining.min(Duration::from_secs(1))
+}
+
+fn nni_detection_timeout_error() -> String {
+    format!("nni_signature_detection_timeout:{NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}")
+}
+
+async fn detect_nni_signature_chip(state: &AppState) -> Result<NniSignatureHelperOutput, String> {
+    let args = [String::from("pubkey")];
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS);
+    let mut last_result = None;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return last_result.unwrap_or_else(|| Err(nni_detection_timeout_error()));
+        }
+
+        let result = match tokio::time::timeout(remaining, run_nni_signature_helper(state, &args))
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return last_result.unwrap_or_else(|| Err(nni_detection_timeout_error()));
+            }
+        };
+        if matches!(&result, Ok(output) if output.ok) {
+            return result;
+        }
+        last_result = Some(result);
+
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            continue;
+        }
+        tokio::time::sleep(nni_detection_retry_delay(remaining)).await;
+    }
+}
+
 fn nni_helper_payload_meta(payload: &Value) -> Value {
     json!({
         "slot": payload.get("slot").cloned().unwrap_or(Value::Null),
@@ -189,6 +267,8 @@ fn nni_helper_payload_meta(payload: &Value) -> Value {
         "i2c_baud": payload.get("i2c_baud").cloned().unwrap_or(Value::Null),
         "i2c_address": payload.get("i2c_address").cloned().unwrap_or(Value::Null),
         "lib_path": payload.get("lib_path").cloned().unwrap_or(Value::Null),
+        "simulated": payload.get("simulated").cloned().unwrap_or(Value::Bool(false)),
+        "device_kind": payload.get("device_kind").cloned().unwrap_or(Value::Null),
     })
 }
 
@@ -229,6 +309,9 @@ async fn nni_device_status(
                     "helper_available": false,
                     "signature_chip_present": false,
                     "status": "helper_missing",
+                    "simulated": false,
+                    "device_kind": "unavailable",
+                    "simulation_available": false,
                     "message_key": "nni.device_status.helper_missing",
                     "next_step_key": "nni.device_status.helper_missing.next_step",
                     "helper_path": script_path.to_string_lossy(),
@@ -239,8 +322,9 @@ async fn nni_device_status(
         );
     }
 
-    match run_nni_signature_helper(&state, &[String::from("pubkey")]).await {
+    match detect_nni_signature_chip(&state).await {
         Ok(output) if output.ok => {
+            let simulated = nni_helper_payload_simulated(&output.payload);
             let pubkey = output
                 .payload
                 .get("pubkey")
@@ -250,9 +334,10 @@ async fn nni_device_status(
                 &state,
                 "device_status",
                 json!({
-                    "status": "ready",
+                    "status": if simulated { "simulated" } else { "ready" },
                     "helper_available": true,
                     "signature_chip_present": true,
+                    "simulated": simulated,
                     "exit_code": output.exit_code,
                 }),
             );
@@ -264,8 +349,12 @@ async fn nni_device_status(
                         "nni_available": true,
                         "helper_available": true,
                         "signature_chip_present": true,
-                        "status": "ready",
-                        "message_key": "nni.device_status.ready",
+                        "status": if simulated { "simulated" } else { "ready" },
+                        "message_key": if simulated { "nni.device_status.simulated" } else { "nni.device_status.ready" },
+                        "next_step_key": if simulated { Some("nni.device_status.simulated.next_step") } else { None },
+                        "simulated": simulated,
+                        "device_kind": if simulated { "simulated" } else { "hardware" },
+                        "simulation_available": false,
                         "helper_path": script_path.to_string_lossy(),
                         "supported_actions": supported_actions,
                         "pubkey": pubkey,
@@ -307,6 +396,9 @@ async fn nni_device_status(
                         "helper_available": true,
                         "signature_chip_present": false,
                         "status": "signature_chip_missing",
+                        "simulated": false,
+                        "device_kind": "unavailable",
+                        "simulation_available": true,
                         "message_key": "nni.device_status.signature_chip_missing",
                         "next_step_key": "nni.device_status.signature_chip_missing.next_step",
                         "helper_path": script_path.to_string_lossy(),
@@ -337,6 +429,9 @@ async fn nni_device_status(
                         "helper_available": true,
                         "signature_chip_present": false,
                         "status": "signature_chip_missing",
+                        "simulated": false,
+                        "device_kind": "unavailable",
+                        "simulation_available": true,
                         "message_key": "nni.device_status.signature_chip_missing",
                         "next_step_key": "nni.device_status.signature_chip_missing.next_step",
                         "helper_path": script_path.to_string_lossy(),
@@ -366,7 +461,7 @@ async fn nni_device_action(
     }
 
     let action = req.action.trim().to_ascii_lowercase();
-    if !nni_supported_actions().contains(&action.as_str()) {
+    if !nni_accepted_actions().contains(&action.as_str()) {
         append_nni_log_event_best_effort(
             &state,
             "device_action",
@@ -379,6 +474,35 @@ async fn nni_device_action(
             StatusCode::BAD_REQUEST,
             format!("unsupported NNI action: {action}"),
         );
+    }
+
+    if action == NNI_SIMULATION_ENABLE_ACTION {
+        if let Ok(output) = run_nni_signature_helper(&state, &[String::from("pubkey")]).await {
+            if output.ok && !nni_helper_payload_simulated(&output.payload) {
+                append_nni_log_event_best_effort(
+                    &state,
+                    "device_action",
+                    json!({
+                        "action": action,
+                        "status": "hardware_signature_chip_present",
+                    }),
+                );
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: Some(json!({
+                            "action": action,
+                            "signature_chip_present": true,
+                            "simulated": false,
+                            "status": "hardware_signature_chip_present",
+                            "message_key": "nni.device_action.simulation_not_needed",
+                        })),
+                        error: Some("nni_hardware_signature_chip_present".to_string()),
+                    }),
+                );
+            }
+        }
     }
 
     let mut args = vec![action.clone()];
@@ -406,13 +530,20 @@ async fn nni_device_action(
 
     match run_nni_signature_helper(&state, &args).await {
         Ok(output) if output.ok => {
+            let simulated = nni_helper_payload_simulated(&output.payload);
+            let signature_chip_present = output
+                .payload
+                .get("signature_chip_present")
+                .and_then(Value::as_bool)
+                .unwrap_or(action != NNI_SIMULATION_DISABLE_ACTION);
             append_nni_log_event_best_effort(
                 &state,
                 "device_action",
                 json!({
                     "action": action,
                     "status": "ok",
-                    "signature_chip_present": true,
+                    "signature_chip_present": signature_chip_present,
+                    "simulated": simulated,
                     "exit_code": output.exit_code,
                     "meta": nni_helper_payload_meta(&output.payload),
                 }),
@@ -423,8 +554,10 @@ async fn nni_device_action(
                     ok: true,
                     data: Some(json!({
                         "action": action,
-                        "signature_chip_present": true,
-                        "message_key": "nni.device_action.completed",
+                        "signature_chip_present": signature_chip_present,
+                        "simulated": simulated,
+                        "device_kind": output.payload.get("device_kind").cloned().unwrap_or(Value::Null),
+                        "message_key": nni_action_message_key(&action),
                         "payload": output.payload,
                         "meta": nni_helper_payload_meta(&output.payload),
                         "exit_code": output.exit_code,
@@ -439,12 +572,26 @@ async fn nni_device_action(
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| (!output.stderr_tail.trim().is_empty()).then_some(output.stderr_tail))
                 .unwrap_or_else(|| "signature chip unavailable".to_string());
+            let simulation_action = matches!(
+                action.as_str(),
+                NNI_SIMULATION_ENABLE_ACTION | NNI_SIMULATION_DISABLE_ACTION
+            );
+            let error_code = output
+                .payload
+                .get("error_code")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(if simulation_action {
+                    "nni_signature_simulation_failed"
+                } else {
+                    "nni_signature_chip_missing"
+                });
             append_nni_log_event_best_effort(
                 &state,
                 "device_action",
                 json!({
                     "action": action,
-                    "status": "signature_chip_missing",
+                    "status": if simulation_action { "simulation_failed" } else { "signature_chip_missing" },
                     "signature_chip_present": false,
                     "exit_code": output.exit_code,
                     "diagnostic": reason,
@@ -457,21 +604,25 @@ async fn nni_device_action(
                     data: Some(json!({
                         "action": action,
                         "signature_chip_present": false,
-                        "status": "signature_chip_missing",
-                        "message_key": "nni.device_action.signature_chip_missing",
+                        "status": if simulation_action { "simulation_failed" } else { "signature_chip_missing" },
+                        "message_key": if simulation_action { "nni.device_action.simulation_failed" } else { "nni.device_action.signature_chip_missing" },
                         "exit_code": output.exit_code,
                     })),
-                    error: Some("nni_signature_chip_missing".to_string()),
+                    error: Some(error_code.to_string()),
                 }),
             )
         }
         Err(err) => {
+            let simulation_action = matches!(
+                action.as_str(),
+                NNI_SIMULATION_ENABLE_ACTION | NNI_SIMULATION_DISABLE_ACTION
+            );
             append_nni_log_event_best_effort(
                 &state,
                 "device_action",
                 json!({
                     "action": action,
-                    "status": "signature_chip_missing",
+                    "status": if simulation_action { "simulation_failed" } else { "signature_chip_missing" },
                     "signature_chip_present": false,
                     "diagnostic": err,
                 }),
@@ -483,10 +634,14 @@ async fn nni_device_action(
                     data: Some(json!({
                         "action": action,
                         "signature_chip_present": false,
-                        "status": "signature_chip_missing",
-                        "message_key": "nni.device_action.signature_chip_missing",
+                        "status": if simulation_action { "simulation_failed" } else { "signature_chip_missing" },
+                        "message_key": if simulation_action { "nni.device_action.simulation_failed" } else { "nni.device_action.signature_chip_missing" },
                     })),
-                    error: Some("nni_signature_chip_missing".to_string()),
+                    error: Some(if simulation_action {
+                        "nni_signature_simulation_failed".to_string()
+                    } else {
+                        "nni_signature_chip_missing".to_string()
+                    }),
                 }),
             )
         }

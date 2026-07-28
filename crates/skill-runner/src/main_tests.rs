@@ -108,6 +108,36 @@ async fn installed_process_fails_closed_when_launch_metadata_is_invalid() {
     assert!(error.detail.contains("sandbox failed closed"));
 }
 
+#[test]
+fn inherited_parent_sandbox_accepts_only_runtime_backend_tokens() {
+    assert_eq!(
+        inherited_parent_sandbox_backend_token("bubblewrap"),
+        Some("bubblewrap")
+    );
+    assert_eq!(
+        inherited_parent_sandbox_backend_token("macos_seatbelt"),
+        Some("macos_seatbelt")
+    );
+    assert_eq!(inherited_parent_sandbox_backend_token("direct"), None);
+    assert_eq!(inherited_parent_sandbox_backend_token("unknown"), None);
+}
+
+#[test]
+fn declared_private_storage_is_writable_for_a_read_only_installed_skill() {
+    let storage = tempfile::tempdir().expect("storage tempdir");
+    let mut launch = ChildLaunch::legacy("/bin/true");
+    launch.installed = true;
+    launch.sandbox_profile = SandboxProfile::Required;
+
+    let paths = installed_writable_paths_from(&launch, None, Some(storage.path()))
+        .expect("declared storage path");
+
+    assert_eq!(
+        paths,
+        vec![std::fs::canonicalize(storage.path()).expect("canonical storage")]
+    );
+}
+
 #[tokio::test]
 async fn http_json_launch_requires_receipt_network_permission() {
     let mut launch = ChildLaunch::legacy("unused");

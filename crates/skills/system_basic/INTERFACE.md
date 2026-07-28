@@ -14,6 +14,7 @@
 - `summarize_structured` recursively reports exact empty-string, null, empty-container, and false-boolean counts plus their machine field paths without returning scalar values. Use `field_path` to scope a category such as skill switches instead of reading and manually counting raw configuration text.
 - When a request asks for a value from the same JSON/TOML/YAML array item or TOML `[[array_table]]` block where another field equals a specified value, encode that relationship in `field_path` with an array filter selector, for example `items[?(@.id=='abc')].status` or `skills.[name=run_cmd].planner_kind`. The LLM-friendly rooted shorthand `skills.run_cmd.planner_kind` is also accepted when `run_cmd` uniquely matches an item's `name`, `id`, or `key`. Do not flatten it to `items.status` / `skills.planner_kind`; that drops the row/block condition.
 - For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
+- `find_path` is a finite compatibility adapter over the canonical shared discovery engine. New plans should call `filesystem.find_entries`; compatibility results still preserve completeness and scan evidence.
 
 ## Actions
 - `info`
@@ -85,11 +86,14 @@
 | `summarize_structured` | `max_paths` | no | integer | `200` | Per-category path preview cap, clamped to `1..1000`; counts remain exact when path previews are omitted. |
 | `validate_structured` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path to parse. |
 | `validate_structured` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
-| `find_path` | `root` | no | string(path) | `.` | Search root inside workspace. |
+| `find_path` | `root` | no | string(path) | `.` | Focused recursive search root inside the trusted boundary. |
 | `find_path` | `name`/`pattern` | yes | string | - | Name or pattern to match. |
 | `find_path` | `match_mode` | no | string | `contains` | `contains|exact|starts_with|ends_with`. |
 | `find_path` | `target_kind` | no | string | `any` | `any|file|dir`. |
 | `find_path` | `max_results` | no | integer | `20` | Output cap, clamped to `1..200`. |
+| `find_path` | `include_hidden` | no | bool | `false` | Include hidden entries. |
+| `find_path` | `respect_ignore` | no | bool | `true` | Respect repository ignore files. |
+| `find_path` | `max_depth` | no | integer | none | Explicit shallow scope; there is no implicit depth cap. |
 | `read_range` | `path` | yes | string(path) | - | Text file to slice. |
 | `read_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_range` | `n` | no | integer | `20` | Number of lines for `head`/`tail`, or fallback window for `range`. |
@@ -152,7 +156,7 @@
 - `validate_structured` success `extra` fields:
   - `action`, `path`, `valid`, format, and parse details; evidence role `status`.
 - `find_path` success `extra` fields:
-  - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
+  - `action`, `root`, `count`, `results`, `known_match_count`, `total_count_is_complete`, `completeness`, `has_more`, and `scan`; evidence roles `path`, `results`, `status`, and `count`. A partial zero-result scan is not exhaustive absence.
 - `read_range` success `extra` fields:
   - `action`, `path`, `resolved_path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `returned_line_count`, `excerpt`, `excerpt_bytes`, `encoding`, `binary`, `size_bytes`, `sha256`, `content_hash`, `truncated`, `page`, and `line_safety`; optional `first_line` appears when the observed slice includes line 1, and selector projections remain optional; evidence roles `path`, `field_value`, and `count`.
 - `read_artifact_range` success `extra` fields:

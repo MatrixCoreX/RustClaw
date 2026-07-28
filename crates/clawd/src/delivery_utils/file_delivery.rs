@@ -1,5 +1,10 @@
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use rustclaw_fs_discovery::{
+    discover, Completeness, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector,
+    MatchMode, TargetKind,
+};
 
 use super::directory_lookup::{resolve_directory_locator_input, resolve_directory_target};
 use super::locator::{
@@ -18,6 +23,9 @@ use super::{
 };
 use crate::AppState;
 use crate::OutputDeliveryIntent;
+
+const LOCATOR_DEADLINE: Duration = Duration::from_secs(5);
+const DIRECT_DIRECTORY_ENTRY_LIMIT: usize = 1_000;
 
 // File-target resolution and batch delivery helpers used by the facade.
 pub(super) fn resolve_batch_directory_delivery(
@@ -40,15 +48,10 @@ pub(super) fn resolve_batch_directory_delivery(
         locator,
         Path::new("/"),
         &state.skill_rt.default_locator_search_dir,
-        state.skill_rt.locator_scan_max_depth,
-        state.skill_rt.locator_scan_max_files,
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_current_level_files_for_delivery(
-                &directory,
-                state.skill_rt.locator_scan_max_files,
-            ) {
+            match list_current_level_files_for_delivery(&directory, DIRECT_DIRECTORY_ENTRY_LIMIT) {
                 CurrentLevelDeliveryEntriesResult::Ready(entries) => {
                     let subdir_hint = localize_delivery_message_for_request(
                         state,
@@ -240,8 +243,6 @@ pub(super) fn enforce_file_delivery_locator_contract(
         user_request,
         Path::new("/"),
         &state.skill_rt.default_locator_search_dir,
-        state.skill_rt.locator_scan_max_depth,
-        state.skill_rt.locator_scan_max_files,
         Some(output_contract.locator_hint.as_str()),
     ) else {
         return;
@@ -291,8 +292,6 @@ pub(super) fn resolve_file_delivery_target_with_hint(
     _user_request: &str,
     system_root: &Path,
     project_root: &Path,
-    scan_max_depth: usize,
-    scan_max_files: usize,
     locator_hint: Option<&str>,
 ) -> Option<FileDeliveryTargetResolution> {
     let locator_hint = normalized_locator_hint(locator_hint);
@@ -306,8 +305,6 @@ pub(super) fn resolve_file_delivery_target_with_hint(
         locator,
         system_root,
         project_root,
-        scan_max_depth,
-        scan_max_files,
     ))
 }
 
@@ -316,8 +313,6 @@ pub(super) fn resolve_file_delivery_target_from_request_for_tests(
     user_request: &str,
     system_root: &Path,
     project_root: &Path,
-    scan_max_depth: usize,
-    scan_max_files: usize,
 ) -> Option<FileDeliveryTargetResolution> {
     if let Some(resolved) =
         resolve_explicit_file_path_candidate(None, Some(user_request), system_root, project_root)
@@ -329,8 +324,6 @@ pub(super) fn resolve_file_delivery_target_from_request_for_tests(
         locator,
         system_root,
         project_root,
-        scan_max_depth,
-        scan_max_files,
     ))
 }
 
@@ -344,8 +337,22 @@ fn resolve_file_delivery_locator(
     locator: FileDeliveryLocatorInput,
     system_root: &Path,
     project_root: &Path,
-    scan_max_depth: usize,
-    scan_max_files: usize,
+) -> FileDeliveryTargetResolution {
+    resolve_file_delivery_locator_with_budget(
+        locator,
+        system_root,
+        project_root,
+        None,
+        rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
+    )
+}
+
+fn resolve_file_delivery_locator_with_budget(
+    locator: FileDeliveryLocatorInput,
+    system_root: &Path,
+    project_root: &Path,
+    max_depth: Option<usize>,
+    hard_entry_limit: usize,
 ) -> FileDeliveryTargetResolution {
     match locator {
         FileDeliveryLocatorInput::ExplicitFilePath { file_path } => {
@@ -359,8 +366,8 @@ fn resolve_file_delivery_locator(
             project_root,
             system_root,
             &file_name,
-            scan_max_depth,
-            scan_max_files,
+            max_depth,
+            hard_entry_limit,
         ),
     }
 }
@@ -440,14 +447,14 @@ pub(super) fn scan_filename_under_roots(
     project_root: &Path,
     system_root: &Path,
     file_name: &str,
-    scan_max_depth: usize,
-    scan_max_files: usize,
+    max_depth: Option<usize>,
+    hard_entry_limit: usize,
 ) -> FileDeliveryTargetResolution {
     let project_outcome = scan_filename_matches_with_limit_internal(
         project_root,
         file_name,
-        scan_max_depth,
-        scan_max_files,
+        max_depth,
+        hard_entry_limit,
     );
     match project_outcome.result {
         FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
@@ -472,8 +479,8 @@ pub(super) fn scan_filename_under_roots(
             match scan_filename_matches_with_limit_internal(
                 system_root,
                 file_name,
-                scan_max_depth,
-                scan_max_files,
+                max_depth,
+                hard_entry_limit,
             )
             .result
             {
@@ -492,12 +499,8 @@ pub(super) fn scan_filename_under_roots(
     }
 }
 
-fn scan_limit_message_for_filename(file_name: &str) -> DeliveryMessageKind {
-    if token_has_definite_file_shape(file_name) {
-        DeliveryMessageKind::Rule3FileNotFound
-    } else {
-        DeliveryMessageKind::Rule3ScanTooMany
-    }
+fn scan_limit_message_for_filename(_file_name: &str) -> DeliveryMessageKind {
+    DeliveryMessageKind::Rule3ScanTooMany
 }
 
 fn prefer_unique_direct_child_filename_candidate(
@@ -688,13 +691,14 @@ pub(super) fn find_file_in_directory_non_recursive(
 }
 
 #[cfg(test)]
-pub(crate) fn scan_filename_matches_with_limit(
-    project_root: &Path,
-    file_name: &str,
-    max_depth: usize,
-    max_files: usize,
-) -> FilenameScanResult {
-    scan_filename_matches_with_limit_internal(project_root, file_name, max_depth, max_files).result
+pub(crate) fn scan_filename_matches(project_root: &Path, file_name: &str) -> FilenameScanResult {
+    scan_filename_matches_with_limit_internal(
+        project_root,
+        file_name,
+        None,
+        rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
+    )
+    .result
 }
 
 #[derive(Debug)]
@@ -705,8 +709,8 @@ struct FilenameScanOutcome {
 fn scan_filename_matches_with_limit_internal(
     project_root: &Path,
     file_name: &str,
-    max_depth: usize,
-    max_files: usize,
+    max_depth: Option<usize>,
+    hard_entry_limit: usize,
 ) -> FilenameScanOutcome {
     if !project_root.is_dir() {
         return FilenameScanOutcome {
@@ -721,63 +725,55 @@ fn scan_filename_matches_with_limit_internal(
     }
     let target_norm = normalize_locator_text(&target);
 
+    let mut request = DiscoveryRequest::new(project_root, project_root);
+    request.selector = DiscoverySelector {
+        patterns: vec![target.clone()],
+        target_kind: TargetKind::File,
+        match_mode: MatchMode::Contains,
+        ..DiscoverySelector::default()
+    };
+    request.policy = DiscoveryPolicy::default();
+    request.budget = DiscoveryBudget {
+        max_depth,
+        hard_entry_limit: hard_entry_limit.max(1),
+        deadline: Some(LOCATOR_DEADLINE),
+        ..DiscoveryBudget::default()
+    };
+    let report = match discover(&request) {
+        Ok(report) => report,
+        Err(_) => {
+            return FilenameScanOutcome {
+                result: FilenameScanResult::NotFound,
+            }
+        }
+    };
+    if !matches!(report.completeness, Completeness::Complete) {
+        return FilenameScanOutcome {
+            result: FilenameScanResult::TooManyEntries,
+        };
+    }
+
     let mut exact_matches = Vec::new();
     let mut stem_matches = Vec::new();
     let mut fuzzy_matches = Vec::new();
-    let mut seen_entries = 0usize;
-    let mut queue = VecDeque::from([(project_root.to_path_buf(), 0usize)]);
-
-    while let Some((dir, depth)) = queue.pop_front() {
-        let mut entries = match std::fs::read_dir(&dir) {
-            Ok(v) => v
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .collect::<Vec<_>>(),
-            Err(_) => continue,
-        };
-        entries.sort();
-        let mut child_dirs = Vec::new();
-        for path in entries {
-            seen_entries += 1;
-            if seen_entries > max_files.max(1) {
-                return FilenameScanOutcome {
-                    result: FilenameScanResult::TooManyEntries,
-                };
-            }
-            let meta = match std::fs::symlink_metadata(&path) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let file_type = meta.file_type();
-            if file_type.is_dir() {
-                if depth < max_depth {
-                    child_dirs.push((path, depth + 1));
-                }
-                continue;
-            }
-            if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
-                continue;
-            }
-            let current_name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let current_name_norm = normalize_locator_text(&current_name);
-            if current_name_norm == target_norm {
-                exact_matches.push(path);
-            } else if !target.contains('.')
-                && path
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().eq_ignore_ascii_case(&target))
-                    .unwrap_or(false)
-            {
-                stem_matches.push(path);
-            } else if current_name_norm.contains(&target_norm) {
-                fuzzy_matches.push(path);
-            }
-        }
-        for child in child_dirs {
-            queue.push_back(child);
+    for entry in report.entries {
+        let path = entry.path;
+        let current_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let current_name_norm = normalize_locator_text(&current_name);
+        if current_name_norm == target_norm {
+            exact_matches.push(path);
+        } else if !target.contains('.')
+            && path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().eq_ignore_ascii_case(&target))
+                .unwrap_or(false)
+        {
+            stem_matches.push(path);
+        } else if current_name_norm.contains(&target_norm) {
+            fuzzy_matches.push(path);
         }
     }
 

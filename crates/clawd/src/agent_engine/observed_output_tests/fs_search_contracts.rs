@@ -293,8 +293,7 @@ fn exact_observation_output_grep_text_direct_answer_returns_matching_lines() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.configure_exact_command_output();
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint =
-        "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
+    route.locator_hint = "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
     route.requires_content_evidence = true;
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
@@ -308,7 +307,7 @@ fn exact_observation_output_grep_text_direct_answer_returns_matching_lines() {
 }
 
 #[test]
-fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
+fn fs_search_grep_text_does_not_reinterpret_content_miss_as_name_match() {
     let value = serde_json::json!({
         "action": "grep_text",
         "query": "abcd",
@@ -324,10 +323,11 @@ fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
         ]
     });
 
-    assert_eq!(
-        super::fs_search_direct_answer_candidate(None, &value, None, false, true, false).as_deref(),
-        Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt\nzz_abcd_backup.log")
-    );
+    let answer = super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+        .expect("content miss should remain a structured no-match result");
+    assert!(answer.contains("reason_code=fs_search_no_match"));
+    assert!(answer.contains("action=grep_text"));
+    assert!(!answer.contains("abcd_report.md"));
 }
 
 #[test]
@@ -365,14 +365,14 @@ fn fs_search_grep_text_observed_body_keeps_line_evidence() {
 }
 
 #[test]
-fn fs_search_grep_text_observed_body_keeps_name_match_fallback() {
+fn fs_search_grep_text_observed_body_ignores_legacy_name_fallback_fields() {
     let body = r#"{"action":"grep_text","query":"abcd","count":0,"match_count":0,"matches":[],"name_count":1,"name_results":["my_abcd.txt"]}"#;
     let observed = super::structured_observed_body("fs_search", body)
-        .expect("grep_text should compact name fallback evidence");
+        .expect("grep_text should compact content evidence");
 
     assert!(observed.contains("grep_text query=abcd"));
-    assert!(observed.contains("name_count=1"));
-    assert!(observed.contains("name_match path=my_abcd.txt"));
+    assert!(!observed.contains("name_count=1"));
+    assert!(!observed.contains("name_match path=my_abcd.txt"));
     assert!(observed.contains("matches: none"));
 }
 
@@ -385,11 +385,11 @@ fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
     let route_result = IntentOutputContract {
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        };
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        ..IntentOutputContract::default()
+    };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
@@ -410,11 +410,11 @@ fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
     let route_result = IntentOutputContract {
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        };
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        ..IntentOutputContract::default()
+    };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
@@ -521,22 +521,22 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             r#"{"action":"find_name","count":1,"results":["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/stem_unique"}"#,
         ));
     let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
-            selection: crate::OutputSelectionContract {
-                list_selector: crate::pipeline_types::OutputListSelector {
-                    target_kind: crate::OutputScalarCountTargetKind::File,
-                    target_kind_specified: true,
-                    ..Default::default()
-                },
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: OutputDeliveryIntent::None,
+        locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
+        selection: crate::OutputSelectionContract {
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
                 ..Default::default()
             },
-        };
+            ..Default::default()
+        },
+    };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
@@ -687,15 +687,15 @@ fn observed_entries_preserve_full_find_name_results_for_synthesis() {
 #[test]
 fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
     let route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Filename,
-            delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "README.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Filename,
+        delivery_intent: OutputDeliveryIntent::None,
+        locator_hint: "README.md".to_string(),
+        selection: crate::OutputSelectionContract::default(),
+    };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
@@ -812,32 +812,29 @@ fn path_inspection_defers_non_bilingual_answer_to_model_synthesis() {
 #[test]
 fn observed_response_style_hint_reflects_output_contract_shape() {
     let mut route_result = IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Filename,
-            delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "README.md".to_string(),
-            selection: crate::OutputSelectionContract::default(),
-        };
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Filename,
+        delivery_intent: OutputDeliveryIntent::None,
+        locator_hint: "README.md".to_string(),
+        selection: crate::OutputSelectionContract::default(),
+    };
     let mut agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("style_policy=evidence_synthesis"));
-    assert!(
-        observed_response_style_hint(Some(&agent_run_context))
-            .contains("response_shape=one_sentence")
-    );
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("response_shape=one_sentence"));
     assert!(observed_response_style_hint(Some(&agent_run_context))
         .contains("include_all_deliverables=true"));
 
     route_result.exact_sentence_count = Some(3);
     agent_run_context.output_contract = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("sentence_count=3"));
+    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("sentence_count=3"));
     route_result.exact_sentence_count = None;
 
     route_result.configure_exact_command_output();
@@ -852,8 +849,7 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
     route_result.response_shape = OutputResponseShape::Scalar;
     route_result.selection.structured_field_selector = Some("value".to_string());
     agent_run_context.output_contract = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("style_policy=scalar"));
+    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("style_policy=scalar"));
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
     route_result.response_shape = OutputResponseShape::OneSentence;
     route_result.requires_content_evidence = false;
@@ -869,8 +865,9 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
         .contains("style_policy=evidence_synthesis"));
     route_result.response_shape = OutputResponseShape::Free;
     agent_run_context.output_contract = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("passthrough=disallowed"));
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains("passthrough=disallowed")
+    );
     assert!(route_disallows_direct_observation_passthrough(
         agent_run_context.output_contract.as_ref().unwrap()
     ));
@@ -890,10 +887,12 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
 
     route_result.response_shape = OutputResponseShape::FileToken;
     agent_run_context.output_contract = Some(route_result);
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("style_policy=file_token"));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("bare_delivery_token=true"));
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains("style_policy=file_token")
+    );
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains("bare_delivery_token=true")
+    );
 }
 
 #[test]
@@ -1039,8 +1038,9 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
     };
     let contract = observed_contract_json(Some(&agent_run_context));
     assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("passthrough=disallowed"));
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains("passthrough=disallowed")
+    );
 }
 
 #[test]
@@ -1055,8 +1055,9 @@ fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
     };
     let contract = observed_contract_json(Some(&agent_run_context));
     assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
-    assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("passthrough=disallowed"));
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains("passthrough=disallowed")
+    );
 }
 
 #[test]

@@ -25,6 +25,7 @@ pub(super) struct ImageEntry {
 pub(super) struct ImageSnapshot {
     pub(super) entries: Vec<ImageEntry>,
     pub(super) scan_truncated: bool,
+    pub(super) stats: super::workspace_traversal::WalkStats,
 }
 
 pub(super) fn default_image_extensions() -> Vec<String> {
@@ -44,7 +45,7 @@ pub(super) fn collect_images(
     snapshot_limit: usize,
 ) -> Result<ImageSnapshot, String> {
     let mut entries = Vec::new();
-    let stats = walk_collect(search_root, scan_limits, &mut |path| {
+    let mut stats = walk_collect(search_root, scan_limits, &mut |path| {
         let extension = path
             .extension()
             .and_then(|value| value.to_str())
@@ -56,12 +57,16 @@ pub(super) fn collect_images(
         entries.len() > snapshot_limit
     })?;
     let result_limit_reached = entries.len() > snapshot_limit;
+    if result_limit_reached {
+        stats.mark_hard_limit();
+    }
     entries.truncate(snapshot_limit);
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     entries.dedup_by(|left, right| left.path == right.path);
     Ok(ImageSnapshot {
         entries,
         scan_truncated: stats.limit_reached || result_limit_reached,
+        stats,
     })
 }
 

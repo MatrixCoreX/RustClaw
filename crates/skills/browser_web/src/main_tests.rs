@@ -1,4 +1,16 @@
 use super::*;
+
+#[test]
+fn browser_node_candidates_include_platform_service_paths_and_path_fallback() {
+    let candidates = browser_node_candidates();
+    assert_eq!(candidates.last(), Some(&PathBuf::from("node")));
+    if cfg!(target_os = "macos") {
+        assert!(candidates.contains(&PathBuf::from("/opt/homebrew/bin/node")));
+        assert!(candidates.contains(&PathBuf::from("/usr/local/bin/node")));
+    } else {
+        assert!(candidates.contains(&PathBuf::from("/usr/bin/node")));
+    }
+}
 use serde_json::json;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

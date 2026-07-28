@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Interactive coding and presentation](09-interactive-coding.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [Task artifact delivery](11-task-artifact-delivery.md)
 
 <!-- ai-learning-navigation:end -->
 
@@ -46,6 +47,21 @@ the public interface.
   tools, skills, and persistence.
 - nginx is optional. It owns TLS/domain termination and static asset delivery,
   then forwards `/v1` and `/webd` to `webd`, never to `clawd`.
+
+## webd listener scope
+
+The dashboard's left entry card controls whether `webd` accepts direct device-IP
+connections. The switch changes only `[webd].listen`, preserves its port and
+other settings, writes the TOML atomically, and schedules a delayed restart so
+the current API response can finish:
+
+- direct access: `0.0.0.0:<port>`
+- local/nginx-only access: `127.0.0.1:<port>`
+
+On a native deployment, nginx and `webd` share the host network namespace, so
+closing direct access does not affect the nginx route. A browser connected to
+`IP:<port>` does disconnect. Container and sidecar deployments must keep the
+listener reachable from their proxy network instead of assuming host loopback.
 - Local channel daemons and `clawcli` may call the loopback core API directly;
   this is machine-local component communication, not a browser entry.
 
@@ -55,11 +71,13 @@ The dashboard reports whether nginx is installed, running, configured for
 RustClaw, and serving a deployed UI. Admin-only actions use the existing
 background workspace-operation state:
 
-- **Enable/Repair nginx** installs or starts nginx, writes the RustClaw site,
-  deploys existing `UI/dist`, validates configuration, and starts or reloads it.
-- **Build and Deploy Latest UI** builds current UI source in a source checkout,
-  or uses packaged UI assets in a Release installation, then deploys to nginx.
-- **Open nginx entry** appears only when process, site, and UI checks all pass.
+- **Enable/Repair nginx** checks the system package version, installs or updates
+  nginx when needed, writes the RustClaw site, deploys existing `UI/dist`,
+  validates configuration, and starts or reloads it. Linux package managers and
+  Homebrew on macOS are handled explicitly.
+- **Disable nginx** stops and disables the service, removes the RustClaw site and
+  its dedicated UI deployment, and warns that a cloud/domain entry will become
+  unreachable. nginx itself is not uninstalled.
 
 Operations return machine status and error keys. Human-facing Chinese or
 English guidance is rendered by the UI rather than parsed by runtime logic.
@@ -79,6 +97,7 @@ English guidance is rendered by the UI rather than parsed by runtime logic.
 cargo test -p webd
 cargo test -p clawd internal_listener_tests::
 cargo test -p clawd workspace_nginx_tests::
+cargo test -p clawd workspace_webd_tests::
 python3 scripts/check_long_files.py
 ```
 

@@ -13,6 +13,7 @@
   `service_control.status` capability; process evidence may supplement that
   result but does not replace service-manager evidence.
 - `port_list` chooses OS-native probes first: Linux uses `ss` with `lsof`/`netstat` fallback; macOS uses `lsof` with `netstat` fallback. The successful response includes `extra.platform` and `extra.command_tool`.
+- `ps` uses the native process snapshot on Linux. On macOS it uses the non-setuid `pgrep` collector supported by the Seatbelt profile and applies the requested filter in Rust; no shell pipeline is used.
 - A wildcard/all-interface bind proves local bind scope only. It does not prove
   Internet/public reachability, firewall policy, NAT exposure, authentication,
   or transport safety; `port_list` reports `internet_reachability=not_observed`

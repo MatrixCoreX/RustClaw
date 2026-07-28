@@ -6,6 +6,14 @@ import sys
 import time
 from ctypes import POINTER, c_int, c_size_t, c_uint8, cast, cdll
 
+from signature_simulator import (
+    SignatureSimulationError,
+    disable_simulation,
+    enable_simulation,
+    run_simulated_action,
+    simulation_enabled,
+)
+
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -327,7 +335,22 @@ def main():
     cfg = None
     lib_path = None
     initialized = False
+    simulator_in_use = action in ("simulation_enable", "simulation_disable")
     try:
+        if action == "simulation_enable":
+            payload = enable_simulation()
+            print(json.dumps({"ok": True, "action": action, **payload}))
+            return 0
+        if action == "simulation_disable":
+            payload = disable_simulation()
+            print(json.dumps({"ok": True, "action": action, **payload}))
+            return 0
+        if simulation_enabled():
+            simulator_in_use = True
+            payload = run_simulated_action(action, action_arg)
+            print(json.dumps({"ok": True, "action": action, **payload}))
+            return 0
+
         cfg, lib_path = build_config()
         status = atcab_init(cfg)
         if status != Status.ATCA_SUCCESS:
@@ -359,11 +382,16 @@ def main():
         print(json.dumps({"ok": True, "action": action, **payload}))
         return 0
     except Exception as exc:
-        error_code = (
-            "cryptoauthlib_unavailable"
-            if _CRYPTOAUTHLIB_IMPORT_ERROR is not None
-            else "signature_chip_unavailable"
-        )
+        if isinstance(exc, SignatureSimulationError):
+            error_code = exc.error_code
+        elif simulator_in_use:
+            error_code = "signature_simulator_error"
+        else:
+            error_code = (
+                "cryptoauthlib_unavailable"
+                if _CRYPTOAUTHLIB_IMPORT_ERROR is not None
+                else "signature_chip_unavailable"
+            )
         print(json.dumps({"ok": False, "error_code": error_code, "error": str(exc)}))
         return 1
     finally:

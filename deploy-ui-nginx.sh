@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 将已构建的 UI/dist 复制到 nginx 目录并刷新 nginx 配置。
 # 参数：--deploy / --copy 仅作兼容保留；脚本默认直接部署现有产物。
-# 可选：--build 先编译 UI；--path /path/to/nginx/root 指定 nginx 站点根。
+# 可选：--build 先编译 UI；--upgrade-nginx 检查并升级 nginx；
+# --path /path/to/nginx/root 指定 nginx 站点根。
 
 set -euo pipefail
 
@@ -30,6 +31,7 @@ NGINX_CONF_DIR=""
 NGINX_SITE_LINK=""
 NGINX_ROOT="$NGINX_ROOT_DEFAULT"
 BUILD_UI=0
+UPGRADE_NGINX=0
 
 path_writable_or_creatable() {
   local target="$1"
@@ -46,10 +48,11 @@ path_writable_or_creatable() {
 }
 
 usage() {
-  echo "Usage: $0 [--deploy|--copy] [--build] [--path DIR]"
+  echo "Usage: $0 [--deploy|--copy] [--build] [--upgrade-nginx] [--path DIR]"
   echo "  --deploy        Compatibility flag; deploy existing UI/dist."
   echo "  --copy          Same as --deploy."
   echo "  --build         Build UI before deploy."
+  echo "  --upgrade-nginx Refresh package metadata and install the latest repository nginx."
   echo "  --path DIR      Nginx site root (default: $NGINX_ROOT_DEFAULT)."
   echo "  (no args)       Copy existing UI/dist to nginx root and configure reverse proxy (default)."
   echo "  host platform   Auto-detected as ${HOST_OS}/${HOST_ARCH} ${HOST_TARGET:+($HOST_TARGET)}."
@@ -413,6 +416,7 @@ nginx_ui_config_matches() {
   grep -Fq "location ^~ /webd/" "$conf_path" || return 1
   grep -Fq "proxy_pass $proxy_upstream;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
+  grep -Fq 'add_header Cache-Control "no-store, no-cache, must-revalidate" always;' "$conf_path" || return 1
   grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
 }
@@ -433,25 +437,40 @@ ensure_deployed_ui_readable() {
 }
 
 ensure_nginx() {
-  if nginx_available; then
+  if nginx_available && [[ "$UPGRADE_NGINX" != "1" ]]; then
     return 0
   fi
 
-  echo "nginx not found. Attempting to install nginx..."
+  if nginx_available; then
+    echo "Checking the installed nginx against the latest package repository version..."
+  else
+    echo "nginx not found. Attempting to install nginx..."
+  fi
   if command -v brew >/dev/null 2>&1; then
-    brew install nginx
+    if nginx_available; then
+      brew update
+      if brew outdated --quiet nginx | grep -qx nginx; then
+        brew upgrade nginx
+      else
+        echo "nginx is already current in Homebrew."
+      fi
+    else
+      brew install nginx
+    fi
   elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -qq && sudo apt-get install -y nginx
   elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper --non-interactive install nginx
+    sudo zypper --non-interactive refresh
+    sudo zypper --non-interactive install --force-resolution nginx
   elif command -v pacman >/dev/null 2>&1; then
     sudo pacman -Sy --noconfirm nginx
   elif command -v apk >/dev/null 2>&1; then
-    sudo apk add nginx
+    sudo apk update
+    sudo apk add --upgrade nginx
   elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y nginx
+    sudo dnf upgrade --refresh -y nginx || sudo dnf install -y nginx
   elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y nginx
+    sudo yum update -y nginx || sudo yum install -y nginx
   else
     echo "Unsupported package manager. Please install nginx manually, then rerun."
     exit 1
@@ -502,6 +521,12 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
     }
 
     location / {
@@ -616,6 +641,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build)
       BUILD_UI=1
+      shift
+      ;;
+    --upgrade-nginx)
+      UPGRADE_NGINX=1
       shift
       ;;
     --path)

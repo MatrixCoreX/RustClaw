@@ -6,7 +6,7 @@
 
 [webd]
 enabled = true
-listen = "0.0.0.0:8788"
+listen = "127.0.0.1:8788"
 upstream = "http://127.0.0.1:8787"
 connect_timeout_seconds = 10
 # 0 = 使用主配置 [server].request_timeout_seconds

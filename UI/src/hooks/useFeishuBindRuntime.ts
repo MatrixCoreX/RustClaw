@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import {
   fetchFeishuBindSession,
   isFeishuBindTerminalStatus,
@@ -27,6 +28,7 @@ export function useFeishuBindRuntime({
   onConfigRefresh,
   onHealthRefresh,
 }: UseFeishuBindRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const [feishuBindLoading, setFeishuBindLoading] = useState(false);
   const [feishuBindError, setFeishuBindError] = useState<string | null>(null);
   const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
@@ -73,12 +75,15 @@ export function useFeishuBindRuntime({
   };
 
   const resetFeishuSetup = async () => {
-    const confirmed = window.confirm(
-      t(
+    const confirmed = await showConfirm({
+      title: t("重置飞书接入", "Reset Feishu setup"),
+      message: t(
         "确认重置飞书接入吗？这会清空飞书配置里的关键凭据，并删除当前 Key 的飞书绑定状态与待绑定会话。",
         "Reset Feishu setup? This clears the Feishu credentials and removes the current key's Feishu bindings and pending setup sessions.",
       ),
-    );
+      confirmLabel: t("重置", "Reset"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setFeishuResetLoading(true);
     setFeishuBindError(null);

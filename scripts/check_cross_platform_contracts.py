@@ -113,6 +113,7 @@ REQUIRED_FILE_TOKENS = {
     ),
     "scripts/nl_tests/run_manual_test.sh": (
         'source "${ROOT_DIR}/scripts/shell_compat.sh"',
+        "configure_platform_command_path",
         "file_mtime_epoch",
         "latest_tree_mtime_epoch",
     ),

@@ -65,16 +65,12 @@ pub(crate) enum DirectoryLocatorExecutionResolution {
 pub(crate) fn resolve_directory_locator_for_execution(
     raw_hint: &str,
     default_locator_search_dir: &Path,
-    max_depth: usize,
-    max_scan_entries: usize,
 ) -> Option<DirectoryLocatorExecutionResolution> {
     let request = locator::directory_lookup_input_from_hint(raw_hint)?;
     match directory_lookup::resolve_directory_target(
         request,
         Path::new("/"),
         default_locator_search_dir,
-        max_depth,
-        max_scan_entries,
     ) {
         DirectoryLookupResolution::Resolved(path) => {
             Some(DirectoryLocatorExecutionResolution::Resolved(path))
@@ -169,15 +165,11 @@ fn resolve_file_delivery_target(
     user_request: &str,
     system_root: &std::path::Path,
     project_root: &std::path::Path,
-    scan_max_depth: usize,
-    scan_max_files: usize,
 ) -> Option<FileDeliveryTargetResolution> {
     file_delivery::resolve_file_delivery_target_from_request_for_tests(
         user_request,
         system_root,
         project_root,
-        scan_max_depth,
-        scan_max_files,
     )
 }
 

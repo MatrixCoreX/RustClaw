@@ -49,6 +49,31 @@ fn menu_commands_filter_by_channel() {
 }
 
 #[test]
+fn default_telegram_commands_only_expose_transport_controls() {
+    let catalog = ChannelCommandCatalog::default();
+    let menu_names = catalog
+        .menu_commands_for_channel("telegram")
+        .into_iter()
+        .map(|command| command.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(menu_names, vec!["help", "status", "cancel", "voicemode"]);
+
+    for removed in [
+        "/ask hello",
+        "/run weather {}",
+        "/skills",
+        "/sendfile report.txt",
+        "/rustclaw show",
+        "/cryptoapi show",
+    ] {
+        assert!(
+            catalog.match_command(removed, "telegram").is_none(),
+            "removed Telegram command unexpectedly matched: {removed}"
+        );
+    }
+}
+
+#[test]
 fn duplicate_alias_on_overlapping_channels_is_rejected() {
     let raw = r#"
 [[commands]]

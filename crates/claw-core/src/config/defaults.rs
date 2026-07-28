@@ -469,10 +469,6 @@ pub(super) fn default_telegram_language() -> String {
     "zh-CN".to_string()
 }
 
-pub(super) fn default_telegram_auto_vision_on_image_only() -> bool {
-    true
-}
-
 pub(super) fn default_telegram_image_inbox_dir() -> String {
     "data/telegramd/image".to_string()
 }
@@ -493,28 +489,12 @@ pub(super) fn default_telegram_voice_reply_mode() -> String {
     "voice".to_string()
 }
 
-pub(super) fn default_telegram_voice_mode_nl_intent_enabled() -> bool {
-    true
-}
-
 pub(super) fn default_telegram_max_audio_input_bytes() -> usize {
     25 * 1024 * 1024
 }
 
 pub(super) fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
     15
-}
-
-pub(super) fn default_sendfile_admin_only() -> bool {
-    false
-}
-
-pub(super) fn default_sendfile_full_access() -> bool {
-    true
-}
-
-pub(super) fn default_sendfile_allowed_dirs() -> Vec<String> {
-    vec!["image/download".to_string(), "document".to_string()]
 }
 
 pub(super) fn default_tool_cmd_timeout_seconds() -> u64 {
@@ -587,14 +567,6 @@ pub(super) fn default_schedule_i18n_dir() -> String {
 
 pub(super) fn default_routing_default_locator_search_dir() -> String {
     ".".to_string()
-}
-
-pub(super) fn default_routing_locator_scan_max_depth() -> usize {
-    2
-}
-
-pub(super) fn default_routing_locator_scan_max_files() -> usize {
-    800
 }
 
 pub(super) fn default_persona_profile() -> String {

@@ -15,7 +15,6 @@ crates/claw-core/src/channel_commands.rs	skill channel command `{}` is missing s
 crates/claw-core/src/channel_i18n.rs	time before unix epoch	.expect("time before unix epoch")
 crates/claw-core/src/config.rs	不主动设置	/// 全部 `Option`，缺省即"不主动设置"，**完全向后兼容**。
 crates/claw-core/src/config.rs	硬编码默认值	/// 完全一致——目的是把以前散落在 provider 实现里的"硬编码默认值"（OpenAI compat
-crates/claw-core/src/hard_rules/voice_mode.rs	voice_mode_intent schema must be valid JSON	.expect("voice_mode_intent schema must be valid JSON")
 crates/claw-core/src/secrets.rs	`<usage>_<vendor>_api_key`	/// §P4.4 E3.a：把 "`<usage>_<vendor>_api_key`" 命名规则集中成函数，
 crates/claw-core/src/secrets.rs	backend error while looking up `{name}`: {source}	#[error("backend error while looking up `{name}`: {source}")]
 crates/claw-core/src/secrets.rs	env var `{var}` is not valid UTF-8	format!("env var `{var}` is not valid UTF-8"),
@@ -386,6 +385,9 @@ crates/clawd/src/fixture_replay_e2e.rs	自家人	///     allowlist 里的"自家
 crates/clawd/src/fixture_replay_e2e.rs	这是 systemd 文件…	///     "这是 systemd 文件…"段落式描述）。
 crates/clawd/src/followup_frame.rs	acquire db for followup frame clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for followup frame clear: {err}"))?;
 crates/clawd/src/followup_frame.rs	acquire db for followup frame persist: {err}	.map_err(|err| anyhow::anyhow!("acquire db for followup frame persist: {err}"))?;
+crates/clawd/src/http/task_artifacts.rs	task artifact auth lookup failed: {error}	tracing::error!("task artifact auth lookup failed: {error}");
+crates/clawd/src/http/task_artifacts.rs	task artifact response build failed: {error}	tracing::error!("task artifact response build failed: {error}");
+crates/clawd/src/http/task_artifacts.rs	task artifact task lookup failed: {error}	tracing::error!("task artifact task lookup failed: {error}");
 crates/clawd/src/http/task_events.rs	no-cache, no-transform	HeaderValue::from_static("no-cache, no-transform"),
 crates/clawd/src/http/task_events.rs	read task for event artifact failed: {}	tracing::error!("read task for event artifact failed: {}", error);
 crates/clawd/src/http/task_events.rs	read task for event stream failed: {}	tracing::error!("read task for event stream failed: {}", error);
@@ -628,6 +630,9 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	systemctl not found for syst
 crates/clawd/src/http/ui_routes/workspace_update.rs	systemd-run failed to schedule restart for {service_unit}	"systemd-run failed to schedule restart for {service_unit}"
 crates/clawd/src/http/ui_routes/workspace_update.rs	workspace update canceled by user	guard.error = Some("workspace update canceled by user".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	.map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
+crates/clawd/src/http/ui_routes/workspace_webd.rs	failed to schedule webd restart and restore listener config	"failed to schedule webd restart and restore listener config"
+crates/clawd/src/http/ui_routes/workspace_webd.rs	failed to schedule webd restart: {error}	.map_err(|error| format!("failed to schedule webd restart: {error}"))
+crates/clawd/src/http/ui_routes/workspace_webd.rs	webd config has no parent	std::io::Error::new(std::io::ErrorKind::InvalidInput, "webd config has no parent")
 crates/clawd/src/llm_gateway.rs	HTTP 请求总量	/// （流程异常放大），不是挡"HTTP 请求总量"（那是 retry/circuit-breaker 的职责）。
 crates/clawd/src/llm_gateway.rs	No available LLM provider configured	return Err("No available LLM provider configured".to_string());
 crates/clawd/src/llm_gateway.rs	Provider override not found in config: {}	warn!("Provider override not found in config: {}", name);
@@ -960,6 +965,8 @@ crates/clawd/src/skills/runner.rs	read skill-runner stdout failed: {err}	Ok(Err(
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)	"skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue internal LLM token: {err}	"skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}	"skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}",
+crates/clawd/src/skills/runner.rs	skill storage database path has no file name	.ok_or_else(|| "skill storage database path has no file name".to_string())?;
+crates/clawd/src/skills/runner.rs	skill storage sandbox target unavailable	return Err("skill storage sandbox target unavailable".to_string());
 crates/clawd/src/skills/runner.rs	skill-runner exit wait timeout	return Err("skill-runner exit wait timeout".to_string());
 crates/clawd/src/skills/runner.rs	skill-runner exit wait timeout: {detail}	return Err(format!("skill-runner exit wait timeout: {detail}"));
 crates/clawd/src/skills/runner.rs	wait skill-runner failed: {err}	return Err(format!("wait skill-runner failed: {err}"));
@@ -1028,6 +1035,7 @@ crates/clawd/src/worker/run_skill_mutation.rs	run-skill:{}:mutation-reconciliati
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1	"DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1	"DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	Schedule worker tick failed: {}	error!("Schedule worker tick failed: {}", err);
+crates/clawd/src/worker/runtime_support/background_workers.rs	cleanup task delivery artifacts failed: {error}	warn!("cleanup task delivery artifacts failed: {error}");
 crates/clawd/src/worker/runtime_support/background_workers.rs	refresh long-term memory summary failed: {err}	warn!("refresh long-term memory summary failed: {err}");
 crates/clawd/src/worker/runtime_support/background_workers.rs	rotate model io log failed: {err}	tracing::warn!("rotate model io log failed: {err}");
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	running recovery lock poisoned	.map_err(|_| anyhow!("running recovery lock poisoned"))?;
@@ -1049,6 +1057,9 @@ crates/feishud/src/main.rs	feishud: task submit no task_id	warn!("feishud: task 
 crates/feishud/src/main.rs	register_p2_im_message_receive_v1_raw: {}	.map_err(|e| anyhow::anyhow!("register_p2_im_message_receive_v1_raw: {}", e))?
 crates/feishud/src/main.rs	resolve response parse failed: {}	.map_err(|e| format!("resolve response parse failed: {}", e))?;
 crates/feishud/src/main.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())?;
+crates/fs-discovery/src/types.rs	path is outside workspace	#[error("path is outside workspace")]
+crates/fs-discovery/src/types.rs	path with '..' is not allowed	#[error("path with '..' is not allowed")]
+crates/fs-discovery/src/types.rs	search root is not a file or directory	#[error("search root is not a file or directory")]
 crates/larkd/src/main.rs	bind response parse failed: {}	.map_err(|e| format!("bind response parse failed: {}", e))?;
 crates/larkd/src/main.rs	download body read failed: {}	.map_err(|e| format!("download body read failed: {}", e))
 crates/larkd/src/main.rs	larkd long_connection mode requires app_id and app_secret	anyhow::bail!("larkd long_connection mode requires app_id and app_secret");
@@ -1068,6 +1079,8 @@ crates/larkd/src/main.rs	resolve response parse failed: {}	.map_err(|e| format!(
 crates/larkd/src/main.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())?;
 crates/skill-runner/src/main.rs	child output exceeds {} bytes	"child output exceeds {} bytes",
 crates/skill-runner/src/main.rs	child stdout is empty	"child stdout is empty",
+crates/skill-runner/src/main.rs	declared skill storage is not a directory	return Err("declared skill storage is not a directory".to_string());
+crates/skill-runner/src/main.rs	declared skill storage unavailable: {error}	.map_err(|error| format!("declared skill storage unavailable: {error}"))?;
 crates/skill-runner/src/main.rs	http_json endpoint is missing from the verified launch spec	"http_json endpoint is missing from the verified launch spec",
 crates/skill-runner/src/main.rs	http_json request returned status {status}	format!("http_json request returned status {status}"),
 crates/skill-runner/src/main.rs	http_json response is oversized	ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
@@ -1112,7 +1125,7 @@ crates/skill-sdk/src/receipt.rs	only http_json launch may declare remote_endpoin
 crates/skill-sdk/src/runtime.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
 crates/skill-sdk/src/runtime.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
 crates/skill-sdk/src/sandbox.rs	(allow file-write* (subpath "{escaped}"))\n	profile.push_str(&format!("(allow file-write* (subpath \\"{escaped}\\"))\\n"));
-crates/skill-sdk/src/sandbox.rs	(version 1)\n(deny default)\n(import "system.sb")\n(allow process*)\n(allow file-read*)\n	"(version 1)\\n(deny default)\\n(import \\"system.sb\\")\\n(allow process*)\\n(allow file-read*)\\n",
+crates/skill-sdk/src/sandbox.rs	(version 1)\n(deny default)\n(import "system.sb")\n(allow process*)\n(allow file-read*)\n(allow mach-lookup (global-name "com.apple.sysmond"))\n	"(version 1)\\n(deny default)\\n(import \\"system.sb\\")\\n(allow process*)\\n(allow file-read*)\\n(allow mach-lookup (global-name \\"com.apple.sysmond\\"))\\n",
 crates/skill-sdk/src/sandbox.rs	macOS sandbox-exec not found	"macOS sandbox-exec not found",
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN OPENSSH PRIVATE KEY-----	|| upper.contains("-----BEGIN OPENSSH PRIVATE KEY-----")
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN RSA PRIVATE KEY-----	|| upper.contains("-----BEGIN RSA PRIVATE KEY-----")
@@ -1416,19 +1429,8 @@ crates/skills/extension_manager/src/main.rs	{path}.{field}: missing required fie
 crates/skills/extension_manager/src/main.rs	{path}: schema missing properties	.ok_or_else(|| format!("{path}: schema missing properties"))?;
 crates/skills/fs_search/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/fs_search/src/main.rs	unsupported action; use find_name|find_ext|grep_text|find_images	"unsupported action; use find_name|find_ext|grep_text|find_images".to_string(),
-crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	dir entry failed: {err}	let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	entry type failed: {err}	.map_err(|err| format!("entry type failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	path is outside workspace	Err("path is outside workspace".to_string())
-crates/skills/fs_search/src/workspace_traversal.rs	path resolution failed: {err}	.map_err(|err| format!("path resolution failed: {err}"))?;
+crates/skills/fs_search/src/workspace_traversal.rs	path resolution failed: {io_error}	.map_err(|io_error| format!("path resolution failed: {io_error}"));
 crates/skills/fs_search/src/workspace_traversal.rs	path with '..' is not allowed	return Err("path with '..' is not allowed".to_string());
-crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	read_dir failed: {err}	let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-crates/skills/fs_search/src/workspace_traversal.rs	workspace resolution failed: {err}	.map_err(|err| format!("workspace resolution failed: {err}"))?;
 crates/skills/git_basic/src/main.rs	args must be object	"args must be object".to_string(),
 crates/skills/git_basic/src/main.rs	current directory is not a git repository. Please use git_basic in a git repo.	"current directory is not a git repository. Please use git_basic in a git repo."
 crates/skills/git_basic/src/main.rs	run git failed: {error}	"run git failed: {error}".to_string(),
@@ -1964,10 +1966,12 @@ crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	let mut lines = 
 crates/skills/process_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/process_basic/src/main.rs	create service logs dir failed: {err}	eprintln!("create service logs dir failed: {err}");
 crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	lines.push(format!("no matching processes for filter: {filter}"));
+crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	lines.push(format!("no matching processes for filter: {filter}"));
 crates/skills/process_basic/src/main.rs	no matching rows for filter: {filter}	kept.push(format!("no matching rows for filter: {filter}"));
 crates/skills/process_basic/src/main.rs	open service log failed: {err}	eprintln!("open service log failed: {err}");
 crates/skills/process_basic/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/process_basic/src/main.rs	read file failed: {err}	std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
+crates/skills/process_basic/src/main.rs	run pgrep failed: {err}	.map_err(|err| format!("run pgrep failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	run ps failed: {err}	.map_err(|err| format!("run ps failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	run {bin} failed: {err}	.map_err(|err| format!("run {bin} failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	unsupported action; use ps|port_list|kill|tail_log	_ => Err("unsupported action; use ps|port_list|kill|tail_log".to_string()),
@@ -2061,7 +2065,6 @@ crates/skills/system_basic/src/main.rs	workspace_glance requires a directory: {}
 crates/skills/system_basic/src/main.rs	{operation} failed for {path_text}: {err}	Self::new(kind, format!("{operation} failed for {path_text}: {err}")).with_extra(json!({
 crates/skills/system_basic/src/path_helpers.rs	file too large to compare content directly: {} bytes exceeds {}	"file too large to compare content directly: {} bytes exceeds {}",
 crates/skills/system_basic/src/path_helpers.rs	path is outside workspace	return Err(SkillError::path_denied("path is outside workspace"));
-crates/skills/system_basic/src/path_helpers.rs	path search requires a directory: {}	"path search requires a directory: {}",
 crates/skills/system_basic/src/path_helpers.rs	path with '..' is not allowed	return Err(SkillError::path_denied("path with '..' is not allowed"));
 crates/skills/system_basic/src/platform_helpers.rs	PID COMM %CPU RSS_KB	let mut out = vec!["PID COMM %CPU RSS_KB".to_string()];
 crates/skills/system_basic/src/platform_helpers.rs	directory traversal requires a directory: {}	"directory traversal requires a directory: {}",
@@ -2163,25 +2166,10 @@ crates/skills/web_search_extract/src/main.rs	{field} items must be strings	Searc
 crates/skills/web_search_extract/src/main.rs	{field} must be array	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be array")))?;
 crates/skills/web_search_extract/src/main.rs	{field} must be integer	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be integer")))?;
 crates/telegramd/src/binding_voice.rs	bind telegram identity failed: {}	"bind telegram identity failed: {}",
-crates/telegramd/src/binding_voice.rs	decode direct classifier response failed	.context("decode direct classifier response failed")?;
-crates/telegramd/src/binding_voice.rs	direct classifier http {status}: {body}	return Err(anyhow!("direct classifier http {status}: {body}"));
-crates/telegramd/src/binding_voice.rs	direct classifier returned empty text	return Err(anyhow!("direct classifier returned empty text"));
 crates/telegramd/src/binding_voice.rs	pending resume lock poisoned	.map_err(|_| anyhow!("pending resume lock poisoned"))?;
-crates/telegramd/src/binding_voice.rs	read crypto credential status failed: {}	"read crypto credential status failed: {}",
-crates/telegramd/src/binding_voice.rs	request direct classifier failed	.context("request direct classifier failed")?;
 crates/telegramd/src/binding_voice.rs	resolve telegram identity failed: {}	"resolve telegram identity failed: {}",
 crates/telegramd/src/binding_voice.rs	send key bind required prompt failed	.context("send key bind required prompt failed")?;
 crates/telegramd/src/binding_voice.rs	send resume submit error failed	.context("send resume submit error failed")?;
-crates/telegramd/src/binding_voice.rs	upsert crypto credential failed: {}	"upsert crypto credential failed: {}",
-crates/telegramd/src/binding_voice.rs	upsert crypto credential missing data	.ok_or_else(|| anyhow!("upsert crypto credential missing data"))
-crates/telegramd/src/binding_voice.rs	voice mode direct classify failed: {err}	warn!("voice mode direct classify failed: {err}");
-crates/telegramd/src/commands.rs	REPLACE_ME_{}_API_KEY	"REPLACE_ME_{}_API_KEY",
-crates/telegramd/src/commands.rs	config root is not a table	.ok_or_else(|| anyhow!("config root is not a table"))?;
-crates/telegramd/src/commands.rs	crypto config root is not a table	.ok_or_else(|| anyhow!("crypto config root is not a table"))?;
-crates/telegramd/src/commands.rs	crypto node is not a table	.ok_or_else(|| anyhow!("crypto node is not a table"))?;
-crates/telegramd/src/commands.rs	llm is not a table	.ok_or_else(|| anyhow!("llm is not a table"))?;
-crates/telegramd/src/commands.rs	models is not an array	.ok_or_else(|| anyhow!("models is not an array"))?;
-crates/telegramd/src/commands.rs	vendor section is not a table	.ok_or_else(|| anyhow!("vendor section is not a table"))?;
 crates/telegramd/src/commands.rs	voice mode map lock poisoned	.map_err(|_| anyhow!("voice mode map lock poisoned"))?;
 crates/telegramd/src/commands.rs	voice mode map lock poisoned	.map_err(|_| anyhow!("voice mode map lock poisoned"))?;
 crates/telegramd/src/main.rs	build reqwest client failed	.context("build reqwest client failed")?;
@@ -2192,38 +2180,20 @@ crates/telegramd/src/main.rs	read setChatMenuButton response failed	.context("re
 crates/telegramd/src/main.rs	read setMyCommands response failed	.context("read setMyCommands response failed")?;
 crates/telegramd/src/main.rs	setChatMenuButton returned not ok: {}	return Err(anyhow!("setChatMenuButton returned not ok: {}", menu_body));
 crates/telegramd/src/main.rs	setMyCommands returned not ok: {}	return Err(anyhow!("setMyCommands returned not ok: {}", cmd_body));
-crates/telegramd/src/media_handlers.rs	audio_synthesize poll failed: {err}	warn!("audio_synthesize poll failed: {err}");
 crates/telegramd/src/media_handlers.rs	create telegram media inbox dir failed	.context("create telegram media inbox dir failed")?;
 crates/telegramd/src/media_handlers.rs	download telegram file request failed	.context("download telegram file request failed")?
-crates/telegramd/src/media_handlers.rs	poll ask result for transcript failed	.context("poll ask result for transcript failed")?;
-crates/telegramd/src/media_handlers.rs	poll audio_transcribe result failed	.context("poll audio_transcribe result failed")?;
 crates/telegramd/src/media_handlers.rs	read telegram file bytes failed	.context("read telegram file bytes failed")?;
+crates/telegramd/src/media_handlers.rs	send attachment task submit error failed	.context("send attachment task submit error failed")?;
 crates/telegramd/src/media_handlers.rs	send audio too large message failed	.context("send audio too large message failed")?;
-crates/telegramd/src/media_handlers.rs	send empty transcript message failed	.context("send empty transcript message failed")?;
-crates/telegramd/src/media_handlers.rs	send file saved path message failed	.context("send file saved path message failed")?;
-crates/telegramd/src/media_handlers.rs	send image saved path message failed	.context("send image saved path message failed")?;
-crates/telegramd/src/media_handlers.rs	send image vision submit error failed	.context("send image vision submit error failed")?;
-crates/telegramd/src/media_handlers.rs	send queue full image message failed	.context("send queue full image message failed")?;
-crates/telegramd/src/media_handlers.rs	send video saved path message failed	.context("send video saved path message failed")?;
-crates/telegramd/src/media_handlers.rs	submit ask task for transcript failed	.context("submit ask task for transcript failed")?;
-crates/telegramd/src/media_handlers.rs	submit audio_synthesize failed: {err}	warn!("submit audio_synthesize failed: {err}");
-crates/telegramd/src/media_handlers.rs	submit audio_transcribe task failed	.context("submit audio_transcribe task failed")?;
 crates/telegramd/src/media_handlers.rs	telegram get_file failed	.context("telegram get_file failed")?;
 crates/telegramd/src/media_handlers.rs	write downloaded file failed	.context("write downloaded file failed")?;
-crates/telegramd/src/message_handler.rs	join rustclaw config task failed: {err}	.map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
+crates/telegramd/src/message_handler.rs	send admin command rejection failed	.context("send admin command rejection failed")?;
 crates/telegramd/src/message_handler.rs	send ask error failed	.context("send ask error failed")?;
 crates/telegramd/src/message_handler.rs	send empty prompt reply failed	.context("send empty prompt reply failed")?;
 crates/telegramd/src/message_handler.rs	send invalid key failed	.context("send invalid key failed")?;
 crates/telegramd/src/message_handler.rs	send key bind success failed	.context("send key bind success failed")?;
-crates/telegramd/src/message_handler.rs	send nl voicemode reply failed	.context("send nl voicemode reply failed")?;
-crates/telegramd/src/message_handler.rs	send nl voicemode unauthorized failed	.context("send nl voicemode unauthorized failed")?;
-crates/telegramd/src/message_handler.rs	send pending image edit submit error failed	.context("send pending image edit submit error failed")?;
-crates/telegramd/src/message_handler.rs	send queue full ask message failed	.context("send queue full ask message failed")?;
-crates/telegramd/src/message_handler.rs	send queue full image-edit message failed	.context("send queue full image-edit message failed")?;
-crates/telegramd/src/message_handler.rs	send queue full message failed	.context("send queue full message failed")?;
 crates/telegramd/src/task_delivery.rs	cancel http {status}: {body}	return Err(anyhow!("cancel http {status}: {body}",));
 crates/telegramd/src/task_delivery.rs	decode cancel response failed	resp.json().await.context("decode cancel response failed")?;
-crates/telegramd/src/task_delivery.rs	decode health response failed	resp.json().await.context("decode health response failed")?;
 crates/telegramd/src/task_delivery.rs	decode health response failed	resp.json().await.context("decode health response failed")?;
 crates/telegramd/src/task_delivery.rs	decode query task response failed	.context("decode query task response failed")?;
 crates/telegramd/src/task_delivery.rs	decode submit task response failed	.context("decode submit task response failed")?;
@@ -2232,12 +2202,10 @@ crates/telegramd/src/task_delivery.rs	request cancel tasks failed	.context("requ
 crates/telegramd/src/task_delivery.rs	send subtask code block failed	.context("send subtask code block failed")?;
 crates/telegramd/src/task_delivery.rs	send subtask header failed	.context("send subtask header failed")?;
 crates/telegramd/src/task_delivery.rs	submit task request failed	.context("submit task request failed")?;
+crates/telegramd/src/task_delivery.rs	telegram voice reply synthesis failed: {err}	warn!("telegram voice reply synthesis failed: {err}");
 crates/telegramd/src/task_delivery.rs	write subtask temp file failed: {}	.with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
 crates/telegramd/src/task_delivery.rs	{header}\nFILE:{file_path}	let answer_with_file = format!("{header}\\nFILE:{file_path}");
 crates/telegramd/src/telegram_formatting.rs	fallback send voice as document failed	.context("fallback send voice as document failed")?;
-crates/telegramd/src/telegram_formatting.rs	path is outside allowed dirs: {}	"path is outside allowed dirs: {}",
-crates/telegramd/src/telegram_formatting.rs	path with '..' is not allowed	return Err("path with '..' is not allowed".to_string());
-crates/telegramd/src/telegram_formatting.rs	read current_dir failed: {err}	let cwd = std::env::current_dir().map_err(|err| format!("read current_dir failed: {err}"))?;
 crates/telegramd/src/telegram_formatting.rs	send document file failed	.context("send document file failed")?;
 crates/telegramd/src/telegram_formatting.rs	send file preface text failed	.context("send file preface text failed")?
 crates/telegramd/src/telegram_formatting.rs	send file preface text with buttons failed	.context("send file preface text with buttons failed")?

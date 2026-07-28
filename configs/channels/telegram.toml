@@ -26,8 +26,6 @@ video_inbox_dir = "data/telegramd/video"
 file_inbox_dir = "data/telegramd/file"
 # 音频落盘根目录
 audio_inbox_dir = "data/telegramd/audio"
-# 仅当收到纯图片消息时自动触发视觉能力
-auto_vision_on_image_only = false
 # Telegram Bot Token
 bot_token = ""
 # Primary bot 对应哪个 agent；留空时默认 main
@@ -47,25 +45,11 @@ language = "zh-CN"
 task_delivery_timeout_seconds = 600
 # 最大音频输入字节数
 max_audio_input_bytes = 26214400
-# 是否启用“自然语言切换语音模式”
-voice_mode_nl_intent_enabled = false
 # 默认语音回复模式：voice / text
 voice_reply_mode = "voice"
 
-[telegram.sendfile]
-# 是否仅管理员可用 /sendfile
-admin_only = false
-# /sendfile 允许访问的目录列表
-allowed_dirs = [
-    "image/download",
-    "document",
-]
-# 是否允许完整文件系统访问
-full_access = true
-
 [telegram.voice_reply_mode_by_chat]
-# 按 chat_id 覆盖语音回复模式，例如 text / voice
-1985996990 = "text"
+# `/voicemode` 会在这里持久化按 chat_id 设置的 text / voice / both 覆盖。
 
 # 兼容入口（与 [telegram] 共用同一个客户端运行时）。
 [telegram_bot]

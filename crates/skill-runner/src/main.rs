@@ -11,14 +11,13 @@
 //! - 单进程串行处理多次请求语义保持不变（每条 stdin 行 = 一次请求）。
 
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rustclaw_skill_sdk::{
     prepare_sandboxed_command, validate_response_line, LauncherKind, ProtocolResponse,
     ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec, SkillRuntimeResolver,
+    PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -480,21 +479,26 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
         .working_directory
         .as_deref()
         .ok_or_else(|| "installed launch working directory is missing".to_string())?;
-    let network = if launch.runtime_network {
-        SandboxNetwork::Allow
+    let std_command = if inherited_parent_sandbox_backend().is_some() {
+        let mut command = std::process::Command::new(&launch.program);
+        command.current_dir(working_directory);
+        command
     } else {
-        SandboxNetwork::Deny
-    };
-    let writable_paths = installed_writable_paths(launch)?;
-    let prepared =
+        let network = if launch.runtime_network {
+            SandboxNetwork::Allow
+        } else {
+            SandboxNetwork::Deny
+        };
+        let writable_paths = installed_writable_paths(launch)?;
         prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
             .map_err(|error| {
                 format!(
                     "sandbox failed closed: code={} detail={}",
                     error.code, error.detail
                 )
-            })?;
-    let std_command = prepared.command;
+            })?
+            .command
+    };
     let mut command = Command::new(std_command.get_program());
     command.args(std_command.get_args());
     if let Some(directory) = std_command.get_current_dir() {
@@ -511,19 +515,53 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
     Ok(command)
 }
 
+fn inherited_parent_sandbox_backend() -> Option<&'static str> {
+    let value = std::env::var(PARENT_SANDBOX_BACKEND_ENV).ok()?;
+    inherited_parent_sandbox_backend_token(&value)
+}
+
+fn inherited_parent_sandbox_backend_token(value: &str) -> Option<&'static str> {
+    match value {
+        "bubblewrap" => Some("bubblewrap"),
+        "macos_seatbelt" => Some("macos_seatbelt"),
+        _ => None,
+    }
+}
+
 fn installed_writable_paths(launch: &ChildLaunch) -> Result<Vec<PathBuf>, String> {
-    if launch.sandbox_profile != SandboxProfile::WorkspaceWrite {
-        return Ok(Vec::new());
+    let workspace = std::env::var_os("WORKSPACE_ROOT").map(PathBuf::from);
+    let declared_storage =
+        std::env::var_os(SKILL_STORAGE_WRITABLE_DIRECTORY_ENV).map(PathBuf::from);
+    installed_writable_paths_from(launch, workspace.as_deref(), declared_storage.as_deref())
+}
+
+fn installed_writable_paths_from(
+    launch: &ChildLaunch,
+    workspace: Option<&Path>,
+    declared_storage: Option<&Path>,
+) -> Result<Vec<PathBuf>, String> {
+    let mut writable_paths = Vec::new();
+    if launch.sandbox_profile == SandboxProfile::WorkspaceWrite {
+        let workspace = workspace
+            .ok_or_else(|| "workspace-write receipt requires WORKSPACE_ROOT".to_string())?;
+        let workspace = std::fs::canonicalize(workspace)
+            .map_err(|error| format!("workspace root unavailable: {error}"))?;
+        if !workspace.is_dir() {
+            return Err("workspace root is not a directory".to_string());
+        }
+        writable_paths.push(workspace);
     }
-    let workspace = std::env::var_os("WORKSPACE_ROOT")
-        .map(PathBuf::from)
-        .ok_or_else(|| "workspace-write receipt requires WORKSPACE_ROOT".to_string())?;
-    let workspace = std::fs::canonicalize(&workspace)
-        .map_err(|error| format!("workspace root unavailable: {error}"))?;
-    if !workspace.is_dir() {
-        return Err("workspace root is not a directory".to_string());
+    if let Some(declared_storage) = declared_storage {
+        let declared_storage = std::fs::canonicalize(declared_storage)
+            .map_err(|error| format!("declared skill storage unavailable: {error}"))?;
+        if !declared_storage.is_dir() {
+            return Err("declared skill storage is not a directory".to_string());
+        }
+        if !writable_paths.contains(&declared_storage) {
+            writable_paths.push(declared_storage);
+        }
     }
-    Ok(vec![workspace])
+    Ok(writable_paths)
 }
 
 async fn read_bounded_output(

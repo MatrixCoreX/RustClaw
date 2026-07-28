@@ -1,5 +1,36 @@
 use super::*;
 
+struct TypingHeartbeatGuard {
+    stop_tx: Option<oneshot::Sender<()>>,
+}
+
+impl TypingHeartbeatGuard {
+    fn start(bot: Bot, chat_id: ChatId) -> Self {
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(4);
+        let (stop_tx, mut stop_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            loop {
+                let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(REFRESH_INTERVAL) => {}
+                    _ = &mut stop_rx => break,
+                }
+            }
+        });
+        Self {
+            stop_tx: Some(stop_tx),
+        }
+    }
+}
+
+impl Drop for TypingHeartbeatGuard {
+    fn drop(&mut self) {
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+    }
+}
+
 pub(super) fn spawn_task_result_delivery(
     bot: Bot,
     state: BotState,
@@ -8,6 +39,48 @@ pub(super) fn spawn_task_result_delivery(
     task_id: String,
     soft_notice_override_seconds: Option<u64>,
     fail_prefix: String,
+) {
+    spawn_task_result_delivery_with_mode(
+        bot,
+        state,
+        chat_id,
+        user_id,
+        task_id,
+        soft_notice_override_seconds,
+        fail_prefix,
+        false,
+    );
+}
+
+pub(super) fn spawn_voice_task_result_delivery(
+    bot: Bot,
+    state: BotState,
+    chat_id: ChatId,
+    user_id: i64,
+    task_id: String,
+    fail_prefix: String,
+) {
+    spawn_task_result_delivery_with_mode(
+        bot,
+        state,
+        chat_id,
+        user_id,
+        task_id,
+        None,
+        fail_prefix,
+        true,
+    );
+}
+
+fn spawn_task_result_delivery_with_mode(
+    bot: Bot,
+    state: BotState,
+    chat_id: ChatId,
+    user_id: i64,
+    task_id: String,
+    soft_notice_override_seconds: Option<u64>,
+    fail_prefix: String,
+    voice_reply: bool,
 ) {
     tokio::spawn(async move {
         let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), chat_id);
@@ -121,18 +194,23 @@ pub(super) fn spawn_task_result_delivery(
                             sent_progress_count,
                             answers.len(),
                         );
-                        for answer in answers {
-                            debug!(
-                                "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} msg_preview={}",
-                                task_id,
-                                chat_id.0,
-                                text_fingerprint_hex(&answer),
-                                answer.len(),
-                                text_preview_for_log(&answer, 160)
-                            );
-                            let _ =
-                                send_success_message_for_telegram(&bot, &state, chat_id, &answer)
-                                    .await;
+                        if voice_reply {
+                            deliver_voice_answers(&bot, &state, chat_id, user_id, &answers).await;
+                        } else {
+                            for answer in answers {
+                                debug!(
+                                    "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} msg_preview={}",
+                                    task_id,
+                                    chat_id.0,
+                                    text_fingerprint_hex(&answer),
+                                    answer.len(),
+                                    text_preview_for_log(&answer, 160)
+                                );
+                                let _ = send_success_message_for_telegram(
+                                    &bot, &state, chat_id, &answer,
+                                )
+                                .await;
+                            }
                         }
                         break;
                     }
@@ -180,6 +258,70 @@ pub(super) fn spawn_task_result_delivery(
             }
         }
     });
+}
+
+async fn deliver_voice_answers(
+    bot: &Bot,
+    state: &BotState,
+    chat_id: ChatId,
+    user_id: i64,
+    answers: &[String],
+) {
+    let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, chat_id.0));
+    if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
+        for answer in answers {
+            let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
+        }
+    }
+    if !matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
+        return;
+    }
+
+    let tts_input = strip_delivery_tokens_for_tts(&answers.join("\n\n"));
+    if tts_input.is_empty() {
+        if matches!(mode, VoiceReplyMode::Voice) {
+            for answer in answers {
+                let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
+            }
+        }
+        return;
+    }
+    let payload = json!({
+        "skill_name": "audio_synthesize",
+        "args": {"text": tts_input, "response_format": "opus"}
+    });
+    let Ok(task_id) =
+        submit_task_only(state, user_id, chat_id.0, TaskKind::RunSkill, payload).await
+    else {
+        if matches!(mode, VoiceReplyMode::Voice) {
+            for answer in answers {
+                let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
+            }
+        }
+        return;
+    };
+    match poll_task_result(
+        state,
+        &task_id,
+        bound_user_key_for_chat(state, chat_id.0).as_deref(),
+        Some(90),
+    )
+    .await
+    {
+        Ok(messages) => {
+            for message in messages {
+                let _ = send_success_message_for_telegram(bot, state, chat_id, &message).await;
+            }
+        }
+        Err(err) => {
+            warn!("telegram voice reply synthesis failed: {err}");
+            if matches!(mode, VoiceReplyMode::Voice) {
+                for answer in answers {
+                    let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
+                }
+            }
+        }
+    }
 }
 
 pub(super) fn task_success_messages(state: &BotState, task: &TaskQueryResponse) -> Vec<String> {
@@ -433,11 +575,7 @@ pub(super) async fn query_task_status(
         let msg = if (body.contains("<!doctype") || body.contains("<html")) && body.len() > 100 {
             state.i18n.t("telegram.error.query_task_wrong_host")
         } else {
-            let body_preview = if body.len() > 300 {
-                format!("{}...", &body[..300])
-            } else {
-                body.clone()
-            };
+            let body_preview = text_preview_for_log(&body, 300);
             state.i18n.t_with(
                 "telegram.error.query_task_failed_http",
                 &[("status", &status.to_string()), ("body", &body_preview)],
@@ -699,46 +837,4 @@ pub(super) async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow:
             ("version", &data.version),
         ],
     ))
-}
-
-pub(super) async fn fetch_queue_length(state: &BotState, chat_id: i64) -> anyhow::Result<usize> {
-    let url = format!("{}/v1/health", state.clawd_base_url);
-    let resp = maybe_with_user_key_header(
-        state.client.get(&url),
-        bound_user_key_for_chat(state, chat_id).as_deref(),
-    )
-    .send()
-    .await
-    .context("request health failed")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.health_http_failed",
-                &[("status", &status.to_string()), ("body", &body)],
-            )
-        ));
-    }
-    let body: ApiResponse<HealthResponse> =
-        resp.json().await.context("decode health response failed")?;
-    if !body.ok {
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.health_failed",
-                &[(
-                    "error",
-                    &body
-                        .error
-                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
-                )],
-            )
-        ));
-    }
-    let data = body
-        .data
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.health_missing_data")))?;
-    Ok(data.queue_length)
 }

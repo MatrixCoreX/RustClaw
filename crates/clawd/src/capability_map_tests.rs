@@ -31,6 +31,20 @@ capabilities = ["net"]
 }
 
 #[test]
+fn leaf_descriptions_compact_whitespace_without_truncating_semantics() {
+    let description = format!(
+        "typed discovery   {}   preserve_this_final_constraint",
+        "capability detail ".repeat(20)
+    );
+
+    let compact = compact_leaf_description(&description);
+
+    assert!(!compact.contains("  "));
+    assert!(compact.len() > 160);
+    assert!(compact.ends_with("preserve_this_final_constraint"));
+}
+
+#[test]
 fn machine_skill_name_cannot_override_registry_group() {
     let entry = registry_entry_from(
         r#"

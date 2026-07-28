@@ -63,7 +63,7 @@ fn execute_returns_structured_extra_fields() {
     let out = execute(json!({ "path": path.display().to_string() })).expect("execute");
 
     assert_eq!(out.get("action").and_then(Value::as_str), Some("scan"));
-    assert_eq!(out.get("risk_count").and_then(Value::as_u64), Some(2));
+    assert_eq!(out.get("risk_count").and_then(Value::as_u64), Some(1));
     assert!(out
         .get("risks")
         .and_then(Value::as_array)

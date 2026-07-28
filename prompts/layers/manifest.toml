@@ -148,15 +148,6 @@ overlay = ["prompts/layers/overlays/voice_chat_prompt.md"]
 vendor_patch = "text/common.md"
 
 [[prompts]]
-logical_path = "prompts/voice_mode_intent_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/routing/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/voice_mode_intent_prompt.md"]
-vendor_patch = "routing/common.md"
-
-[[prompts]]
 logical_path = "prompts/audio_transcribe_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/audio_transcribe_prompt.md"]

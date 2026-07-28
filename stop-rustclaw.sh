@@ -43,6 +43,16 @@ process_executable_matches() {
     return
   fi
 
+  # macOS has no /proc executable link. lsof exposes the mapped main binary,
+  # which remains reliable when argv[0] was workspace-relative.
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v lsof >/dev/null 2>&1; then
+    while IFS= read -r executable_path; do
+      if [[ -n "$executable_path" && "$executable_path" == "$expected_command" ]]; then
+        return 0
+      fi
+    done < <(lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p')
+  fi
+
   return 1
 }
 

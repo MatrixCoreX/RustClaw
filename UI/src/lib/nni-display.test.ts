@@ -9,6 +9,7 @@ import {
   nniDeviceNextStep,
   nniJoinErrorMessage,
   nniPayloadHexField,
+  nniSimulationControlMode,
   nniTimestampSignatureReady,
   parseNniRemoteNodeUrls,
   shortenHex,
@@ -120,6 +121,34 @@ test("renders NNI device messages from machine keys", () => {
     "A device signature chip was detected, and NNI device signing is available.",
   );
   assert.equal(
+    nniDeviceMessage(
+      {
+        nni_available: true,
+        helper_available: true,
+        signature_chip_present: true,
+        simulated: true,
+        status: "simulated",
+        message_key: "nni.device_status.simulated",
+      },
+      "zh",
+    ),
+    "软件模拟芯片正在运行，可用于本机协议测试。",
+  );
+  assert.match(
+    nniDeviceNextStep(
+      {
+        nni_available: true,
+        helper_available: true,
+        signature_chip_present: true,
+        simulated: true,
+        status: "simulated",
+        next_step_key: "nni.device_status.simulated.next_step",
+      },
+      "en",
+    ) || "",
+    /not a real hardware chip/,
+  );
+  assert.equal(
     nniDeviceNextStep(
       {
         nni_available: true,
@@ -130,7 +159,7 @@ test("renders NNI device messages from machine keys", () => {
       },
       "zh",
     ),
-    "参与网络原生智能需要购买并使用带设备签名芯片的 MatrixAI 硬件设备。",
+    "正式参与网络原生智能需要带签名芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
   );
   assert.equal(
     nniDeviceMessage(
@@ -142,6 +171,45 @@ test("renders NNI device messages from machine keys", () => {
       "zh",
     ),
     "NNI 设备签名操作完成。",
+  );
+});
+
+test("offers simulation only after the real-chip detection request finishes", () => {
+  const missing = {
+    nni_available: true,
+    helper_available: true,
+    signature_chip_present: false,
+    simulated: false,
+    simulation_available: true,
+    status: "signature_chip_missing",
+  };
+  assert.equal(nniSimulationControlMode(missing, true), null);
+  assert.equal(nniSimulationControlMode(missing, false), "enable");
+  assert.equal(nniSimulationControlMode({ ...missing, simulation_available: false }, false), null);
+  assert.equal(
+    nniSimulationControlMode(
+      {
+        ...missing,
+        signature_chip_present: true,
+        device_kind: "hardware",
+        status: "ready",
+      },
+      false,
+    ),
+    null,
+  );
+  assert.equal(
+    nniSimulationControlMode(
+      {
+        ...missing,
+        signature_chip_present: true,
+        simulated: true,
+        device_kind: "simulated",
+        status: "simulated",
+      },
+      false,
+    ),
+    "disable",
   );
 });
 

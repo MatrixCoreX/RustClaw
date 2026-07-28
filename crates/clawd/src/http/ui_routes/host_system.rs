@@ -336,6 +336,7 @@ fn normalize_host_value(value: String) -> Option<String> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_linux_os_release(text: &str) -> (Option<String>, Option<String>) {
     let mut values = BTreeMap::new();
     for line in text.lines().take(128) {
@@ -360,6 +361,7 @@ fn parse_linux_os_release(text: &str) -> (Option<String>, Option<String>) {
     (name, version)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_linux_meminfo(text: &str) -> (Option<u64>, Option<u64>) {
     let mut total = None;
     let mut available = None;
@@ -373,6 +375,7 @@ fn parse_linux_meminfo(text: &str) -> (Option<u64>, Option<u64>) {
     (total, available)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_kib_value(raw: &str) -> Option<u64> {
     raw.split_whitespace()
         .next()?
@@ -381,6 +384,7 @@ fn parse_kib_value(raw: &str) -> Option<u64> {
         .map(|value| value.saturating_mul(1024))
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_linux_uptime(text: &str) -> Option<u64> {
     text.split_whitespace()
         .next()?

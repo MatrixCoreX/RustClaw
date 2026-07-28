@@ -3,7 +3,7 @@
 # 在 pi_app 目录下执行。图标写入 ~/Desktop/RustClaw.desktop
 
 set -e
-PI_APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTER="${PI_APP_DIR}/register-launcher.sh"
 WRAPPER="${HOME}/.local/bin/rustclaw-small-screen-launcher"
 ICON="${HOME}/.local/share/icons/rustclaw-small-screen.png"

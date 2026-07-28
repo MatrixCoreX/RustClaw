@@ -27,7 +27,6 @@ fn test_state() -> AppState {
             ..crate::CoreServices::test_default()
         },
         skill_rt: crate::SkillRuntime {
-            locator_scan_max_files: 200,
             tools_policy: Arc::new(
                 ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
             ),

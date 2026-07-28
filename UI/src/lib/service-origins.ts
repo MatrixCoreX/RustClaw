@@ -52,6 +52,15 @@ function preferredServiceBaseUrl(
 ): string {
   const normalized = stored?.trim() ?? "";
   if (!normalized) return defaultUrl;
+  const currentOrigin = location ? currentHttpOrigin(location) : null;
+  if (
+    location &&
+    LOCAL_FRONTEND_PORTS.has(location.port) &&
+    currentOrigin === normalized &&
+    currentOrigin !== defaultUrl
+  ) {
+    return defaultUrl;
+  }
   const legacyDefault = location ? originWithPort(location, legacyPort) : null;
   if (legacyDefault && normalized === legacyDefault && legacyDefault !== defaultUrl) {
     return defaultUrl;

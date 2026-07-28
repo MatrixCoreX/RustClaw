@@ -173,6 +173,15 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/health", get(health))
         .route("/system/host-summary", get(host_system_summary))
+        .route("/system/dependencies", get(host_dependencies))
+        .route(
+            "/admin/system-dependencies/install",
+            post(start_dependency_install),
+        )
+        .route(
+            "/admin/system-dependencies/operations/:operation_id",
+            get(get_dependency_install_operation),
+        )
         .route("/skills", get(list_skills))
         .route("/capabilities", get(list_capabilities))
         .route(
@@ -225,6 +234,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/nni/heartbeat/errors/clear",
             post(nni_clear_heartbeat_errors),
         )
+        .route("/logs/files", get(logs_files))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
@@ -254,20 +264,20 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/admin/nginx", get(get_nginx_ui_status))
         .route(
+            "/admin/webd-exposure",
+            get(get_webd_exposure_status).post(update_webd_exposure),
+        )
+        .route(
             "/admin/workspace-update/nginx-enable",
             post(start_workspace_update_nginx_enable),
         )
         .route(
-            "/admin/workspace-update/nginx-deploy",
-            post(start_workspace_update_nginx_deploy),
+            "/admin/workspace-update/nginx-disable",
+            post(start_workspace_update_nginx_disable),
         )
         .route(
             "/admin/workspace-update/deploy-release",
             post(start_workspace_update_release_deploy),
-        )
-        .route(
-            "/admin/workspace-update/enable-release-package",
-            post(start_workspace_update_release_package),
         )
         .route(
             "/admin/workspace-update/enable-source",
@@ -364,6 +374,7 @@ struct NniDeviceActionRequest {
 
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/host_system.rs");
+include!("ui_routes/host_dependencies.rs");
 include!("ui_routes/nni_internal_llm.rs");
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
@@ -377,6 +388,7 @@ include!("ui_routes/slo_metrics.rs");
 include!("ui_routes/service_control.rs");
 include!("ui_routes/workspace_update.rs");
 include!("ui_routes/workspace_nginx.rs");
+include!("ui_routes/workspace_webd.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/skill_import_config.rs");
@@ -411,8 +423,24 @@ mod crypto_credentials_tests;
 mod host_system_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/host_dependencies_tests.rs"]
+mod host_dependencies_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/nni_device_tests.rs"]
+mod nni_device_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/logs_runtime_tests.rs"]
+mod logs_runtime_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/workspace_nginx_tests.rs"]
 mod workspace_nginx_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/workspace_webd_tests.rs"]
+mod workspace_webd_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/auth_contract_tests.rs"]

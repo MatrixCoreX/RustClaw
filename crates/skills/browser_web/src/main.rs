@@ -811,7 +811,7 @@ fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, Sk
         ));
     }
 
-    let mut cmd = Command::new("node");
+    let mut cmd = Command::new(browser_node_executable());
     cmd.arg(helper_path.as_os_str())
         .current_dir(workspace_root)
         .stdin(Stdio::piped())
@@ -873,6 +873,29 @@ fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, Sk
         .map_err(|error| SkillFailure::with_message("HELPER_OUTPUT_INVALID", error.to_string()))?;
 
     Ok(stdout.trim().to_string())
+}
+
+fn browser_node_executable() -> PathBuf {
+    browser_node_candidates()
+        .into_iter()
+        .find(|candidate| candidate.components().count() > 1 && candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from("node"))
+}
+
+fn browser_node_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/node"));
+        candidates.push(PathBuf::from("/usr/local/bin/node"));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/node"));
+        candidates.push(PathBuf::from("/usr/bin/node"));
+    }
+    candidates.push(PathBuf::from("node"));
+    candidates
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "macos"))]
 use std::cmp::Ordering;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
@@ -197,6 +198,7 @@ fn ps_extra(limit: u64, filter: Option<String>, text: &str, match_count: usize) 
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize), String> {
     let output = Command::new("ps")
         .args(["-Ao", "pid=,ppid=,pcpu=,pmem=,comm="])
@@ -246,6 +248,42 @@ fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize)
         ),
         match_count,
     ))
+}
+
+#[cfg(target_os = "macos")]
+fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize), String> {
+    // macOS denies execution of the setuid /bin/ps inside Seatbelt. pgrep is
+    // non-setuid and provides a stable process snapshot through sysmond.
+    let output = Command::new("/usr/bin/pgrep")
+        .args(["-lf", "."])
+        .output()
+        .map_err(|err| format!("run pgrep failed: {err}"))?;
+    let exit_code = output.status.code().unwrap_or(-1);
+    if !output.status.success() && exit_code != 1 {
+        return Err(format!(
+            "process command failed: exit={exit_code}\n{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let mut rows = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(parse_pgrep_row)
+        .filter(|row| ps_row_matches_filter(row, filter))
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|row| row.pid);
+    let match_count = rows.len();
+
+    let mut lines = vec!["PID COMMAND".to_string()];
+    for row in rows.iter().take(limit) {
+        lines.push(format!("{} {}", row.pid, row.comm));
+    }
+    if lines.len() == 1 {
+        if let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) {
+            lines.push(format!("no matching processes for filter: {filter}"));
+        }
+    }
+    Ok((format!("exit=0\n{}", lines.join("\n")), match_count))
 }
 
 fn ps_row_matches_filter(row: &PsRow, filter: Option<&str>) -> bool {
@@ -558,11 +596,14 @@ fn run_port_list_snapshot() -> Result<(&'static str, String), String> {
 struct PsRow {
     pid: i64,
     ppid: i64,
+    #[cfg(any(not(target_os = "macos"), test))]
     cpu: f64,
+    #[cfg(any(not(target_os = "macos"), test))]
     mem: f64,
     comm: String,
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn parse_ps_row(line: &str) -> Option<PsRow> {
     let mut parts = line.split_whitespace();
     let pid = parts.next()?.parse::<i64>().ok()?;
@@ -579,6 +620,25 @@ fn parse_ps_row(line: &str) -> Option<PsRow> {
         cpu,
         mem,
         comm,
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_pgrep_row(line: &str) -> Option<PsRow> {
+    let (pid, comm) = line.trim().split_once(char::is_whitespace)?;
+    let pid = pid.parse::<i64>().ok()?;
+    let comm = comm.trim();
+    if comm.is_empty() {
+        return None;
+    }
+    Some(PsRow {
+        pid,
+        ppid: 0,
+        #[cfg(any(not(target_os = "macos"), test))]
+        cpu: 0.0,
+        #[cfg(any(not(target_os = "macos"), test))]
+        mem: 0.0,
+        comm: comm.to_string(),
     })
 }
 

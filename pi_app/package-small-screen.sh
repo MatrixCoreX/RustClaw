@@ -55,6 +55,8 @@ add_data_tree() {
 add_data_tree "assets" "assets"
 add_data_tree "small_screen_markets.toml" "."
 add_data_tree "signature.py" "."
+add_data_tree "signature_simulator.py" "."
+add_data_tree "signature_simulator_x509.py" "."
 add_data_tree "RustClaw480X320.png" "."
 add_data_tree "longxia.png" "."
 add_data_tree "image" "image"

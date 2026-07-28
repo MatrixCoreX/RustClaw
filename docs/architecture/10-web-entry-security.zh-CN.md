@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[交互式编码与输出呈现](09-interactive-coding.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[任务产物交付](11-task-artifact-delivery.zh-CN.md)
 
 <!-- ai-learning-navigation:end -->
 
@@ -42,6 +43,19 @@ flowchart LR
 - `clawd` 负责已鉴权的任务/管理 API、agent 执行、工具、技能和持久化。
 - nginx 是可选外层，负责 TLS/域名终止和静态资源，再把 `/v1` 与 `/webd` 转给
   `webd`，不直接连 `clawd`。
+
+## webd 监听范围
+
+首页左侧入口卡片控制 `webd` 是否接受设备 IP 直连。开关只修改
+`[webd].listen`，保留原端口和其他设置，使用原子写入，并延迟重启以确保当前 API
+响应先完整返回：
+
+- 对外直连：`0.0.0.0:<端口>`
+- 仅本机/nginx：`127.0.0.1:<端口>`
+
+原生部署时 nginx 与 `webd` 位于同一主机网络命名空间，因此关闭直连不影响 nginx
+入口；正在通过 `IP:<端口>` 访问的浏览器则会断开。容器或 sidecar 部署不能默认使用
+主机 loopback，必须按代理所在网络保持上游可达。
 - 本机通信守护进程和 `clawcli` 可以直连 loopback 核心 API；这是机器内部组件通信，
   不是浏览器入口。
 
@@ -50,11 +64,11 @@ flowchart LR
 首页会显示 nginx 是否已安装、正在运行、已配置 RustClaw 站点，以及 UI 是否已部署。
 仅管理员可执行下列后台操作：
 
-- **启用/修复 nginx**：安装或启动 nginx，写入 RustClaw 站点，部署已有 `UI/dist`，
-  验证配置后启动或重载。
-- **构建并部署最新 UI**：源码安装会先构建当前 UI；Release 安装使用包内预构建产物，
-  然后部署到 nginx。
-- **打开 nginx 入口**：只有进程、站点和 UI 检查全部通过后才会出现。
+- **启用/修复 nginx**：检查系统软件源版本，按需安装或更新 nginx，写入 RustClaw
+  站点，部署已有 `UI/dist`，验证配置后启动或重载。Linux 使用对应包管理器，macOS
+  使用 Homebrew。
+- **关闭 nginx**：停止并禁用服务，删除 RustClaw 站点和专用 UI 部署，但不卸载 nginx；
+  操作前会明确提示云服务器或域名入口将无法继续访问。
 
 操作返回机器状态和错误键。面向用户的中英文说明由 UI 渲染，运行时不解析固定自然语言。
 
@@ -72,6 +86,7 @@ flowchart LR
 cargo test -p webd
 cargo test -p clawd internal_listener_tests::
 cargo test -p clawd workspace_nginx_tests::
+cargo test -p clawd workspace_webd_tests::
 python3 scripts/check_long_files.py
 ```
 

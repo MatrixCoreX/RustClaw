@@ -1,19 +1,8 @@
-use super::{extract_bind_key_candidate, is_unbound_allowed_command, TextCatalog};
-use claw_core::channel_commands::ChannelCommandCatalog;
+use super::{extract_bind_key_candidate, TextCatalog};
 use std::path::Path;
-
-fn default_catalog() -> ChannelCommandCatalog {
-    ChannelCommandCatalog::default()
-}
 
 #[test]
 fn unbound_plain_text_requires_key_binding() {
-    let catalog = default_catalog();
-    assert!(!is_unbound_allowed_command(
-        &catalog,
-        "telegram",
-        "hello rustclaw"
-    ));
     assert_eq!(extract_bind_key_candidate("hello rustclaw", false), None);
 }
 
@@ -26,13 +15,6 @@ fn unbound_key_command_is_accepted_for_binding() {
 }
 
 #[test]
-fn bound_gate_allows_help_commands() {
-    let catalog = default_catalog();
-    assert!(is_unbound_allowed_command(&catalog, "telegram", "/start"));
-    assert!(is_unbound_allowed_command(&catalog, "telegram", "/help"));
-}
-
-#[test]
 fn waiting_bind_state_accepts_plain_key_reply() {
     assert_eq!(
         extract_bind_key_candidate("rk_live_abc", true).as_deref(),
@@ -42,14 +24,12 @@ fn waiting_bind_state_accepts_plain_key_reply() {
 
 #[test]
 fn waiting_bind_state_does_not_treat_other_commands_as_key() {
-    assert_eq!(extract_bind_key_candidate("/run weather {}", true), None);
-    assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
+    assert_eq!(extract_bind_key_candidate("/status now", true), None);
+    assert_eq!(extract_bind_key_candidate("/cancel all", true), None);
 }
 
 #[test]
 fn unbound_media_like_empty_text_requires_binding_prompt() {
-    let catalog = default_catalog();
-    assert!(!is_unbound_allowed_command(&catalog, "telegram", ""));
     assert_eq!(extract_bind_key_candidate("", false), None);
 }
 

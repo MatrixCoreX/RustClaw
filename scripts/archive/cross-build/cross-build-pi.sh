@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHIVE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${ARCHIVE_DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "${SCRIPT_DIR}"
@@ -27,7 +28,7 @@ die() {
 
 usage() {
 	cat <<'EOF'
-Usage: ./cross-build-pi.sh [options] [-- cargo-args...]
+Usage: ./scripts/archive/cross-build/cross-build-pi.sh [options] [-- cargo-args...]
 
 Cross-build RustClaw locally for Raspberry Pi Linux.
 
@@ -54,10 +55,10 @@ Environment:
   INSTALL_DEPS=0                         same as --skip-deps
 
 Examples:
-  ./cross-build-pi.sh
-  ./cross-build-pi.sh --target pi32
-  ./cross-build-pi.sh --package clawd
-  ./cross-build-pi.sh --bin clawd -- --locked
+  ./scripts/archive/cross-build/cross-build-pi.sh
+  ./scripts/archive/cross-build/cross-build-pi.sh --target pi32
+  ./scripts/archive/cross-build/cross-build-pi.sh --package clawd
+  ./scripts/archive/cross-build/cross-build-pi.sh --bin clawd -- --locked
 EOF
 }
 

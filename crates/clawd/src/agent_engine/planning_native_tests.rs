@@ -651,8 +651,8 @@ fn native_respond_projects_structured_fields_from_failed_capability_observation(
 }
 
 #[test]
-fn native_respond_rejects_invalid_or_duplicate_object_fields() {
-    let invalid_json = turn(
+fn native_respond_repairs_plain_scalar_and_rejects_structural_or_duplicate_fields() {
+    let plain_scalar = turn(
         vec![respond_call(json!({
             "shape": "object",
             "content": "",
@@ -663,10 +663,52 @@ fn native_respond_rejects_invalid_or_duplicate_object_fields() {
         }))],
         "",
     );
+    let actions = actions_from_native_turn(&plain_scalar, &callable_capabilities())
+        .expect("plain scalar is normalized as a JSON string");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
     assert_eq!(
-        actions_from_native_turn(&invalid_json, &callable_capabilities())
-            .expect_err("invalid JSON lexical value rejected"),
+        serde_json::from_str::<Value>(content).expect("normalized object"),
+        json!({"provider": "minimax"})
+    );
+
+    let malformed_structure = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [{"name": "provider", "value_json": "{broken"}],
+            "exact_field_count": 1
+        }))],
+        "",
+    );
+    assert_eq!(
+        actions_from_native_turn(&malformed_structure, &callable_capabilities())
+            .expect_err("malformed structural JSON remains rejected"),
         "native_respond_object_field_json_invalid"
+    );
+
+    let trailing_quote = turn(
+        vec![respond_call(json!({
+            "shape": "object",
+            "content": "",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [{"name": "items", "value_json": "[\"one\",\"two\"]\""}],
+            "exact_field_count": 1
+        }))],
+        "",
+    );
+    let actions = actions_from_native_turn(&trailing_quote, &callable_capabilities())
+        .expect("one trailing quote after a complete container is repaired");
+    let AgentAction::Respond { content } = &actions[0] else {
+        panic!("expected terminal response");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(content).expect("normalized object"),
+        json!({"items": ["one", "two"]})
     );
 
     let non_string_json = turn(
@@ -936,6 +978,7 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
         tool_name: "call_doc_parse".to_string(),
         description: "runtime_capability_group_v1; semantic_tags=document_summary".to_string(),
         capability_names: vec!["doc_parse".to_string()],
+        capability_descriptions: BTreeMap::new(),
         capability_argument_schemas: BTreeMap::from([(
             "doc_parse".to_string(),
             json!({
@@ -1042,6 +1085,16 @@ fn native_request_expands_multi_capability_groups_into_direct_leaf_tools() {
             "filesystem.list_entries".to_string(),
             "filesystem.read_text_range".to_string(),
         ],
+        capability_descriptions: BTreeMap::from([
+            (
+                "filesystem.list_entries".to_string(),
+                "typed direct-child directory inventory".to_string(),
+            ),
+            (
+                "filesystem.read_text_range".to_string(),
+                "bounded read for a known path".to_string(),
+            ),
+        ]),
         capability_argument_schemas: BTreeMap::from([
             (
                 "filesystem.list_entries".to_string(),
@@ -1088,6 +1141,9 @@ fn native_request_expands_multi_capability_groups_into_direct_leaf_tools() {
     assert!(read_tool_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES);
     assert_eq!(request.tools.len(), 3);
     assert_eq!(request.tools[0].name, list_tool_name);
+    assert!(request.tools[0]
+        .description
+        .contains("typed direct-child directory inventory"));
     assert_eq!(request.tools[0].input_schema["required"], json!(["path"]));
     assert!(request.tools[0].input_schema.get("oneOf").is_none());
     assert_eq!(request.tools[1].name, read_tool_name);
@@ -1197,6 +1253,7 @@ fn native_request_loads_hidden_registry_groups_before_they_are_callable() {
         tool_name: "call_doc_parse".to_string(),
         description: "runtime_capability_group_v1".to_string(),
         capability_names: vec!["doc_parse".to_string()],
+        capability_descriptions: BTreeMap::new(),
         capability_argument_schemas: BTreeMap::from([(
             "doc_parse".to_string(),
             json!({
@@ -1477,6 +1534,7 @@ fn native_unknown_tool_for_loadable_capability_retries_through_exact_group_loade
         tool_name: "call_process_basic".to_string(),
         description: "runtime_capability_group_v1; semantic_tags=process".to_string(),
         capability_names: vec![capability.clone()],
+        capability_descriptions: BTreeMap::new(),
         capability_argument_schemas: BTreeMap::from([(
             capability.clone(),
             json!({
