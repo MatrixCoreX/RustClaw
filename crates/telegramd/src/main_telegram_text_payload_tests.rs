@@ -85,9 +85,7 @@ fn should_never_format_as_code_detects_numbered_list() {
 
 #[test]
 fn command_example_line_uses_structural_separator_rule() {
-    assert!(looks_like_command_example_line(
-        "示例：/rustclaw config show"
-    ));
+    assert!(looks_like_command_example_line("示例：/status"));
     assert!(looks_like_command_example_line("Example: /help"));
     assert!(!looks_like_command_example_line("Example: plain text"));
 }

@@ -174,8 +174,8 @@ STALE_MINIMAX_ENDPOINT_SCAN_ROOTS = (
 STALE_MINIMAX_ENDPOINT_SCAN_SUFFIXES = (".toml", ".ts", ".tsx", ".rs", ".py", ".sh")
 
 PRIMARY_MODEL_ENDPOINT_SOURCE_FILES = (
-    ROOT / "crates/telegramd/src/commands.rs",
-    ROOT / "crates/telegramd/src/main_model_config_tests.rs",
+    ROOT / "configs/config.toml",
+    ROOT / "docker/config/config.toml",
     ROOT / "crates/clawd/src/http/ui_routes_tests.rs",
     ROOT / "crates/claw-core/src/model_catalog_tests.rs",
     ROOT / "UI/src/lib/llm-config.test.ts",

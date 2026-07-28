@@ -1,5 +1,27 @@
 use super::*;
 
+#[test]
+fn summarize_structured_treats_root_token_as_document_root() {
+    let root = temp_root("summarize_structured_root_token");
+    std::fs::create_dir_all(&root).expect("create root");
+    let path = root.join("settings.json");
+    std::fs::write(&path, r#"{"app":{"name":"demo"},"enabled":true}"#).expect("write JSON fixture");
+    let obj = serde_json::json!({
+        "path": "settings.json",
+        "format": "json",
+        "field_path": "root",
+    })
+    .as_object()
+    .expect("object")
+    .clone();
+
+    let out = summarize_structured(&root, &obj, false).expect("structured summary");
+    let value: Value = serde_json::from_str(&out).expect("summary response");
+    assert_eq!(value["exists"], true);
+    assert!(value["node_count"].as_u64().unwrap_or(0) >= 4);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn temp_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "rustclaw-{label}-{}-{}",

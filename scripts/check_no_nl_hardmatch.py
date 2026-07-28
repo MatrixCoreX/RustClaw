@@ -267,7 +267,10 @@ def scan_source(path: Path, text: str) -> list[Finding]:
     for idx, line in enumerate(effective, start=1):
         for match in CONFIG_FIELD_ACCESS_RE.finditer(line):
             field = match.group("field")
-            if not suspicious_config_field(field):
+            # A generic field such as ``patterns`` is common in file/search
+            # APIs.  It is a routing smell only inside a function that also
+            # receives or derives user-language text.
+            if not suspicious_config_field(field) or not tainted_by_line[idx - 1]:
                 continue
             function = fn_names[idx - 1] if idx - 1 < len(fn_names) else "<module>"
             findings.append(

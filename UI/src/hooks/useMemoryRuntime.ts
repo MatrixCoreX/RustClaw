@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import type {
   ApiResponse,
   MemoryClearResult,
@@ -22,6 +23,7 @@ export interface UseMemoryRuntimeParams {
 }
 
 export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const [memoryOverview, setMemoryOverview] = useState<MemoryOverviewResponse | null>(null);
   const [memoryPreferences, setMemoryPreferences] = useState<MemoryPreferenceItem[]>([]);
   const [memoryFacts, setMemoryFacts] = useState<MemoryFactItem[]>([]);
@@ -75,9 +77,12 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
   };
 
   const deleteMemoryItem = async (id: string) => {
-    const confirmed = window.confirm(
-      t("确定删除这条记忆吗？删除后不会再用于后续回复。", "Delete this memory item? It will no longer be used in future replies."),
-    );
+    const confirmed = await showConfirm({
+      title: t("删除记忆", "Delete memory"),
+      message: t("确定删除这条记忆吗？删除后不会再用于后续回复。", "Delete this memory item? It will no longer be used in future replies."),
+      confirmLabel: t("删除", "Delete"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setMemoryActionLoading(`delete:${id}`);
     setMemoryError(null);
@@ -100,9 +105,12 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
   };
 
   const expireMemoryItem = async (id: string) => {
-    const confirmed = window.confirm(
-      t("确定把这条记忆标记为过期吗？过期后不会再主动用于回复。", "Mark this memory item as expired? Expired items will not be actively used in replies."),
-    );
+    const confirmed = await showConfirm({
+      title: t("标记记忆过期", "Expire memory"),
+      message: t("确定把这条记忆标记为过期吗？过期后不会再主动用于回复。", "Mark this memory item as expired? Expired items will not be actively used in replies."),
+      confirmLabel: t("标记过期", "Expire"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setMemoryActionLoading(`expire:${id}`);
     setMemoryError(null);
@@ -131,12 +139,15 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       facts: t("事实卡片", "fact cards"),
       all: t("全部记忆", "all memory data"),
     };
-    const confirmed = window.confirm(
-      t(
+    const confirmed = await showConfirm({
+      title: t("清空记忆", "Clear memory"),
+      message: t(
         `确定清空${labelMap[memoryClearScope]}吗？这个操作会影响后续回复使用的记忆。`,
         `Clear ${labelMap[memoryClearScope]}? This affects which memories are used in future replies.`,
       ),
-    );
+      confirmLabel: t("清空", "Clear"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setMemoryActionLoading(`clear:${memoryClearScope}`);
     setMemoryError(null);

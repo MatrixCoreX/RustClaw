@@ -324,6 +324,8 @@ pub(crate) fn update_task_success(
                     ],
                 )?;
                 if changed > 0 {
+                    drop(db);
+                    attach_task_artifacts_after_success(state, task_id, claim_attempt, result_json);
                     return Ok(());
                 }
             }
@@ -337,7 +339,68 @@ pub(crate) fn update_task_success(
             &["running", "succeeded"],
         ));
     }
+    drop(db);
+    attach_task_artifacts_after_success(state, task_id, claim_attempt, result_json);
     Ok(())
+}
+
+fn attach_task_artifacts_after_success(
+    state: &AppState,
+    task_id: &str,
+    claim_attempt: i64,
+    result_json: &str,
+) {
+    let delivered_result_json = match crate::task_artifacts::materialize_task_result_artifacts(
+        &state.skill_rt.workspace_root,
+        task_id,
+        result_json,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            warn!(
+                "task artifact materialization failed task_id={} error={}",
+                task_id, error
+            );
+            return;
+        }
+    };
+    if delivered_result_json == result_json {
+        return;
+    }
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(error) => {
+            warn!("task artifact manifest store unavailable task_id={task_id} error={error}");
+            return;
+        }
+    };
+    match db.execute(
+        "UPDATE tasks
+         SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1
+           AND status = 'succeeded'
+           AND result_json = ?4
+           AND lease_owner = ?5
+           AND claim_attempt = ?6",
+        params![
+            task_id,
+            delivered_result_json,
+            now_ts(),
+            result_json,
+            state.worker.worker_id.as_str(),
+            claim_attempt
+        ],
+    ) {
+        Ok(1) => {}
+        Ok(_) => warn!(
+            "task artifact manifest compare-and-set skipped task_id={} claim_attempt={}",
+            task_id, claim_attempt
+        ),
+        Err(error) => warn!(
+            "task artifact manifest store failed task_id={} error={}",
+            task_id, error
+        ),
+    }
 }
 
 pub(crate) fn touch_running_task(

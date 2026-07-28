@@ -100,6 +100,33 @@ test("uses the persisted custom title instead of inferring it from the first tur
   assert.equal(threads[0].title, "发布检查");
 });
 
+test("restores assistant artifacts from server conversation history", () => {
+  const input = page();
+  input.turns[0].artifacts = [
+    {
+      schema_version: 1,
+      id: "artifact-1",
+      filename: "report.pdf",
+      kind: "pdf",
+      mime_type: "application/pdf",
+      size_bytes: 42,
+      sha256: "a".repeat(64),
+      download_url: "/v1/tasks/task-2/artifacts/artifact-1/content",
+      preview_url: "/v1/tasks/task-2/artifacts/artifact-1/content?disposition=inline",
+    },
+  ];
+
+  const threads = projectConversationHistory([input], t);
+  const assistant = threads[0].messages.find((message) => message.id === "a-task-2");
+
+  assert.equal(assistant?.artifacts?.[0].filename, "report.pdf");
+  assert.equal(
+    threads[0].teachingRuns[1].taskResult.result_json &&
+      (threads[0].teachingRuns[1].taskResult.result_json as { artifacts?: unknown[] }).artifacts?.length,
+    1,
+  );
+});
+
 test("builds a credential-free history scope only after authentication is ready", () => {
   assert.equal(conversationHistoryScope(false, "webd", 42, 7), "");
   assert.equal(conversationHistoryScope(true, null, 42, 7), "");

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-status}"
-PI_APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_NAME="rustclaw-small-screen-headless.service"
 SERVICE_SRC="${PI_APP_DIR}/systemd/${SERVICE_NAME}"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"

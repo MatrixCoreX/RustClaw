@@ -60,15 +60,23 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned file below `.rustclaw/artifacts`; regular workspace files are rejected. |
 | `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset returned by an artifact range handle or prior `page.next_cursor`. |
 | `read_artifact_range` | `max_bytes` | no | integer | `65536` | Bounded page size, clamped to `256..1048576`; binary pages return base64. |
-| `find_entries` | `root` | no | string(path) | workspace | Bounded search root. |
+| `find_entries` | `root` | no | string(path) | workspace | Focused recursive search root; no implicit depth cap. |
 | `find_entries` | `pattern` | conditional | string/string[] | - | Name/basename pattern for name search. |
+| `find_entries` | `glob` / `globs` | conditional | string/string[] | - | Typed path glob(s), used when a path shape is known; parsed as data rather than shell syntax. |
 | `find_entries` | `ext` | conditional | string/string[] | - | Extension selector for extension search. |
 | `find_entries` | `target_kind` | no | string | `any` | `any|file|dir`. |
+| `find_entries` | `match_mode` / `case_mode` | no | enums | `contains` / `smart` | Name matching: `exact|prefix|suffix|contains|glob`; case: `smart|sensitive|insensitive`. |
 | `find_entries` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`; ties use path order. |
+| `find_entries` / `grep_text` / `find_images` | `include_hidden` | no | boolean | `false` | Include hidden entries for an explicit request. |
+| `find_entries` / `grep_text` / `find_images` | `respect_ignore` | no | boolean | `true` | Respect repository ignore files by default. |
+| `find_entries` / `grep_text` / `find_images` | `max_depth` | no | integer | none | Explicit shallow-scope selector, never an implicit completeness limit. |
+| `find_entries` / `grep_text` / `find_images` | `max_results` / `cursor` | no | integer / opaque string | bounded / none | Bound the returned page and continue the same query/snapshot; they do not bound traversal. |
 | `grep_text` | `query` | yes | string | - | Text query. |
 | `grep_text` | `root` | no | string(path) | workspace | Search root or known file path. |
 | `grep_text` | `pattern` | no | string/string[] | - | Optional filename filter. |
-| `grep_text` | `multiline` | no | boolean | `false` | Enable bounded literal matching across lines; literal `.*` remains an ordered wildcard, not arbitrary regex. |
+| `grep_text` | `glob` / `globs`, `file_match_mode` | no | typed filters | - | Optional path glob and basename match-mode filters. |
+| `grep_text` | `pattern_kind` / `output_mode` / `case_mode` | no | enums | `literal` / `content` / `smart` | Choose bounded literal or linear-time regex matching and `content|paths|count` output. |
+| `grep_text` | `multiline` | no | boolean | `false` | Permit a literal or regex selector to cross line boundaries within content byte ceilings. |
 | `grep_text` | `context_before` / `context_after` | no | integer | `0` | Structured surrounding lines, each capped at 20. |
 | `grep_text` | `max_file_bytes` / `max_scan_bytes` | no | integer | bounded defaults | Per-file and aggregate content-read budgets. |
 | `find_images` | `root`, `exts`, `max_results`, `cursor`, `max_dirs` | no | bounded fields | workspace/defaults | Return paged image paths plus MIME, size, mtime, and dimensions where available. |
@@ -89,13 +97,17 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 
 ## Boundaries
 - Known explicit path facts: use `stat_paths`, not search.
+- Known explicit path content: use `read_text_range` or a known-file `grep_text`; do not launch a repository-wide path search first.
+- Symbol definitions, references, tests, and impact: prefer `code_index`. Use `grep_text` only as literal/regex fallback when parser coverage is unavailable or incomplete, and do not describe it as semantic resolution.
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
+- Start at the narrowest known root with an exact basename/kind when possible. If results are broad, narrow root/filter; if completeness is partial, continue or refine from machine evidence rather than claiming absence.
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
 - Directory inventory: use `list_dir`, not `grep_text`.
 - File-name inventory is a file-only listing: prefer `filesystem.list_file_names` / `fs_basic.list_dir` with `files_only=true`, `dirs_only=false`, and `names_only=true`. Directory/folder-name inventory is directory-only with `dirs_only=true`, `files_only=false`. Use mixed file+directory inventory only for untyped entries/items/names.
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned structured line/byte provenance and bounded context rather than the full file excerpt.
+- A `grep_text` content miss is not a filename search. Call `find_entries` separately when the requested selector is a basename/path.
 - Image-file discovery uses `find_images`; image understanding uses the handoff capability returned by a rejected text read or `image_vision.describe`.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
 - Truncated tool/skill output: follow its `range_handles` with `artifact.read_range`; never route a runtime artifact through unrestricted file reads or guess byte offsets.
@@ -109,7 +121,9 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 
 ## Evidence & Final Answer Contract
-- For `find_entries`, the returned `results` array is the authoritative candidate set and `count` is the authoritative number of observed candidates.
+- For recursive search, preserve `completeness`, `known_match_count`, `total_count_is_complete`, and `continuation`. `partial_*` with zero matches is not authoritative absence; `stale_snapshot` requires a new first-page search.
+- Continue an opaque cursor from the same normalized query so runtime can reuse its bounded snapshot. Do not restart an equivalent broad scan from page zero unless the snapshot is stale/expired or the selector changes.
+- For `find_entries`, the returned `results` array is the authoritative current page and `count` is its returned item count.
 - If the user asks to find/list candidates and the tool returns multiple `results`, the final answer must include every returned candidate unless the user asked for a top-N subset or the tool result explicitly says it was capped/truncated.
 - Do not replace a full `results` array with a sample, examples, "etc.", "and others", or a smaller hand-picked subset.
 - If `count` is larger than the number of visible `results`, say that the result is capped/truncated and report only the visible candidates plus the observed count. Do not invent the missing candidates.

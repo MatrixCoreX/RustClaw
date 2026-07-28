@@ -45,7 +45,6 @@ fn observed_entries_keep_run_cmd_schema_excerpt_with_boundary_description() {
       1176	image_vision_compare.schema.json
       1020	image_vision_describe.schema.json
        911	permanent_extension_plan.schema.json
-       856	voice_mode_intent.schema.json
        788	external_skill_implementation.schema.json
        706	image_reference_resolver.schema.json
        698	language_infer.schema.json

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/lib.sh"
 

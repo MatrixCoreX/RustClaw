@@ -1,5 +1,12 @@
 use super::*;
 
+pub(super) fn normalized_structured_field_path(value: Option<&str>) -> &str {
+    match value.map(str::trim).unwrap_or("") {
+        "root" | "$" => "",
+        value => value,
+    }
+}
+
 pub(super) fn detect_format_from_path(path: &Path) -> String {
     match path
         .extension()

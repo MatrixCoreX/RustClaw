@@ -1,7 +1,7 @@
 use super::{
     canonicalize_legacy_tool_call, normalize_virtual_tool_arg_aliases, rewrite_virtual_tool_call,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[test]
 fn legacy_system_basic_path_batch_facts_canonicalizes_to_fs_basic() {
@@ -406,6 +406,84 @@ fn fs_basic_find_entries_by_extension_rewrites_to_fs_search_find_ext() {
 }
 
 #[test]
+fn fs_basic_find_entries_preserves_typed_path_glob() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "crates",
+        "glob": "**/src/*.rs",
+        "case_mode": "smart"
+    });
+    let rewritten = rewrite_virtual_tool_call("fs_basic", args)
+        .expect("rewrite")
+        .expect("virtual rewrite");
+
+    assert_eq!(rewritten.runtime_tool, "fs_search");
+    assert_eq!(
+        rewritten.runtime_args.get("action").and_then(Value::as_str),
+        Some("find_name")
+    );
+    assert_eq!(
+        rewritten.runtime_args.get("glob").and_then(Value::as_str),
+        Some("**/src/*.rs")
+    );
+    assert!(rewritten.runtime_args.get("pattern").is_none());
+    assert_eq!(
+        rewritten
+            .runtime_args
+            .get("case_mode")
+            .and_then(Value::as_str),
+        Some("smart")
+    );
+}
+
+#[test]
+fn fs_basic_grep_text_preserves_typed_search_modes() {
+    let args = json!({
+        "action": "grep_text",
+        "root": "crates",
+        "query": "fn\\s+main",
+        "pattern_kind": "regex",
+        "output_mode": "paths",
+        "case_mode": "sensitive",
+        "globs": ["**/*.rs"]
+    });
+    let rewritten = rewrite_virtual_tool_call("fs_basic", args)
+        .expect("rewrite")
+        .expect("virtual rewrite");
+
+    assert_eq!(rewritten.runtime_tool, "fs_search");
+    assert_eq!(
+        rewritten.runtime_args.get("action").and_then(Value::as_str),
+        Some("grep_text")
+    );
+    assert_eq!(
+        rewritten
+            .runtime_args
+            .get("pattern_kind")
+            .and_then(Value::as_str),
+        Some("regex")
+    );
+    assert_eq!(
+        rewritten
+            .runtime_args
+            .get("output_mode")
+            .and_then(Value::as_str),
+        Some("paths")
+    );
+    assert_eq!(
+        rewritten
+            .runtime_args
+            .get("case_mode")
+            .and_then(Value::as_str),
+        Some("sensitive")
+    );
+    assert_eq!(
+        rewritten.runtime_args.get("globs"),
+        Some(&json!(["**/*.rs"]))
+    );
+}
+
+#[test]
 fn fs_basic_find_path_alias_rewrites_to_find_entries() {
     let mut args = json!({
         "action": "find_path",
@@ -611,6 +689,33 @@ fn fs_basic_find_entries_concrete_name_pattern_requests_exact_match() {
         rewrite.runtime_args.get("exact").and_then(|v| v.as_bool()),
         Some(true)
     );
+}
+
+#[test]
+fn fs_basic_exact_dotfile_pattern_stays_a_name_search() {
+    let args = json!({
+        "action": "find_entries",
+        "root": "target",
+        "pattern": ".rustc_info.json",
+        "match_mode": "exact",
+        "target_kind": "file",
+        "include_hidden": true,
+        "respect_ignore": false
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "fs_search");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(Value::as_str),
+        Some("find_name")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("pattern").and_then(Value::as_str),
+        Some(".rustc_info.json")
+    );
+    assert!(rewrite.runtime_args.get("ext").is_none());
 }
 
 #[test]

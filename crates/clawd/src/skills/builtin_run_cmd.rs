@@ -305,6 +305,7 @@ pub(super) enum RunSafeCommandError {
 }
 
 impl RunSafeCommandError {
+    #[cfg(test)]
     fn into_text(self) -> String {
         match self {
             Self::Policy(text) => text,
@@ -386,6 +387,7 @@ pub(crate) async fn run_safe_command(
     .map_err(RunSafeCommandError::into_text)
 }
 
+#[cfg(test)]
 pub(crate) async fn run_safe_command_with_sandbox(
     cwd: &Path,
     command: &str,

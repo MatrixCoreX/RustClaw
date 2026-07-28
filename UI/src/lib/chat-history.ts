@@ -4,6 +4,7 @@ import type {
   ConversationHistoryTurn,
   TaskQueryResponse,
 } from "../types/api";
+import { normalizeTaskArtifacts } from "./task-artifacts";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -91,6 +92,7 @@ export async function verifyConversationHistoryPage(
       !Number.isSafeInteger(turn.attachment_count) ||
       turn.attachment_count < 0 ||
       !Array.isArray(turn.attachment_kinds) ||
+      (turn.artifacts != null && !Array.isArray(turn.artifacts)) ||
       !Number.isSafeInteger(turn.created_at) ||
       !Number.isSafeInteger(turn.updated_at)
     ) {
@@ -154,6 +156,7 @@ function projectThread(
         role: turn.assistant_text ? "assistant" : "system",
         text: assistantText,
         ts: completedAt ?? timestampMs(turn.updated_at),
+        artifacts: normalizeTaskArtifacts(turn.artifacts),
       });
     }
     teachingRuns.push({
@@ -169,7 +172,9 @@ function projectThread(
       taskResult: {
         task_id: turn.task_id,
         status: turn.status,
-        result_json: turn.assistant_text ? { text: turn.assistant_text } : null,
+        result_json: turn.assistant_text
+          ? { text: turn.assistant_text, artifacts: normalizeTaskArtifacts(turn.artifacts) }
+          : null,
         error_text: turn.error_text ?? null,
       },
     });

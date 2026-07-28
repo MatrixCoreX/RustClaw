@@ -201,8 +201,6 @@ pub(crate) struct SkillRuntime {
     pub(crate) max_cmd_length: usize,
     pub(crate) workspace_root: PathBuf,
     pub(crate) default_locator_search_dir: PathBuf,
-    pub(crate) locator_scan_max_depth: usize,
-    pub(crate) locator_scan_max_files: usize,
 }
 
 impl SkillRuntime {
@@ -221,8 +219,6 @@ impl SkillRuntime {
             max_cmd_length: 4096,
             workspace_root: std::env::temp_dir(),
             default_locator_search_dir: std::env::temp_dir(),
-            locator_scan_max_depth: 2,
-            locator_scan_max_files: 100,
         }
     }
 }
@@ -953,8 +949,6 @@ impl AppState {
         self.skill_rt.cmd_max_output_bytes = config.tools.cmd_max_output_bytes.max(128);
         self.skill_rt.max_cmd_length = config.tools.max_cmd_length.max(16);
         self.skill_rt.default_locator_search_dir = default_locator_search_dir;
-        self.skill_rt.locator_scan_max_depth = config.routing.locator_scan_max_depth;
-        self.skill_rt.locator_scan_max_files = config.routing.locator_scan_max_files.max(1);
         self.policy = PolicyConfig {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,

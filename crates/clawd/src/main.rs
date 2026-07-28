@@ -92,6 +92,7 @@ mod skill_storage;
 mod skills;
 mod system_health;
 mod task_admin_routes;
+mod task_artifacts;
 mod task_budget_contract;
 mod task_context_builder;
 mod task_contract;
@@ -706,13 +707,9 @@ async fn run() -> anyhow::Result<()> {
             }
         }
     };
-    let locator_scan_max_depth = config.routing.locator_scan_max_depth;
-    let locator_scan_max_files = config.routing.locator_scan_max_files.max(1);
     info!(
-        "routing default_locator_search_dir={} locator_scan_max_depth={} locator_scan_max_files={}",
+        "routing default_locator_search_dir={}",
         default_locator_search_dir.display(),
-        locator_scan_max_depth,
-        locator_scan_max_files,
     );
 
     let mcp_runtime = Arc::new(crate::mcp_runtime::McpRuntime::new(config.mcp.clone()));
@@ -755,8 +752,6 @@ async fn run() -> anyhow::Result<()> {
             max_cmd_length: config.tools.max_cmd_length.max(16),
             workspace_root,
             default_locator_search_dir,
-            locator_scan_max_depth,
-            locator_scan_max_files,
         },
         policy: crate::PolicyConfig {
             maintenance: config.maintenance.clone(),
@@ -850,6 +845,15 @@ async fn run() -> anyhow::Result<()> {
         .route(
             "/tasks/:task_id/events/artifacts/:artifact_id",
             get(http::task_events::get_task_event_artifact),
+        )
+        .route(
+            "/tasks/:task_id/artifacts",
+            get(http::task_artifacts::list_task_artifacts),
+        )
+        .route(
+            "/tasks/:task_id/artifacts/:artifact_id/content",
+            get(http::task_artifacts::get_task_artifact_content)
+                .head(http::task_artifacts::head_task_artifact_content),
         )
         .route("/classifiers/direct", post(classify_direct))
         .route("/memory", get(get_memory_overview))

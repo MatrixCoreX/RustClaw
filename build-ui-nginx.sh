@@ -576,6 +576,7 @@ nginx_ui_config_matches() {
   grep -Fq "location ^~ /webd/" "$conf_path" || return 1
   grep -Fq "proxy_pass $proxy_upstream;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
+  grep -Fq 'add_header Cache-Control "no-store, no-cache, must-revalidate" always;' "$conf_path" || return 1
   grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
 }
@@ -692,6 +693,12 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
     }
 
     location / {

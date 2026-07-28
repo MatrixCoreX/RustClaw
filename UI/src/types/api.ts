@@ -72,6 +72,7 @@ export interface ConversationHistoryTurn {
   error_text?: string | null;
   attachment_count: number;
   attachment_kinds: string[];
+  artifacts?: TaskArtifact[];
   created_at: number;
   updated_at: number;
 }
@@ -287,9 +288,8 @@ export type WorkspaceUpdateMode =
   | "ui_only"
   | "clawd_only"
   | "nginx_enable"
-  | "nginx_deploy"
+  | "nginx_disable"
   | "release_deploy"
-  | "release_package"
   | "source_checkout";
 
 export interface WorkspaceUpdateStatus {
@@ -325,6 +325,18 @@ export interface NginxUiStatus {
   configured: boolean;
   ui_deployed: boolean;
   clawd_exposure: "loopback_only" | string;
+}
+
+export interface WebdExposureStatus {
+  supported: boolean;
+  platform: string;
+  enabled: boolean;
+  running: boolean;
+  listen: string;
+  port: number;
+  externally_accessible: boolean;
+  nginx_compatible: boolean;
+  restart_scheduled: boolean;
 }
 
 export interface PiAppStatusResponse {
@@ -800,12 +812,17 @@ export interface NniDeviceMeta {
   i2c_baud?: number | null;
   i2c_address?: string | null;
   lib_path?: string | null;
+  simulated?: boolean;
+  device_kind?: "hardware" | "simulated" | "unavailable" | string | null;
 }
 
 export interface NniDeviceStatusResponse {
   nni_available: boolean;
   helper_available: boolean;
   signature_chip_present: boolean;
+  simulated?: boolean;
+  device_kind?: "hardware" | "simulated" | "unavailable" | string | null;
+  simulation_available?: boolean;
   status: string;
   message?: string | null;
   message_key?: string | null;
@@ -833,16 +850,22 @@ export interface NniDevicePayload {
   root_cert_hex?: string;
   root_cert_hex_size?: number;
   slot?: number;
-  i2c_bus?: number;
-  i2c_baud?: number;
-  i2c_address?: string;
-  lib_path?: string;
+  i2c_bus?: number | null;
+  i2c_baud?: number | null;
+  i2c_address?: string | null;
+  lib_path?: string | null;
+  simulated?: boolean;
+  device_kind?: "hardware" | "simulated" | "unavailable" | string;
+  signature_chip_present?: boolean;
+  simulation_enabled?: boolean;
   [key: string]: unknown;
 }
 
 export interface NniDeviceActionResponse {
   action: string;
   signature_chip_present: boolean;
+  simulated?: boolean;
+  device_kind?: "hardware" | "simulated" | "unavailable" | string | null;
   message?: string | null;
   message_key?: string | null;
   payload?: NniDevicePayload;
@@ -1068,6 +1091,10 @@ export interface LogLatestResponse {
   text: string;
 }
 
+export interface LogFilesResponse {
+  files: string[];
+}
+
 export interface WhatsappWebLoginStatus {
   connected?: boolean;
   qr_ready?: boolean;
@@ -1110,6 +1137,19 @@ export interface ChatMessage {
   ts: number;
   attachments?: ChatAttachment[];
   images?: ChatAttachment[];
+  artifacts?: TaskArtifact[];
+}
+
+export interface TaskArtifact {
+  schema_version: 1;
+  id: string;
+  filename: string;
+  kind: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  download_url: string;
+  preview_url?: string | null;
 }
 
 export type BrowserFileWithPath = File & {
@@ -1184,6 +1224,51 @@ export interface HostSystemSummary {
   storage: HostCapacitySummary;
   uptime_seconds: number | null;
   unavailable_fields: HostUnavailableField[];
+}
+
+export type HostDependencyCategory = "runtime" | "build" | "tool" | "skill" | "optional";
+
+export interface HostDependencySummary {
+  total: number;
+  installed: number;
+  missing_required: number;
+  missing_optional: number;
+}
+
+export interface HostDependencyStatus {
+  id: string;
+  category: HostDependencyCategory;
+  required: boolean;
+  installed: boolean;
+  version: string | null;
+  executable: string | null;
+  package_manager: string | null;
+  installable: boolean;
+  used_by: string[];
+  status_code: "installed" | "missing_required" | "missing_optional" | string;
+}
+
+export interface DependencyInstallOperation {
+  schema_version: number;
+  operation_id: string;
+  dependency_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  package_manager: string;
+  started_ts: number | null;
+  finished_ts: number | null;
+  exit_code: number | null;
+  log_tail: string;
+  error_code: string | null;
+}
+
+export interface HostDependenciesSnapshot {
+  schema_version: number;
+  collected_at_ts: number;
+  platform: string;
+  package_manager: string | null;
+  summary: HostDependencySummary;
+  dependencies: HostDependencyStatus[];
+  operations: DependencyInstallOperation[];
 }
 
 export interface ServiceActionNotice {

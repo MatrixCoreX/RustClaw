@@ -510,7 +510,21 @@ pub(crate) fn publish_task_status_projection(state: &AppState, task_id: &str) {
             | claw_core::types::TaskStatus::Canceled
             | claw_core::types::TaskStatus::Timeout
     ) {
-        let _ = publish_event(state, task_id, "task_final", payload);
+        let artifacts = crate::task_artifacts::manifests_from_result(task.result_json.as_ref());
+        let final_payload = if artifacts.is_empty() {
+            payload
+        } else {
+            let artifact_payload = json!({"artifacts": artifacts});
+            let _ = publish_event(state, task_id, "task_artifacts", artifact_payload.clone());
+            let mut payload = payload;
+            if let (Some(target), Some(source)) =
+                (payload.as_object_mut(), artifact_payload.as_object())
+            {
+                target.extend(source.clone());
+            }
+            payload
+        };
+        let _ = publish_event(state, task_id, "task_final", final_payload);
     }
 }
 

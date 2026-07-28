@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::AppState;
+use crate::{task_artifacts::TaskArtifactManifest, AppState};
 
 const DEFAULT_PAGE_LIMIT: usize = 120;
 const MAX_PAGE_LIMIT: usize = 200;
@@ -28,6 +28,7 @@ pub(crate) struct ConversationHistoryTurn {
     pub(crate) error_text: Option<String>,
     pub(crate) attachment_count: usize,
     pub(crate) attachment_kinds: Vec<String>,
+    pub(crate) artifacts: Vec<TaskArtifactManifest>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -306,6 +307,7 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         .as_ref()
         .and_then(visible_result_text)
         .map(|text| bounded_text(text, MAX_ASSISTANT_TEXT_BYTES));
+    let artifacts = crate::task_artifacts::manifests_from_result(result.as_ref());
     let error_text = row
         .error_text
         .as_deref()
@@ -330,6 +332,7 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         error_text,
         attachment_count,
         attachment_kinds,
+        artifacts,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })

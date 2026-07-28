@@ -61,7 +61,7 @@ Optional:
 
 ### `guard_config`
 
-Run a structured RustClaw config risk guard. It reports known risky fields such as real-looking secrets, sudo/path policy flags, and full-access file delivery flags.
+Run a structured RustClaw config risk guard. It reports known risky fields such as real-looking secrets and sudo/path policy flags. Obsolete filesystem scan-limit keys are returned separately as structured deprecations and do not control runtime search.
 
 Optional:
 - `path`: config file path, default `configs/config.toml`.
@@ -133,7 +133,7 @@ Optional:
   - `path`, `field_path`, and typed target value fields when present; evidence roles `path` and `field_value`.
 - `validate_config` and `guard_config` success `extra` fields:
   - `action`: string action name; evidence role `status`.
-  - `valid` or risk/count fields when present; evidence roles `status` and `count`.
+  - `valid`, risk/count fields, and optional `deprecation_count` / `deprecations[]` with stable field/code/message-key data; evidence roles `status`, `entries`, and `count`.
 - `read_back` success `extra` fields:
   - `action`: string, always `read_back`; evidence role `status`.
   - `path`: string config path; evidence role `path`.

@@ -1,25 +1,128 @@
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
+
+use rustclaw_fs_discovery::{
+    discover, resolve_root, BackendPreference, Completeness, DiscoveryBackend, DiscoveryBudget,
+    DiscoveryPolicy, DiscoveryRequest, DiscoverySelector, TargetKind,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScanLimits {
-    pub(super) max_depth: usize,
-    pub(super) max_files: usize,
+    pub(super) max_depth: Option<usize>,
+    pub(super) hard_entry_limit: usize,
+    pub(super) include_hidden: bool,
+    pub(super) respect_ignore: bool,
+    pub(super) deadline: Option<Duration>,
+    pub(super) backend: BackendPreference,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct WalkStats {
-    pub(super) visited: usize,
+    pub(super) visited_files: usize,
+    pub(super) visited_directories: usize,
+    pub(super) skipped_ignored: usize,
+    pub(super) skipped_hidden: usize,
+    pub(super) skipped_symlinks: usize,
+    pub(super) permission_denied: usize,
+    pub(super) skipped_counts_complete: bool,
+    pub(super) completeness: Completeness,
     pub(super) limit_reached: bool,
+    pub(super) backend: DiscoveryBackend,
+    pub(super) backend_version: Option<String>,
+    pub(super) backend_fallback_reason: Option<String>,
+    pub(super) backend_elapsed_ms: u64,
 }
 
-pub(super) fn skip_default_scan_dir(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
+impl WalkStats {
+    pub(super) fn mark_hard_limit(&mut self) {
+        self.completeness = Completeness::PartialHardLimit;
+        self.limit_reached = true;
+    }
+}
+
+fn discovery_boundary(path: &Path) -> PathBuf {
+    let workspace = workspace_root();
+    if path.starts_with(&workspace) {
+        return workspace;
+    }
+    #[cfg(test)]
+    {
+        return path.to_path_buf();
+    }
+    #[cfg(not(test))]
+    workspace
+}
+
+fn walk_with_kind(
+    path: &Path,
+    limits: ScanLimits,
+    target_kind: TargetKind,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<WalkStats, String> {
+    let mut selector = DiscoverySelector::default();
+    selector.target_kind = target_kind;
+    walk_with_selector(path, limits, selector, f)
+}
+
+fn walk_with_selector(
+    path: &Path,
+    limits: ScanLimits,
+    selector: DiscoverySelector,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<WalkStats, String> {
+    let boundary = discovery_boundary(path);
+    let mut request = DiscoveryRequest::new(&boundary, path);
+    request.selector = selector;
+    request.policy = DiscoveryPolicy {
+        include_hidden: limits.include_hidden,
+        respect_ignore: limits.respect_ignore,
     };
-    matches!(
-        name,
-        ".git" | "target" | "node_modules" | ".venv" | "venv" | "__pycache__"
-    )
+    request.budget = DiscoveryBudget {
+        max_depth: limits.max_depth,
+        hard_entry_limit: limits.hard_entry_limit,
+        match_snapshot_limit: limits.hard_entry_limit,
+        deadline: limits.deadline,
+        cancellation: None,
+    };
+    request.backend = limits.backend;
+    let report = discover(&request).map_err(|error| error.to_string())?;
+    let mut inspected = 0usize;
+    let mut stopped = false;
+    for entry in &report.entries {
+        inspected = inspected.saturating_add(1);
+        if f(&entry.path) {
+            stopped = true;
+            break;
+        }
+    }
+    let mut stats = WalkStats {
+        visited_files: report.visited_files,
+        visited_directories: report.visited_directories,
+        skipped_ignored: report.skipped_ignored,
+        skipped_hidden: report.skipped_hidden,
+        skipped_symlinks: report.skipped_symlinks,
+        permission_denied: report.permission_denied,
+        skipped_counts_complete: report.skipped_counts_complete,
+        completeness: report.completeness,
+        limit_reached: report.scan_truncated(),
+        backend: report.backend.backend,
+        backend_version: report.backend.version,
+        backend_fallback_reason: report.backend.fallback_reason,
+        backend_elapsed_ms: report.backend.elapsed_ms,
+    };
+    if stopped && inspected < report.entries.len() {
+        stats.mark_hard_limit();
+    }
+    Ok(stats)
+}
+
+pub(super) fn walk_collect_selected(
+    path: &Path,
+    limits: ScanLimits,
+    selector: DiscoverySelector,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<WalkStats, String> {
+    walk_with_selector(path, limits, selector, f)
 }
 
 pub(super) fn walk_collect(
@@ -27,247 +130,11 @@ pub(super) fn walk_collect(
     limits: ScanLimits,
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<WalkStats, String> {
-    let mut stats = WalkStats::default();
-    let mut stop = false;
-    walk_collect_inner(path, 0, limits, &mut stats, &mut stop, f)?;
-    Ok(stats)
-}
-
-fn walk_collect_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    stats: &mut WalkStats,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop {
-        return Ok(());
-    }
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|err| format!("metadata failed: {err}"))?;
-    if metadata.file_type().is_symlink() {
-        return Ok(());
-    }
-    if metadata.is_file() {
-        if stats.visited >= limits.max_files {
-            stats.limit_reached = true;
-            return Ok(());
-        }
-        stats.visited += 1;
-        if f(path) {
-            *stop = true;
-        }
-        return Ok(());
-    }
-    if !metadata.is_dir() || depth > limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut files = Vec::new();
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| format!("entry type failed: {err}"))?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            if !skip_default_scan_dir(&path) {
-                dirs.push(path);
-            }
-        } else if file_type.is_file() {
-            files.push(path);
-        }
-    }
-    files.sort();
-    dirs.sort();
-    for path in files {
-        if stats.visited >= limits.max_files {
-            stats.limit_reached = true;
-            return Ok(());
-        }
-        stats.visited += 1;
-        if f(&path) {
-            *stop = true;
-            return Ok(());
-        }
-    }
-    for path in dirs {
-        if *stop {
-            return Ok(());
-        }
-        if depth < limits.max_depth {
-            walk_collect_inner(&path, depth + 1, limits, stats, stop, f)?;
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn walk_collect_nodes(
-    path: &Path,
-    limits: ScanLimits,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<WalkStats, String> {
-    let mut stats = WalkStats::default();
-    let mut stop = false;
-    walk_collect_nodes_inner(path, 0, limits, &mut stats, &mut stop, f)?;
-    Ok(stats)
-}
-
-pub(super) fn walk_collect_dirs(
-    path: &Path,
-    limits: ScanLimits,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<WalkStats, String> {
-    let mut stats = WalkStats::default();
-    let mut stop = false;
-    walk_collect_dirs_inner(path, 0, limits, &mut stats, &mut stop, f)?;
-    Ok(stats)
-}
-
-fn walk_collect_dirs_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    stats: &mut WalkStats,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop {
-        return Ok(());
-    }
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|err| format!("metadata failed: {err}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Ok(());
-    }
-    if stats.visited >= limits.max_files {
-        stats.limit_reached = true;
-        return Ok(());
-    }
-    stats.visited += 1;
-    if f(path) {
-        *stop = true;
-        return Ok(());
-    }
-    if depth >= limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| format!("entry type failed: {err}"))?;
-        if file_type.is_dir() && !file_type.is_symlink() && !skip_default_scan_dir(&path) {
-            dirs.push(path);
-        }
-    }
-    dirs.sort();
-    for path in dirs {
-        if *stop {
-            return Ok(());
-        }
-        walk_collect_dirs_inner(&path, depth + 1, limits, stats, stop, f)?;
-    }
-    Ok(())
-}
-
-fn walk_collect_nodes_inner(
-    path: &Path,
-    depth: usize,
-    limits: ScanLimits,
-    stats: &mut WalkStats,
-    stop: &mut bool,
-    f: &mut dyn FnMut(&Path) -> bool,
-) -> Result<(), String> {
-    if *stop {
-        return Ok(());
-    }
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|err| format!("metadata failed: {err}"))?;
-    if metadata.file_type().is_symlink() || metadata.is_file() {
-        if stats.visited >= limits.max_files {
-            stats.limit_reached = true;
-            return Ok(());
-        }
-        stats.visited += 1;
-        if f(path) {
-            *stop = true;
-        }
-        return Ok(());
-    }
-    if !metadata.is_dir() {
-        return Ok(());
-    }
-    if f(path) {
-        *stop = true;
-        return Ok(());
-    }
-    if depth > limits.max_depth {
-        return Ok(());
-    }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
-    let mut files = Vec::new();
-    let mut dirs = Vec::new();
-    for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| format!("entry type failed: {err}"))?;
-        if file_type.is_dir() && !file_type.is_symlink() {
-            if !skip_default_scan_dir(&path) {
-                dirs.push(path);
-            }
-        } else {
-            files.push(path);
-        }
-    }
-    files.sort();
-    dirs.sort();
-    for path in files {
-        if stats.visited >= limits.max_files {
-            stats.limit_reached = true;
-            return Ok(());
-        }
-        stats.visited += 1;
-        if f(&path) {
-            *stop = true;
-            return Ok(());
-        }
-    }
-    for path in dirs {
-        if *stop {
-            return Ok(());
-        }
-        if depth < limits.max_depth {
-            walk_collect_nodes_inner(&path, depth + 1, limits, stats, stop, f)?;
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn path_kind(path: &Path) -> &'static str {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => "symlink",
-        Ok(metadata) if metadata.is_dir() => "dir",
-        Ok(metadata) if metadata.is_file() => "file",
-        _ => "other",
-    }
+    walk_with_kind(path, limits, TargetKind::File, f)
 }
 
 pub(super) fn to_rel(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string()
+    rustclaw_fs_discovery::relative_path(root, path)
 }
 
 pub(super) fn workspace_root() -> PathBuf {
@@ -287,32 +154,30 @@ pub(super) fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf
     {
         return Err("path with '..' is not allowed".to_string());
     }
-    let candidate = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        workspace_root.join(raw)
-    };
-    let resolved = candidate
-        .canonicalize()
-        .map_err(|err| format!("path resolution failed: {err}"))?;
-    let workspace = workspace_root
-        .canonicalize()
-        .map_err(|err| format!("workspace resolution failed: {err}"))?;
-    if resolved.starts_with(&workspace) || test_fixture_path_allowed(&workspace, &resolved) {
-        return Ok(resolved);
+    match resolve_root(workspace_root, raw) {
+        Ok((_, root)) => Ok(root),
+        Err(error) => {
+            #[cfg(test)]
+            {
+                let workspace_is_current = workspace_root
+                    .canonicalize()
+                    .ok()
+                    .zip(
+                        std::env::current_dir()
+                            .ok()
+                            .and_then(|value| value.canonicalize().ok()),
+                    )
+                    .is_some_and(|(workspace, current)| workspace == current);
+                if workspace_is_current
+                    && raw.is_absolute()
+                    && raw.starts_with(std::env::temp_dir())
+                {
+                    return raw
+                        .canonicalize()
+                        .map_err(|io_error| format!("path resolution failed: {io_error}"));
+                }
+            }
+            Err(error.to_string())
+        }
     }
-    Err("path is outside workspace".to_string())
-}
-
-#[cfg(test)]
-fn test_fixture_path_allowed(workspace: &Path, path: &Path) -> bool {
-    let current = std::env::current_dir()
-        .ok()
-        .and_then(|value| value.canonicalize().ok());
-    current.as_deref() == Some(workspace) && path.starts_with(std::env::temp_dir())
-}
-
-#[cfg(not(test))]
-fn test_fixture_path_allowed(_workspace: &Path, _path: &Path) -> bool {
-    false
 }

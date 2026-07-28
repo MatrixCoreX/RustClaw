@@ -4,7 +4,7 @@ schema_version = 1
 [package]
 name = "fs_search"
 version = "0.1.8"
-description = "Search workspace paths or file content and return bounded structured matches."
+description = "Typed recursive path/glob and literal/regex content search with opaque snapshot pages, explicit completeness, verified ripgrep fast paths, and a safe Rust fallback."
 protocol = "rustclaw-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
@@ -39,7 +39,7 @@ runtime_network = false
 inherit_credentials = false
 
 [storage]
-kind = "none"
+kind = "sqlite"
 schema_version = 1
 migration_owner = "fs_search"
 

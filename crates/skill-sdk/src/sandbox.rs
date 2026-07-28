@@ -5,6 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{SkillSdkError, SkillSdkResult};
 
+/// Set by the trusted runtime when the skill runner and all of its descendants
+/// already execute inside the capability-scoped process sandbox.
+pub const PARENT_SANDBOX_BACKEND_ENV: &str = "RUSTCLAW_PARENT_SANDBOX_BACKEND";
+/// Set only by the trusted runtime so a read-only installed skill can write to
+/// its declared private storage without gaining write access to the workspace.
+pub const SKILL_STORAGE_WRITABLE_DIRECTORY_ENV: &str = "RUSTCLAW_SKILL_STORAGE_WRITABLE_DIRECTORY";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxNetwork {
@@ -138,15 +145,19 @@ fn prepare_macos_seatbelt(
         )
         .phase("preflight"));
     }
-    let mut profile = String::from(
-        "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process*)\n(allow file-read*)\n",
-    );
+    let mut profile = String::from("(version 1)\n(allow default)\n(deny file-write*)\n");
     if network == SandboxNetwork::Allow {
         profile.push_str("(allow network*)\n");
     } else {
         profile.push_str("(deny network*)\n");
     }
-    for path in writable_paths {
+    let mut macos_writable_paths = writable_paths.to_vec();
+    if let Ok(temp_directory) = std::fs::canonicalize(std::env::temp_dir()) {
+        if temp_directory.is_dir() && !macos_writable_paths.contains(&temp_directory) {
+            macos_writable_paths.push(temp_directory);
+        }
+    }
+    for path in &macos_writable_paths {
         let value = path.to_string_lossy();
         if value
             .chars()
@@ -171,3 +182,7 @@ fn prepare_macos_seatbelt(
         backend: "macos_seatbelt",
     })
 }
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "sandbox_tests.rs"]
+mod tests;

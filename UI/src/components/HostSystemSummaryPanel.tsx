@@ -169,7 +169,7 @@ export function HostSystemSummaryPanel({
           />
           <ResourceProgress
             t={t}
-            label={t("RustClaw 存储", "RustClaw storage")}
+            label={t("系统存储", "System storage")}
             capacity={summary.storage}
             icon={<HardDrive className="h-4 w-4" />}
           />

@@ -3,6 +3,7 @@ use super::*;
 fn options<'a>(query: &'a str) -> GrepOptions<'a> {
     GrepOptions {
         query,
+        pattern_kind: PatternKind::Literal,
         case_insensitive: false,
         multiline: false,
         context_before: 0,
@@ -23,10 +24,7 @@ fn line_matches_include_bounded_context_and_byte_range() {
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].line, 3);
     assert_eq!(matches[0].end_line, 3);
-    assert_eq!(
-        &text[matches[0].start_byte..matches[0].end_byte],
-        "needle value"
-    );
+    assert_eq!(&text[matches[0].start_byte..matches[0].end_byte], "needle");
     assert_eq!(matches[0].context_before[0].line, 2);
     assert_eq!(matches[0].context_before[0].text, "before");
     assert_eq!(matches[0].context_after[0].line, 4);
@@ -48,6 +46,7 @@ fn multiline_literal_and_wildcard_report_exact_provenance() {
     );
 
     let mut wildcard = options("let value.*finish");
+    wildcard.pattern_kind = PatternKind::Regex;
     wildcard.multiline = true;
     let wildcard_matches = find_matches(text, wildcard).expect("wildcard multiline");
     assert_eq!(wildcard_matches.len(), 1);

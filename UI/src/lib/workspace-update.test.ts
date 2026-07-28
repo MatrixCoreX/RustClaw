@@ -66,11 +66,10 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStep("building_clawd", "zh"), "正在编译 clawd");
   assert.equal(formatWorkspaceUpdateStep("custom_step", "en"), "custom_step");
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
-  assert.equal(formatWorkspaceUpdateStatus("running", "release_package", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
   assert.equal(formatWorkspaceUpdateStatus("running", "nginx_enable", "zh"), "配置中");
-  assert.equal(formatWorkspaceUpdateStatus("running", "nginx_deploy", "en"), "Deploying");
+  assert.equal(formatWorkspaceUpdateStatus("running", "nginx_disable", "en"), "Disabling");
   assert.equal(formatWorkspaceUpdateStatus("failed", undefined, "en"), "Failed");
   assert.equal(formatWorkspaceUpdateStatus("idle", undefined, "zh"), "待更新");
   assert.equal(formatWorkspaceUpdateApiError("workspace_update_already_running", "en"), "An update is already running.");
@@ -78,10 +77,6 @@ test("formats workspace update steps and statuses", () => {
   assert.equal(
     formatWorkspaceUpdateApiError("workspace_update_source_checkout_required", "en"),
     "This installation uses a Release package and can only be updated through Releases.",
-  );
-  assert.equal(
-    formatWorkspaceUpdateApiError("workspace_update_release_package_already_enabled", "en"),
-    "Release mode is already enabled.",
   );
   assert.equal(
     formatWorkspaceUpdateApiError("workspace_update_release_platform_unsupported", "zh"),
@@ -129,20 +124,31 @@ test("builds release deployment progress view", () => {
   assert.equal(view.notice?.detail, "Release deployment is running. Logs will keep refreshing below.");
 });
 
-test("builds nginx enable and deployment progress views", () => {
+test("builds nginx repair and UI deployment progress view", () => {
   const enabling = buildWorkspaceUpdateView(
     status({ status: "running", mode: "nginx_enable", step: "enabling_nginx" }),
     "en",
   );
   assert.equal(enabling.progressPercent, 45);
-  assert.match(enabling.progressLabel, /configuring the RustClaw web entry/);
+  assert.match(enabling.progressLabel, /installing, or updating nginx/);
+  assert.match(enabling.progressLabel, /deploying the current UI/);
+});
 
-  const deploying = buildWorkspaceUpdateView(
-    status({ status: "running", mode: "nginx_deploy", step: "deploying_nginx_ui" }),
-    "zh",
+test("builds nginx disable warning and completion views", () => {
+  const disabling = buildWorkspaceUpdateView(
+    status({ status: "running", mode: "nginx_disable", step: "disabling_nginx" }),
+    "en",
   );
-  assert.equal(deploying.progressPercent, 82);
-  assert.match(deploying.progressLabel, /重载 nginx/);
+  assert.equal(disabling.progressPercent, 45);
+  assert.match(disabling.progressLabel, /removing the RustClaw site/);
+  assert.match(disabling.notice?.detail ?? "", /may disconnect immediately/);
+
+  const completed = buildWorkspaceUpdateView(
+    status({ status: "succeeded", mode: "nginx_disable", step: "nginx_disabled" }),
+    "en",
+  );
+  assert.equal(completed.notice?.title, "nginx was disabled and the deployed UI was removed.");
+  assert.match(completed.notice?.detail ?? "", /remote entry is unavailable/);
 });
 
 test("builds source checkout migration progress view", () => {
@@ -159,33 +165,6 @@ test("builds source checkout migration progress view", () => {
   assert.match(view.progressLabel, /Validating source/);
   assert.equal(view.notice?.title, "Fetching complete source");
   assert.match(view.notice?.detail ?? "", /current Release installation remains unchanged/);
-});
-
-test("builds release package migration progress and failure views", () => {
-  const running = buildWorkspaceUpdateView(
-    status({
-      status: "running",
-      mode: "release_package",
-      step: "downloading_release",
-      next_step_key: "workspace_update.release_package_downloading",
-    }),
-    "en",
-  );
-  assert.equal(running.progressPercent, 35);
-  assert.match(running.progressLabel, /source tree will be backed up/);
-  assert.match(running.notice?.detail ?? "", /source checkout remains unchanged/);
-
-  const failed = buildWorkspaceUpdateView(
-    status({
-      status: "failed",
-      mode: "release_package",
-      error: "release_package_migration_failed",
-      next_step_key: "workspace_update.release_package_failed",
-    }),
-    "zh",
-  );
-  assert.equal(failed.notice?.title, "Release 模式切换失败");
-  assert.match(failed.notice?.detail ?? "", /当前源码目录保持不变/);
 });
 
 test("builds failed and canceled notices", () => {
@@ -311,9 +290,8 @@ test("reloads once after compile modes complete but not after release deployment
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "full", "up_to_date"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "clawd_only", "idle"), true);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_deploy", "up_to_date"), false);
-  assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_package", "up_to_date"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "nginx_enable", "succeeded"), false);
-  assert.equal(shouldReloadAfterWorkspaceBuild(true, "nginx_deploy", "succeeded"), true);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "nginx_disable", "succeeded"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(false, "ui_only", "succeeded"), false);
   assert.equal(shouldReloadAfterWorkspaceBuild(true, "ui_only", "failed"), false);
 });

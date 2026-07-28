@@ -1527,22 +1527,6 @@ fn workspace_update_source_checkout_mode_preserves_installation_state() {
 }
 
 #[test]
-fn workspace_update_release_package_mode_preserves_source_state_until_activation() {
-    let previous = WorkspaceUpdateStatus {
-        installation_kind: "source_checkout".to_string(),
-        source_update_available: true,
-        ..WorkspaceUpdateStatus::default()
-    };
-
-    let started = begin_workspace_update_status(&previous, WorkspaceUpdateMode::ReleasePackage);
-
-    assert_eq!(started.status, "running");
-    assert_eq!(started.mode, "release_package");
-    assert_eq!(started.installation_kind, "source_checkout");
-    assert!(started.source_update_available);
-}
-
-#[test]
 fn workspace_update_release_lookup_errors_control_cached_tag_reuse() {
     assert!(LatestReleaseLookupError::RequestTimedOut.can_use_cached_tag());
     assert!(LatestReleaseLookupError::HttpStatus.can_use_cached_tag());
@@ -1573,6 +1557,26 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(source_checkout_script.contains("git clone --quiet --single-branch"));
     assert!(source_checkout_script.contains("source_checkout_status=enabled"));
     assert!(source_checkout_script.contains("mv \"$ROOT_DIR\" \"$BACKUP_DIR\""));
+}
+
+#[test]
+fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() {
+    let deploy_script = include_str!("../../../../deploy-ui-nginx.sh");
+    assert!(deploy_script.contains("--upgrade-nginx"));
+    assert!(deploy_script.contains("brew upgrade nginx"));
+    assert!(deploy_script.contains("apt-get install -y nginx"));
+    assert!(deploy_script.contains("apk add --upgrade nginx"));
+
+    let disable_script = include_str!("../../../../scripts/disable-nginx-web.sh");
+    assert!(disable_script.contains("brew services stop nginx"));
+    assert!(disable_script.contains("systemctl disable --now nginx"));
+    assert!(disable_script.contains("# RustClaw UI"));
+    assert!(disable_script.contains("*/rustclaw|*/nginx-ui"));
+    assert!(disable_script.contains("Refusing to delete non-dedicated UI root"));
+
+    let package_script = include_str!("../../../../package-release.sh");
+    assert!(package_script.contains("copy_if_exists \"deploy-ui-nginx.sh\""));
+    assert!(package_script.contains("copy_if_exists \"scripts\""));
 }
 
 #[test]

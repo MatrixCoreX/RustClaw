@@ -54,11 +54,11 @@ async fn start_workspace_update_nginx_enable(
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::NginxEnable).await
 }
 
-async fn start_workspace_update_nginx_deploy(
+async fn start_workspace_update_nginx_disable(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
-    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::NginxDeploy).await
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::NginxDisable).await
 }
 
 fn collect_nginx_ui_status() -> NginxUiStatus {
@@ -161,29 +161,17 @@ async fn run_workspace_update_nginx_job(
     workspace_root: PathBuf,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
     control: Arc<Mutex<WorkspaceUpdateControl>>,
-    build_ui: bool,
 ) {
     record_workspace_update_current_version(&workspace_root, &shared).await;
     if finish_workspace_update_if_canceled(&shared, &control) {
         return;
     }
 
-    set_workspace_update_step(
-        &shared,
-        if build_ui {
-            "deploying_nginx_ui"
-        } else {
-            "enabling_nginx"
-        },
-    );
+    set_workspace_update_step(&shared, "enabling_nginx");
     reset_workspace_update_build_logs(&shared);
 
-    let source_checkout = workspace_root.join(".git").is_dir();
-    let (script, args): (&str, &[&str]) = if build_ui && source_checkout {
-        ("./build-ui-nginx.sh", &["./build-ui-nginx.sh", "--build", "--deploy"])
-    } else {
-        ("./deploy-ui-nginx.sh", &["./deploy-ui-nginx.sh"])
-    };
+    let script = "./deploy-ui-nginx.sh";
+    let args = &["./deploy-ui-nginx.sh", "--upgrade-nginx"];
     match run_workspace_update_command_streaming(
         "bash",
         args,
@@ -194,29 +182,13 @@ async fn run_workspace_update_nginx_job(
     .await
     {
         Ok(out) if out.exit_code == Some(0) => {
-            finish_workspace_update_succeeded(
-                &shared,
-                if build_ui {
-                    "nginx_ui_deployed"
-                } else {
-                    "nginx_enabled"
-                },
-                out,
-            );
+            finish_workspace_update_succeeded(&shared, "nginx_enabled", out);
         }
         Ok(out) => {
             fail_workspace_update(
                 &shared,
-                if build_ui {
-                    "nginx_ui_deploy_failed"
-                } else {
-                    "nginx_enable_failed"
-                },
-                if build_ui {
-                    "workspace_update.nginx_ui_deploy_failed"
-                } else {
-                    "workspace_update.nginx_enable_failed"
-                },
+                "nginx_enable_failed",
+                "workspace_update.nginx_enable_failed",
                 out,
             );
         }
@@ -229,6 +201,53 @@ async fn run_workspace_update_nginx_job(
             fail_workspace_update_with_error(
                 &shared,
                 format!("{script}: {err}"),
+                "workspace_update.nginx_command_failed",
+            );
+        }
+    }
+}
+
+async fn run_workspace_update_nginx_disable_job(
+    workspace_root: PathBuf,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    record_workspace_update_current_version(&workspace_root, &shared).await;
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "disabling_nginx");
+    reset_workspace_update_build_logs(&shared);
+    match run_workspace_update_command_streaming(
+        "bash",
+        &["./scripts/disable-nginx-web.sh"],
+        &workspace_root,
+        shared.clone(),
+        control.clone(),
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            finish_workspace_update_succeeded(&shared, "nginx_disabled", out);
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "nginx_disable_failed",
+                "workspace_update.nginx_disable_failed",
+                out,
+            );
+        }
+        Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
+            fail_workspace_update_with_error(
+                &shared,
+                format!("./scripts/disable-nginx-web.sh: {err}"),
                 "workspace_update.nginx_command_failed",
             );
         }

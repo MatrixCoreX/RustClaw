@@ -6,6 +6,9 @@ type Translate = (zh: string, en: string) => string;
 export interface LogsPageProps {
   t: Translate;
   tSlash: (mixed: string) => string;
+  logFiles: string[];
+  logFilesLoading: boolean;
+  logFilesError: string | null;
   selectedLogFile: string;
   logTailLines: number;
   logFollowTail: boolean;
@@ -18,12 +21,15 @@ export interface LogsPageProps {
   onSelectedLogFileChange: (value: string) => void;
   onLogTailLinesChange: (value: number) => void;
   onLogFollowTailChange: (value: boolean) => void;
-  onFetchLatestLog: () => void | Promise<void>;
+  onRefreshLogs: () => void | Promise<void>;
 }
 
 export function LogsPage({
   t,
   tSlash,
+  logFiles,
+  logFilesLoading,
+  logFilesError,
   selectedLogFile,
   logTailLines,
   logFollowTail,
@@ -36,18 +42,18 @@ export function LogsPage({
   onSelectedLogFileChange,
   onLogTailLinesChange,
   onLogFollowTailChange,
-  onFetchLatestLog,
+  onRefreshLogs,
 }: LogsPageProps) {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-base font-semibold">{t("最新日志", "Latest Logs")}</h3>
         <button
-          onClick={() => void onFetchLatestLog()}
-          disabled={logLoading}
+          onClick={() => void onRefreshLogs()}
+          disabled={logLoading || logFilesLoading}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {logLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {logLoading || logFilesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {tSlash("刷新 / Refresh")}
         </button>
       </div>
@@ -59,16 +65,19 @@ export function LogsPage({
             className="theme-input"
             value={selectedLogFile}
             onChange={(event) => onSelectedLogFileChange(event.target.value)}
+            disabled={logFilesLoading || logFiles.length === 0}
           >
-            <option value="agent_trace.log">agent_trace.log</option>
-            <option value="model_io.log">model_io.log</option>
-            <option value="routing.log">routing.log</option>
-            <option value="act_plan.log">act_plan.log</option>
-            <option value="clawd.log">clawd.log</option>
-            <option value="nni.log">nni.log</option>
-            <option value="telegramd.log">telegramd.log</option>
-            <option value="whatsappd.log">whatsappd.log</option>
-            <option value="whatsapp_webd.log">whatsapp_webd.log</option>
+            {logFiles.length === 0 ? (
+              <option value="">
+                {logFilesLoading ? t("正在检查...", "Checking...") : t("没有可用日志", "No logs available")}
+              </option>
+            ) : (
+              logFiles.map((file) => (
+                <option key={file} value={file}>
+                  {file}
+                </option>
+              ))
+            )}
           </select>
         </label>
 
@@ -98,9 +107,9 @@ export function LogsPage({
         </div>
       </div>
 
-      {logError ? (
+      {logFilesError || logError ? (
         <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {t("日志读取失败", "Log read failed")}: {logError}
+          {t("日志读取失败", "Log read failed")}: {logFilesError || logError}
         </p>
       ) : null}
 

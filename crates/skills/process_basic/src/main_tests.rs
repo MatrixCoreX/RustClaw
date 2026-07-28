@@ -27,6 +27,20 @@ fn ps_filter_matches_command_case_insensitively() {
 }
 
 #[test]
+fn pgrep_row_parser_preserves_full_command() {
+    let row =
+        parse_pgrep_row("33030 /Users/xuhao/rustclaw/target/release/clawd --config local.toml")
+            .expect("pgrep row");
+
+    assert_eq!(row.pid, 33030);
+    assert_eq!(row.ppid, 0);
+    assert_eq!(
+        row.comm,
+        "/Users/xuhao/rustclaw/target/release/clawd --config local.toml"
+    );
+}
+
+#[test]
 fn command_output_filter_keeps_exit_and_matching_rows() {
     let text =
         "exit=0\nLISTEN 0 128 0.0.0.0:8788 users:((\"webd\",pid=1))\nLISTEN 0 128 0.0.0.0:5432";

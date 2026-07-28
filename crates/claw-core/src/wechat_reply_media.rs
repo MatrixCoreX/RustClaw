@@ -232,6 +232,9 @@ fn collect_media_from_object(
     seen: &mut HashSet<String>,
     media_context: bool,
 ) {
+    if is_browser_task_artifact_manifest(obj) {
+        return;
+    }
     let kind = media_kind_from_object(obj);
     for key in ["output_path", "file_path", "local_path", "resolved_path"] {
         collect_string_or_strings(obj.get(key), workspace_root, out, seen, kind);
@@ -274,6 +277,9 @@ fn value_contains_structured_media(value: &Value, media_context: bool) -> bool {
 }
 
 fn object_contains_structured_media(obj: &Map<String, Value>, media_context: bool) -> bool {
+    if is_browser_task_artifact_manifest(obj) {
+        return false;
+    }
     let kind = media_kind_from_object(obj);
     if ["output_path", "file_path", "local_path", "resolved_path"]
         .iter()
@@ -307,6 +313,20 @@ fn object_contains_structured_media(obj: &Map<String, Value>, media_context: boo
         (child_media_context || structured_payload_container_key(key))
             && value_contains_structured_media(child, child_media_context)
     })
+}
+
+fn is_browser_task_artifact_manifest(obj: &Map<String, Value>) -> bool {
+    obj.get("schema_version").and_then(Value::as_u64) == Some(1)
+        && obj.get("id").and_then(Value::as_str).is_some()
+        && obj.get("sha256").and_then(Value::as_str).is_some()
+        && obj
+            .get("download_url")
+            .and_then(Value::as_str)
+            .is_some_and(|url| {
+                url.starts_with("/v1/tasks/")
+                    && url.contains("/artifacts/")
+                    && url.ends_with("/content")
+            })
 }
 
 fn value_has_string_or_strings(value: Option<&Value>) -> bool {

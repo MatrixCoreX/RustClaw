@@ -333,6 +333,45 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
 }
 
 #[test]
+fn update_task_success_attaches_artifacts_only_after_fenced_commit() {
+    let workspace = TempDirGuard::new("successful_artifact_commit");
+    let mut state = state_with_tasks_table();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    let task_id = "artifact-success";
+    let output = workspace.path.join("report.txt");
+    std::fs::write(&output, b"committed output").expect("write output fixture");
+    insert_task(&state, task_id, "running", None, crate::now_ts_u64() as i64);
+    set_task_lease(
+        &state,
+        task_id,
+        state.worker.worker_id.as_str(),
+        i64::MAX,
+        1,
+        crate::now_ts_u64() as i64,
+    );
+
+    update_task_success(
+        &state,
+        task_id,
+        1,
+        &json!({"text": "ready", "output_path": output}).to_string(),
+    )
+    .expect("commit task success");
+
+    let result = stored_result_json(&state, task_id);
+    let artifacts = crate::task_artifacts::manifests_from_result(Some(&result));
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(result["text"], "ready");
+    let delivered = crate::task_artifacts::delivery_artifact_path(
+        &workspace.path,
+        task_id,
+        &artifacts[0].id,
+        &artifacts[0].filename,
+    );
+    assert_eq!(std::fs::read(delivered).unwrap(), b"committed output");
+}
+
+#[test]
 fn claim_next_task_records_worker_lease_fields() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();
@@ -785,9 +824,13 @@ fn assert_worker_lease_lost(error: anyhow::Error, operation: &str) {
 
 #[test]
 fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
-    let stale_worker = state_with_tasks_table();
+    let workspace = TempDirGuard::new("stale_artifact_fence");
+    let mut stale_worker = state_with_tasks_table();
+    stale_worker.skill_rt.workspace_root = workspace.path.clone();
     let mut current_worker = stale_worker.clone();
     current_worker.worker.worker_id = "worker:takeover".to_string();
+    let stale_output = workspace.path.join("stale-output.txt");
+    std::fs::write(&stale_output, b"stale worker output").expect("write stale output fixture");
     let now = crate::now_ts_u64() as i64;
     for task_id in [
         "lease-heartbeat",
@@ -821,10 +864,19 @@ fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
         "update_task_progress_result",
     );
     assert_worker_lease_lost(
-        update_task_success(&stale_worker, "lease-success", 1, r#"{"status":"ok"}"#)
-            .expect_err("stale success must be fenced"),
+        update_task_success(
+            &stale_worker,
+            "lease-success",
+            1,
+            &json!({"status": "ok", "output_path": stale_output}).to_string(),
+        )
+        .expect_err("stale success must be fenced"),
         "update_task_success",
     );
+    assert!(!workspace
+        .path
+        .join(".rustclaw/artifacts/delivery/lease-success")
+        .exists());
     assert_worker_lease_lost(
         update_task_failure(&stale_worker, "lease-failure", 1, "worker_runtime_error")
             .expect_err("stale failure must be fenced"),

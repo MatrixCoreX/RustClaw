@@ -21,6 +21,7 @@ import {
   nniDeviceMessage,
   nniDeviceNextStep,
   nniPayloadHexField,
+  nniSimulationControlMode,
   nniTimestampSignatureReady,
   shortenHex,
   shortNniValue,
@@ -87,6 +88,7 @@ export interface NniPageProps {
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
+  onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onActionMessageChange: (message: string | null) => void;
   onActionErrorChange: (message: string | null) => void;
 }
@@ -101,6 +103,7 @@ const NNI_DEVICE_ACTIONS = [
 ];
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
+const NNI_SIGNATURE_DETECTION_SECONDS = 12;
 
 export function NniPage({
   lang,
@@ -154,13 +157,17 @@ export function NniPage({
   onFetchHeartbeatErrors,
   onClearHeartbeatErrors,
   onRunDeviceAction,
+  onSetDeviceSimulation,
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
+  const [nniDetectionSecondsLeft, setNniDetectionSecondsLeft] = useState(NNI_SIGNATURE_DETECTION_SECONDS);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.signature_chip_present === false;
+  const nniSimulated = nniStatus?.simulated === true;
+  const nniSimulationControl = nniSimulationControlMode(nniStatus, nniStatusLoading);
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
   const nniHeartbeatRecordsCanPrev = nniHeartbeatRecordsPage > 1;
   const nniHeartbeatRecordsCanNext = nniHeartbeatRecordsPage < nniHeartbeatRecordsTotalPages;
@@ -169,14 +176,16 @@ export function NniPage({
   const actionLabel = (action: string) => nniActionLabel(action, lang);
   const nniRuntimeActivity =
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
-  const nniStatusMessage =
-    nniDeviceMessage(
-      nniStatus,
-      lang,
-      nniStatusLoading
-        ? t("正在读取签名芯片状态。", "Reading signature chip status.")
-        : t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."),
-    ) ?? "";
+  const nniStatusMessage = nniStatusLoading
+    ? t(
+        `正在检测真实签名芯片，请等待约 ${nniDetectionSecondsLeft} 秒。`,
+        `Checking for a real signature chip. Please wait about ${nniDetectionSecondsLeft} seconds.`,
+      )
+    : nniDeviceMessage(
+        nniStatus,
+        lang,
+        t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."),
+      ) ?? "";
   const nniStatusNextStep = nniDeviceNextStep(nniStatus, lang);
 
   useEffect(() => {
@@ -186,6 +195,23 @@ export function NniPage({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!nniStatusLoading) {
+      setNniDetectionSecondsLeft(NNI_SIGNATURE_DETECTION_SECONDS);
+      return;
+    }
+    const startedAt = Date.now();
+    const updateCountdown = () => {
+      const elapsedSeconds = (Date.now() - startedAt) / 1000;
+      setNniDetectionSecondsLeft(
+        Math.max(1, Math.ceil(NNI_SIGNATURE_DETECTION_SECONDS - elapsedSeconds)),
+      );
+    };
+    updateCountdown();
+    const timer = window.setInterval(updateCountdown, 250);
+    return () => window.clearInterval(timer);
+  }, [nniStatusLoading]);
 
   const runTestJoinWithRuntimePulse = async () => {
     if (nniTestJoinPulseTimer.current !== null) {
@@ -307,47 +333,113 @@ export function NniPage({
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("设备状态", "Device status")}</p>
               <h4 className="mt-2 text-lg font-semibold">{t("设备签名芯片", "Device signature chip")}</h4>
             </div>
-            <span
-              className={
-                nniStatusLoading
-                  ? "setup-status"
-                  : nniStatus == null
-                    ? "setup-status setup-status-todo"
-                    : nniChipPresent
-                      ? "setup-status setup-status-done"
-                      : "setup-status setup-status-attention"
-              }
-            >
-              {nniStatusLoading ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t("检测中", "Checking")}
-                </>
-              ) : nniChipPresent ? (
-                <>
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {t("可用", "Ready")}
-                </>
-              ) : nniStatus == null ? (
-                t("未检测", "Not checked")
-              ) : (
-                <>
-                  <ShieldAlert className="h-3.5 w-3.5" />
-                  {t("缺失签名芯片", "Signature chip missing")}
-                </>
-              )}
-            </span>
+            <div className="flex flex-col items-end gap-2">
+              {nniSimulationControl ? (
+                <button
+                  type="button"
+                  onClick={() => void onSetDeviceSimulation(nniSimulationControl === "enable")}
+                  disabled={Boolean(nniActionLoading) || nniStatusLoading}
+                  className="theme-secondary-btn px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    nniSimulated
+                      ? t("停止软件模拟并重新检测真实芯片。", "Stop software simulation and check for a real chip again.")
+                      : t(
+                          "仅用于本机协议测试；模拟密钥不受真实硬件保护。",
+                          "For local protocol testing only; simulated keys are not protected by real hardware.",
+                        )
+                  }
+                >
+                  {["simulation_enable", "simulation_disable"].includes(nniActionLoading || "") ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Cpu className="h-3.5 w-3.5" />
+                  )}
+                  {nniSimulated ? t("停止模拟", "Stop simulation") : t("模拟芯片", "Simulate chip")}
+                </button>
+              ) : null}
+              <span
+                className={
+                  nniStatusLoading || nniSimulated
+                    ? "setup-status"
+                    : nniStatus == null
+                      ? "setup-status setup-status-todo"
+                      : nniChipPresent
+                        ? "setup-status setup-status-done"
+                        : "setup-status setup-status-attention"
+                }
+              >
+                {nniStatusLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t("检测中", "Checking")}
+                  </>
+                ) : nniSimulated ? (
+                  <>
+                    <Cpu className="h-3.5 w-3.5" />
+                    {t("模拟中", "Simulated")}
+                  </>
+                ) : nniChipPresent ? (
+                  <>
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {t("可用", "Ready")}
+                  </>
+                ) : nniStatus == null ? (
+                  t("未检测", "Not checked")
+                ) : (
+                  <>
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    {t("缺失签名芯片", "Signature chip missing")}
+                  </>
+                )}
+              </span>
+            </div>
           </div>
 
           <div
             className={
-              nniChipPresent
-                ? "mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100"
-                : "mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100"
+              nniStatusLoading
+                ? "mt-4 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-3 text-sm text-sky-50"
+                : nniChipPresent && !nniSimulated
+                  ? "mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100"
+                  : "mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100"
             }
+            role={nniStatusLoading ? "status" : undefined}
+            aria-live="polite"
           >
-            <p className="font-medium">{nniStatusMessage}</p>
-            {nniStatusNextStep ? <p className="mt-1 text-sm opacity-80">{nniStatusNextStep}</p> : null}
+            {nniStatusLoading ? (
+              <>
+                <div className="flex items-start gap-3">
+                  <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
+                  <div>
+                    <p className="font-medium">{nniStatusMessage}</p>
+                    <p className="mt-1 text-sm opacity-75">
+                      {t(
+                        "请保持芯片连接。检测完成前不会显示模拟入口。",
+                        "Keep the chip connected. Simulation will remain hidden until detection finishes.",
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/20">
+                  <div
+                    className="h-full rounded-full bg-sky-300 transition-[width] duration-300 ease-linear"
+                    style={{
+                      width: `${Math.max(
+                        8,
+                        ((NNI_SIGNATURE_DETECTION_SECONDS - nniDetectionSecondsLeft) /
+                          NNI_SIGNATURE_DETECTION_SECONDS) *
+                          100,
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">{nniStatusMessage}</p>
+                {nniStatusNextStep ? <p className="mt-1 text-sm opacity-80">{nniStatusNextStep}</p> : null}
+              </>
+            )}
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

@@ -913,10 +913,16 @@ fn native_group_tool_definitions(
             let description = if group.capability_names.len() == 1 {
                 group.description.clone()
             } else {
-                format!(
-                    "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",
-                    group.skill_name
-                )
+                group
+                    .capability_descriptions
+                    .get(capability)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",
+                            group.skill_name
+                        )
+                    })
             };
             native_capability_tool_definition(
                 &native_group_leaf_tool_name(group, capability),
@@ -1663,8 +1669,7 @@ fn action_from_native_respond_call(
                     .and_then(Value::as_str)
                     .filter(|value| !value.is_empty() && value.len() <= 65536)
                     .ok_or_else(|| "native_respond_object_field_value_invalid".to_string())?;
-                let value = serde_json::from_str(value_json)
-                    .map_err(|_| "native_respond_object_field_json_invalid".to_string())?;
+                let value = parse_native_authored_json_value(value_json)?;
                 if object.insert(name.to_string(), value).is_some() {
                     return Err("native_respond_object_field_duplicate".to_string());
                 }
@@ -1737,6 +1742,30 @@ fn action_from_native_respond_call(
         }
         _ => Err("native_respond_shape_unsupported".to_string()),
     }
+}
+
+fn parse_native_authored_json_value(value_json: &str) -> Result<Value, String> {
+    if let Ok(value) = serde_json::from_str(value_json) {
+        return Ok(value);
+    }
+
+    let trimmed = value_json.trim();
+    if let Some(without_extra_quote) = trimmed.strip_suffix('"') {
+        if matches!(without_extra_quote.as_bytes().first(), Some(b'[' | b'{')) {
+            if let Ok(value) = serde_json::from_str(without_extra_quote) {
+                return Ok(value);
+            }
+        }
+    }
+
+    let plain_scalar = !trimmed.is_empty()
+        && !trimmed.contains(['\r', '\n'])
+        && !matches!(trimmed.as_bytes().first(), Some(b'"' | b'[' | b'{'));
+    if plain_scalar {
+        return Ok(Value::String(trimmed.to_string()));
+    }
+
+    Err("native_respond_object_field_json_invalid".to_string())
 }
 
 fn project_exact_object_from_observations(

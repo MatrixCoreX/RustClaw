@@ -23,7 +23,7 @@ CONFIGURE_PI_APP=0
 # 无构建模式优先使用 Git 跟踪的 release-bin；若本地刚构建，则回退到 target/release
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
 REQUIRED_BIN_NAME="clawd"
-# 交叉编译拉回路径（与 cross-build-upload.sh 一致）
+# 交叉编译拉回路径（与已归档 cross-build 上传脚本的产物布局一致）
 CROSS_TARGET="${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}"
 
 default_nginx_root() {
@@ -559,6 +559,7 @@ nginx_ui_config_matches() {
   grep -Fq "location ^~ /webd/" "$conf_path" || return 1
   grep -Fq "proxy_pass $proxy_upstream;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
+  grep -Fq 'add_header Cache-Control "no-store, no-cache, must-revalidate" always;' "$conf_path" || return 1
   grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
 }
@@ -1159,6 +1160,12 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
+    }
+
     location / {
         try_files \$uri \$uri/ /index.html;
     }
@@ -1192,6 +1199,12 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        expires -1;
     }
 
     location / {

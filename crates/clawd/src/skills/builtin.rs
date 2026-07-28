@@ -23,6 +23,7 @@ mod builtin_workspace_replace;
 use builtin_child_task_patch::execute_child_task_patch;
 #[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
+#[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
 use builtin_run_cmd::{
     command_has_shell_background_operator, looks_detached_background_command,
@@ -363,8 +364,6 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 match crate::delivery_utils::resolve_directory_locator_for_execution(
                     path,
                     &state.skill_rt.default_locator_search_dir,
-                    state.skill_rt.locator_scan_max_depth,
-                    state.skill_rt.locator_scan_max_files,
                 ) {
                     Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::Resolved(
                         directory,

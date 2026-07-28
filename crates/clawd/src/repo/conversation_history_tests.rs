@@ -141,6 +141,53 @@ fn custom_title_is_persisted_and_projected_for_its_owner() {
 }
 
 #[test]
+fn conversation_history_projects_downloadable_task_artifacts() {
+    let state = state_with_tasks();
+    let task_id = Uuid::new_v4();
+    insert_turn(
+        &state,
+        TurnFixture {
+            task_id,
+            user_id: 42,
+            user_key: "owner-key",
+            conversation_id: "chat-thread-artifact",
+            text: "Create a report",
+            answer: "Report ready",
+            updated_at: 351,
+        },
+    );
+    let artifact = json!({
+        "schema_version": 1,
+        "id": "artifact-1",
+        "filename": "report.pdf",
+        "kind": "pdf",
+        "mime_type": "application/pdf",
+        "size_bytes": 42,
+        "sha256": "a".repeat(64),
+        "download_url": format!("/v1/tasks/{task_id}/artifacts/artifact-1/content"),
+        "preview_url": format!("/v1/tasks/{task_id}/artifacts/artifact-1/content?disposition=inline")
+    });
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+            rusqlite::params![
+                task_id.to_string(),
+                json!({"text": "Report ready", "artifacts": [artifact]}).to_string()
+            ],
+        )
+        .unwrap();
+
+    let history = list_conversation_history(&state, &identity("user"), None, None).unwrap();
+
+    assert_eq!(history.turns[0].artifacts.len(), 1);
+    assert_eq!(history.turns[0].artifacts[0].filename, "report.pdf");
+}
+
+#[test]
 fn conversation_titles_reject_inaccessible_conversations() {
     let state = state_with_tasks();
     insert_turn(

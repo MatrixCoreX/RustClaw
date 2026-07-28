@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-PI_APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${HOME}/.config/rustclaw-small-screen"
 STATE_FILE="${STATE_DIR}/active-pi-app-dir"
 BIN_DIR="${HOME}/.local/bin"

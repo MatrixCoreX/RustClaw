@@ -77,3 +77,53 @@ fn structured_single_line_delivery_is_removed_from_caption() {
     assert_eq!(strip_wechat_delivery_lines(&answer), "caption");
     fs::remove_file(image).ok();
 }
+
+#[test]
+fn browser_task_artifact_manifest_does_not_trigger_channel_media_delivery() {
+    let answer = serde_json::json!({
+        "text": "ready",
+        "artifacts": [{
+            "schema_version": 1,
+            "id": "artifact-1",
+            "filename": "report.pdf",
+            "kind": "pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 42,
+            "sha256": "a".repeat(64),
+            "download_url": "/v1/tasks/task-1/artifacts/artifact-1/content"
+        }]
+    })
+    .to_string();
+
+    assert!(extract_wechat_outbound_media(&answer, Path::new("/")).is_empty());
+    assert_eq!(strip_wechat_delivery_lines(&answer), answer);
+}
+
+#[test]
+fn browser_manifest_preserves_existing_native_channel_media_delivery() {
+    let image = temp_media_path("wechat_native_with_browser_manifest.png");
+    fs::write(&image, b"not really an image").expect("write temp media");
+    let answer = serde_json::json!({
+        "extra": {"media_type": "image", "output_path": image.to_string_lossy()},
+        "artifacts": [{
+            "schema_version": 1,
+            "id": "artifact-1",
+            "filename": "image.png",
+            "kind": "image",
+            "mime_type": "image/png",
+            "size_bytes": 20,
+            "sha256": "b".repeat(64),
+            "download_url": "/v1/tasks/task-1/artifacts/artifact-1/content",
+            "preview_url": "/v1/tasks/task-1/artifacts/artifact-1/content?disposition=inline"
+        }]
+    })
+    .to_string();
+
+    let media = extract_wechat_outbound_media(&answer, Path::new("/"));
+    assert_eq!(media.len(), 1);
+    assert_eq!(
+        media[0].source,
+        WechatOutboundSource::LocalPath(image.canonicalize().expect("canonicalize temp image"))
+    );
+    fs::remove_file(image).ok();
+}

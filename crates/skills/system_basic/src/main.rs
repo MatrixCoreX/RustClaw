@@ -3,9 +3,13 @@ use std::ffi::OsStr;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{SecondsFormat, Utc};
+use rustclaw_fs_discovery::{
+    discover, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector, MatchMode,
+    TargetKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -203,6 +207,7 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_kind": error_kind,
+        "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     });
@@ -1184,7 +1189,8 @@ fn structured_keys(
 ) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
-    let field_path = obj.get("field_path").and_then(Value::as_str).unwrap_or("");
+    let field_path =
+        normalized_structured_field_path(obj.get("field_path").and_then(Value::as_str));
     let max_keys = u64_arg(obj, "max_keys", 200).clamp(1, 1000) as usize;
     let (format, root_value) =
         parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
@@ -1360,7 +1366,6 @@ fn find_path(
         .or_else(|| obj.get("pattern"))
         .and_then(Value::as_str)
         .ok_or_else(|| SkillError::invalid_input("name or pattern is required"))?;
-    let needle_norm = needle.to_ascii_lowercase();
     let match_mode = obj
         .get("match_mode")
         .and_then(Value::as_str)
@@ -1372,46 +1377,66 @@ fn find_path(
         .unwrap_or("any")
         .to_ascii_lowercase();
     let max_results = u64_arg(obj, "max_results", 20).clamp(1, 200) as usize;
-
-    let mut matches = Vec::new();
-    walk_collect(&real_root, &mut |p| {
-        let Some(name) = p.file_name().and_then(OsStr::to_str) else {
-            return false;
-        };
-        let meta = match std::fs::metadata(p) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-        let kind = if meta.is_dir() {
-            "dir"
-        } else if meta.is_file() {
-            "file"
-        } else {
-            "other"
-        };
-        if target_kind != "any" && target_kind != kind {
-            return false;
-        }
-        let name_norm = name.to_ascii_lowercase();
-        let hit = match match_mode.as_str() {
-            "exact" => name_norm == needle_norm,
-            "starts_with" => name_norm.starts_with(&needle_norm),
-            "ends_with" => name_norm.ends_with(&needle_norm),
-            _ => name_norm.contains(&needle_norm),
-        };
-        if hit {
-            let resolved_path = p.display().to_string();
-            matches.push(json!({
-                "name": name,
-                "path": to_rel(workspace_root, p),
-                "resolved_path": resolved_path,
-                "kind": kind,
-            }));
-        }
-        matches.len() >= max_results
-    })?;
+    let boundary = if allow_path_outside_workspace {
+        real_root.as_path()
+    } else {
+        workspace_root
+    };
+    let mut request = DiscoveryRequest::new(boundary, &real_root);
+    request.selector = DiscoverySelector {
+        patterns: vec![needle.to_string()],
+        target_kind: match target_kind.as_str() {
+            "file" => TargetKind::File,
+            "dir" => TargetKind::Directory,
+            _ => TargetKind::Any,
+        },
+        match_mode: match match_mode.as_str() {
+            "exact" => MatchMode::Exact,
+            "starts_with" => MatchMode::StartsWith,
+            "ends_with" => MatchMode::EndsWith,
+            _ => MatchMode::Contains,
+        },
+        ..DiscoverySelector::default()
+    };
+    request.policy = DiscoveryPolicy {
+        include_hidden: bool_arg(obj, "include_hidden", false),
+        respect_ignore: bool_arg(obj, "respect_ignore", true),
+    };
+    request.budget = DiscoveryBudget {
+        max_depth: obj
+            .get("max_depth")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize),
+        deadline: Some(Duration::from_secs(
+            std::env::var("SKILL_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(30)
+                .saturating_sub(1)
+                .max(1),
+        )),
+        ..DiscoveryBudget::default()
+    };
+    let report =
+        discover(&request).map_err(|error| SkillError::new(error.code(), error.to_string()))?;
+    let known_match_count = report.entries.len();
+    let has_more = known_match_count > max_results;
+    let matches = report
+        .entries
+        .iter()
+        .take(max_results)
+        .map(|entry| {
+            json!({
+                "name": entry.path.file_name().and_then(OsStr::to_str).unwrap_or_default(),
+                "path": to_rel(workspace_root, &entry.path),
+                "resolved_path": entry.path.display().to_string(),
+                "kind": entry.kind.as_str(),
+            })
+        })
+        .collect::<Vec<_>>();
 
     Ok(json!({
+        "schema_version": 2,
         "action": "find_path",
         "root": root,
         "resolved_root": real_root.display().to_string(),
@@ -1419,6 +1444,21 @@ fn find_path(
         "match_mode": match_mode,
         "target_kind": target_kind,
         "count": matches.len(),
+        "returned_count": matches.len(),
+        "known_match_count": known_match_count,
+        "total_count_is_complete": report.completeness.is_complete(),
+        "completeness": report.completeness.as_str(),
+        "has_more": has_more,
+        "scan": {
+            "visited_files": report.visited_files,
+            "visited_directories": report.visited_directories,
+            "skipped_ignored": report.skipped_ignored,
+            "skipped_hidden": report.skipped_hidden,
+            "skipped_symlinks": report.skipped_symlinks,
+            "permission_denied": report.permission_denied,
+            "skipped_counts_complete": report.skipped_counts_complete,
+        },
+        "results": &matches,
         "matches": matches,
     })
     .to_string())

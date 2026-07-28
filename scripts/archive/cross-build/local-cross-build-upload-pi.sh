@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 本机交叉编译 aarch64 Linux 产物，并把运行/测试所需文件同步到远端树莓派。
 # 用法:
-#   ./local-cross-build-upload-pi.sh all
-#   ./local-cross-build-upload-pi.sh crate <package>
-#   ./local-cross-build-upload-pi.sh dir <repo-relative-dir>
+#   ./scripts/archive/cross-build/local-cross-build-upload-pi.sh all
+#   ./scripts/archive/cross-build/local-cross-build-upload-pi.sh crate <package>
+#   ./scripts/archive/cross-build/local-cross-build-upload-pi.sh dir <repo-relative-dir>
 #
 # 说明:
 # - 本脚本在本机编译，兼容 macOS 和 Ubuntu。
@@ -19,7 +19,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHIVE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${ARCHIVE_DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "${SCRIPT_DIR}"

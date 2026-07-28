@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import { copyAuthKeyValue, writeTextToClipboard } from "../lib/auth-keys";
 import type { ApiResponse, AuthKeyListItem } from "../types/api";
 
@@ -13,6 +14,7 @@ export interface UseAuthKeysRuntimeParams {
 }
 
 export function useAuthKeysRuntime({ apiFetch, t }: UseAuthKeysRuntimeParams) {
+  const { confirm: showConfirm, prompt: showPrompt } = useUiDialog();
   const [authKeysList, setAuthKeysList] = useState<AuthKeyListItem[]>([]);
   const [authKeysLoading, setAuthKeysLoading] = useState(false);
   const [authKeysError, setAuthKeysError] = useState<string | null>(null);
@@ -181,12 +183,15 @@ export function useAuthKeysRuntime({ apiFetch, t }: UseAuthKeysRuntimeParams) {
   };
 
   const deleteAuthKey = async (row: AuthKeyListItem) => {
-    const ok = window.confirm(
-      t(
+    const ok = await showConfirm({
+      title: t("删除访问 Key", "Delete access key"),
+      message: t(
         `确认删除 ${row.user_key}？删除后将移除该 Key、关联绑定，以及它对应的用户名密码登录。`,
         `Delete ${row.user_key}? This will remove the key, related bindings, and its username/password login.`,
       ),
-    );
+      confirmLabel: t("删除", "Delete"),
+      tone: "danger",
+    });
     if (!ok) return;
     setAuthKeyActionLoading(row.key_id);
     setAuthKeyActionError(null);
@@ -205,20 +210,26 @@ export function useAuthKeysRuntime({ apiFetch, t }: UseAuthKeysRuntimeParams) {
   };
 
   const promptCreateCustomAuthKey = async () => {
-    const role = window.prompt(
-      t("请输入自定义角色名称，例如 operator / reviewer / finance", "Enter a custom role, such as operator / reviewer / finance"),
-      "",
-    );
+    const role = await showPrompt({
+      title: t("创建自定义角色 Key", "Create a custom-role key"),
+      message: t("请输入自定义角色名称，例如 operator / reviewer / finance。", "Enter a custom role, such as operator / reviewer / finance."),
+      inputLabel: t("角色名称", "Role name"),
+      placeholder: "operator",
+      confirmLabel: t("创建", "Create"),
+    });
     const normalized = role?.trim();
     if (!normalized) return;
     await createAuthKey(normalized);
   };
 
   const promptUpdateAuthKeyRole = async (row: AuthKeyListItem) => {
-    const role = window.prompt(
-      t("请输入新的角色名称。内置推荐：admin / user / guest，也支持自定义。", "Enter a new role. Suggested built-ins: admin / user / guest, but custom values are also allowed."),
-      row.role,
-    );
+    const role = await showPrompt({
+      title: t("修改 Key 角色", "Change key role"),
+      message: t("请输入新的角色名称。内置推荐：admin / user / guest，也支持自定义。", "Enter a new role. Suggested built-ins: admin / user / guest, but custom values are also allowed."),
+      inputLabel: t("角色名称", "Role name"),
+      initialValue: row.role,
+      confirmLabel: t("保存", "Save"),
+    });
     const normalized = role?.trim();
     if (!normalized || normalized === row.role) return;
     await updateAuthKey(row.key_id, { role: normalized });

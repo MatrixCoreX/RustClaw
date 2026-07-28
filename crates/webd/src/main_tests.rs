@@ -418,6 +418,22 @@ fn task_event_stream_uses_long_running_upstream_wait() {
     ));
 }
 
+#[test]
+fn task_artifact_delivery_uses_streaming_upstream_for_webd_and_nginx_paths() {
+    let path = "/v1/tasks/task-123/artifacts/artifact-9/content";
+    assert!(uses_long_running_upstream_wait(&Method::GET, path));
+    assert!(uses_long_running_upstream_wait(
+        &Method::GET,
+        &format!("{path}?disposition=inline")
+    ));
+    assert!(uses_long_running_upstream_wait(&Method::HEAD, path));
+    assert!(!uses_long_running_upstream_wait(&Method::POST, path));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/tasks/task-123/artifacts"
+    ));
+}
+
 async fn delayed_upstream_response() -> &'static str {
     tokio::time::sleep(Duration::from_millis(80)).await;
     "ok"

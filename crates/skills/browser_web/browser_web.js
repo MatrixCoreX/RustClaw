@@ -682,7 +682,19 @@ async function createBrowserContext(networkPolicy = {}) {
     }
 
     const runtimeCheck = await readRuntimeRestrictionSignals();
-    const executablePath = chooseChromiumExecutablePath();
+    let executablePath = chooseChromiumExecutablePath();
+    if (!executablePath) {
+        const managedExecutable = playwright.chromium.executablePath();
+        if (managedExecutable && fsSync.existsSync(managedExecutable)) {
+            executablePath = managedExecutable;
+        }
+    }
+    if (!executablePath) {
+        throw new SkillError(
+            'DEPENDENCY_MISSING',
+            'Playwright browser runtime is not installed'
+        );
+    }
 
     const launchEnv = { ...process.env };
     delete launchEnv.DISPLAY;

@@ -187,8 +187,7 @@ fn batch_directory_delivery_directory_not_found_does_not_enter_file_tokens() {
     let system_root = TempDirGuard::new("batch_dir_miss_system");
     let project_root = TempDirGuard::new("batch_dir_miss_project");
     let locator = directory_lookup_input_from_hint("missing_dir").expect("batch locator");
-    let resolved =
-        resolve_directory_target(locator, system_root.path(), project_root.path(), 3, 200);
+    let resolved = resolve_directory_target(locator, system_root.path(), project_root.path());
     assert_eq!(
         resolved,
         DirectoryLookupResolution::UserMessage(DeliveryMessageKind::DirectoryBothRootsMiss)

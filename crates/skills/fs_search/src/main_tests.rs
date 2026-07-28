@@ -5,7 +5,7 @@ use std::path::PathBuf;
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 
-    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["schema_version"], 2);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
     assert_eq!(extra["error_kind"], "execution_failed");
@@ -79,7 +79,7 @@ fn find_name_reports_result_limit_truncation() {
 }
 
 #[test]
-fn find_name_directory_target_ignores_unrelated_file_budget() {
+fn find_name_directory_target_uses_kind_filter() {
     let root = unique_temp_dir("dir-budget");
     let noisy = root.join("a_many_files");
     let target = root.join("z_parent/bundle_src");
@@ -97,7 +97,6 @@ fn find_name_directory_target_ignores_unrelated_file_budget() {
         "root": root.to_string_lossy().to_string(),
         "target_kind": "directory",
         "max_depth": 4,
-        "max_files": 4,
         "max_results": 5
     }))
     .expect("find_name succeeds");
@@ -245,7 +244,7 @@ fn search_success_exposes_absolute_workspace_root() {
 }
 
 #[test]
-fn find_name_checks_shallow_files_before_deep_scan_budget() {
+fn find_name_finds_shallow_files_alongside_deep_entries() {
     let root = unique_temp_dir("shallow-before-deep");
     let deep = root.join("aaa_deep");
     std::fs::create_dir_all(&deep).expect("create deep dir");
@@ -260,7 +259,6 @@ fn find_name_checks_shallow_files_before_deep_scan_budget() {
         "pattern": "start-all-bin.sh",
         "root": root.to_string_lossy().to_string(),
         "max_depth": 8,
-        "max_files": 1,
         "max_results": 10
     }))
     .expect("find_name succeeds");
@@ -441,8 +439,10 @@ fn grep_text_returns_matching_lines_for_known_file_root() {
     assert_eq!(matches[0].get("line").and_then(Value::as_u64), Some(2));
     assert_eq!(
         matches[0].get("start_byte").and_then(Value::as_u64),
-        Some(18)
+        Some(35)
     );
+    assert_eq!(matches[0]["matched_text"], "run_cmd");
+    assert_eq!(matches[0]["range_handle"]["start_byte"], 35);
     assert!(matches[0]
         .get("text")
         .and_then(Value::as_str)
@@ -460,7 +460,8 @@ fn grep_text_returns_bounded_context_and_multiline_provenance() {
 
     let out = execute(json!({
         "action": "grep_text",
-        "query": "let value.*finish(value)",
+        "query": "let value.*finish\\(value\\)",
+        "pattern_kind": "regex",
         "root": file.to_string_lossy().to_string(),
         "multiline": true,
         "context_before": 1,
@@ -469,7 +470,7 @@ fn grep_text_returns_bounded_context_and_multiline_provenance() {
     }))
     .expect("multiline grep");
 
-    assert_eq!(out["schema_version"], 1);
+    assert_eq!(out["schema_version"], 2);
     assert_eq!(out["multiline"], true);
     assert_eq!(out["total_match_count"], 1);
     let matched = &out["matches"][0];
@@ -601,6 +602,7 @@ fn grep_text_accepts_ordered_wildcard_query() {
     let out = execute(json!({
         "action": "grep_text",
         "query": "type.*run_cmd",
+        "pattern_kind": "regex",
         "path": file.to_string_lossy().to_string(),
         "max_results": 10
     }))
@@ -687,7 +689,7 @@ fn grep_text_filters_by_file_pattern() {
 }
 
 #[test]
-fn grep_text_surfaces_name_matches_when_content_has_no_hits() {
+fn grep_text_does_not_mix_filename_matches_into_content_results() {
     let root = unique_temp_dir("grep-text-name-fallback");
     std::fs::create_dir_all(&root).expect("create root");
     std::fs::write(root.join("my_abcd.txt"), "content without target\n").expect("write target");
@@ -704,14 +706,11 @@ fn grep_text_surfaces_name_matches_when_content_has_no_hits() {
 
     assert_eq!(out.get("count").and_then(Value::as_u64), Some(0));
     assert_eq!(out.get("match_count").and_then(Value::as_u64), Some(0));
-    assert_eq!(out.get("name_count").and_then(Value::as_u64), Some(1));
-    let name_results = out
-        .get("name_results")
-        .and_then(Value::as_array)
-        .expect("name_results array");
-    assert!(name_results
-        .iter()
-        .any(|v| v.as_str().is_some_and(|path| path.ends_with("my_abcd.txt"))));
+    assert_eq!(
+        out.get("name_fallback_used").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(out.get("name_results").is_none());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -767,7 +766,10 @@ fn find_name_returns_stable_cursor_pages_and_snapshot_hash() {
     });
 
     let first = execute(args.clone()).expect("first page");
-    let cursor = first["page"]["next_cursor"].as_u64().expect("next cursor");
+    let cursor = first["page"]["next_cursor"]
+        .as_str()
+        .expect("opaque next cursor")
+        .to_string();
     let mut second_args = args;
     second_args["cursor"] = json!(cursor);
     let second = execute(second_args).expect("second page");
@@ -778,11 +780,180 @@ fn find_name_returns_stable_cursor_pages_and_snapshot_hash() {
     assert_eq!(first["page"]["has_more"], true);
     assert_eq!(second["returned_count"], 2);
     assert_eq!(second["page"]["cursor"], 2);
-    assert_eq!(second["page"]["previous_cursor"], 0);
+    assert!(second["page"]["previous_cursor"].is_string());
+    assert_eq!(first["page"]["legacy_next_offset"], 2);
     assert_eq!(second["page"]["has_more"], false);
     assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
     assert_ne!(first["results"], second["results"]);
 
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_rejects_cursor_from_a_different_query() {
+    let root = unique_temp_dir("cursor-query");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(root.join("alpha-one.txt"), "").expect("write alpha one");
+    std::fs::write(root.join("alpha-two.txt"), "").expect("write alpha two");
+    std::fs::write(root.join("beta.txt"), "").expect("write beta");
+    let first = execute(json!({
+        "action": "find_name",
+        "pattern": "alpha",
+        "root": root.to_string_lossy(),
+        "max_results": 1
+    }))
+    .expect("first query");
+    let error = execute(json!({
+        "action": "find_name",
+        "pattern": "beta",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "cursor": first["page"]["next_cursor"].clone()
+    }))
+    .expect_err("cursor must be query bound");
+    assert_eq!(error, "cursor_query_mismatch");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn opaque_cursor_ignores_changing_runtime_memory_context() {
+    let root = unique_temp_dir("cursor-runtime-memory");
+    std::fs::create_dir_all(&root).expect("create root");
+    for name in ["match-a.txt", "match-b.txt", "match-c.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let mut args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "_memory": {"context": "first request"}
+    });
+
+    let first = execute(args.clone()).expect("first page");
+    args["cursor"] = first["page"]["next_cursor"].clone();
+    args["_memory"] = json!({"context": "changed between tasks"});
+    let second = execute(args).expect("runtime memory must not change query identity");
+
+    assert_eq!(
+        first["page"]["query_sha256"],
+        second["page"]["query_sha256"]
+    );
+    assert_eq!(second["page"]["cursor"], 1);
+    assert_ne!(first["results"], second["results"]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn empty_optional_cursor_starts_from_the_first_page() {
+    let root = unique_temp_dir("empty-cursor");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(root.join("match-a.txt"), "fixture\n").expect("write fixture");
+
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "cursor": "",
+        "max_results": 1
+    }))
+    .expect("empty optional cursor behaves like omission");
+
+    assert_eq!(out["page"]["cursor"], 0);
+    assert_eq!(out["returned_count"], 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_marks_cursor_stale_when_snapshot_changes() {
+    let root = unique_temp_dir("cursor-stale");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(root.join("match-a.txt"), "").expect("write a");
+    std::fs::write(root.join("match-b.txt"), "").expect("write b");
+    let args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "max_results": 1
+    });
+    let first = execute(args.clone()).expect("first page");
+    std::fs::write(root.join("match-c.txt"), "").expect("change snapshot");
+    let mut next_args = args;
+    next_args["cursor"] = first["page"]["next_cursor"].clone();
+    let stale = execute(next_args).expect("stale snapshot is structured");
+    assert_eq!(stale["completeness"], "stale_snapshot");
+    assert_eq!(stale["results"], json!([]));
+    assert_eq!(stale["continuation"]["kind"], "new_snapshot");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_default_search_crosses_old_depth_boundary() {
+    let root = unique_temp_dir("default-deep");
+    let mut nested = root.clone();
+    for index in 0..12 {
+        nested.push(format!("level-{index}"));
+    }
+    std::fs::create_dir_all(&nested).expect("create deep root");
+    std::fs::write(nested.join("deep-target.txt"), "").expect("write deep target");
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "deep-target.txt",
+        "exact": true,
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("unbounded-depth default search");
+    assert_eq!(out["returned_count"], 1);
+    assert_eq!(out["completeness"], "complete");
+    assert_eq!(out["effective_policy"]["max_depth"], Value::Null);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_default_scan_exceeds_old_eight_hundred_entry_budget() {
+    let root = unique_temp_dir("default-large");
+    std::fs::create_dir_all(&root).expect("create root");
+    for index in 0..805 {
+        std::fs::write(root.join(format!("noise-{index:04}.txt")), "").expect("write noise");
+    }
+    std::fs::write(root.join("wanted-after-800.txt"), "").expect("write target");
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "wanted-after-800.txt",
+        "exact": true,
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("large default search");
+    assert_eq!(out["returned_count"], 1);
+    assert_eq!(out["completeness"], "complete");
+    assert!(out["scan"]["visited_files"].as_u64().unwrap_or_default() > 800);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn partial_zero_result_is_not_reported_as_complete_absence() {
+    let root = unique_temp_dir("partial-zero");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(root.join("a.txt"), "").expect("write a");
+    std::fs::write(root.join("z-target.txt"), "").expect("write target");
+    let out = execute(json!({
+        "action": "find_name",
+        "pattern": "z-target.txt",
+        "exact": true,
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "__test_hard_entry_limit": 1,
+        "max_results": 10
+    }))
+    .expect("internally bounded search");
+    assert_eq!(out["returned_count"], 0);
+    assert_eq!(out["completeness"], "partial_hard_limit");
+    assert_eq!(out["total_count_is_complete"], false);
+    assert_eq!(out["continuation"]["kind"], "narrow_search");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -811,7 +982,7 @@ fn find_images_returns_stable_pages_and_bounded_metadata() {
     second_args["cursor"] = first["page"]["next_cursor"].clone();
     let second = execute(second_args).expect("second image page");
 
-    assert_eq!(first["schema_version"], 1);
+    assert_eq!(first["schema_version"], 2);
     assert_eq!(first["count"], 2);
     assert_eq!(first["total_count"], 3);
     assert_eq!(first["images"][0]["mime_type"], "image/png");
@@ -898,4 +1069,334 @@ fn grep_text_does_not_follow_directory_symlinks() {
     assert_eq!(out["matches"], json!([]));
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(outside);
+}
+
+fn cache_context(database_path: &std::path::Path) -> Value {
+    json!({
+        "skill_storage": {
+            "storage_kind": "sqlite",
+            "skill_name": "fs_search",
+            "schema_version": 1,
+            "database_path": database_path.to_string_lossy()
+        }
+    })
+}
+
+#[test]
+fn find_name_supports_path_globs_and_smart_case() {
+    let root = unique_temp_dir("typed-glob-case");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("one/src")).expect("create source dir");
+    std::fs::create_dir_all(root.join("one/tests")).expect("create tests dir");
+    std::fs::write(root.join("one/src/Widget.RS"), "").expect("write smart-case target");
+    std::fs::write(root.join("one/tests/widget.rs"), "").expect("write excluded target");
+
+    let smart = execute(json!({
+        "action": "find_name",
+        "glob": "**/src/*.rs",
+        "case_mode": "smart",
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("smart-case glob search");
+    assert_eq!(smart["results"].as_array().map(Vec::len), Some(1));
+    assert!(smart["results"][0]
+        .as_str()
+        .is_some_and(|path| path.ends_with("one/src/Widget.RS")));
+
+    let sensitive = execute(json!({
+        "action": "find_name",
+        "glob": "**/src/*.rs",
+        "case_mode": "sensitive",
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("case-sensitive glob search");
+    assert_eq!(sensitive["returned_count"], 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_name_supports_prefix_and_suffix_modes() {
+    let root = unique_temp_dir("typed-name-modes");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create root");
+    for name in ["alpha-report.md", "beta-report.md", "alpha-notes.txt"] {
+        std::fs::write(root.join(name), "").expect("write fixture");
+    }
+
+    let prefix = execute(json!({
+        "action": "find_name",
+        "pattern": "alpha-",
+        "match_mode": "prefix",
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("prefix search");
+    assert_eq!(prefix["returned_count"], 2);
+
+    let suffix = execute(json!({
+        "action": "find_name",
+        "pattern": "-report.md",
+        "match_mode": "suffix",
+        "target_kind": "file",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("suffix search");
+    assert_eq!(suffix["returned_count"], 2);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn grep_text_distinguishes_literal_regex_and_output_modes() {
+    let root = unique_temp_dir("typed-grep-modes");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).expect("create source dir");
+    std::fs::write(root.join("src/main.rs"), "fn   main() {}\n").expect("write source");
+    std::fs::write(root.join("src/main.txt"), "fn   main() {}\n").expect("write non-rust");
+
+    let literal = execute(json!({
+        "action": "grep_text",
+        "query": "fn\\s+main",
+        "pattern_kind": "literal",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("literal search");
+    assert_eq!(literal["total_match_count"], 0);
+
+    let paths = execute(json!({
+        "action": "grep_text",
+        "query": "fn\\s+main",
+        "pattern_kind": "regex",
+        "output_mode": "paths",
+        "globs": ["**/*.rs"],
+        "case_mode": "sensitive",
+        "root": root.to_string_lossy(),
+        "max_results": 10
+    }))
+    .expect("regex paths search");
+    assert_eq!(paths["results"].as_array().map(Vec::len), Some(1));
+    assert_eq!(paths["matches"], json!([]));
+    assert!(paths["results"][0]
+        .as_str()
+        .is_some_and(|path| path.ends_with("src/main.rs")));
+
+    let count = execute(json!({
+        "action": "grep_text",
+        "query": "fn\\s+main",
+        "pattern_kind": "regex",
+        "output_mode": "count",
+        "globs": ["**/*.rs"],
+        "root": root.to_string_lossy(),
+        "max_results": 1
+    }))
+    .expect("regex count search");
+    assert_eq!(count["count"], 1);
+    assert_eq!(count["results"], json!([]));
+    assert_eq!(count["matches"], json!([]));
+    assert_eq!(count["has_more"], false);
+    assert_eq!(count["continuation"], Value::Null);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn opaque_continuation_reuses_declared_skill_snapshot_cache() {
+    let root = unique_temp_dir("snapshot-cache-root");
+    let storage = unique_temp_dir("snapshot-cache-storage");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    for name in ["match-a.txt", "match-b.txt", "match-c.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let context = cache_context(&storage.join("fs-search.sqlite3"));
+    let args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "__test_backend": "rust"
+    });
+
+    let first = execute_with_context(args.clone(), Some(&context)).expect("first cached page");
+    assert_eq!(first["cache_reused"], false);
+    assert_eq!(first["cache_status"], "stored");
+    let mut second_args = args;
+    second_args["cursor"] = first["page"]["next_cursor"].clone();
+    let second = execute_with_context(second_args, Some(&context)).expect("cached second page");
+    assert_eq!(second["cache_reused"], true);
+    assert_eq!(second["scan"]["cache_reused"], true);
+    assert_eq!(second["page"]["cursor"], 1);
+    assert_ne!(first["results"], second["results"]);
+    assert_eq!(first["snapshot_sha256"], second["snapshot_sha256"]);
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(storage);
+}
+
+#[test]
+fn snapshot_cache_returns_stale_status_after_tree_change() {
+    let root = unique_temp_dir("snapshot-cache-stale-root");
+    let storage = unique_temp_dir("snapshot-cache-stale-storage");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    std::fs::write(root.join("match-a.txt"), "a\n").expect("write a");
+    std::fs::write(root.join("match-b.txt"), "b\n").expect("write b");
+    let context = cache_context(&storage.join("fs-search.sqlite3"));
+    let args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "__test_backend": "rust"
+    });
+    let first = execute_with_context(args.clone(), Some(&context)).expect("first page");
+    std::fs::write(root.join("match-c.txt"), "c\n").expect("mutate tree");
+    let mut next_args = args;
+    next_args["cursor"] = first["page"]["next_cursor"].clone();
+    let stale = execute_with_context(next_args, Some(&context)).expect("stale cache response");
+    assert_eq!(stale["cache_reused"], true);
+    assert_eq!(stale["completeness"], "stale_snapshot");
+    assert_eq!(stale["results"], json!([]));
+    assert_eq!(stale["continuation"]["kind"], "new_snapshot");
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(storage);
+}
+
+#[test]
+fn snapshot_cache_invalidates_when_ignore_policy_file_changes() {
+    let root = unique_temp_dir("snapshot-cache-ignore-root");
+    let storage = unique_temp_dir("snapshot-cache-ignore-storage");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    std::fs::write(root.join(".gitignore"), "ignored.txt\n").expect("write ignore file");
+    for name in ["match-a.txt", "match-b.txt", "ignored.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let context = cache_context(&storage.join("fs-search.sqlite3"));
+    let args = json!({
+        "action": "find_ext",
+        "ext": "txt",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "__test_backend": "rust"
+    });
+    let first = execute_with_context(args.clone(), Some(&context)).expect("first page");
+    assert_eq!(first["known_match_count"], 2);
+    std::fs::write(root.join(".gitignore"), "# no ignored entries now\n")
+        .expect("change ignore file");
+    let mut next_args = args;
+    next_args["cursor"] = first["page"]["next_cursor"].clone();
+    let stale = execute_with_context(next_args, Some(&context)).expect("stale ignore response");
+    assert_eq!(stale["completeness"], "stale_snapshot");
+    assert_eq!(stale["continuation"]["reason_code"], "stale_snapshot");
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(storage);
+}
+
+#[test]
+fn expired_snapshot_requires_a_new_snapshot_without_rescanning() {
+    let root = unique_temp_dir("snapshot-cache-expired-root");
+    let storage = unique_temp_dir("snapshot-cache-expired-storage");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    for name in ["match-a.txt", "match-b.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let database = storage.join("fs-search.sqlite3");
+    let context = cache_context(&database);
+    let args = json!({
+        "action": "find_name",
+        "pattern": "match-",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "__test_backend": "rust"
+    });
+    let first = execute_with_context(args.clone(), Some(&context)).expect("first page");
+    rusqlite::Connection::open(&database)
+        .expect("open cache")
+        .execute(
+            "UPDATE fs_search_snapshots SET created_at = created_at - 120",
+            [],
+        )
+        .expect("expire cache row");
+    let mut next_args = args;
+    next_args["cursor"] = first["page"]["next_cursor"].clone();
+    let expired = execute_with_context(next_args, Some(&context)).expect("expired response");
+    assert_eq!(expired["completeness"], "stale_snapshot");
+    assert_eq!(expired["cache_status"], "miss_or_expired");
+    assert_eq!(
+        expired["continuation"]["reason_code"],
+        "snapshot_cache_miss"
+    );
+    assert_eq!(expired["scan"]["visited_entries"], Value::Null);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(storage);
+}
+
+#[test]
+fn snapshot_cache_evicts_oldest_entry_at_the_bounded_capacity() {
+    let root = unique_temp_dir("snapshot-cache-eviction-root");
+    let storage = unique_temp_dir("snapshot-cache-eviction-storage");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&storage);
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    for name in ["common-a.txt", "common-b.txt"] {
+        std::fs::write(root.join(name), "fixture\n").expect("write fixture");
+    }
+    let database = storage.join("fs-search.sqlite3");
+    let context = cache_context(&database);
+    let first_args = json!({
+        "action": "find_name",
+        "pattern": "common-",
+        "root": root.to_string_lossy(),
+        "max_results": 1,
+        "__test_backend": "rust"
+    });
+    let first = execute_with_context(first_args.clone(), Some(&context)).expect("first page");
+    let db = rusqlite::Connection::open(&database).expect("open cache");
+    db.execute("UPDATE fs_search_snapshots SET last_accessed_at = 0", [])
+        .expect("age first row");
+    drop(db);
+    for index in 0..16 {
+        execute_with_context(
+            json!({
+                "action": "find_name",
+                "pattern": format!("distinct-{index}"),
+                "root": root.to_string_lossy(),
+                "max_results": 1,
+                "__test_backend": "rust"
+            }),
+            Some(&context),
+        )
+        .expect("store distinct snapshot");
+    }
+    let db = rusqlite::Connection::open(&database).expect("reopen cache");
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM fs_search_snapshots", [], |row| {
+            row.get(0)
+        })
+        .expect("count cache rows");
+    assert_eq!(count, 16);
+    drop(db);
+    let mut next_args = first_args;
+    next_args["cursor"] = first["page"]["next_cursor"].clone();
+    let evicted = execute_with_context(next_args, Some(&context)).expect("evicted response");
+    assert_eq!(evicted["completeness"], "stale_snapshot");
+    assert_eq!(evicted["cache_status"], "miss_or_expired");
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(storage);
 }

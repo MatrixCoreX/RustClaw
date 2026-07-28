@@ -557,6 +557,7 @@ flowchart LR
 - The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
 - On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
+- The dashboard system-dependency check covers RustClaw runtime requirements, source/UI build tools, and native dependencies used by built-in tools and skills. It reports detected versions and capability ownership. Administrators can start allowlisted installs through a Linux package manager or macOS Homebrew when the service already has non-interactive package-manager permission; installs run asynchronously and remain observable after a page refresh. The browser cannot submit arbitrary package names, system commands, or operating-system passwords.
 
 `clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` uses `configs/channels/webd.toml` and can listen on either `0.0.0.0:8788` for direct device-IP access or `127.0.0.1:8788` for nginx-only/local access. The dashboard preserves the configured port when switching scope and atomically updates only the listener address. Docker publishes `8788`, not `8787`; container networking must be evaluated before changing the listener to loopback.
 
@@ -566,6 +567,10 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `GET /v1/system/host-summary`: returns a versioned, authenticated, secret-free
   host summary for the dashboard, including OS/version, architecture, memory,
   RustClaw data-volume storage, uptime, and machine-readable unavailable fields
+- `GET /v1/system/dependencies`: returns Linux/macOS dependency state, installed
+  versions, consuming tools/skills, and controlled-install availability
+- `POST /v1/admin/system-dependencies/install`: starts an allowlisted asynchronous
+  install by fixed `dependency_id`; arbitrary commands and package names are rejected
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `GET /v1/tasks/conversation-history`
@@ -890,7 +895,7 @@ cd pi_app && ./open-small-screen.sh
 
 It reads health status from `clawd`, so start the backend first.
 
-The Pi App also carries the NNI device-signing helper used by the backend and browser UI. `pi_app/signature.py` supports Slot 0 public-key reads, timestamp signing, and TNG device/signer/root certificate reads when supported hardware and `cryptoauthlib` are present; see `pi_app/TNG_SERVER_GUIDE.md`. Devices without that chip are valid deployments and are reported as a missing-signature-chip state.
+The Pi App also carries the NNI device-signing helper used by the backend and browser UI. `pi_app/signature.py` supports Slot 0 public-key reads, timestamp signing, and TNG device/signer/root certificate reads when supported hardware and `cryptoauthlib` are present; see `pi_app/TNG_SERVER_GUIDE.md`. Devices without that chip are valid deployments and are reported as a missing-signature-chip state. After real-hardware detection completes and a short grace period passes, the Device signature chip card offers a clearly labeled software simulator for local protocol testing; it is never offered when a real chip is detected and does not provide a trusted hardware identity.
 
 ## Developer Notes
 

@@ -5,41 +5,22 @@ pub(super) async fn handle_callback_query(
     q: CallbackQuery,
     _state: BotState,
 ) -> anyhow::Result<()> {
-    // Inline keyboards for crypto trade confirmation were removed; dismiss loading state for stray taps.
+    // The transport owns no callback actions; dismiss loading state for stale buttons.
     if q.data.is_some() {
         let _ = bot.answer_callback_query(q.id).await;
     }
     Ok(())
 }
 
-pub(super) async fn handle_image_only_message(
+pub(super) async fn handle_image_message(
     bot: &Bot,
     msg: &Message,
     state: &BotState,
     user_id: i64,
     file_id: String,
     ext: &str,
+    prompt: &str,
 ) -> anyhow::Result<()> {
-    let queue_len = match fetch_queue_length(state, msg.chat.id.0).await {
-        Ok(v) => v,
-        Err(_) => 0,
-    };
-    if queue_len >= state.queue_limit {
-        bot.send_message(
-            msg.chat.id,
-            state.i18n.t_with(
-                "telegram.msg.queue_full",
-                &[
-                    ("queued", &queue_len.to_string()),
-                    ("limit", &state.queue_limit.to_string()),
-                ],
-            ),
-        )
-        .await
-        .context("send queue full image message failed")?;
-        return Ok(());
-    }
-
     let ts = unix_ts();
     let normalized_ext = normalize_image_ext(ext);
     let rel_path = build_telegram_inbox_rel_path(
@@ -56,76 +37,18 @@ pub(super) async fn handle_image_only_message(
 
     download_telegram_file(state, bot, file_id, &abs_path).await?;
 
-    let args = json!({
-        "action": "describe",
-        "images": [{"path": rel_path}],
-        "detail_level": "normal"
-    });
-    let payload = json!({
-        "skill_name": "image_vision",
-        "args": args
-    });
-
-    match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
-        Ok(task_id) => {
-            spawn_task_result_delivery(
-                bot.clone(),
-                state.clone(),
-                msg.chat.id,
-                user_id,
-                task_id,
-                None,
-                state.i18n.t("telegram.msg.skill_exec_failed"),
-            );
-        }
-        Err(err) => {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.skill_exec_failed_with_error",
-                    &[("error", &err.to_string())],
-                ),
-            )
-            .await
-            .context("send image vision submit error failed")?;
-        }
-    }
-
-    Ok(())
-}
-
-pub(super) async fn handle_image_only_save_only(
-    bot: &Bot,
-    msg: &Message,
-    state: &BotState,
-    user_id: i64,
-    file_id: String,
-    ext: &str,
-) -> anyhow::Result<()> {
-    let ts = unix_ts();
-    let normalized_ext = normalize_image_ext(ext);
-    let rel_path = build_telegram_inbox_rel_path(
-        &state.image_inbox_dir,
-        &state.bot_name,
-        msg.chat.id.0,
+    submit_attachment_ask(
+        bot,
+        msg,
+        state,
         user_id,
-        ts,
+        prompt,
+        "image",
         &normalized_ext,
-    );
-    let abs_path = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(&rel_path);
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
-    if let Ok(mut m) = state.pending_image_by_chat.lock() {
-        m.insert(msg.chat.id.0, rel_path.clone());
-    }
-    bot.send_message(
-        msg.chat.id,
-        state.i18n.t("telegram.msg.image_received_wait_prompt"),
+        rel_path,
+        false,
     )
     .await
-    .context("send image saved path message failed")?;
-    Ok(())
 }
 
 pub(super) async fn handle_audio_message(
@@ -135,6 +58,7 @@ pub(super) async fn handle_audio_message(
     user_id: i64,
     file_id: String,
     ext: &str,
+    prompt: &str,
 ) -> anyhow::Result<()> {
     let ts = unix_ts();
     let normalized_ext = normalize_audio_ext(ext);
@@ -168,125 +92,18 @@ pub(super) async fn handle_audio_message(
         }
     }
 
-    let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), msg.chat.id);
-    let transcribe_payload = json!({
-        "skill_name": "audio_transcribe",
-        "args": {
-            "audio": { "path": rel_path }
-        }
-    });
-    let transcribe_task_id = submit_task_only(
+    submit_attachment_ask(
+        bot,
+        msg,
         state,
         user_id,
-        msg.chat.id.0,
-        TaskKind::RunSkill,
-        transcribe_payload,
+        prompt,
+        "audio",
+        &normalized_ext,
+        rel_path,
+        true,
     )
     .await
-    .context("submit audio_transcribe task failed")?;
-    let transcript = poll_task_result(
-        state,
-        &transcribe_task_id,
-        bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
-        Some(120),
-    )
-    .await
-    .context("poll audio_transcribe result failed")?;
-    let transcript = transcript.join("\n").trim().to_string();
-    let transcript = transcript.as_str();
-    if transcript.is_empty() {
-        bot.send_message(
-            msg.chat.id,
-            state.i18n.t("telegram.msg.audio_transcript_empty"),
-        )
-        .await
-        .context("send empty transcript message failed")?;
-        return Ok(());
-    }
-
-    info!(
-        "{} transport_prompt_use flow=voice_chat prompt_name=voice_chat_prompt chat_id={} user_id={} prompt_source={}",
-        transport_highlight_tag("transport_prompt"),
-        msg.chat.id.0,
-        user_id,
-        VOICE_CHAT_PROMPT_LOGICAL_PATH
-    );
-    let ask_task_id = submit_task_only(
-        state,
-        user_id,
-        msg.chat.id.0,
-        TaskKind::Ask,
-        json!({
-            "text": render_voice_chat_prompt(&state.voice_chat_prompt_template, transcript),
-            "source": "voice"
-        }),
-    )
-    .await
-    .context("submit ask task for transcript failed")?;
-    let answers = poll_task_result(
-        state,
-        &ask_task_id,
-        bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
-        Some(state.task_wait_seconds.max(300)),
-    )
-    .await
-    .context("poll ask result for transcript failed")?;
-    let answer_joined = answers.join("\n\n");
-    let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, msg.chat.id.0));
-    if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
-        for answer in &answers {
-            send_text_or_image(bot, state, msg.chat.id, answer).await?;
-        }
-    }
-
-    if matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
-        let tts_input = strip_delivery_tokens_for_tts(&answer_joined);
-        if !tts_input.is_empty() {
-            let tts_payload = json!({
-                "skill_name": "audio_synthesize",
-                "args": {
-                    "text": tts_input,
-                    "response_format": "opus"
-                }
-            });
-            match submit_task_only(
-                state,
-                user_id,
-                msg.chat.id.0,
-                TaskKind::RunSkill,
-                tts_payload,
-            )
-            .await
-            {
-                Ok(tts_task_id) => match poll_task_result(
-                    state,
-                    &tts_task_id,
-                    bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
-                    Some(90),
-                )
-                .await
-                {
-                    Ok(tts_answer) => {
-                        for msg_text in tts_answer {
-                            let _ = send_text_or_image(bot, state, msg.chat.id, &msg_text).await;
-                        }
-                    }
-                    Err(err) => {
-                        warn!("audio_synthesize poll failed: {err}");
-                    }
-                },
-                Err(err) => {
-                    warn!("submit audio_synthesize failed: {err}");
-                }
-            }
-        } else if matches!(mode, VoiceReplyMode::Voice) {
-            // Voice-only mode but no speakable text: fallback to original answer.
-            for answer in &answers {
-                send_text_or_image(bot, state, msg.chat.id, answer).await?;
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(super) async fn handle_file_message(
@@ -296,6 +113,7 @@ pub(super) async fn handle_file_message(
     user_id: i64,
     file_id: String,
     ext: &str,
+    prompt: &str,
 ) -> anyhow::Result<()> {
     let ts = unix_ts();
     let normalized_ext = normalize_file_ext(ext);
@@ -311,15 +129,18 @@ pub(super) async fn handle_file_message(
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
     download_telegram_file(state, bot, file_id, &abs_path).await?;
-    bot.send_message(
-        msg.chat.id,
-        state
-            .i18n
-            .t_with("telegram.msg.file_saved_path", &[("path", &rel_path)]),
+    submit_attachment_ask(
+        bot,
+        msg,
+        state,
+        user_id,
+        prompt,
+        "file",
+        &normalized_ext,
+        rel_path,
+        false,
     )
     .await
-    .context("send file saved path message failed")?;
-    Ok(())
 }
 
 pub(super) async fn handle_video_message(
@@ -329,6 +150,7 @@ pub(super) async fn handle_video_message(
     user_id: i64,
     file_id: String,
     ext: &str,
+    prompt: &str,
 ) -> anyhow::Result<()> {
     let ts = unix_ts();
     let normalized_ext = normalize_video_ext(ext);
@@ -344,15 +166,100 @@ pub(super) async fn handle_video_message(
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
     download_telegram_file(state, bot, file_id, &abs_path).await?;
-    bot.send_message(
-        msg.chat.id,
-        state
-            .i18n
-            .t_with("telegram.msg.video_saved_path", &[("path", &rel_path)]),
+    submit_attachment_ask(
+        bot,
+        msg,
+        state,
+        user_id,
+        prompt,
+        "video",
+        &normalized_ext,
+        rel_path,
+        false,
     )
     .await
-    .context("send video saved path message failed")?;
+}
+
+async fn submit_attachment_ask(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+    user_id: i64,
+    prompt: &str,
+    kind: &str,
+    ext: &str,
+    rel_path: String,
+    voice_reply: bool,
+) -> anyhow::Result<()> {
+    let size = tokio::fs::metadata(&rel_path)
+        .await
+        .ok()
+        .map(|meta| meta.len());
+    let payload = json!({
+        "text": prompt.trim(),
+        "source": "telegram",
+        "attachments": [{
+            "kind": kind,
+            "path": rel_path,
+            "mime_type": attachment_mime_type(kind, ext),
+            "size": size,
+        }]
+    });
+    match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::Ask, payload).await {
+        Ok(task_id) if voice_reply => spawn_voice_task_result_delivery(
+            bot.clone(),
+            state.clone(),
+            msg.chat.id,
+            user_id,
+            task_id,
+            state.i18n.t("telegram.msg.process_failed"),
+        ),
+        Ok(task_id) => spawn_task_result_delivery(
+            bot.clone(),
+            state.clone(),
+            msg.chat.id,
+            user_id,
+            task_id,
+            None,
+            state.i18n.t("telegram.msg.process_failed"),
+        ),
+        Err(err) => {
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t_with(
+                    "telegram.msg.process_failed_with_error",
+                    &[("error", &err.to_string())],
+                ),
+            )
+            .await
+            .context("send attachment task submit error failed")?;
+        }
+    }
     Ok(())
+}
+
+fn attachment_mime_type(kind: &str, ext: &str) -> String {
+    let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    match (kind, normalized.as_str()) {
+        ("image", "jpg" | "jpeg") => "image/jpeg".to_string(),
+        ("image", "png") => "image/png".to_string(),
+        ("image", "webp") => "image/webp".to_string(),
+        ("image", "gif") => "image/gif".to_string(),
+        ("audio", "ogg" | "opus") => "audio/ogg".to_string(),
+        ("audio", "mp3") => "audio/mpeg".to_string(),
+        ("audio", "wav") => "audio/wav".to_string(),
+        ("audio", "m4a") => "audio/mp4".to_string(),
+        ("video", "webm") => "video/webm".to_string(),
+        ("video", "mov") => "video/quicktime".to_string(),
+        ("video", "mp4") => "video/mp4".to_string(),
+        ("file", "pdf") => "application/pdf".to_string(),
+        ("file", "json") => "application/json".to_string(),
+        ("file", "txt" | "md" | "csv") => "text/plain".to_string(),
+        ("image", _) => format!("image/{normalized}"),
+        ("audio", _) => format!("audio/{normalized}"),
+        ("video", _) => format!("video/{normalized}"),
+        _ => "application/octet-stream".to_string(),
+    }
 }
 
 pub(super) fn extract_image_attachment(msg: &Message) -> Option<(String, String)> {
@@ -535,6 +442,13 @@ pub(super) fn extension_from_filename(name: &str) -> Option<String> {
     } else {
         Some(ext.to_ascii_lowercase())
     }
+}
+
+fn is_image_ext(ext: &str) -> bool {
+    matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "heif"
+    )
 }
 
 pub(super) fn normalize_image_ext(ext: &str) -> String {

@@ -45,7 +45,7 @@ if pgrep -f "rustclaw_small_screen\.py" >/dev/null 2>&1; then
   exit 0
 fi
 
-PI_APP_DIR="$(dirname "$(readlink -f "$0")")"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PI_APP_DIR" || exit 1
 
 LOG="$HOME/.rustclaw-small-screen.log"

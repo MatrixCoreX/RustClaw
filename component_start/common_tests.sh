@@ -13,6 +13,20 @@ RUSTCLAW_MODEL_SELECT=0 component_start_init "$ROOT_DIR" release "test-entry"
 [[ "$COMPONENT_CHANNEL_CONFIG_DIR" == "$ROOT_DIR/configs/channels" ]]
 [[ "$(component_binary_path clawd)" == "$ROOT_DIR/target/release/clawd" ]]
 
+unset MINIMAX_API_KEY MIMO_API_KEY XIAOMI_API_KEY
+[[ -z "$(component_vendor_api_key_from_env minimax)" ]]
+MINIMAX_API_KEY="minimax-test-key"
+export MINIMAX_API_KEY
+[[ "$(component_vendor_api_key_from_env MiniMax)" == "minimax-test-key" ]]
+XIAOMI_API_KEY="xiaomi-test-key"
+MIMO_API_KEY="mimo-test-key"
+export XIAOMI_API_KEY MIMO_API_KEY
+[[ "$(component_vendor_api_key_from_env mimo)" == "mimo-test-key" ]]
+MIMO_API_KEY="REPLACE_ME"
+export MIMO_API_KEY
+[[ "$(component_vendor_api_key_from_env mimo)" == "xiaomi-test-key" ]]
+unset MINIMAX_API_KEY MIMO_API_KEY XIAOMI_API_KEY
+
 if component_start_init "$ROOT_DIR" debug "test-entry" >/dev/null 2>&1; then
   echo "Unsupported profile was accepted." >&2
   exit 1

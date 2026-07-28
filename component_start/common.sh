@@ -59,6 +59,37 @@ component_start_init() {
   mkdir -p "$COMPONENT_PID_DIR"
 }
 
+component_vendor_api_key_from_env() {
+  local vendor
+  local env_names=""
+  local env_name=""
+  local candidate=""
+  local resolved=""
+  vendor="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+
+  case "$vendor" in
+    openai) env_names="OPENAI_API_KEY" ;;
+    google) env_names="GOOGLE_API_KEY" ;;
+    anthropic) env_names="ANTHROPIC_API_KEY" ;;
+    grok) env_names="GROK_API_KEY" ;;
+    deepseek) env_names="DEEPSEEK_API_KEY" ;;
+    qwen) env_names="QWEN_API_KEY" ;;
+    minimax) env_names="MINIMAX_API_KEY" ;;
+    mimo) env_names="XIAOMI_API_KEY MIMO_API_KEY" ;;
+    custom) env_names="CUSTOM_API_KEY" ;;
+    *) return 0 ;;
+  esac
+
+  # Preserve the runtime's override order: the last populated alias wins.
+  for env_name in $env_names; do
+    candidate="$(printenv "$env_name" 2>/dev/null || true)"
+    if [[ -n "$candidate" && "$candidate" != REPLACE_ME* ]]; then
+      resolved="$candidate"
+    fi
+  done
+  printf '%s' "$resolved"
+}
+
 component_binary_path() {
   local binary_name="$1"
   printf '%s\n' "$COMPONENT_ROOT/target/$COMPONENT_PROFILE/$binary_name"

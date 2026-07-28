@@ -27,11 +27,8 @@ pub(super) fn summarize_structured(
 ) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
-    let field_path = obj
-        .get("field_path")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let field_path =
+        normalized_structured_field_path(obj.get("field_path").and_then(Value::as_str));
     let max_paths =
         u64_arg(obj, "max_paths", DEFAULT_MAX_PATHS as u64).clamp(1, MAX_MAX_PATHS as u64) as usize;
     let (format, root_value) =

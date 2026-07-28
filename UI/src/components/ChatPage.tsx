@@ -8,11 +8,19 @@ import {
 } from "react";
 import {
   Check,
+  Download,
+  ExternalLink,
+  FileArchive,
+  FileAudio,
   FileText,
+  FileVideo,
+  Image as ImageIcon,
   Loader2,
   MessageSquare,
   Mic,
   Paperclip,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Pencil,
   RefreshCw,
@@ -32,7 +40,8 @@ import {
   teachingMessageInteractive,
   teachingRunByMessageId,
 } from "../lib/chat-teaching";
-import type { ChatAttachment, ChatMessage, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import { artifactPreviewKind } from "../lib/task-artifacts";
+import type { ChatAttachment, ChatMessage, TaskArtifact, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import type {
   VoiceInputDeviceOption,
   VoiceRecordingAvailability,
@@ -157,6 +166,7 @@ export function ChatPage({
   onSendMessage,
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
+  const [taskHistoryExpanded, setTaskHistoryExpanded] = useState(true);
   const [threadSearch, setThreadSearch] = useState("");
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -201,6 +211,11 @@ export function ChatPage({
     setRenamingThreadId(null);
     setRenameDraft("");
   };
+  const createNewChatThread = () => {
+    setTaskHistoryExpanded(true);
+    setThreadSearch("");
+    onCreateNewChatThread();
+  };
   const saveRename = async (threadId: string) => {
     if (renameSaving) return;
     setRenameSaving(true);
@@ -230,30 +245,88 @@ export function ChatPage({
   };
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside className="rounded-2xl border border-white/10 bg-white/5 p-3">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{t("任务历史", "Task history")}</h3>
-          <button
-            type="button"
-            onClick={onCreateNewChatThread}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10"
+    <section
+      className={
+        taskHistoryExpanded
+          ? "grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]"
+          : "grid gap-4 lg:grid-cols-[3.75rem_minmax(0,1fr)]"
+      }
+    >
+      <aside className="self-start rounded-2xl border border-white/10 bg-white/5 p-3">
+        <div
+          className={
+            taskHistoryExpanded
+              ? "mb-3 flex items-center justify-between gap-2"
+              : "flex items-center justify-between gap-2 lg:flex-col"
+          }
+        >
+          <h3
+            className={
+              taskHistoryExpanded
+                ? "text-sm font-semibold"
+                : "text-sm font-semibold lg:sr-only"
+            }
           >
-            <Plus className="h-3.5 w-3.5" />
-            {t("新任务", "New")}
-          </button>
+            {t("任务历史", "Task history")}
+          </h3>
+          <div
+            className={
+              taskHistoryExpanded
+                ? "flex items-center gap-1"
+                : "flex items-center gap-1 lg:flex-col"
+            }
+          >
+            <button
+              type="button"
+              onClick={createNewChatThread}
+              className={
+                taskHistoryExpanded
+                  ? "inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10"
+                  : "theme-icon-btn h-8 w-8"
+              }
+              title={t("新建任务", "New task")}
+              aria-label={t("新建任务", "New task")}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {taskHistoryExpanded ? t("新任务", "New") : null}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskHistoryExpanded((expanded) => !expanded)}
+              className="theme-icon-btn h-8 w-8"
+              title={
+                taskHistoryExpanded
+                  ? t("收起任务历史", "Collapse task history")
+                  : t("展开任务历史", "Expand task history")
+              }
+              aria-label={
+                taskHistoryExpanded
+                  ? t("收起任务历史", "Collapse task history")
+                  : t("展开任务历史", "Expand task history")
+              }
+              aria-expanded={taskHistoryExpanded}
+              aria-controls="chat-task-history-content"
+            >
+              {taskHistoryExpanded ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
-        <label className="mb-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/55">
-          <Search className="h-3.5 w-3.5 shrink-0" />
-          <input
-            type="search"
-            value={threadSearch}
-            onChange={(event) => setThreadSearch(event.target.value)}
-            placeholder={t("搜索标题、任务 ID、状态", "Search title, task ID, status")}
-            className="min-w-0 flex-1 bg-transparent text-white/80 outline-none placeholder:text-white/35"
-          />
-        </label>
-        <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+        <div id="chat-task-history-content" hidden={!taskHistoryExpanded}>
+            <label className="mb-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/55">
+              <Search className="h-3.5 w-3.5 shrink-0" />
+              <input
+                type="search"
+                value={threadSearch}
+                onChange={(event) => setThreadSearch(event.target.value)}
+                placeholder={t("搜索标题、任务 ID、状态", "Search title, task ID, status")}
+                className="min-w-0 flex-1 bg-transparent text-white/80 outline-none placeholder:text-white/35"
+              />
+            </label>
+            <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
           {visibleChatThreads.map((thread) => {
             const active = thread.id === activeChatThreadId;
             const renaming = thread.id === renamingThreadId;
@@ -375,6 +448,7 @@ export function ChatPage({
               {t("没有匹配的任务。", "No matching tasks.")}
             </div>
           ) : null}
+            </div>
         </div>
       </aside>
 
@@ -466,6 +540,17 @@ export function ChatPage({
                       <AttachmentPreview
                         key={`${message.id}-${attachment.name}-${index}`}
                         attachment={attachment}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {message.artifacts?.length ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {message.artifacts.map((artifact) => (
+                      <TaskArtifactCard
+                        key={`${message.id}-${artifact.id}`}
+                        artifact={artifact}
                         t={t}
                       />
                     ))}
@@ -942,6 +1027,111 @@ function AttachmentPreview({
           {attachment.name}
         </div>
         <div className="text-white/45">{formatAttachmentSize(attachment.size)}</div>
+      </div>
+    </div>
+  );
+}
+
+function TaskArtifactCard({
+  artifact,
+  t,
+}: {
+  artifact: TaskArtifact;
+  t: Translate;
+}) {
+  const previewKind = artifactPreviewKind(artifact);
+  const previewUrl = artifact.preview_url ?? null;
+  const stopBubble = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  const icon =
+    previewKind === "image" ? (
+      <ImageIcon className="h-5 w-5" />
+    ) : previewKind === "audio" ? (
+      <FileAudio className="h-5 w-5" />
+    ) : previewKind === "video" ? (
+      <FileVideo className="h-5 w-5" />
+    ) : artifact.kind === "archive" ? (
+      <FileArchive className="h-5 w-5" />
+    ) : (
+      <FileText className="h-5 w-5" />
+    );
+
+  return (
+    <div
+      className="min-w-0 overflow-hidden rounded-md border border-white/12 bg-black/20"
+      onClick={stopBubble}
+      onKeyDown={stopBubble}
+    >
+      {previewKind === "image" && previewUrl ? (
+        <a
+          href={previewUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block border-b border-white/10 bg-black/20"
+          title={t("打开图片预览", "Open image preview")}
+        >
+          <img
+            src={previewUrl}
+            alt={artifact.filename}
+            loading="lazy"
+            className="h-44 w-full object-contain"
+          />
+        </a>
+      ) : null}
+      {previewKind === "audio" && previewUrl ? (
+        <div className="border-b border-white/10 p-3">
+          <audio
+            controls
+            preload="metadata"
+            src={previewUrl}
+            className="h-9 w-full"
+            title={artifact.filename}
+          />
+        </div>
+      ) : null}
+      {previewKind === "video" && previewUrl ? (
+        <div className="border-b border-white/10 bg-black/25">
+          <video
+            controls
+            preload="metadata"
+            src={previewUrl}
+            className="aspect-video w-full object-contain"
+            title={artifact.filename}
+          />
+        </div>
+      ) : null}
+      <div className="flex min-w-0 items-center gap-3 p-3">
+        <span className="shrink-0 text-sky-200">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-white/85" title={artifact.filename}>
+            {artifact.filename}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-white/45" title={artifact.mime_type}>
+            {artifact.mime_type} · {formatAttachmentSize(artifact.size_bytes)}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {previewKind === "pdf" && previewUrl ? (
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="theme-icon-btn h-8 w-8"
+              title={t("预览", "Preview")}
+              aria-label={t(`预览 ${artifact.filename}`, `Preview ${artifact.filename}`)}
+            >
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          ) : null}
+          <a
+            href={artifact.download_url}
+            download={artifact.filename}
+            className="theme-icon-btn h-8 w-8"
+            title={t("下载", "Download")}
+            aria-label={t(`下载 ${artifact.filename}`, `Download ${artifact.filename}`)}
+          >
+            <Download className="h-4 w-4" />
+          </a>
+        </div>
       </div>
     </div>
   );

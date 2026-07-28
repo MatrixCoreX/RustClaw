@@ -5,7 +5,7 @@
 # 取消自启动：运行本目录下 disable-autostart.sh
 
 set -e
-PI_APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTER="${PI_APP_DIR}/register-launcher.sh"
 WRAPPER="${HOME}/.local/bin/rustclaw-small-screen-launcher"
 AUTOSTART_DIR="${HOME}/.config/autostart"

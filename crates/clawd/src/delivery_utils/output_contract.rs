@@ -218,8 +218,6 @@ pub(super) fn enforce_output_contract(
                 user_request,
                 Path::new("/"),
                 &state.skill_rt.default_locator_search_dir,
-                state.skill_rt.locator_scan_max_depth,
-                state.skill_rt.locator_scan_max_files,
                 Some(output_contract.locator_hint.as_str()),
             ) {
                 Some(FileDeliveryTargetResolution::Resolved(path)) => {

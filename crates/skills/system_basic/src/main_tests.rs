@@ -489,7 +489,6 @@ planner_kind = "tool"
 [[skills]]
 name = "run_cmd"
 planner_kind = "tool"
-runner_name = "run-cmd-skill"
 "#,
     )
     .expect("write toml");
@@ -802,6 +801,31 @@ planner_kind = "tool"
             .and_then(Value::as_str),
         Some("fs_basic")
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn structured_keys_treats_root_token_as_document_root() {
+    let root = temp_root("structured_keys_root_token");
+    let path = root.join("settings.toml");
+    std::fs::write(
+        &path,
+        "[app]\nname = \"demo\"\n[features]\nenabled = true\n",
+    )
+    .expect("write TOML fixture");
+    let obj = serde_json::json!({
+        "path": "settings.toml",
+        "format": "toml",
+        "field_path": "root",
+    })
+    .as_object()
+    .expect("object")
+    .clone();
+
+    let out = structured_keys(&root, &obj, false).expect("structured keys");
+    let value: Value = serde_json::from_str(&out).expect("structured response");
+    assert_eq!(value["exists"], true);
+    assert_eq!(value["keys"], serde_json::json!(["app", "features"]));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1475,6 +1499,56 @@ fn find_path_match_includes_resolved_path() {
 }
 
 #[test]
+fn find_path_default_search_reaches_beyond_eight_levels() {
+    let root = temp_root("find_path_deep_default");
+    let mut parent = root.clone();
+    for index in 0..10 {
+        parent = parent.join(format!("level_{index}"));
+    }
+    std::fs::create_dir_all(&parent).expect("create deep tree");
+    let target = parent.join("deep-target.txt");
+    std::fs::write(&target, "deep").expect("write deep target");
+    let mut obj = Map::new();
+    obj.insert("name".to_string(), json!("deep-target.txt"));
+    obj.insert("match_mode".to_string(), json!("exact"));
+    obj.insert("target_kind".to_string(), json!("file"));
+
+    let out = find_path(&root, &obj, false).expect("find deep path");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(value["completeness"], "complete");
+    assert_eq!(value["known_match_count"], 1);
+    assert_eq!(
+        value["matches"][0]["resolved_path"],
+        target.to_string_lossy().as_ref()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn find_path_default_search_is_not_limited_to_eight_hundred_entries() {
+    let root = temp_root("find_path_large_default");
+    for index in 0..805 {
+        std::fs::write(root.join(format!("f_{index:04}.txt")), "fixture").expect("write fixture");
+    }
+    let target = root.join("wanted-after-800.txt");
+    std::fs::write(&target, "wanted").expect("write target");
+    let mut obj = Map::new();
+    obj.insert("name".to_string(), json!("wanted-after-800.txt"));
+    obj.insert("match_mode".to_string(), json!("exact"));
+    obj.insert("target_kind".to_string(), json!("file"));
+
+    let out = find_path(&root, &obj, false).expect("find after 800 entries");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(value["completeness"], "complete");
+    assert_eq!(value["known_match_count"], 1);
+    assert_eq!(
+        value["matches"][0]["resolved_path"],
+        target.to_string_lossy().as_ref()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn read_range_directory_error_is_structured() {
     let root = temp_root("read_range_directory_error");
     let mut obj = Map::new();
@@ -1601,7 +1675,7 @@ fn inventory_dir_returns_stable_cursor_pages_and_full_counts() {
 
 #[cfg(unix)]
 #[test]
-fn inventory_and_walk_do_not_follow_directory_symlinks() {
+fn inventory_does_not_follow_directory_symlinks() {
     use std::os::unix::fs::symlink;
 
     let root = temp_root("inventory_symlink");
@@ -1620,14 +1694,6 @@ fn inventory_and_walk_do_not_follow_directory_symlinks() {
     assert_eq!(external["kind"], "symlink");
     assert_eq!(external["is_symlink"], true);
 
-    let mut visited = Vec::new();
-    walk_collect(&root, &mut |path| {
-        visited.push(path.to_path_buf());
-        false
-    })
-    .expect("walk");
-    assert!(visited.iter().any(|path| path.ends_with("external")));
-    assert!(!visited.iter().any(|path| path.ends_with("secret.txt")));
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(outside);
 }

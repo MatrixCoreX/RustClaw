@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
+import { ApiResponseFormatError, readJsonApiResponse } from "../lib/api-response";
 import { sleep } from "../lib/display-format";
 import { formatSystemActionError } from "../lib/system-actions";
 import {
@@ -11,8 +13,10 @@ import type {
   ConsolePage,
   HealthResponse,
   HostSystemSummary,
+  HostDependenciesSnapshot,
   NginxUiStatus,
   PiAppStatusResponse,
+  WebdExposureStatus,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
 } from "../types/api";
@@ -55,6 +59,7 @@ export function useSystemRuntime({
   fetchSkillsConfig,
   fetchSkills,
 }: UseSystemRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const workspaceUpdateSilentFailuresRef = useRef(0);
   const workspaceUpdateWasActiveRef = useRef(false);
   const workspaceUpdateActiveModeRef = useRef<WorkspaceUpdateMode | string | undefined>(undefined);
@@ -64,6 +69,10 @@ export function useSystemRuntime({
   const [hostSystemSummary, setHostSystemSummary] = useState<HostSystemSummary | null>(null);
   const [hostSystemLoading, setHostSystemLoading] = useState(false);
   const [hostSystemErrorCode, setHostSystemErrorCode] = useState<string | null>(null);
+  const [hostDependencies, setHostDependencies] = useState<HostDependenciesSnapshot | null>(null);
+  const [hostDependenciesLoading, setHostDependenciesLoading] = useState(false);
+  const [hostDependenciesErrorCode, setHostDependenciesErrorCode] = useState<string | null>(null);
+  const [dependencyInstallingId, setDependencyInstallingId] = useState<string | null>(null);
   const [piAppStatus, setPiAppStatus] = useState<PiAppStatusResponse | null>(null);
   const [piAppRestarting, setPiAppRestarting] = useState(false);
   const [piAppRestartMessage, setPiAppRestartMessage] = useState<string | null>(null);
@@ -74,6 +83,11 @@ export function useSystemRuntime({
   const [nginxStatus, setNginxStatus] = useState<NginxUiStatus | null>(null);
   const [nginxStatusLoading, setNginxStatusLoading] = useState(false);
   const [nginxStatusError, setNginxStatusError] = useState<string | null>(null);
+  const [webdExposureStatus, setWebdExposureStatus] = useState<WebdExposureStatus | null>(null);
+  const [webdExposureLoading, setWebdExposureLoading] = useState(false);
+  const [webdExposureUpdating, setWebdExposureUpdating] = useState(false);
+  const [webdExposureError, setWebdExposureError] = useState<string | null>(null);
+  const [webdExposureMessage, setWebdExposureMessage] = useState<string | null>(null);
   const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
   const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
     formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
@@ -93,6 +107,48 @@ export function useSystemRuntime({
       setHostSystemErrorCode("disconnected");
     } finally {
       setHostSystemLoading(false);
+    }
+  };
+
+  const fetchHostDependencies = async (silent = false): Promise<HostDependenciesSnapshot | null> => {
+    if (!silent) setHostDependenciesLoading(true);
+    setHostDependenciesErrorCode(null);
+    try {
+      const res = await apiFetch("/v1/system/dependencies");
+      const body = (await res.json()) as ApiResponse<HostDependenciesSnapshot>;
+      if (!res.ok || !body.ok || !body.data) {
+        setHostDependenciesErrorCode(res.status === 401 || res.status === 403 ? "permission_denied" : "unavailable");
+        return null;
+      }
+      setHostDependencies(body.data);
+      return body.data;
+    } catch {
+      setHostDependenciesErrorCode("disconnected");
+      return null;
+    } finally {
+      if (!silent) setHostDependenciesLoading(false);
+    }
+  };
+
+  const installHostDependency = async (dependencyId: string) => {
+    setDependencyInstallingId(dependencyId);
+    setHostDependenciesErrorCode(null);
+    try {
+      const res = await apiFetch("/v1/admin/system-dependencies/install", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dependency_id: dependencyId }),
+      });
+      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!res.ok || !body.ok) {
+        setHostDependenciesErrorCode(body.error || "install_failed");
+        return;
+      }
+      await fetchHostDependencies(true);
+    } catch {
+      setHostDependenciesErrorCode("disconnected");
+    } finally {
+      setDependencyInstallingId(null);
     }
   };
 
@@ -128,18 +184,107 @@ export function useSystemRuntime({
     setNginxStatusError(null);
     try {
       const res = await apiFetch("/v1/admin/nginx");
-      const body = (await res.json()) as ApiResponse<NginxUiStatus>;
+      const body = await readJsonApiResponse<ApiResponse<NginxUiStatus>>(res);
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nginx status failed (${res.status})`);
       }
       setNginxStatus(body.data);
       return body.data;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = err instanceof ApiResponseFormatError
+        ? err.kind === "html_response"
+          ? t(
+              "状态接口返回了网页而不是 API 数据。请更新并重启 RustClaw；本地开发页面还应确认 API 指向 webd（默认 8788 端口）。",
+              "The status endpoint returned a web page instead of API data. Update and restart RustClaw; for local development, also confirm the API points to webd (port 8788 by default).",
+            )
+          : t(
+              "状态接口返回了无法识别的数据，请更新并重启 RustClaw 后重试。",
+              "The status endpoint returned unrecognized data. Update and restart RustClaw, then retry.",
+            )
+        : err instanceof Error
+          ? err.message
+          : t("未知错误", "Unknown error");
       setNginxStatusError(message);
       return null;
     } finally {
       if (!silent) setNginxStatusLoading(false);
+    }
+  };
+
+  const fetchWebdExposureStatus = async (silent = false): Promise<WebdExposureStatus | null> => {
+    if (!silent) setWebdExposureLoading(true);
+    setWebdExposureError(null);
+    try {
+      const res = await apiFetch("/v1/admin/webd-exposure");
+      const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `webd exposure status failed (${res.status})`);
+      }
+      setWebdExposureStatus(body.data);
+      return body.data;
+    } catch (err) {
+      const message = err instanceof ApiResponseFormatError
+        ? t(
+            "webd 状态接口返回了无法识别的数据，请更新并重启 RustClaw 后重试。",
+            "The webd status endpoint returned unrecognized data. Update and restart RustClaw, then retry.",
+          )
+        : err instanceof Error
+          ? err.message
+          : t("未知错误", "Unknown error");
+      setWebdExposureError(message);
+      return null;
+    } finally {
+      if (!silent) setWebdExposureLoading(false);
+    }
+  };
+
+  const setWebdExternalAccess = async (externallyAccessible: boolean) => {
+    const confirmed = await showConfirm({
+      title: externallyAccessible
+        ? t("开放 webd 对外端口", "Expose the webd port")
+        : t("关闭 webd 对外端口", "Close the public webd port"),
+      message: externallyAccessible
+        ? t(
+            `开放后，局域网或公网可直接连接当前设备的 ${webdExposureStatus?.port ?? 8788} 端口。该入口会绕过 nginx，请确认防火墙和访问网络可信。Web 入口将短暂重启。`,
+            `After this is enabled, LAN or internet clients can connect directly to port ${webdExposureStatus?.port ?? 8788} on this device. This path bypasses nginx, so verify the firewall and network trust first. The web entry will restart briefly.`,
+          )
+        : t(
+            `关闭后，webd 只监听 127.0.0.1:${webdExposureStatus?.port ?? 8788}。nginx 页面和 API 仍可使用；当前若通过 IP:${webdExposureStatus?.port ?? 8788} 直连，页面会断开。Web 入口将短暂重启。`,
+            `After this is disabled, webd listens only on 127.0.0.1:${webdExposureStatus?.port ?? 8788}. The nginx UI and API remain available; a page connected directly through IP:${webdExposureStatus?.port ?? 8788} will disconnect. The web entry will restart briefly.`,
+          ),
+      confirmLabel: externallyAccessible ? t("确认开放", "Expose port") : t("确认关闭", "Close port"),
+      tone: externallyAccessible ? "danger" : "default",
+    });
+    if (!confirmed) return;
+
+    setWebdExposureUpdating(true);
+    setWebdExposureError(null);
+    setWebdExposureMessage(null);
+    try {
+      const res = await apiFetch("/v1/admin/webd-exposure", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ externally_accessible: externallyAccessible }),
+      });
+      const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `webd exposure update failed (${res.status})`);
+      }
+      setWebdExposureStatus(body.data);
+      setWebdExposureMessage(body.data.restart_scheduled
+        ? t(
+            "访问范围已保存，RustClaw 正在重启。nginx 入口会在服务恢复后继续工作。",
+            "The access scope was saved and RustClaw is restarting. The nginx entry will continue working after the service recovers.",
+          )
+        : t("webd 已经是所选访问范围。", "webd already uses the selected access scope."));
+      if (body.data.restart_scheduled) {
+        window.setTimeout(() => void fetchWebdExposureStatus(true), 5000);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setWebdExposureError(`${t("修改 webd 访问范围失败", "Failed to update webd access scope")}: ${message}`);
+    } finally {
+      setWebdExposureUpdating(false);
     }
   };
 
@@ -171,19 +316,22 @@ export function useSystemRuntime({
       },
       nginx_enable: {
         confirm: t(
-          "将安装或启动 nginx，配置 RustClaw Web 入口，并部署已有 UI 产物。可能需要系统管理员权限，确认继续吗？",
-          "Install or start nginx, configure the RustClaw web entry, and deploy the existing UI assets. System administrator privileges may be required. Continue?",
+          "将检查 nginx：未安装时自动安装，系统仓库有新版本时自动更新；随后修复 RustClaw Web 入口、启动服务并部署当前 UI。可能需要系统管理员权限，确认继续吗？",
+          "Check nginx, install it when missing, and update it when the system repository has a newer version. Then repair the RustClaw web entry, start the service, and deploy the current UI. System administrator privileges may be required. Continue?",
         ),
         endpoint: "/v1/admin/workspace-update/nginx-enable",
-        started: t("nginx 启用任务已开始。", "The nginx enable task has started."),
+        started: t("nginx 检查、修复和 UI 部署任务已开始。", "The nginx check, repair, and UI deployment task has started."),
       },
-      nginx_deploy: {
+      nginx_disable: {
         confirm: t(
-          "将构建当前 UI 源码并部署到 nginx；Release 安装会直接部署包内 UI。确认继续吗？",
-          "Build the current UI source and deploy it to nginx. Release installations deploy the packaged UI directly. Continue?",
+          "关闭 nginx 会停止并禁用 nginx 服务，同时删除 RustClaw 的 nginx 站点配置和已部署 UI。云服务器或域名入口会立即无法访问，之后需要通过服务器终端或仍可直连的 webd 恢复。确认关闭吗？",
+          "Disabling nginx stops and disables the service, then removes the RustClaw nginx site and deployed UI. A cloud server or domain entry will immediately become unreachable; recovery requires server terminal access or a still-reachable direct webd connection. Disable nginx?",
         ),
-        endpoint: "/v1/admin/workspace-update/nginx-deploy",
-        started: t("nginx UI 部署已开始。", "The nginx UI deployment has started."),
+        endpoint: "/v1/admin/workspace-update/nginx-disable",
+        started: t(
+          "正在关闭 nginx 并删除已部署 UI。远程入口可能会立即断开。",
+          "Disabling nginx and removing the deployed UI. The remote entry may disconnect immediately.",
+        ),
       },
       release_deploy: {
         confirm: t(
@@ -192,17 +340,6 @@ export function useSystemRuntime({
         ),
         endpoint: "/v1/admin/workspace-update/deploy-release",
         started: t("Release 包部署已开始，下面会自动刷新进度。", "Release package deployment started. Progress will refresh automatically."),
-      },
-      release_package: {
-        confirm: t(
-          "切换后会下载并校验最新 Release 包，保留配置、数据、日志、任务状态及已安装技能，再把完整源码目录移到回滚备份。完成后将不再显示 Git 拉取和本机编译功能。确认切换回 Release 模式吗？",
-          "This downloads and verifies the latest Release package, preserves configuration, data, logs, task state, and installed skills, then moves the complete source tree to a rollback backup. Git pull and local build controls will no longer be shown. Switch back to Release mode?",
-        ),
-        endpoint: "/v1/admin/workspace-update/enable-release-package",
-        started: t(
-          "正在安全切换回 Release 模式，下面会自动刷新进度。",
-          "Safely switching back to Release mode. Progress will refresh automatically.",
-        ),
       },
       source_checkout: {
         confirm: t(
@@ -214,7 +351,14 @@ export function useSystemRuntime({
       },
     };
     const selectedMode = modeConfig[mode];
-    const confirmed = window.confirm(selectedMode.confirm);
+    const confirmed = await showConfirm({
+      title: mode === "nginx_disable"
+        ? t("关闭 nginx Web 入口", "Disable nginx web entry")
+        : t("确认系统操作", "Confirm system operation"),
+      message: selectedMode.confirm,
+      confirmLabel: mode === "nginx_disable" ? t("确认关闭", "Disable") : t("继续", "Continue"),
+      tone: mode === "nginx_disable" ? "danger" : "default",
+    });
     if (!confirmed) return;
     setWorkspaceUpdateLoading(true);
     setWorkspaceUpdateMessage(null);
@@ -242,24 +386,27 @@ export function useSystemRuntime({
   };
 
   const cancelWorkspaceUpdate = async () => {
-    const confirmed = window.confirm(
-      t(
+    const confirmed = await showConfirm({
+      title: t("停止当前操作", "Stop current operation"),
+      message: t(
         workspaceUpdateStatus?.mode === "release_deploy"
           ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
-          : workspaceUpdateStatus?.mode === "release_package"
-            ? "停止切换 Release 模式？如果尚未完成原子切换，当前源码目录会保持不变。"
+          : workspaceUpdateStatus?.mode === "nginx_disable"
+            ? "停止关闭 nginx？已经停止的服务或已经删除的 UI 不会自动恢复。"
           : workspaceUpdateStatus?.mode === "source_checkout"
             ? "停止切换源码模式？如果尚未完成原子切换，当前 Release 安装会保持不变。"
             : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
         workspaceUpdateStatus?.mode === "release_deploy"
           ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
-          : workspaceUpdateStatus?.mode === "release_package"
-            ? "Stop switching to Release mode? The current source checkout remains unchanged if the atomic switch has not completed."
+          : workspaceUpdateStatus?.mode === "nginx_disable"
+            ? "Stop disabling nginx? A service already stopped or UI files already removed will not be restored automatically."
           : workspaceUpdateStatus?.mode === "source_checkout"
             ? "Stop switching to source mode? The current Release installation remains unchanged if the atomic switch has not completed."
           : "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
       ),
-    );
+      confirmLabel: t("停止", "Stop"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setWorkspaceUpdateCanceling(true);
     setWorkspaceUpdateMessage(null);
@@ -383,18 +530,31 @@ export function useSystemRuntime({
   useEffect(() => {
     if (!uiAuthReady || currentPage !== "dashboard") return;
     void fetchHostSystemSummary();
+    void fetchHostDependencies();
     if (isAdminIdentity) {
       void fetchWorkspaceUpdateStatus(true);
       void fetchNginxStatus(true);
+      void fetchWebdExposureStatus(true);
       void fetchPiAppStatus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady, isAdminIdentity, currentPage]);
 
   useEffect(() => {
+    if (!uiAuthReady || currentPage !== "dashboard") return;
+    const hasActiveInstall = hostDependencies?.operations.some(
+      (operation) => operation.status === "queued" || operation.status === "running",
+    );
+    if (!hasActiveInstall) return;
+    const interval = window.setInterval(() => void fetchHostDependencies(true), 2500);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, uiAuthReady, currentPage, hostDependencies?.operations]);
+
+  useEffect(() => {
     const status = workspaceUpdateStatus?.status;
     if (
-      (workspaceUpdateStatus?.mode === "nginx_enable" || workspaceUpdateStatus?.mode === "nginx_deploy") &&
+      (workspaceUpdateStatus?.mode === "nginx_enable" || workspaceUpdateStatus?.mode === "nginx_disable") &&
       (status === "succeeded" || status === "failed" || status === "canceled")
     ) {
       void fetchNginxStatus(true);
@@ -453,6 +613,10 @@ export function useSystemRuntime({
     hostSystemSummary,
     hostSystemLoading,
     hostSystemErrorCode,
+    hostDependencies,
+    hostDependenciesLoading,
+    hostDependenciesErrorCode,
+    dependencyInstallingId,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -464,11 +628,20 @@ export function useSystemRuntime({
     nginxStatusLoading,
     nginxStatusError,
     fetchNginxStatus,
+    webdExposureStatus,
+    webdExposureLoading,
+    webdExposureUpdating,
+    webdExposureError,
+    webdExposureMessage,
+    fetchWebdExposureStatus,
+    setWebdExternalAccess,
     fetchWorkspaceUpdateStatus,
     startWorkspaceUpdate,
     cancelWorkspaceUpdate,
     restartSystem,
     restartPiApp,
     fetchHostSystemSummary,
+    fetchHostDependencies,
+    installHostDependency,
   };
 }

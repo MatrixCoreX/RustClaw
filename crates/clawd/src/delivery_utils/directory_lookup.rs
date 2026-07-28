@@ -1,4 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use rustclaw_fs_discovery::{
+    discover, Completeness, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector,
+    MatchMode, TargetKind,
+};
 
 use super::locator::{directory_lookup_input_from_hint, normalize_locator_text};
 use super::types::localize_delivery_message_for_request;
@@ -9,6 +15,14 @@ use super::{
 };
 use crate::AppState;
 use crate::{OutputDeliveryIntent, OutputLocatorKind};
+
+const LOCATOR_DEADLINE: Duration = Duration::from_secs(5);
+const DIRECT_DIRECTORY_ENTRY_LIMIT: usize = 1_000;
+
+struct DirectoryCandidateScan {
+    paths: Vec<PathBuf>,
+    completeness: Completeness,
+}
 
 // Directory-only lookup and listing flow used by delivery interception.
 pub(super) fn try_handle_directory_lookup_request(
@@ -33,13 +47,10 @@ pub(super) fn try_handle_directory_lookup_request(
         request,
         Path::new("/"),
         &state.skill_rt.default_locator_search_dir,
-        state.skill_rt.locator_scan_max_depth,
-        state.skill_rt.locator_scan_max_files,
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_directory_entries_for_user(&directory, state.skill_rt.locator_scan_max_files)
-            {
+            match list_directory_entries_for_user(&directory, DIRECT_DIRECTORY_ENTRY_LIMIT) {
                 DirectoryEntriesListResult::FilePaths(paths) => {
                     if paths.is_empty() {
                         Some(localize_delivery_message_for_request(
@@ -109,8 +120,6 @@ pub(super) fn resolve_directory_target(
     input: DirectoryLookupInput,
     system_root: &Path,
     project_root: &Path,
-    max_depth: usize,
-    max_scan_entries: usize,
 ) -> DirectoryLookupResolution {
     match input {
         DirectoryLookupInput::ExplicitPath { directory_path } => {
@@ -124,22 +133,18 @@ pub(super) fn resolve_directory_target(
             DirectoryLookupResolution::UserMessage(DeliveryMessageKind::DirectoryBothRootsMiss)
         }
         DirectoryLookupInput::NameHint { directory_hint } => {
-            let mut exact = collect_directory_candidates(
-                system_root,
-                &directory_hint,
-                max_depth,
-                max_scan_entries,
-                true,
-            );
-            let mut project_exact = collect_directory_candidates(
-                project_root,
-                &directory_hint,
-                max_depth,
-                max_scan_entries,
-                true,
-            );
-            exact.append(&mut project_exact);
+            let system_exact = scan_directory_candidates(system_root, &directory_hint, true);
+            let project_exact = scan_directory_candidates(project_root, &directory_hint, true);
+            let exact_complete =
+                system_exact.completeness.is_complete() && project_exact.completeness.is_complete();
+            let mut exact = system_exact.paths;
+            exact.extend(project_exact.paths);
             dedup_and_sort_paths(&mut exact);
+            if !exact_complete {
+                return DirectoryLookupResolution::UserMessage(
+                    DeliveryMessageKind::DirectoryEntriesTooMany,
+                );
+            }
             if exact.len() == 1 {
                 return DirectoryLookupResolution::Resolved(exact[0].clone());
             }
@@ -149,22 +154,18 @@ pub(super) fn resolve_directory_target(
                 );
             }
 
-            let mut fuzzy = collect_directory_candidates(
-                system_root,
-                &directory_hint,
-                max_depth,
-                max_scan_entries,
-                false,
-            );
-            let mut project_fuzzy = collect_directory_candidates(
-                project_root,
-                &directory_hint,
-                max_depth,
-                max_scan_entries,
-                false,
-            );
-            fuzzy.append(&mut project_fuzzy);
+            let system_fuzzy = scan_directory_candidates(system_root, &directory_hint, false);
+            let project_fuzzy = scan_directory_candidates(project_root, &directory_hint, false);
+            let fuzzy_complete =
+                system_fuzzy.completeness.is_complete() && project_fuzzy.completeness.is_complete();
+            let mut fuzzy = system_fuzzy.paths;
+            fuzzy.extend(project_fuzzy.paths);
             dedup_and_sort_paths(&mut fuzzy);
+            if !fuzzy_complete {
+                return DirectoryLookupResolution::UserMessage(
+                    DeliveryMessageKind::DirectoryEntriesTooMany,
+                );
+            }
             if fuzzy.len() == 1 {
                 DirectoryLookupResolution::Resolved(fuzzy[0].clone())
             } else if fuzzy.len() > 1 {
@@ -176,70 +177,62 @@ pub(super) fn resolve_directory_target(
     }
 }
 
+#[cfg(test)]
 pub(super) fn collect_directory_candidates(
     root: &Path,
     hint: &str,
-    max_depth: usize,
-    max_scan_entries: usize,
     exact_only: bool,
 ) -> Vec<PathBuf> {
-    if !root.is_dir() {
-        return Vec::new();
+    scan_directory_candidates(root, hint, exact_only).paths
+}
+
+fn scan_directory_candidates(root: &Path, hint: &str, exact_only: bool) -> DirectoryCandidateScan {
+    // Never turn a missing hint into an unbounded scan of the host root. Explicit
+    // paths are still resolved directly above; production name lookup searches
+    // the focused locator root instead.
+    if !root.is_dir() || root == Path::new("/") {
+        return DirectoryCandidateScan {
+            paths: Vec::new(),
+            completeness: Completeness::Complete,
+        };
     }
     let hint_norm = normalize_locator_text(hint);
     if hint_norm.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut scanned = 0usize;
-    let mut stack = vec![(root.to_path_buf(), 0usize)];
-
-    while let Some((dir, depth)) = stack.pop() {
-        let mut entries = match std::fs::read_dir(&dir) {
-            Ok(v) => v
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .collect::<Vec<_>>(),
-            Err(_) => continue,
+        return DirectoryCandidateScan {
+            paths: Vec::new(),
+            completeness: Completeness::Complete,
         };
-        entries.sort();
-        for path in entries {
-            scanned += 1;
-            if scanned > max_scan_entries.max(1) {
-                return out;
-            }
-            let meta = match std::fs::symlink_metadata(&path) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            if !meta.file_type().is_dir() {
-                continue;
-            }
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let name_norm = normalize_locator_text(&name);
-            let matched = if exact_only {
-                name_norm == hint_norm
-            } else {
-                name_norm == hint_norm
-                    || name_norm.contains(&hint_norm)
-                    || hint_norm.contains(&name_norm)
-            };
-            if matched {
-                if let Ok(canonical) = path.canonicalize() {
-                    out.push(canonical);
-                } else {
-                    out.push(path.clone());
-                }
-            }
-            if depth < max_depth {
-                stack.push((path, depth + 1));
-            }
-        }
     }
-    out
+    let mut request = DiscoveryRequest::new(root, root);
+    request.selector = DiscoverySelector {
+        patterns: vec![hint_norm],
+        target_kind: TargetKind::Directory,
+        match_mode: if exact_only {
+            MatchMode::Exact
+        } else {
+            MatchMode::Contains
+        },
+        ..DiscoverySelector::default()
+    };
+    request.policy = DiscoveryPolicy::default();
+    request.budget = DiscoveryBudget {
+        deadline: Some(LOCATOR_DEADLINE),
+        ..DiscoveryBudget::default()
+    };
+    match discover(&request) {
+        Ok(report) => DirectoryCandidateScan {
+            completeness: report.completeness,
+            paths: report
+                .entries
+                .into_iter()
+                .filter_map(|entry| entry.path.canonicalize().ok())
+                .collect(),
+        },
+        Err(_) => DirectoryCandidateScan {
+            paths: Vec::new(),
+            completeness: Completeness::PartialPermission,
+        },
+    }
 }
 
 pub(super) fn list_directory_entries_for_user(

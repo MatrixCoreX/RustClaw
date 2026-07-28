@@ -70,7 +70,32 @@ test("renders task rename and delete as directly operable controls", () => {
 
   assert.match(markup, /aria-label="重命名任务：自定义任务"/);
   assert.match(markup, /aria-label="删除任务：自定义任务"/);
-  assert.doesNotMatch(markup, /aria-expanded=/);
+  assert.match(markup, /aria-label="收起任务历史"/);
+  assert.match(markup, /aria-expanded="true"/);
+  assert.match(markup, /aria-controls="chat-task-history-content"/);
+});
+
+test("renders a newly prepended task above older task history", () => {
+  const pageProps = props();
+  pageProps.chatThreads = [
+    {
+      ...pageProps.chatThreads[0],
+      id: "chat-thread-new",
+      title: "最新创建任务",
+      updatedAt: 2,
+    },
+    {
+      ...pageProps.chatThreads[0],
+      id: "chat-thread-old",
+      title: "旧任务",
+      updatedAt: 1,
+    },
+  ];
+  pageProps.activeChatThreadId = "chat-thread-new";
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.ok(markup.indexOf("最新创建任务") < markup.indexOf("旧任务"));
 });
 
 test("describes hold-to-talk voice as release-to-send without a preview step", () => {

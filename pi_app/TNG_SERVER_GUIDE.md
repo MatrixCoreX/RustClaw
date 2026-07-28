@@ -24,6 +24,8 @@
   - 读取当前业务使用的设备公钥
 - `sign_timestamp <unix_time>`
   - 对时间戳字符串的 `sha256` 做芯片内签名
+- `sign_challenge <challenge>`
+  - 对远程节点挑战字符串的 `sha256` 做芯片内签名
 - `tng_device_pubkey`
   - 读取 TNG 设备公钥
 - `tng_device_cert`
@@ -41,6 +43,19 @@
 - `read_tng_device_cert_via_helper()`
 - `read_tng_signer_cert_via_helper()`
 - `read_tng_root_cert_via_helper()`
+
+## 本地无芯片模拟
+
+浏览器 UI 的“设备签名芯片”卡片会先完整检测真实芯片。检测期间不显示模拟入口；只有 helper 明确返回缺失状态并再经过短暂确认时间后，才会显示“模拟芯片”按钮。检测到真实芯片时，按钮不会出现，后端也会拒绝覆盖真实芯片的模拟启用请求。
+
+启用后，模拟器遵循与 `signature.py` 相同的 action 和单行 JSON 输出协议：
+
+- 生成并持久化一套本地 P-256 测试密钥
+- 返回与真实 helper 相同的 64 字节 `X || Y` 公钥
+- 返回与真实 helper 相同的 64 字节 `R || S` 时间戳/挑战签名
+- 为 TNG 证书读取 action 生成可解析的本地测试证书链
+
+模拟状态保存在仓库运行目录的 `data/nni/signature-simulator.json`，文件权限为 `0600`；停止模拟时会删除这套测试密钥。模拟身份不具备安全芯片的密钥保护或厂商可信身份，远程 NNI 节点仍可通过公钥白名单拒绝它，不能用于替代正式设备身份。
 
 ## 当前机器上的验证结论
 

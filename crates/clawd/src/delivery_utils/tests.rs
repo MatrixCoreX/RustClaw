@@ -838,8 +838,6 @@ fn rule1_explicit_file_path_hits_system_root() {
         "把 /alpha/report.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -861,8 +859,6 @@ fn rule1_explicit_file_path_hits_project_root() {
         "把 /alpha/report.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -884,8 +880,6 @@ fn rule1_explicit_file_path_case_mismatch_still_hits_project_root() {
         "把 /alpha/report.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -905,8 +899,6 @@ fn rule1_explicit_file_path_miss_both_roots() {
         "把 /not_exists/report.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -928,8 +920,6 @@ fn rule2_directory_missing_returns_immediately_without_rule3_fallback() {
         "去 missing_dir 找 summary.md",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -951,8 +941,6 @@ fn rule2_directory_and_file_found() {
         "去 docs/reports 找 summary.md",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -974,8 +962,6 @@ fn rule2_directory_and_bare_stem_unique_extension_found() {
         "去 docs/reports 找 abcd",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -997,8 +983,6 @@ fn rule2_directory_and_bare_stem_multiple_extensions_requires_confirmation() {
         "去 docs/reports 找 abcd",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1028,8 +1012,6 @@ fn rule2_directory_found_but_file_missing() {
         "去 docs/reports 找 summary.md",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1051,8 +1033,6 @@ fn rule2_directory_fuzzy_name_requires_confirmation_instead_of_auto_delivery() {
         "去 docs/reports 找 最终版.txt",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1074,8 +1054,6 @@ fn rule3_filename_only_scan_hits_under_project_root() {
         "把 README.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1093,13 +1071,8 @@ fn rule3_filename_only_bare_stem_unique_extension_resolves_directly() {
     let target = project_root.path().join("docs/ABCD.txt");
     write_text_file(&target);
 
-    let resolved = resolve_file_delivery_target(
-        "把 abcd 发给我",
-        system_root.path(),
-        project_root.path(),
-        3,
-        200,
-    );
+    let resolved =
+        resolve_file_delivery_target("把 abcd 发给我", system_root.path(), project_root.path());
 
     assert_eq!(
         resolved,
@@ -1116,13 +1089,8 @@ fn rule3_filename_only_bare_stem_multiple_extensions_requires_confirmation() {
     write_text_file(&project_root.path().join("docs/abcd.txt"));
     write_text_file(&project_root.path().join("docs/abcd.cpp"));
 
-    let resolved = resolve_file_delivery_target(
-        "把 abcd 发给我",
-        system_root.path(),
-        project_root.path(),
-        3,
-        200,
-    );
+    let resolved =
+        resolve_file_delivery_target("把 abcd 发给我", system_root.path(), project_root.path());
 
     assert_eq!(
         resolved,
@@ -1150,13 +1118,8 @@ fn rule3_filename_only_bare_stem_prefers_unique_project_root_direct_child() {
     write_text_file(&root_target);
     write_text_file(&nested_target);
 
-    let resolved = resolve_file_delivery_target(
-        "把 readme 发给我",
-        system_root.path(),
-        project_root.path(),
-        3,
-        200,
-    );
+    let resolved =
+        resolve_file_delivery_target("把 readme 发给我", system_root.path(), project_root.path());
 
     assert_eq!(
         resolved,
@@ -1179,8 +1142,6 @@ fn rule3_filename_only_exact_name_prefers_unique_project_root_direct_child() {
         "把 README.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1202,8 +1163,6 @@ fn rule3_filename_only_scan_falls_back_to_system_root() {
         "把 demo.conf 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1225,8 +1184,6 @@ fn rule3_filename_only_fuzzy_name_requires_confirmation_instead_of_auto_delivery
         "把 最终版.txt 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1250,13 +1207,8 @@ fn rule3_filename_only_fuzzy_name_returns_ranked_top3_candidates() {
     write_text_file(&c3);
     write_text_file(&c4);
 
-    let resolved = resolve_file_delivery_target(
-        "把 abcd 发给我",
-        system_root.path(),
-        project_root.path(),
-        3,
-        200,
-    );
+    let resolved =
+        resolve_file_delivery_target("把 abcd 发给我", system_root.path(), project_root.path());
 
     assert_eq!(
         resolved,
@@ -1277,8 +1229,6 @@ fn rule3_filename_only_scan_not_found() {
         "把 unknown_file_22781.md 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1290,7 +1240,7 @@ fn rule3_filename_only_scan_not_found() {
 }
 
 #[test]
-fn rule3_precise_missing_filename_prefers_not_found_over_scan_too_many() {
+fn rule3_precise_missing_filename_reports_not_found_after_complete_scan() {
     let system_root = TempDirGuard::new("rule3_system_precise_missing_many");
     let project_root = TempDirGuard::new("rule3_project_precise_missing_many");
     for idx in 0..5 {
@@ -1301,8 +1251,6 @@ fn rule3_precise_missing_filename_prefers_not_found_over_scan_too_many() {
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
         system_root.path(),
         project_root.path(),
-        1,
-        2,
     );
 
     assert_eq!(
@@ -1324,8 +1272,6 @@ fn rule3_filename_only_long_missing_name_does_not_match_short_substrings() {
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1346,8 +1292,6 @@ fn rule3_filename_only_missing_name_does_not_fallback_to_real_system_root_scan()
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
         std::path::Path::new("/"),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1359,31 +1303,26 @@ fn rule3_filename_only_missing_name_does_not_fallback_to_real_system_root_scan()
 }
 
 #[test]
-fn rule3_filename_only_scan_rejects_when_scope_too_large() {
+fn rule3_filename_only_default_scan_is_not_limited_by_old_entry_budget() {
     let system_root = TempDirGuard::new("rule3_system_too_many");
     let project_root = TempDirGuard::new("rule3_project_too_many");
     for idx in 0..6 {
         write_text_file(&project_root.path().join(format!("f{idx}.txt")));
     }
 
-    let resolved = resolve_file_delivery_target(
-        "把 target 发给我",
-        system_root.path(),
-        project_root.path(),
-        3,
-        3,
-    );
+    let resolved =
+        resolve_file_delivery_target("把 target 发给我", system_root.path(), project_root.path());
 
     assert_eq!(
         resolved,
         Some(FileDeliveryTargetResolution::UserMessage(
-            DeliveryMessageKind::Rule3ScanTooMany
+            DeliveryMessageKind::Rule3FileNotFound
         ))
     );
 }
 
 #[test]
-fn rule3_filename_only_scan_respects_depth_limit() {
+fn rule3_filename_only_default_scan_crosses_old_depth_limit() {
     let system_root = TempDirGuard::new("rule3_system_depth");
     let project_root = TempDirGuard::new("rule3_project_depth");
     let deep_target = project_root.path().join("a/b/c/deep.txt");
@@ -1393,14 +1332,12 @@ fn rule3_filename_only_scan_respects_depth_limit() {
         "把 deep.txt 发给我",
         system_root.path(),
         project_root.path(),
-        1,
-        200,
     );
 
     assert_eq!(
         resolved,
-        Some(FileDeliveryTargetResolution::UserMessage(
-            DeliveryMessageKind::Rule3FileNotFound
+        Some(FileDeliveryTargetResolution::Resolved(
+            deep_target.canonicalize().expect("canonical deep target")
         ))
     );
 }
@@ -1420,8 +1357,6 @@ fn directory_rule_explicit_path_hits_system_root() {
         },
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1444,8 +1379,6 @@ fn directory_rule_explicit_path_hits_project_root() {
         },
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1468,8 +1401,6 @@ fn directory_rule_explicit_path_case_mismatch_hits_project_root() {
         },
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1489,8 +1420,6 @@ fn directory_rule_explicit_path_miss_both_roots() {
         },
         system_root.path(),
         project_root.path(),
-        3,
-        200,
     );
 
     assert_eq!(
@@ -1512,8 +1441,6 @@ fn directory_rule_name_hint_unique_hit() {
         },
         system_root.path(),
         project_root.path(),
-        4,
-        300,
     );
 
     assert_eq!(
@@ -1537,8 +1464,6 @@ fn directory_rule_name_hint_multiple_candidates_keep_top3() {
         },
         system_root.path(),
         project_root.path(),
-        4,
-        500,
     );
 
     match resolved {
@@ -1561,8 +1486,6 @@ fn directory_rule_name_hint_not_found() {
         },
         system_root.path(),
         project_root.path(),
-        4,
-        300,
     );
 
     assert_eq!(
@@ -1578,7 +1501,7 @@ fn directory_execution_resolution_finds_unique_directory_hint() {
     fs::create_dir_all(&archive_dir).expect("create archive dir");
     write_text_file(&archive_dir.join("one.txt"));
 
-    let resolved = resolve_directory_locator_for_execution("archive", project_root.path(), 4, 300);
+    let resolved = resolve_directory_locator_for_execution("archive", project_root.path());
 
     assert_eq!(
         resolved,
@@ -1596,7 +1519,7 @@ fn directory_execution_resolution_returns_top3_for_ambiguous_hint() {
     fs::create_dir_all(project_root.path().join("c/archive")).expect("create c/archive");
     fs::create_dir_all(project_root.path().join("d/archive")).expect("create d/archive");
 
-    let resolved = resolve_directory_locator_for_execution("archive", project_root.path(), 4, 500);
+    let resolved = resolve_directory_locator_for_execution("archive", project_root.path());
 
     match resolved {
         Some(DirectoryLocatorExecutionResolution::MultipleCandidates(candidates)) => {
@@ -1852,7 +1775,7 @@ fn chinese_directory_name_is_matchable_in_directory_scan() {
     let root = TempDirGuard::new("cn_dir_scan");
     fs::create_dir_all(root.path().join("项目资料/日志")).expect("create cn dirs");
 
-    let out = collect_directory_candidates(root.path(), "项目资料", 3, 100, true);
+    let out = collect_directory_candidates(root.path(), "项目资料", true);
     assert_eq!(out.len(), 1);
     assert!(out[0].ends_with("项目资料"));
 }
@@ -1895,8 +1818,7 @@ fn chinese_filename_matches_project_root_scan() {
     let target = root.path().join("项目资料/日报.md");
     write_text_file(&target);
 
-    let out =
-        super::file_delivery::scan_filename_matches_with_limit(root.path(), "日报.md", 3, 100);
+    let out = super::file_delivery::scan_filename_matches(root.path(), "日报.md");
     assert_eq!(
         out,
         FilenameScanResult::Found(target.canonicalize().expect("canonical target"))
@@ -1909,8 +1831,7 @@ fn chinese_filename_supports_normalized_contains_match_project_scan() {
     let target = root.path().join("项目资料/日报_最终版.txt");
     write_text_file(&target);
 
-    let out =
-        super::file_delivery::scan_filename_matches_with_limit(root.path(), "最终版.txt", 3, 100);
+    let out = super::file_delivery::scan_filename_matches(root.path(), "最终版.txt");
     assert_eq!(
         out,
         FilenameScanResult::Candidates(vec![target.canonicalize().expect("canonical target")])

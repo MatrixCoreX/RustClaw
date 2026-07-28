@@ -260,7 +260,6 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "name_pattern",
                     "basename_pattern",
                     "filename_pattern",
-                    "glob",
                     "filter",
                     "file_filter",
                     "include",
@@ -295,10 +294,11 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
+            let has_path_glob = has_any_non_empty_arg(&obj, &["glob", "globs"]);
             if !has_ext {
                 obj.remove("ext");
             }
-            if !has_pattern && !has_ext {
+            if !has_pattern && !has_ext && !has_path_glob {
                 if let Some(root) = obj.remove("root") {
                     obj.insert("path".to_string(), root);
                 }
@@ -1098,10 +1098,12 @@ fn extension_from_globish_filter(text: &str) -> Option<String> {
     {
         return None;
     }
-    cleaned
-        .contains('*')
-        .then(|| ext.to_string())
-        .or_else(|| cleaned.strip_prefix('.').map(ToString::to_string))
+    cleaned.contains('*').then(|| ext.to_string()).or_else(|| {
+        cleaned
+            .strip_prefix('.')
+            .filter(|value| !value.contains('.'))
+            .map(ToString::to_string)
+    })
 }
 
 fn extension_selector_value(value: &Value) -> Option<Value> {

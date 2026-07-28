@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useUiDialog } from "../components/UiDialogProvider";
 import {
   nniDeviceMessage,
   nniJoinErrorMessage,
@@ -34,6 +35,7 @@ export interface UseNniRuntimeParams {
 }
 
 export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
+  const { confirm: showConfirm } = useUiDialog();
   const [nniStatus, setNniStatus] = useState<NniDeviceStatusResponse | null>(null);
   const [nniStatusLoading, setNniStatusLoading] = useState(false);
   const [nniStatusError, setNniStatusError] = useState<string | null>(null);
@@ -150,6 +152,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
               ? {
                   ...prev,
                   signature_chip_present: false,
+                  simulated: false,
+                  device_kind: "unavailable",
                   status: "signature_chip_missing",
                   message_key: "nni.device_status.signature_chip_missing",
                   next_step_key: "nni.device_status.signature_chip_missing.next_step",
@@ -164,17 +168,41 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
               ),
           );
         }
+        const actionMessage = nniDeviceMessage(actionData, lang);
+        if (actionMessage) throw new Error(actionMessage);
         throw new Error(body.error || `NNI 操作失败 (${res.status})`);
       }
       setNniActionResult(body.data);
       setNniActionMessage(nniDeviceMessage(body.data, lang, t("NNI 操作已完成。", "NNI action completed.")));
+      if (body.data.action === "simulation_disable") {
+        setNniStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                signature_chip_present: false,
+                simulated: false,
+                device_kind: "unavailable",
+                simulation_available: true,
+                status: "signature_chip_missing",
+                message_key: "nni.device_status.signature_chip_missing",
+                next_step_key: "nni.device_status.signature_chip_missing.next_step",
+                pubkey: null,
+                pubkey_preview: null,
+                pubkey_fingerprint: null,
+                meta: null,
+              }
+            : prev,
+        );
+      }
       if (body.data.payload?.pubkey) {
         setNniStatus((prev) =>
           prev
             ? {
                 ...prev,
                 signature_chip_present: true,
-                status: "ready",
+                simulated: body.data.simulated ?? prev.simulated,
+                device_kind: body.data.device_kind ?? prev.device_kind,
+                status: body.data.simulated ? "simulated" : "ready",
                 pubkey: body.data.payload?.pubkey,
                 pubkey_preview: shortenHex(body.data.payload?.pubkey, 12, 12),
               }
@@ -190,6 +218,12 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } finally {
       setNniActionLoading(null);
     }
+  };
+
+  const setNniDeviceSimulation = async (enabled: boolean) => {
+    const result = await runNniDeviceAction(enabled ? "simulation_enable" : "simulation_disable");
+    if (!result) return null;
+    return fetchNniDeviceStatus(false);
   };
 
   const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
@@ -272,12 +306,15 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const clearNniHeartbeatRecords = async () => {
-    const confirmed = window.confirm(
-      t(
+    const confirmed = await showConfirm({
+      title: t("清理 NNI 请求记录", "Clear NNI request records"),
+      message: t(
         "确定清理本机 NNI 请求记录吗？这只会清理本机保存的加入和心跳历史，不会修改远程 NNI 服务端记录。",
         "Clear local NNI request records? This only clears Join and Heartbeat history saved on this device and will not change remote NNI server records.",
       ),
-    );
+      confirmLabel: t("清理", "Clear"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setNniHeartbeatRecordsClearing(true);
     setNniHeartbeatRecordsError(null);
@@ -363,12 +400,15 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const clearNniHeartbeatErrors = async () => {
-    const confirmed = window.confirm(
-      t(
+    const confirmed = await showConfirm({
+      title: t("清理心跳错误", "Clear heartbeat errors"),
+      message: t(
         "确定清理本机心跳错误记录吗？这只会清理本机页面里的错误历史，不会修改远程 NNI 服务端请求记录。",
         "Clear local heartbeat error history? This only clears the local error history shown here and will not change remote NNI server request records.",
       ),
-    );
+      confirmLabel: t("清理", "Clear"),
+      tone: "danger",
+    });
     if (!confirmed) return;
     setNniHeartbeatErrorsClearing(true);
     setNniHeartbeatErrorsError(null);
@@ -550,5 +590,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
     runNniDeviceAction,
+    setNniDeviceSimulation,
   };
 }

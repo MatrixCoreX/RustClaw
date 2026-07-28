@@ -63,7 +63,6 @@ fn test_state(workspace_root: PathBuf) -> AppState {
         skill_rt: crate::SkillRuntime {
             workspace_root: workspace_root.clone(),
             default_locator_search_dir: workspace_root,
-            locator_scan_max_files: 200,
             tools_policy: Arc::new(
                 ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
             ),
