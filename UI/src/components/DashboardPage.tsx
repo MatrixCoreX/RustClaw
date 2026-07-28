@@ -35,6 +35,7 @@ import type {
   HostDependenciesSnapshot,
   NginxUiStatus,
   PiAppStatusResponse,
+  ServiceActionNotice,
   WebdExposureStatus,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -92,6 +93,8 @@ export interface DashboardPageProps {
   piAppRestarting: boolean;
   piAppRestartMessage: string | null;
   dashboardCommunicationRows: DashboardCommunicationRow[];
+  serviceActionLoading: Record<string, boolean>;
+  serviceActionMessage: ServiceActionNotice | null;
   queuePressureHigh: boolean;
   runningTooOld: boolean;
   isOnline: boolean;
@@ -106,6 +109,10 @@ export interface DashboardPageProps {
   onCancelWorkspaceUpdate: () => unknown | Promise<unknown>;
   onRestartSystem: () => unknown | Promise<unknown>;
   onRestartPiApp: () => unknown | Promise<unknown>;
+  onControlService: (
+    serviceName: DashboardCommunicationRow["serviceName"],
+    action: "stop",
+  ) => unknown | Promise<unknown>;
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
   onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
@@ -154,6 +161,8 @@ export function DashboardPage({
   piAppRestarting,
   piAppRestartMessage,
   dashboardCommunicationRows,
+  serviceActionLoading,
+  serviceActionMessage,
   queuePressureHigh,
   runningTooOld,
   isOnline,
@@ -168,6 +177,7 @@ export function DashboardPage({
   onCancelWorkspaceUpdate,
   onRestartSystem,
   onRestartPiApp,
+  onControlService,
   onFetchHostSystemSummary,
   onFetchHostDependencies,
   onInstallHostDependency,
@@ -897,6 +907,18 @@ export function DashboardPage({
             </button>
           </div>
 
+          {serviceActionMessage ? (
+            <p
+              className={`mt-4 rounded-xl border px-3 py-3 text-sm ${
+                serviceActionMessage.tone === "error"
+                  ? "border-red-500/30 bg-red-500/10 text-red-100"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+              }`}
+            >
+              {serviceActionMessage.text}
+            </p>
+          ) : null}
+
           <div className="mt-4 grid gap-3 xl:grid-cols-2">
             {dashboardCommunicationRows.map((row) => (
               <div key={row.key} className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -943,6 +965,34 @@ export function DashboardPage({
                     <p className="mt-2 text-sm font-semibold text-white/92">{row.processCount ?? "--"}</p>
                     <p className="mt-1 text-xs text-white/50">{row.statusLabel}</p>
                   </div>
+                </div>
+
+                <div className="mt-4 flex justify-end border-t border-white/8 pt-3">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const confirmed = await showConfirm({
+                        title: t(`关闭${row.label}`, `Stop ${row.label}`),
+                        message: t(
+                          "关闭后，这个通信端会停止接收和发送消息。之后可以在“通信接入”页面重新启动。确定关闭吗？",
+                          "This communication service will stop receiving and sending messages. You can start it again later from Communication Setup. Stop it now?",
+                        ),
+                        confirmLabel: t("确认关闭", "Stop"),
+                        tone: "danger",
+                      });
+                      if (confirmed) void onControlService(row.serviceName, "stop");
+                    }}
+                    disabled={Boolean(serviceActionLoading[row.serviceName])}
+                    className="theme-secondary-btn px-3 py-2 text-sm"
+                    aria-label={t(`关闭${row.label}`, `Stop ${row.label}`)}
+                  >
+                    {serviceActionLoading[row.serviceName] ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <PowerOff className="h-4 w-4" />
+                    )}
+                    {serviceActionLoading[row.serviceName] ? t("关闭中", "Stopping") : t("关闭", "Stop")}
+                  </button>
                 </div>
               </div>
             ))}
