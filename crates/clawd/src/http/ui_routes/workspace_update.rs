@@ -1541,8 +1541,24 @@ async fn detect_workspace_update_conflict_paths(
         local_untracked.extend(untracked);
     }
 
+    // A generated file may already contain the exact incoming upstream content
+    // while still appearing dirty against the current local HEAD. Only retain
+    // tracked paths whose working-tree content actually differs from upstream.
+    let tracked_dirty = tracked_dirty.into_iter().collect::<Vec<_>>();
+    let mut tracked_different_from_upstream = BTreeSet::new();
+    for batch in tracked_dirty.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
+        tracked_different_from_upstream.extend(
+            git_workspace_name_list_raw(
+                &["diff", "--name-only", "-z", "@{upstream}", "--"],
+                batch,
+                workspace_root,
+            )
+            .await?,
+        );
+    }
+
     Ok(WorkspaceUpdateConflictPaths {
-        tracked: tracked_dirty.into_iter().collect(),
+        tracked: tracked_different_from_upstream.into_iter().collect(),
         untracked: local_untracked.into_iter().collect(),
     })
 }
