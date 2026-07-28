@@ -15,6 +15,72 @@ resolve_script_dir() {
   dirname "$(resolve_path_python "$source_path")"
 }
 
+default_macos_deployment_target() {
+  local product_version="${1:-}"
+  local major=""
+  local remainder=""
+  local minor=""
+
+  product_version="${product_version%%-*}"
+  major="${product_version%%.*}"
+  remainder="${product_version#*.}"
+  if [[ "$remainder" != "$product_version" ]]; then
+    minor="${remainder%%.*}"
+  fi
+  case "$major" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
+  if (( major >= 11 )); then
+    printf '%s.0\n' "$major"
+    return 0
+  fi
+  if [[ "$major" == "10" ]]; then
+    case "$minor" in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    printf '10.%s\n' "$minor"
+    return 0
+  fi
+  return 1
+}
+
+configure_macos_deployment_target() {
+  local host_os="${1:-}"
+  local host_version="${2:-}"
+  local target=""
+
+  if [[ -z "$host_os" ]]; then
+    host_os="$(detect_host_os 2>/dev/null || true)"
+  fi
+  [[ "$host_os" == "macos" ]] || return 0
+
+  # An explicit standard variable is authoritative. The Rust toolchain used by
+  # that build must provide standard libraries compatible with the requested OS.
+  if [[ -n "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${RUSTCLAW_MACOS_DEPLOYMENT_TARGET:-}" ]]; then
+    target="$RUSTCLAW_MACOS_DEPLOYMENT_TARGET"
+    if [[ ! "$target" =~ ^[0-9]+([.][0-9]+){1,2}$ ]]; then
+      echo "Invalid RUSTCLAW_MACOS_DEPLOYMENT_TARGET: $target" >&2
+      return 2
+    fi
+  else
+    if [[ -z "$host_version" ]]; then
+      host_version="$(sw_vers -productVersion 2>/dev/null || true)"
+    fi
+    target="$(default_macos_deployment_target "$host_version" 2>/dev/null || true)"
+    if [[ -z "$target" ]]; then
+      echo "Unable to determine a macOS deployment target from: $host_version" >&2
+      return 1
+    fi
+  fi
+
+  export MACOSX_DEPLOYMENT_TARGET="$target"
+}
+
 configure_platform_command_path() {
   local candidate
   if [[ "$(uname -s 2>/dev/null || true)" != "Darwin" ]]; then
@@ -34,6 +100,7 @@ configure_platform_command_path() {
     esac
   done
   export PATH
+  configure_macos_deployment_target
 }
 
 append_to_array() {
