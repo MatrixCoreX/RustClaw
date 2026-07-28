@@ -25,14 +25,26 @@ export interface UiPromptOptions extends UiConfirmOptions {
   placeholder?: string;
 }
 
+export interface UiChoiceOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface UiChoiceOptions extends Omit<UiConfirmOptions, "confirmLabel"> {
+  choices: readonly UiChoiceOption[];
+}
+
 interface UiDialogContextValue {
   confirm: (options: UiConfirmOptions) => Promise<boolean>;
   prompt: (options: UiPromptOptions) => Promise<string | null>;
+  choose: (options: UiChoiceOptions) => Promise<string | null>;
 }
 
 type DialogRequest =
   | ({ kind: "confirm"; resolve: (value: boolean) => void } & UiConfirmOptions)
-  | ({ kind: "prompt"; resolve: (value: string | null) => void } & UiPromptOptions);
+  | ({ kind: "prompt"; resolve: (value: string | null) => void } & UiPromptOptions)
+  | ({ kind: "choice"; resolve: (value: string | null) => void } & UiChoiceOptions);
 
 const UiDialogContext = createContext<UiDialogContextValue | null>(null);
 
@@ -79,6 +91,10 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
 
   const prompt = useCallback((options: UiPromptOptions) => new Promise<string | null>((resolve) => {
     enqueue({ ...options, kind: "prompt", resolve });
+  }), [enqueue]);
+
+  const choose = useCallback((options: UiChoiceOptions) => new Promise<string | null>((resolve) => {
+    enqueue({ ...options, kind: "choice", resolve });
   }), [enqueue]);
 
   useEffect(() => {
@@ -146,45 +162,73 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <form onSubmit={submitDialog}>
-          {active.kind === "prompt" ? (
-            <div className="px-5 pt-4">
-              <label className="block text-sm font-medium text-white/80" htmlFor="ui-dialog-input">
-                {active.inputLabel ?? browserCopy("输入内容", "Enter a value")}
-              </label>
-              <input
-                ref={inputRef}
-                id="ui-dialog-input"
-                value={promptValue}
-                onChange={(event) => setPromptValue(event.target.value)}
-                placeholder={active.placeholder}
-                className="theme-input mt-2 w-full"
-              />
+        {active.kind === "choice" ? (
+          <div>
+            <div className="grid gap-3 px-5 pt-4">
+              {active.choices.map((choice, index) => (
+                <button
+                  key={choice.value}
+                  ref={index === 0 ? primaryButtonRef : undefined}
+                  type="button"
+                  onClick={() => finish(choice.value)}
+                  className="theme-secondary-btn min-h-16 w-full items-start px-4 py-3 text-left"
+                >
+                  <span className="block text-sm font-semibold text-white">{choice.label}</span>
+                  {choice.description ? (
+                    <span className="mt-1 block text-xs font-normal leading-5 text-white/60">
+                      {choice.description}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
             </div>
-          ) : null}
-
-          <div className="flex flex-wrap justify-end gap-2 px-5 py-4">
-            <button type="button" onClick={() => finish(null)} className="theme-secondary-btn px-4 py-2 text-sm">
-              {active.cancelLabel ?? browserCopy("取消", "Cancel")}
-            </button>
-            <button
-              ref={primaryButtonRef}
-              type="submit"
-              className={active.tone === "danger"
-                ? "inline-flex min-h-10 items-center justify-center rounded-md border border-red-400/35 bg-red-500/15 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/25"
-                : "theme-accent-btn px-4 py-2 text-sm"}
-            >
-              {active.confirmLabel ?? browserCopy("确认", "Confirm")}
-            </button>
+            <div className="flex justify-end px-5 py-4">
+              <button type="button" onClick={() => finish(null)} className="theme-secondary-btn px-4 py-2 text-sm">
+                {active.cancelLabel ?? browserCopy("取消", "Cancel")}
+              </button>
+            </div>
           </div>
-        </form>
+        ) : (
+          <form onSubmit={submitDialog}>
+            {active.kind === "prompt" ? (
+              <div className="px-5 pt-4">
+                <label className="block text-sm font-medium text-white/80" htmlFor="ui-dialog-input">
+                  {active.inputLabel ?? browserCopy("输入内容", "Enter a value")}
+                </label>
+                <input
+                  ref={inputRef}
+                  id="ui-dialog-input"
+                  value={promptValue}
+                  onChange={(event) => setPromptValue(event.target.value)}
+                  placeholder={active.placeholder}
+                  className="theme-input mt-2 w-full"
+                />
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap justify-end gap-2 px-5 py-4">
+              <button type="button" onClick={() => finish(null)} className="theme-secondary-btn px-4 py-2 text-sm">
+                {active.cancelLabel ?? browserCopy("取消", "Cancel")}
+              </button>
+              <button
+                ref={primaryButtonRef}
+                type="submit"
+                className={active.tone === "danger"
+                  ? "inline-flex min-h-10 items-center justify-center rounded-md border border-red-400/35 bg-red-500/15 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/25"
+                  : "theme-accent-btn px-4 py-2 text-sm"}
+              >
+                {active.confirmLabel ?? browserCopy("确认", "Confirm")}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>,
     document.body,
   ) : null;
 
   return (
-    <UiDialogContext.Provider value={{ confirm, prompt }}>
+    <UiDialogContext.Provider value={{ confirm, prompt, choose }}>
       {children}
       {dialog}
     </UiDialogContext.Provider>

@@ -259,6 +259,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(start_workspace_update_ui_only),
         )
         .route(
+            "/admin/workspace-update/preserve-nginx",
+            post(start_workspace_update_preserve_nginx),
+        )
+        .route(
             "/admin/workspace-update/build-clawd",
             post(start_workspace_update_clawd_only),
         )

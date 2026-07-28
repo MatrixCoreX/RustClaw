@@ -232,6 +232,7 @@ DO_CLEAN=0
 REQUESTED_TARGET="host"
 EXTRA_TARGETS=()
 TOOLCHAIN_MODE="${RUSTCLAW_TOOLCHAIN_MODE:-ensure}"
+PRESERVE_NGINX="${RUSTCLAW_PRESERVE_NGINX:-0}"
 
 # Release-only build; keep compatibility with legacy `release` arguments.
 # Use SKIP_UI=1 or `no-ui` to skip the UI build.
@@ -248,6 +249,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	no-ui)
 		SKIP_UI=1
+		shift
+		;;
+	preserve-nginx)
+		PRESERVE_NGINX=1
 		shift
 		;;
 	--target)
@@ -267,15 +272,16 @@ while [[ $# -gt 0 ]]; do
 		shift
 		;;
 	-h|--help)
-		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
+		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [preserve-nginx] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
 		echo "  host build: output to target/release"
 		echo "  cross build: output to target/<triple>/release"
+		echo "  preserve-nginx: build UI/dist but do not install, reload, copy, or modify nginx"
 		echo "  --check-toolchains: inspect available compiler/tool updates without upgrading installed tools"
 		echo "  --update-toolchains: update installed Rust, Clang, protoc, Node.js, and npm before building"
 		exit 0
 		;;
 	*)
-		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
+		echo "Usage: ./build-all.sh [release] [clean] [no-ui] [preserve-nginx] [--target host|<triple>] [--extra-target <triple>] [--check-toolchains|--update-toolchains]"
 		echo "  host build: output to target/release"
 		echo "  cross build: output to target/<triple>/release"
 		exit 1
@@ -288,6 +294,14 @@ case "$TOOLCHAIN_MODE" in
 		;;
 	*)
 		echo "Unsupported RUSTCLAW_TOOLCHAIN_MODE: $TOOLCHAIN_MODE (expected ensure, check, or update)."
+		exit 1
+		;;
+esac
+
+case "$PRESERVE_NGINX" in
+	0|1) ;;
+	*)
+		echo "RUSTCLAW_PRESERVE_NGINX must be 0 or 1."
 		exit 1
 		;;
 esac
@@ -488,7 +502,9 @@ PY
 done
 
 if [[ "$UI_BUILT" == "1" ]]; then
-	if [[ "$PRIMARY_TARGET" == "$HOST_TARGET" ]]; then
+	if [[ "$PRESERVE_NGINX" == "1" ]]; then
+		echo "Preserving nginx as requested; UI/dist was built but nginx was not modified."
+	elif [[ "$PRIMARY_TARGET" == "$HOST_TARGET" ]]; then
 		echo "Checking whether an existing RustClaw nginx site needs the latest UI..."
 		bash "$SCRIPT_DIR/build-ui-nginx.sh" --copy-if-configured
 	else

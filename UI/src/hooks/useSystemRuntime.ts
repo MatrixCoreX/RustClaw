@@ -59,7 +59,7 @@ export function useSystemRuntime({
   fetchSkillsConfig,
   fetchSkills,
 }: UseSystemRuntimeParams) {
-  const { confirm: showConfirm } = useUiDialog();
+  const { choose: showChoice, confirm: showConfirm } = useUiDialog();
   const workspaceUpdateSilentFailuresRef = useRef(0);
   const workspaceUpdateWasActiveRef = useRef(false);
   const workspaceUpdateActiveModeRef = useRef<WorkspaceUpdateMode | string | undefined>(undefined);
@@ -296,7 +296,21 @@ export function useSystemRuntime({
           "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls and builds everything, deploys the latest UI when nginx is already configured, and restarts RustClaw. Start now?",
         ),
         endpoint: "/v1/admin/workspace-update",
-        started: t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."),
+        started: t(
+          "完整编译已开始；完成后会把最新 UI 部署到已配置的 nginx，并重启 RustClaw。",
+          "The full build has started. When it finishes, the latest UI will be deployed to the configured nginx site and RustClaw will restart.",
+        ),
+      },
+      full_preserve_nginx: {
+        confirm: t(
+          "将拉取并完整编译后端、UI、核心工具和本平台技能，但不会安装、升级、重载、复制或修改任何 nginx 内容。完成后会重启 RustClaw。确认继续吗？",
+          "Pull and fully build the backend, UI, core tools, and platform skills without installing, upgrading, reloading, copying, or modifying anything in nginx. RustClaw will restart when the build finishes. Continue?",
+        ),
+        endpoint: "/v1/admin/workspace-update/preserve-nginx",
+        started: t(
+          "完整编译已开始；nginx 将保持不变，完成后会重启 RustClaw。",
+          "The full build has started. nginx will remain unchanged, and RustClaw will restart when the build finishes.",
+        ),
       },
       ui_only: {
         confirm: t(
@@ -350,16 +364,50 @@ export function useSystemRuntime({
         started: t("正在安全切换到源码模式，下面会自动刷新进度。", "Safely switching to source mode. Progress will refresh automatically."),
       },
     };
-    const selectedMode = modeConfig[mode];
-    const confirmed = await showConfirm({
-      title: mode === "nginx_disable"
-        ? t("关闭 nginx Web 入口", "Disable nginx web entry")
-        : t("确认系统操作", "Confirm system operation"),
-      message: selectedMode.confirm,
-      confirmLabel: mode === "nginx_disable" ? t("确认关闭", "Disable") : t("继续", "Continue"),
-      tone: mode === "nginx_disable" ? "danger" : "default",
-    });
+    let selectedModeKey = mode;
+    let confirmed = false;
+    if (mode === "full") {
+      const choice = await showChoice({
+        title: t("选择完整编译方式", "Choose full build behavior"),
+        message: t(
+          "两种方式都会拉取最新代码并完整编译后端、UI、核心工具和本平台技能，完成后重启 RustClaw。请选择是否同时更新 nginx 中的 UI。",
+          "Both choices pull the latest code and fully build the backend, UI, core tools, and platform skills, then restart RustClaw. Choose whether to update the UI hosted by nginx as well.",
+        ),
+        choices: [
+          {
+            value: "deploy_nginx",
+            label: t("包含 nginx：完整部署最新 UI", "Include nginx: deploy the latest UI"),
+            description: t(
+              "如果本机已配置 RustClaw nginx 站点，将最新 UI 同步到该站点；未配置时不会新建 nginx。",
+              "Sync the latest UI to the existing RustClaw nginx site. This does not create nginx when no site is configured.",
+            ),
+          },
+          {
+            value: "preserve_nginx",
+            label: t("不动 nginx", "Leave nginx unchanged"),
+            description: t(
+              "仍然完整编译 UI，但不安装、升级、重载、复制或修改任何 nginx 内容。",
+              "Still build the complete UI without installing, upgrading, reloading, copying, or modifying anything in nginx.",
+            ),
+          },
+        ],
+      });
+      if (!choice) return;
+      selectedModeKey = choice === "preserve_nginx" ? "full_preserve_nginx" : "full";
+      confirmed = true;
+    } else {
+      const selectedMode = modeConfig[selectedModeKey];
+      confirmed = await showConfirm({
+        title: selectedModeKey === "nginx_disable"
+          ? t("关闭 nginx Web 入口", "Disable nginx web entry")
+          : t("确认系统操作", "Confirm system operation"),
+        message: selectedMode.confirm,
+        confirmLabel: selectedModeKey === "nginx_disable" ? t("确认关闭", "Disable") : t("继续", "Continue"),
+        tone: selectedModeKey === "nginx_disable" ? "danger" : "default",
+      });
+    }
     if (!confirmed) return;
+    const selectedMode = modeConfig[selectedModeKey];
     setWorkspaceUpdateLoading(true);
     setWorkspaceUpdateMessage(null);
     try {
