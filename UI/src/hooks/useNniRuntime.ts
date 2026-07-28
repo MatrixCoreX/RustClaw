@@ -163,8 +163,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           throw new Error(
             nniDeviceMessage(actionData, lang) ||
               t(
-                "未检测到 MatrixAI 设备签名芯片，无法完成本次操作。",
-                "No MatrixAI device signature chip was detected, so this action cannot be completed.",
+                "未检测到 MatrixAI 芯片，无法完成本次操作。",
+                "No MatrixAI chip was detected, so this action cannot be completed.",
               ),
           );
         }
@@ -495,8 +495,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniActionError(
         nniDeviceMessage(status, lang) ||
           t(
-            "未检测到设备签名芯片，暂时不能加入需要设备签名的 NNI。",
-            "No device signature chip was detected, so this device cannot join signed NNI yet.",
+            "未检测到芯片，暂时不能加入需要设备签名的 NNI。",
+            "No chip was detected, so this device cannot join signed NNI yet.",
           ),
       );
       await setNniJoinedPersisted(false);

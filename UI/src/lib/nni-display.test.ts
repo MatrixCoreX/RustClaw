@@ -118,7 +118,7 @@ test("renders NNI device messages from machine keys", () => {
       },
       "en",
     ),
-    "A device signature chip was detected, and NNI device signing is available.",
+    "A chip was detected, and NNI device signing is available.",
   );
   assert.equal(
     nniDeviceMessage(
@@ -159,7 +159,7 @@ test("renders NNI device messages from machine keys", () => {
       },
       "zh",
     ),
-    "正式参与网络原生智能需要带签名芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
+    "正式参与网络原生智能需要带芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
   );
   assert.equal(
     nniDeviceMessage(
