@@ -271,9 +271,53 @@ configure_cargo_build_jobs_for_small_host() {
   echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS on this <=16 GiB/ARM host to avoid concurrent high-memory Rust links."
 }
 
+cargo_uses_sccache_wrapper() {
+  if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+    [[ "$(basename "$RUSTC_WRAPPER")" == "sccache" ]]
+    return $?
+  fi
+
+  local cargo_home config
+  cargo_home="${CARGO_HOME:-${HOME:-}/.cargo}"
+  for config in \
+    "$cargo_home/config.toml" \
+    "$cargo_home/config" \
+    "${PWD}/.cargo/config.toml" \
+    "${PWD}/.cargo/config"; do
+    [[ -f "$config" ]] || continue
+    if awk '
+      /^[[:space:]]*\[build\][[:space:]]*$/ { in_build = 1; next }
+      /^[[:space:]]*\[/ { in_build = 0 }
+      in_build && /^[[:space:]]*rustc-wrapper[[:space:]]*=/ {
+        found = 1
+        value = $0
+        sub(/^[^=]*=[[:space:]]*/, "", value)
+        sub(/[[:space:]]*#.*/, "", value)
+        single_quote = sprintf("%c", 39)
+        gsub(single_quote, "", value)
+        gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", value)
+        count = split(value, parts, "/")
+        if (parts[count] == "sccache") exit 0
+        exit 1
+      }
+      END { if (!found) exit 1 }
+    ' "$config"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 configure_cargo_build_environment() {
   configure_platform_command_path
   configure_cargo_build_jobs_for_small_host
+  if cargo_uses_sccache_wrapper; then
+    if [[ "${CARGO_INCREMENTAL:-}" != "0" ]]; then
+      export CARGO_INCREMENTAL=0
+      echo "sccache Rust wrapper detected; disabling Cargo incremental compilation for compatibility."
+    fi
+    return 0
+  fi
   if [[ -z "${CARGO_INCREMENTAL:-}" && "${CI:-}" != "true" && "${CI:-}" != "1" ]]; then
     export CARGO_INCREMENTAL=1
     echo "CARGO_INCREMENTAL not set; enabling it for faster repeated local builds."
