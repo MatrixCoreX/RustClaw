@@ -20,7 +20,11 @@ cat >"$CARGO_HOME/config.toml" <<'EOF'
 rustc-wrapper = "/usr/bin/sccache"
 EOF
 configure_cargo_build_environment >/dev/null
-[[ "$CARGO_INCREMENTAL" == "0" ]]
+[[ -z "${CARGO_INCREMENTAL:-}" ]]
+[[ "$CARGO_PROFILE_DEV_INCREMENTAL" == "false" ]]
+[[ "$CARGO_PROFILE_TEST_INCREMENTAL" == "false" ]]
+[[ "$CARGO_PROFILE_RELEASE_INCREMENTAL" == "false" ]]
+[[ "$CARGO_PROFILE_BENCH_INCREMENTAL" == "false" ]]
 
 cat >"$CARGO_HOME/config.toml" <<'EOF'
 [build]
@@ -34,6 +38,6 @@ RUSTC_WRAPPER="/opt/homebrew/bin/sccache"
 CARGO_INCREMENTAL=1
 export RUSTC_WRAPPER CARGO_INCREMENTAL
 configure_cargo_build_environment >/dev/null
-[[ "$CARGO_INCREMENTAL" == "0" ]]
+[[ -z "${CARGO_INCREMENTAL:-}" ]]
 
 echo "SHELL_COMPAT_TESTS ok"
