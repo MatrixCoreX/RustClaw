@@ -1,6 +1,6 @@
 # Generated minimal NL suite for built-in RustClaw tools and skills.
 # Do not edit by hand; run scripts/nl_tests/build_builtin_tool_skill_subset.py.
-# source_sha256=cf9e9e6c4cb74ea8bd433b457d296cc06a8fb3b104271d06f4b8147eedb3525f
+# source_sha256=148d2dff552fecd708046de8a5eb41c4aa2274d255c55e2283161f78c582c8b9
 # selected_rows=36 required_categories=59 missing_categories=0
 # Selection: exact minimum-cardinality set cover over registry skills, safety/lifecycle classes, and zh/en.
 # Scope: core/fixed built-ins only; on-demand Skill Store packages are excluded.
@@ -29,7 +29,7 @@ basic_skill_100_coverage|b100_073_browser_open_example_en|covers:browser_web,ext
 basic_skill_100_coverage|b100_075_web_search_rust_async_en|covers:web_search_extract,external_network;requires_tool_call=true;external_network|Search the web for "Rust async tutorial" top_k=3 and return title/domain pairs without opening extra pages.|expect=Rust
 basic_skill_100_coverage|b100_078_schedule_missing_content_en|covers:schedule,clarify,dry_run;requires_tool_call=true;dry_run|Preview "remind me next Monday at 9" without creating a task. The configured timezone may be used, but the reminder content is missing; ask one concise clarification grounded in the schedule preview.
 basic_skill_100_coverage|b100_079_extension_assess_gap_zh|covers:extension_manager,skill:extension_manager,requires_tool_call=true,no_external_side_effect|先用 load_capability_groups 加载 extension_manager（groups=["extension_manager"]），再调用 extension.assess_gap 评估“增加一个只读 CSV 统计摘要技能”是否需要 external skill；只做缺口评估，不创建文件、不注册。
-basic_skill_100_coverage|b100_089_image_vision_local_zh|covers:image_vision,image,local_readonly;requires_tool_call=true;local_readonly|看一下本地图片 document/rust_icon_pixel.png，返回 image_path 和一句短描述；如果文件不存在，返回 exists=false。|expect=image_path
+basic_skill_100_coverage|b100_089_image_vision_local_zh|covers:image_vision,image,local_readonly;requires_tool_call=true;local_readonly|看一下本地图片 scripts/nl_tests/fixtures/photo_organize/fixture_2024_05.jpg，返回 image_path 和一句短描述；如果文件不存在，返回 exists=false。|expect=image_path
 basic_skill_100_coverage|b100_092_image_cancel_dry_run_en|covers:image_generate,image.cancel,dry_run,media,image,async_cancel,no_external_side_effect;requires_tool_call=true;dry_run|Dry run only: image.cancel task_id=basic100-image-task job_id=basic100-image-job; return task_id, job_id, status=cancelled, async_cancel_adapter_result.|expect=basic100-image-task
 basic_skill_100_coverage|b100_093_image_edit_dry_run_zh|covers:image_edit,image,dry_run,media,no_external_side_effect;requires_tool_call=true;dry_run|只做 dry_run：把 document/rust_icon_pixel.png 预览编辑成像素风图，输出 document/media_dry_run/basic100_edit.png，不真实调用 provider。|expect=basic100_edit.png
 basic_skill_100_coverage|b100_094_audio_transcribe_dry_run_en|covers:audio_transcribe,audio,dry_run,media,no_external_side_effect;requires_tool_call=true;dry_run|Dry-run only: preview transcribing document/media_dry_run/audio_check.mp3; return input_path, provider/model, and dry_run=true without calling a provider.|expect=audio_check.mp3
