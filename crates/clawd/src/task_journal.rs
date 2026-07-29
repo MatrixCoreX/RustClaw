@@ -48,7 +48,6 @@ pub(crate) use task_journal_evidence_coverage::{
     evidence_coverage_for_output_contract, failure_attribution_for_error_text,
     step_reads_text_content, TaskJournalEvidenceCoverage,
 };
-use task_journal_evidence_registry::*;
 pub(crate) use task_journal_evidence_registry::{
     evidence_extractor_registry_contains, evidence_extractor_registry_trace,
     observed_evidence_for_step_trace, observed_evidence_from_output,

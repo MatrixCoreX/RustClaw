@@ -23,14 +23,12 @@ impl EvidenceObservationSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EvidenceExtractorKind {
     StructuredJson,
-    TextLegacy,
 }
 
 impl EvidenceExtractorKind {
     fn as_str(self) -> &'static str {
         match self {
             EvidenceExtractorKind::StructuredJson => "structured_json",
-            EvidenceExtractorKind::TextLegacy => "text_legacy",
         }
     }
 }
@@ -87,17 +85,6 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         fallback: true,
     },
     EvidenceExtractorSpec {
-        observation_source: EvidenceObservationSource::StepOutput,
-        extractor_ref: "step_output.text_legacy_v1",
-        kind: EvidenceExtractorKind::TextLegacy,
-        format: "text",
-        schema_version: 1,
-        source_action_ref: None,
-        provided_evidence: &["legacy_text_excerpt"],
-        strict_shape_eligible: false,
-        fallback: true,
-    },
-    EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepError,
         extractor_ref: "step_error.structured_json_v1",
         kind: EvidenceExtractorKind::StructuredJson,
@@ -106,22 +93,11 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         source_action_ref: None,
         provided_evidence: &[
             "command_output",
-            "error_kind",
+            "error_code",
             "exit_code",
             "field_value",
             "generic_json_fields",
         ],
-        strict_shape_eligible: false,
-        fallback: true,
-    },
-    EvidenceExtractorSpec {
-        observation_source: EvidenceObservationSource::StepError,
-        extractor_ref: "step_error.text_legacy_v1",
-        kind: EvidenceExtractorKind::TextLegacy,
-        format: "text",
-        schema_version: 1,
-        source_action_ref: None,
-        provided_evidence: &["legacy_error_excerpt"],
         strict_shape_eligible: false,
         fallback: true,
     },
@@ -488,7 +464,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "rss_fetch.structured_json_v1",
         &["candidates", "content_excerpt", "field_value"],
     ),
-    step_json_extractor("x", "x.structured_json_v1", &["field_value"]),
+    step_json_extractor(
+        "x",
+        "x.structured_json_v1",
+        &["content_excerpt", "field_value"],
+    ),
     step_json_extractor(
         "image_generate",
         "image_generate.structured_json_v1",
@@ -757,53 +737,26 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "schedule.preview.structured_json_v1",
         &["datetime", "timezone", "title"],
     ),
-    step_text_extractor(
-        "http_basic",
-        "http_basic.text_legacy_v1",
-        &["command_output", "content_excerpt", "field_value", "status"],
+    step_json_extractor(
+        "run_cmd",
+        "run_cmd.structured_json_v1",
+        &["command_output", "field_value", "status"],
     ),
-    step_text_extractor(
+    step_json_extractor(
+        "read_file",
+        "read_file.structured_json_v1",
+        &["content_excerpt", "field_value", "path", "status"],
+    ),
+    step_json_extractor(
+        "list_dir",
+        "list_dir.structured_json_v1",
+        &["count", "entries", "path", "status"],
+    ),
+    step_json_extractor(
         "write_file",
-        "write_file.text_legacy_v1",
-        &["legacy_machine_tokens", "path"],
+        "write_file.structured_json_v1",
+        &["artifact_refs", "changed_files", "path", "status"],
     ),
-    step_text_extractor(
-        "x",
-        "x.text_legacy_v1",
-        &["field_value", "legacy_machine_tokens"],
-    ),
-    step_text_extractor(
-        "task_control.list",
-        "task_control.list.text_legacy_v1",
-        &["content_excerpt", "field_value", "status"],
-    ),
-    step_text_extractor(
-        "task_control.get",
-        "task_control.get.text_legacy_v1",
-        &["field_value", "status"],
-    ),
-    EvidenceExtractorSpec {
-        observation_source: EvidenceObservationSource::StepOutput,
-        extractor_ref: "run_cmd.text_legacy_v1",
-        kind: EvidenceExtractorKind::TextLegacy,
-        format: "text",
-        schema_version: 1,
-        source_action_ref: Some("run_cmd"),
-        provided_evidence: &["command_output", "legacy_machine_tokens"],
-        strict_shape_eligible: true,
-        fallback: false,
-    },
-    EvidenceExtractorSpec {
-        observation_source: EvidenceObservationSource::StepOutput,
-        extractor_ref: "list_dir.text_legacy_v1",
-        kind: EvidenceExtractorKind::TextLegacy,
-        format: "text",
-        schema_version: 1,
-        source_action_ref: Some("list_dir"),
-        provided_evidence: &["candidates", "count", "legacy_machine_tokens"],
-        strict_shape_eligible: true,
-        fallback: false,
-    },
 ];
 
 const MATRIX_ADMITTED_EXTERNAL_STRUCTURED_JSON_EXTRACTOR: EvidenceExtractorSpec =
@@ -829,24 +782,6 @@ const fn step_json_extractor(
         extractor_ref,
         kind: EvidenceExtractorKind::StructuredJson,
         format: "json",
-        schema_version: 1,
-        source_action_ref: Some(source_action_ref),
-        provided_evidence,
-        strict_shape_eligible: true,
-        fallback: false,
-    }
-}
-
-const fn step_text_extractor(
-    source_action_ref: &'static str,
-    extractor_ref: &'static str,
-    provided_evidence: &'static [&'static str],
-) -> EvidenceExtractorSpec {
-    EvidenceExtractorSpec {
-        observation_source: EvidenceObservationSource::StepOutput,
-        extractor_ref,
-        kind: EvidenceExtractorKind::TextLegacy,
-        format: "text",
         schema_version: 1,
         source_action_ref: Some(source_action_ref),
         provided_evidence,
@@ -889,24 +824,6 @@ pub(crate) fn evidence_extractor_registry_contains(
     explicit_evidence_extractor_spec(source_action_ref, extractor_kind).is_some()
 }
 
-pub(super) fn explicit_text_extractor_provides(extractor_ref: &str, field: &str) -> bool {
-    EVIDENCE_EXTRACTOR_REGISTRY
-        .iter()
-        .chain(EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY)
-        .chain(std::iter::once(
-            &MATRIX_ADMITTED_EXTERNAL_STRUCTURED_JSON_EXTRACTOR,
-        ))
-        .any(|spec| {
-            spec.extractor_ref == extractor_ref
-                && spec.kind == EvidenceExtractorKind::TextLegacy
-                && !spec.fallback
-                && spec
-                    .provided_evidence
-                    .iter()
-                    .any(|provided| *provided == field)
-        })
-}
-
 pub(super) fn explicit_evidence_extractor_spec(
     source_action_ref: &str,
     extractor_kind: &str,
@@ -927,14 +844,13 @@ pub(super) fn explicit_evidence_extractor_spec(
 pub(super) fn parse_evidence_extractor_kind(extractor_kind: &str) -> Option<EvidenceExtractorKind> {
     match normalize_machine_token(extractor_kind).as_str() {
         "structured_json" => Some(EvidenceExtractorKind::StructuredJson),
-        "text_legacy" => Some(EvidenceExtractorKind::TextLegacy),
         _ => None,
     }
 }
 
 pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Value> {
     let output = output.map(str::trim).filter(|value| !value.is_empty())?;
-    let (collector, extractor) = collect_observed_evidence_from_output(output);
+    let (collector, extractor) = collect_observed_evidence_from_output(output)?;
     observed_evidence_from_collector(collector, extractor)
 }
 
@@ -944,73 +860,35 @@ pub(super) fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) ->
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())?;
-    let fallback_extractor = match serde_json::from_str::<Value>(output) {
-        Ok(value) => {
-            let mut collector = ObservedEvidenceCollector::default();
-            collect_embedded_http_json_body_evidence(&mut collector, &value);
-            collect_priority_json_status_scalar_evidence(
-                &mut collector,
-                "json_output",
-                "",
-                &value,
-                0,
-            );
-            collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
-            if normalize_machine_token(&step.skill).replace('-', "_") == "schedule" {
-                if let Some(text) = value.get("text").and_then(Value::as_str) {
-                    collect_text_observed_evidence_fields(&mut collector, text);
-                }
-            }
-            let fallback_extractor = evidence_extractor_spec(
-                EvidenceObservationSource::StepOutput,
-                EvidenceExtractorKind::StructuredJson,
-            );
-            let extractor =
-                explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
-                    .unwrap_or(fallback_extractor);
-            return observed_evidence_from_collector(collector, extractor);
-        }
-        Err(_) => evidence_extractor_spec(
-            EvidenceObservationSource::StepOutput,
-            EvidenceExtractorKind::TextLegacy,
-        ),
-    };
+    let value = serde_json::from_str::<Value>(output).ok()?;
+    let mut collector = ObservedEvidenceCollector::default();
+    collect_embedded_http_json_body_evidence(&mut collector, &value);
+    collect_priority_json_status_scalar_evidence(&mut collector, "json_output", "", &value, 0);
+    collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
+    let fallback_extractor = evidence_extractor_spec(
+        EvidenceObservationSource::StepOutput,
+        EvidenceExtractorKind::StructuredJson,
+    );
     let extractor = explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
         .unwrap_or(fallback_extractor);
-    let mut collector = ObservedEvidenceCollector::default();
-    collect_text_observed_evidence_for_extractor(&mut collector, output, extractor);
     observed_evidence_from_collector(collector, extractor)
 }
 
 pub(super) fn collect_observed_evidence_from_output(
     output: &str,
-) -> (ObservedEvidenceCollector, EvidenceExtractorSpec) {
+) -> Option<(ObservedEvidenceCollector, EvidenceExtractorSpec)> {
     let mut collector = ObservedEvidenceCollector::default();
-    let extractor = match serde_json::from_str::<Value>(output) {
-        Ok(value) => {
-            collect_embedded_http_json_body_evidence(&mut collector, &value);
-            collect_priority_json_status_scalar_evidence(
-                &mut collector,
-                "json_output",
-                "",
-                &value,
-                0,
-            );
-            collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
-            evidence_extractor_spec(
-                EvidenceObservationSource::StepOutput,
-                EvidenceExtractorKind::StructuredJson,
-            )
-        }
-        Err(_) => {
-            collect_text_observed_evidence(&mut collector, output);
-            evidence_extractor_spec(
-                EvidenceObservationSource::StepOutput,
-                EvidenceExtractorKind::TextLegacy,
-            )
-        }
-    };
-    (collector, extractor)
+    let value = serde_json::from_str::<Value>(output).ok()?;
+    collect_embedded_http_json_body_evidence(&mut collector, &value);
+    collect_priority_json_status_scalar_evidence(&mut collector, "json_output", "", &value, 0);
+    collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
+    Some((
+        collector,
+        evidence_extractor_spec(
+            EvidenceObservationSource::StepOutput,
+            EvidenceExtractorKind::StructuredJson,
+        ),
+    ))
 }
 
 pub(super) fn observed_evidence_from_collector(
@@ -1246,8 +1124,8 @@ pub(super) fn observed_evidence_from_error(error: Option<&str>) -> Option<Value>
     let extractor = if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
         collector.push(json_observed_evidence_item(
             "structured_error",
-            "error_kind",
-            &json!(structured.error_kind),
+            "error_code",
+            &json!(structured.error_code),
         ));
         if !structured.skill.trim().is_empty() {
             collector.push(json_observed_evidence_item(
@@ -1266,11 +1144,7 @@ pub(super) fn observed_evidence_from_error(error: Option<&str>) -> Option<Value>
             EvidenceExtractorKind::StructuredJson,
         )
     } else {
-        collect_text_observed_evidence(&mut collector, error);
-        evidence_extractor_spec(
-            EvidenceObservationSource::StepError,
-            EvidenceExtractorKind::TextLegacy,
-        )
+        return None;
     };
     if collector.items.is_empty() {
         return None;
@@ -1292,7 +1166,7 @@ pub(super) fn collect_structured_error_not_found_evidence(
     collector: &mut ObservedEvidenceCollector,
     structured: &crate::skills::StructuredSkillError,
 ) {
-    if structured.error_kind != "not_found" {
+    if structured.error_code != "not_found" {
         return;
     }
     collector.push(json_observed_evidence_item(
@@ -1335,8 +1209,8 @@ pub(super) fn collect_structured_error_command_output_evidence(
     }
     collector.push(json_observed_evidence_item(
         "structured_error",
-        "error_kind",
-        &json!(structured.error_kind),
+        "error_code",
+        &json!(structured.error_code),
     ));
     if let Some(extra) = structured.extra.as_ref() {
         for field in ["exit_code", "exit_category", "stderr", "stdout", "command"] {

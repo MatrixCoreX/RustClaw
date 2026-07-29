@@ -555,7 +555,6 @@ fn category_failure(error_code: &str, retryable: bool, fields: Value) -> SkillFa
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_code,
         "error_code": error_code,
         "message_key": format!("skill.rss_fetch.{error_code}"),
         "retryable": retryable,

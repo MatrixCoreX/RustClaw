@@ -248,7 +248,7 @@ recovery = "artifact_range"
 terminal_behavior = "Unsafe output growth may stop the producer, but every preserved byte range and terminal reason is addressable."
 acceptance_case = "output_over_inline_limit"
 locations = [
-  "crates/clawd/src/main.rs::MAX_READ_FILE_BYTES",
+  "crates/clawd/src/skills/builtin_read_file.rs::MAX_READ_BYTES",
   "crates/skill-sdk/src/process.rs::MAX_CAPTURE_BYTES",
 ]
 boundary_tests = [

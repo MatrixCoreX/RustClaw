@@ -650,7 +650,7 @@ fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "crypto",
-                "error_kind": "unknown",
+                "error_code": "unknown",
                 "error_text": marker,
                 "extra": null
             })

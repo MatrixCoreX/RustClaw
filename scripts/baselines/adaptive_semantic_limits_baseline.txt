@@ -199,7 +199,6 @@ crates/clawd/src/http/ui_routes/slo_metrics.rs	take	.take(MAX_SCANNED_JOBS)
 crates/clawd/src/http/ui_routes/slo_metrics.rs	take	.take(limit)
 crates/clawd/src/main.rs	clamp	.clamp(MIN_TOKIO_WORKER_STACK_BYTES, MAX_TOKIO_WORKER_STACK_BYTES)
 crates/clawd/src/main.rs	hard_count	DEFAULT_TOKIO_WORKER_STACK_BYTES
-crates/clawd/src/main.rs	hard_count	MAX_READ_FILE_BYTES
 crates/clawd/src/main.rs	hard_count	MAX_TOKIO_WORKER_STACK_BYTES
 crates/clawd/src/main.rs	hard_count	MAX_WRITE_FILE_BYTES
 crates/clawd/src/main.rs	hard_count	MIN_TOKIO_WORKER_STACK_BYTES
@@ -246,7 +245,6 @@ crates/clawd/src/skill_output_artifact.rs	hard_count	DEFAULT_PREVIEW_BYTES
 crates/clawd/src/skill_output_artifact.rs	hard_count	MAX_PREVIEW_BYTES
 crates/clawd/src/skill_output_artifact.rs	hard_count	MIN_PREVIEW_BYTES
 crates/clawd/src/skill_output_artifact.rs	take	.take(96)
-crates/clawd/src/skills/builtin.rs	truncate	.truncate(max_entries)
 crates/clawd/src/skills/builtin_code_index.rs	hard_count	DEFAULT_MAX_FILES
 crates/clawd/src/skills/builtin_code_index.rs	hard_count	DEFAULT_MAX_RESULTS
 crates/clawd/src/skills/builtin_code_index.rs	hard_count	HARD_MAX_FILES
@@ -262,6 +260,10 @@ crates/clawd/src/skills/builtin_pty_session.rs	hard_count	MAX_PAGE_BYTES
 crates/clawd/src/skills/builtin_pty_session.rs	hard_count	MAX_SESSION_OUTPUT_BYTES
 crates/clawd/src/skills/builtin_pty_session.rs	hard_count	MIN_SESSION_OUTPUT_BYTES
 crates/clawd/src/skills/builtin_pty_session.rs	take	.take(max_bytes as u64)
+crates/clawd/src/skills/builtin_read_file.rs	clamp	.clamp(MIN_READ_BYTES, MAX_READ_BYTES)
+crates/clawd/src/skills/builtin_read_file.rs	hard_count	DEFAULT_READ_BYTES
+crates/clawd/src/skills/builtin_read_file.rs	hard_count	MAX_READ_BYTES
+crates/clawd/src/skills/builtin_read_file.rs	hard_count	MIN_READ_BYTES
 crates/clawd/src/skills/builtin_run_cmd.rs	clamp	.clamp(1, 86_400)
 crates/clawd/src/skills/builtin_run_cmd_artifact.rs	clamp	.clamp(MIN_HARD_LIMIT_BYTES, MAX_HARD_LIMIT_BYTES)
 crates/clawd/src/skills/builtin_run_cmd_artifact.rs	hard_count	HARD_LIMIT_MULTIPLIER
@@ -301,7 +303,6 @@ crates/clawd/src/task_journal_event_stream.rs	take	.take(64)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_ARRAY_SAMPLES)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_ARRAY_SAMPLES)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_ARRAY_VALUE_SAMPLES)
-crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_EVIDENCE_ITEMS)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_EVIDENCE_KEYS)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_EVIDENCE_KEYS)
 crates/clawd/src/task_journal_evidence_collect.rs	take	.take(MAX_OBSERVED_EVIDENCE_KEYS)
@@ -354,11 +355,12 @@ crates/skill-sdk/src/prebuilt.rs	hard_count	MAX_PREBUILT_DOWNLOAD_BYTES
 crates/skill-sdk/src/process.rs	hard_count	MAX_CAPTURE_BYTES
 crates/skill-sdk/src/process.rs	take	.take(MAX_CAPTURE_BYTES + 1)
 crates/skill-sdk/src/protocol.rs	hard_count	MAX_PROTOCOL_LINE_BYTES
+crates/skill-sdk/src/safe_archive.rs	clamp	.clamp(100_000, 2_000_000)
 crates/skill-sdk/src/secret_scan.rs	hard_count	MAX_SCAN_BYTES
 crates/skill-sdk/src/secret_scan.rs	hard_count	MAX_SCAN_FILES
 crates/skill-sdk/src/secret_scan.rs	take	.take(200)
+crates/skills/archive_basic/src/main.rs	clamp	.clamp(64 * 1024, MAX_PROTOCOL_LINE_BYTES / 2)
 crates/skills/archive_basic/src/main.rs	take	.take(240)
-crates/skills/archive_basic/src/main.rs	truncate	.truncate(10000)
 crates/skills/audio_synthesize/src/main.rs	take	.take(max)
 crates/skills/audio_transcribe/src/main.rs	take	.take(max)
 crates/skills/browser_web/browser_web.js	hard_count	DEFAULT_CHUNK_CHARS
@@ -1293,6 +1295,9 @@ crates/skills/image_vision/src/prompting.rs	clamp	.clamp(10, 90)
 crates/skills/image_vision/src/prompting.rs	clamp	.clamp(10, 90)
 crates/skills/image_vision/src/prompting.rs	clamp	.clamp(5, 120)
 crates/skills/image_vision/src/prompting.rs	clamp	.clamp(5, 45)
+crates/skills/kb/src/ingest.rs	hard_count	DEFAULT_BYTES_PER_RUN
+crates/skills/kb/src/ingest.rs	hard_count	DEFAULT_FILES_PER_RUN
+crates/skills/kb/src/ingest.rs	hard_count	DEFAULT_MAX_DEPTH
 crates/skills/kb/src/main.rs	take	.take(32)
 crates/skills/kb/src/main.rs	truncate	.truncate(s.top_k)
 crates/skills/kb/src/storage.rs	take	.take(8)
@@ -1313,12 +1318,14 @@ crates/skills/package_manager/src/main.rs	take	.take(160)
 crates/skills/process_basic/src/main.rs	take	.take(limit)
 crates/skills/process_basic/src/main.rs	truncate	.truncate(limit)
 crates/skills/process_basic/src/main.rs	truncate	.truncate(limit)
+crates/skills/rss_fetch/src/main.rs	clamp	.clamp(20, 100)
 crates/skills/rss_fetch/src/main.rs	take	.take(200)
 crates/skills/rss_fetch/src/main.rs	take	.take(limit)
 crates/skills/rss_fetch/src/main.rs	take	.take(limit)
 crates/skills/rss_fetch/src/main.rs	take	.take(limit)
 crates/skills/rss_fetch/src/main.rs	take	.take(limit)
 crates/skills/rss_fetch/src/main.rs	take	.take(limit)
+crates/skills/rss_fetch/src/main.rs	truncate	.truncate(false)
 crates/skills/rss_fetch/src/source_discovery.rs	clamp	.clamp(3, 60)
 crates/skills/rss_fetch/src/source_discovery.rs	hard_count	MAX_FEED_BYTES
 crates/skills/rss_fetch/src/source_discovery.rs	take	.take(3)

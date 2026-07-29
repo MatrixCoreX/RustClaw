@@ -226,7 +226,7 @@ fn run_skill_failure_machine_payload(err_text: &str) -> Value {
     let structured = crate::skills::parse_structured_skill_error(err_text);
     let error_code = structured
         .as_ref()
-        .map(|error| error.error_kind.as_str())
+        .map(|error| error.error_code.as_str())
         .unwrap_or("skill_execution_failed");
     let message_key = structured
         .as_ref()
@@ -523,7 +523,7 @@ async fn finalize_run_skill_success(
             &args,
             &step_result,
             outcome.extra.as_ref(),
-        ));
+        )?);
     journal.push_step_result(&step_result);
     let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_success_machine_payload();
@@ -703,7 +703,7 @@ async fn finalize_run_skill_failure(
             &args,
             &step_result,
             None,
-        ));
+        )?);
     journal.push_step_result(&step_result);
     let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_failure_machine_payload(err_text);

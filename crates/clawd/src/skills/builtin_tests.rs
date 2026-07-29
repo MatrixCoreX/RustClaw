@@ -269,7 +269,14 @@ async fn list_dir_accepts_names_only_arg() {
     .await
     .expect("list_dir should succeed");
 
-    assert_eq!(output, "a.txt\nb.txt");
+    let output: Value = serde_json::from_str(&output).expect("structured listing");
+    assert_eq!(output["names"], json!(["a.txt", "b.txt"]));
+    assert_eq!(output["total_count"], 2);
+    assert_eq!(output["complete"], true);
+    assert_eq!(output["entries"][0]["kind"], "file");
+    assert!(output["snapshot_hash"]
+        .as_str()
+        .is_some_and(|value| value.len() == 64));
 }
 
 #[tokio::test]
@@ -284,7 +291,62 @@ async fn list_dir_accepts_structured_limit_arg() {
         .await
         .expect("list_dir should succeed");
 
-    assert_eq!(output, "a.txt\nb.txt");
+    let first: Value = serde_json::from_str(&output).expect("structured first page");
+    assert_eq!(first["names"], json!(["a.txt", "b.txt"]));
+    assert_eq!(first["total_count"], 3);
+    assert_eq!(first["complete"], false);
+    assert_eq!(first["next_cursor"], 2);
+
+    let second = execute_builtin_skill(
+        &state,
+        "list_dir",
+        &json!({"path": ".", "limit": 2, "cursor": 2}),
+    )
+    .await
+    .expect("list_dir second page should succeed");
+    let second: Value = serde_json::from_str(&second).expect("structured second page");
+    assert_eq!(second["names"], json!(["c.txt"]));
+    assert_eq!(second["complete"], true);
+    assert_eq!(second["snapshot_hash"], first["snapshot_hash"]);
+}
+
+#[tokio::test]
+async fn read_file_returns_verified_byte_pages_without_silent_truncation() {
+    let root = TempDirGuard::new("read_file_pages");
+    let content = "0123456789abcdef".repeat(128);
+    fs::write(root.path.join("large.txt"), &content).expect("write fixture");
+    let state = test_state(root.path.clone());
+
+    let first = execute_builtin_skill(
+        &state,
+        "read_file",
+        &json!({"path": "large.txt", "max_bytes": 256}),
+    )
+    .await
+    .expect("read first page");
+    let first: Value = serde_json::from_str(&first).expect("structured first page");
+    assert_eq!(first["start_byte"], 0);
+    assert_eq!(first["end_byte"], 256);
+    assert_eq!(first["returned_bytes"], 256);
+    assert_eq!(first["size_bytes"], content.len());
+    assert_eq!(first["complete"], false);
+    assert_eq!(first["continuation"]["args"]["start_byte"], 256);
+    assert!(first["sha256"]
+        .as_str()
+        .is_some_and(|value| value.len() == 64));
+
+    let second = execute_builtin_skill(
+        &state,
+        "read_file",
+        &json!({"path": "large.txt", "start_byte": 256, "max_bytes": 1024}),
+    )
+    .await
+    .expect("read second page");
+    let second: Value = serde_json::from_str(&second).expect("structured second page");
+    assert_eq!(second["start_byte"], 256);
+    assert_eq!(second["end_byte"], 1280);
+    assert_eq!(second["sha256"], first["sha256"]);
+    assert_eq!(second["content"], &content[256..1280]);
 }
 
 #[tokio::test]
@@ -415,7 +477,7 @@ async fn write_file_rejects_conflicting_append_and_mode_tokens() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured write_file error");
     assert_eq!(structured.skill, "write_file");
-    assert_eq!(structured.error_kind, "invalid_args");
+    assert_eq!(structured.error_code, "invalid_args");
 }
 
 #[tokio::test]
@@ -502,7 +564,7 @@ async fn write_file_respects_create_parents_false_token() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured write_file error");
     assert_eq!(structured.skill, "write_file");
-    assert_eq!(structured.error_kind, "not_found");
+    assert_eq!(structured.error_code, "not_found");
     assert!(!root.path.join("notes").exists());
 }
 
@@ -521,7 +583,7 @@ async fn list_dir_missing_locator_is_error_not_success_observation() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured list_dir error");
     assert_eq!(structured.skill, "list_dir");
-    assert_eq!(structured.error_kind, "not_found");
+    assert_eq!(structured.error_code, "not_found");
     assert!(structured
         .error_text
         .contains("directory not found under system root and project root"));
@@ -549,7 +611,7 @@ async fn list_dir_file_target_returns_structured_not_a_directory() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured list_dir error");
     assert_eq!(structured.skill, "list_dir");
-    assert_eq!(structured.error_kind, "not_a_directory");
+    assert_eq!(structured.error_code, "not_a_directory");
     assert!(crate::skills::is_recoverable_skill_error("list_dir", &err));
 }
 
@@ -565,7 +627,7 @@ async fn remove_file_missing_path_is_structured_but_not_recoverable() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured remove_file error");
     assert_eq!(structured.skill, "remove_file");
-    assert_eq!(structured.error_kind, "not_found");
+    assert_eq!(structured.error_code, "not_found");
     assert!(!crate::skills::is_recoverable_skill_error(
         "remove_file",
         &err
@@ -585,7 +647,7 @@ async fn remove_file_keeps_directory_delete_explicit() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured remove_file error");
     assert_eq!(structured.skill, "remove_file");
-    assert_eq!(structured.error_kind, "is_directory");
+    assert_eq!(structured.error_code, "is_directory");
 
     let output = execute_builtin_skill(
         &state,
@@ -632,7 +694,7 @@ async fn make_dir_parents_false_does_not_create_missing_parents() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured make_dir error");
     assert_eq!(structured.skill, "make_dir");
-    assert_eq!(structured.error_kind, "not_found");
+    assert_eq!(structured.error_code, "not_found");
     assert!(!root.path.join("nested/child").exists());
 }
 
@@ -653,7 +715,15 @@ async fn run_cmd_accepts_timeout_seconds_override() {
     .await
     .expect("run_cmd should succeed");
 
-    assert_eq!(output, "ok");
+    let output: serde_json::Value =
+        serde_json::from_str(&output).expect("structured run_cmd output");
+    assert_eq!(
+        output.get("command_output").and_then(Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(output.get("stdout").and_then(Value::as_str), Some("ok"));
+    assert_eq!(output.get("exit_code").and_then(Value::as_i64), Some(0));
+    assert_eq!(output.get("complete").and_then(Value::as_bool), Some(true));
 }
 
 #[tokio::test]
@@ -674,7 +744,15 @@ async fn run_cmd_accepts_planner_action_metadata() {
     .await
     .expect("run_cmd should ignore planner action metadata");
 
-    assert_eq!(output, "ok");
+    let output: serde_json::Value =
+        serde_json::from_str(&output).expect("structured run_cmd output");
+    assert_eq!(
+        output.get("command_output").and_then(Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(output.get("stdout").and_then(Value::as_str), Some("ok"));
+    assert_eq!(output.get("exit_code").and_then(Value::as_i64), Some(0));
+    assert_eq!(output.get("complete").and_then(Value::as_bool), Some(true));
 }
 
 #[cfg(unix)]
@@ -938,7 +1016,7 @@ async fn run_cmd_nonzero_exit_returns_structured_error() {
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured run_cmd error");
     assert_eq!(structured.skill, "run_cmd");
-    assert_eq!(structured.error_kind, "nonzero_exit");
+    assert_eq!(structured.error_code, "nonzero_exit");
     assert!(structured.error_text.contains("run_cmd.nonzero_exit"));
     assert!(structured.error_text.contains("exit_code=7"));
     assert_eq!(
@@ -1021,7 +1099,7 @@ async fn run_cmd_command_not_found_uses_exit_code_category() {
 
     let structured =
         crate::skills::parse_structured_skill_error(&err).expect("structured run_cmd error");
-    assert_eq!(structured.error_kind, "nonzero_exit");
+    assert_eq!(structured.error_code, "nonzero_exit");
     assert_eq!(
         structured
             .extra
@@ -1127,7 +1205,7 @@ async fn run_cmd_rejects_shell_faked_runtime_checkpoint_without_async_start() {
     .expect_err("fake checkpoint shell should be rejected");
 
     assert!(
-        err.contains("\"error_kind\":\"async_start_required\""),
+        err.contains("\"error_code\":\"async_start_required\""),
         "{err}"
     );
     assert!(
@@ -1152,7 +1230,7 @@ async fn run_cmd_rejects_unmanaged_terminal_background_process() {
     .expect_err("unmanaged background process should be rejected");
 
     assert!(
-        err.contains("\"error_kind\":\"async_start_required\""),
+        err.contains("\"error_code\":\"async_start_required\""),
         "{err}"
     );
     assert!(

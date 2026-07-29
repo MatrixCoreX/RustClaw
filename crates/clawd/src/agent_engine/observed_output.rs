@@ -1031,6 +1031,43 @@ pub(crate) async fn synthesize_answer_from_observed_output(
 }
 
 pub(crate) fn normalized_observed_listing(observed: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(observed.trim()) {
+        let names = value
+            .get("names")
+            .and_then(serde_json::Value::as_array)
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|names| !names.is_empty())
+            .or_else(|| {
+                value
+                    .get("entries")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter_map(|entry| {
+                                entry
+                                    .get("name")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(str::trim)
+                                    .filter(|name| !name.is_empty())
+                            })
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|names| !names.is_empty())
+            });
+        if let Some(names) = names {
+            return Some(names.join("\n"));
+        }
+    }
     normalized_listing_text(observed)
 }
 

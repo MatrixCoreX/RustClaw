@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -164,7 +164,7 @@ impl BoundedResult<String> {
         })
     }
 
-    fn with_sizes(mut self, returned: u64, original: u64) -> Self {
+    pub(crate) fn with_sizes(mut self, returned: u64, original: u64) -> Self {
         self.returned_size_bytes = Some(returned);
         self.original_size_bytes = Some(original);
         self
@@ -242,6 +242,116 @@ impl ArtifactSpill {
             sha256,
             sensitivity: self.sensitivity.clone(),
             read_capability: "artifact.read_range".to_string(),
+        })
+    }
+
+    /// Streams a large text result into skill-owned storage while retaining
+    /// only a UTF-8-safe inline preview in memory.
+    pub fn spill_text_reader<R: Read>(
+        &self,
+        label: &str,
+        media_type: &str,
+        mut reader: R,
+        preview_bytes: usize,
+    ) -> SkillSdkResult<BoundedResult<String>> {
+        let label = safe_component(label, "result")?;
+        let directory = self.root.join(&self.namespace);
+        fs::create_dir_all(&directory).map_err(|error| {
+            SkillSdkError::new("artifact_spill_directory_create_failed", error.to_string())
+        })?;
+        reject_symlink(&directory)?;
+        apply_private_directory_permissions(&directory)?;
+        let temporary = directory.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(|error| {
+            SkillSdkError::new("artifact_spill_write_failed", error.to_string())
+        })?;
+        let streamed = (|| -> SkillSdkResult<(String, u64, Vec<u8>)> {
+            let mut hasher = Sha256::new();
+            let mut total = 0_u64;
+            let mut preview = Vec::with_capacity(preview_bytes.min(64 * 1024));
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let read = reader.read(&mut buffer).map_err(|error| {
+                    SkillSdkError::new("artifact_spill_read_failed", error.to_string())
+                })?;
+                if read == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..read]);
+                file.write_all(&buffer[..read]).map_err(|error| {
+                    SkillSdkError::new("artifact_spill_write_failed", error.to_string())
+                })?;
+                let remaining = preview_bytes.saturating_sub(preview.len());
+                preview.extend_from_slice(&buffer[..read.min(remaining)]);
+                total = total.checked_add(read as u64).ok_or_else(|| {
+                    SkillSdkError::new("artifact_spill_size_overflow", "stream size overflow")
+                })?;
+            }
+            file.sync_all().map_err(|error| {
+                SkillSdkError::new("artifact_spill_sync_failed", error.to_string())
+            })?;
+            Ok((format!("{:x}", hasher.finalize()), total, preview))
+        })();
+        let (sha256, size_bytes, preview) = match streamed {
+            Ok(streamed) => streamed,
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
+            }
+        };
+        let path = directory.join(format!("{label}-{sha256}.artifact"));
+        if path.exists() {
+            fs::remove_file(&temporary).map_err(|error| {
+                SkillSdkError::new("artifact_spill_cleanup_failed", error.to_string())
+            })?;
+        } else {
+            fs::rename(&temporary, &path).map_err(|error| {
+                let _ = fs::remove_file(&temporary);
+                SkillSdkError::new("artifact_spill_publish_failed", error.to_string())
+            })?;
+        }
+        let artifact = ArtifactDescriptor {
+            id: format!("skill-artifact:{sha256}"),
+            path: path.to_string_lossy().to_string(),
+            media_type: media_type.to_string(),
+            size_bytes,
+            sha256,
+            sensitivity: self.sensitivity.clone(),
+            read_capability: "artifact.read_range".to_string(),
+        };
+        // Continuation offsets address the original artifact bytes, so retain
+        // the exact source-byte length even when a lossy preview needs to
+        // replace a trailing partial UTF-8 sequence.
+        let returned_size = preview.len() as u64;
+        let preview = String::from_utf8_lossy(&preview).to_string();
+        let continuation = ContinuationDescriptor {
+            kind: "artifact_range".to_string(),
+            token: Some(artifact.id.clone()),
+            state: json!({
+                "artifact_ref": artifact.id,
+                "start_byte": returned_size,
+                "end_byte": artifact.size_bytes,
+                "read_capability": artifact.read_capability,
+            }),
+        };
+        Ok(BoundedResult {
+            value: preview,
+            complete: false,
+            partial_reason: Some("inline_protocol_budget".to_string()),
+            original_size_bytes: Some(size_bytes),
+            returned_size_bytes: Some(returned_size),
+            original_count: None,
+            returned_count: None,
+            continuation: Some(continuation),
+            artifacts: vec![artifact],
+            field_truncations: BTreeMap::new(),
         })
     }
 }

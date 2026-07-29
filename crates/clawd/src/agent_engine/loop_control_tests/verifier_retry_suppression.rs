@@ -120,7 +120,7 @@ fn code_mutation_validation_failure_creates_retry_gap() {
             StepExecutionStatus::Error,
             None,
             Some(
-                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"AssertionError"}}"#
+                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_code":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"AssertionError"}}"#
                     .to_string(),
             ),
         ));
@@ -164,7 +164,7 @@ fn text_workspace_mutation_validation_failure_creates_retry_gap() {
             StepExecutionStatus::Error,
             None,
             Some(
-                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"AssertionError"}}"#
+                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_code":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"AssertionError"}}"#
                     .to_string(),
             ),
         ));

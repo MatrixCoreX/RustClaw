@@ -60,7 +60,7 @@ fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("dry-run async preflight error should be structured");
 
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
     assert_eq!(
         parsed
             .extra

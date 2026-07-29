@@ -350,7 +350,7 @@ pub(super) fn latest_non_control_step_is_missing_target(
 
 pub(super) fn step_error_is_missing_target(error: &str) -> bool {
     crate::skills::parse_structured_skill_error(error)
-        .is_some_and(|structured| structured.error_kind == "not_found")
+        .is_some_and(|structured| structured.error_code == "not_found")
         || error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
 }
 
@@ -362,7 +362,7 @@ pub(super) fn step_error_is_terminal_blocker(error: &str) -> bool {
     }
     crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
         matches!(
-            structured.error_kind.as_str(),
+            structured.error_code.as_str(),
             "permission_denied" | "policy_block" | "path_outside_workspace"
         )
     })

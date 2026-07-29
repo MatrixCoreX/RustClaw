@@ -1028,7 +1028,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                             "model": provider.config.model,
                             "model_kind": model_kind,
                             "status": "failed",
-                            "error_kind": error_kind
+                            "error_code": error_kind
                         })
                         .to_string(),
                     ),

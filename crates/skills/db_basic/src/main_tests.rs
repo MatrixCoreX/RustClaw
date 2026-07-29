@@ -13,7 +13,7 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "sqlite_open_failed");
+    assert_eq!(extra["error_code"], "sqlite_open_failed");
     assert_eq!(extra["message_key"], "skill.db_basic.sqlite_open_failed");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["path"], "/tmp/missing.sqlite");
@@ -44,9 +44,9 @@ fn sqlite_query_rejects_mutating_sql_with_structured_kind() {
     assert_eq!(
         err.extra
             .as_ref()
-            .and_then(|v| v.get("error_kind"))
+            .and_then(|v| v.get("action"))
             .and_then(Value::as_str),
-        Some("unsafe_sql")
+        Some("sqlite_query")
     );
 }
 
@@ -64,9 +64,9 @@ fn sqlite_execute_without_confirm_reports_confirmation_required() {
     assert_eq!(
         err.extra
             .as_ref()
-            .and_then(|v| v.get("error_kind"))
+            .and_then(|v| v.get("action"))
             .and_then(Value::as_str),
-        Some("confirmation_required")
+        Some("sqlite_execute")
     );
 }
 

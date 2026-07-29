@@ -1780,7 +1780,7 @@ fn schedule_notify_observation_marks_delivery_failure() {
     );
     assert_eq!(
         observation
-            .get("error_kind")
+            .get("error_code")
             .and_then(|value| value.as_str()),
         Some("channel_send_failed")
     );

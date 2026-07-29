@@ -295,7 +295,7 @@ impl CapabilityResultEnvelope {
             return Err(CapabilityResultValidationError::InvalidAction);
         }
         match self.status {
-            CapabilityResultStatus::Ok if self.error.is_some() => {
+            status if status != CapabilityResultStatus::Error && self.error.is_some() => {
                 return Err(CapabilityResultValidationError::UnexpectedError)
             }
             CapabilityResultStatus::Error if self.error.is_none() => {
@@ -307,6 +307,36 @@ impl CapabilityResultEnvelope {
                 return Err(CapabilityResultValidationError::MissingContinuation)
             }
             _ => {}
+        }
+        if let Some(continuation) = self.continuation.as_ref() {
+            if !continuation.state.is_object()
+                || continuation
+                    .reference
+                    .as_deref()
+                    .is_some_and(|reference| reference.trim().is_empty())
+            {
+                return Err(CapabilityResultValidationError::InvalidContinuation);
+            }
+            if self.status == CapabilityResultStatus::Waiting
+                && !matches!(
+                    continuation.kind,
+                    ContinuationKind::Poll
+                        | ContinuationKind::Checkpoint
+                        | ContinuationKind::RetryAfter
+                )
+            {
+                return Err(CapabilityResultValidationError::InvalidContinuation);
+            }
+            if self.status == CapabilityResultStatus::NeedsUser
+                && continuation.kind != ContinuationKind::AwaitUser
+            {
+                return Err(CapabilityResultValidationError::InvalidContinuation);
+            }
+            if self.status == CapabilityResultStatus::Error
+                && continuation.kind != ContinuationKind::RetryAfter
+            {
+                return Err(CapabilityResultValidationError::InvalidContinuation);
+            }
         }
         if let Some(error) = self.error.as_ref() {
             if !is_machine_ref(&error.code) {
@@ -326,6 +356,11 @@ impl CapabilityResultEnvelope {
             }
         }
         for artifact in &self.artifacts {
+            if artifact.id.as_deref().is_some_and(|id| !is_machine_ref(id))
+                || !artifact.metadata.is_object()
+            {
+                return Err(CapabilityResultValidationError::InvalidArtifactRef);
+            }
             if artifact.id.as_deref().is_none_or(|id| id.trim().is_empty())
                 && artifact
                     .path
@@ -367,6 +402,14 @@ impl CapabilityResultEnvelope {
                 return Err(CapabilityResultValidationError::InvalidCompleteness);
             }
         }
+        if self.truncated
+            && self
+                .completeness
+                .as_ref()
+                .is_none_or(|completeness| completeness.complete)
+        {
+            return Err(CapabilityResultValidationError::InvalidCompleteness);
+        }
         if self.page.as_ref().is_some_and(|page| !page.is_object()) {
             return Err(CapabilityResultValidationError::InvalidPage);
         }
@@ -393,6 +436,9 @@ impl CapabilityResultEnvelope {
         }
         if !self.delivery.constraints.is_object() {
             return Err(CapabilityResultValidationError::InvalidDeliveryConstraints);
+        }
+        if self.delivery.intent == CapabilityDeliveryIntent::Artifact && self.artifacts.is_empty() {
+            return Err(CapabilityResultValidationError::MissingDeliveryArtifact);
         }
         Ok(())
     }
@@ -432,6 +478,8 @@ pub enum CapabilityResultValidationError {
     UnexpectedError,
     #[error("capability_result_continuation_missing")]
     MissingContinuation,
+    #[error("capability_result_continuation_invalid")]
+    InvalidContinuation,
     #[error("capability_result_error_code_invalid")]
     InvalidErrorCode,
     #[error("capability_result_message_key_invalid")]
@@ -442,6 +490,8 @@ pub enum CapabilityResultValidationError {
     DuplicateEvidenceRef,
     #[error("capability_result_artifact_unaddressable")]
     UnaddressableArtifact,
+    #[error("capability_result_artifact_ref_invalid")]
+    InvalidArtifactRef,
     #[error("capability_result_completeness_invalid")]
     InvalidCompleteness,
     #[error("capability_result_partial_recovery_missing")]
@@ -458,6 +508,8 @@ pub enum CapabilityResultValidationError {
     InvalidVerification,
     #[error("capability_result_delivery_constraints_invalid")]
     InvalidDeliveryConstraints,
+    #[error("capability_result_delivery_artifact_missing")]
+    MissingDeliveryArtifact,
 }
 
 fn empty_object() -> JsonValue {

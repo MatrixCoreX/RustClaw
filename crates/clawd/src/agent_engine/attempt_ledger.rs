@@ -15,7 +15,6 @@ pub(crate) struct AttemptLedgerEntry {
     pub(super) status: String,
     pub(super) observed_output: String,
     pub(super) error_code: Option<String>,
-    pub(super) error_kind: Option<String>,
     pub(super) exit_code: Option<i64>,
     pub(super) missing_evidence: Vec<String>,
     pub(super) verifier_reason_code: Option<String>,
@@ -142,7 +141,6 @@ pub(super) fn record_attempt_with_retry_instruction(
         status: status.as_str().to_string(),
         observed_output: crate::truncate_for_agent_trace(observed_output.trim()),
         error_code,
-        error_kind: error_kind.clone(),
         exit_code,
         missing_evidence,
         verifier_reason_code,
@@ -273,7 +271,6 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 "args_summary": "not_recorded_in_step_result",
                 "observed_output": crate::truncate_for_agent_trace(output_text),
                 "error_code": error_code.clone(),
-                "error_kind": error_kind.clone(),
                 "exit_code": exit_code,
                 "missing_evidence": missing_evidence.clone(),
                 "verifier_reason_code": failed
@@ -355,7 +352,6 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
         "args_summary": entry.args_summary,
         "observed_output": entry.observed_output,
         "error_code": entry.error_code,
-        "error_kind": entry.error_kind,
         "exit_code": entry.exit_code,
         "missing_evidence": entry.missing_evidence,
         "verifier_reason_code": entry.verifier_reason_code,
@@ -371,7 +367,7 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
             &entry.tool_or_skill,
             &entry.status,
             entry.error_code.as_deref(),
-            entry.error_kind.as_deref(),
+            entry.error_code.as_deref(),
             entry.retryable,
             &entry.missing_evidence,
             &entry.forbidden_repeat_signature,
@@ -500,7 +496,7 @@ fn executor_failure_attribution(error_kind: Option<&str>) -> &'static str {
 
 fn structured_error_kind(error_text: &str) -> Option<String> {
     crate::skills::parse_structured_skill_error(error_text)
-        .map(|structured| structured.error_kind)
+        .map(|structured| structured.error_code)
         .or_else(|| (!error_text.trim().is_empty()).then_some("unclassified_error".to_string()))
 }
 
@@ -513,7 +509,7 @@ fn structured_error_code(error_text: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or(Some(structured.error_kind))
+        .or(Some(structured.error_code))
 }
 
 fn structured_exit_code(error_text: &str) -> Option<i64> {
@@ -527,14 +523,14 @@ fn structured_exit_code(error_text: &str) -> Option<i64> {
 fn contract_policy_from_structured_error(error_text: &str) -> Option<Value> {
     let structured = crate::skills::parse_structured_skill_error(error_text)?;
     if !matches!(
-        structured.error_kind.as_str(),
+        structured.error_code.as_str(),
         "contract_action_rejected" | "contract_arg_rejected"
     ) {
         return None;
     }
     let extra = structured.extra.as_ref()?;
     Some(json!({
-        "error_kind": structured.error_kind.as_str(),
+        "error_code": structured.error_code.as_str(),
         "decision": extra.get("decision").and_then(Value::as_str),
         "policy_decision": extra.get("policy_decision").and_then(Value::as_str),
         "action": extra.get("action").and_then(Value::as_str),
@@ -574,7 +570,7 @@ fn provider_status_from_structured_error(error_text: &str) -> Option<Value> {
     let status_code = provider_error_class
         .as_deref()
         .or(error_code.as_deref())
-        .unwrap_or(structured.error_kind.as_str())
+        .unwrap_or(structured.error_code.as_str())
         .to_string();
     let external_provider_blocked = extra
         .and_then(|extra| extra.get("external_provider_blocked"))
@@ -625,7 +621,7 @@ fn provider_status_from_structured_error(error_text: &str) -> Option<Value> {
     }
 
     Some(json!({
-        "error_kind": structured.error_kind,
+        "error_code": structured.error_code,
         "status_code": status_code,
         "provider": provider,
         "provider_error_class": provider_error_class,

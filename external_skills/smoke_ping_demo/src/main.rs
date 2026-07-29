@@ -49,9 +49,12 @@ fn main() -> anyhow::Result<()> {
                     status: "error".to_string(),
                     text: String::new(),
                     extra: Some(json!({
+                        "schema_version": 1,
+                        "source_skill": "smoke_ping_demo",
+                        "status": "error",
                         "error_code": err.kind,
-                        "error_kind": err.kind,
-                        "message_key": format!("skill.smoke_ping_demo.{}", err.kind)
+                        "message_key": format!("skill.smoke_ping_demo.{}", err.kind),
+                        "retryable": false
                     })),
                     error_text: Some(err.message),
                 },
@@ -61,9 +64,12 @@ fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 extra: Some(json!({
+                    "schema_version": 1,
+                    "source_skill": "smoke_ping_demo",
+                    "status": "error",
                     "error_code":"invalid_input",
-                    "error_kind":"invalid_input",
-                    "message_key":"skill.smoke_ping_demo.invalid_input"
+                    "message_key":"skill.smoke_ping_demo.invalid_input",
+                    "retryable": false
                 })),
                 error_text: Some(format!("invalid input: {err}")),
             },

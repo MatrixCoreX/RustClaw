@@ -177,7 +177,7 @@ fn missing_child_task_exposes_bounded_pre_dispatch_replan_contract() {
         crate::skills::parse_structured_skill_error(&error).expect("structured missing task error");
     let extra = parsed.extra.expect("replan metadata");
 
-    assert_eq!(parsed.error_kind, "child_patch_task_not_found");
+    assert_eq!(parsed.error_code, "child_patch_task_not_found");
     assert_eq!(extra["retryable"], true);
     assert_eq!(extra["side_effect_applied"], false);
     assert_eq!(extra["failure_phase"], "pre_dispatch");
@@ -353,7 +353,7 @@ fn overlapping_child_patches_require_parent_resolution() {
     let parsed =
         crate::skills::parse_structured_skill_error(&error).expect("structured conflict error");
 
-    assert_eq!(parsed.error_kind, "patch_precondition_failed");
+    assert_eq!(parsed.error_code, "patch_precondition_failed");
     assert!(second_plan.execution_root.exists());
     assert!(second_artifact_path.exists());
 

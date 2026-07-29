@@ -60,7 +60,7 @@ fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag()
     loop_state.executed_step_results.push(err_step_result(
         "step_4",
         "fs_basic",
-        "__RC_SKILL_ERROR__:{\"error_kind\":\"invalid_data\",\"error_text\":\"binary file is not utf8\"}",
+        "__RC_SKILL_ERROR__:{\"error_code\":\"invalid_data\",\"error_text\":\"binary file is not utf8\"}",
     ));
     let delivery_messages = vec![
         "| item | value |\n| --- | --- |\n| archive members | notes.txt, nested/config.ini |\n| schema_version | 7 |".to_string(),
@@ -234,7 +234,7 @@ fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 7",
             "platform": "linux",
             "extra": {
@@ -260,7 +260,7 @@ fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr
 
     assert!(answer.contains("step.2.error_summary="), "answer: {answer}");
     assert!(
-        answer.contains("step.2.error_kind=nonzero_exit"),
+        answer.contains("step.2.error_code=nonzero_exit"),
         "answer: {answer}"
     );
     assert!(answer.contains("step.2.exit_code=7"), "answer: {answer}");
@@ -608,7 +608,7 @@ fn terminal_respond_after_structured_skill_failure_is_not_replaced_by_generic_st
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "map_merchant",
-        r#"__RC_SKILL_ERROR__:{"error_kind":"missing_anchor","error_text":"code=missing_anchor","extra":{"error_code":"missing_anchor","required_any":[["latitude","longitude"],["place"]]},"skill":"map_merchant"}"#,
+        r#"__RC_SKILL_ERROR__:{"error_code":"missing_anchor","error_text":"code=missing_anchor","extra":{"error_code":"missing_anchor","required_any":[["latitude","longitude"],["place"]]},"skill":"map_merchant"}"#,
     ));
     loop_state
         .executed_step_results
@@ -641,7 +641,7 @@ fn grounded_structured_failure_response_is_not_replaced_by_generic_status() {
     let state = test_state();
     let task = claimed_task("task-terminal-structured-response-after-skill-failure");
     let answer = json!({
-        "error_kind": "invalid_input",
+        "error_code": "invalid_input",
         "status": "error",
         "published": false,
         "would_execute": false,
@@ -770,7 +770,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "run_cmd",
-        "__RC_SKILL_ERROR__:{\"error_kind\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_rustclaw_render_ko_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
+        "__RC_SKILL_ERROR__:{\"error_code\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_rustclaw_render_ko_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
     ));
 
     backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
@@ -796,7 +796,7 @@ fn generic_execution_status_ignores_contract_gap_errors() {
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "system_basic",
-        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"action rejected by the current output contract","extra":{"failure_attribution":"contract_gap"},"skill":"system_basic"}"#,
+        r#"__RC_SKILL_ERROR__:{"error_code":"contract_action_rejected","error_text":"action rejected by the current output contract","extra":{"failure_attribution":"contract_gap"},"skill":"system_basic"}"#,
     ));
     loop_state
         .executed_step_results

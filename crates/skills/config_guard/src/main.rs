@@ -22,8 +22,6 @@ struct Resp {
     extra: Option<Value>,
     error_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     platform: Option<String>,
 }
 
@@ -56,7 +54,6 @@ impl SkillError {
             kind,
             format!("{operation} failed for {path_text}: {err}"),
             Some(json!({
-                "error_kind": kind,
                 "operation": operation,
                 "path": path_text
             })),
@@ -78,7 +75,6 @@ fn main() -> anyhow::Result<()> {
                     text: extra.to_string(),
                     extra: Some(extra),
                     error_text: None,
-                    error_kind: None,
                     platform: None,
                 },
                 Err(err) => Resp {
@@ -87,7 +83,6 @@ fn main() -> anyhow::Result<()> {
                     text: String::new(),
                     extra: Some(error_extra_with_details(err.kind, err.extra)),
                     error_text: Some(err.message),
-                    error_kind: Some(err.kind.to_string()),
                     platform: Some(std::env::consts::OS.to_string()),
                 },
             },
@@ -100,7 +95,6 @@ fn main() -> anyhow::Result<()> {
                     Some(json!({ "operation": "parse_request" })),
                 )),
                 error_text: Some(format!("invalid input: {err}")),
-                error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
             },
         };
@@ -115,7 +109,6 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -138,7 +131,6 @@ fn execute(args: Value) -> Result<Value, SkillError> {
             "invalid_input",
             "args must be object",
             Some(json!({
-                "error_kind": "invalid_input",
                 "operation": "parse_args"
             })),
         )
@@ -153,7 +145,6 @@ fn execute(args: Value) -> Result<Value, SkillError> {
             "invalid_data",
             format!("parse_toml failed for {}: {err}", config_path.display()),
             Some(json!({
-                "error_kind": "invalid_data",
                 "operation": "parse_toml",
                 "path": config_path.display().to_string()
             })),

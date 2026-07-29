@@ -617,7 +617,7 @@ fn native_respond_projects_structured_fields_from_failed_capability_observation(
             "exact_item_count": 0,
             "fields": [],
             "observed_fields": [
-                {"name": "error_kind", "capability": "x.draft_preview", "path": "error.code"},
+                {"name": "error_code", "capability": "x.draft_preview", "path": "error.code"},
                 {"name": "status", "capability": "x.draft_preview", "path": "status"},
                 {"name": "published", "capability": "x.draft_preview", "path": "error.details.structured_error.extra.published"},
                 {"name": "would_execute", "capability": "x.draft_preview", "path": "error.details.structured_error.extra.would_execute"},
@@ -641,7 +641,7 @@ fn native_respond_projects_structured_fields_from_failed_capability_observation(
     assert_eq!(
         serde_json::from_str::<Value>(content).expect("projected failure object"),
         json!({
-            "error_kind": "invalid_input",
+            "error_code": "invalid_input",
             "status": "error",
             "published": false,
             "would_execute": false,
@@ -1698,7 +1698,7 @@ fn native_observed_path_schema_and_repair_explain_array_segments() {
         .expect("observed path description");
     assert!(path_description.contains("array_index=decimal_path_segment"));
     assert!(path_description.contains("data.extra.items.0.name"));
-    assert!(path_description.contains("error.details.structured_error.extra.error_kind"));
+    assert!(path_description.contains("error.details.structured_error.extra.error_code"));
 
     for error_code in [
         "native_respond_observed_path_invalid",

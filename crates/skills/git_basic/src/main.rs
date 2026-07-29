@@ -218,7 +218,6 @@ fn error_extra_with_detail(error_kind: &str, detail: Option<Value>) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -241,6 +240,7 @@ fn execute(args: Value) -> Result<(String, Value), GitBasicError> {
     )
 }
 
+#[cfg(test)]
 fn execute_with_workspace_root(
     workspace_root: &Path,
     args: Value,

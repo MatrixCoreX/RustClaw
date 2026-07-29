@@ -25,7 +25,7 @@
 ## Error Contract (from interface)
 - Return `status=error` with readable `error_text` when required params are missing.
 - Return `unsupported action: <name>` for unknown actions.
-- Error responses include `extra.error_kind` with one of `invalid_args`, `invalid_input`, `missing_action`, or `unsupported_action`.
+- Error responses include canonical `extra.error_code` with one of `invalid_args`, `invalid_input`, `missing_action`, or `unsupported_action`.
 - Keep request/response payloads as single-line JSON objects over stdin/stdout.
 
 ## Structured Evidence Contract (from interface)
@@ -35,7 +35,7 @@
   - `ok`: boolean success flag, always `true`.
   - `message`: stable machine-readable string, currently `pong`.
 - `ping` error `extra` fields:
-  - `error_kind`: stable machine-readable error kind.
+  - `error_code`: stable machine-readable error identifier.
 - Sensitive fields: none.
 - Strict evidence eligibility:
   - `extra.ok` may satisfy a boolean/status evidence field only after admission validation.

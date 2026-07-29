@@ -144,7 +144,6 @@ fn error_response(request_id: &str, error: &SearchError) -> Value {
             "schema_version": 1,
             "source_skill": SKILL_NAME,
             "status": "error",
-            "error_kind": error.code,
             "error_code": error.code,
             "message_key": format!("skill.{}.{}", SKILL_NAME, error.code.to_ascii_lowercase()),
             "retryable": error.retryable,

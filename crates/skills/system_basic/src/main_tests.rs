@@ -13,7 +13,7 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "io_error");
+    assert_eq!(extra["error_code"], "io_error");
     assert_eq!(extra["message_key"], "skill.system_basic.io_error");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["operation"], "read_file");
@@ -1588,7 +1588,13 @@ fn read_range_directory_error_is_structured() {
         context: Some(json!({"allow_path_outside_workspace": true})),
     });
     assert_eq!(resp.status, "error");
-    assert_eq!(resp.error_kind.as_deref(), Some("is_directory"));
+    assert_eq!(
+        resp.extra
+            .as_ref()
+            .and_then(|extra| extra.get("error_code"))
+            .and_then(Value::as_str),
+        Some("is_directory")
+    );
     assert_eq!(resp.platform.as_deref(), Some(std::env::consts::OS));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1863,7 +1869,7 @@ fn validate_structured_reports_parse_failure_as_structured_output() {
     let value: Value = serde_json::from_str(&out).expect("json");
     assert_eq!(value.get("valid").and_then(Value::as_bool), Some(false));
     assert_eq!(
-        value.get("error_kind").and_then(Value::as_str),
+        value.get("error_code").and_then(Value::as_str),
         Some("invalid_data")
     );
     assert!(value

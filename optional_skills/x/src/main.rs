@@ -67,7 +67,6 @@ impl XSkillError {
             "status": "error",
             "action": "post",
             "source_skill": "x",
-            "error_kind": self.kind,
             "error_code": self.kind,
             "message_key": format!("skill.x.{}", self.kind),
             "retryable": false,

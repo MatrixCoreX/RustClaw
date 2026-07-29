@@ -129,7 +129,7 @@ fn replace_rejects_missing_and_ambiguous_targets() {
     )
     .expect_err("ambiguous");
     assert_eq!(
-        parse_error(ambiguous).error_kind,
+        parse_error(ambiguous).error_code,
         "replacement_target_ambiguous"
     );
     assert_eq!(
@@ -149,7 +149,7 @@ fn replace_rejects_missing_and_ambiguous_targets() {
     )
     .expect_err("missing");
     assert_eq!(
-        parse_error(missing).error_kind,
+        parse_error(missing).error_code,
         "replacement_target_not_found"
     );
     assert_eq!(
@@ -176,7 +176,7 @@ fn replace_checks_hash_and_preserves_crlf() {
     )
     .expect_err("stale");
     assert_eq!(
-        parse_error(stale).error_kind,
+        parse_error(stale).error_code,
         "replacement_precondition_failed"
     );
     assert_eq!(
@@ -275,7 +275,7 @@ fn replace_rejects_an_absolute_path_outside_the_workspace() {
     )
     .expect_err("outside path");
 
-    assert_eq!(parse_error(error).error_kind, "path_outside_workspace");
+    assert_eq!(parse_error(error).error_code, "path_outside_workspace");
     assert_eq!(
         fs::read_to_string(&outside).expect("unchanged"),
         "before old after"
@@ -298,7 +298,7 @@ fn replace_rejects_binary_and_symlink_targets() {
         })),
     )
     .expect_err("binary");
-    assert_eq!(parse_error(binary).error_kind, "binary_file_unsupported");
+    assert_eq!(parse_error(binary).error_code, "binary_file_unsupported");
 
     #[cfg(unix)]
     {
@@ -314,7 +314,7 @@ fn replace_rejects_binary_and_symlink_targets() {
             })),
         )
         .expect_err("symlink");
-        assert_eq!(parse_error(symlink).error_kind, "symlink_path_denied");
+        assert_eq!(parse_error(symlink).error_code, "symlink_path_denied");
 
         let absolute_symlink = execute_workspace_replace_for_root(
             dir.path(),
@@ -328,7 +328,7 @@ fn replace_rejects_binary_and_symlink_targets() {
         )
         .expect_err("absolute symlink");
         assert_eq!(
-            parse_error(absolute_symlink).error_kind,
+            parse_error(absolute_symlink).error_code,
             "symlink_path_denied"
         );
     }
@@ -351,7 +351,7 @@ fn replace_rejects_non_utf8_and_workspace_escape() {
     )
     .expect_err("non utf8");
     assert_eq!(
-        parse_error(non_utf8).error_kind,
+        parse_error(non_utf8).error_code,
         "non_utf8_file_unsupported"
     );
 
@@ -366,7 +366,7 @@ fn replace_rejects_non_utf8_and_workspace_escape() {
         })),
     )
     .expect_err("workspace escape");
-    assert_eq!(parse_error(escaped).error_kind, "path_outside_workspace");
+    assert_eq!(parse_error(escaped).error_code, "path_outside_workspace");
 }
 
 #[cfg(unix)]
@@ -396,7 +396,7 @@ fn replace_permission_failure_preserves_content_and_cleans_temporary_file() {
     fs::set_permissions(&protected, fs::Permissions::from_mode(0o755))
         .expect("restore directory permission");
     let error = result.expect_err("permission failure");
-    assert_eq!(parse_error(error).error_kind, "replacement_write_failed");
+    assert_eq!(parse_error(error).error_code, "replacement_write_failed");
     assert_eq!(
         fs::read_to_string(&path).expect("unchanged file"),
         "before old after"

@@ -383,7 +383,7 @@ async fn skill_poll_async_adapter_result(
                     Some(json!({
                         "source": "skill_poll_adapter",
                         "skill_name": skill_name,
-                        "error_kind": "missing_extra",
+                        "error_code": "missing_extra",
                     })),
                 ));
             };
@@ -397,7 +397,7 @@ async fn skill_poll_async_adapter_result(
                 Some(json!({
                     "source": "skill_poll_adapter",
                     "skill_name": skill_name,
-                    "error_kind": "invalid_adapter_result",
+                    "error_code": "invalid_adapter_result",
                 })),
             ))
         }
@@ -408,7 +408,7 @@ async fn skill_poll_async_adapter_result(
             Some(json!({
                 "source": "skill_poll_adapter",
                 "skill_name": skill_name,
-                "error_kind": "execution_failed",
+                "error_code": "execution_failed",
             })),
         )),
     }

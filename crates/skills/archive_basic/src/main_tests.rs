@@ -13,7 +13,8 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "not_found");
+    assert_eq!(extra["error_code"], "not_found");
+    assert!(extra.get("error_kind").is_none());
     assert_eq!(extra["message_key"], "skill.archive_basic.not_found");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["path"], "/tmp/missing.zip");
@@ -63,8 +64,6 @@ fn list_zip_archive_returns_structured_member_entries() {
         listing.entries,
         vec!["notes.txt".to_string(), "nested/config.ini".to_string()]
     );
-    assert!(listing.output.contains("notes.txt"));
-    assert!(listing.output.contains("nested/config.ini"));
 }
 
 #[test]
@@ -74,10 +73,18 @@ fn execute_list_projects_member_count_and_members() {
         .canonicalize()
         .expect("fixture archive exists");
 
-    let (_text, extra) = execute(json!({
-        "action": "list",
-        "archive": fixture.display().to_string()
-    }))
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .expect("workspace root");
+    let (_text, extra) = execute_with_root_and_context(
+        json!({
+            "action": "list",
+            "archive": fixture.display().to_string()
+        }),
+        &workspace,
+        None,
+    )
     .expect("execute list");
 
     assert_eq!(extra.get("member_count").and_then(Value::as_u64), Some(2));
@@ -118,9 +125,10 @@ fn read_archive_member_returns_member_content() {
         .expect("create tar fixture");
     assert!(status.success(), "tar fixture creation failed");
 
-    let content = read_archive_member(&archive, "notes.txt").expect("read member");
+    let content =
+        read_archive_member(&archive, "notes.txt", None, 1024 * 1024).expect("read member");
 
-    assert_eq!(content, "fixture archive notes\n");
+    assert_eq!(content.value, "fixture archive notes\n");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -131,11 +139,19 @@ fn execute_read_projects_member_path_and_content_excerpt() {
         .canonicalize()
         .expect("fixture archive exists");
 
-    let (_text, extra) = execute(json!({
-        "action": "read",
-        "archive": fixture.display().to_string(),
-        "member": "notes.txt"
-    }))
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .expect("workspace root");
+    let (_text, extra) = execute_with_root_and_context(
+        json!({
+            "action": "read",
+            "archive": fixture.display().to_string(),
+            "member": "notes.txt"
+        }),
+        &workspace,
+        None,
+    )
     .expect("execute read");
 
     assert_eq!(extra.get("path").and_then(Value::as_str), Some("notes.txt"));
@@ -169,12 +185,16 @@ fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
     std::fs::write(source.join("notes.txt"), "fixture archive notes\n")
         .expect("write source fixture");
 
-    let (_text, pack_extra) = execute(json!({
-        "action": "pack",
-        "format": "tar.gz",
-        "source": source.display().to_string(),
-        "archive": archive.display().to_string()
-    }))
+    let (_text, pack_extra) = execute_with_root_and_context(
+        json!({
+            "action": "pack",
+            "format": "tar.gz",
+            "source": source.display().to_string(),
+            "archive": archive.display().to_string()
+        }),
+        &root,
+        None,
+    )
     .expect("execute pack");
 
     let archive_path = archive.display().to_string();
@@ -191,11 +211,15 @@ fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
         Some(archive_path.as_str())
     );
 
-    let (_text, unpack_extra) = execute(json!({
-        "action": "unpack",
-        "archive": archive.display().to_string(),
-        "dest": dest.display().to_string()
-    }))
+    let (_text, unpack_extra) = execute_with_root_and_context(
+        json!({
+            "action": "unpack",
+            "archive": archive.display().to_string(),
+            "dest": dest.display().to_string()
+        }),
+        &root,
+        None,
+    )
     .expect("execute unpack");
 
     let dest_path = dest.display().to_string();
@@ -208,4 +232,44 @@ fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
     let archived_source = source.strip_prefix("/").unwrap_or(source.as_path());
     assert!(dest.join(archived_source).join("notes.txt").is_file());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn archive_paths_fail_closed_and_allow_verified_admin_external_access() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let external = tempfile::tempdir().expect("external");
+    let archive = external.path().join("bundle.tar.gz");
+    let status = Command::new("tar")
+        .args([
+            "-czf",
+            archive.to_str().unwrap(),
+            "--files-from",
+            "/dev/null",
+        ])
+        .status()
+        .expect("create empty archive");
+    assert!(status.success());
+
+    let denied = execute_with_root_and_context(
+        json!({"action":"list","archive":archive}),
+        workspace.path(),
+        None,
+    )
+    .expect_err("confined request must reject external archive");
+    assert_eq!(denied.kind, "path_outside_workspace");
+
+    let context = json!({
+        "authority_scope": "unrestricted_admin",
+        "permissions": {
+            "unrestricted_admin": true,
+            "allow_path_outside_workspace": true
+        }
+    });
+    let (_, extra) = execute_with_root_and_context(
+        json!({"action":"list","archive":archive}),
+        workspace.path(),
+        Some(&context),
+    )
+    .expect("admin may inspect external archive");
+    assert_eq!(extra["authority_scope"], "unrestricted_admin");
 }

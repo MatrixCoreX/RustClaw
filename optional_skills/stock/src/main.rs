@@ -276,7 +276,6 @@ fn stock_error_extra(error_kind: &str) -> Value {
     json!({
         "schema_version": 1,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.stock.{error_kind}"),
         "source_skill": "stock",

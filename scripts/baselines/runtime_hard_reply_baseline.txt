@@ -165,10 +165,34 @@ crates/clawd/src/agent_engine/prepare_round.rs	verification_issue_kind: {first_i
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline	"execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline",
-crates/clawd/src/agent_engine/skill_execution_preflight.rs	expected type `{expected_type}`	return Err(format!("expected type `{expected_type}`"));
-crates/clawd/src/agent_engine/skill_execution_preflight.rs	field `{key}` expected type `{field_type}`	return Err(format!("field `{key}` expected type `{field_type}`"));
-crates/clawd/src/agent_engine/skill_execution_preflight.rs	missing required field `{key}`	return Err(format!("missing required field `{key}`"));
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist	"path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist",
+crates/clawd/src/agent_engine/skill_output_contract.rs	schema `type` array must contain only strings	.ok_or_else(|| "schema `type` array must contain only strings".to_string())
+crates/clawd/src/agent_engine/skill_output_contract.rs	schema `type` must be a string or string array	Some(_) => Err("schema `type` must be a string or string array".to_string()),
+crates/clawd/src/agent_engine/skill_output_contract.rs	skill input does not match its declared contract	"skill input does not match its declared contract",
+crates/clawd/src/agent_engine/skill_output_contract.rs	skill output does not match its declared contract	"skill output does not match its declared contract",
+crates/clawd/src/agent_engine/skill_output_contract.rs	unsupported schema type `{unsupported}`	unsupported => Err(format!("unsupported schema type `{unsupported}`")),
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: array length {length} exceeds {maximum}	return Err(format!("{path}: array length {length} exceeds {maximum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: array length {length} is below {minimum}	return Err(format!("{path}: array length {length} is below {minimum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: did not match anyOf branches ({})	"{path}: did not match anyOf branches ({})",
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: expected exactly one oneOf branch, matched {matches}	"{path}: expected exactly one oneOf branch, matched {matches}"
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: expected type {}, got `{}`	"{path}: expected type {}, got `{}`",
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: invalid schema pattern `{pattern}`: {error}	.map_err(|error| format!("{path}: invalid schema pattern `{pattern}`: {error}"))?;
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: missing required field `{key}`	return Err(format!("{path}: missing required field `{key}`"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: number {number} exceeds {maximum}	return Err(format!("{path}: number {number} exceeds {maximum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: number {number} is below {minimum}	return Err(format!("{path}: number {number} is below {minimum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: number {number} must be greater than {minimum}	"{path}: number {number} must be greater than {minimum}"
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: number {number} must be less than {maximum}	"{path}: number {number} must be less than {maximum}"
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: schema `additionalProperties` must be boolean or object	"{path}: schema `additionalProperties` must be boolean or object"
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: schema `required` must contain strings	.ok_or_else(|| format!("{path}: schema `required` must contain strings"))?;
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: schema must be an object or boolean	_ => return Err(format!("{path}: schema must be an object or boolean")),
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: schema rejects every value	Value::Bool(false) => return Err(format!("{path}: schema rejects every value")),
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: string does not match pattern `{pattern}`	return Err(format!("{path}: string does not match pattern `{pattern}`"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: string length {length} exceeds {maximum}	return Err(format!("{path}: string length {length} exceeds {maximum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: string length {length} is below {minimum}	return Err(format!("{path}: string length {length} is below {minimum}"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: unexpected field `{key}`	return Err(format!("{path}: unexpected field `{key}`"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: value does not match schema const	return Err(format!("{path}: value does not match schema const"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: value is not in schema enum	return Err(format!("{path}: value is not in schema enum"));
+crates/clawd/src/agent_engine/skill_output_contract.rs	{path}[{index}]: duplicate array item	return Err(format!("{path}[{index}]: duplicate array item"));
 crates/clawd/src/agent_engine/support.rs	agent-loop:{}:round-{}:step-{}:{}	"agent-loop:{}:round-{}:step-{}:{}",
 crates/clawd/src/app_helpers.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
 crates/clawd/src/bootstrap/config_loaders.rs	An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}	"An identical scheduled job already exists: {job_id}\\nType: {type}\\nTimezone: {timezone}\\nNext run: {next_run_human}\\nTask content: {task_content}".to_string()
@@ -226,6 +250,8 @@ crates/clawd/src/capability_map.rs	confirmation_exempt_when: {exemptions}	parts.
 crates/clawd/src/capability_map.rs	prefer over run_cmd when semantics match	parts.push("prefer over run_cmd when semantics match".to_string());
 crates/clawd/src/capability_map.rs	requires_confirmation: {requires_confirmation}	parts.push(format!("requires_confirmation: {requires_confirmation}"));
 crates/clawd/src/capability_map.rs	{"reason_code":"sandbox_diagnostics_encode_failed"}	"{\\"reason_code\\":\\"sandbox_diagnostics_encode_failed\\"}".to_string()
+crates/clawd/src/capability_result.rs	test capability error fixture must be valid	.expect("test capability error fixture must be valid")
+crates/clawd/src/capability_result.rs	test capability result fixture must be valid	.expect("test capability result fixture must be valid")
 crates/clawd/src/channel_send.rs	telegram bot token is empty	return Err("telegram bot token is empty".to_string());
 crates/clawd/src/channel_send.rs	token response missing tenant_access_token	.ok_or_else(|| "token response missing tenant_access_token".to_string())
 crates/clawd/src/channel_send.rs	wechat api_base_url is empty	return Err("wechat api_base_url is empty".to_string());
@@ -941,6 +967,8 @@ crates/clawd/src/skills/builtin.rs	content too large: {} bytes	format!("content 
 crates/clawd/src/skills/builtin.rs	directory locator matched multiple candidates: {}	"directory locator matched multiple candidates: {}",
 crates/clawd/src/skills/builtin.rs	directory not found under system root and project root: {path}	format!("directory not found under system root and project root: {path}"),
 crates/clawd/src/skills/builtin.rs	empty command after sanitize	return Err("empty command after sanitize".to_string());
+crates/clawd/src/skills/builtin.rs	list_dir cursor exceeds this platform's addressable range	"list_dir cursor exceeds this platform's addressable range",
+crates/clawd/src/skills/builtin.rs	list_dir cursor {cursor} exceeds total entry count {total}	format!("list_dir cursor {cursor} exceeds total entry count {total}"),
 crates/clawd/src/skills/builtin.rs	list_dir requires a directory: {}	format!("list_dir requires a directory: {}", real_path.display()),
 crates/clawd/src/skills/builtin.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills/builtin.rs	read_file requires a file, but target is a directory: {}	"read_file requires a file, but target is a directory: {}",
@@ -950,6 +978,7 @@ crates/clawd/src/skills/builtin.rs	skill args must be a JSON object	.ok_or_else(
 crates/clawd/src/skills/builtin.rs	unknown skill: {skill_name}	_ => Err(format!("unknown skill: {skill_name}")),
 crates/clawd/src/skills/builtin.rs	{key} must be string	.ok_or_else(|| format!("{key} must be string"))
 crates/clawd/src/skills/builtin.rs	{operation} failed for {target}: {err}	format!("{operation} failed for {target}: {err}"),
+crates/clawd/src/skills/builtin_read_file.rs	start_byte {start_byte} exceeds file size {total_size}	format!("start_byte {start_byte} exceeds file size {total_size}"),
 crates/clawd/src/skills/runner.rs	empty skill-runner output	return Err("empty skill-runner output".to_string());
 crates/clawd/src/skills/runner.rs	empty skill-runner output: {detail}	return Err(format!("empty skill-runner output: {detail}"));
 crates/clawd/src/skills/runner.rs	flush skill-runner stdin failed: {err}	.map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
@@ -1111,6 +1140,8 @@ crates/skill-sdk/src/manifest.rs	provide exactly one relative source_path or htt
 crates/skill-sdk/src/manifest.rs	remote prebuilt artifacts require size_bytes	"remote prebuilt artifacts require size_bytes",
 crates/skill-sdk/src/manifest.rs	run.smoke_args must be an object	"run.smoke_args must be an object",
 crates/skill-sdk/src/manifest.rs	skills must receive scoped secret references from runtime	"skills must receive scoped secret references from runtime",
+crates/skill-sdk/src/path_policy.rs	path is empty or oversized	SkillSdkError::new("path_invalid", "path is empty or oversized")
+crates/skill-sdk/src/path_policy.rs	path must not contain parent traversal	"path must not contain parent traversal",
 crates/skill-sdk/src/prebuilt.rs	archive links and special files are forbidden	"archive links and special files are forbidden",
 crates/skill-sdk/src/prebuilt.rs	only HTTPS downloads are allowed	"only HTTPS downloads are allowed",
 crates/skill-sdk/src/prebuilt.rs	source_path or url is required	SkillSdkError::new("prebuilt_source_missing", "source_path or url is required")
@@ -1121,6 +1152,8 @@ crates/skill-sdk/src/receipt.rs	http_json launch requires an HTTPS endpoint	"htt
 crates/skill-sdk/src/receipt.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
 crates/skill-sdk/src/runtime.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
 crates/skill-sdk/src/runtime.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
+crates/skill-sdk/src/safe_archive.rs	archive member path is absolute or contains traversal	"archive member path is absolute or contains traversal",
+crates/skill-sdk/src/safe_archive.rs	large archive member requires declared skill storage	"large archive member requires declared skill storage",
 crates/skill-sdk/src/sandbox.rs	(allow file-write* (subpath "{escaped}"))\n	profile.push_str(&format!("(allow file-write* (subpath \\"{escaped}\\"))\\n"));
 crates/skill-sdk/src/sandbox.rs	(version 1)\n(allow default)\n(deny file-write*)\n	let mut profile = String::from("(version 1)\\n(allow default)\\n(deny file-write*)\\n");
 crates/skill-sdk/src/sandbox.rs	macOS sandbox-exec not found	"macOS sandbox-exec not found",
@@ -1131,17 +1164,18 @@ crates/skill-sdk/src/templates.rs	# __SKILL_NAME__\n\n__SUMMARY__\n\nThis packag
 crates/skill-sdk/src/templates.rs	### `{action}`\n\n- Required args: none.\n- Optional args: action-specific values documented by the developer.\n	"### `{action}`\\n\\n- Required args: none.\\n- Optional args: action-specific values documented by the developer.\\n"
 crates/skill-sdk/src/templates.rs	capability_summary is empty	"capability_summary is empty",
 crates/skill-sdk/templates/rust/src/main.rs	request record is required	error_text: Some("request record is required".to_string()),
+crates/skills/archive_basic/src/main.rs	archive has no parent: {}	SkillError::invalid_input(format!("archive has no parent: {}", archive.display()))
+crates/skills/archive_basic/src/main.rs	archive has no parent: {}	SkillError::invalid_input(format!("archive has no parent: {}", archive.display()))
+crates/skills/archive_basic/src/main.rs	archive list continuation is beyond the current member set	"archive list continuation is beyond the current member set",
 crates/skills/archive_basic/src/main.rs	archive member must be a relative path	"archive member must be a relative path",
 crates/skills/archive_basic/src/main.rs	archive member must be a relative path	"archive member must be a relative path",
 crates/skills/archive_basic/src/main.rs	archive member with '..' is not allowed	"archive member with '..' is not allowed",
 crates/skills/archive_basic/src/main.rs	args must be object	.ok_or_else(|| SkillError::invalid_input("args must be object"))?;
-crates/skills/archive_basic/src/main.rs	path with '..' is not allowed	return Err(SkillError::invalid_input("path with '..' is not allowed"));
-crates/skills/archive_basic/src/main.rs	run {bin} failed: {err}	.map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
+crates/skills/archive_basic/src/main.rs	atomic promote failed: {error}	.map_err(|error| SkillError::command_failed(format!("atomic promote failed: {error}")))?;
+crates/skills/archive_basic/src/main.rs	destination has no parent: {}	SkillError::invalid_input(format!("destination has no parent: {}", dest.display()))
+crates/skills/archive_basic/src/main.rs	invalid archive list continuation	.ok_or_else(|| SkillError::invalid_input("invalid archive list continuation"))
 crates/skills/archive_basic/src/main.rs	run {bin} failed: {err}	.map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
 crates/skills/archive_basic/src/main.rs	unsupported action; use list|read|pack|unpack	"unsupported action; use list|read|pack|unpack",
-crates/skills/archive_basic/src/main.rs	unsupported archive format for list	"unsupported archive format for list",
-crates/skills/archive_basic/src/main.rs	unsupported archive format for read	"unsupported archive format for read",
-crates/skills/archive_basic/src/main.rs	unsupported archive format for unpack	"unsupported archive format for unpack",
 crates/skills/archive_basic/src/main.rs	unsupported format; use zip|tar.gz	"unsupported format; use zip|tar.gz",
 crates/skills/archive_basic/src/main.rs	{role} not found: {path_text}	format!("{role} not found: {path_text}"),
 crates/skills/audio_synthesize/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
@@ -1691,38 +1725,62 @@ crates/skills/image_vision/src/providers.rs	{error_label} request failed: {err}	
 crates/skills/image_vision/src/providers.rs	{error_label} response missing text: {}	"{error_label} response missing text: {}",
 crates/skills/install_module/src/main.rs	args must be object or string	.ok_or_else(|| "args must be object or string".to_string())?;
 crates/skills/install_module/src/main.rs	cargo is not available. install Rust toolchain first	"rust" => "cargo is not available. install Rust toolchain first".to_string(),
-crates/skills/install_module/src/main.rs	check installer failed: {err}	.map_err(|err| format!("check installer failed: {err}"))?;
 crates/skills/install_module/src/main.rs	go is not available. install golang toolchain first	"go" => "go is not available. install golang toolchain first".to_string(),
 crates/skills/install_module/src/main.rs	invalid module name: {module}	return Err(format!("invalid module name: {module}"));
 crates/skills/install_module/src/main.rs	no modules to install	return Err("no modules to install".to_string());
+crates/skills/install_module/src/main.rs	prepare installation target {} failed: {error}	"prepare installation target {} failed: {error}",
 crates/skills/install_module/src/main.rs	python3 pip is not available. install python3-pip first	"python" => "python3 pip is not available. install python3-pip first".to_string(),
 crates/skills/install_module/src/main.rs	run installer failed: {err}	.map_err(|err| format!("run installer failed: {err}"))
+crates/skills/install_module/src/main.rs	workspace root unavailable: {error}	fs::canonicalize(&root).map_err(|error| format!("workspace root unavailable: {error}"))
+crates/skills/kb/src/ingest.rs	ingest job owner mismatch	return Err(anyhow!("ingest job owner mismatch"));
+crates/skills/kb/src/ingest.rs	namespace has no documents to reindex	return Err(anyhow!("namespace has no documents to reindex"));
+crates/skills/kb/src/ingest.rs	namespace not found or unreadable: {namespace}	.map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
+crates/skills/kb/src/ingest.rs	skip large file {path_str} ({size} bytes > max_file_size {})	"skip large file {path_str} ({size} bytes > max_file_size {})",
+crates/skills/kb/src/ingest.rs	skip {path_str}: extraction failed: {error}	.push(format!("skip {path_str}: extraction failed: {error}"));
+crates/skills/kb/src/ingest.rs	skip {path_str}: {reason}	job.warnings.push(format!("skip {path_str}: {reason}"));
+crates/skills/kb/src/ingest.rs	{action} requires job_id	.ok_or_else(|| anyhow!("{action} requires job_id"))
+crates/skills/kb/src/ingest_extract.rs	binary content contains NUL bytes	reason: "binary content contains NUL bytes".to_string(),
+crates/skills/kb/src/ingest_extract.rs	content is not valid UTF-8	reason: "content is not valid UTF-8".to_string(),
+crates/skills/kb/src/ingest_extract.rs	document has no extractable text	reason: "document has no extractable text".to_string(),
 crates/skills/kb/src/main.rs	KB skill storage descriptor is invalid	return Err(anyhow!("KB skill storage descriptor is invalid"));
+crates/skills/kb/src/main.rs	KB skill storage descriptor is malformed	serde_json::from_value(storage).context("KB skill storage descriptor is malformed")?;
 crates/skills/kb/src/main.rs	KB skill storage descriptor is required	.ok_or_else(|| anyhow!("KB skill storage descriptor is required"))?;
-crates/skills/kb/src/main.rs	action must be ingest|search|list_namespaces|stats	"action must be ingest|search|list_namespaces|stats"
+crates/skills/kb/src/main.rs	action must be ingest|search|list_namespaces|list_documents|remove_documents|delete_namespace|reindex|resume_ingest|ingest_job_status|cancel_ingest|stats	"action must be ingest|search|list_namespaces|list_documents|remove_documents|delete_namespace|reindex|resume_ingest|ingest_job_status|cancel_ingest|stats"
 crates/skills/kb/src/main.rs	found {} hit(s) for query	"summary": format!("found {} hit(s) for query", hits.len()),
 crates/skills/kb/src/main.rs	load namespace failed: {namespace}	.with_context(|| format!("load namespace failed: {namespace}"))?;
+crates/skills/kb/src/main.rs	managed document path is invalid	return Err(anyhow!("managed document path is invalid"));
+crates/skills/kb/src/main.rs	namespace not found or unreadable: {namespace}	.map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
+crates/skills/kb/src/main.rs	namespace not found or unreadable: {namespace}	.map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
 crates/skills/kb/src/main.rs	namespace not found or unreadable: {}	.map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
 crates/skills/kb/src/main.rs	no effective query terms	json!({"status":"ok","hits":[],"summary":"no effective query terms","stats":{"total_candidates":0}}),
-crates/skills/kb/src/main.rs	no matching chunks under filters	json!({"status":"ok","hits":[],"summary":"no matching chunks under filters","stats":{"total_candidates":0}}),
-crates/skills/kb/src/main.rs	paths[] must not be empty	return Err(anyhow!("paths[] must not be empty"));
-crates/skills/kb/src/main.rs	skill-owned retrieval index sync failed: {err}	warnings.push(format!("skill-owned retrieval index sync failed: {err}"));
-crates/skills/kb/src/main.rs	skip empty text file {}	warnings.push(format!("skip empty text file {}", path_str));
-crates/skills/kb/src/main.rs	skip large file {} ({} bytes > max_file_size {})	"skip large file {} ({} bytes > max_file_size {})",
-crates/skills/kb/src/storage.rs	DELETE FROM memory_retrieval_index_fts	db.execute("DELETE FROM memory_retrieval_index_fts", [])?;
+crates/skills/kb/src/main.rs	no matching chunks under filters	"summary":"no matching chunks under filters",
+crates/skills/kb/src/storage.rs	ALTER TABLE kb_namespaces RENAME TO kb_namespaces_v1	db.execute("ALTER TABLE kb_namespaces RENAME TO kb_namespaces_v1", [])?;
+crates/skills/kb/src/storage.rs	DROP TABLE kb_namespaces_v1	db.execute("DROP TABLE kb_namespaces_v1", [])?;
+crates/skills/kb/src/storage.rs	DROP TABLE kb_namespaces_v1	tx.execute("DROP TABLE kb_namespaces_v1", [])?;
+crates/skills/kb/src/storage.rs	KB chunk text must not be empty	return Err(anyhow!("KB chunk text must not be empty"));
+crates/skills/kb/src/storage.rs	KB document chunk count does not match payload	return Err(anyhow!("KB document chunk count does not match payload"));
+crates/skills/kb/src/storage.rs	KB ingest job identity is incomplete	return Err(anyhow!("KB ingest job identity is incomplete"));
+crates/skills/kb/src/storage.rs	KB ingest job owner mismatch	return Err(anyhow!("KB ingest job owner mismatch"));
 crates/skills/kb/src/storage.rs	KB skill storage integrity check failed	return Err(anyhow!("KB skill storage integrity check failed"));
+crates/skills/kb/src/storage.rs	KB snapshot contains an orphan chunk	return Err(anyhow!("KB snapshot contains an orphan chunk"));
+crates/skills/kb/src/storage.rs	PRAGMA table_info({table})	let mut stmt = db.prepare(&format!("PRAGMA table_info({table})"))?;
+crates/skills/kb/src/storage.rs	SELECT COUNT(*) FROM {table} WHERE {predicate}	let sql = format!("SELECT COUNT(*) FROM {table} WHERE {predicate}");
+crates/skills/kb/src/storage.rs	both active and staged legacy KB namespace tables exist	"both active and staged legacy KB namespace tables exist"
+crates/skills/kb/src/storage.rs	changed KB document disappeared	.ok_or_else(|| anyhow!("changed KB document disappeared"))?;
+crates/skills/kb/src/storage.rs	ingest job not found	.ok_or_else(|| anyhow!("ingest job not found"))?;
+crates/skills/kb/src/storage.rs	legacy KB SQLite payload is malformed	.context("legacy KB SQLite payload is malformed")?,
+crates/skills/kb/src/storage.rs	legacy KB snapshot digest verification failed	return Err(anyhow!("legacy KB snapshot digest verification failed"));
 crates/skills/kb/src/storage.rs	legacy KB snapshot has no stable owner or namespace identity	"legacy KB snapshot has no stable owner or namespace identity"
-crates/skills/kb/src/storage.rs	legacy KB snapshot verification failed	return Err(anyhow!("legacy KB snapshot verification failed"));
+crates/skills/kb/src/storage.rs	legacy KB snapshot row-count verification failed	return Err(anyhow!("legacy KB snapshot row-count verification failed"));
 crates/skills/kb/src/storage.rs	namespace is owned by another user scope	return Err(anyhow!("namespace is owned by another user scope"));
-crates/skills/kb/src/storage.rs	namespace payload is malformed	.context("namespace payload is malformed")?;
-crates/skills/kb/src/storage.rs	namespace payload is malformed	.context("namespace payload is malformed")?;
 crates/skills/kb/src/storage.rs	open KB skill storage failed: {}	"open KB skill storage failed: {}",
-crates/skills/kb/src/storage.rs	parse legacy KB snapshot failed: {}	.with_context(|| format!("parse legacy KB snapshot failed: {}", path.display()))?;
+crates/skills/kb/src/storage.rs	parse legacy KB snapshot failed: {}	.with_context(|| format!("parse legacy KB snapshot failed: {}", path.display()))?,
 crates/skills/kb/src/storage.rs	read legacy KB directory failed: {}	.with_context(|| format!("read legacy KB directory failed: {}", directory.display()))?
 crates/skills/kb/src/storage.rs	read legacy KB snapshot failed: {}	.with_context(|| format!("read legacy KB snapshot failed: {}", path.display()))?;
 crates/skills/kb/src/storage.rs	remove migrated KB snapshot failed: {}	.with_context(|| format!("remove migrated KB snapshot failed: {}", path.display()))?;
 crates/skills/kb/src/storage.rs	skill storage database identity is invalid	return Err(anyhow!("skill storage database identity is invalid"));
 crates/skills/kb/src/storage.rs	skill storage database path must be absolute	return Err(anyhow!("skill storage database path must be absolute"));
+crates/skills/kb/src/storage.rs	stored ingest job is malformed	serde_json::from_str(&payload).context("stored ingest job is malformed")?;
 crates/skills/log_analyze/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}	"log directory contains no readable files: {}",
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}	"log directory contains no readable files: {}",
@@ -1955,26 +2013,22 @@ crates/skills/package_manager/src/main.rs	args must be object	.ok_or_else(|| "ar
 crates/skills/package_manager/src/main.rs	args.package or args.packages is required	Err("args.package or args.packages is required".to_string())
 crates/skills/package_manager/src/main.rs	cannot detect package manager; set args.manager	.ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
 crates/skills/package_manager/src/main.rs	cannot detect package manager; set args.manager	.ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
-crates/skills/package_manager/src/main.rs	create install logs dir failed: {err}	eprintln!("create install logs dir failed: {err}");
 crates/skills/package_manager/src/main.rs	invalid package name: {package}	return Err(format!("invalid package name: {package}"));
-crates/skills/package_manager/src/main.rs	open install log failed: {err}	eprintln!("open install log failed: {err}");
 crates/skills/package_manager/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/package_manager/src/main.rs	run package install failed: {err}	.map_err(|err| format!("run package install failed: {err}"))?;
-crates/skills/package_manager/src/main.rs	unsupported action; use detect|install|smart_install|uninstall	"unsupported action; use detect|install|smart_install|uninstall"
-crates/skills/package_manager/src/main.rs	write install log failed: {err}	eprintln!("write install log failed: {err}");
+crates/skills/package_manager/src/main.rs	unsupported action; use detect|install|smart_install_preview|smart_install|uninstall	"unsupported action; use detect|install|smart_install_preview|smart_install|uninstall"
 crates/skills/process_basic/src/main.rs	PID PPID %CPU %MEM COMM	"PID PPID %CPU %MEM COMM",
 crates/skills/process_basic/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
-crates/skills/process_basic/src/main.rs	create service logs dir failed: {err}	eprintln!("create service logs dir failed: {err}");
 crates/skills/process_basic/src/main.rs	no matching processes for filter: {filter}	output.push(format!("no matching processes for filter: {filter}"));
 crates/skills/process_basic/src/main.rs	no matching rows for filter: {filter}	kept.push(format!("no matching rows for filter: {filter}"));
-crates/skills/process_basic/src/main.rs	open service log failed: {err}	eprintln!("open service log failed: {err}");
-crates/skills/process_basic/src/main.rs	path with '..' is not allowed	Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
 crates/skills/process_basic/src/main.rs	read file failed: {err}	std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
+crates/skills/process_basic/src/main.rs	refusing to signal the active process skill	return Err("refusing to signal the active process skill".to_string());
 crates/skills/process_basic/src/main.rs	run pgrep failed: {err}	.map_err(|err| format!("run pgrep failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	run ps failed: {err}	.map_err(|err| format!("run ps failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	run {bin} failed: {err}	.map_err(|err| format!("run {bin} failed: {err}"))?;
 crates/skills/process_basic/src/main.rs	unsupported action; use ps|port_list|kill|tail_log	_ => Err("unsupported action; use ps|port_list|kill|tail_log".to_string()),
-crates/skills/process_basic/src/main.rs	write service log failed: {err}	eprintln!("write service log failed: {err}");
+crates/skills/process_basic/src/main.rs	unsupported signal; use TERM|KILL|INT|HUP	_ => Err("unsupported signal; use TERM|KILL|INT|HUP".to_string()),
+crates/skills/rss_fetch/src/category_discovery.rs	pending category candidate was appended	.expect("pending category candidate was appended")
 crates/skills/rss_fetch/src/main.rs	From {host}.	"From {host}.",
 crates/skills/rss_fetch/src/main.rs	From {host}.	"From {host}.".to_string(),
 crates/skills/rss_fetch/src/main.rs	Please check the original title and link for details.	"Please check the original title and link for details.",

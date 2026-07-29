@@ -1,12 +1,12 @@
 #[cfg(not(target_os = "macos"))]
 use std::cmp::Ordering;
-use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
+use rustclaw_skill_sdk::{
+    BoundedResult, ContinuationDescriptor, ExpectedPathKind, SkillPathPolicy,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -17,6 +17,8 @@ const SKILL_NAME: &str = "process_basic";
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,7 +38,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args) {
+            Ok(req) => match execute_with_context(req.args, req.context.as_ref()) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -67,19 +69,26 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
+fn error_extra(error_code: &str) -> Value {
     json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
     })
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
+fn execute_with_context(args: Value, context: Option<&Value>) -> Result<(String, Value), String> {
+    execute_with_root_and_context(args, &workspace_root(), context)
+}
+
+fn execute_with_root_and_context(
+    args: Value,
+    workspace_root: &Path,
+    context: Option<&Value>,
+) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -119,7 +128,8 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .get("pid")
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| "pid is required".to_string())?;
-            let signal = obj.get("signal").and_then(|v| v.as_str()).unwrap_or("TERM");
+            validate_kill_target(pid)?;
+            let signal = normalize_signal(obj.get("signal").and_then(|v| v.as_str()))?;
             run_command("kill", &["-s", signal, &pid.to_string()], None).map(|text| {
                 (
                     text.clone(),
@@ -137,20 +147,48 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(100)
                 .min(1000) as usize;
-            let root = workspace_root();
-            let full = resolve_path(&root, path)?;
+            let policy =
+                SkillPathPolicy::new(workspace_root, context).map_err(path_policy_error)?;
+            let full = policy
+                .resolve_existing(path, ExpectedPathKind::File)
+                .map_err(path_policy_error)?;
             tail_file(&full, n).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"tail_log","path":path,"n":n,"platform":std::env::consts::OS,"output":text}),
+                    json!({"action":"tail_log","path":path,"resolved_path":full.display().to_string(),"n":n,"authority_scope":if policy.authority().is_unrestricted_admin(){"unrestricted_admin"}else{"workspace"},"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }
         _ => Err("unsupported action; use ps|port_list|kill|tail_log".to_string()),
     };
 
-    append_service_log(action, obj, &result);
     result
+}
+
+fn normalize_signal(signal: Option<&str>) -> Result<&'static str, String> {
+    let signal = signal.unwrap_or("TERM").trim().to_ascii_uppercase();
+    let signal = signal.strip_prefix("SIG").unwrap_or(signal.as_str());
+    match signal {
+        "TERM" => Ok("TERM"),
+        "KILL" => Ok("KILL"),
+        "INT" => Ok("INT"),
+        "HUP" => Ok("HUP"),
+        _ => Err("unsupported signal; use TERM|KILL|INT|HUP".to_string()),
+    }
+}
+
+fn validate_kill_target(pid: i64) -> Result<(), String> {
+    if pid <= 1 {
+        return Err("refusing to signal init/kernel process".to_string());
+    }
+    if pid == i64::from(std::process::id()) {
+        return Err("refusing to signal the active process skill".to_string());
+    }
+    Ok(())
+}
+
+fn path_policy_error(error: rustclaw_skill_sdk::SkillSdkError) -> String {
+    format!("{}: {}", error.code, error.detail)
 }
 
 fn string_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -771,83 +809,6 @@ fn workspace_root() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
-    let raw = Path::new(input);
-    let mut normalized = PathBuf::new();
-    for comp in raw.components() {
-        match comp {
-            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
-            Component::CurDir => {}
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    if raw.is_absolute() {
-        return Ok(normalized);
-    }
-    Ok(workspace_root.join(normalized))
-}
-
-fn append_service_log(
-    action: &str,
-    args: &serde_json::Map<String, Value>,
-    result: &Result<(String, Value), String>,
-) {
-    let root = workspace_root();
-    let log_dir = root.join("logs");
-    if let Err(err) = create_dir_all(&log_dir) {
-        eprintln!("create service logs dir failed: {err}");
-        return;
-    }
-    let file_path = log_dir.join("service_ops.log");
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file_path)
-    {
-        Ok(f) => f,
-        Err(err) => {
-            eprintln!("open service log failed: {err}");
-            return;
-        }
-    };
-
-    let (status, output, error) = match result {
-        Ok((text, _extra)) => ("ok", Some(truncate_for_log(text)), None),
-        Err(err) => ("failed", None, Some(truncate_for_log(err))),
-    };
-
-    let line = serde_json::json!({
-        "ts": now_ts(),
-        "action": action,
-        "status": status,
-        "args": args,
-        "output": output,
-        "error": error,
-    })
-    .to_string();
-
-    if let Err(err) = writeln!(file, "{line}") {
-        eprintln!("write service log failed: {err}");
-    }
-}
-
-fn truncate_for_log(s: &str) -> String {
-    const MAX: usize = 8000;
-    if s.len() <= MAX {
-        return s.to_string();
-    }
-    let mut out = s[..MAX].to_string();
-    out.push_str("...(truncated)");
-    out
-}
-
-fn now_ts() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[cfg(test)]

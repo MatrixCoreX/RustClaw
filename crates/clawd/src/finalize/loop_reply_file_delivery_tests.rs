@@ -787,7 +787,7 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
         ..Default::default()
     };
 
-    let contract_error = "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
+    let contract_error = "__RC_SKILL_ERROR__:{\"error_code\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;

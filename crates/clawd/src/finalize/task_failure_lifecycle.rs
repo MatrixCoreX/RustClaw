@@ -24,7 +24,7 @@ fn terminal_failure_reason_for_error(
     failure_attribution: &str,
 ) -> Option<&'static str> {
     if let Some(structured) = crate::skills::parse_structured_skill_error(err_text.trim()) {
-        let error_kind = structured.error_kind.trim().to_ascii_lowercase();
+        let error_kind = structured.error_code.trim().to_ascii_lowercase();
         if matches!(error_kind.as_str(), "timeout" | "idle_timeout") {
             return Some(
                 crate::task_lifecycle::TerminalFailureReason::ToolTimeoutWithoutAsyncResume

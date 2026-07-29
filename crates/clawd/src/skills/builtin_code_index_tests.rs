@@ -55,6 +55,48 @@ fn execute_json(repo: &TempRepo, args: Value) -> Value {
     serde_json::from_str(&text).expect("machine json")
 }
 
+fn relative_file_snapshot(root: &Path) -> Vec<String> {
+    fn visit(root: &Path, current: &Path, files: &mut Vec<String>) {
+        let mut entries = fs::read_dir(current)
+            .expect("read snapshot directory")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read snapshot entries");
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if entry.file_type().expect("snapshot file type").is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.push(
+                    path.strip_prefix(root)
+                        .expect("snapshot path under root")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files
+}
+
+#[test]
+fn observe_only_query_builds_fresh_ephemeral_index_without_workspace_writes() {
+    let repo = TempRepo::new();
+    let before = relative_file_snapshot(&repo.path);
+
+    let result = execute_json(
+        &repo,
+        json!({"action": "find_definitions", "symbol": "helper"}),
+    );
+
+    assert_eq!(result["data"]["definitions"][0]["name"], "helper");
+    assert_eq!(relative_file_snapshot(&repo.path), before);
+    assert!(!repo.path.join(".rustclaw").exists());
+}
+
 #[test]
 fn refresh_is_incremental_and_indexes_rust_symbols_references_and_tests() {
     let repo = TempRepo::new();

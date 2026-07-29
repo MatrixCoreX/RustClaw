@@ -307,7 +307,7 @@ pub(super) fn step_error_has_missing_file_evidence(
         return true;
     }
     crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
-        structured.error_kind == "not_found"
+        structured.error_code == "not_found"
             && structured.extra.as_ref().is_some_and(|extra| {
                 ["path", "resolved_path"].iter().any(|field| {
                     extra
@@ -505,7 +505,7 @@ fn missing_file_path_from_step_error(
         return Some(path.to_string());
     }
     let structured = crate::skills::parse_structured_skill_error(error)?;
-    if structured.error_kind != "not_found" {
+    if structured.error_code != "not_found" {
         return None;
     }
     structured

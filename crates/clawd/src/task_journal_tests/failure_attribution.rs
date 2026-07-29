@@ -1,20 +1,20 @@
 use super::*;
 
 #[test]
-fn trace_json_infers_failure_attribution_from_standard_error_kind() {
-    for (error_kind, expected) in [
+fn trace_json_infers_failure_attribution_from_standard_error_code() {
+    for (error_code, expected) in [
         ("schema_validation_failed", "schema_error"),
         ("provider_retryable_response", "provider_error"),
         ("channel_send_failed", "delivery_error"),
     ] {
         let mut journal = TaskJournal::for_task(
-            format!("task-{error_kind}"),
+            format!("task-{error_code}"),
             "ask",
             "trigger structured error",
         );
         let err = crate::skills::structured_skill_error_from_parts(
             "runtime",
-            error_kind,
+            error_code,
             "structured failure",
             None,
             None,
@@ -37,8 +37,8 @@ fn trace_json_infers_failure_attribution_from_standard_error_kind() {
             .expect("step result should be present");
 
         assert_eq!(
-            step.get("error_kind").and_then(Value::as_str),
-            Some(error_kind)
+            step.get("error_code").and_then(Value::as_str),
+            Some(error_code)
         );
         assert_eq!(
             step.get("failure_attribution").and_then(Value::as_str),

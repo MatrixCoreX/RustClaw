@@ -271,7 +271,7 @@ fn observed_tool_evidence_retry_ignores_failed_tool_step() {
             "archive_basic",
             crate::executor::StepExecutionStatus::Error,
             None,
-            Some(r#"{"error_kind":"permission_denied"}"#.to_string()),
+            Some(r#"{"error_code":"permission_denied"}"#.to_string()),
         ));
     let verifier = crate::answer_verifier::AnswerVerifierOut {
         pass: false,
@@ -302,7 +302,7 @@ fn presentation_only_retry_uses_successful_evidence_after_recovered_failure() {
             "fs_basic",
             crate::executor::StepExecutionStatus::Error,
             None,
-            Some(r#"{"error_kind":"invalid_input"}"#.to_string()),
+            Some(r#"{"error_code":"invalid_input"}"#.to_string()),
         ));
     journal
         .step_results
@@ -340,7 +340,7 @@ fn evidence_gap_does_not_ignore_failed_tool_step() {
             "fs_basic",
             crate::executor::StepExecutionStatus::Error,
             None,
-            Some(r#"{"error_kind":"invalid_input"}"#.to_string()),
+            Some(r#"{"error_code":"invalid_input"}"#.to_string()),
         ));
     journal
         .step_results
@@ -943,7 +943,7 @@ fn resume_failure_missing_file_delivery_is_success_result() {
             "error": "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt",
             "structured_error": {
                 "skill": "read_file",
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "extra": {
                     "path": "/tmp/missing.txt",
                     "error_code": "not_found"
@@ -995,7 +995,7 @@ fn resume_failure_unbound_path_lookup_is_clarify_result() {
             "error": "read_dir failed",
             "structured_error": {
                 "skill": "fs_search",
-                "error_kind": "read_dir_failed",
+                "error_code": "read_dir_failed",
                 "extra": {
                     "operation": "read_dir",
                     "reason_code": "read_dir_failed"
@@ -1029,7 +1029,7 @@ fn resume_failure_unbound_directory_lookup_is_clarify_result_without_path_batch(
             "error": "read_dir failed: No such file or directory (os error 2)",
             "structured_error": {
                 "skill": "fs_search",
-                "error_kind": "directory_lookup_failed",
+                "error_code": "directory_lookup_failed",
                 "extra": {
                     "operation": "read_dir",
                     "error_code": "directory_lookup_failed"

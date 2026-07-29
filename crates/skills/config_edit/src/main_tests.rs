@@ -13,7 +13,7 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "path_denied");
+    assert_eq!(extra["error_code"], "path_denied");
     assert_eq!(extra["message_key"], "skill.config_edit.path_denied");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["operation"], "write_config");

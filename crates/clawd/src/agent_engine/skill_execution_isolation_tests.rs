@@ -38,7 +38,7 @@ planner_capabilities = [
         .expect("isolation preflight error should be structured");
     let extra = parsed.extra.as_ref().expect("extra");
 
-    assert_eq!(parsed.error_kind, "isolation_policy_violation");
+    assert_eq!(parsed.error_code, "isolation_policy_violation");
     assert_eq!(
         extra.pointer("/violations/0"),
         Some(&serde_json::json!("filesystem_write"))
@@ -109,7 +109,7 @@ planner_capabilities = [
         .expect("isolation preflight error should be structured");
     let extra = parsed.extra.as_ref().expect("extra");
 
-    assert_eq!(parsed.error_kind, "isolation_policy_violation");
+    assert_eq!(parsed.error_code, "isolation_policy_violation");
     assert_eq!(
         extra.pointer("/violations/0"),
         Some(&serde_json::json!("external_publish"))

@@ -94,7 +94,7 @@ pub(super) fn record_subagent_step_execution(
     action_trace_kind: &str,
     stop_signal: Option<&str>,
     fingerprint: &str,
-) {
+) -> Result<(), String> {
     let output =
         latest_subagent_runtime_observation_for_step(loop_state, global_step, step_in_round)
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
@@ -146,14 +146,15 @@ pub(super) fn record_subagent_step_execution(
         started_at: now,
         finished_at: now,
     };
-    loop_state
-        .capability_results
-        .push(crate::capability_result::envelope_for_step_execution(
+    loop_state.capability_results.push(
+        crate::capability_result::envelope_for_step_execution(
             "subagent",
             args,
             &step_execution,
             None,
-        ));
+        )
+        .map_err(|error| error.to_string())?,
+    );
     loop_state
         .executed_step_results
         .push(step_execution.clone());
@@ -185,4 +186,5 @@ pub(super) fn record_subagent_step_execution(
             .as_deref(),
         &step_execution,
     );
+    Ok(())
 }

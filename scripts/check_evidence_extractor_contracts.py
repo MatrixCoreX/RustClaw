@@ -34,15 +34,7 @@ STEP_TEXT_RE = re.compile(
 )
 FIELD_RE = re.compile(r'"([^"]+)"')
 
-BASELINE_TEXT_LEGACY_STRICT_REFS = {
-    "http_basic.text_legacy_v1",
-    "list_dir.text_legacy_v1",
-    "run_cmd.text_legacy_v1",
-    "task_control.get.text_legacy_v1",
-    "task_control.list.text_legacy_v1",
-    "write_file.text_legacy_v1",
-    "x.text_legacy_v1",
-}
+BASELINE_TEXT_LEGACY_STRICT_REFS: set[str] = set()
 
 
 def stable_field_tokens(raw_fields: str) -> list[str]:

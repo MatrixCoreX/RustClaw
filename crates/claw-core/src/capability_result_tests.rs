@@ -117,6 +117,18 @@ fn extended_machine_metadata_is_versioned_and_validated() {
         "snapshot_sha256": "abc123"
     }));
     envelope.truncated = true;
+    envelope.completeness = Some(ResultCompleteness::partial(
+        "page_has_more",
+        Some(20),
+        None,
+        false,
+    ));
+    envelope.continuation = Some(Continuation {
+        kind: ContinuationKind::Opaque,
+        reference: Some("cursor:20".to_string()),
+        poll_after_ms: None,
+        state: json!({"snapshot_sha256": "abc123"}),
+    });
     envelope.provenance = json!({
         "source": "runtime_step",
         "content_trust": "untrusted_tool_output"
@@ -199,6 +211,43 @@ fn complete_result_rejects_partial_reason() {
     assert_eq!(
         envelope.validate(),
         Err(CapabilityResultValidationError::InvalidCompleteness)
+    );
+}
+
+#[test]
+fn status_continuation_delivery_and_artifact_consistency_are_enforced() {
+    let mut waiting = CapabilityResultEnvelope::ok("video.generate", None, json!({}));
+    waiting.status = CapabilityResultStatus::Waiting;
+    waiting.continuation = Some(Continuation {
+        kind: ContinuationKind::AwaitUser,
+        reference: None,
+        poll_after_ms: None,
+        state: json!({}),
+    });
+    assert_eq!(
+        waiting.validate(),
+        Err(CapabilityResultValidationError::InvalidContinuation)
+    );
+
+    let mut artifact_delivery = CapabilityResultEnvelope::ok("document.generate", None, json!({}));
+    artifact_delivery.delivery.intent = CapabilityDeliveryIntent::Artifact;
+    assert_eq!(
+        artifact_delivery.validate(),
+        Err(CapabilityResultValidationError::MissingDeliveryArtifact)
+    );
+
+    let mut artifact = CapabilityResultEnvelope::ok("document.generate", None, json!({}));
+    artifact.artifacts.push(ArtifactRef {
+        id: Some("not a machine id".to_string()),
+        path: Some("report.pdf".to_string()),
+        uri: None,
+        media_type: Some("application/pdf".to_string()),
+        sha256: None,
+        metadata: json!({}),
+    });
+    assert_eq!(
+        artifact.validate(),
+        Err(CapabilityResultValidationError::InvalidArtifactRef)
     );
 }
 

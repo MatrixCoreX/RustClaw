@@ -222,7 +222,6 @@ pub(crate) const WEBD_LOGIN_SQL: &str = include_str!("../../../migrations/005_we
 const LLM_RETRY_TIMES: usize = 2;
 pub(crate) const AGENT_MAX_ACTIONS_PER_TURN: usize = 32;
 pub(crate) const RESUME_CONTEXT_ERROR_PREFIX: &str = "__RESUME_CTX__";
-pub(crate) const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 /// Per-line truncation ceiling for [`crate::log_utils::truncate_for_log`].
 ///

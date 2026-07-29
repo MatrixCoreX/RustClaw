@@ -44,7 +44,7 @@ pub(super) fn prepare_mutation_execution(
             "clawd.task.mutation_ledger_unavailable"
         };
         json!({
-            "error_kind": reason_code,
+            "error_code": reason_code,
             "reason_code": reason_code,
             "message_key": message_key,
             "owner_layer": "task_mutation_ledger",
@@ -57,7 +57,7 @@ pub(super) fn prepare_mutation_execution(
             crate::repo::start_task_mutation_attempt(&state.core.db, &mut lease).map_err(
                 |error| {
                     json!({
-                        "error_kind": "mutation_attempt_start_failed",
+                        "error_code": "mutation_attempt_start_failed",
                         "reason_code": "mutation_attempt_start_failed",
                         "message_key": "clawd.task.mutation_attempt_start_failed",
                         "owner_layer": "task_mutation_ledger",
@@ -107,7 +107,7 @@ fn reconcile_uncertain_mutation_if_directed(
     )
     .map_err(|error| {
         json!({
-            "error_kind": "mutation_reconciliation_failed",
+            "error_code": "mutation_reconciliation_failed",
             "reason_code": "mutation_reconciliation_failed",
             "message_key": "clawd.task.mutation_reconciliation_failed",
             "owner_layer": "task_mutation_ledger",
@@ -261,14 +261,15 @@ pub(super) fn record_completed_without_replay(
         started_at: crate::now_ts_u64(),
         finished_at: crate::now_ts_u64(),
     };
-    loop_state
-        .capability_results
-        .push(crate::capability_result::envelope_for_step_execution(
+    loop_state.capability_results.push(
+        crate::capability_result::envelope_for_step_execution(
             normalized_skill,
             args,
             &step_result,
             record.receipt.as_ref(),
-        ));
+        )
+        .map_err(|error| error.to_string())?,
+    );
     loop_state.executed_step_results.push(step_result);
     crate::append_subtask_result(
         &mut loop_state.subtask_results,

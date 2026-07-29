@@ -246,12 +246,8 @@ fn loop_has_directory_read_error(loop_state: &LoopState) -> bool {
 
 fn step_error_kind(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let raw = step.error.as_deref()?.trim();
-    let payload = raw.strip_prefix("__RC_SKILL_ERROR__:").unwrap_or(raw);
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()?
-        .get("error_kind")
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_ascii_lowercase())
+    crate::skills::parse_structured_skill_error(raw)
+        .map(|value| value.error_code.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
 }
 

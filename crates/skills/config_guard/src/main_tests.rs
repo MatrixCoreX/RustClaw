@@ -14,7 +14,7 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "not_found");
+    assert_eq!(extra["error_code"], "not_found");
     assert_eq!(extra["message_key"], "skill.config_guard.not_found");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["operation"], "read_config");
@@ -81,9 +81,9 @@ fn execute_missing_file_returns_structured_error_kind() {
     assert_eq!(
         err.extra
             .as_ref()
-            .and_then(|extra| extra.get("error_kind"))
+            .and_then(|extra| extra.get("operation"))
             .and_then(Value::as_str),
-        Some("not_found")
+        Some("read_config")
     );
     let _ = std::fs::remove_dir_all(root);
 }

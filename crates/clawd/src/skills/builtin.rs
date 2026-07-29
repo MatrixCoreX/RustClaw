@@ -8,8 +8,12 @@ use crate::{AppState, ClaimedTask};
 mod builtin_child_task_patch;
 #[path = "builtin_code_index.rs"]
 mod builtin_code_index;
+#[path = "builtin_list_dir.rs"]
+mod builtin_list_dir;
 #[path = "builtin_pty_session.rs"]
 mod builtin_pty_session;
+#[path = "builtin_read_file.rs"]
+mod builtin_read_file;
 #[path = "builtin_run_cmd.rs"]
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
@@ -200,7 +204,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 })
         }
         "read_file" => {
-            ensure_only_keys(map, &["path"])?;
+            ensure_only_keys(map, &["path", "start_byte", "max_bytes"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
@@ -220,23 +224,27 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     None,
                 ));
             }
-            let bytes = std::fs::read(&real_path).map_err(|err| {
-                if err.kind() == std::io::ErrorKind::NotFound {
-                    format!(
-                        "{}{}",
-                        super::READ_FILE_NOT_FOUND_PREFIX,
-                        real_path.display()
-                    )
-                } else {
-                    io_builtin_error("read_file", "read file", &err, Some(path), Some(&real_path))
-                }
-            })?;
-            let clip = if bytes.len() > crate::MAX_READ_FILE_BYTES {
-                &bytes[..crate::MAX_READ_FILE_BYTES]
-            } else {
-                &bytes
-            };
-            Ok(String::from_utf8_lossy(clip).to_string())
+            let start_byte = map.get("start_byte").and_then(Value::as_u64).unwrap_or(0);
+            let max_bytes = optional_usize(map, "max_bytes");
+            let value = builtin_read_file::read_file_page(path, &real_path, start_byte, max_bytes)
+                .map_err(|err| {
+                    if err.kind() == std::io::ErrorKind::NotFound {
+                        format!(
+                            "{}{}",
+                            super::READ_FILE_NOT_FOUND_PREFIX,
+                            real_path.display()
+                        )
+                    } else {
+                        io_builtin_error(
+                            "read_file",
+                            "read file",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    }
+                })?;
+            Ok(value.to_string())
         }
         "write_file" => {
             ensure_only_keys(
@@ -348,7 +356,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
             )
         }
         "list_dir" => {
-            ensure_only_keys(map, &["path", "names_only", "limit", "max_entries"])?;
+            ensure_only_keys(
+                map,
+                &["path", "names_only", "limit", "max_entries", "cursor"],
+            )?;
             let path = optional_string(map, "path").unwrap_or(".");
             let max_entries = optional_usize(map, "limit")
                 .or_else(|| optional_usize(map, "max_entries"))
@@ -424,32 +435,37 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     None,
                 ));
             }
-            let mut items = Vec::new();
-            for entry in std::fs::read_dir(&real_path).map_err(|err| {
-                io_builtin_error("list_dir", "read_dir", &err, Some(path), Some(&real_path))
-            })? {
-                let e = entry.map_err(|err| {
-                    io_builtin_error(
+            let cursor = map.get("cursor").and_then(Value::as_u64).unwrap_or(0);
+            let cursor = usize::try_from(cursor).map_err(|_| {
+                builtin_error(
+                    "list_dir",
+                    "invalid_cursor",
+                    "list_dir cursor exceeds this platform's addressable range",
+                    Some(path),
+                    Some(&real_path),
+                    None,
+                )
+            })?;
+            match builtin_list_dir::list_directory_page(path, &real_path, cursor, max_entries) {
+                Ok(value) => Ok(value.to_string()),
+                Err(builtin_list_dir::ListDirError::Io(err)) => Err(io_builtin_error(
+                    "list_dir",
+                    "read directory",
+                    &err,
+                    Some(path),
+                    Some(&real_path),
+                )),
+                Err(builtin_list_dir::ListDirError::CursorOutOfRange { cursor, total }) => {
+                    Err(builtin_error(
                         "list_dir",
-                        "read directory entry",
-                        &err,
+                        "cursor_out_of_range",
+                        format!("list_dir cursor {cursor} exceeds total entry count {total}"),
                         Some(path),
                         Some(&real_path),
-                    )
-                })?;
-                let name = e.file_name();
-                let mut label = name.to_string_lossy().to_string();
-                if e.path().is_dir() {
-                    label.push('/');
-                }
-                items.push(label);
-                if items.len() >= 200 {
-                    break;
+                        Some(serde_json::json!({ "cursor": cursor, "total_count": total })),
+                    ))
                 }
             }
-            items.sort();
-            items.truncate(max_entries);
-            Ok(items.join("\n"))
         }
         "run_cmd" => {
             ensure_only_keys(
@@ -743,7 +759,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     }
                 });
             }
-            run_safe_command_detailed(
+            let success = run_safe_command_detailed(
                 &cwd_path,
                 &sanitized_command,
                 state.skill_rt.max_cmd_length,
@@ -769,7 +785,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
                         Some(extra),
                     )
                 }
-            })
+            })?;
+            Ok(success
+                .machine_projection(&sanitized_command, &cwd_path)
+                .to_string())
         }
         "make_dir" => {
             ensure_only_keys(map, &["path", "parents", "recursive"])?;

@@ -52,7 +52,7 @@ fn source_health_rejects_unknown_category_structurally() {
         .clone();
     let error = source_health(&cfg, &args).expect_err("unknown category");
 
-    assert_eq!(error.extra["error_kind"], "category_not_configured");
+    assert_eq!(error.extra["error_code"], "category_not_configured");
     assert_eq!(error.extra["invalid_argument"], "category");
     assert_eq!(error.extra["available_categories"], json!(["general"]));
 }
@@ -121,7 +121,7 @@ fn discovery_requires_evidence_url_before_network() {
     .clone();
     let error = discover_sources(&mut cfg, &args).expect_err("invalid evidence");
 
-    assert_eq!(error.extra["error_kind"], "no_valid_source_candidates");
+    assert_eq!(error.extra["error_code"], "no_valid_source_candidates");
     assert_eq!(
         error.extra["results"][0]["error_code"],
         "invalid_discovery_evidence:invalid_url"
@@ -157,7 +157,7 @@ fn promotion_requires_explicit_machine_confirmation() {
     let error = promote_sources(&mut cfg, &args).expect_err("confirmation required");
 
     assert_eq!(
-        error.extra["error_kind"],
+        error.extra["error_code"],
         "source_promotion_confirmation_required"
     );
     assert_eq!(error.extra["confirmation_field"], "confirm");
@@ -173,7 +173,7 @@ fn refresh_without_candidates_returns_structured_error() {
         .clone();
     let error = refresh_candidates(&mut cfg, &args).expect_err("no candidates");
 
-    assert_eq!(error.extra["error_kind"], "no_source_candidates");
+    assert_eq!(error.extra["error_code"], "no_source_candidates");
     assert_eq!(error.extra["action"], "refresh_candidates");
 }
 

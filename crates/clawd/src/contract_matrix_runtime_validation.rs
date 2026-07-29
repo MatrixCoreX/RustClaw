@@ -73,7 +73,7 @@ pub(in crate::contract_matrix) fn collect_external_observation_admission_errors(
     errors: &mut BTreeSet<String>,
     context: &str,
     observation_sources: &[String],
-    observation_extractors: &[ObservationExtractor],
+    _observation_extractors: &[ObservationExtractor],
     registry: &SkillsRegistry,
 ) {
     for token in observation_sources {
@@ -93,23 +93,6 @@ pub(in crate::contract_matrix) fn collect_external_observation_admission_errors(
                 "{context} observation_source `{}` requires matrix_admission.eligible=true for strict evidence use",
                 action_ref.as_key()
             ));
-        }
-        let uses_text_legacy = observation_extractors.iter().any(|extractor| {
-            extractor.extractor_kind == "text_legacy"
-                && (extractor.source == action_ref.as_key() || extractor.source == action_ref.skill)
-        });
-        if uses_text_legacy {
-            let admission_allows_text_legacy = entry
-                .matrix_admission
-                .as_ref()
-                .and_then(|admission| admission.extractor_kind.as_deref())
-                .is_some_and(|kind| normalize_action_token(kind) == "text_legacy");
-            if !admission_allows_text_legacy {
-                errors.insert(format!(
-                    "{context} observation_source `{}` uses text_legacy extractor without matrix_admission.extractor_kind=text_legacy",
-                    action_ref.as_key()
-                ));
-            }
         }
     }
 }
@@ -189,12 +172,9 @@ pub(in crate::contract_matrix) fn observation_extractors_stable_key(
 }
 
 pub(in crate::contract_matrix) fn default_extractor_kind_for_observation_source(
-    source: &str,
+    _source: &str,
 ) -> &'static str {
-    match normalize_action_token(source).as_str() {
-        "run_cmd" | "http_basic" => "text_legacy",
-        _ => "structured_json",
-    }
+    "structured_json"
 }
 
 pub(in crate::contract_matrix) fn normalized_extractor_kind(value: &str) -> String {
@@ -202,7 +182,7 @@ pub(in crate::contract_matrix) fn normalized_extractor_kind(value: &str) -> Stri
 }
 
 fn extractor_kind_is_valid(value: &str) -> bool {
-    matches!(value, "structured_json" | "text_legacy")
+    value == "structured_json"
 }
 
 pub(in crate::contract_matrix) fn normalized_contract_field(value: &str, default: &str) -> String {

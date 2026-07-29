@@ -258,7 +258,7 @@ fn structured_hook_error(outcome: &HookOutcome) -> String {
         "decision": outcome.decision,
         "reason_code": outcome.reason_code,
         "status_code": outcome.reason_code,
-        "error_kind": outcome.reason_code,
+        "error_code": outcome.reason_code,
         "message_key": message_key,
         "action_ref": outcome.action_ref,
     })

@@ -390,7 +390,7 @@ fn structured_run_command_error_records_machine_evidence() {
                 .is_some_and(|value| value == "1")
     }));
     assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("error_kind")
+        item.get("field").and_then(Value::as_str) == Some("error_code")
             && item
                 .get("excerpt")
                 .and_then(Value::as_str)

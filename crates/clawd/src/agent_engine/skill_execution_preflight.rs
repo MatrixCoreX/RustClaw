@@ -9,75 +9,6 @@ use crate::agent_engine::{
     attempt_ledger, maybe_publish_execution_recipe_phase_hint, CLAWD_LITERAL_COMMAND_ARG,
 };
 
-fn matches_json_schema_type(value: &Value, expected_type: &str) -> bool {
-    match expected_type {
-        "string" => value.is_string(),
-        "object" => value.is_object(),
-        "array" => value.is_array(),
-        "boolean" => value.is_boolean(),
-        "number" => value.is_number(),
-        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-        _ => true,
-    }
-}
-
-fn validate_json_contract(value: &Value, schema: &Value) -> Result<(), String> {
-    let expected_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if !expected_type.is_empty() && !matches_json_schema_type(value, expected_type) {
-        return Err(format!("expected type `{expected_type}`"));
-    }
-    if expected_type == "object" {
-        let obj = value
-            .as_object()
-            .ok_or_else(|| "expected object output".to_string())?;
-        if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
-            for key in required.iter().filter_map(|item| item.as_str()) {
-                if !obj.contains_key(key) {
-                    return Err(format!("missing required field `{key}`"));
-                }
-            }
-        }
-        if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
-            for (key, prop_schema) in properties {
-                let Some(field_value) = obj.get(key) else {
-                    continue;
-                };
-                if let Some(field_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
-                    if !matches_json_schema_type(field_value, field_type) {
-                        return Err(format!("field `{key}` expected type `{field_type}`"));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_skill_output_contract(
-    state: &AppState,
-    normalized_skill: &str,
-    output: &str,
-) -> Result<(), String> {
-    let Some((output_kind, schema)) = state.skill_output_contract(normalized_skill) else {
-        return Ok(());
-    };
-    let schema_accepts_text_object = schema.get("type").and_then(|v| v.as_str()) == Some("object")
-        && schema
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .map(|props| props.contains_key("text"))
-            .unwrap_or(false);
-    let candidate = if schema_accepts_text_object {
-        json!({ "text": output })
-    } else if output_kind == claw_core::skill_registry::OutputKind::Text {
-        Value::String(output.to_string())
-    } else {
-        crate::parse_llm_json_raw_or_any::<Value>(output)
-            .unwrap_or_else(|| Value::String(output.to_string()))
-    };
-    validate_json_contract(&candidate, &schema)
-}
-
 fn string_contains_unresolved_runtime_placeholder(value: &str) -> bool {
     let mut search_start = 0usize;
     while let Some(open_rel) = value[search_start..].find("{{") {
@@ -948,7 +879,7 @@ pub(super) fn structured_observation_path_argument_error(
 
 pub(super) struct PreflightFailureMetadata {
     pub(super) reason: &'static str,
-    pub(super) error_kind: String,
+    pub(super) error_code: String,
     pub(super) retry_instruction: String,
 }
 
@@ -1022,12 +953,12 @@ fn contract_policy_retry_instruction(
 
 pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata {
     let structured = crate::skills::parse_structured_skill_error(err);
-    let error_kind = structured
+    let error_code = structured
         .as_ref()
-        .map(|value| value.error_kind.clone())
+        .map(|value| value.error_code.clone())
         .unwrap_or_else(|| "invalid_args".to_string());
     if matches!(
-        error_kind.as_str(),
+        error_code.as_str(),
         "contract_action_rejected" | "contract_arg_rejected"
     ) {
         let retry_instruction = structured
@@ -1038,28 +969,28 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
                     .to_string()
             });
         return PreflightFailureMetadata {
-            reason: if error_kind == "contract_action_rejected" {
+            reason: if error_code == "contract_action_rejected" {
                 "contract_action_rejected"
             } else {
                 "contract_arg_rejected"
             },
-            error_kind,
+            error_code,
             retry_instruction,
         };
     }
-    if error_kind == "isolation_policy_violation" {
+    if error_code == "isolation_policy_violation" {
         return PreflightFailureMetadata {
             reason: "isolation_policy_violation",
-            error_kind,
+            error_code,
             retry_instruction:
                 "isolation_policy=choose_capability_matching_profile;retry_same_policy=false"
                     .to_string(),
         };
     }
-    if error_kind == "child_task_policy_violation" {
+    if error_code == "child_task_policy_violation" {
         return PreflightFailureMetadata {
             reason: "child_task_policy_violation",
-            error_kind,
+            error_code,
             retry_instruction:
                 "child_task_policy=use_declared_capability_and_permission_profile;retry_same_policy=false"
                     .to_string(),
@@ -1073,7 +1004,7 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
     {
         return PreflightFailureMetadata {
             reason: "structured_observation_embedded_in_path_arg",
-            error_kind,
+            error_code,
             retry_instruction:
                 "path_arg_policy=concrete_observed_path_or_clarify;structured_observation_embedded=false"
                     .to_string(),
@@ -1081,7 +1012,7 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
     }
     PreflightFailureMetadata {
         reason: "unresolved_runtime_placeholder",
-        error_kind,
+        error_code,
         retry_instruction:
             "placeholder_policy=resolve_from_observed_value_or_synthesize_or_pipeline;retry_same_placeholder=false"
                 .to_string(),
@@ -1098,7 +1029,7 @@ pub(super) fn handle_preflight_argument_failure(
     classification_args: &Value,
     err: &str,
     action_trace_kind: &str,
-) -> SkillActionOutcome {
+) -> Result<SkillActionOutcome, String> {
     let error_observation = super::skill_error_observation_or_raw(normalized_skill, err);
     let progress_error = super::skill_error_progress_token(normalized_skill, err);
     let metadata = preflight_failure_metadata(err);
@@ -1108,7 +1039,7 @@ pub(super) fn handle_preflight_argument_failure(
         &format!("preflight=rejected_{}", metadata.reason),
         crate::executor::StepExecutionStatus::Error,
         "",
-        Some(metadata.error_kind.as_str()),
+        Some(metadata.error_code.as_str()),
         &error_observation,
         Some(metadata.retry_instruction.as_str()),
     );
@@ -1144,14 +1075,15 @@ pub(super) fn handle_preflight_argument_failure(
         started_at: now,
         finished_at: now,
     };
-    loop_state
-        .capability_results
-        .push(crate::capability_result::envelope_for_step_execution(
+    loop_state.capability_results.push(
+        crate::capability_result::envelope_for_step_execution(
             normalized_skill,
             classification_args,
             &step_execution,
             None,
-        ));
+        )
+        .map_err(|error| error.to_string())?,
+    );
     loop_state
         .executed_step_results
         .push(step_execution.clone());
@@ -1181,18 +1113,18 @@ pub(super) fn handle_preflight_argument_failure(
         "recoverable_failure_continue_round",
     );
     info!(
-        "executor_preflight_arg_rejected task_id={} round={} step={} type={} skill={} reason={} error_kind={}",
+        "executor_preflight_arg_rejected task_id={} round={} step={} type={} skill={} reason={} error_code={}",
         task.task_id,
         loop_state.round_no,
         step_in_round,
         action_trace_kind,
         normalized_skill,
         metadata.reason,
-        metadata.error_kind
+        metadata.error_code
     );
-    SkillActionOutcome {
+    Ok(SkillActionOutcome {
         ended_with_user_visible_output: false,
         stop_signal: Some("recoverable_failure_continue_round".to_string()),
         continue_in_round: false,
-    }
+    })
 }

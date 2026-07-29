@@ -203,7 +203,7 @@ fn handle_request(
 
 fn error_resp(
     request_id: impl Into<String>,
-    error_kind: &str,
+    error_code: &str,
     error_text: impl Into<String>,
     details: Option<Value>,
 ) -> SkillResp {
@@ -211,19 +211,18 @@ fn error_resp(
         request_id: request_id.into(),
         status: "error",
         text: String::new(),
-        extra: Some(error_extra_with_details(error_kind, details)),
+        extra: Some(error_extra_with_details(error_code, details)),
         error_text: Some(error_text.into()),
     }
 }
 
-fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+fn error_extra_with_details(error_code: &str, details: Option<Value>) -> Value {
     let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
     });
     if let Some(details) = details {

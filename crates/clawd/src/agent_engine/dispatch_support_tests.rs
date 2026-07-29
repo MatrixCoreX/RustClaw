@@ -173,7 +173,7 @@ fn unresolved_disabled_capability_error_is_machine_payload() {
     let payload: serde_json::Value =
         serde_json::from_str(&error).expect("unresolved capability error json");
 
-    assert_eq!(payload["error_kind"], "capability_disabled");
+    assert_eq!(payload["error_code"], "capability_disabled");
     assert_eq!(payload["message_key"], "capability_disabled");
     assert_eq!(payload["owner_layer"], "capability_resolver");
     assert_eq!(payload["outcome"], "blocked");
@@ -472,7 +472,7 @@ fn single_literal_structured_run_cmd_failure_finalizes_as_observed_result() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 7\nstderr:\nproblem",
             "extra": {
                 "command": "printf problem >&2; exit 7",
@@ -511,7 +511,7 @@ fn permission_failure_without_remaining_action_finalizes_without_shell_fallback(
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "permission_denied",
+            "error_code": "permission_denied",
             "error_text": "permission denied: /root/secret.txt"
         })
     );
@@ -550,7 +550,7 @@ fn crypto_account_access_failure_finalizes_without_replan() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "crypto",
-            "error_kind": "unknown",
+            "error_code": "unknown",
             "error_text": marker,
             "extra": null
         })
@@ -590,7 +590,7 @@ fn fs_basic_virtual_permission_failure_finalizes_without_shell_fallback() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "permission_denied",
+            "error_code": "permission_denied",
             "error_text": "permission denied: /root/secret.txt"
         })
     );
@@ -623,7 +623,7 @@ fn structured_missing_target_continues_next_round() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "error_text": "path not found: missing.md"
         })
     );
@@ -676,7 +676,7 @@ fn planner_protocol_failure_replans_next_round() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "unsupported_action",
+            "error_code": "unsupported_action",
             "error_text": "unknown action: check_exists"
         })
     );
@@ -715,7 +715,7 @@ fn structured_pre_dispatch_replan_stops_the_current_action_batch() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "workspace_patch",
-            "error_kind": "child_patch_task_not_found",
+            "error_code": "child_patch_task_not_found",
             "error_text": "workspace.child_patch.child_patch_task_not_found",
             "extra": {
                 "retryable": true,
@@ -757,7 +757,7 @@ fn workspace_patch_context_mismatch_replans_next_round() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "workspace_patch",
-            "error_kind": "patch_context_mismatch",
+            "error_code": "patch_context_mismatch",
             "error_text": "patch check failed",
             "extra": {"error_code": "patch_context_mismatch"}
         })
@@ -797,7 +797,7 @@ fn workspace_exact_replace_machine_mismatches_replan_next_round() {
         _ => unreachable!(),
     });
 
-    for error_kind in [
+    for error_code in [
         "replacement_target_not_found",
         "replacement_target_ambiguous",
         "replacement_precondition_failed",
@@ -807,15 +807,15 @@ fn workspace_exact_replace_machine_mismatches_replan_next_round() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "workspace_patch",
-                "error_kind": error_kind,
+                "error_code": error_code,
                 "error_text": "structured exact-replacement mismatch",
-                "extra": {"error_code": error_kind}
+                "extra": {"error_code": error_code}
             })
         );
         assert_eq!(
             classify_skill_failure_recovery(&state, &actions, 0, 4, "workspace_patch", args, &err,),
             Some("recoverable_failure_continue_round"),
-            "error_kind={error_kind}"
+            "error_code={error_code}"
         );
     }
 }
@@ -831,7 +831,7 @@ fn workspace_patch_apply_io_failure_does_not_gain_contract_repair() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "workspace_patch",
-            "error_kind": "patch_apply_failed",
+            "error_code": "patch_apply_failed",
             "error_text": "patch apply failed",
             "extra": {"error_code": "patch_apply_failed"}
         })
@@ -865,7 +865,7 @@ fn planner_generated_terminal_command_failure_replans_but_literal_command_finali
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "extra": {
                 "exit_code": 127,
@@ -927,7 +927,7 @@ fn literal_run_cmd_failure_before_discussion_only_tail_finalizes() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "extra": {
                 "exit_code": 127,
@@ -969,7 +969,7 @@ fn literal_command_failure_with_structured_repairable_marker_replans() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "extra": {
                 "exit_code": 127,
@@ -1036,7 +1036,7 @@ fn planner_generated_command_failure_replans_before_discussion_only_tail() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "extra": {
                 "exit_code": 127,
@@ -1079,7 +1079,7 @@ fn recoverable_nonterminal_failure_with_only_discussion_remaining_continues_next
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "list_dir",
-            "error_kind": "ambiguous_target",
+            "error_code": "ambiguous_target",
             "error_text": "directory locator matched multiple candidates",
             "extra": { "candidates": ["/tmp/a", "/tmp/b"] }
         })

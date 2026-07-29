@@ -146,7 +146,7 @@ impl RssMachineState {
 
 #[derive(Debug)]
 struct PersistenceError {
-    error_kind: &'static str,
+    error_code: &'static str,
     failure_phase: &'static str,
     cause_code: String,
     side_effect_applied: bool,
@@ -182,7 +182,6 @@ impl SkillFailure {
                 "schema_version": 1,
                 "source_skill": SKILL_NAME,
                 "status": "error",
-                "error_kind": "category_not_configured",
                 "error_code": "category_not_configured",
                 "message_key": "skill.rss_fetch.category_not_configured",
                 "retryable": true,
@@ -408,7 +407,7 @@ fn process_request(req: Req) -> Resp {
                 req.request_id,
                 Err(SkillFailure::execution_failed("config_load_failed")),
                 Some(PersistenceError {
-                    error_kind: "config_load_failed",
+                    error_code: "config_load_failed",
                     failure_phase: "config_loading",
                     cause_code,
                     side_effect_applied: false,
@@ -425,7 +424,7 @@ fn process_request(req: Req) -> Resp {
                 req.request_id,
                 Err(SkillFailure::execution_failed("skill_storage_failed")),
                 Some(PersistenceError {
-                    error_kind: "skill_storage_failed",
+                    error_code: "skill_storage_failed",
                     failure_phase: "storage_persistence",
                     cause_code,
                     side_effect_applied: false,
@@ -440,7 +439,7 @@ fn process_request(req: Req) -> Resp {
                 req.request_id,
                 Err(SkillFailure::execution_failed("config_persist_failed")),
                 Some(PersistenceError {
-                    error_kind: "config_persist_failed",
+                    error_code: "config_persist_failed",
                     failure_phase: "config_persistence",
                     cause_code,
                     side_effect_applied: true,
@@ -466,7 +465,7 @@ fn process_request(req: Req) -> Resp {
                 req.request_id,
                 result,
                 Some(PersistenceError {
-                    error_kind: "config_persist_failed",
+                    error_code: "config_persist_failed",
                     failure_phase: "config_persistence",
                     cause_code,
                     side_effect_applied: false,
@@ -483,7 +482,7 @@ fn process_request(req: Req) -> Resp {
                 req.request_id,
                 result,
                 Some(PersistenceError {
-                    error_kind: "skill_storage_failed",
+                    error_code: "skill_storage_failed",
                     failure_phase: "storage_persistence",
                     cause_code,
                     side_effect_applied,
@@ -532,7 +531,6 @@ fn error_extra(error_kind: &str) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -541,14 +539,13 @@ fn error_extra(error_kind: &str) -> Value {
 
 fn persistence_failure(error: &PersistenceError) -> SkillFailure {
     SkillFailure {
-        error_text: error.error_kind.to_string(),
+        error_text: error.error_code.to_string(),
         extra: json!({
             "schema_version": 1,
             "source_skill": SKILL_NAME,
             "status": "error",
-            "error_kind": error.error_kind,
-            "error_code": error.error_kind,
-            "message_key": format!("skill.rss_fetch.{}", error.error_kind),
+            "error_code": error.error_code,
+            "message_key": format!("skill.rss_fetch.{}", error.error_code),
             "retryable": true,
             "failure_phase": error.failure_phase,
             "side_effect_applied": error.side_effect_applied,
@@ -591,7 +588,6 @@ fn storage_contract_failure(error_kind: &str) -> SkillFailure {
             "schema_version": 1,
             "source_skill": SKILL_NAME,
             "status": "error",
-            "error_kind": error_kind,
             "error_code": error_kind,
             "message_key": format!("skill.rss_fetch.{error_kind}"),
             "retryable": false,

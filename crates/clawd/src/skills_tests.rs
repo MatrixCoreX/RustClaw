@@ -1204,7 +1204,7 @@ fn builtin_read_only_structured_file_errors_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "read_file",
-            "error_kind": "is_directory",
+            "error_code": "is_directory",
             "error_text": "read_file requires a file",
             "platform": "linux",
             "extra": { "requested_path": "docs" }
@@ -1214,7 +1214,7 @@ fn builtin_read_only_structured_file_errors_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "list_dir",
-            "error_kind": "ambiguous_target",
+            "error_code": "ambiguous_target",
             "error_text": "directory locator matched multiple candidates",
             "platform": "linux",
             "extra": { "candidates": ["/tmp/a", "/tmp/b"] }
@@ -1224,7 +1224,7 @@ fn builtin_read_only_structured_file_errors_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "remove_file",
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "error_text": "remove_file failed",
             "platform": "linux",
             "extra": { "requested_path": "missing.txt" }
@@ -1239,7 +1239,7 @@ fn builtin_read_only_structured_file_errors_are_recoverable() {
             .unwrap();
     assert_eq!(
         observation
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("ambiguous_target")
     );
@@ -1255,7 +1255,7 @@ fn system_basic_read_failures_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "system_basic",
-            "error_kind": "permission_denied",
+            "error_code": "permission_denied",
             "error_text": "read_range failed for /tmp/demo",
             "platform": "linux"
         })
@@ -1264,7 +1264,7 @@ fn system_basic_read_failures_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "system_basic",
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "error_text": "path was not found: /tmp/demo",
             "platform": "linux"
         })
@@ -1273,7 +1273,7 @@ fn system_basic_read_failures_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "system_basic",
-            "error_kind": "is_directory",
+            "error_code": "is_directory",
             "error_text": "read_range requires a file, but target is a directory: /tmp/demo",
             "platform": "linux"
         })
@@ -1309,7 +1309,7 @@ fn system_basic_read_failures_are_recoverable() {
     )
     .unwrap();
     assert_eq!(
-        n1.pointer("/error_kind")
+        n1.pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("permission_denied")
     );
@@ -1318,7 +1318,7 @@ fn system_basic_read_failures_are_recoverable() {
     )
     .unwrap();
     assert_eq!(
-        n2.pointer("/error_kind")
+        n2.pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("is_directory")
     );
@@ -1327,7 +1327,7 @@ fn system_basic_read_failures_are_recoverable() {
     )
     .unwrap();
     assert_eq!(
-        n3.pointer("/error_kind")
+        n3.pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );
@@ -1340,13 +1340,13 @@ fn structured_skill_error_ignores_json_hidden_in_visible_text() {
         &json!({
             "status": "error",
             "error_text": "skill failed",
-            "text": "{\"error_kind\":\"not_found\",\"failure_reason\":\"path was not found\",\"platform\":\"linux\",\"manager_type\":\"systemd\",\"service_name\":\"clawd\"}"
+            "text": "{\"error_code\":\"not_found\",\"failure_reason\":\"path was not found\",\"platform\":\"linux\",\"manager_type\":\"systemd\",\"service_name\":\"clawd\"}"
         }),
     );
 
     let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
 
-    assert_eq!(parsed.error_kind, "unknown");
+    assert_eq!(parsed.error_code, "unknown");
     assert_eq!(parsed.error_text, "skill failed");
     assert_eq!(parsed.platform, None);
     assert_eq!(parsed.manager_type, None);
@@ -1362,7 +1362,7 @@ fn structured_skill_error_accepts_extra_machine_fields() {
             "status": "error",
             "error_text": "skill failed",
             "extra": {
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "failure_reason": "path was not found",
                 "platform": "linux",
                 "manager_type": "systemd",
@@ -1374,7 +1374,7 @@ fn structured_skill_error_accepts_extra_machine_fields() {
 
     let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
 
-    assert_eq!(parsed.error_kind, "not_found");
+    assert_eq!(parsed.error_code, "not_found");
     assert_eq!(parsed.error_text, "skill failed");
     assert_eq!(parsed.platform.as_deref(), Some("linux"));
     assert_eq!(parsed.manager_type.as_deref(), Some("systemd"));
@@ -1388,7 +1388,7 @@ fn run_cmd_structured_error_machine_observation_uses_extra_streams() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 7",
             "platform": "linux",
             "extra": {
@@ -1401,7 +1401,7 @@ fn run_cmd_structured_error_machine_observation_uses_extra_streams() {
     );
 
     let structured = parse_structured_skill_error(&err).expect("structured run_cmd error");
-    assert_eq!(structured.error_kind, "nonzero_exit");
+    assert_eq!(structured.error_code, "nonzero_exit");
     assert_eq!(
         structured
             .extra
@@ -1439,7 +1439,7 @@ fn run_cmd_structured_error_machine_observation_uses_exit_category() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "platform": "linux",
             "extra": {
@@ -1493,7 +1493,7 @@ fn crypto_account_access_errors_are_recoverable() {
     );
     assert_eq!(
         observation
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("account_access_failed")
     );
@@ -1518,7 +1518,7 @@ fn wrapped_crypto_account_access_errors_are_recoverable() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "crypto",
-            "error_kind": "unknown",
+            "error_code": "unknown",
             "error_text": marker,
             "extra": null
         })
@@ -1530,7 +1530,7 @@ fn wrapped_crypto_account_access_errors_are_recoverable() {
         serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
     assert_eq!(
         observation
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("unknown")
     );
@@ -1545,10 +1545,10 @@ fn structured_crypto_account_access_extra_is_recoverable_without_sentinel() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "crypto",
-            "error_kind": "account_access_failed",
+            "error_code": "account_access_failed",
             "error_text": "private exchange account access failed",
             "extra": {
-                "error_kind": "account_access_failed",
+                "error_code": "account_access_failed",
                 "message_key": "crypto.err.account_access_failed",
                 "exchange": "binance",
                 "detail": "binance api error code=-2015: Invalid API-key"
@@ -1583,10 +1583,10 @@ fn structured_crypto_credential_errors_are_recoverable_i18n() {
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
             "skill": "crypto",
-            "error_kind": "credential_not_bound",
+            "error_code": "credential_not_bound",
             "error_text": "credential binding unavailable",
             "extra": {
-                "error_kind": "credential_not_bound",
+                "error_code": "credential_not_bound",
                 "message_key": "crypto.err.okx_not_bound",
                 "exchange": "okx",
                 "action": "cancel_all_orders",
@@ -1632,7 +1632,7 @@ fn contract_structured_errors_project_machine_observation() {
 
     assert_eq!(
         observation
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("contract_action_rejected")
     );
@@ -1716,7 +1716,7 @@ fn skill_error_machine_observation_strips_user_visible_fields() {
         STRUCTURED_SKILL_ERROR_PREFIX,
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "text": "visible prose",
             "extra": {
@@ -1771,7 +1771,7 @@ fn skill_error_machine_observation_projects_read_file_not_found_marker() {
     );
     assert_eq!(
         value
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );

@@ -14,7 +14,7 @@ fn error_looks_like_os_permission_denied(error: &str) -> bool {
 
 fn error_looks_like_missing_file_or_directory(error: &str) -> bool {
     if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
-        return structured.error_kind == "not_found";
+        return structured.error_code == "not_found";
     }
     error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
 }
@@ -100,15 +100,15 @@ fn structured_failure_is_publishable_user_result(raw_error: &str) -> bool {
     let Some(structured) = crate::skills::parse_structured_skill_error(raw_error) else {
         return false;
     };
-    !structured.error_kind.trim().is_empty()
+    !structured.error_code.trim().is_empty()
 }
 
 fn push_structured_error_facts(observed_facts: &mut Vec<String>, raw_error: &str) {
     let Some(structured) = crate::skills::parse_structured_skill_error(raw_error) else {
         return;
     };
-    if !structured.error_kind.trim().is_empty() {
-        observed_facts.push(format!("error_kind: {}", structured.error_kind.trim()));
+    if !structured.error_code.trim().is_empty() {
+        observed_facts.push(format!("error_code: {}", structured.error_code.trim()));
     }
     if !structured.skill.trim().is_empty() {
         observed_facts.push(format!("structured_skill: {}", structured.skill.trim()));

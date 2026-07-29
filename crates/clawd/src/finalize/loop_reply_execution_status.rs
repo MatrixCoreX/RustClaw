@@ -37,7 +37,7 @@ fn step_error_is_contract_policy_gap(step: &crate::executor::StepExecutionResult
     };
     crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
         matches!(
-            structured.error_kind.as_str(),
+            structured.error_code.as_str(),
             "contract_action_rejected" | "contract_arg_rejected" | "contract_policy_violation"
         )
     })
@@ -174,10 +174,10 @@ fn push_structured_step_error_machine_facts(
     let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
         return;
     };
-    if !structured.error_kind.trim().is_empty() {
+    if !structured.error_code.trim().is_empty() {
         lines.push(format!(
-            "step.{step_no}.error_kind={}",
-            structured.error_kind.trim()
+            "step.{step_no}.error_code={}",
+            structured.error_code.trim()
         ));
     }
     if let Some(extra) = structured.extra.as_ref() {

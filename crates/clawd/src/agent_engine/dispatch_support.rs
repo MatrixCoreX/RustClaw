@@ -87,7 +87,7 @@ fn unresolved_capability_error(state: &AppState, capability: &str, args: &Value)
             args.clone(),
         );
     json!({
-        "error_kind": record.reason_code,
+        "error_code": record.reason_code,
         "reason_code": record.reason_code,
         "message_key": record.reason_code,
         "owner_layer": record.owner_layer,

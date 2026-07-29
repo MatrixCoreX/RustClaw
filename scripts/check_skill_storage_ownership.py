@@ -9,8 +9,13 @@ from pathlib import Path
 
 
 PERSISTED_SKILLS = {
+    "archive_basic": {
+        "kind": "sqlite",
+        "schema_version": 1,
+        "migration_owner": "archive_basic",
+    },
     "crypto": {"kind": "sqlite", "schema_version": 1, "migration_owner": "crypto"},
-    "kb": {"kind": "sqlite", "schema_version": 1, "migration_owner": "kb"},
+    "kb": {"kind": "sqlite", "schema_version": 3, "migration_owner": "kb"},
     "rss_fetch": {
         "kind": "sqlite",
         "schema_version": 1,
@@ -185,18 +190,22 @@ def write_fixture(root: Path) -> None:
         "configs/config.toml": '[database]\nskill_data_root = "data/skills"\n',
         "docker/config/config.toml": '[database]\nskill_data_root = "data/skills"\n',
         "configs/skills_registry.toml": (
+            '[[skills]]\nname = "archive_basic"\nstorage = { kind = "sqlite", '
+            'schema_version = 1, migration_owner = "archive_basic" }\n'
             '[[skills]]\nname = "crypto"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
-            'schema_version = 1, migration_owner = "kb" }\n'
+            'schema_version = 3, migration_owner = "kb" }\n'
             '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),
         "docker/config/skills_registry.toml": (
+            '[[skills]]\nname = "archive_basic"\nstorage = { kind = "sqlite", '
+            'schema_version = 1, migration_owner = "archive_basic" }\n'
             '[[skills]]\nname = "crypto"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
-            'schema_version = 1, migration_owner = "kb" }\n'
+            'schema_version = 3, migration_owner = "kb" }\n'
             '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),

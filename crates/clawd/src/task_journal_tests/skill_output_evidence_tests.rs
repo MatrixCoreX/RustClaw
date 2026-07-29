@@ -43,7 +43,7 @@ fn generic_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidenc
 }
 
 #[test]
-fn docker_success_exit_text_counts_as_field_value_evidence() {
+fn docker_success_structured_output_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
     let route = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -54,7 +54,16 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
         step_id: "step_1".to_string(),
         skill: "docker_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("exit=0\nClient: Docker Engine".to_string()),
+        output: Some(
+            json!({
+                "action": "version",
+                "available": true,
+                "command_succeeded": true,
+                "exit_code": 0,
+                "output": "exit=0\nClient: Docker Engine"
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -75,7 +84,7 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
         .and_then(Value::as_array)
         .expect("observed evidence items should be present");
     assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("exit")
+        item.get("field").and_then(Value::as_str) == Some("exit_code")
             && item.get("excerpt").and_then(Value::as_str) == Some("0")
     }));
 }
@@ -149,7 +158,7 @@ fn selected_keys_array_counts_as_generic_selector_evidence() {
 }
 
 #[test]
-fn command_not_found_text_counts_as_generic_command_evidence() {
+fn run_cmd_structured_output_counts_as_generic_command_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-command-not-found",
         "ask",
@@ -161,7 +170,19 @@ fn command_not_found_text_counts_as_generic_command_evidence() {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("bash: line 1: service-cli: command not found\n".to_string()),
+        output: Some(
+            json!({
+                "schema_version": 1,
+                "action": "run",
+                "status": "ok",
+                "command_output": "service-cli ready",
+                "stdout": "service-cli ready",
+                "stderr": "",
+                "exit_code": 0,
+                "complete": true
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -511,7 +532,18 @@ fn x_preview_output_counts_as_generic_content_evidence() {
         step_id: "step_1".to_string(),
         skill: "x".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("x skill dry_run=1, preview post: RustClaw release notes".to_string()),
+        output: Some(
+            json!({
+                "status": "ok",
+                "action": "post",
+                "source_skill": "x",
+                "draft_text": "RustClaw release notes",
+                "outcome": "dry_run",
+                "dry_run": true,
+                "published": false
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -523,7 +555,9 @@ fn x_preview_output_counts_as_generic_content_evidence() {
         coverage.observed_canonical.contains("content_excerpt"),
         "coverage: {coverage:?}"
     );
-    assert!(coverage.observed_extractors.contains("x.text_legacy_v1"));
+    assert!(coverage
+        .observed_extractors
+        .contains("x.structured_json_v1"));
 }
 
 #[test]
@@ -737,34 +771,13 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
 }
 
 #[test]
-fn text_observed_evidence_parses_status_prefixed_json_body() {
+fn status_prefixed_text_does_not_become_machine_evidence() {
     let output = concat!(
         "status=200\n",
         "{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"uptime_seconds\":95,\"telegramd_process_count\":0},\"error\":null}"
     );
 
-    let observed = observed_evidence_from_output(Some(output))
-        .expect("status-prefixed json output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("status")
-            && item.get("excerpt").and_then(Value::as_str) == Some("200")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.ok")
-            && item.get("excerpt").and_then(Value::as_str) == Some("true")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.data.worker_state")
-            && item.get("excerpt").and_then(Value::as_str) == Some("running")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.data.telegramd_process_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("0")
-    }));
+    assert!(observed_evidence_from_output(Some(output)).is_none());
 }
 
 #[test]
@@ -844,32 +857,14 @@ fn embedded_http_health_body_prioritizes_optional_daemon_statuses() {
 }
 
 #[test]
-fn text_observed_evidence_keeps_safe_file_tokens_while_redacting_secret_tokens() {
+fn unstructured_secret_bearing_text_is_not_machine_evidence() {
     let output = concat!(
         "The files are builtin_write_smoke.txt, full_suite_trace_note.txt, gen-1778122040.png, ",
         "and hello.sh; secrets sk-123456789012345678901234 and ",
         "rustclaw-secret://v1/12345678-1234-1234-1234-123456789abc should not be exposed."
     );
 
-    let observed = observed_evidence_from_output(Some(output))
-        .expect("text output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    let text_excerpt = items
-        .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("text_excerpt"))
-        .and_then(|item| item.get("excerpt"))
-        .and_then(Value::as_str)
-        .expect("text excerpt");
-
-    assert!(text_excerpt.contains("full_suite_trace_note.txt"));
-    assert!(text_excerpt.contains("gen-1778122040.png"));
-    assert!(text_excerpt.contains("hello.sh"));
-    assert!(text_excerpt.contains("[redacted]"));
-    assert!(!text_excerpt.contains("sk-123456789012345678901234"));
-    assert!(!text_excerpt.contains("rustclaw-secret://"));
+    assert!(observed_evidence_from_output(Some(output)).is_none());
 }
 
 #[test]
@@ -1118,7 +1113,7 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
 }
 
 #[test]
-fn run_cmd_process_output_counts_as_generic_command_evidence() {
+fn run_cmd_process_structured_output_counts_as_generic_command_evidence() {
     let mut journal =
         TaskJournal::for_task("task-process-run-cmd", "ask", "inspect the running process");
     let route = route_for_contract(false);
@@ -1127,10 +1122,16 @@ fn run_cmd_process_output_counts_as_generic_command_evidence() {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml\n"
-                .to_string(),
-        ),
+        output: Some(json!({
+            "schema_version": 1,
+            "action": "run",
+            "status": "ok",
+            "command_output": "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml",
+            "stdout": "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml",
+            "stderr": "",
+            "exit_code": 0,
+            "complete": true
+        }).to_string()),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -1142,7 +1143,7 @@ fn run_cmd_process_output_counts_as_generic_command_evidence() {
 }
 
 #[test]
-fn http_basic_text_counts_as_generic_field_value_evidence() {
+fn http_basic_structured_output_counts_as_generic_field_value_evidence() {
     let mut journal =
         TaskJournal::for_task("task-http-basic-fields", "ask", "检查本地 health 接口");
     let route = route_for_contract(false);
@@ -1151,7 +1152,16 @@ fn http_basic_text_counts_as_generic_field_value_evidence() {
         step_id: "step_1".to_string(),
         skill: "http_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("status=200\n{\"ok\":true,\"service\":\"clawd\"}\n".to_string()),
+        output: Some(
+            json!({
+                "schema_version": 1,
+                "action": "get",
+                "status_code": 200,
+                "success_status": true,
+                "body_preview": "{\"ok\":true,\"service\":\"clawd\"}"
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -1160,7 +1170,6 @@ fn http_basic_text_counts_as_generic_field_value_evidence() {
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("command_output"));
 }
 
 #[test]
@@ -1311,7 +1320,7 @@ fn http_basic_json_wrapper_body_counts_as_generic_content_excerpt_evidence() {
 }
 
 #[test]
-fn exact_observation_output_http_basic_text_counts_as_command_output_evidence() {
+fn exact_observation_output_http_basic_structured_body_counts_as_command_output_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-raw-command-http-basic",
         "ask",
@@ -1324,7 +1333,16 @@ fn exact_observation_output_http_basic_text_counts_as_command_output_evidence() 
         step_id: "step_1".to_string(),
         skill: "http_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("status=200\n{\"ok\":true,\"service\":\"clawd\"}\n".to_string()),
+        output: Some(
+            json!({
+                "schema_version": 1,
+                "action": "get",
+                "status_code": 200,
+                "success_status": true,
+                "body_preview": "{\"ok\":true,\"service\":\"clawd\"}"
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,

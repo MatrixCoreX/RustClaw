@@ -135,7 +135,11 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
     let _guard = lock
         .lock()
         .map_err(|_| CodeIndexError::new("index_lock_failed", "code_index.index_lock_failed"))?;
-    let (index, refresh) = refresh_index(workspace_root, max_files, scan_continuation)?;
+    // Query capabilities are declared observe-only. They may reuse a persisted
+    // index as an incremental input, but only the explicit refresh action is
+    // allowed to update the workspace cache.
+    let persist = action == "refresh";
+    let (index, refresh) = refresh_index(workspace_root, max_files, scan_continuation, persist)?;
     let result = match action {
         "refresh" => json!({
             "schema_version": INDEX_SCHEMA_VERSION,
@@ -165,6 +169,7 @@ fn refresh_index(
     workspace_root: &Path,
     max_files: usize,
     scan_continuation: Option<&str>,
+    persist: bool,
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
     let previous = load_index(&index_path);
@@ -232,7 +237,9 @@ fn refresh_index(
         scan_complete: !stats.scan_truncated,
         files,
     };
-    persist_index(&index_path, &index)?;
+    if persist {
+        persist_index(&index_path, &index)?;
+    }
     Ok((index, stats))
 }
 

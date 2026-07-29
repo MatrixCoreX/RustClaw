@@ -1603,7 +1603,7 @@ fn trace_json_includes_contract_policy_for_contract_rejection() {
         .expect("step result should be present");
 
     assert_eq!(
-        step.get("error_kind").and_then(Value::as_str),
+        step.get("error_code").and_then(Value::as_str),
         Some("contract_action_rejected")
     );
     assert_eq!(

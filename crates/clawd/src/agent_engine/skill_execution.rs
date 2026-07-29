@@ -26,6 +26,8 @@ mod skill_execution_observations;
 mod skill_execution_preflight;
 #[path = "skill_execution_subagent.rs"]
 mod skill_execution_subagent;
+#[path = "skill_output_contract.rs"]
+mod skill_output_contract;
 
 use child_task_execution_policy::child_task_execution_policy_error;
 #[cfg(test)]
@@ -52,9 +54,11 @@ use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
     evidence_policy_action_policy_error, handle_preflight_argument_failure,
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract,
 };
 use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_execution};
+#[cfg(test)]
+use skill_output_contract::validate_skill_output_contract;
+use skill_output_contract::{enforce_skill_output_contract, skill_input_contract_error};
 
 async fn run_with_tool_budget_timeout<F>(
     tool_timeout: Option<(u64, &'static str)>,
@@ -180,23 +184,6 @@ async fn handle_skill_step_success(
         action_args,
         true,
     );
-    if let Err(contract_err) = validate_skill_output_contract(state, normalized_skill, out) {
-        warn!(
-            "skill_output_contract_mismatch task_id={} round={} step={} skill={} err={}",
-            task.task_id,
-            loop_state.round_no,
-            step_in_round,
-            normalized_skill,
-            crate::truncate_for_log(&contract_err)
-        );
-        loop_state.history_compact.push(format!(
-            "round={} step={} skill={} output_contract_mismatch={}",
-            loop_state.round_no,
-            step_in_round,
-            normalized_skill,
-            crate::truncate_for_agent_trace(&contract_err)
-        ));
-    }
     if let Some((original_path, _effective_path, user_visible_path)) = write_file_effective_path {
         remember_written_file_alias(loop_state, original_path, user_visible_path);
         register_file_path_output(
@@ -853,7 +840,7 @@ pub(super) async fn execute_prepared_skill_action(
                 ),
             ],
         );
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -863,12 +850,12 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &error,
             action_trace_kind,
-        ));
+        );
     }
     if let Some(err) =
         child_task_execution_policy_error(state, task, child_policy_skill, child_policy_args)
     {
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -878,7 +865,7 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
     }
     if normalized_skill == "subagent" {
         record_subagent_hook_stage(
@@ -917,7 +904,7 @@ pub(super) async fn execute_prepared_skill_action(
                 action_trace_kind,
                 step_error_signal,
                 fingerprint,
-            );
+            )?;
             record_subagent_hook_stage(
                 state,
                 task,
@@ -967,7 +954,7 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
             stop_signal.as_deref(),
             fingerprint,
-        );
+        )?;
         record_subagent_hook_stage(
             state,
             task,
@@ -985,10 +972,8 @@ pub(super) async fn execute_prepared_skill_action(
             continue_in_round: false,
         });
     }
-    if let Some(err) =
-        capability_isolation_policy_error(state, normalized_skill, classification_args)
-    {
-        return Ok(handle_preflight_argument_failure(
+    if let Some(err) = skill_input_contract_error(state, normalized_skill, &exec_args) {
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -998,7 +983,22 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
+    }
+    if let Some(err) =
+        capability_isolation_policy_error(state, normalized_skill, classification_args)
+    {
+        return handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        );
     }
     if let Some(err) = evidence_policy_action_policy_error(
         state,
@@ -1007,7 +1007,7 @@ pub(super) async fn execute_prepared_skill_action(
         classification_args,
         action_trace_kind,
     ) {
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -1017,14 +1017,14 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
     }
     if let Some(err) = unresolved_runtime_template_argument_error(
         normalized_skill,
         &exec_args,
         classification_args,
     ) {
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -1034,10 +1034,10 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
     }
     if let Some(err) = structured_observation_path_argument_error(normalized_skill, &exec_args) {
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -1047,7 +1047,7 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
     }
     let pre_tool_use_evaluation = crate::agent_hooks::pre_tool_use_outcome_for_state(
         state,
@@ -1093,7 +1093,7 @@ pub(super) async fn execute_prepared_skill_action(
             if let Some(err) =
                 crate::agent_hooks::structured_error_for_outcome(&permission_evaluation.outcome)
             {
-                return Ok(handle_preflight_argument_failure(
+                return handle_preflight_argument_failure(
                     state,
                     task,
                     loop_state,
@@ -1103,7 +1103,7 @@ pub(super) async fn execute_prepared_skill_action(
                     classification_args,
                     &err,
                     action_trace_kind,
-                ));
+                );
             }
         }
         super::publish_agent_loop_user_input_checkpoint_progress(
@@ -1138,7 +1138,7 @@ pub(super) async fn execute_prepared_skill_action(
     if let Some(err) =
         crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_evaluation.outcome)
     {
-        return Ok(handle_preflight_argument_failure(
+        return handle_preflight_argument_failure(
             state,
             task,
             loop_state,
@@ -1148,7 +1148,7 @@ pub(super) async fn execute_prepared_skill_action(
             classification_args,
             &err,
             action_trace_kind,
-        ));
+        );
     }
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
@@ -1219,7 +1219,7 @@ pub(super) async fn execute_prepared_skill_action(
         )
     });
     let tool_cancellation = state.worker.task_cancellation_token(&task.task_id);
-    let step_execution =
+    let mut step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
@@ -1262,6 +1262,28 @@ pub(super) async fn execute_prepared_skill_action(
         .ok()
         .and_then(|slot| slot.clone());
     let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
+    if let Some(contract_error) = enforce_skill_output_contract(
+        state,
+        normalized_skill,
+        &mut step_execution,
+        structured_extra.as_ref(),
+    ) {
+        warn!(
+            "skill_output_contract_rejected task_id={} round={} step={} skill={} err={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_log(&contract_error)
+        );
+        loop_state.history_compact.push(format!(
+            "round={} step={} skill={} output_contract_violation={}",
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_agent_trace(&contract_error)
+        ));
+    }
     let mcp_capabilities_loaded =
         if normalized_skill == crate::mcp_runtime::MCP_CATALOG_SEARCH_CAPABILITY {
             let loaded = super::capability_discovery::activate_mcp_search_results(
@@ -1345,7 +1367,8 @@ pub(super) async fn execute_prepared_skill_action(
         classification_args,
         &step_execution,
         structured_extra.as_ref(),
-    );
+    )
+    .map_err(|error| error.to_string())?;
     capability_result.effect = Some(
         if raw_action_effect.validates {
             "validate"
@@ -1365,7 +1388,9 @@ pub(super) async fn execute_prepared_skill_action(
             },
         });
     }
-    debug_assert!(capability_result.validate().is_ok());
+    capability_result
+        .validate()
+        .map_err(|error| error.to_string())?;
     loop_state.capability_results.push(capability_result);
     match step_execution.output.as_ref() {
         Some(out) => {

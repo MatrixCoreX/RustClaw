@@ -7,7 +7,8 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["error_code"], "execution_failed");
+    assert!(extra.get("error_kind").is_none());
     assert_eq!(
         extra["message_key"],
         "skill.package_manager.execution_failed"
@@ -111,6 +112,24 @@ fn dry_run_install_accepts_structured_module_alias() {
         extra.get("dry_run").and_then(serde_json::Value::as_bool),
         Some(true)
     );
+}
+
+#[test]
+fn smart_install_preview_forces_dry_run_and_does_not_write_a_local_log() {
+    let root = TempDir::new("smart-preview-no-write");
+
+    let (_text, extra) = execute(serde_json::json!({
+        "action": "smart_install_preview",
+        "manager": "apt-get",
+        "package": "jq",
+        "dry_run": false,
+        "use_sudo": false
+    }))
+    .expect("smart preview");
+
+    assert_eq!(extra["action"], "smart_install_preview");
+    assert_eq!(extra["dry_run"], true);
+    assert!(!root.path.join("logs/install_ops.log").exists());
 }
 
 #[test]

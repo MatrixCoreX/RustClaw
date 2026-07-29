@@ -269,7 +269,15 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "write_file",
-        "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        &serde_json::json!({
+            "schema_version": 1,
+            "action": "write_file",
+            "status": "ok",
+            "path": "/home/guagua/rustclaw/document/pwd_line.txt",
+            "size_bytes": 40,
+            "complete": true
+        })
+        .to_string(),
     ));
     loop_state.output_vars.insert(
         "last_file_path".to_string(),
@@ -533,11 +541,13 @@ fn direct_scalar_does_not_passthrough_multiline_list_dir_listing() {
 }
 
 #[test]
-fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
+fn direct_scalar_counts_structured_list_dir_when_route_requests_count() {
     let mut loop_state = LoopState::new();
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "list_dir",
+        r#"{"schema_version":1,"status":"ok","path":"/tmp/scripts","entries":[{"name":"a"},{"name":"b"},{"name":"c"}],"count":3,"total_count":3,"complete":true}"#,
+    ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
