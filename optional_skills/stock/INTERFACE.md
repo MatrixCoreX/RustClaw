@@ -12,6 +12,10 @@
 - `preview_quote`：离线检查报价请求并返回规范化结果；不请求新浪财经或 LLM。
 - `quote`（默认）/ `query`：按股票代码，或按已配置的公司名/别名，查询单只 A 股行情。
 
+成功的 `quote` / `query` 在 `extra` 中稳定提供 `normalized_code`、`name`、
+`price`、`provider=sina_finance` 和带 `+08:00` 时区的 `observed_at`；原始
+`current`、`date`、`time` 字段继续保留用于兼容。
+
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
@@ -27,6 +31,9 @@
 - 接口失败或响应格式异常时返回 status=error 与可读 error_text。
 - 无效代码或非 A 股时返回「未获取到行情」类提示。
 - 名称未命中映射时返回明确提示，并建议补充 `configs/stock.toml`。
+- 错误 `extra` 包含稳定的 `error_code`、`message_key`、`retryable`；请求中存在
+  `symbol` / `code` / `name` 时还会原样提供 `requested_symbol`，运行时无需解析
+  `error_text`。
 
 ## Config Entry Points
 - `configs/stock.toml` controls aliases, name-normalization cleanup metadata, and LLM typo correction.

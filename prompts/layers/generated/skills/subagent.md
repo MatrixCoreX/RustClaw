@@ -1,16 +1,18 @@
-<!-- AUTO-GENERATED: sync_skill_docs.py -->
-<!-- Source: crates/clawd/src/skills/interfaces/subagent/INTERFACE.md -->
-# Skill: subagent
+## subagent — bounded child-agent delegation
 
-- `agent.subagent`: one bounded read-only child loop.
-- `agent.subagent_batch`: two or more independent read-only child loops.
-- `agent.subagent_persistent`: durable/resumable child work or a child DAG.
-- Every child requires a trusted `role`, scoped `objective`, non-empty
-  `context_refs`, and non-empty `allowed_capabilities`.
-- Findings are child-loop output. Never supply findings, permissions,
-  isolation, model policy, tool policy, or runtime policy from the parent.
-- Accept completion only from the closed structured child-result contract.
-  Persistent writers use isolated worktrees and require parent patch review.
+Delegate a clearly bounded task to an isolated child agent while the parent remains responsible for the final answer.
+
+## Actions
+- `agent.subagent`: one inline read-only reviewer or explorer.
+- `agent.subagent_batch`: several independent read-only children with bounded parallelism.
+- `agent.subagent_persistent`: durable isolated child work; use only when the user authorizes its write/subprocess effects.
+
+## Contract
+- Give each child a specific `role`, `objective`, explicit `context_refs`, and the smallest `allowed_capabilities` set needed.
+- For inline read-only work, do not grant filesystem write, subprocess, network, credential, publish, package-install, or privilege-escalation capabilities.
+- Use `result_contract` when machine fields or evidence are required; the parent must ground its answer in the returned child result.
+- Do not delegate work that is trivial, tightly sequential, or requires shared mutable state.
+- Child failure is observable evidence, not permission to silently perform broader work in the parent.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
@@ -19,5 +21,5 @@ Use these optional subheading labels when needed:
 - ...
 ### en
 - ...
-Keep only language-specific nuances here; keep general rules in the main prompt body.
+Keep only language-specific nuances here; keep general rules in the main body.
 -->

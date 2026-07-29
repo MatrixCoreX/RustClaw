@@ -1163,6 +1163,38 @@ fn test_user_safe_step_error_preserves_sanitized_error_excerpt() {
 }
 
 #[test]
+fn resume_failure_machine_facts_preserve_proven_not_created_fields() {
+    let structured = serde_json::json!({
+        "skill": "image_edit",
+        "error_code": "execution_failed",
+        "extra": {
+            "status": "error",
+            "error_code": "execution_failed",
+            "failure_phase": "pre_dispatch",
+            "retryable": false,
+            "side_effect_applied": false
+        }
+    });
+
+    let (facts, proven_not_applied) = resume_failure_machine_facts(Some(&structured));
+
+    assert!(proven_not_applied);
+    for expected in [
+        "status: error",
+        "error_code: execution_failed",
+        "failure_phase: pre_dispatch",
+        "retryable: false",
+        "side_effect_applied: false",
+        "cleanup_status: not_created",
+    ] {
+        assert!(
+            facts.iter().any(|fact| fact == expected),
+            "missing {expected}"
+        );
+    }
+}
+
+#[test]
 fn test_extract_single_explicit_path_from_request_ok() {
     let text = "先读 /home/guagua/test/README.md 开头，再用一句话总结";
     assert_eq!(

@@ -54,6 +54,30 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn current_weather_response_preserves_provider_observation_clock() {
+    let response: ForecastResponse = serde_json::from_value(json!({
+        "timezone": "GMT",
+        "timezone_abbreviation": "GMT",
+        "utc_offset_seconds": 0,
+        "current_weather": {
+            "time": "2026-07-29T18:45",
+            "temperature": 25.2,
+            "windspeed": 3.1,
+            "winddirection": 180.0,
+            "weathercode": 3,
+            "is_day": 1
+        }
+    }))
+    .expect("weather response");
+
+    let current = response.current_weather.expect("current weather");
+    assert_eq!(current.time, "2026-07-29T18:45");
+    assert_eq!(response.timezone.as_deref(), Some("GMT"));
+    assert_eq!(response.timezone_abbreviation.as_deref(), Some("GMT"));
+    assert_eq!(response.utc_offset_seconds, Some(0));
+}
+
+#[test]
 fn location_display_prefers_user_supplied_place() {
     assert_eq!(
         weather_location_display(

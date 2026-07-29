@@ -522,22 +522,42 @@ pub(super) fn mark_mutation_execution_uncertain(
     }
 }
 
-pub(super) fn settle_policy_blocked_mutation_as_not_applied(
+pub(super) fn settle_verified_not_applied_mutation(
     state: &AppState,
     lease: &crate::repo::TaskMutationLease,
     error: &str,
 ) -> bool {
-    let Some(policy_block) = crate::skills::parse_policy_block_error(error) else {
+    let projection = if let Some(policy_block) = crate::skills::parse_policy_block_error(error) {
+        json!({
+            "schema_version": 1,
+            "disposition": "not_applied",
+            "status_code": "execution_policy_blocked",
+            "reason_code": policy_block.reason_code,
+            "decision": policy_block.decision,
+            "owner_layer": "task_mutation_ledger",
+        })
+    } else if crate::skills::structured_skill_error_proves_not_applied(error) {
+        let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
+            return false;
+        };
+        let failure_phase = structured
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("failure_phase"))
+            .and_then(Value::as_str)
+            .unwrap_or("pre_dispatch");
+        json!({
+            "schema_version": 1,
+            "disposition": "not_applied",
+            "status_code": structured.error_code,
+            "reason_code": structured.error_code,
+            "failure_phase": failure_phase,
+            "source_skill": structured.skill,
+            "owner_layer": "task_mutation_ledger",
+        })
+    } else {
         return false;
     };
-    let projection = json!({
-        "schema_version": 1,
-        "disposition": "not_applied",
-        "status_code": "execution_policy_blocked",
-        "reason_code": policy_block.reason_code,
-        "decision": policy_block.decision,
-        "owner_layer": "task_mutation_ledger",
-    });
     match crate::repo::reconcile_task_mutation(
         &state.core.db,
         &state.worker.worker_id,
@@ -550,7 +570,7 @@ pub(super) fn settle_policy_blocked_mutation_as_not_applied(
         Ok(crate::repo::ReconcileTaskMutationOutcome::RetryReady(_)) => true,
         Ok(other) => {
             warn!(
-                "policy-blocked mutation produced unexpected reconciliation outcome task_id={} action_ref={} outcome={:?}",
+                "verified not-applied mutation produced unexpected reconciliation outcome task_id={} action_ref={} outcome={:?}",
                 lease.record.task_id,
                 lease.record.action_ref,
                 other
@@ -559,7 +579,7 @@ pub(super) fn settle_policy_blocked_mutation_as_not_applied(
         }
         Err(error) => {
             warn!(
-                "policy-blocked mutation not-applied persistence failed task_id={} action_ref={} error={}",
+                "verified not-applied mutation persistence failed task_id={} action_ref={} error={}",
                 lease.record.task_id,
                 lease.record.action_ref,
                 crate::truncate_for_log(&error.to_string())

@@ -188,6 +188,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
         extra["message_key"],
         "clawd.contract.input_contract_violation"
     );
+    assert_eq!(extra["retryable"], false);
     assert!(extra["contract_error"].as_str().unwrap().contains("enum"));
 }
 

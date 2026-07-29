@@ -40,7 +40,7 @@ or dry-run schedule operation.
   `title` machine fields, set `response_shape="strict"` and
   `structured_field_selector="datetime,timezone,title"`. Return only observed
   values for those fields.
-- If request is not a schedule intent, return an error.
+- If request is not a schedule intent, return an error. An incomplete create returns `schedule_needs_more_info` with `failure_phase=pre_dispatch`, `side_effect_applied=false`, and `recovery_action=replan_arguments`; correct it in one bounded retry.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

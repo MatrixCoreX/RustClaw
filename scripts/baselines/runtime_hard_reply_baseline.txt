@@ -130,9 +130,12 @@ crates/clawcli/src/task.rs	parse get task response	let body: serde_json::Value =
 crates/clawcli/src/task.rs	response missing data.task_id	.ok_or_else(|| anyhow::anyhow!("response missing data.task_id"))?;
 crates/clawd/src/agent_engine.rs	LLM should infer continuation from resume context and user follow-up.	"hint": "LLM should infer continuation from resume context and user follow-up."
 crates/clawd/src/agent_engine.rs	check task running state failed: {err}	Err(err) => Err(format!("check task running state failed: {err}")),
+crates/clawd/src/agent_engine.rs	error_code: {error_code}	facts.push(format!("error_code: {error_code}"));
 crates/clawd/src/agent_engine.rs	error_summary: {safe_err}	format!("error_summary: {safe_err}"),
 crates/clawd/src/agent_engine.rs	failed_action: {failed_action}	format!("failed_action: {failed_action}"),
 crates/clawd/src/agent_engine.rs	failed_step_index: {failed_index}	format!("failed_step_index: {failed_index}"),
+crates/clawd/src/agent_engine.rs	failure_phase: {failure_phase}	facts.push(format!("failure_phase: {failure_phase}"));
+crates/clawd/src/agent_engine.rs	side_effect_applied: {side_effect_applied}	facts.push(format!("side_effect_applied: {side_effect_applied}"));
 crates/clawd/src/agent_engine/arg_resolver.rs	double brace placeholder regex	Regex::new(r"\\{\\{\\s*([^{}]+?)\\s*\\}\\}").expect("double brace placeholder regex")
 crates/clawd/src/agent_engine/arg_resolver.rs	默认 path 兜底	// AUTO_LOCATOR 只是 turn 级"默认 path 兜底"，仅当 LLM 给的 path 看起来是
 crates/clawd/src/agent_engine/async_start_checkpoint.rs	agent-loop:{}:round-{}:step-{}:async-job:{}	"agent-loop:{}:round-{}:step-{}:async-job:{}",
@@ -193,6 +196,7 @@ crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: unexpected field 
 crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: value does not match schema const	return Err(format!("{path}: value does not match schema const"));
 crates/clawd/src/agent_engine/skill_output_contract.rs	{path}: value is not in schema enum	return Err(format!("{path}: value is not in schema enum"));
 crates/clawd/src/agent_engine/skill_output_contract.rs	{path}[{index}]: duplicate array item	return Err(format!("{path}[{index}]: duplicate array item"));
+crates/clawd/src/agent_engine/subagent_runtime_model.rs	child returned every required result-contract key	"summary": "child returned every required result-contract key"
 crates/clawd/src/agent_engine/support.rs	agent-loop:{}:round-{}:step-{}:{}	"agent-loop:{}:round-{}:step-{}:{}",
 crates/clawd/src/app_helpers.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
 crates/clawd/src/bootstrap/config_loaders.rs	An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}	"An identical scheduled job already exists: {job_id}\\nType: {type}\\nTimezone: {timezone}\\nNext run: {next_run_human}\\nTask content: {task_content}".to_string()
@@ -979,6 +983,7 @@ crates/clawd/src/skills/builtin.rs	unknown skill: {skill_name}	_ => Err(format!(
 crates/clawd/src/skills/builtin.rs	{key} must be string	.ok_or_else(|| format!("{key} must be string"))
 crates/clawd/src/skills/builtin.rs	{operation} failed for {target}: {err}	format!("{operation} failed for {target}: {err}"),
 crates/clawd/src/skills/builtin_read_file.rs	start_byte {start_byte} exceeds file size {total_size}	format!("start_byte {start_byte} exceeds file size {total_size}"),
+crates/clawd/src/skills/builtin_schedule.rs	schedule input is incomplete	.unwrap_or("schedule input is incomplete");
 crates/clawd/src/skills/runner.rs	empty skill-runner output	return Err("empty skill-runner output".to_string());
 crates/clawd/src/skills/runner.rs	empty skill-runner output: {detail}	return Err(format!("empty skill-runner output: {detail}"));
 crates/clawd/src/skills/runner.rs	flush skill-runner stdin failed: {err}	.map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
@@ -1502,6 +1507,7 @@ crates/skills/image_edit/src/i18n.rs	图片编辑成功并已保存：{path}	"�
 crates/skills/image_edit/src/main.rs	Edited successfully and saved: {path}	"Edited successfully and saved: {path}",
 crates/skills/image_edit/src/main.rs	Keep composition, restyle visual style only. {instruction}	"restyle" => format!("Keep composition, restyle visual style only. {instruction}"),
 crates/skills/image_edit/src/main.rs	Outpaint this image. Extend canvas naturally. {instruction}	"outpaint" => format!("Outpaint this image. Extend canvas naturally. {instruction}"),
+crates/skills/image_edit/src/main.rs	all providers failed: {detail}	let message = format!("all providers failed: {detail}");
 crates/skills/image_edit/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/image_edit/src/main.rs	chat completion HTTP error: {t}	return Err(format!("chat completion HTTP error: {t}"));
 crates/skills/image_edit/src/main.rs	chat completion request failed: {e}	.map_err(|e| format!("chat completion request failed: {e}"))?;
@@ -1536,6 +1542,7 @@ crates/skills/image_edit/src/main.rs	read image failed: {err}	let bytes = std::f
 crates/skills/image_edit/src/main.rs	read image failed: {err}	let bytes = std::fs::read(path).map_err(|err| format!("read image failed: {err}"))?;
 crates/skills/image_edit/src/main.rs	resolver model returned no usable selected_index (output truncated): {}	"resolver model returned no usable selected_index (output truncated): {}",
 crates/skills/image_edit/src/main.rs	upload image to OSS failed: {err}	.map_err(|err| format!("upload image to OSS failed: {err}"))?;
+crates/skills/image_edit/src/main.rs	{NOT_APPLIED_ERROR_PREFIX}{}	"{NOT_APPLIED_ERROR_PREFIX}{}",
 crates/skills/image_edit/src/main.rs	{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED	let text = format!("{preface}\\nFILE:{saved_path}\\nEPHEMERAL:IMAGE_SAVED");
 crates/skills/image_edit/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
 crates/skills/image_edit/src/providers.rs	Edit this image. Size hint: {size}. {}{}	"Edit this image. Size hint: {size}. {}{}",
@@ -1558,7 +1565,8 @@ crates/skills/image_edit/src/providers.rs	download edited image failed: {err}	.m
 crates/skills/image_edit/src/providers.rs	download edited image failed: {err}	.map_err(|err| format!("download edited image failed: {err}"))?
 crates/skills/image_edit/src/providers.rs	google request failed: {err}	.map_err(|err| format!("google request failed: {err}"))?;
 crates/skills/image_edit/src/providers.rs	google response contains no image payload: {}	"google response contains no image payload: {}",
-crates/skills/image_edit/src/providers.rs	minimax reference edit requires non-empty image.url	return Err("minimax reference edit requires non-empty image.url".to_string());
+crates/skills/image_edit/src/providers.rs	minimax reference edit requires non-empty image.url	"minimax reference edit requires non-empty image.url",
+crates/skills/image_edit/src/providers.rs	minimax rejected image edit: {}	"minimax rejected image edit: {}",
 crates/skills/image_edit/src/providers.rs	minimax request failed: {err}	.map_err(|err| format!("minimax request failed: {err}"))?;
 crates/skills/image_edit/src/providers.rs	minimax response contains no image payload: {}	"minimax response contains no image payload: {}",
 crates/skills/image_edit/src/providers.rs	parse google response failed: {err}	.map_err(|err| format!("parse google response failed: {err}"))?;
@@ -1600,6 +1608,7 @@ crates/skills/image_generate/src/async_projection.rs	adapter_result must be obje
 crates/skills/image_generate/src/i18n.rs	Generated successfully and saved: {path}	"Generated successfully and saved: {path}".to_string(),
 crates/skills/image_generate/src/i18n.rs	图片生成成功并已保存：{path}	"图片生成成功并已保存：{path}".to_string(),
 crates/skills/image_generate/src/main.rs	Generate one image. Size hint: {size}. Prompt: {prompt}	let mut full_prompt = format!("Generate one image. Size hint: {size}. Prompt: {prompt}");
+crates/skills/image_generate/src/main.rs	all providers failed: {detail}	let message = format!("all providers failed: {detail}");
 crates/skills/image_generate/src/main.rs	anthropic native image generation adapter is not available	"anthropic native image generation adapter is not available".to_string()
 crates/skills/image_generate/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/image_generate/src/main.rs	build anthropic client failed: {err}	.map_err(|err| format!("build anthropic client failed: {err}"))?;
@@ -1621,6 +1630,7 @@ crates/skills/image_generate/src/main.rs	download generated image failed: {err}	
 crates/skills/image_generate/src/main.rs	download generated image failed: {err}	.map_err(|err| format!("download generated image failed: {err}"))?
 crates/skills/image_generate/src/main.rs	google request failed: {err}	.map_err(|err| format!("google request failed: {err}"))?;
 crates/skills/image_generate/src/main.rs	google response contains no image payload: {}	"google response contains no image payload: {}",
+crates/skills/image_generate/src/main.rs	minimax rejected image generation: {}	"minimax rejected image generation: {}",
 crates/skills/image_generate/src/main.rs	minimax request failed: {err}	.map_err(|err| format!("minimax request failed: {err}"))?;
 crates/skills/image_generate/src/main.rs	minimax response contains no image payload: {}	"minimax response contains no image payload: {}",
 crates/skills/image_generate/src/main.rs	output path has no parent directory	.ok_or_else(|| "output path has no parent directory".to_string())?;
@@ -1656,6 +1666,7 @@ crates/skills/image_generate/src/main.rs	write output failed: {err}	std::fs::wri
 crates/skills/image_generate/src/main.rs	write output failed: {err}	std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))
 crates/skills/image_generate/src/main.rs	write output failed: {err}	std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))?;
 crates/skills/image_generate/src/main.rs	write output failed: {err}	std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))?;
+crates/skills/image_generate/src/main.rs	{NOT_APPLIED_ERROR_PREFIX}{}	"{NOT_APPLIED_ERROR_PREFIX}{}",
 crates/skills/image_generate/src/main.rs	{vendor_name} native image generation adapter is not available	"{vendor_name} native image generation adapter is not available"
 crates/skills/image_generate/src/main.rs	{vendor_name} request failed: {err}	.map_err(|err| format!("{vendor_name} request failed: {err}"))?;
 crates/skills/image_generate/src/main.rs	{vendor_name} response contains no image payload: {}	"{vendor_name} response contains no image payload: {}",

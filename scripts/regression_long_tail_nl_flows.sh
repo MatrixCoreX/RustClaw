@@ -266,11 +266,6 @@ text = replace_once(
     'access_profile = "full"',
     text,
 )
-text = replace_once(r'^auto_on_capability_gap\s*=\s*(true|false)$', 'auto_on_capability_gap = false', text)
-text = replace_once(r'^allow_execute\s*=\s*(true|false)$', 'allow_execute = false', text)
-text = replace_once(r'^allow_package_install\s*=\s*(true|false)$', 'allow_package_install = false', text)
-text = replace_once(r'^allow_permanent_extension\s*=\s*(true|false)$', 'allow_permanent_extension = false', text)
-text = replace_once(r'^allow_runtime_enable\s*=\s*(true|false)$', 'allow_runtime_enable = false', text)
 
 config_path.write_text(text, encoding="utf-8")
 PY
@@ -359,17 +354,28 @@ ensure_binaries() {
     "$ROOT_DIR/prompts"
     "$ROOT_DIR/crates/skills/health_check"
   )
+  local kb_inputs=(
+    "$ROOT_DIR/Cargo.toml"
+    "$ROOT_DIR/Cargo.lock"
+    "$ROOT_DIR/configs"
+    "$ROOT_DIR/prompts"
+    "$ROOT_DIR/crates/skills/kb"
+  )
   [[ -x "$CLAWD_BIN" ]] || need_build=1
   [[ -x "$ROOT_DIR/target/release/skill-runner" ]] || need_build=1
   [[ -x "$ROOT_DIR/target/release/health-check-skill" ]] || need_build=1
+  [[ -x "$ROOT_DIR/target/release/kb-skill" ]] || need_build=1
   [[ -x "$ROOT_DIR/target/release/rustclaw-skill" ]] || need_build=1
   [[ -f "$ROOT_DIR/data/skill-packages/health_check/current.json" ]] || need_build=1
+  [[ -f "$ROOT_DIR/data/skill-packages/kb/current.json" ]] || need_build=1
   if [[ "$AUTO_BUILD" == "1" ]]; then
     stale="$(binary_is_stale "$CLAWD_BIN" "${clawd_inputs[@]}")"
     [[ "$stale" == "1" ]] && need_build=1
     stale="$(binary_is_stale "$ROOT_DIR/target/release/skill-runner" "${skill_runner_inputs[@]}")"
     [[ "$stale" == "1" ]] && need_build=1
     stale="$(binary_is_stale "$ROOT_DIR/target/release/health-check-skill" "${health_check_inputs[@]}")"
+    [[ "$stale" == "1" ]] && need_build=1
+    stale="$(binary_is_stale "$ROOT_DIR/target/release/kb-skill" "${kb_inputs[@]}")"
     [[ "$stale" == "1" ]] && need_build=1
   fi
 
@@ -382,10 +388,14 @@ ensure_binaries() {
       cargo build --release \
         -p skill-runner \
         -p rustclaw-skill-sdk \
-        -p health-check-skill
+        -p health-check-skill \
+        -p kb-skill
       python3 scripts/project_skill_receipts.py \
         --package-root "$ROOT_DIR/data/skill-packages" \
         --skill health_check
+      python3 scripts/project_skill_receipts.py \
+        --package-root "$ROOT_DIR/data/skill-packages" \
+        --skill kb
     )
     if [[ -x "$ROOT_DIR/target/debug/clawd" ]]; then
       CLAWD_BIN="$ROOT_DIR/target/debug/clawd"
@@ -407,6 +417,11 @@ ensure_binaries() {
   "$ROOT_DIR/target/release/rustclaw-skill" receipt-verify \
     "$ROOT_DIR/data/skill-packages" health_check >/dev/null || {
     echo "verified install receipt missing for skill: health_check" >&2
+    exit 2
+  }
+  "$ROOT_DIR/target/release/rustclaw-skill" receipt-verify \
+    "$ROOT_DIR/data/skill-packages" kb >/dev/null || {
+    echo "verified install receipt missing for skill: kb" >&2
     exit 2
   }
 }
@@ -489,6 +504,62 @@ import sys
 obj = json.load(sys.stdin)
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
+if str(data.get("status") or "") not in {"failed", "timeout"}:
+    raise SystemExit(1)
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+def decoded_object(value):
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+machine_objects = list(walk(result))
+journal_summary = ((result.get("task_journal") or {}).get("summary") or {})
+for candidate in (
+    result.get("text"),
+    journal_summary.get("final_answer"),
+    data.get("error_text"),
+):
+    parsed = decoded_object(candidate)
+    if parsed is not None:
+        machine_objects.extend(walk(parsed))
+
+for item in machine_objects:
+    external_blocked = item.get("external_provider_blocked") is True
+    attribution = str(item.get("failure_attribution") or "").strip().lower()
+    codes = {
+        str(item.get(field) or "").strip().lower()
+        for field in (
+            "error_code",
+            "provider_blocker_status_code",
+            "reason_code",
+            "status_code",
+        )
+    }
+    provider_code = any(
+        code == "rate_limited"
+        or code.startswith("provider_")
+        or code.startswith("llm_provider_")
+        for code in codes
+    )
+    if external_blocked and (attribution == "provider_gap" or provider_code):
+        raise SystemExit(0)
+
 messages = result.get("messages") or []
 parts = [
     str(data.get("error_text") or ""),
@@ -564,6 +635,319 @@ if missing:
     print("\n".join(missing))
     raise SystemExit(1)
 PY
+}
+
+lifecycle_structured_summary() {
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
+import json
+import re
+import sys
+
+obj = json.load(sys.stdin)
+expected = [part.strip() for part in sys.argv[1].split(";;") if part.strip()]
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+trace = ((result.get("task_journal") or {}).get("trace") or {})
+steps = [step for step in trace.get("step_results") or [] if isinstance(step, dict)]
+
+parts = []
+for candidate in (data.get("error_text"), result.get("text")):
+    if isinstance(candidate, str) and candidate.strip():
+        parts.append(candidate.strip())
+for message in result.get("messages") or []:
+    if isinstance(message, str):
+        parts.append(message)
+    elif isinstance(message, dict) and isinstance(message.get("text"), str):
+        parts.append(message["text"])
+
+dry_run_true = []
+action_refs = []
+for index, step in enumerate(steps):
+    for key in (
+        "requested_action_ref",
+        "requested_capability",
+        "resolved_capability",
+        "executed_skill",
+        "output_excerpt",
+        "error_excerpt",
+    ):
+        value = step.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+            if key in {"requested_action_ref", "requested_capability", "resolved_capability"}:
+                action_refs.append(value.strip())
+    contract = step.get("contract") or {}
+    value = contract.get("requested_action_ref")
+    if isinstance(value, str) and value.strip():
+        parts.append(value.strip())
+        action_refs.append(value.strip())
+    evidence = step.get("observed_evidence") or {}
+    for item in evidence.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "")
+        excerpt = item.get("excerpt")
+        if isinstance(excerpt, str):
+            parts.append(excerpt)
+            if field.split(".")[-1] == "dry_run" and excerpt.strip().lower() == "true":
+                dry_run_true.append(f"step={index}:{field}")
+        values = item.get("sample_values")
+        if isinstance(values, list):
+            parts.extend(str(value) for value in values)
+
+haystack = "\n".join(parts)
+missing = []
+if str(data.get("status") or "") != "succeeded":
+    missing.append(f"task_status={data.get('status')}")
+for marker in expected:
+    alternatives = [part.strip() for part in marker.split("__OR__") if part.strip()]
+    if alternatives and not any(part in haystack for part in alternatives):
+        missing.append(f"marker_missing={marker}")
+if not steps:
+    missing.append("step_results_missing")
+if not action_refs:
+    missing.append("capability_action_refs_missing")
+if dry_run_true:
+    missing.append("non_x_dry_run_observed=" + ",".join(dry_run_true))
+if "preview_background_command" in haystack:
+    missing.append("background_command_was_previewed")
+if "kb.ingest" in expected:
+    refs = [str(step.get("requested_action_ref") or "") for step in steps]
+    try:
+        ingest_index = refs.index("kb.ingest")
+        status_index = refs.index("kb.ingest_job_status", ingest_index + 1)
+        resume_index = refs.index("kb.resume_ingest", status_index + 1)
+        search_index = refs.index("kb.search", resume_index + 1)
+        delete_index = refs.index("kb.delete_namespace", search_index + 1)
+    except ValueError:
+        missing.append("kb_checkpoint_action_order_invalid")
+    else:
+        excerpts = [str(step.get("output_excerpt") or "") for step in steps]
+        if '"complete":false' not in excerpts[ingest_index]:
+            missing.append("kb_initial_checkpoint_not_incomplete")
+        if not any('"complete":true' in excerpts[index] for index in range(resume_index, search_index)):
+            missing.append("kb_resume_did_not_complete")
+        if '"removed_documents":2' not in excerpts[delete_index]:
+            missing.append("kb_cleanup_document_count_not_two")
+        job_ids = set(re.findall(r"kbj-[a-zA-Z0-9_-]+", "\n".join(excerpts[ingest_index:search_index])))
+        canonical_job_id = max(job_ids, key=len, default="")
+        if len(canonical_job_id) < 16 or any(not canonical_job_id.startswith(value) for value in job_ids):
+            missing.append(f"kb_job_identity_count={len(job_ids)}")
+if missing:
+    print("\n".join(missing))
+    raise SystemExit(1)
+print(
+    f"status=succeeded; steps={len(steps)}; actions={len(action_refs)}; "
+    "non_x_dry_run=0; markers=complete"
+)
+PY
+}
+
+lifecycle_expected_failure_summary() {
+  python3 /dev/fd/3 "$2" 3<<'PY' <<<"$1"
+import json
+import sys
+
+obj = json.load(sys.stdin)
+expected = [part.strip() for part in sys.argv[1].split(";;") if part.strip()]
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+serialized = json.dumps(result, ensure_ascii=False, sort_keys=True)
+steps = (((result.get("task_journal") or {}).get("trace") or {}).get("step_results") or [])
+
+def dry_run_true(value):
+    if isinstance(value, dict):
+        return any((key == "dry_run" and child is True) or dry_run_true(child) for key, child in value.items())
+    if isinstance(value, list):
+        return any(dry_run_true(child) for child in value)
+    return False
+
+missing = []
+if str(data.get("status") or "") != "failed":
+    missing.append(f"task_status={data.get('status')}")
+for marker in expected:
+    alternatives = [part.strip() for part in marker.split("__OR__") if part.strip()]
+    if alternatives and not any(part in serialized for part in alternatives):
+        missing.append(f"marker_missing={marker}")
+if not steps:
+    missing.append("step_results_missing")
+if dry_run_true(result):
+    missing.append("non_x_dry_run_observed")
+if "preview_background_command" in serialized:
+    missing.append("background_command_was_previewed")
+if missing:
+    print("\n".join(missing))
+    raise SystemExit(1)
+print(f"status=failed_expected; steps={len(steps)}; non_x_dry_run=0; terminal_contract=complete")
+PY
+}
+
+wait_for_async_job_checkpoint() {
+  local task_id="$1"
+  local limit_seconds="$2"
+  local waited=0
+  while (( waited <= limit_seconds )); do
+    local raw
+    raw="$(query_task "$task_id")"
+    if python3 /dev/fd/3 3<<'PY' <<<"$raw"
+import json
+import sys
+
+obj = json.load(sys.stdin)
+data = obj.get("data") or {}
+if data.get("status") not in {"queued", "running"}:
+    raise SystemExit(1)
+
+def has_local_job(value):
+    if isinstance(value, dict):
+        job_id = value.get("job_id")
+        if isinstance(job_id, str) and job_id.startswith("local_process:"):
+            return True
+        return any(has_local_job(child) for child in value.values())
+    if isinstance(value, list):
+        return any(has_local_job(child) for child in value)
+    return False
+
+raise SystemExit(0 if has_local_job(data.get("result_json") or {}) else 1)
+PY
+    then
+      printf '%s\n' "$raw"
+      return 0
+    fi
+    sleep "$POLL_INTERVAL_SECONDS"
+    waited=$((waited + POLL_INTERVAL_SECONDS))
+  done
+  return 1
+}
+
+run_lifecycle_concurrent_case() {
+  local round_no="$1" case_name="$2" auth_kind="$3" assertion="$4" expected="$5" prompt="$6"
+  local case_dir="$LOG_DIR/cases/ask_round${round_no}_${case_name}"
+  local submit_raw task_id pending_raw health_submit health_task_id health_final long_during long_final note
+  mkdir -p "$case_dir"
+  printf '%s\n' "$prompt" > "$case_dir/prompt.txt"
+  submit_raw="$(submit_task "$prompt")"
+  printf '%s\n' "$submit_raw" > "$case_dir/submit.json"
+  task_id="$(extract_submit_task_id "$submit_raw")"
+  if ! pending_raw="$(wait_for_async_job_checkpoint "$task_id" "$WAIT_SECONDS")"; then
+    note="long task did not publish an active async checkpoint"
+  else
+    printf '%s\n' "$pending_raw" > "$case_dir/long_pending.json"
+    health_submit="$(submit_run_skill_task "health_check" "{}")"
+    printf '%s\n' "$health_submit" > "$case_dir/health_submit.json"
+    health_task_id="$(extract_submit_task_id "$health_submit")"
+    health_final="$(wait_task_until_terminal_with_limit "$health_task_id" 20 || true)"
+    printf '%s\n' "$health_final" > "$case_dir/health_final.json"
+    long_during="$(query_task "$task_id")"
+    printf '%s\n' "$long_during" > "$case_dir/long_during_health_completion.json"
+    long_final="$(wait_task_until_terminal_with_limit "$task_id" "$WAIT_SECONDS" || true)"
+    printf '%s\n' "$long_final" > "$case_dir/final.json"
+    if note="$(python3 /dev/fd/3 "$expected" "$case_dir/health_final.json" "$case_dir/long_during_health_completion.json" 3<<'PY' <<<"$long_final"
+import json
+import sys
+from pathlib import Path
+
+long_final = json.load(sys.stdin)
+expected = [part for part in sys.argv[1].split(";;") if part]
+health = json.loads(Path(sys.argv[2]).read_text())
+long_during = json.loads(Path(sys.argv[3]).read_text())
+long_result = (long_final.get("data") or {}).get("result_json") or {}
+health_result = (health.get("data") or {}).get("result_json") or {}
+long_text = json.dumps(long_result, ensure_ascii=False, sort_keys=True)
+health_text = json.dumps(health_result, ensure_ascii=False, sort_keys=True)
+missing = []
+if (long_final.get("data") or {}).get("status") != "succeeded": missing.append("long_task_not_succeeded")
+if (health.get("data") or {}).get("status") != "succeeded": missing.append("health_task_not_succeeded")
+if (long_during.get("data") or {}).get("status") not in {"queued", "running"}: missing.append("long_task_not_active_when_health_finished")
+if "system_health" not in health_text: missing.append("health_check_result_missing")
+for marker in expected:
+    if marker not in long_text: missing.append(f"long_marker_missing={marker}")
+if '"dry_run": true' in long_text or '"dry_run": true' in health_text: missing.append("non_x_dry_run_observed")
+if missing:
+    print("\n".join(missing)); raise SystemExit(1)
+print("long_active_during_health=1; health_status=succeeded; long_status=succeeded; non_x_dry_run=0")
+PY
+)"; then
+      echo "[PASS] ${case_name} (${note})"
+      PASS=$((PASS + 1)); append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$note"
+      return
+    fi
+  fi
+  echo "[FAIL] ${case_name}: ${note}"
+  FAIL=$((FAIL + 1)); append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$note"
+}
+
+run_lifecycle_cancel_case() {
+  local round_no="$1" case_name="$2" auth_kind="$3" assertion="$4" expected="$5" prompt="$6"
+  local case_dir="$LOG_DIR/cases/ask_round${round_no}_${case_name}"
+  local submit_raw task_id pending_raw cancel_first cancel_second final_raw stable_raw note
+  local -a auth_args=()
+  mkdir -p "$case_dir"
+  printf '%s\n' "$prompt" > "$case_dir/prompt.txt"
+  submit_raw="$(submit_task "$prompt")"; printf '%s\n' "$submit_raw" > "$case_dir/submit.json"
+  task_id="$(extract_submit_task_id "$submit_raw")"
+  if ! pending_raw="$(wait_for_async_job_checkpoint "$task_id" "$WAIT_SECONDS")"; then
+    note="long task did not publish an active async checkpoint"
+  else
+    printf '%s\n' "$pending_raw" > "$case_dir/pending.json"
+    array_from_command_lines auth_args curl_auth_args
+    cancel_first="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\"}")"
+    printf '%s\n' "$cancel_first" > "$case_dir/cancel_first.json"
+    final_raw="$(wait_task_until_terminal_with_limit "$task_id" 30 || true)"
+    printf '%s\n' "$final_raw" > "$case_dir/final.json"
+    cancel_second="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\"}")"
+    printf '%s\n' "$cancel_second" > "$case_dir/cancel_second.json"
+    sleep 2
+    stable_raw="$(query_task "$task_id")"; printf '%s\n' "$stable_raw" > "$case_dir/stable_terminal.json"
+    if note="$(python3 - "$case_dir/pending.json" "$case_dir/cancel_first.json" "$case_dir/cancel_second.json" "$case_dir/final.json" "$case_dir/stable_terminal.json" "$expected" <<'PY'
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+pending, first, second, final, stable = [json.loads(Path(p).read_text()) for p in sys.argv[1:6]]
+expected = [part for part in sys.argv[6].split(";;") if part]
+serialized = json.dumps(pending, ensure_ascii=False) + json.dumps(final, ensure_ascii=False)
+missing = []
+if not first.get("ok") or ((first.get("data") or {}).get("status") != "task_cancelled"): missing.append("first_cancel_failed")
+if not second.get("ok") or ((second.get("data") or {}).get("status") != "task_already_cancelled"): missing.append("second_cancel_not_idempotent")
+if (final.get("data") or {}).get("status") != "canceled": missing.append("task_not_canceled")
+if (stable.get("data") or {}).get("status") != "canceled": missing.append("canceled_status_not_stable")
+for marker in expected:
+    if marker not in serialized: missing.append(f"marker_missing={marker}")
+if '"dry_run": true' in serialized: missing.append("non_x_dry_run_observed")
+cancel_result = (((final.get("data") or {}).get("result_json") or {}).get("cancel_adapter_result") or {})
+if cancel_result.get("adapter_kind") != "local_process_poll": missing.append("local_cancel_adapter_missing")
+if cancel_result.get("status") != "accepted": missing.append("local_cancel_not_accepted")
+if not isinstance(cancel_result.get("pid"), int): missing.append("local_cancel_pid_missing")
+
+def collect_pids(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "pid" and isinstance(child, int): yield child
+            yield from collect_pids(child)
+    elif isinstance(value, list):
+        for child in value: yield from collect_pids(child)
+alive = []
+for pid in set(collect_pids(cancel_result)):
+    try: os.kill(pid, 0)
+    except ProcessLookupError: pass
+    except PermissionError: alive.append(pid)
+    else: alive.append(pid)
+if alive: missing.append("process_still_alive=" + ",".join(map(str, alive)))
+if missing:
+    print("\n".join(missing)); raise SystemExit(1)
+print("first_cancel=applied; second_cancel=idempotent; terminal=canceled; process_gone=1; non_x_dry_run=0")
+PY
+)"; then
+      echo "[PASS] ${case_name} (${note})"
+      PASS=$((PASS + 1)); append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$note"
+      return
+    fi
+  fi
+  echo "[FAIL] ${case_name}: ${note}"
+  FAIL=$((FAIL + 1)); append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$note"
 }
 
 expand_template() {
@@ -674,7 +1058,12 @@ def action_refs(step):
 
 def is_http_observation(step):
     refs = set(action_refs(step))
-    return bool(refs & {"http.get", "http_basic.get"})
+    if refs & {"http.get", "http_basic.get"}:
+        return True
+    if "system.run_command" not in refs:
+        return False
+    evidence_text = "\n".join(step_text_parts(step)).lower()
+    return "curl " in evidence_text and "127.0.0.1:" in evidence_text
 
 mutation_action_refs = {
     "fs_basic.write_text",
@@ -687,6 +1076,8 @@ mutation_action_refs = {
     "make_dir",
     "remove_file",
     "workspace.apply_patch",
+    "workspace.replace_text",
+    "workspace.write_text",
 }
 
 def is_structured_mutation(step):
@@ -739,6 +1130,12 @@ if not repair_mutation:
     missing.append("repair_mutation_missing")
 if not post_repair_validation:
     missing.append("post_repair_validation_missing")
+if any(
+    '"dry_run": true' in json.dumps(step, ensure_ascii=False, sort_keys=True)
+    or '"preview": true' in json.dumps(step, ensure_ascii=False, sort_keys=True)
+    for step in step_results
+):
+    missing.append("non_x_dry_run_observed")
 if missing:
     print("\n".join(missing))
     raise SystemExit(1)
@@ -1014,6 +1411,14 @@ run_nl_case() {
   read -r USER_ID CHAT_ID < <(case_user_ids "$round_no" "$ordinal")
   export USER_KEY USER_ID CHAT_ID
 
+  if [[ "$assertion" == "lifecycle_concurrent" ]]; then
+    run_lifecycle_concurrent_case "$round_no" "$case_name" "$auth_kind" "$assertion" "$expected" "$prompt"
+    return
+  elif [[ "$assertion" == "lifecycle_cancel" ]]; then
+    run_lifecycle_cancel_case "$round_no" "$case_name" "$auth_kind" "$assertion" "$expected" "$prompt"
+    return
+  fi
+
   if [[ "$assertion" == "ops_http" ]]; then
     kill_process_on_port "$HTTP_PORT"
   elif [[ "$assertion" == "ops_http_repair" ]]; then
@@ -1088,6 +1493,28 @@ run_nl_case() {
       fi
       kill_process_on_port "$HTTP_REPAIR_PORT"
       ;;
+    lifecycle_structured)
+      if missing="$(lifecycle_structured_summary "$final_raw" "$expected" 2>&1)"; then
+        echo "[PASS] ${case_name} (${missing})"
+        PASS=$((PASS + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$missing"
+      else
+        echo "[FAIL] ${case_name}: ${missing}"
+        FAIL=$((FAIL + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$missing"
+      fi
+      ;;
+    lifecycle_expected_failure)
+      if missing="$(lifecycle_expected_failure_summary "$final_raw" "$expected" 2>&1)"; then
+        echo "[PASS] ${case_name} (${missing})"
+        PASS=$((PASS + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$missing"
+      else
+        echo "[FAIL] ${case_name}: ${missing}"
+        FAIL=$((FAIL + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$missing"
+      fi
+      ;;
     *)
       echo "unsupported assertion kind in case ${case_name}: ${assertion}" >&2
       FAIL=$((FAIL + 1))
@@ -1099,6 +1526,11 @@ run_nl_case() {
 run_transport_self_test() {
   local payload
   local visible
+  local lifecycle_payload
+  local lifecycle_summary
+  local expected_failure_payload
+  local expected_failure_summary
+  local dry_run_payload
   payload="$(
     python3 - <<'PY'
 import json
@@ -1119,7 +1551,102 @@ PY
   [[ "${#visible}" -gt 300000 ]]
   result_provider_unavailable "$payload"
   missing_substrings "$visible" "rate limit;;$(printf 'X%.0s' {1..128})"
-  echo "LONG_TAIL_RUNNER_TRANSPORT_SELF_TEST ok payload_bytes=${#payload}"
+  lifecycle_payload="$({
+    python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "data": {
+        "status": "succeeded",
+        "result_json": {
+            "text": "RUSTCLAW_LONG_COMMAND_COMPLETE",
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "requested_action_ref": "system.run_command",
+                        "resolved_capability": "local_process_poll",
+                        "observed_evidence": {
+                            "items": [{
+                                "field": "extra.output",
+                                "excerpt": "RUSTCLAW_HEARTBEAT_7",
+                            }],
+                        },
+                    }],
+                },
+            },
+        },
+    },
+}))
+PY
+  })"
+  lifecycle_summary="$(
+    lifecycle_structured_summary \
+      "$lifecycle_payload" \
+      "system.run_command;;local_process_poll;;RUSTCLAW_HEARTBEAT_7"
+  )"
+  missing_substrings "$lifecycle_summary" "status=succeeded;;non_x_dry_run=0;;markers=complete"
+
+  expected_failure_payload="$({
+    python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "data": {
+        "status": "failed",
+        "result_json": {
+            "error_code": "local_process_runtime_timeout",
+            "exit_code": 124,
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "requested_action_ref": "system.run_command",
+                        "resolved_capability": "local_process_poll",
+                    }],
+                },
+            },
+        },
+    },
+}))
+PY
+  })"
+  expected_failure_summary="$(
+    lifecycle_expected_failure_summary \
+      "$expected_failure_payload" \
+      "system.run_command;;local_process_poll;;local_process_runtime_timeout;;124"
+  )"
+  missing_substrings "$expected_failure_summary" "status=failed_expected;;non_x_dry_run=0;;terminal_contract=complete"
+
+  dry_run_payload="$({
+    python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "data": {
+        "status": "succeeded",
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "requested_action_ref": "system.run_command",
+                        "observed_evidence": {
+                            "items": [{
+                                "field": "extra.dry_run",
+                                "excerpt": "true",
+                            }],
+                        },
+                    }],
+                },
+            },
+        },
+    },
+}))
+PY
+  })"
+  if lifecycle_structured_summary "$dry_run_payload" "system.run_command" >/dev/null 2>&1; then
+    echo "lifecycle assertion accepted a non-X dry-run result" >&2
+    return 1
+  fi
+  echo "LONG_TAIL_RUNNER_TRANSPORT_SELF_TEST ok payload_bytes=${#payload} lifecycle_assertions=ok"
 }
 
 cleanup() {
@@ -1203,8 +1730,8 @@ CLAWD_PID=$!
 wait_for_health
 init_llm_trace_offset "$LOG_DIR/llm_trace.offset"
 
-printf 'workspace_root=%s\nbase_url=%s\nhttp_port=%s\nhttp_dir=%s\nhttp_marker=%s\nhttp_repair_port=%s\nhttp_repair_dir=%s\nhttp_repair_marker=%s\nhttp_repair_bad_marker=%s\nadmin_key=%s\nuser_key=%s\nrounds=%s\ncase_file=%s\n' \
-  "$TEMP_WORKSPACE" "$BASE_URL" "$HTTP_PORT" "$HTTP_DIR_REL" "$HTTP_MARKER" "$HTTP_REPAIR_PORT" "$REPAIR_HTTP_DIR_REL" "$REPAIR_HTTP_MARKER" "$REPAIR_HTTP_BAD_MARKER" "$ADMIN_USER_KEY" "$REGULAR_USER_KEY" "$ROUNDS" "$CASE_FILE" > "$LOG_DIR/meta.txt"
+printf 'workspace_root=%s\nbase_url=%s\nhttp_port=%s\nhttp_dir=%s\nhttp_marker=%s\nhttp_repair_port=%s\nhttp_repair_dir=%s\nhttp_repair_marker=%s\nhttp_repair_bad_marker=%s\ntemporary_admin_auth=generated\ntemporary_user_auth=generated\nrounds=%s\ncase_file=%s\n' \
+  "$TEMP_WORKSPACE" "$BASE_URL" "$HTTP_PORT" "$HTTP_DIR_REL" "$HTTP_MARKER" "$HTTP_REPAIR_PORT" "$REPAIR_HTTP_DIR_REL" "$REPAIR_HTTP_MARKER" "$REPAIR_HTTP_BAD_MARKER" "$ROUNDS" "$CASE_FILE" > "$LOG_DIR/meta.txt"
 
 for round_no in $(seq 1 "$ROUNDS"); do
   ordinal=0

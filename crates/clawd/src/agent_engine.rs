@@ -6,6 +6,7 @@ use tracing::{debug, info};
 
 mod action_batch_contract;
 mod arg_resolver;
+mod async_completion_checkpoint;
 mod async_start_checkpoint;
 mod attempt_ledger;
 mod capability_catalog;
@@ -27,6 +28,7 @@ pub(crate) use mutation_ledger::{
 };
 pub(crate) mod observed_output;
 mod parallel_read_batch;
+mod plan_verifier_observation;
 mod planner_skill_context;
 mod planning;
 mod progress_contract;
@@ -68,6 +70,7 @@ pub(crate) fn planner_internal_tool_is_observe_only(tool: &str) -> bool {
     tool == "load_capability_groups"
 }
 
+pub(crate) use self::async_completion_checkpoint::completed_async_job_continuation_result;
 pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{
@@ -754,6 +757,56 @@ fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value>
     }))
 }
 
+fn resume_failure_machine_facts(structured_error: Option<&Value>) -> (Vec<String>, bool) {
+    let Some(structured_error) = structured_error.and_then(Value::as_object) else {
+        return (Vec::new(), false);
+    };
+    let extra = structured_error.get("extra").and_then(Value::as_object);
+    let error_code = extra
+        .and_then(|extra| extra.get("error_code"))
+        .or_else(|| structured_error.get("error_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let status = extra
+        .and_then(|extra| extra.get("status"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("error");
+    let failure_phase = extra
+        .and_then(|extra| extra.get("failure_phase"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let retryable = extra
+        .and_then(|extra| extra.get("retryable"))
+        .and_then(Value::as_bool);
+    let side_effect_applied = extra
+        .and_then(|extra| extra.get("side_effect_applied"))
+        .and_then(Value::as_bool);
+    let proven_not_applied = side_effect_applied == Some(false)
+        && matches!(failure_phase, Some("pre_dispatch" | "provider_rejected"));
+
+    let mut facts = vec![format!("status: {status}")];
+    if let Some(error_code) = error_code {
+        facts.push(format!("error_code: {error_code}"));
+    }
+    if let Some(failure_phase) = failure_phase {
+        facts.push(format!("failure_phase: {failure_phase}"));
+    }
+    if let Some(retryable) = retryable {
+        facts.push(format!("retryable: {retryable}"));
+    }
+    if let Some(side_effect_applied) = side_effect_applied {
+        facts.push(format!("side_effect_applied: {side_effect_applied}"));
+    }
+    if proven_not_applied {
+        facts.push("cleanup_status: not_created".to_string());
+    }
+    (facts, proven_not_applied)
+}
+
 async fn build_resume_context_error(
     state: &AppState,
     task: &ClaimedTask,
@@ -816,12 +869,13 @@ async fn build_resume_context_error(
         "remaining_actions": remaining_actions,
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
-    if let Some(structured_error) = resume_context_structured_skill_error(raw_err) {
+    let structured_error = resume_context_structured_skill_error(raw_err);
+    if let Some(structured_error) = structured_error.as_ref() {
         if let Some(failed_step) = resume_context
             .get_mut("failed_step")
             .and_then(|value| value.as_object_mut())
         {
-            failed_step.insert("structured_error".to_string(), structured_error);
+            failed_step.insert("structured_error".to_string(), structured_error.clone());
         }
     }
     let has_remaining_actions = resume_context
@@ -845,6 +899,9 @@ async fn build_resume_context_error(
         format!("error_summary: {safe_err}"),
         format!("remaining_steps_count: {}", remaining_steps.len()),
     ];
+    let (machine_facts, proven_not_applied) =
+        resume_failure_machine_facts(structured_error.as_ref());
+    observed_facts.extend(machine_facts);
     if !completed_steps.is_empty() {
         observed_facts.push(format!("completed_steps_count: {}", completed_steps.len()));
     }
@@ -853,6 +910,15 @@ async fn build_resume_context_error(
         "failed_step_success_claim_allowed=false".to_string(),
         "response_focus=failed_step_and_recovery_path".to_string(),
     ];
+    if structured_error.is_some() {
+        policy_boundary.push(
+            "preserve_observed_failure_fields=status,error_code,failure_phase,retryable"
+                .to_string(),
+        );
+    }
+    if proven_not_applied {
+        policy_boundary.push("preserve_observed_failure_fields+=cleanup_status".to_string());
+    }
     if has_remaining_actions {
         policy_boundary.push("remaining_steps_state=paused".to_string());
         policy_boundary.push("resume_available=true".to_string());

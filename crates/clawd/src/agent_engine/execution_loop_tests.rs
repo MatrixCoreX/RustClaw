@@ -3,6 +3,7 @@ use super::{
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
     check_repeat_action_guard, finalize_execute_round_outcome,
     prior_structured_observation_satisfies_read_only_action,
+    registry_allows_repeated_idempotent_action,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
@@ -123,9 +124,10 @@ fn filesystem_write_registry_fixture() -> &'static str {
 name = "fs_basic"
 enabled = true
 kind = "runner"
-input_schema = { type = "object", properties = { path = { type = "string" }, content = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, content = { type = "string" }, recursive = { type = "boolean" } } }
 planner_capabilities = [
   { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", once_per_task = true, dedup_scope = "args", idempotent = false },
+  { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], optional = ["recursive"], risk_level = "high", once_per_task = true, dedup_scope = "args", idempotent = false },
 ]
 "#
 }
@@ -139,6 +141,19 @@ kind = "runner"
 planner_capabilities = [
   { name = "preview.inspect", action = "inspect", effect = "observe", idempotent = true },
   { name = "preview.apply", action = "apply", effect = "mutate", once_per_task = true, idempotent = false },
+]
+"#
+}
+
+fn idempotent_resume_registry_fixture() -> &'static str {
+    r#"
+[[skills]]
+name = "kb"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "kb.resume_ingest", action = "resume_ingest", effect = "external", idempotent = true, once_per_task = false, dedup_scope = "args" },
+  { name = "kb.ingest", action = "ingest", effect = "external", idempotent = false, once_per_task = true, dedup_scope = "args" },
 ]
 "#
 }
@@ -648,6 +663,47 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
 }
 
 #[test]
+fn repeat_guard_allows_registry_declared_idempotent_resume_action() {
+    let state = state_with_registry(idempotent_resume_registry_fixture(), &["kb"]);
+    let task = task_fixture("task-repeat-idempotent-resume");
+    let mut loop_state = super::LoopState::new();
+    let action = crate::AgentAction::CallCapability {
+        capability: "kb.resume_ingest".to_string(),
+        args: serde_json::json!({"job_id": "kb-job-1"}),
+    };
+    let policy = test_policy(true);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert!(registry_allows_repeated_idempotent_action(&state, &action));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
+}
+
+#[test]
+fn registry_idempotency_does_not_override_once_per_task() {
+    let state = state_with_registry(idempotent_resume_registry_fixture(), &["kb"]);
+    let action = crate::AgentAction::CallCapability {
+        capability: "kb.ingest".to_string(),
+        args: serde_json::json!({"path": "docs"}),
+    };
+
+    assert!(!registry_allows_repeated_idempotent_action(&state, &action));
+}
+
+#[test]
 fn repeat_guard_blocks_exact_failed_action_before_runner_reentry() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-failed-action");
@@ -900,4 +956,39 @@ fn registry_args_dedup_allows_multiple_distinct_filesystem_writes() {
         None
     );
     assert!(loop_state.rollout_attribution.is_empty());
+}
+
+#[test]
+fn registry_args_dedup_allows_removing_multiple_distinct_paths() {
+    let state = state_with_registry(filesystem_write_registry_fixture(), &["fs_basic"]);
+    let task = task_fixture("task-registry-remove-multiple-paths");
+    let mut loop_state = super::LoopState::new();
+    let first = crate::AgentAction::CallCapability {
+        capability: "filesystem.remove_path".to_string(),
+        args: serde_json::json!({"path": "tmp/first", "recursive": true}),
+    };
+    let second = crate::AgentAction::CallCapability {
+        capability: "filesystem.remove_path".to_string(),
+        args: serde_json::json!({"path": "tmp/second", "recursive": true}),
+    };
+    let policy = test_policy(true);
+    let first_fingerprint = action_fingerprint_for_policy(&state, &policy, &first);
+    let second_fingerprint = action_fingerprint_for_policy(&state, &policy, &second);
+
+    assert_ne!(first_fingerprint, second_fingerprint);
+    loop_state
+        .successful_action_fingerprints
+        .insert(first_fingerprint, 1);
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &second,
+            &second_fingerprint,
+            2,
+        ),
+        None
+    );
 }

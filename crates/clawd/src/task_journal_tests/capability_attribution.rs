@@ -102,3 +102,65 @@ fn executed_round_wins_over_earlier_rejected_and_unresolved_capabilities() {
         Some(canonical)
     );
 }
+
+#[test]
+fn restored_step_provenance_precedes_new_terminal_round_attribution() {
+    let mut journal = TaskJournal::for_task("task-restored-provenance", "ask", "run then report");
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "observation_kind": "checkpoint_step_provenance",
+        "owner_layer": "task_journal",
+        "step_id": "step_2",
+        "requested_action_type": "call_capability",
+        "requested_capability": "system.run_command",
+        "requested_action_ref": "system.run_command",
+        "resolved_capability": "system.run_command",
+        "resolved_tool_or_skill": "run_cmd",
+        "round_no": 2,
+        "step_in_round": 1,
+        "dispatch_executed": true,
+    }));
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 3,
+        goal: "report completion".to_string(),
+        plan_result: Some(crate::PlanResult {
+            goal: "report completion".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            output_contract: None,
+            steps: vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "respond".to_string(),
+                skill: "respond".to_string(),
+                args: json!({"text": "done"}),
+                depends_on: Vec::new(),
+                why: "report completion".to_string(),
+            }],
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: json!({"steps": [{"type": "respond", "text": "done"}]}).to_string(),
+        }),
+        ..Default::default()
+    });
+    for (step_id, skill, output) in [
+        ("step_2", "run_cmd", "command complete"),
+        ("step_1", "respond", "done"),
+    ] {
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(output.to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+    }
+
+    let trace = journal.to_trace_json();
+    let steps = trace["step_results"].as_array().expect("step results");
+    assert_eq!(steps[0]["requested_capability"], "system.run_command");
+    assert_eq!(steps[0]["requested_action_ref"], "system.run_command");
+    assert_eq!(steps[0]["requested_action_type"], "call_capability");
+    assert_eq!(steps[1]["requested_capability"], "respond");
+}

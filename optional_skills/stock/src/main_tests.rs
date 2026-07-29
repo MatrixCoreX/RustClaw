@@ -58,7 +58,20 @@ fn parse_sina_hq_returns_structured_quote_extra() {
         Some("stock")
     );
     assert_eq!(extra.get("code").and_then(Value::as_str), Some("SH600519"));
+    assert_eq!(
+        extra.get("normalized_code").and_then(Value::as_str),
+        Some("SH600519")
+    );
     assert_eq!(extra.get("name").and_then(Value::as_str), Some("贵州茅台"));
+    assert_eq!(extra.get("price").and_then(Value::as_str), Some("1519.80"));
+    assert_eq!(
+        extra.get("provider").and_then(Value::as_str),
+        Some("sina_finance")
+    );
+    assert_eq!(
+        extra.get("observed_at").and_then(Value::as_str),
+        Some("2026-07-07T15:00:00+08:00")
+    );
     assert_eq!(
         extra.get("current").and_then(Value::as_str),
         Some("1519.80")
@@ -111,4 +124,12 @@ fn protocol_errors_always_expose_stable_machine_fields() {
     let extra = stock_error_extra("unsupported_action");
     assert_eq!(extra["error_code"], "unsupported_action");
     assert_eq!(extra["message_key"], "skill.stock.unsupported_action");
+}
+
+#[test]
+fn requested_symbol_is_projected_without_parsing_error_text() {
+    assert_eq!(
+        requested_symbol_from_args(&json!({"code": " NOT-A-STOCK "})),
+        Some("NOT-A-STOCK")
+    );
 }

@@ -1,4 +1,7 @@
-use super::builtin_schedule::{schedule_args_contain_structured_intent, schedule_workflow_prompt};
+use super::builtin_schedule::{
+    explicit_schedule_intent_from_args, schedule_args_contain_structured_intent,
+    schedule_replan_error, schedule_workflow_prompt,
+};
 use serde_json::json;
 
 #[test]
@@ -52,4 +55,32 @@ fn schedule_machine_fields_claim_structured_intent() {
     ] {
         assert!(schedule_args_contain_structured_intent(&args));
     }
+}
+
+#[test]
+fn schedule_clarification_proves_mutation_was_not_applied() {
+    let mut intent = crate::ScheduleIntentOutput::default();
+    intent.needs_clarify = true;
+    intent.clarify_question = "Please provide a time".to_string();
+
+    let encoded = schedule_replan_error(&intent);
+    let structured =
+        crate::skills::parse_structured_skill_error(&encoded).expect("structured schedule error");
+    let extra = structured.extra.expect("schedule error extra");
+    assert_eq!(structured.error_code, "schedule_needs_more_info");
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+}
+
+#[test]
+fn schedule_list_without_filters_uses_structured_list_intent() {
+    let args = json!({"action": "list"});
+    let intent = explicit_schedule_intent_from_args(&args, "list", "schedule workflow request")
+        .expect("valid list intent")
+        .expect("standalone list intent");
+
+    assert_eq!(intent.kind, "list");
+    assert!(!intent.needs_clarify);
 }

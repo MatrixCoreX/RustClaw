@@ -50,7 +50,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"w1","status":"ok","text":"…","extra":{"action":"query","mode":"current","locale":"zh-CN","location":"北京","resolved_location":"Beijing, Beijing Municipality, China","temperature":25.2,"weather_code":"多云","weather_code_raw":3},"error_text":null}
+{"request_id":"w1","status":"ok","text":"…","extra":{"action":"query","mode":"current","locale":"zh-CN","location":"北京","resolved_location":"Beijing, Beijing Municipality, China","temperature":25.2,"weather_code":"多云","weather_code_raw":3,"provider_observed_at":"2026-07-29T18:45","provider_timezone":"GMT","provider_timezone_abbreviation":"GMT","provider_utc_offset_seconds":0},"error_text":null}
 ```
 
 ### Example 2：未来多天预报（请求超过上限时 extra 标注）

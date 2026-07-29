@@ -101,6 +101,12 @@ fn planner_repair_signal(
     Some(json!({
         "schema_version": 1,
         "status_code": "plan_verifier_replan_required",
+        "do_not_repeat_same_rejected_plan": true,
+        "allowed_next_outcomes": [
+            "materially_change_arguments",
+            "request_missing_user_input",
+            "respond_from_verifier_evidence"
+        ],
         "issues": verify_result
             .issues
             .iter()
@@ -108,8 +114,12 @@ fn planner_repair_signal(
             .map(|issue| json!({
                 "step_id": issue.step_id,
                 "verify_issue_kind": issue.kind.as_str(),
+                "status": "error",
+                "error_code": issue.kind.status_code(),
                 "status_code": issue.kind.status_code(),
                 "message_key": issue.kind.message_key(),
+                "retryable": false,
+                "planner_repairable": true,
                 "missing_fields": issue.missing_fields,
                 "machine_detail": crate::truncate_for_agent_trace(&issue.detail),
                 "forbidden_repeat_fingerprint": plan_result

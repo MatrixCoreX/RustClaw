@@ -197,6 +197,9 @@ pub(crate) struct SkillRuntime {
     pub(crate) tools_policy: Arc<ToolsPolicy>,
     pub(crate) cmd_timeout_seconds: u64,
     pub(crate) cmd_idle_timeout_seconds: u64,
+    pub(crate) cmd_async_timeout_seconds: u64,
+    pub(crate) cmd_async_retention_seconds: u64,
+    pub(crate) cmd_terminate_grace_seconds: u64,
     pub(crate) cmd_max_output_bytes: usize,
     pub(crate) max_cmd_length: usize,
     pub(crate) workspace_root: PathBuf,
@@ -215,6 +218,9 @@ impl SkillRuntime {
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: 60,
             cmd_idle_timeout_seconds: 60,
+            cmd_async_timeout_seconds: 3_600,
+            cmd_async_retention_seconds: 86_400,
+            cmd_terminate_grace_seconds: 5,
             cmd_max_output_bytes: 8000,
             max_cmd_length: 4096,
             workspace_root: std::env::temp_dir(),
@@ -940,6 +946,9 @@ impl AppState {
         self.skill_rt.tools_policy = Arc::new(tools_policy);
         self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
         self.skill_rt.cmd_idle_timeout_seconds = config.tools.cmd_idle_timeout_seconds.max(1);
+        self.skill_rt.cmd_async_timeout_seconds = config.tools.cmd_async_timeout_seconds.max(1);
+        self.skill_rt.cmd_async_retention_seconds = config.tools.cmd_async_retention_seconds.max(1);
+        self.skill_rt.cmd_terminate_grace_seconds = config.tools.cmd_terminate_grace_seconds.max(1);
         self.skill_rt.cmd_max_output_bytes = config.tools.cmd_max_output_bytes.max(128);
         self.skill_rt.max_cmd_length = config.tools.max_cmd_length.max(16);
         self.skill_rt.default_locator_search_dir = default_locator_search_dir;

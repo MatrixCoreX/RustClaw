@@ -737,7 +737,9 @@ pub(super) async fn start_async_command(
     cwd: &Path,
     command: &str,
     max_cmd_length: usize,
-    max_runtime_seconds: u64,
+    runtime_timeout_seconds: Option<u64>,
+    retention_seconds: u64,
+    terminate_grace_seconds: u64,
     allow_sudo: bool,
     job_id: &str,
     job_dir: &Path,
@@ -780,85 +782,187 @@ pub(super) async fn start_async_command(
     let exit_code_path = job_dir.join("exit_code");
     let exit_code_temp_path = job_dir.join("exit_code.tmp");
     let started_path = job_dir.join("started_at");
+    let started_temp_path = job_dir.join("started_at.tmp");
     let finished_path = job_dir.join("finished_at");
+    let finished_temp_path = job_dir.join("finished_at.tmp");
     let run_script_path = job_dir.join("run.sh");
-    let max_runtime_seconds = max_runtime_seconds.clamp(1, 86_400);
-    let script = format!(
-        r#"#!/usr/bin/env bash
-set +e
-printf '%s\n' "$(date +%s)" > {}
-if command -v timeout >/dev/null 2>&1; then
-  timeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}
-elif command -v gtimeout >/dev/null 2>&1; then
-  gtimeout -k 5 {} bash -o pipefail -lc {} > {} 2> {}
-elif command -v python3 >/dev/null 2>&1; then
-  python3 - {} {} {} {} <<'PY'
+    let terminate_grace_seconds = terminate_grace_seconds.max(1);
+    let command_runner = if let Some(runtime_timeout_seconds) = runtime_timeout_seconds {
+        let runtime_timeout_seconds = runtime_timeout_seconds.max(1);
+        format!(
+            r#"if command -v python3 >/dev/null 2>&1; then
+  python3 - {} {} {} {} {} <<'PY'
 import os
 import signal
 import subprocess
 import sys
+import time
+
+def process_tree(root_pid):
+    try:
+        rows = subprocess.check_output(
+            ["ps", "-eo", "pid=,ppid="],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return [root_pid]
+    children = {{}}
+    for row in rows:
+        parts = row.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, parent = (int(parts[0]), int(parts[1]))
+        except ValueError:
+            continue
+        children.setdefault(parent, []).append(pid)
+    discovered = []
+    pending = [root_pid]
+    while pending:
+        pid = pending.pop()
+        if pid in discovered:
+            continue
+        discovered.append(pid)
+        pending.extend(children.get(pid, []))
+    return discovered
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+def signal_tree(pids, sig):
+    for pid in reversed(pids):
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 limit = int(sys.argv[1])
-command = sys.argv[2]
-with open(sys.argv[3], "wb") as stdout, open(sys.argv[4], "wb") as stderr:
+grace = int(sys.argv[2])
+command = sys.argv[3]
+with open(sys.argv[4], "wb") as stdout, open(sys.argv[5], "wb") as stderr:
     process = subprocess.Popen(
         ["bash", "-o", "pipefail", "-lc", command],
         stdout=stdout,
         stderr=stderr,
-        start_new_session=True,
     )
     try:
         code = process.wait(timeout=limit)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
+        pids = process_tree(process.pid)
+        signal_tree(pids, signal.SIGTERM)
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline and any(alive(pid) for pid in pids):
+            time.sleep(0.05)
+        signal_tree([pid for pid in pids if alive(pid)], signal.SIGKILL)
+        process.wait()
         code = 124
 sys.exit(code if code >= 0 else 128 - code)
 PY
+elif command -v timeout >/dev/null 2>&1; then
+  timeout --foreground -k {} {} bash -o pipefail -lc {} > {} 2> {}
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout --foreground -k {} {} bash -o pipefail -lc {} > {} 2> {}
 else
   printf '%s\n' 'portable_timeout_backend_unavailable' > {}
-  code=125
-  printf '%s\n' "$code" > {}
-  mv -f {} {}
-  printf '%s\n' "$(date +%s)" > {}
-  exit "$code"
-fi
+  exit 125
+fi"#,
+            runtime_timeout_seconds,
+            terminate_grace_seconds,
+            shell_single_quote(command),
+            shell_single_quote(&stdout_path.display().to_string()),
+            shell_single_quote(&stderr_path.display().to_string()),
+            terminate_grace_seconds,
+            runtime_timeout_seconds,
+            shell_single_quote(command),
+            shell_single_quote(&stdout_path.display().to_string()),
+            shell_single_quote(&stderr_path.display().to_string()),
+            terminate_grace_seconds,
+            runtime_timeout_seconds,
+            shell_single_quote(command),
+            shell_single_quote(&stdout_path.display().to_string()),
+            shell_single_quote(&stderr_path.display().to_string()),
+            shell_single_quote(&stderr_path.display().to_string()),
+        )
+    } else {
+        format!(
+            "bash -o pipefail -lc {} > {} 2> {}",
+            shell_single_quote(command),
+            shell_single_quote(&stdout_path.display().to_string()),
+            shell_single_quote(&stderr_path.display().to_string()),
+        )
+    };
+    let script = format!(
+        r#"#!/usr/bin/env bash
+set +e
+printf '%s\n' "$(date +%s)" > {}
+mv -f {} {}
+{}
 code=$?
+printf '%s\n' "$(date +%s)" > {}
+mv -f {} {}
 printf '%s\n' "$code" > {}
 mv -f {} {}
-printf '%s\n' "$(date +%s)" > {}
 "#,
+        shell_single_quote(&started_temp_path.display().to_string()),
+        shell_single_quote(&started_temp_path.display().to_string()),
         shell_single_quote(&started_path.display().to_string()),
-        max_runtime_seconds,
-        shell_single_quote(command),
-        shell_single_quote(&stdout_path.display().to_string()),
-        shell_single_quote(&stderr_path.display().to_string()),
-        max_runtime_seconds,
-        shell_single_quote(command),
-        shell_single_quote(&stdout_path.display().to_string()),
-        shell_single_quote(&stderr_path.display().to_string()),
-        max_runtime_seconds,
-        shell_single_quote(command),
-        shell_single_quote(&stdout_path.display().to_string()),
-        shell_single_quote(&stderr_path.display().to_string()),
-        shell_single_quote(&stderr_path.display().to_string()),
-        shell_single_quote(&exit_code_temp_path.display().to_string()),
-        shell_single_quote(&exit_code_temp_path.display().to_string()),
-        shell_single_quote(&exit_code_path.display().to_string()),
+        command_runner,
+        shell_single_quote(&finished_temp_path.display().to_string()),
+        shell_single_quote(&finished_temp_path.display().to_string()),
         shell_single_quote(&finished_path.display().to_string()),
         shell_single_quote(&exit_code_temp_path.display().to_string()),
         shell_single_quote(&exit_code_temp_path.display().to_string()),
         shell_single_quote(&exit_code_path.display().to_string()),
-        shell_single_quote(&finished_path.display().to_string()),
     );
-    std::fs::write(&run_script_path, script).map_err(|err| {
+    crate::local_process_job::write_atomic(&run_script_path, &script).map_err(|err| {
         RunSafeCommandError::Command(CommandRunFailure::new(
             "async_job_script_write_failed",
             format!("{}:{err}", "async_job_script_write_failed"),
+        ))
+    })?;
+    crate::local_process_job::write_atomic(&job_dir.join("job_id"), job_id).map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_metadata_write_failed",
+            format!("async_job_metadata_write_failed:{err}"),
+        ))
+    })?;
+    crate::local_process_job::write_atomic(
+        &job_dir.join("runtime_timeout_seconds"),
+        &runtime_timeout_seconds
+            .map(|seconds| seconds.max(1).to_string())
+            .unwrap_or_else(|| "disabled".to_string()),
+    )
+    .map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_metadata_write_failed",
+            format!("async_job_metadata_write_failed:{err}"),
+        ))
+    })?;
+    crate::local_process_job::write_atomic(
+        &job_dir.join("terminate_grace_seconds"),
+        &terminate_grace_seconds.to_string(),
+    )
+    .map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_metadata_write_failed",
+            format!("async_job_metadata_write_failed:{err}"),
+        ))
+    })?;
+    crate::local_process_job::write_atomic(
+        &job_dir.join("retention_seconds"),
+        &retention_seconds.max(1).to_string(),
+    )
+    .map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_metadata_write_failed",
+            format!("async_job_metadata_write_failed:{err}"),
         ))
     })?;
     let mut cmd =
@@ -877,13 +981,29 @@ printf '%s\n' "$(date +%s)" > {}
             format!("{}:{err}", "async_job_spawn_failed"),
         ))
     })?;
-    if let Some(pid) = child.id() {
-        let _ = std::fs::write(job_dir.join("pid"), pid.to_string());
+    let Some(pid) = child.id() else {
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_pid_missing",
+            "async_job_pid_missing",
+        )));
+    };
+    if let Err(err) = crate::local_process_job::write_atomic(&job_dir.join("pid"), &pid.to_string())
+    {
+        let _ = crate::local_process_job::terminate_verified_process_group(job_dir, pid, "KILL");
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_metadata_write_failed",
+            format!("async_job_pid_write_failed:{err}"),
+        )));
     }
     drop(child);
     Ok(serde_json::json!({
+        "schema_version": 1,
+        "source": "run_cmd",
+        "action": "async_start",
         "status": "accepted",
         "job_id": job_id,
+        "complete": false,
+        "retryable": true,
         "message_key": "clawd.task.async_job_started",
     })
     .to_string())

@@ -704,6 +704,8 @@ fn async_job_contract_requires_machine_poll_fields() {
         status: AsyncJobStatus::Accepted,
         poll_after_seconds: 0,
         expires_at: 0,
+        runtime_deadline_at: None,
+        retention_deadline_at: None,
         cancel_ref: String::new(),
         message_key: String::new(),
     };

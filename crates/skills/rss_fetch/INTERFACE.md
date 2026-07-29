@@ -102,7 +102,7 @@
 - `extra.mode`: `direct`, `category`, or `explicit_urls`.
 - `extra.field_value`: object containing stable execution counters such as `sources_ok`, `sources_failed`, and `items` / `item_count`, plus a compact `titles` array for grounding brief headline answers before evidence truncation.
 - `extra.items`: array of normalized feed item objects with `title`, `link`, `date`, `source`, `source_host`, `layer`, and `topic`.
-- Discovery responses expose `results[]` with URL, lifecycle status, validation counters, sample titles, and machine error code. `source_health` exposes per-category counts and `recommended_action`.
+- Discovery responses expose `results[]` with URL, lifecycle status, validation counters, sample titles, and machine error code. `source_health` exposes per-category `active_count`, `candidate_count`, `eligible_count`, `quarantined_count`, and `recommended_action`.
 - Generic evidence extractors treat `extra.items` as candidate/list evidence; do not duplicate the same item array under another key.
 - `text` remains the localized, user-visible news listing. Consumers must use `extra` for machine evidence instead of parsing `text`.
 

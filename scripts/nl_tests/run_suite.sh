@@ -528,7 +528,7 @@ suite_accepts_flag_option() {
   case "$option" in
     --no-llm-trace)
       case "$suite" in
-        manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        client_like_continuous|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac

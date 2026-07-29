@@ -22,6 +22,7 @@ BASE_URL=""
 ADMIN_KEY=""
 TASK_ID=""
 APPROVAL_REQUEST_ID=""
+PRE_RESTART_READY_KIND=""
 
 cleanup() {
   local exit_code=$?
@@ -198,12 +199,13 @@ query_task() {
     "${BASE_URL}/v1/tasks/${TASK_ID}" >"$output_path"
 }
 
-wait_for_approval_request() {
+wait_for_approval_or_checkpoint() {
   local waited=0
-  local query_path="$LOG_DIR/approval_task.json"
+  local query_path="$LOG_DIR/pre_restart_task.json"
   while (( waited <= WAIT_SECONDS )); do
     query_task "$query_path"
-    APPROVAL_REQUEST_ID="$(
+    local ready
+    ready="$(
       python3 - "$query_path" <<'PY'
 from pathlib import Path
 import json
@@ -213,16 +215,34 @@ obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 result = ((obj.get("data") or {}).get("result_json") or {})
 request = ((result.get("resume_context") or {}).get("approval_request") or {})
 if request.get("status") == "pending":
-    print(str(request.get("request_id") or ""))
+    print("approval:" + str(request.get("request_id") or ""))
+else:
+    checkpoint = result.get("task_checkpoint") or {}
+    job = checkpoint.get("pending_async_job") or {}
+    if (
+        checkpoint.get("checkpoint_id")
+        and job.get("job_id")
+        and job.get("cancel_ref")
+        and int(job.get("poll_after_seconds") or 0) > 0
+    ):
+        print("checkpoint")
 PY
     )"
-    if [[ -n "$APPROVAL_REQUEST_ID" ]]; then
-      return 0
-    fi
+    case "$ready" in
+      approval:*)
+        APPROVAL_REQUEST_ID="${ready#approval:}"
+        PRE_RESTART_READY_KIND="approval"
+        return 0
+        ;;
+      checkpoint)
+        PRE_RESTART_READY_KIND="checkpoint"
+        return 0
+        ;;
+    esac
     sleep "$POLL_INTERVAL_SECONDS"
     waited=$((waited + POLL_INTERVAL_SECONDS))
   done
-  echo "task did not publish an approval request" >&2
+  echo "task did not publish an approval request or active async checkpoint" >&2
   return 1
 }
 
@@ -369,10 +389,14 @@ start_clawd "$LOG_DIR/clawd_before_restart.log"
 wait_for_health
 submit_long_command
 echo "  task_id=${TASK_ID}"
-wait_for_approval_request
-approve_task_once
-echo "  approval=approved_once"
-wait_for_checkpoint
+wait_for_approval_or_checkpoint
+if [[ "$PRE_RESTART_READY_KIND" == "approval" ]]; then
+  approve_task_once
+  echo "  approval=approved_once"
+  wait_for_checkpoint
+else
+  echo "  approval=not_required"
+fi
 echo "  checkpoint=observed"
 
 stop_clawd

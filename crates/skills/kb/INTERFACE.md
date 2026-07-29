@@ -45,7 +45,7 @@ Natural-language intent mapping:
   - response JSON includes `namespaces` plus machine fields `names`, `count`, and `namespace_count`
 - `list_documents`: list typed document metadata for one namespace
 - `remove_documents`: remove selected document paths and their chunks/retrieval rows in one transaction
-- `delete_namespace`: delete one owned namespace and all of its private rows
+- `delete_namespace`: delete one owned namespace and all private rows; `deleted=true` plus `cleanup_status=cleaned` is terminal evidence, so do not probe the deleted namespace
 - `reindex`: rebuild an existing namespace from its recorded source paths
 - `resume_ingest`: continue a persisted ingest/reindex job from its last atomic checkpoint
 - `ingest_job_status`: inspect persisted progress without changing the job

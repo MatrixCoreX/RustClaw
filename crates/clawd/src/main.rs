@@ -59,6 +59,7 @@ mod http;
 mod intent;
 mod language_policy;
 mod llm_gateway;
+mod local_process_job;
 mod log_utils;
 mod machine_selector;
 mod mcp_admin_routes;
@@ -561,9 +562,12 @@ async fn run() -> anyhow::Result<()> {
         );
     }
     info!(
-        "run_cmd config: timeout_seconds={}, idle_timeout_seconds={}, max_output_bytes={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
+        "run_cmd config: timeout_seconds={}, idle_timeout_seconds={}, async_timeout_seconds={}, async_retention_seconds={}, terminate_grace_seconds={}, max_output_bytes={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
         config.tools.cmd_timeout_seconds.max(1),
         config.tools.cmd_idle_timeout_seconds.max(1),
+        config.tools.cmd_async_timeout_seconds.max(1),
+        config.tools.cmd_async_retention_seconds.max(1),
+        config.tools.cmd_terminate_grace_seconds.max(1),
         config.tools.cmd_max_output_bytes.max(128),
         config.tools.max_cmd_length.max(16),
         config.tools.allow_path_outside_workspace,
@@ -747,6 +751,9 @@ async fn run() -> anyhow::Result<()> {
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
             cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
+            cmd_async_timeout_seconds: config.tools.cmd_async_timeout_seconds.max(1),
+            cmd_async_retention_seconds: config.tools.cmd_async_retention_seconds.max(1),
+            cmd_terminate_grace_seconds: config.tools.cmd_terminate_grace_seconds.max(1),
             cmd_max_output_bytes: config.tools.cmd_max_output_bytes.max(128),
             max_cmd_length: config.tools.max_cmd_length.max(16),
             workspace_root,

@@ -38,6 +38,10 @@ pub(crate) fn build_checkpoint_resume_state(
     loop_state: &LoopState,
     stage: AgentCheckpointStage,
 ) -> Value {
+    let executed_step_provenance = crate::task_journal::checkpoint_step_provenance_records(
+        &loop_state.round_traces,
+        &loop_state.executed_step_results,
+    );
     json!({
         "schema_version": 1,
         "stage": stage.as_str(),
@@ -55,6 +59,7 @@ pub(crate) fn build_checkpoint_resume_state(
         "last_output": loop_state.last_output,
         "history_compact": loop_state.history_compact,
         "task_observations": loop_state.task_observations,
+        "executed_step_provenance": executed_step_provenance,
         "latest_validation_result": loop_state.latest_validation_result,
         "delivery_messages": loop_state.delivery_messages,
         "last_user_visible_respond": loop_state.last_user_visible_respond,
@@ -116,6 +121,10 @@ pub(crate) fn restore_checkpoint_resume_state(
         &mut loop_state.task_observations,
         value_array(resume_state, "task_observations"),
     );
+    extend_unique_values(
+        &mut loop_state.task_observations,
+        value_array(resume_state, "executed_step_provenance"),
+    );
     loop_state.latest_validation_result = resume_state
         .get("latest_validation_result")
         .filter(|value| !value.is_null())
@@ -156,10 +165,7 @@ fn step_results(value: &Value, key: &str) -> Vec<crate::executor::StepExecutionR
                 output: optional_string(item, "output"),
                 error: optional_string(item, "error"),
                 started_at: item.get("started_at").and_then(Value::as_u64).unwrap_or(0),
-                finished_at: item
-                    .get("finished_at")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
+                finished_at: item.get("finished_at").and_then(Value::as_u64).unwrap_or(0),
             })
         })
         .collect()

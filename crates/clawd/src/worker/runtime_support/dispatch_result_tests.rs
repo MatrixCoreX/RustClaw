@@ -111,6 +111,8 @@ fn async_poll_claimed_dispatch(
             status: crate::task_lifecycle::AsyncJobStatus::Running,
             poll_after_seconds: 7,
             expires_at: expires_at.unwrap_or(2_000),
+            runtime_deadline_at: None,
+            retention_deadline_at: expires_at.or(Some(2_000)),
             cancel_ref: "cancel:job-async-poll".to_string(),
             message_key: "tool.msg.job.running".to_string(),
         }),
@@ -277,7 +279,7 @@ fn seeded_agent_loop_terminal_payload_rejects_text_leaks_in_claim_chain() {
 }
 
 #[test]
-fn async_poll_dispatch_result_reschedules_before_expiry_and_fails_after_expiry() {
+fn async_poll_dispatch_result_reschedules_and_renews_stale_retention() {
     let active = async_poll_claimed_dispatch(Some(1_050));
     let rescheduled = super::dispatch_result::paused_checkpoint_resume_dispatch_result_payload(
         &active, 1_000, 90,
@@ -296,16 +298,18 @@ fn async_poll_dispatch_result_reschedules_before_expiry_and_fails_after_expiry()
     assert!(rescheduled.get("error_text").is_none());
 
     let expired = async_poll_claimed_dispatch(Some(999));
-    let failed = super::dispatch_result::paused_checkpoint_resume_dispatch_result_payload(
+    let renewed = super::dispatch_result::paused_checkpoint_resume_dispatch_result_payload(
         &expired, 1_000, 90,
     )
-    .expect("expired async poll payload");
-    assert_eq!(failed["executor_result_status"], "async_poll_failed");
-    assert_eq!(failed["error_code"], "async_poll_expired");
-    assert_eq!(failed["message_key"], "clawd.task.async_poll_expired");
-    assert!(failed.get("next_check_after").is_none());
-    assert!(failed.get("text").is_none());
-    assert!(failed.get("error_text").is_none());
+    .expect("stale retention is renewed");
+    assert_eq!(renewed["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(renewed["defer_reason_code"], "async_poll_adapter_pending");
+    assert_eq!(renewed["retention_renewed"], true);
+    assert_eq!(renewed["retention_deadline_at"], 1_360);
+    assert_eq!(renewed["next_check_after"], 1_090);
+    assert!(renewed.get("error_code").is_none());
+    assert!(renewed.get("text").is_none());
+    assert!(renewed.get("error_text").is_none());
 }
 
 #[test]

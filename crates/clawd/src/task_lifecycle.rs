@@ -796,6 +796,14 @@ fn append_lifecycle_product_contract_fields(
     result_json: &Value,
     state: &str,
 ) {
+    if let Some(process_observation) = result_json
+        .pointer("/task_lifecycle/resume_executor_result_projection/process_observation")
+        .filter(|value| value.is_object())
+        .cloned()
+    {
+        obj.entry("process_observation".to_string())
+            .or_insert(process_observation);
+    }
     if lifecycle_state_token_is_paused(state) || state.trim() == "needs_user" {
         if let Some(reason_code) = string_field(obj, "resume_reason")
             .or_else(|| string_field(obj, "terminal_reason"))
@@ -907,6 +915,12 @@ fn append_lifecycle_product_contract_fields(
             .or_insert(json!(job.poll_after_seconds));
         obj.entry("async_job_expires_at".to_string())
             .or_insert(json!(job.expires_at));
+        if let Some(runtime_deadline_at) = job.runtime_deadline_at {
+            obj.entry("async_job_runtime_deadline_at".to_string())
+                .or_insert(json!(runtime_deadline_at));
+        }
+        obj.entry("async_job_retention_deadline_at".to_string())
+            .or_insert(json!(job.retention_deadline_at.unwrap_or(job.expires_at)));
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
     }
@@ -1410,7 +1424,12 @@ pub(crate) struct AsyncJobRef {
     pub(crate) job_id: String,
     pub(crate) status: AsyncJobStatus,
     pub(crate) poll_after_seconds: u64,
+    /// Legacy-compatible poll/retention deadline, never a process kill deadline.
     pub(crate) expires_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime_deadline_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) retention_deadline_at: Option<i64>,
     pub(crate) cancel_ref: String,
     pub(crate) message_key: String,
 }

@@ -121,6 +121,37 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     };
     action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
         || waiting_task_allows_repeated_observation(loop_state, effect)
+        || registry_allows_repeated_idempotent_action(state, action)
+}
+
+fn registry_allows_repeated_idempotent_action(state: &AppState, action: &AgentAction) -> bool {
+    let (skill_name, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::CallCapability { .. } => {
+            let resolved =
+                crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+            if matches!(resolved, AgentAction::CallCapability { .. }) {
+                return false;
+            }
+            return registry_allows_repeated_idempotent_action(state, &resolved);
+        }
+        AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return false,
+    };
+    let canonical_skill = state.resolve_canonical_skill_name(skill_name);
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    state.get_skills_registry().is_some_and(|registry| {
+        registry.resolved_idempotent(&canonical_skill, action)
+            && !registry.resolved_once_per_task(&canonical_skill, action)
+            && crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args)
+                .mutates
+    })
 }
 
 fn action_effect_for_repeat_guard(
@@ -196,14 +227,14 @@ fn check_repeat_action_guard(
     if matches!(action, AgentAction::Respond { .. }) {
         return None;
     }
-    let repeatable_observation =
+    let repeated_action_allowed =
         repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action);
     let repeat_count = loop_state
         .repeat_action_counts
         .entry(fingerprint.to_string())
         .or_insert(0);
     *repeat_count += 1;
-    if *repeat_count > policy.repeat_action_limit && !repeatable_observation {
+    if *repeat_count > policy.repeat_action_limit && !repeated_action_allowed {
         if let Some(attribution) = super::registry_idempotency_guard_attribution(
             state,
             policy,
@@ -230,7 +261,7 @@ fn check_repeat_action_guard(
         return Some("repeat_action_limit".to_string());
     }
     if let Some(failure_count) = loop_state.failed_action_fingerprints.get(fingerprint) {
-        if !repeatable_observation {
+        if !repeated_action_allowed {
             if let Some(attribution) = super::registry_idempotency_guard_attribution(
                 state,
                 policy,
@@ -272,7 +303,7 @@ fn check_repeat_action_guard(
         }
     }
     if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
-        if repeatable_observation {
+        if repeated_action_allowed {
             return None;
         }
         let repeated_observation_ready = action_effect_for_repeat_guard(state, loop_state, action)

@@ -100,3 +100,47 @@ fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
         "preflight must not inherit dry-run mode from removed route state"
     );
 }
+
+#[test]
+fn run_cmd_async_start_uses_defaults_but_rejects_explicit_invalid_bounds() {
+    let state = test_state();
+    let loop_state = LoopState::new();
+    let defaults = serde_json::json!({
+        "command": "sleep 2",
+        "async_start": true
+    });
+    assert!(evidence_policy_action_policy_error(
+        &state,
+        &loop_state,
+        "run_cmd",
+        &defaults,
+        "call_skill",
+    )
+    .is_none());
+
+    let invalid = serde_json::json!({
+        "command": "sleep 2",
+        "async_start": true,
+        "poll_after_seconds": 0
+    });
+    let err =
+        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &invalid, "call_skill")
+            .expect("explicit invalid lifecycle bound should be rejected");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("invalid lifecycle bound error should be structured");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("async_start_invalid_lifecycle_bound"))
+    );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("invalid_fields")),
+        Some(&serde_json::json!(["poll_after_seconds"]))
+    );
+}

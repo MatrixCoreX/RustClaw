@@ -94,7 +94,7 @@ pub(crate) fn async_job_protocol_hint_line() -> String {
         .join("|");
     let adapter_kinds = ASYNC_POLL_ADAPTER_KINDS.join("|");
     format!(
-        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|error_code|retryable;legacy_compat_fields:poll_after_seconds|cancel_ref;poll_adapter_kinds:{adapter_kinds};adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable;user_text_fields_forbidden:text|error_text"
+        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|runtime_deadline_at|retention_deadline_at|error_code|retryable;legacy_compat_fields:poll_after_seconds|cancel_ref|expires_at;poll_adapter_kinds:{adapter_kinds};adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|runtime_deadline_at|retention_deadline_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable;user_text_fields_forbidden:text|error_text"
     )
 }
 
@@ -136,6 +136,15 @@ pub(crate) fn parse_pending_async_job_ref_from_extra(
             .get("expires_at")
             .and_then(Value::as_i64)
             .unwrap_or(0),
+        runtime_deadline_at: candidate
+            .get("runtime_deadline_at")
+            .and_then(Value::as_i64)
+            .filter(|deadline| *deadline > 0),
+        retention_deadline_at: candidate
+            .get("retention_deadline_at")
+            .or_else(|| candidate.get("expires_at"))
+            .and_then(Value::as_i64)
+            .filter(|deadline| *deadline > 0),
         cancel_ref: required_machine_string_any(candidate, &["cancel_ref", "cancel_token"])
             .unwrap_or_default(),
         message_key: required_machine_string(candidate, "message_key").unwrap_or_default(),
@@ -187,6 +196,11 @@ pub(crate) fn pending_async_job_contract_summary(
         "poll_after_seconds": poll_after_seconds,
         "poll_after_ms": poll_after_ms,
         "expires_at": candidate.get("expires_at").and_then(Value::as_i64),
+        "runtime_deadline_at": candidate.get("runtime_deadline_at").and_then(Value::as_i64),
+        "retention_deadline_at": candidate
+            .get("retention_deadline_at")
+            .or_else(|| candidate.get("expires_at"))
+            .and_then(Value::as_i64),
         "cancel_ref_present": required_machine_string(candidate, "cancel_ref").is_some(),
         "cancel_token_present": cancel_token_present,
         "result_ref": result_ref,
@@ -207,12 +221,15 @@ pub(crate) fn pending_async_job_contract_summary(
             "poll_after_ms",
             "cancel_token",
             "result_ref",
+            "runtime_deadline_at",
+            "retention_deadline_at",
             "error_code",
             "retryable"
         ],
         "legacy_compat_fields": [
             "poll_after_seconds",
-            "cancel_ref"
+            "cancel_ref",
+            "expires_at"
         ],
         "forbidden_user_text_fields_absent": true,
         "poll_adapter_present": poll_adapter.is_some(),
@@ -298,19 +315,28 @@ pub(crate) fn pending_async_job_timeout_policy(
             .then_some("local_process_poll")
         })
         .unwrap_or("unspecified_poll");
-    let max_runtime_seconds = async_adapter_max_runtime_seconds(adapter_kind);
-    let max_runtime_deadline_ts =
-        now_ts.saturating_add(max_runtime_seconds.min(i64::MAX as u64) as i64);
-    let effective_deadline_ts = job.expires_at.min(max_runtime_deadline_ts);
+    // `expires_at` remains the compatibility poll/retention boundary. The adapter
+    // owns any explicit runtime deadline; never derive a kill deadline from polling.
+    let retention_deadline_at = job.retention_deadline_at.unwrap_or(job.expires_at);
+    let retention_remaining_seconds = retention_deadline_at.saturating_sub(now_ts).max(0) as u64;
+    let runtime_remaining_seconds = job
+        .runtime_deadline_at
+        .map(|deadline| deadline.saturating_sub(now_ts).max(0) as u64);
     json!({
         "schema_version": 1,
-        "policy_source": "async_job_contract",
+        "policy_source": "pending_async_job_contract",
         "adapter_kind": adapter_kind,
-        "max_runtime_seconds": max_runtime_seconds,
-        "max_runtime_deadline_ts": max_runtime_deadline_ts,
-        "deadline_ts": job.expires_at,
-        "effective_deadline_ts": effective_deadline_ts,
-        "remaining_seconds": effective_deadline_ts.saturating_sub(now_ts).max(0),
+        "timeout_role": "runtime_and_poll_retention_separated",
+        "runtime_deadline_owner": "adapter",
+        "runtime_deadline_at": job.runtime_deadline_at,
+        "runtime_remaining_seconds": runtime_remaining_seconds,
+        "retention_deadline_at": retention_deadline_at,
+        "retention_remaining_seconds": retention_remaining_seconds,
+        // Existing checkpoint scheduling consumes these aliases. Both aliases
+        // intentionally mean retention rather than runtime.
+        "deadline_ts": retention_deadline_at,
+        "effective_deadline_ts": retention_deadline_at,
+        "remaining_seconds": retention_remaining_seconds,
     })
 }
 
@@ -321,16 +347,6 @@ fn poll_adapter_kind(adapter: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-}
-
-fn async_adapter_max_runtime_seconds(adapter_kind: &str) -> u64 {
-    match adapter_kind {
-        "http_job_poll" => 300,
-        "browser_job_poll" => 600,
-        "mcp_job_poll" | "media_job_poll" | "skill_poll" => 900,
-        "local_process_poll" | "remote_job_poll" => 3_600,
-        _ => 300,
-    }
 }
 
 fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {
@@ -480,12 +496,15 @@ pub(crate) fn async_job_contract_json() -> Value {
             "poll_after_ms",
             "cancel_token",
             "result_ref",
+            "runtime_deadline_at",
+            "retention_deadline_at",
             "error_code",
             "retryable"
         ],
         "legacy_compat_fields": [
             "poll_after_seconds",
-            "cancel_ref"
+            "cancel_ref",
+            "expires_at"
         ],
         "poll_adapter_kinds": ASYNC_POLL_ADAPTER_KINDS,
         "adapter_result_key": ASYNC_POLL_ADAPTER_RESULT_KEY,
@@ -495,6 +514,8 @@ pub(crate) fn async_job_contract_json() -> Value {
             "poll_after_seconds",
             "poll_after_ms",
             "expires_at",
+            "runtime_deadline_at",
+            "retention_deadline_at",
             "result_ref",
             "final_result_json",
             "failure_result_json",
@@ -505,8 +526,12 @@ pub(crate) fn async_job_contract_json() -> Value {
         ],
         "timeout_policy_fields": [
             "adapter_kind",
-            "max_runtime_seconds",
-            "max_runtime_deadline_ts",
+            "timeout_role",
+            "runtime_deadline_owner",
+            "runtime_deadline_at",
+            "runtime_remaining_seconds",
+            "retention_deadline_at",
+            "retention_remaining_seconds",
             "deadline_ts",
             "effective_deadline_ts",
             "remaining_seconds",

@@ -217,6 +217,84 @@ fn inline_subagent_capability_rejects_missing_context_evidence() {
 }
 
 #[test]
+fn terminal_control_uses_capability_required_args_instead_of_run_cmd_fallback() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = plan_result(vec![PlanStep {
+        step_id: "terminate".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({
+            "action": "terminal_terminate",
+            "session_id": "session-1"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue.missing_fields.iter().any(|field| field == "command")
+    }));
+}
+
+#[test]
+fn terminal_control_reports_its_own_missing_required_arg() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = plan_result(vec![PlanStep {
+        step_id: "terminate".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({"action": "terminal_terminate"}),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue
+                .missing_fields
+                .iter()
+                .any(|field| field == "session_id")
+    }));
+    assert!(!result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue.missing_fields.iter().any(|field| field == "command")
+    }));
+}
+
+#[test]
 fn batch_subagent_capability_verifies_structured_children() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

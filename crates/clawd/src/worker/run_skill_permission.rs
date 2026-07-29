@@ -46,9 +46,15 @@ pub(super) fn verify_direct_run_skill(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
-    args: Value,
+    mut args: Value,
 ) -> DirectRunSkillVerification {
     let canonical_skill = state.resolve_canonical_skill_name(skill_name);
+    if canonical_skill == "run_cmd" {
+        if let Some(args) = args.as_object_mut() {
+            args.entry("action".to_string())
+                .or_insert_with(|| json!("exec"));
+        }
+    }
     let request_envelope = json!({
         "request_kind": "direct_skill",
         "skill": canonical_skill,

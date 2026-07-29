@@ -316,7 +316,11 @@ fn execute_synthesize(
         obj.get("output_path").and_then(|v| v.as_str()),
         &actual_format,
     )?;
-    let requested_model = obj.get("model").and_then(|v| v.as_str());
+    let requested_model = obj
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if dry_run {
         let model = requested_model
             .or(first_model_candidate(

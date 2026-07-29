@@ -194,6 +194,160 @@ async fn run_cmd_background_preview_returns_synthetic_refs_without_starting_proc
 }
 
 #[tokio::test]
+async fn run_cmd_disable_timeout_requires_async_admin_and_no_explicit_deadline() {
+    let root = TempDirGuard::new("run_cmd_disable_timeout_contract");
+    let state = test_state(root.path.clone());
+
+    let conflict = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "printf ignored",
+            "async_start": true,
+            "disable_timeout": true,
+            "timeout_seconds": 30
+        }),
+    )
+    .await
+    .expect_err("disable timeout must conflict with an explicit deadline");
+    assert!(conflict.contains("run_cmd_timeout_conflict"));
+
+    let foreground = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({"command": "printf ignored", "disable_timeout": true}),
+    )
+    .await
+    .expect_err("disable timeout must require durable async execution");
+    assert!(foreground.contains("run_cmd_disable_timeout_requires_async_start"));
+
+    let unprivileged = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "printf ignored",
+            "async_start": true,
+            "disable_timeout": true
+        }),
+    )
+    .await
+    .expect_err("disable timeout must require an authenticated admin task");
+    assert!(unprivileged.contains("run_cmd_disable_timeout_requires_admin"));
+}
+
+#[tokio::test]
+async fn planner_run_cmd_deadline_modes_reject_ambiguous_arguments() {
+    let root = TempDirGuard::new("run_cmd_deadline_capability_contract");
+    let state = test_state(root.path.clone());
+
+    let ordinary_with_deadline = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "exec",
+            "command": "printf ignored",
+            "timeout_seconds": 1
+        }),
+    )
+    .await
+    .expect_err("ordinary planner capability must reject an invented deadline");
+    assert!(ordinary_with_deadline.contains("run_cmd_deadline_capability_required"));
+
+    let deadline_without_value = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "exec_with_deadline",
+            "command": "printf ignored"
+        }),
+    )
+    .await
+    .expect_err("deadline capability must require timeout_seconds");
+    assert!(deadline_without_value.contains("run_cmd_timeout_required"));
+}
+
+#[tokio::test]
+async fn authenticated_admin_can_explicitly_disable_async_command_deadline() {
+    let root = TempDirGuard::new("run_cmd_admin_disable_timeout");
+    let state = test_state(root.path.clone());
+    let db = state.core.db.get().expect("db pool");
+    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+        .expect("create auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'admin', 1, '123', NULL)",
+        rusqlite::params!["rk-admin-disable-timeout"],
+    )
+    .expect("insert admin key");
+    drop(db);
+    let identity = crate::resolve_auth_identity_by_key(&state, "rk-admin-disable-timeout")
+        .expect("resolve admin key")
+        .expect("admin identity");
+    let mut payload = json!({"text": "run a durable command without a runtime deadline"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut payload,
+        Some(&identity),
+        Some("ui"),
+        None,
+    )
+    .expect("stamp unrestricted admin policy");
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-admin-disable-timeout".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: Some("rk-admin-disable-timeout".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: payload.to_string(),
+    };
+    let job_dir = root.path.join("async-admin-job");
+
+    let output = super::execute_builtin_skill_for_task(
+        &state,
+        &task,
+        "run_cmd",
+        &json!({
+            "action": "exec_without_deadline",
+            "command": "printf admin-disable-timeout-ok",
+            "async_start": true,
+            "_clawd_async_job_id": "local_process:admin-disable-timeout",
+            "_clawd_async_job_dir": job_dir.display().to_string(),
+            "_clawd_async_retention_deadline_at": crate::now_ts_u64().saturating_add(30),
+            "_clawd_async_terminate_grace_seconds": 1
+        }),
+    )
+    .await
+    .expect("authorized admin disable-timeout command starts");
+    let accepted: serde_json::Value = serde_json::from_str(&output).expect("accepted JSON");
+    assert_eq!(accepted["schema_version"], 1);
+    assert_eq!(accepted["source"], "run_cmd");
+    assert_eq!(accepted["action"], "async_start");
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(accepted["job_id"], "local_process:admin-disable-timeout");
+    for _ in 0..40 {
+        if job_dir.join("exit_code").is_file() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        fs::read_to_string(job_dir.join("runtime_timeout_seconds"))
+            .expect("runtime timeout metadata")
+            .trim(),
+        "disabled"
+    );
+    assert_eq!(
+        fs::read_to_string(job_dir.join("exit_code"))
+            .expect("terminal exit code")
+            .trim(),
+        "0"
+    );
+}
+
+#[tokio::test]
 async fn run_cmd_dispatches_durable_terminal_sessions_through_the_policy_path() {
     let root = TempDirGuard::new("run_cmd_terminal_dispatch");
     let state = test_state(root.path.clone());
@@ -225,7 +379,8 @@ async fn run_cmd_dispatches_durable_terminal_sessions_through_the_policy_path() 
             &json!({
                 "action": "terminal_poll",
                 "session_id": session_id,
-                "cursor": 0
+                "cursor": 0,
+                "max_bytes": 4096
             }),
         )
         .await
@@ -797,7 +952,7 @@ async fn run_cmd_async_start_uses_dedicated_process_group() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
+async fn run_cmd_async_job_stops_at_explicit_runtime_deadline() {
     let root = TempDirGuard::new("run_cmd_async_expiry");
     let state = test_state(root.path.clone());
     let job_dir = root.path.join("async-job");
@@ -810,7 +965,9 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
             "async_start": true,
             "_clawd_async_job_id": "local_process:test-expiry",
             "_clawd_async_job_dir": job_dir.display().to_string(),
-            "_clawd_async_expires_at": crate::now_ts_u64().saturating_add(1)
+            "_clawd_async_runtime_timeout_seconds": 1,
+            "_clawd_async_retention_deadline_at": crate::now_ts_u64().saturating_add(60),
+            "_clawd_async_terminate_grace_seconds": 1
         }),
     )
     .await
@@ -818,13 +975,13 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
     assert!(output.contains("\"status\":\"accepted\""));
 
     let finished_at_path = job_dir.join("finished_at");
-    for _ in 0..60 {
-        if finished_at_path.is_file() {
+    let exit_code_path = job_dir.join("exit_code");
+    for _ in 0..200 {
+        if exit_code_path.is_file() && finished_at_path.is_file() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let exit_code_path = job_dir.join("exit_code");
     let exit_code = fs::read_to_string(&exit_code_path)
         .expect("expiry should publish an exit code")
         .trim()
@@ -836,7 +993,7 @@ async fn run_cmd_async_job_stops_at_checkpoint_expiry() {
         "unsupported timeout exit code: {exit_code}"
     );
     assert!(started.elapsed() >= Duration::from_millis(800));
-    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert!(finished_at_path.is_file());
 }
 

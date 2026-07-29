@@ -1635,6 +1635,49 @@ fn native_response_contract_retry_targets_the_respond_schema() {
 }
 
 #[test]
+fn native_bare_text_retry_preserves_execution_and_response_functions() {
+    let signal = native_contract_repair_signal("native_plan_respond_tool_required");
+    let request = native_planner_request(
+        "protocol",
+        "current turn",
+        Some(90),
+        &callable_capabilities(),
+        &BTreeMap::new(),
+        &[],
+        &[],
+        &[],
+    );
+    let repaired = native_contract_retry_request(&request, &signal);
+    let observation: Value = serde_json::from_str(&signal).expect("machine observation json");
+    let tool_names = repaired
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert!(tool_names.contains("call_capability"));
+    assert!(tool_names.contains("respond"));
+    assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
+    assert_eq!(
+        observation["protocol_observation"]["tool_name"],
+        Value::Null
+    );
+    assert_eq!(
+        observation["protocol_observation"]["required_argument_fields"],
+        json!([])
+    );
+    assert_eq!(
+        observation["protocol_observation"]["next_action"],
+        "retry_with_required_native_function"
+    );
+    assert_eq!(
+        observation["protocol_observation"]["argument_constraints"]
+            ["required_native_function_outcome"]["bare_text"],
+        "rejected"
+    );
+}
+
+#[test]
 fn native_object_response_schema_and_repair_explain_serialized_json_values() {
     let request = native_planner_request(
         "protocol",
@@ -1735,8 +1778,15 @@ fn native_contract_repair_continues_past_four_when_evidence_changes() {
     let respond_retry = native_contract_retry_request(&request, &respond_signal);
     assert_eq!(capability_retry.tools.len(), 1);
     assert_eq!(capability_retry.tools[0].name, "call_capability");
-    assert_eq!(respond_retry.tools.len(), 1);
-    assert_eq!(respond_retry.tools[0].name, "respond");
+    assert_eq!(respond_retry.tools.len(), 2);
+    assert!(respond_retry
+        .tools
+        .iter()
+        .any(|tool| tool.name == "call_capability"));
+    assert!(respond_retry
+        .tools
+        .iter()
+        .any(|tool| tool.name == "respond"));
     assert_eq!(capability_retry.tool_choice, ModelToolChoice::Required);
     assert_eq!(respond_retry.tool_choice, ModelToolChoice::Required);
 

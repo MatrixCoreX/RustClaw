@@ -984,6 +984,7 @@ fn build_tool_descriptors(
             capability: format!("mcp.{namespace}.{tool_name}"),
             server_id: server_id.to_string(),
             tool_name: tool_name.to_string(),
+            timeout_seconds: server.timeout_seconds.max(1),
             description: tool
                 .description
                 .map(|value| value.chars().take(4096).collect()),
@@ -1118,6 +1119,7 @@ fn catalog_search_descriptor() -> McpToolDescriptor {
         capability: MCP_CATALOG_SEARCH_CAPABILITY.to_string(),
         server_id: "runtime".to_string(),
         tool_name: "catalog_search".to_string(),
+        timeout_seconds: 30,
         description: Some(
             "mcp_catalog_search_v2; input=metadata_query; output=exact_capability_schema_policy"
                 .to_string(),

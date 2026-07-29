@@ -58,6 +58,13 @@ struct SkillOutput {
     extra: Option<Value>,
 }
 
+#[derive(Debug)]
+struct PreflightFailure {
+    error_code: &'static str,
+    error_text: String,
+    source_dir: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct RootConfig {
     #[serde(default)]
@@ -265,22 +272,32 @@ fn main() -> anyhow::Result<()> {
             Ok(req) => {
                 let lang = resolve_lang(&req, &cfg);
                 let cat = load_catalog(&workspace_root, &cfg.photo_organize, &lang);
-                match execute(&req.args, &cat, &cfg.photo_organize) {
-                    Ok(out) => Resp {
-                        request_id: req.request_id,
-                        status: "ok".to_string(),
-                        text: out.text,
-                        buttons: out.buttons,
-                        extra: out.extra,
-                        error_text: None,
-                    },
-                    Err(err) => Resp {
+                match explicit_source_dir_preflight(&req.args, &workspace_root, &cat) {
+                    Some(failure) => Resp {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
                         buttons: None,
-                        extra: Some(error_extra("execution_failed")),
-                        error_text: Some(err),
+                        extra: Some(preflight_error_extra(&failure)),
+                        error_text: Some(failure.error_text),
+                    },
+                    None => match execute(&req.args, &cat, &cfg.photo_organize) {
+                        Ok(out) => Resp {
+                            request_id: req.request_id,
+                            status: "ok".to_string(),
+                            text: out.text,
+                            buttons: out.buttons,
+                            extra: out.extra,
+                            error_text: None,
+                        },
+                        Err(err) => Resp {
+                            request_id: req.request_id,
+                            status: "error".to_string(),
+                            text: String::new(),
+                            buttons: None,
+                            extra: Some(error_extra("execution_failed")),
+                            error_text: Some(err),
+                        },
                     },
                 }
             }
@@ -322,6 +339,79 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn preflight_error_extra(failure: &PreflightFailure) -> Value {
+    let mut extra = error_extra(failure.error_code);
+    if let Some(extra) = extra.as_object_mut() {
+        extra.insert(
+            "failure_phase".to_string(),
+            Value::String("pre_dispatch".to_string()),
+        );
+        extra.insert("side_effect_applied".to_string(), Value::Bool(false));
+        extra.insert(
+            "source_dir".to_string(),
+            Value::String(failure.source_dir.clone()),
+        );
+    }
+    extra
+}
+
+fn explicit_source_dir_preflight(
+    args: &Value,
+    workspace_root: &Path,
+    cat: &TextCatalog,
+) -> Option<PreflightFailure> {
+    let obj = args.as_object()?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("organize")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(
+        action.as_str(),
+        "organize" | "run" | "copy" | "move" | "plan" | "preview" | "dry_run"
+    ) {
+        return None;
+    }
+    let source_dir = obj.get("source_dir")?.as_str()?.trim();
+    if source_dir.is_empty() {
+        return None;
+    }
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| workspace_root.to_path_buf());
+    let resolved = resolve_source_path(source_dir, Some(workspace_root), &current_dir);
+    match fs::metadata(&resolved) {
+        Ok(metadata) if metadata.is_dir() => None,
+        Ok(_) => Some(PreflightFailure {
+            error_code: "source_dir_not_directory",
+            error_text: tr_with(
+                cat,
+                "photo_organize.err.source_dir_not_directory",
+                &[("path", resolved.display().to_string())],
+            ),
+            source_dir: source_dir.to_string(),
+        }),
+        Err(error) => {
+            let error_code = if error.kind() == std::io::ErrorKind::NotFound {
+                "source_dir_not_found"
+            } else {
+                "source_dir_inaccessible"
+            };
+            Some(PreflightFailure {
+                error_code,
+                error_text: tr_with(
+                    cat,
+                    "photo_organize.err.source_dir_inaccessible",
+                    &[
+                        ("path", resolved.display().to_string()),
+                        ("error", error.to_string()),
+                    ],
+                ),
+                source_dir: source_dir.to_string(),
+            })
+        }
+    }
 }
 
 fn load_root_config(workspace_root: &Path) -> RootConfig {

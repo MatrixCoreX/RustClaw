@@ -231,6 +231,37 @@ test("builds async polling hints from machine lifecycle fields", () => {
   assert.ok(view.meta.includes("Cancel ref: cancel-123"));
 });
 
+test("keeps a quiet background process visibly running across refreshes", () => {
+  const lifecycle = {
+    state: "background",
+    can_poll: true,
+    can_cancel: true,
+    poll_ref: "local_process:quiet-job",
+    next_check_after: 1_800_000_005,
+    async_job_runtime_deadline_at: 1_800_000_120,
+    async_job_retention_deadline_at: 1_800_086_400,
+    process_observation: {
+      process_alive: true,
+      process_identity_state: "alive_verified",
+      started_at: 1_800_000_000,
+      updated_at: 1_800_000_035,
+      stdout_total_bytes: 0,
+      stderr_total_bytes: 0,
+    },
+  };
+
+  const status = buildTaskLifecycleView(lifecycle, "running", "en");
+  const polling = buildTaskPollingView(lifecycle, "en");
+
+  assert.match(status.detail, /still running/i);
+  assert.ok(status.meta.includes("Background process: Running"));
+  assert.ok(status.meta.includes("Elapsed: 35s"));
+  assert.ok(status.meta.includes("Output progress: stdout 0 B / stderr 0 B"));
+  assert.ok(polling?.detail.includes("same job ID"));
+  assert.ok(polling?.meta.some((item) => item.startsWith("Runtime deadline:")));
+  assert.ok(polling?.meta.some((item) => item.startsWith("Status retained until:")));
+});
+
 test("task control helpers derive actions from machine lifecycle fields", () => {
   const checkpoint = {
     state: "background",

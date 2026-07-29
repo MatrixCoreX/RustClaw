@@ -4,9 +4,10 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::{
-    goal_by_task_id, list_active_tasks, list_approval_scope_grants, resume_task_by_id,
-    retry_child_task_by_id, revoke_approval_scope_grant, ActiveTasksRequest, GoalByTaskIdRequest,
-    ResumeTaskByIdRequest, RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest,
+    cancel_task_by_id, goal_by_task_id, list_active_tasks, list_approval_scope_grants,
+    resume_task_by_id, retry_child_task_by_id, revoke_approval_scope_grant, ActiveTasksRequest,
+    CancelTaskByIdRequest, GoalByTaskIdRequest, ResumeTaskByIdRequest, RetryChildTaskByIdRequest,
+    RevokeApprovalScopeGrantRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -120,6 +121,40 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
     assert_eq!(status, StatusCode::OK);
     let data = response.data.expect("active tasks response");
     assert_eq!(data["count"], 2);
+}
+
+#[tokio::test]
+async fn cancel_task_by_id_is_idempotent_after_the_task_is_cancelled() {
+    let task_id = "cancel-route-idempotent";
+    let state = state_with_goal_task(task_id, json!({"text": "long task"}));
+
+    let (first_status, Json(first_response)) = cancel_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(CancelTaskByIdRequest {
+            task_id: task_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::OK);
+    let first = first_response.data.expect("first cancel response");
+    assert_eq!(first["status"], "task_cancelled");
+    assert_eq!(first["canceled"], 1);
+
+    let (second_status, Json(second_response)) = cancel_task_by_id(
+        State(state),
+        auth_headers(),
+        Json(CancelTaskByIdRequest {
+            task_id: task_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::OK);
+    let second = second_response.data.expect("second cancel response");
+    assert_eq!(second["status"], "task_already_cancelled");
+    assert_eq!(second["canceled"], 0);
+    assert_eq!(second["already_terminal"], true);
+    assert_eq!(second["task_id"], task_id);
 }
 
 fn insert_child_task(

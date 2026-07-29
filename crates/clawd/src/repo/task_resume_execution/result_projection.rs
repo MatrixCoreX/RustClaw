@@ -397,7 +397,11 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     {
         return Ok(false);
     }
-    if terminal_dispatch_result_status(executor_action, executor_result_status) {
+    let deferred_checkpoint_result =
+        deferred_dispatch_checkpoint_result(projection_payload, checkpoint_id);
+    if terminal_dispatch_result_status(executor_action, executor_result_status)
+        && deferred_checkpoint_result.is_none()
+    {
         return record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             state,
             claim_attempt,
@@ -413,10 +417,16 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
             now_ts,
         );
     }
-    let Some(target_executor_state) =
-        rescheduled_dispatch_result_target_executor_state(executor_action, executor_result_status)
-    else {
-        return Ok(false);
+    let target_executor_state = if deferred_checkpoint_result.is_some() {
+        "ready_for_planner_resume"
+    } else {
+        let Some(target) = rescheduled_dispatch_result_target_executor_state(
+            executor_action,
+            executor_result_status,
+        ) else {
+            return Ok(false);
+        };
+        target
     };
     let next_check_after = projection_payload
         .get("next_check_after")
@@ -429,8 +439,6 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
                 .map(|seconds| now_ts.saturating_add(seconds))
         })
         .filter(|ts| *ts > now_ts);
-    let deferred_checkpoint_result =
-        deferred_seeded_loop_checkpoint_result(projection_payload, checkpoint_id);
     if next_check_after.is_none() && deferred_checkpoint_result.is_none() {
         return Ok(false);
     }
@@ -559,6 +567,13 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
         let Some(deferred_result_obj) = deferred_result.as_object_mut() else {
             return Ok(false);
         };
+        for key in ["task_journal", "progress_messages"] {
+            if deferred_result_obj.get(key).is_none() {
+                if let Some(value) = result_json.get(key).cloned() {
+                    deferred_result_obj.insert(key.to_string(), value);
+                }
+            }
+        }
         deferred_result_obj.insert("task_lifecycle".to_string(), deferred_lifecycle);
         deferred_result_obj.insert(
             "task_checkpoint".to_string(),
@@ -639,6 +654,9 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
             "message_key",
             "poll_after_seconds",
             "expires_at",
+            "runtime_deadline_at",
+            "retention_deadline_at",
+            "process_observation",
         ] {
             if let Some(value) = projection_payload.get(key).cloned().or_else(|| {
                 obj.get("resume_executor")
@@ -651,6 +669,19 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     }
 
     obj.insert("state".to_string(), serde_json::json!("background"));
+    if let Some(value) = projection_payload.get("runtime_deadline_at").cloned() {
+        obj.insert("async_job_runtime_deadline_at".to_string(), value);
+    }
+    if let Some(value) = projection_payload.get("retention_deadline_at").cloned() {
+        obj.insert("async_job_retention_deadline_at".to_string(), value);
+    }
+    if let Some(value) = projection_payload
+        .get("process_observation")
+        .cloned()
+        .filter(Value::is_object)
+    {
+        obj.insert("process_observation".to_string(), value);
+    }
     obj.insert(
         "resume_reason".to_string(),
         serde_json::json!(executor_result_status),
@@ -706,20 +737,54 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     Ok(changed > 0)
 }
 
+fn deferred_dispatch_checkpoint_result(
+    projection_payload: &Value,
+    previous_checkpoint_id: &str,
+) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
+    let executor_result_status = projection_payload
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+        .map(str::trim)?;
+    match executor_result_status {
+        "seeded_loop_deferred" => {
+            deferred_seeded_loop_checkpoint_result(projection_payload, previous_checkpoint_id)
+        }
+        "async_poll_completed" => {
+            deferred_async_completion_checkpoint_result(projection_payload, previous_checkpoint_id)
+        }
+        _ => return None,
+    }
+}
+
 fn deferred_seeded_loop_checkpoint_result(
     projection_payload: &Value,
     previous_checkpoint_id: &str,
 ) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
-    if projection_payload
-        .get("executor_result_status")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        != Some("seeded_loop_deferred")
-    {
-        return None;
-    }
+    deferred_checkpoint_result_for_key(
+        projection_payload,
+        previous_checkpoint_id,
+        "final_result_json",
+    )
+}
+
+fn deferred_async_completion_checkpoint_result(
+    projection_payload: &Value,
+    previous_checkpoint_id: &str,
+) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
+    deferred_checkpoint_result_for_key(
+        projection_payload,
+        previous_checkpoint_id,
+        "continuation_result_json",
+    )
+}
+
+fn deferred_checkpoint_result_for_key(
+    projection_payload: &Value,
+    previous_checkpoint_id: &str,
+    result_key: &str,
+) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
     let result = projection_payload
-        .get("final_result_json")
+        .get(result_key)
         .filter(|value| value.is_object())?
         .clone();
     let lifecycle =

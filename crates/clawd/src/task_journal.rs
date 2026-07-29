@@ -53,6 +53,7 @@ pub(crate) use task_journal_evidence_registry::{
     observed_evidence_for_step_trace, observed_evidence_from_output,
 };
 use task_journal_goal::task_goal_summary_json;
+pub(crate) use task_journal_summary_trace::checkpoint_step_provenance_records;
 use task_journal_summary_trace::{
     answer_verifier_summary_json, ask_transition_json, boundary_context_summary_json,
     budget_profile_json, capability_resolution_source, cost_budget_json, finalizer_summary_json,

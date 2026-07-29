@@ -68,6 +68,7 @@
 | cancel | `dry_run` | no | boolean | `false` | Return synthetic cancellation evidence without provider calls. |
 
 ## Error Contract (from interface)
+- A provider rejection that returns no job or image is reported with `failure_phase=provider_rejected` and `side_effect_applied=false`; transport loss and ambiguous provider outcomes do not claim this proof.
 - Missing or empty `prompt`.
 - Invalid option values (`size/style/quality/n`).
 - Provider/runtime generation failures should return clear error text.

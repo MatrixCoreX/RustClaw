@@ -375,11 +375,20 @@ fn canonical_value(value: &Value) -> Value {
 }
 
 fn canonical_approval_arguments(state: &AppState, step: &PlanStep) -> Value {
-    let default_cwd_is_implicit =
-        state.resolve_canonical_skill_name(step.skill.trim()) == "run_cmd";
+    let run_cmd = state.resolve_canonical_skill_name(step.skill.trim()) == "run_cmd";
+    let mut args = step.args.clone();
+    if run_cmd && args.get("action").and_then(Value::as_str) == Some("exec") {
+        // Actionless direct run_skill and the ordinary planner capability both
+        // mean the same default command mode. Their one-shot approval must bind
+        // to identical semantic arguments; explicit deadline modes remain
+        // distinct because their action token is retained.
+        if let Some(args) = args.as_object_mut() {
+            args.remove("action");
+        }
+    }
     canonical_approval_value(
-        &step.args,
-        default_cwd_is_implicit.then_some(state.skill_rt.workspace_root.as_path()),
+        &args,
+        run_cmd.then_some(state.skill_rt.workspace_root.as_path()),
     )
 }
 

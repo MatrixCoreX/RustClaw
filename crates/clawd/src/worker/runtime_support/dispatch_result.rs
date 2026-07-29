@@ -451,23 +451,13 @@ pub(crate) fn paused_checkpoint_resume_dispatch_result_payload(
                 .and_then(Value::as_i64)
         })
         .flatten();
-    if claimed.executor_action == "poll_async_job" {
-        match poll_expires_at {
-            Some(expires_at) if expires_at <= now_ts => {
-                executor_result_status = "async_poll_failed";
-                reason_code = "async_poll_expired";
-                terminal_error = Some(("async_poll_expired", "clawd.task.async_poll_expired"));
-            }
-            Some(_) => {}
-            None => {
-                executor_result_status = "async_poll_failed";
-                reason_code = "async_poll_invalid_contract";
-                terminal_error = Some((
-                    "async_poll_invalid_contract",
-                    "clawd.task.async_poll_invalid_contract",
-                ));
-            }
-        }
+    if claimed.executor_action == "poll_async_job" && poll_expires_at.is_none() {
+        executor_result_status = "async_poll_failed";
+        reason_code = "async_poll_invalid_contract";
+        terminal_error = Some((
+            "async_poll_invalid_contract",
+            "clawd.task.async_poll_invalid_contract",
+        ));
     }
     if claimed.executor_action == "verify_and_finalize" {
         if let Some(final_result_json) = checkpoint_finalize_final_result_json(claimed) {
@@ -483,9 +473,18 @@ pub(crate) fn paused_checkpoint_resume_dispatch_result_payload(
     }
 
     let retry_after_seconds = retry_after_seconds.max(1);
+    let supplied_retention_deadline_at = poll_expires_at;
+    let retention_deadline_at = supplied_retention_deadline_at.map(|deadline| {
+        if deadline <= now_ts {
+            now_ts.saturating_add(retry_after_seconds.saturating_mul(4).max(60))
+        } else {
+            deadline
+        }
+    });
+    let retention_renewed = retention_deadline_at != supplied_retention_deadline_at;
     let mut next_check_after = now_ts.saturating_add(retry_after_seconds);
     if terminal_error.is_none() && terminal_result_json.is_none() {
-        if let Some(expires_at) = poll_expires_at.filter(|expires_at| *expires_at > now_ts) {
+        if let Some(expires_at) = retention_deadline_at {
             next_check_after = next_check_after.min(expires_at);
         }
     }
@@ -514,6 +513,14 @@ pub(crate) fn paused_checkpoint_resume_dispatch_result_payload(
             "retry_after_seconds".to_string(),
             json!(retry_after_seconds),
         );
+        if let Some(retention_deadline_at) = retention_deadline_at {
+            obj.insert("expires_at".to_string(), json!(retention_deadline_at));
+            obj.insert(
+                "retention_deadline_at".to_string(),
+                json!(retention_deadline_at),
+            );
+            obj.insert("retention_renewed".to_string(), json!(retention_renewed));
+        }
         obj.insert("next_check_after".to_string(), json!(next_check_after));
     }
     if let Some((error_code, message_key)) = terminal_error {

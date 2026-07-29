@@ -475,8 +475,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "command",
                     "cwd",
                     "timeout_seconds",
+                    "disable_timeout",
                     "idle_timeout_seconds",
                     "max_output_bytes",
+                    "max_bytes",
                     "async_start",
                     "poll_after_seconds",
                     "expires_in_seconds",
@@ -492,6 +494,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "_clawd_async_job_dir",
                     "_clawd_async_poll_after_seconds",
                     "_clawd_async_expires_at",
+                    "_clawd_async_runtime_timeout_seconds",
+                    "_clawd_async_runtime_deadline_at",
+                    "_clawd_async_retention_deadline_at",
+                    "_clawd_async_terminate_grace_seconds",
                 ],
             )?;
             let action = optional_string(map, "action")
@@ -521,7 +527,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     .get("expires_in_seconds")
                     .and_then(Value::as_u64)
                     .unwrap_or(3_600)
-                    .clamp(poll_after_seconds.saturating_add(1), 86_400);
+                    .max(poll_after_seconds.saturating_add(1));
                 let now_ts = crate::now_ts_u64();
                 let task_ref = task
                     .map(|claimed| claimed.task_id.as_str())
@@ -603,10 +609,43 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     crate::truncate_for_log(&sanitized_command)
                 );
             }
-            let timeout_seconds = map
-                .get("timeout_seconds")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(state.skill_rt.cmd_timeout_seconds);
+            if action == "exec" && map.get("timeout_seconds").is_some() {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd_deadline_capability_required",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "error_code": "run_cmd_deadline_capability_required",
+                        "message_key": "clawd.run_cmd.deadline_capability_required",
+                        "required_capability": "system.run_command_with_deadline",
+                        "retryable": true,
+                    })),
+                ));
+            }
+            if action == "exec_with_deadline" && map.get("timeout_seconds").is_none() {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd_timeout_required",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "error_code": "run_cmd_timeout_required",
+                        "message_key": "clawd.run_cmd.timeout_required",
+                        "required_arg": "timeout_seconds",
+                        "retryable": true,
+                    })),
+                ));
+            }
+            let timeout_seconds = if action == "exec" {
+                state.skill_rt.cmd_timeout_seconds
+            } else {
+                map.get("timeout_seconds")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(state.skill_rt.cmd_timeout_seconds)
+            };
             let idle_timeout_seconds = map
                 .get("idle_timeout_seconds")
                 .and_then(|v| v.as_u64())
@@ -620,6 +659,59 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .get("async_start")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false);
+            let disable_timeout = action == "exec_without_deadline"
+                || map
+                    .get("disable_timeout")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+            if disable_timeout && map.get("timeout_seconds").is_some() {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd_timeout_conflict",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "error_code": "run_cmd_timeout_conflict",
+                        "message_key": "clawd.run_cmd.timeout_conflict",
+                        "conflicting_args": ["disable_timeout", "timeout_seconds"],
+                        "retryable": false,
+                    })),
+                ));
+            }
+            if disable_timeout && !async_start {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd_disable_timeout_requires_async_start",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "error_code": "run_cmd_disable_timeout_requires_async_start",
+                        "message_key": "clawd.run_cmd.disable_timeout_requires_async_start",
+                        "required_arg": "async_start",
+                        "retryable": false,
+                    })),
+                ));
+            }
+            if disable_timeout
+                && !task.is_some_and(|task| {
+                    crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
+                })
+            {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "permission_denied",
+                    "run_cmd_disable_timeout_requires_admin",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "error_code": "run_cmd_disable_timeout_requires_admin",
+                        "message_key": "clawd.run_cmd.disable_timeout_requires_admin",
+                        "retryable": false,
+                    })),
+                ));
+            }
             if action == "terminal_start" {
                 if async_start {
                     return Err(builtin_error(
@@ -725,18 +817,34 @@ pub(crate) async fn execute_builtin_skill_with_task(
             if async_start {
                 let job_id = required_string(map, "_clawd_async_job_id")?;
                 let job_dir = required_string(map, "_clawd_async_job_dir")?;
-                let async_expires_at = map
-                    .get("_clawd_async_expires_at")
+                let async_runtime_timeout_seconds = map
+                    .get("_clawd_async_runtime_timeout_seconds")
+                    .and_then(Value::as_u64);
+                let terminate_grace_seconds = map
+                    .get("_clawd_async_terminate_grace_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(state.skill_rt.cmd_terminate_grace_seconds)
+                    .max(1);
+                let retention_seconds = map
+                    .get("_clawd_async_retention_deadline_at")
                     .and_then(Value::as_i64)
-                    .unwrap_or_else(|| (crate::now_ts_u64() as i64).saturating_add(3_600));
-                let async_max_runtime_seconds = async_expires_at
+                    .unwrap_or_else(|| {
+                        (crate::now_ts_u64() as i64).saturating_add(
+                            state
+                                .skill_rt
+                                .cmd_async_retention_seconds
+                                .min(i64::MAX as u64) as i64,
+                        )
+                    })
                     .saturating_sub(crate::now_ts_u64() as i64)
-                    .clamp(1, 86_400) as u64;
+                    .max(1) as u64;
                 return start_async_command(
                     &cwd_path,
                     &sanitized_command,
                     state.skill_rt.max_cmd_length,
-                    async_max_runtime_seconds,
+                    async_runtime_timeout_seconds,
+                    retention_seconds,
+                    terminate_grace_seconds,
                     crate::skills::task_allows_sudo(state, task),
                     &job_id,
                     Path::new(&job_dir),

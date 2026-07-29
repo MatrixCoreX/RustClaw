@@ -453,6 +453,21 @@ pub(super) fn parse_child_model_result_for_test(raw: &str) -> Value {
     subagent_runtime_model::parse_child_model_result_for_test(raw)
 }
 
+#[cfg(test)]
+pub(super) fn parse_child_loop_result_for_test(
+    raw: &str,
+    role: &str,
+    context_refs: &Value,
+    result_contract: &Value,
+) -> Value {
+    subagent_runtime_model::parse_child_loop_result_for_test(
+        raw,
+        role,
+        context_refs,
+        result_contract,
+    )
+}
+
 pub(super) struct SubagentActionOptions {
     allowed_capabilities: Vec<String>,
     budget: Option<Value>,

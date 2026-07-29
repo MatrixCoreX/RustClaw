@@ -17,22 +17,55 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_user_visible_respond = Some("completed-result".to_string());
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
-    source.executed_step_results.push(crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "office_workspace".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "preview": true,
-                "writes_performed": false,
-                "normalized_operations": [{"op": "add_heading"}]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 10,
-        finished_at: 11,
-    });
+    source
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "office_workspace".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "preview": true,
+                    "writes_performed": false,
+                    "normalized_operations": [{"op": "add_heading"}]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 10,
+            finished_at: 11,
+        });
+    source
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 2,
+            goal: "edit the document".to_string(),
+            plan_result: Some(crate::PlanResult {
+                goal: "edit the document".to_string(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                output_contract: None,
+                steps: vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_capability".to_string(),
+                    skill: "office.edit".to_string(),
+                    args: json!({"path": "src/lib.rs"}),
+                    depends_on: Vec::new(),
+                    why: "edit the requested document".to_string(),
+                }],
+                planner_notes: String::new(),
+                plan_kind: crate::PlanKind::Single,
+                raw_plan_text: json!({
+                    "steps": [{
+                        "type": "call_capability",
+                        "capability": "office.edit",
+                        "args": {"path": "src/lib.rs"}
+                    }]
+                })
+                .to_string(),
+            }),
+            ..Default::default()
+        });
     source.loaded_capability_skills.insert("crypto".to_string());
     source
         .loaded_mcp_capabilities
@@ -103,6 +136,19 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
         assert!(restored.task_observations.iter().any(|item| {
             item.get("status_code").and_then(serde_json::Value::as_str) == Some("ok")
         }));
+        assert!(restored.task_observations.iter().any(|item| {
+            item.get("observation_kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("checkpoint_step_provenance")
+                && item
+                    .get("requested_capability")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("office.edit")
+                && item
+                    .get("resolved_tool_or_skill")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("office_workspace")
+        }));
         assert_eq!(
             restored
                 .latest_validation_result
@@ -121,10 +167,7 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
         );
         assert_eq!(restored.executed_step_results.len(), 1);
         assert_eq!(restored.executed_step_results[0].step_id, "step_1");
-        assert_eq!(
-            restored.executed_step_results[0].skill,
-            "office_workspace"
-        );
+        assert_eq!(restored.executed_step_results[0].skill, "office_workspace");
         assert_eq!(
             restored.executed_step_results[0].status,
             crate::executor::StepExecutionStatus::Ok
