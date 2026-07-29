@@ -722,7 +722,7 @@ fn discover_photo_children(root: &Path, cfg: &PhotoOrganizeConfig) -> Vec<PathBu
     out
 }
 
-fn discover_external_roots(cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
+fn discover_external_roots(_cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         discover_macos_volume_roots()
@@ -733,7 +733,7 @@ fn discover_external_roots(cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
         for path in discover_linux_mountinfo_roots() {
             push_unique_path(&mut roots, path);
         }
-        for path in discover_linux_common_mount_roots(cfg) {
+        for path in discover_linux_common_mount_roots(_cfg) {
             push_unique_path(&mut roots, path);
         }
         roots
@@ -891,6 +891,7 @@ fn discover_roots_in_path(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+#[cfg(target_os = "linux")]
 fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     if !paths.iter().any(|existing| existing == &path) {
         paths.push(path);
