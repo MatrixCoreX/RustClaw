@@ -702,7 +702,7 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
             </span>
             <div>
               <p className="theme-kicker text-[10px] uppercase">
-                {t("Agent学习/维护", "Agent Learning / Maintenance")}
+                {t("学习/维护", "Learning / Maintenance")}
               </p>
               <h2 className="mt-1 text-lg font-semibold text-[var(--theme-text-strong)]">
                 {t("从使用到架构，分阶段理解 AI Agent", "Learn AI agents from everyday use to architecture")}

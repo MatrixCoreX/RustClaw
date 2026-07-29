@@ -20,16 +20,16 @@ GitHub 的 README 不支持真正的页内分页。RustClaw 因此只在仓库 R
 | 10 | [Web entry and core isolation](10-web-entry-security.md) | [Web 入口与核心隔离](10-web-entry-security.zh-CN.md) |
 | 11 | [Task artifact delivery](11-task-artifact-delivery.md) | [任务产物交付](11-task-artifact-delivery.zh-CN.md) |
 
-These files are also the source documents rendered by the UI's Agent Learning / Maintenance
+These files are also the source documents rendered by the UI's Learning / Maintenance
 page. Edit a diagram here instead of copying it into UI source.
 
-这些文件同时是 UI“Agent学习/维护”页面的内容源。流程图应直接在这里修改，不要复制到 UI 源码中维护第二份内容。
+这些文件同时是 UI“学习/维护”页面的内容源。流程图应直接在这里修改，不要复制到 UI 源码中维护第二份内容。
 
 Architecture pages describe the current implementation only: current owners,
 current request flow, current machine contracts, and current validation.
 Migration history and retired behavior belong in Git history or archived local
-plans, not in these pages or the Agent Learning / Maintenance UI.
+plans, not in these pages or the Learning / Maintenance UI.
 
 架构页面只描述当前实现：当前责任方、当前请求流程、当前机器合同和当前验收方式。
 迁移历史与停用行为由 Git 历史或本地归档计划保存，不进入这些页面，也不进入
-UI“Agent学习/维护”模块。
+UI“学习/维护”模块。

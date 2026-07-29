@@ -435,7 +435,7 @@ CLI lifecycle and its persisted teaching evidence are documented in [Task state 
 ## Detailed Architecture Guide
 
 GitHub README pages do not support true pagination. Detailed diagrams are
-maintained as an ordered guide so that each page stays focused. The Agent Learning / Maintenance
+maintained as an ordered guide so that each page stays focused. The Learning / Maintenance
 UI renders these same Markdown sources instead of maintaining a second copy:
 
 1. [Agent loop and planning](docs/architecture/01-agent-loop.md)
@@ -553,7 +553,7 @@ flowchart LR
 - The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep the webd public port open when local use omits nginx. Closing direct webd access does not interrupt a configured native nginx deployment because nginx continues proxying over loopback.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the RustClaw host itself.
-- The `Agent Learning / Maintenance` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
+- The `Learning / Maintenance` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
 - The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
 - On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
