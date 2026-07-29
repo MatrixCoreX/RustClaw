@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 
 CONFIG_PATH="$SCRIPT_DIR/configs/config.toml"
 

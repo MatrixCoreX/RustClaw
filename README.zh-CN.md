@@ -762,6 +762,7 @@ Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_ap
 - 如果你是源码开发者，`build-all.sh` 是最贴近当前仓库脚本行为的统一构建入口
 - Linux 本机构建默认复用当前 Rust 工具链自带的 LLD；内存不高于 16 GiB 时 Cargo 默认单作业，本地重复构建默认保留增量编译。可显式设置 `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` 覆盖默认值，排查 linker 兼容性时可设置 `RUSTCLAW_DISABLE_BUNDLED_LLD=1`。
 - 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
+- 安装器会校验带 `tomllib` 的 Python 3.11+；macOS 缺失时安装当前 Homebrew `python` 公式，运行和编译入口会精确选择该解释器，同时不替换已经选定的 Rust 工具链
 - 如果只想重建本地 UI，使用 `build-ui-nginx.sh`；只有 nginx 托管的服务器才使用 `deploy-ui-nginx.sh`
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步
 - 各类回归和辅助脚本主要集中在 `scripts/`

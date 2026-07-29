@@ -103,6 +103,10 @@ REQUIRED_FILE_TOKENS = {
     ),
     "scripts/shell_compat.sh": (
         "run_with_timeout()",
+        "resolve_python3_with_tomllib()",
+        "configure_python3_with_tomllib()",
+        "/usr/local/bin/python3",
+        "/opt/homebrew/bin/python3",
         "timeout=timeout_seconds",
         "file_mtime_epoch()",
         "file_size_bytes()",
@@ -110,6 +114,15 @@ REQUIRED_FILE_TOKENS = {
         "format_epoch_local()",
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
+    ),
+    "install-rustclaw-cmd.sh": (
+        "ensure_python_runtime()",
+        "brew install python",
+        "configure_python3_with_tomllib",
+    ),
+    "start-all-bin.sh": (
+        "configure_python3_with_tomllib",
+        "scripts/skill_store_packages.py",
     ),
     "scripts/nl_tests/run_manual_test.sh": (
         'source "${ROOT_DIR}/scripts/shell_compat.sh"',

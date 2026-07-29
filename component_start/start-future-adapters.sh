@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/component_start/common.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 component_start_init "$SCRIPT_DIR" release "./component_start/start-future-adapters.sh"
 
 python3 - <<'PY'

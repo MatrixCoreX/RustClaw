@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
 TARGET="$SCRIPT_DIR/rustclaw"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="${HOME}/.local/bin"
@@ -274,6 +275,49 @@ ensure_cargo() {
     exit 1
   fi
   echo "Rust toolchain installed."
+}
+
+ensure_python_runtime() {
+  if configure_python3_with_tomllib 2>/dev/null; then
+    echo "Python runtime ready: $RUSTCLAW_PYTHON_BIN ($($RUSTCLAW_PYTHON_BIN --version 2>&1))"
+    return 0
+  fi
+
+  echo "Python 3.11+ with tomllib not found. Installing the RustClaw Python runtime dependency..."
+  if [[ "$HOST_OS" == "macos" ]]; then
+    if ! command -v brew >/dev/null 2>&1; then
+      echo "Homebrew is required to install current Python on macOS: https://brew.sh" >&2
+      exit 1
+    fi
+    brew install python
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq
+    if apt-cache show python3.11 >/dev/null 2>&1; then
+      sudo apt-get install -y python3.11
+    else
+      sudo apt-get install -y python3
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y python3
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y python3
+  elif command -v zypper >/dev/null 2>&1; then
+    sudo zypper --non-interactive install python3
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm python
+  elif command -v apk >/dev/null 2>&1; then
+    sudo apk add python3
+  else
+    echo "No supported package manager could install Python 3.11+." >&2
+    exit 1
+  fi
+
+  configure_platform_command_path
+  if ! configure_python3_with_tomllib; then
+    echo "Python was installed, but RustClaw still cannot find Python 3.11+ with tomllib." >&2
+    exit 1
+  fi
+  echo "Python runtime installed: $RUSTCLAW_PYTHON_BIN ($($RUSTCLAW_PYTHON_BIN --version 2>&1))"
 }
 
 ensure_protoc() {
@@ -958,6 +1002,8 @@ echo "Host platform: ${HOST_OS}/${HOST_ARCH} ${HOST_RUST_TARGET:+($HOST_RUST_TAR
 echo "Selected target: $INSTALL_TARGET"
 echo "Primary output: $BUILD_RELEASE_DIR"
 echo "Flavor tag: $PACKAGE_FLAVOR"
+
+ensure_python_runtime
 
 SELECTED_RELEASE_DIR="$(resolve_release_dir)"
 REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
