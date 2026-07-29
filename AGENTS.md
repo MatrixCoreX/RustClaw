@@ -1,7 +1,7 @@
 # RustClaw Skill Development Rules / RustClaw 技能开发规则
 
-本文件给所有参与本仓库的 agent 使用。目标是统一技能接入流程，确保“代码上传后编译通过即可允许启用”。
-This file is for all agents working in this repository. The goal is to standardize skill integration so that “once code is pushed and compilation passes, the skill can be considered allowed/enabled”.
+本文件给所有参与本仓库的 agent 使用。目标是统一技能接入、宿主准入、授权、热更新和卸载流程；编译/协议通过只证明产物可被准入，不等同于已经获得运行权限或自动启用。
+This file is for all agents working in this repository. The goal is to standardize skill integration, host admission, authorization, hot reload, and removal. A successful build/protocol smoke proves only that an artifact is admissible; it does not grant runtime permissions or enable the skill automatically.
 
 ## Design Context
 
@@ -61,8 +61,8 @@ This file is for all agents working in this repository. The goal is to standardi
    `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.
 6. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。
    `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.
-7. `skill-runner` 只通过 `SkillRuntimeResolver` 读取已验证的安装回执并生成 `SkillLaunchSpec`；不得根据技能名、扩展名或 `target/release` 路径猜测入口。
-   `skill-runner` resolves only a verified install receipt through `SkillRuntimeResolver` and produces `SkillLaunchSpec`; it must not guess an entrypoint from a skill name, extension, or `target/release` path.
+7. capability step 开始时必须固定 registry generation、技能版本、receipt digest 与 policy digest；`clawd` 把这些期望值传给 `skill-runner`，runner 只解析该精确版本并回报实际 digest。不得再次按 current pointer 选择版本，也不得根据技能名、扩展名或 `target/release` 路径猜测入口。
+   At capability-step start, pin the registry generation, skill version, receipt digest, and policy digest. `clawd` passes those expected values to `skill-runner`, which resolves only that exact version and reports the actual digest. It must not select a version again through a current pointer or guess an entrypoint from a skill name, extension, or `target/release` path.
 8. Cargo、Python、Node、Go、预编译和类型化 HTTP 技能都遵循同一 JSONL 协议与结构化结果合同，再由 `clawd` 汇总为任务结果。
    Cargo, Python, Node, Go, prebuilt, and typed HTTP skills all use the same JSONL protocol and structured result contract before `clawd` aggregates the task result.
 
@@ -104,33 +104,37 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
 新增技能 `foo_bar` 时，必须同时改这些点：
 When adding a new skill `foo_bar`, all of the following are required:
 
-外部提交技能（`external_skills/foo_bar`）走 `extension_manager` 时，必须先完成 manifest 校验、隔离 adapter 安装、协议冒烟和回执验证，再写入技能 registry 与 `configs/config.toml` 的 `skill_switches.foo_bar = true`；只有 Cargo adapter 写 workspace。普通新增 skill 不应再为了接入去改 `clawd` 主流程代码。
-For externally submitted skills (`external_skills/foo_bar`) handled by `extension_manager`, registration after manifest validation, isolated adapter installation, protocol smoke, and receipt verification must write the registry entry and `configs/config.toml` `skill_switches.foo_bar = true`; only Cargo adapters may add a workspace entry. Normal new skills should not require changes to the `clawd` main flow.
+外部提交技能走统一 `SkillAdmissionService`：manifest/capability request 校验、隔离 adapter 安装、协议冒烟、receipt 验证和宿主 policy grant 完成后，只写 data-root runtime overlay 与不可变 generation。不得修改 Git 跟踪的 base registry、`configs/config.toml`、prompt 或根 Cargo workspace；外部技能默认 `awaiting_policy_approval` 或 `installed_disabled`，不能自报低风险后自动启用。普通新增业务技能不得为了接入修改 `clawd` 主流程。
+External submissions use the single `SkillAdmissionService`. After manifest/capability-request validation, isolated adapter installation, protocol smoke, receipt verification, and host policy grant, admission writes only the data-root runtime overlay and an immutable generation. It must not modify the Git-tracked base registry, `configs/config.toml`, prompts, or the root Cargo workspace. External skills default to `awaiting_policy_approval` or `installed_disabled` and cannot self-enable by claiming low risk. Ordinary business-skill integration must not modify the `clawd` main flow.
+
+运行时唯一真相由只读 base registry/prompt 与 data-root overlay 合并产生；overlay 至少包含 registry、prompt、package receipt、policy grant 与 generation metadata。安装、更新、禁用和卸载必须事务化、可回滚，并且不得造成 tracked source diff。
+The runtime source of truth is the merge of the read-only base registry/prompts and the data-root overlay. The overlay includes at least registry data, prompts, package receipts, policy grants, and generation metadata. Install, update, disable, and removal must be transactional and recoverable and must not create tracked-source diffs.
 
 1. 新建技能包：固定/核心技能使用 `crates/skills/foo_bar`；UI Skill Store 按需安装的 bundled 技能使用 `optional_skills/foo_bar`；外部提交使用 `external_skills/foo_bar`。每个进程技能都必须提供 `skill.toml` 与 `INTERFACE.md`。
    Create the package under `crates/skills/foo_bar` for fixed/core skills, `optional_skills/foo_bar` for on-demand bundled skills, or `external_skills/foo_bar` for external submissions. Every process skill must provide `skill.toml` and `INTERFACE.md`.
-2. 只有 Cargo adapter 技能加入根 `Cargo.toml` 的 `[workspace].members`；Python、Node、Go、prebuilt、generic-process 和 HTTP 技能不得为了注册而修改 Cargo workspace。
-   Add only Cargo-adapter skills to root `[workspace].members`; Python, Node, Go, prebuilt, generic-process, and HTTP skills must not edit the Cargo workspace merely to register.
-3. 在 `skill.toml` 声明版本、平台、build adapter、锁文件、类型化入口、超时、构建网络策略和沙箱；registry 用 `package_manifest` 引用它。禁止 `runner_name`、任意 shell 构建命令和按扩展名推断运行时。
-   Declare version, platforms, build adapter, lockfile, typed entrypoint, timeout, build-network policy, and sandbox in `skill.toml`; reference it from registry with `package_manifest`. `runner_name`, arbitrary shell build commands, and extension-based runtime inference are forbidden.
-4. 注册执行别名（可选但建议）：只在 `configs/skills_registry.toml` 的 `aliases` 中配置。
-   Register aliases (optional but recommended) only through `aliases` in `configs/skills_registry.toml`.
-5. 如果技能需要进入 planner 常规自然语言执行流，优先在 `configs/skills_registry.toml` 声明 `planner_capabilities`（能力名、action、effect、required/optional、risk_level），让 `call_capability` 通过 resolver/verifier 接入；不要为了接入去改 `clawd` 主流程代码。
-   If the skill should be used by the planner for normal natural-language execution, declare `planner_capabilities` in `configs/skills_registry.toml` first (capability name, action, effect, required/optional fields, risk_level) so `call_capability` can flow through resolver/verifier; do not modify the `clawd` main flow just to integrate it.
+2. 只有仓库维护者管理的 core/bundled Cargo 技能可以加入根 `[workspace].members`。external Cargo 必须使用 standalone workspace 与独立 target/cache，永远不得修改根 `Cargo.toml`/`Cargo.lock`；Python、Node、Go、prebuilt、generic-process 和 HTTP 也不得因注册修改根 workspace。
+   Only repository-maintained core/bundled Cargo skills may join root `[workspace].members`. External Cargo skills must use a standalone workspace and isolated target/cache and must never modify the root `Cargo.toml`/`Cargo.lock`; Python, Node, Go, prebuilt, generic-process, and HTTP registration must not modify the root workspace either.
+3. 在 `skill.toml` 声明版本、平台、build adapter、锁文件、类型化入口、超时、构建网络策略、沙箱和 capability/permission request；request 不能与宿主实际 grant 混用。base 或 overlay registry 用 `package_manifest` 引用它。禁止 `runner_name`、任意 shell 构建命令和按扩展名推断运行时。
+   Declare version, platforms, build adapter, lockfile, typed entrypoint, timeout, build-network policy, sandbox, and capability/permission requests in `skill.toml`; requested fields must never be confused with host grants. The base or overlay registry references it through `package_manifest`. `runner_name`, arbitrary shell build commands, and extension-based runtime inference are forbidden.
+4. 注册执行别名（可选）：仓库内 core/bundled 写 base registry；运行时安装技能写 overlay registry。不得让 UI、CLI、extension manager 各自维护别名写入逻辑。
+   Register execution aliases optionally in the base registry for repository core/bundled skills or in the overlay registry for runtime-installed skills. UI, CLI, and extension manager must not maintain separate alias-writing implementations.
+5. planner capability 由包提出 request、宿主 policy 授权后投影到当前 registry generation；`call_capability` 始终经过同一 resolver/verifier。包内 `risk_level` 只是申请，不能授予 auto-invocable、admin、网络、文件或凭据权限；不要为了接入修改 `clawd` 主流程。
+   Planner capabilities are package requests projected into the current registry generation only after host-policy grant; `call_capability` always uses the same resolver/verifier. Package `risk_level` is only a request and cannot grant auto-invocable, admin, network, filesystem, or credential permission. Do not modify the `clawd` main flow just to integrate a skill.
 6. 加入 agent 技能认知 / Add agent skill awareness:
  - `<source-root>/foo_bar/INTERFACE.md`
  - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/layers/generated/skills/foo_bar.md`
-- 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`（逻辑路径；运行时主体读取 `prompts/layers/generated/skills/foo_bar.md`，如有模型差异再叠加 `prompts/layers/vendor_patches/<vendor>/skills/foo_bar.md`）
- - 技能参数契约写入 `INTERFACE.md`，并由 `sync_skill_docs.py` 生成 skill 专属 prompt；不要为单个普通 skill 修改全局 `prompts/layers/overlays/agent_tool_spec.md`
-7. 配置基线 / Config baseline:
-   - `crates/claw-core/src/config.rs` 的默认 `skills_list`（按需要）
-     Default `skills_list` in `crates/claw-core/src/config.rs` (as needed)
-   - `configs/config.toml` / `configs/config_copy/*.toml`（按现有规范）
-     `configs/config.toml` / `configs/config_copy/*.toml` (follow current conventions)
-   - 外部技能通过 `extension_manager register_external_skill` 自动写入 `configs/config.toml` 的 `skill_switches.<skill>=true`；不要再手工维护一套重复开关流程，除非自动化失败需要排障。
-     External skills should use `extension_manager register_external_skill` to automatically write `skill_switches.<skill>=true` into `configs/config.toml`; do not maintain a duplicate manual switch flow unless debugging an automation failure.
-8. 如果技能需独立配置，补 `configs/*.toml` 与 README 说明，并在 `INTERFACE.md` 里新增 `## Config Entry Points`，写清楚真实配置入口（配置文件 / 环境变量 / 本地数据库或 API / 登录态 / 依赖）。
-   If the skill needs dedicated config, add `configs/*.toml` and README docs, and add `## Config Entry Points` to `INTERFACE.md` so the real setup path is explicit (config file / environment variable / local DB or API / login state / dependency).
+- 仓库维护的 core/bundled 技能在 base registry 配置逻辑 `prompt_file`；运行时导入技能在 overlay registry 配置经 digest 绑定的 data-root prompt。运行时主体合并当前 generation 的 base/overlay prompt；如仓库技能确有模型差异，再叠加 `prompts/layers/vendor_patches/<vendor>/skills/foo_bar.md`。
+- 技能参数契约写入 `INTERFACE.md`，并由 `sync_skill_docs.py` 生成 skill 专属 prompt；不要为单个普通 skill 修改全局 `prompts/layers/overlays/agent_tool_spec.md`
+- 上述 tracked prompt 流程只适用于仓库维护的 core/bundled/external 开发源码。运行时导入的包把经摘要绑定的 prompt 写入 data-root overlay，不得调用同步脚本修改 tracked prompt。
+7. 配置与 overlay / Configuration and overlay:
+   - base registry 是仓库内业务技能名单的唯一真相源；不得在 `claw-core` 默认值、脚本、UI 或安装器中新增第二套 core/optional/full 名单。既有重复默认名单是迁移债务，只能收缩。
+     The base registry is the sole source of truth for repository business-skill membership. Do not add a second core/optional/full list to `claw-core` defaults, scripts, UI, or installers. Existing duplicate defaults are migration debt and may only shrink.
+   - `configs/config.toml` / `configs/config_copy/*.toml` 只表达发行启动默认值，不记录运行时安装事实、授权结果或当前 generation。
+     `configs/config.toml` / `configs/config_copy/*.toml` express release startup defaults only; they do not record runtime installation facts, grants, or the current generation.
+   - 运行时导入、授权、开关、policy 和 prompt 全部写 data-root overlay，由统一 admission service 事务化更新；不得修改 tracked config。
+     Runtime import, grant, switches, policy, and prompts all live in the data-root overlay and are updated transactionally by the single admission service; tracked config must not be modified.
+8. 仓库维护技能如需独立配置可补 tracked `configs/*.toml`；运行时安装技能的配置必须位于该技能 data-root 私有目录或宿主 credential/config broker。两者都要在 `INTERFACE.md` 写清真实入口（配置 / 环境变量 / 私有存储或 API / 登录态 / 依赖）。
+   Repository-maintained skills may add tracked `configs/*.toml`; runtime-installed skill configuration must live in that skill's private data-root directory or the host credential/config broker. Both document the real entry points in `INTERFACE.md` (configuration / environment / private storage or API / login state / dependencies).
    - 技能只要需要持久化状态，就必须在 registry 声明
      `storage = { kind, schema_version, migration_owner }`，并通过 runtime
      `SkillStorageResolver` 获得当前技能自己的路径/连接信息。技能不得读取
@@ -174,6 +178,7 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
     - `prompts/layers/generated/skills/<skill>.md`
    - 新外部 skill 目录（`external_skills/<skill>`）出现时，自动创建：
     - `prompts/layers/generated/skills/<skill>.md`（前提：开发者已提供 `external_skills/<skill>/INTERFACE.md`）
+   - 这里只处理仓库内开发源码；UI/CLI/Skill Store 运行时导入不得在 `external_skills/` 或 `prompts/` 创建文件，而应写 data-root overlay。
    - 对外部技能强制门禁 / Hard gate for external skills:
      - 若缺少 `external_skills/<skill>/INTERFACE.md`，同步脚本会报错并返回非 0（可直接用于 CI 阻断）。
      - If `external_skills/<skill>/INTERFACE.md` is missing, sync exits non-zero and can be used as a CI blocker.
@@ -190,13 +195,12 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
 
 ## 4) Skill Switch Rules / 技能开关规则（当前仓库约定）
 
-- 运行时允许集由 `[skills].skills_list` + `[skills].skill_switches` 叠加得出。
-  Runtime allowed skills are computed from `[skills].skills_list` + `[skills].skill_switches`.
-- `skill_switches` 优先级高于 `skills_list` / `skill_switches` has higher priority than `skills_list`:
-  - `true`：强制开启 / force enable
-  - `false`：强制关闭 / force disable
-- 外部技能在验证/编译通过并执行 `register_external_skill` 后，默认自动记录为 `true`；需要停用时再显式改为 `false`。
-  External skills are automatically recorded as `true` after validation/compilation and `register_external_skill`; set them to `false` only when explicitly disabling them.
+- 运行时允许集由当前 generation 的 `base registry + overlay registry + host policy grant + enable state` 共同决定；tracked `[skills].skills_list` / `[skills].skill_switches` 仅作为仓库发行启动默认输入，不能成为运行时安装真相源。
+  The runtime allow-set is determined by the current generation's `base registry + overlay registry + host policy grant + enable state`. Tracked `[skills].skills_list` / `[skills].skill_switches` are repository release startup inputs only and are not runtime installation truth.
+- switch 不能绕过 admission、receipt 或 policy grant。`false` 必须阻止新调用；`true` 只表达启用意图，缺少有效 receipt/grant/generation 时仍不得执行。
+  A switch cannot bypass admission, receipt verification, or a host policy grant. `false` blocks new calls; `true` only expresses enable intent and still cannot execute without a valid receipt, grant, and generation.
+- 外部技能验证/编译/协议通过后默认进入 `awaiting_policy_approval` 或 `installed_disabled`；只有宿主 grant 与显式 enable 事务成功后才进入当前 generation，撤销 grant 或禁用会立即阻止新调用，运行中调用按固定版本 lease 收尾。
+  After validation/build/protocol smoke, external skills default to `awaiting_policy_approval` or `installed_disabled`. They enter the current generation only after a successful host grant and explicit enable transaction. Revocation or disable immediately blocks new calls, while in-flight calls drain under their pinned-version lease.
 - Registry 中 `install_mode = "on_demand"` 的 Skill Store 技能不得由普通构建、安装器、交叉编译 `all` 模式或启动初始化脚本主动编译。正式平台发行流程必须通过显式的 Skill Store 预编译入口，按目标 OS/架构单独编译所有兼容的按需 Cargo 技能，生成并校验不可变收据后随对应平台发行包交付；UI 安装优先验证并启用匹配平台的预编译产物，仅在发行包没有兼容产物且本地源码完整时回退到单技能源码编译。开发者仍可显式执行单 `skill` / `crate` 编译。所有脚本必须通过 `scripts/skill_store_packages.py` 读取动态名单，修改相关脚本后运行 `python3 scripts/check_on_demand_skill_builds.py`，不得维护第二套写死技能列表。
   Skill Store entries with registry `install_mode = "on_demand"` must not be proactively compiled by normal builds, installers, cross-build `all` modes, or startup setup scripts. Official platform release flows must use the explicit Skill Store precompile entry point to build every compatible on-demand Cargo skill for the exact target OS/architecture, generate and verify immutable receipts, and ship them only with that platform's release package. UI installation prefers a verified matching platform precompile and falls back to a single-skill source build only when no compatible release artifact exists and complete local source is available. Developers may still explicitly compile one `skill` / `crate`. Build scripts must obtain the dynamic set through `scripts/skill_store_packages.py`; after changing these scripts, run `python3 scripts/check_on_demand_skill_builds.py` and do not maintain a second hardcoded skill list.
 - 关闭技能后 / When a skill is disabled:
@@ -207,13 +211,13 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
   - 运行时调用会被 `clawd` 拦截
     Runtime invocation is blocked by `clawd`
 
-## 5) Admission Criteria (“compile => allowed”) / “编译即可允许” 的准入标准
+## 5) Admission Criteria / 技能准入标准
 
 PR 合并前至少满足：
 Before merge, at least the following must pass:
 
-1. 运行 `rustclaw-skill validate`、对应 adapter 的 build/protocol smoke；若是 Cargo 技能，再运行 `cargo check -p clawd -p skill-runner -p <new-skill-crate>`。
-   Run `rustclaw-skill validate` plus the selected adapter's build/protocol smoke; for Cargo skills, also run `cargo check -p clawd -p skill-runner -p <new-skill-crate>`.
+1. 运行 `rustclaw-skill validate`、对应 adapter 的 build/protocol smoke；仓库 core/bundled Cargo 再运行相应 workspace check，external Cargo 只检查其 standalone workspace，不得为了检查 external 重新编译或修改 `clawd`。
+   Run `rustclaw-skill validate` plus the selected adapter's build/protocol smoke. Repository core/bundled Cargo skills also run the relevant workspace check; external Cargo is checked only in its standalone workspace and must not modify or rebuild `clawd` for admission.
 2. 若改了 UI：在 `UI/` 下执行 `npm run lint && npm run build`
    If UI changed: run `npm run lint && npm run build` under `UI/`
 3. 能通过 `run_skill` 路径打通（最少一次 happy path）
@@ -221,11 +225,11 @@ Before merge, at least the following must pass:
    - `POST /v1/tasks`，`kind=run_skill`，`payload.skill_name=<skill>`
 4. 失败路径有清晰 `error_text`（不允许静默失败）。
    Failure path must return clear `error_text` (no silent failure).
-5. 外部技能注册动作必须自动完成配置写入：`configs/config.toml` 中出现 `skill_switches.<skill>=true`，registry 的 `package_manifest` 映射完整，且有已验证安装回执；只有 Cargo adapter 检查 workspace 映射。
-   External skill registration must automatically complete config writing: `configs/config.toml` contains `skill_switches.<skill>=true`, registry has a complete `package_manifest` mapping, and a verified install receipt exists; workspace mapping applies only to Cargo adapters.
+5. 外部技能准入必须生成已验证 receipt、host policy grant（或明确 awaiting 状态）、overlay registry/prompt/policy 与不可变 generation；操作前后 `git diff --exit-code -- configs prompts Cargo.toml Cargo.lock` 必须通过，external Cargo standalone workspace 不得进入根 workspace。
+   External admission must produce a verified receipt, a host-policy grant (or an explicit awaiting state), overlay registry/prompt/policy data, and an immutable generation. `git diff --exit-code -- configs prompts Cargo.toml Cargo.lock` must pass across the operation, and an external Cargo standalone workspace must not enter the root workspace.
 
-只有当“映射完整 + 编译通过 + 路径可跑通”同时成立，才允许把该技能视为可用。
-A skill is considered available only when “mapping complete + compile pass + runnable path” are all satisfied.
+只有当“request 合法 + 编译/协议通过 + receipt 完整 + 宿主 grant + generation 激活 + 路径可跑通”同时成立，才允许把技能视为已启用；缺少 grant 时只能视为已安装未授权。
+A skill is enabled only when its request is valid, build/protocol smoke passes, receipt is complete, host grant exists, generation activation succeeds, and the path is runnable. Without a grant it is installed but unauthorized, not enabled.
 
 ## 6) Execution Principles (for agents) / 实施原则（给 agent）
 
@@ -335,6 +339,8 @@ A skill is considered available only when “mapping complete + compile pass + r
   After live NL for route authority, agent-loop default paths, pre-planner debt deletion, or release/deletion-gate changes, run `scripts/check_agent_loop_trace_release_gate.py <run_dir>` on the run directory; old `scripts/check_route_delta_release_gate.py` remains only as a historical compatibility entrypoint. Use `--allow-semantic-debt` only for migration observation runs; do not use it before physically deleting old compat/rollback paths.
 - 新增、删除或重命名 top-level `scripts/check_*.py` 守卫后，必须运行 `python3 scripts/check_agent_parity_gate_inventory.py`；稳定离线守卫必须加入 `agent_parity_gate`，需要 live NL run-dir 的 deletion/trace 守卫才允许保留在脚本内显式豁免表。Agent parity gate 必须继续写入 `agent_parity_gate_inventory_contracts.txt`，并通过 `agent_parity_gate_inventory_contracts=1`、`AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok` 与 `AGENT_PARITY_GATE_INVENTORY_CHECK ok` 证明该 inventory 参与 release artifact。
   After adding, deleting, or renaming a top-level `scripts/check_*.py` guard, run `python3 scripts/check_agent_parity_gate_inventory.py`; stable offline guards must be added to `agent_parity_gate`, and only live-NL-run-dir deletion/trace guards may stay in the script's explicit exemption table. The agent parity gate must keep writing `agent_parity_gate_inventory_contracts.txt` and prove that inventory participated in the release artifact through `agent_parity_gate_inventory_contracts=1`, `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok`, and `AGENT_PARITY_GATE_INVENTORY_CHECK ok`.
+- 修改技能注册、回执解析、启停/卸载、技能名单、timeout 或按技能名语义分支后，必须运行 `python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test && python3 scripts/check_skill_hotplug_coupling_inventory.py`。该 ratchet 只允许基线收缩，新增普通业务技能名耦合、重复名单或回执二次解析必须先改为 registry/descriptor/generation 驱动；agent parity gate 必须在 `maintainability_skill_contracts.txt` 中保留 `SKILL_HOTPLUG_COUPLING_INVENTORY_SELF_TEST ok` 与 `findings=0`。
+  After changing skill registration, receipt resolution, enable/disable/removal, skill membership, timeout handling, or name-based semantic branches, run `python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test && python3 scripts/check_skill_hotplug_coupling_inventory.py`. This ratchet may only shrink: new business-skill name coupling, duplicate membership lists, or second-pass receipt resolution must first be replaced with registry/descriptor/generation-driven behavior. The agent parity gate must retain `SKILL_HOTPLUG_COUPLING_INVENTORY_SELF_TEST ok` and `findings=0` in `maintainability_skill_contracts.txt`.
 - 新增、删除或重命名 `scripts/nl_tests/check_*.py` suite checker 后，必须运行 `python3 scripts/check_nl_test_checker_inventory.py`；这些 checker 必须由 `run_agent_parity_gate.sh`、`run_chinese_provider_smoke_matrix.sh` 或后续明确 release-gated runner 调用，不能只停留在 README 或手工命令里。Agent parity gate 的 `agent_parity_gate_inventory_contracts.txt` 必须继续包含 `NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` 与 `NL_TEST_CHECKER_INVENTORY_CHECK ok`。
   After adding, deleting, or renaming a `scripts/nl_tests/check_*.py` suite checker, run `python3 scripts/check_nl_test_checker_inventory.py`; these checkers must be invoked by `run_agent_parity_gate.sh`, `run_chinese_provider_smoke_matrix.sh`, or a future explicitly release-gated runner, not only by README prose or manual commands. The agent parity gate `agent_parity_gate_inventory_contracts.txt` must keep including `NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` and `NL_TEST_CHECKER_INVENTORY_CHECK ok`.
 - 改动 `scripts/nl_tests/check_suite_wrapper_contract.py`、`scripts/nl_tests/check_runner_path_ref_contract.py`、`scripts/nl_tests/check_compact_coverage.py` 或相关 gate wiring 后，必须运行对应 `--self-test`；`agent_parity_gate` 必须继续写入 `nl_suite_checker_self_tests.txt`，并通过 `nl_suite_checker_self_tests=1`、`SUITE_WRAPPER_CONTRACT_SELF_TEST ok`、`RUNNER_PATH_REF_CONTRACT_SELF_TEST ok` 与 `COMPACT_COVERAGE_SELF_TEST ok` 证明 suite checker 的拒绝路径参与 release artifact。
