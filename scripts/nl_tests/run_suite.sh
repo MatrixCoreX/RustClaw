@@ -151,7 +151,8 @@ write_artifact_index() {
       -maxdepth 4 \
       -type f \
       ! -name "artifact_index.txt" \
-      -printf '%P\n' \
+      -print \
+      | sed 's#^\./##' \
       | sort > "$tmp"
   )
   mv "$tmp" "$artifact_index"
