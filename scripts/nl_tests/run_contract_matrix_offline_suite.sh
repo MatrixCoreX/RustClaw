@@ -110,6 +110,10 @@ python3 "${ROOT_DIR}/scripts/nl_tests/build_release_gate_subset.py" --self-test
 echo "Checking release-gate equivalent subset is current"
 python3 "${ROOT_DIR}/scripts/nl_tests/build_release_gate_subset.py" --check
 
+echo "Checking minimal built-in tool/skill NL subset"
+python3 "${ROOT_DIR}/scripts/nl_tests/build_builtin_tool_skill_subset.py" --self-test
+python3 "${ROOT_DIR}/scripts/nl_tests/build_builtin_tool_skill_subset.py" --check
+
 echo "Checking legacy client-like aggregate coverage tokens"
 python3 - <<'PY'
 from pathlib import Path

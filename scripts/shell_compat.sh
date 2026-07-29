@@ -108,25 +108,32 @@ configure_macos_deployment_target() {
   configure_macos_target_rustflags "$target"
 }
 
+append_existing_command_path() {
+  local candidate="$1"
+  [[ -d "$candidate" ]] || return 0
+  case ":${PATH:-}:" in
+    *":${candidate}:"*) ;;
+    *) PATH="${PATH:+${PATH}:}${candidate}" ;;
+  esac
+  export PATH
+}
+
 configure_platform_command_path() {
   local candidate
   if [[ "$(uname -s 2>/dev/null || true)" != "Darwin" ]]; then
     return 0
   fi
   # GUI launchers, LaunchAgent, and non-login SSH sessions do not reliably
-  # inherit Homebrew paths. Add only existing standard prefixes.
+  # inherit Homebrew paths. Add only existing standard prefixes, after the
+  # caller's PATH so an explicitly selected rustup or managed toolchain is not
+  # silently replaced by a Homebrew compiler that lacks cross-target stdlibs.
   for candidate in \
     /usr/local/sbin \
     /usr/local/bin \
     /opt/homebrew/sbin \
     /opt/homebrew/bin; do
-    [[ -d "$candidate" ]] || continue
-    case ":${PATH:-}:" in
-      *":${candidate}:"*) ;;
-      *) PATH="${candidate}${PATH:+:${PATH}}" ;;
-    esac
+    append_existing_command_path "$candidate"
   done
-  export PATH
   configure_macos_deployment_target
 }
 

@@ -349,7 +349,8 @@ PY
     --source "${SOURCE_CONFIG}" \
     --output "${ISOLATED_CONFIG}" \
     --sqlite-path "${ISOLATED_DB}" \
-    --audit-sqlite-path "${ISOLATED_AUDIT_DB}"
+    --audit-sqlite-path "${ISOLATED_AUDIT_DB}" \
+    --skill-data-root "${ISOLATION_ROOT}/skills"
   echo "server_mode=isolated"
   echo "base_url=${BASE_URL}"
   echo "config_identity=isolated/config.toml"

@@ -17,6 +17,22 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_user_visible_respond = Some("completed-result".to_string());
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
+    source.executed_step_results.push(crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "office_workspace".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "preview": true,
+                "writes_performed": false,
+                "normalized_operations": [{"op": "add_heading"}]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 10,
+        finished_at: 11,
+    });
     source.loaded_capability_skills.insert("crypto".to_string());
     source
         .loaded_mcp_capabilities
@@ -103,6 +119,20 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             restored.last_capability_synthesis_output.as_deref(),
             Some("capability-result")
         );
+        assert_eq!(restored.executed_step_results.len(), 1);
+        assert_eq!(restored.executed_step_results[0].step_id, "step_1");
+        assert_eq!(
+            restored.executed_step_results[0].skill,
+            "office_workspace"
+        );
+        assert_eq!(
+            restored.executed_step_results[0].status,
+            crate::executor::StepExecutionStatus::Ok
+        );
+        assert!(restored.executed_step_results[0]
+            .output
+            .as_deref()
+            .is_some_and(|output| output.contains("writes_performed")));
         assert_eq!(
             restored.loaded_capability_skills,
             std::collections::BTreeSet::from(["crypto".to_string()])

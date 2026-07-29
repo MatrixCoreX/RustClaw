@@ -376,8 +376,7 @@ fn poll_dry_run_success_returns_adapter_final_result() {
             "job_id": "provider:video_generate:minimax:provider-task-success",
             "vendor": "minimax",
             "dry_run": true,
-            "mock_status": "Success",
-            "mock_file_id": "file-1",
+            "mock_status": "succeeded",
             "download": false,
             "poll_after_seconds": 3,
             "expires_at": unix_ts() as i64 + 600
@@ -386,13 +385,15 @@ fn poll_dry_run_success_returns_adapter_final_result() {
     .expect("poll dry run");
 
     assert_eq!(extra["async_poll_adapter_result"]["status"], "succeeded");
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["status"], "Success");
     assert_eq!(
         extra["async_poll_adapter_result"]["final_result_json"]["source"],
         "video_generate_poll_adapter"
     );
     assert_eq!(
         extra["async_poll_adapter_result"]["final_result_json"]["file_id"],
-        "file-1"
+        "provider:video_generate:minimax:provider-task-success"
     );
     assert!(extra["async_poll_adapter_result"].get("text").is_none());
     assert!(extra["async_poll_adapter_result"]

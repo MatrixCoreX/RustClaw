@@ -73,6 +73,21 @@ fn create_target_canonicalizes_existing_parent() {
     assert_eq!(target, workspace.path().join("new/deep/file.txt"));
 }
 
+#[test]
+fn create_target_preserves_existing_file_path() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let target = workspace.path().join("existing.zip");
+    std::fs::write(&target, b"fixture").expect("existing target fixture");
+    let policy = SkillPathPolicy::new(workspace.path(), None).expect("policy");
+
+    let resolved = policy
+        .resolve_create_target("existing.zip")
+        .expect("resolve existing target");
+
+    assert_eq!(resolved, target);
+    assert_eq!(resolved.to_string_lossy(), target.to_string_lossy());
+}
+
 #[cfg(unix)]
 #[test]
 fn confined_policy_rejects_symlink_escape_and_symlink_mutation_target() {

@@ -272,6 +272,17 @@ struct ChildLaunch {
     sandbox_profile: SandboxProfile,
 }
 
+const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 4] = [
+    // Credentials arrive as short-lived references.  The child must see the
+    // broker-owned token directory in order to redeem an allowed credential
+    // environment variable; package manifests should not need to declare
+    // this runtime implementation detail themselves.
+    "RUSTCLAW_SECRET_TOKEN_DIR",
+    "RUSTCLAW_UNRESTRICTED_ADMIN",
+    "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE",
+    "RUSTCLAW_ALLOW_SUDO",
+];
+
 impl ChildLaunch {
     #[cfg(test)]
     fn legacy(program: impl Into<PathBuf>) -> Self {
@@ -513,11 +524,7 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
             command.env(key, value);
         }
     }
-    for key in [
-        "RUSTCLAW_UNRESTRICTED_ADMIN",
-        "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE",
-        "RUSTCLAW_ALLOW_SUDO",
-    ] {
+    for key in RUNTIME_CHILD_ENV_ALLOWLIST {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }

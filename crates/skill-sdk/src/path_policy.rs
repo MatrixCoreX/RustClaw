@@ -130,7 +130,11 @@ impl SkillPathPolicy {
             SkillSdkError::new("path_invalid", format!("path={}", candidate.display()))
                 .phase("path_policy")
         })?;
-        let resolved = canonical_ancestor.join(suffix);
+        let resolved = if suffix.as_os_str().is_empty() {
+            canonical_ancestor
+        } else {
+            canonical_ancestor.join(suffix)
+        };
         self.require_allowed(&resolved)?;
         Ok(resolved)
     }

@@ -279,7 +279,7 @@ fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
     let descriptor = state
         .core
         .skill_storage
-        .descriptor("kb")
+        .descriptor("kb", 3)
         .expect("KB descriptor");
     let context = build_runner_skill_context(
         &state,
@@ -297,6 +297,36 @@ fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
         context.pointer("/skill_storage/storage_kind"),
         Some(&json!("sqlite"))
     );
+    assert_eq!(
+        context.pointer("/skill_storage/schema_version"),
+        Some(&json!(3))
+    );
     assert!(context.get("database_sqlite_path").is_none());
     assert!(context.get("database_busy_timeout_ms").is_none());
+}
+
+#[test]
+fn registry_storage_schema_version_is_forwarded_to_the_skill() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skills registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    let descriptor = storage_descriptor_for_skill(&state, "kb")
+        .expect("valid KB storage declaration")
+        .expect("KB storage descriptor");
+    assert_eq!(descriptor.schema_version, 3);
+    assert_eq!(descriptor.skill_name, "kb");
 }

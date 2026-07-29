@@ -588,7 +588,11 @@ fn parse_search_cursor(
     args: &serde_json::Map<String, Value>,
     query: &str,
 ) -> std::result::Result<usize, SearchError> {
-    if let Some(token) = args.get("continuation").and_then(Value::as_str) {
+    if let Some(token) = args
+        .get("continuation")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+    {
         return decode_search_continuation(query, token);
     }
     let Some(value) = args.get("cursor") else {

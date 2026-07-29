@@ -261,6 +261,13 @@ fn strict_input_rejects_wrong_types_but_allows_continuation_beyond_100() {
     .expect("cursor is no longer a terminal search window");
     assert_eq!(continued.cursor, 101);
 
+    let empty_continuation = parse_input(&json!({
+        "request_id": "empty-continuation",
+        "args": {"action": "search", "query": "rust", "cursor": 7, "continuation": ""}
+    }))
+    .expect("an empty optional continuation must not override the cursor");
+    assert_eq!(empty_continuation.cursor, 7);
+
     let token = encode_search_continuation("rust", 140);
     let opaque = parse_input(&json!({
         "request_id": "opaque-cursor",

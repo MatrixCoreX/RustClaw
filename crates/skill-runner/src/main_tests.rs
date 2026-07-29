@@ -131,6 +131,11 @@ fn unrestricted_admin_flag_is_exact_and_server_owned() {
 }
 
 #[test]
+fn installed_child_inherits_secret_token_store_without_manifest_declaration() {
+    assert!(RUNTIME_CHILD_ENV_ALLOWLIST.contains(&"RUSTCLAW_SECRET_TOKEN_DIR"));
+}
+
+#[test]
 fn declared_private_storage_is_writable_for_a_read_only_installed_skill() {
     let storage = tempfile::tempdir().expect("storage tempdir");
     let mut launch = ChildLaunch::legacy("/bin/true");

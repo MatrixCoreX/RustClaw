@@ -84,6 +84,7 @@ RISKY_FILE_NAMES = {
 }
 
 GENERATED_FILE_NAMES = {
+    "nl_cases_builtin_tool_skill_minimal_current.txt",
     "nl_cases_client_like_all_aggregate.txt",
     "nl_cases_client_like_release_gate_equivalent.txt",
 }
