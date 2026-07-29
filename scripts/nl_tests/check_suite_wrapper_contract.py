@@ -36,7 +36,7 @@ RUN_SUITE_REQUIRED_SNIPPETS = {
     "summary_artifact_finalize_status": 'echo "artifact_finalize_status=${artifact_finalize_status}"',
     "summary_run_log_relative": 'echo "run_log=run.log"',
     "summary_artifact_index_relative": 'echo "artifact_index=artifact_index.txt"',
-    "artifact_index_relative_find": "-printf '%P\\n'",
+    "artifact_index_portable_relative_find": "| sed 's#^\\./##'",
     "artifact_index_excludes_self": '! -name "artifact_index.txt"',
     "checker_script": 'check_suite_artifact_contract.py',
     "checker_runs_from_run_root": 'cd "$run_dir"',
