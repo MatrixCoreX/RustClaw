@@ -902,6 +902,7 @@ The Pi App also carries the NNI device-signing helper used by the backend and br
 - `build-all.sh` is the most accurate repo-level build entry if you are building from source
 - Native Linux builds use the active Rust toolchain's bundled LLD; hosts with no more than 16 GiB RAM default to one Cargo job, and repeated local builds keep incremental compilation enabled. Set `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` explicitly to override those defaults, or `RUSTCLAW_DISABLE_BUNDLED_LLD=1` to diagnose linker compatibility.
 - `install-rustclaw-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
+- the installer verifies Python 3.11+ with `tomllib`; on macOS it installs the current Homebrew `python` formula when missing, and runtime/build entrypoints select that interpreter without replacing the chosen Rust toolchain
 - if you only want to rebuild the local UI, use `build-ui-nginx.sh`; use `deploy-ui-nginx.sh` only for an nginx-hosted server
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you
 - many helper and regression scripts live in `scripts/`

@@ -22,6 +22,7 @@ if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
   . "$RUNTIME_ENV_SCRIPT"
 fi
 configure_platform_command_path
+configure_python3_with_tomllib
 
 # Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then

@@ -137,6 +137,42 @@ configure_platform_command_path() {
   configure_macos_deployment_target
 }
 
+resolve_python3_with_tomllib() {
+  local candidate resolved seen=""
+  for candidate in \
+    "${RUSTCLAW_PYTHON_BIN:-}" \
+    "$(command -v python3 2>/dev/null || true)" \
+    /usr/local/bin/python3 \
+    /opt/homebrew/bin/python3 \
+    "$(command -v python3.14 2>/dev/null || true)" \
+    "$(command -v python3.13 2>/dev/null || true)" \
+    "$(command -v python3.12 2>/dev/null || true)" \
+    "$(command -v python3.11 2>/dev/null || true)"; do
+    [[ -n "$candidate" && -x "$candidate" ]] || continue
+    resolved="$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate")"
+    case ":$seen:" in
+      *":$resolved:"*) continue ;;
+    esac
+    seen="${seen:+$seen:}$resolved"
+    if "$resolved" -c 'import tomllib' >/dev/null 2>&1; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  done
+  echo "Python 3.11+ with stdlib tomllib is required; install it or set RUSTCLAW_PYTHON_BIN." >&2
+  return 1
+}
+
+configure_python3_with_tomllib() {
+  RUSTCLAW_PYTHON_BIN="$(resolve_python3_with_tomllib)" || return 1
+  export RUSTCLAW_PYTHON_BIN
+  # Keep the caller's PATH ordering intact so selecting a Homebrew Python on
+  # macOS cannot silently replace an explicitly selected rustup Cargo.
+  python3() {
+    command "$RUSTCLAW_PYTHON_BIN" "$@"
+  }
+}
+
 append_to_array() {
   local array_name="$1"
   local value="$2"

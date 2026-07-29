@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/version_info.sh"
 cd "$SCRIPT_DIR"

@@ -24,7 +24,7 @@
 基础依赖：
 
 - `bash`
-- `python3`
+- Python 3.11 或更高版本（需要标准库 `tomllib`）
 - `curl`
 - `tar`
 
@@ -56,6 +56,10 @@ bash scripts/build_toolchain_manager.sh update
 
 构建脚本会按 CPU 和可用内存调整并发；树莓派等低内存设备不应手工提高 Cargo
 或 Node.js 并发。
+
+`install-rustclaw-cmd.sh` 会校验这项 Python 运行时依赖；macOS 缺失时通过
+Homebrew 安装当前 `python` 公式，并让 RustClaw 精确使用它，不受系统自带旧版
+`/usr/bin/python3` 的 PATH 顺序影响。
 
 ## 3. 获取 RustClaw
 

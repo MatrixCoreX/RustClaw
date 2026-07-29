@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/scripts/version_info.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/shell_compat.sh"
 configure_platform_command_path
+configure_python3_with_tomllib
 configure_cargo_build_environment
 print_rustclaw_version "$SCRIPT_DIR"
 

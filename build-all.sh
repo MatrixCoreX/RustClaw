@@ -7,6 +7,7 @@ cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 configure_platform_command_path
+configure_python3_with_tomllib
 
 # ----- Ensure Cargo (Rust) is installed -----
 # zh: 确保本机已有 Rust/Cargo；缺失时尝试自动安装 rustup。

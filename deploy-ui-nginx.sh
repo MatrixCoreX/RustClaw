@@ -10,6 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 UI_DIR="$SCRIPT_DIR/UI"
 DIST_DIR="$UI_DIR/dist"
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
