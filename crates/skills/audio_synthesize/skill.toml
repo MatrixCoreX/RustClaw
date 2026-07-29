@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "audio_synthesize"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "workspace_write"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "audio_synthesize"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_synthesize", "synthesize", "poll", "cancel"] }, "text" = { "type" = "string" }, "input" = { "type" = "string" }, "task_id" = { "type" = "string" }, "job_id" = { "type" = "string" }, "cancel_token" = { "type" = "string" }, "cancel_ref" = { "type" = "string" }, "output_path" = { "type" = "string" }, "vendor" = { "type" = "string" }, "model" = { "type" = "string" }, "voice" = { "type" = "string" }, "format" = { "type" = "string" }, "response_format" = { "type" = "string" }, "poll_after_seconds" = { "type" = "integer", "minimum" = 0 }, "poll_after_ms" = { "type" = "integer", "minimum" = 0 }, "expires_at" = { "type" = "integer", "minimum" = 0 }, "mock_status" = { "type" = "string" }, "mock_file_id" = { "type" = "string" }, "dry_run" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "audio.preview_synthesize", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["text"], "optional" = ["output_path", "vendor", "model", "voice", "format", "response_format", "poll_after_seconds", "poll_after_ms", "expires_at"], "timeout_seconds" = 90, "action" = "preview_synthesize" }, { "name" = "audio.synthesize", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["text"], "optional" = ["output_path", "vendor", "model", "voice", "format", "response_format", "dry_run", "poll_after_seconds", "poll_after_ms", "expires_at"], "timeout_seconds" = 90, "action" = "synthesize" }, { "name" = "audio.poll", "effect" = "external", "execution_mode" = "async_required", "required" = ["task_id"], "optional" = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], "timeout_seconds" = 90, "action" = "poll" }, { "name" = "audio.cancel", "effect" = "mutate", "execution_mode" = "async_required", "required" = ["task_id"], "optional" = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], "timeout_seconds" = 90, "action" = "cancel" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = false
+filesystem_write = true
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

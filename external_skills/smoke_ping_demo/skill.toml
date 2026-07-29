@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "smoke_ping_demo"
@@ -46,3 +46,29 @@ migration_owner = "smoke_ping_demo"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["ping"] } } }
+output_schema = { type = "object", properties = { schema_version = { type = "integer" }, source_skill = { type = "string" }, status = { type = "string" }, message_key = { type = "string" } } }
+config_entry_points = []
+capabilities = [{ name = "smoke_ping_demo.ping", action = "ping", effect = "observe", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 15 }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = true
+selectors = ["extra.message_key"]

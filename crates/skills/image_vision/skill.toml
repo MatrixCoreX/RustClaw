@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "image_vision"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "required"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "image_vision"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["describe", "analyze", "extract", "compare", "screenshot_summary"] }, "images" = { "type" = "array", "items" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" }, "base64" = { "type" = "string" } } }] } }, "image" = { "type" = "string" }, "instruction" = { "type" = "string" }, "query" = { "type" = "string" }, "text" = { "type" = "string" }, "response_language" = { "type" = "string" }, "language" = { "type" = "string" }, "detail_level" = { "type" = "string" }, "schema" = { "type" = "object" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "image_vision.describe", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "describe" }, { "name" = "image_vision.analyze", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "analyze" }, { "name" = "image_vision.extract", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "schema"], "timeout_seconds" = 90, "action" = "extract" }, { "name" = "image_vision.compare", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "compare" }, { "name" = "image_vision.screenshot_summary", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "screenshot_summary" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["image"]
+output_fields = ["extra.artifacts"]
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

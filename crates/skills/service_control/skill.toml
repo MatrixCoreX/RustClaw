@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "service_control"
@@ -47,3 +47,29 @@ migration_owner = "service_control"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, "service" = { "type" = "string" }, "target" = { "type" = "string" }, "manager_type" = { "type" = "string", "enum" = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "rustclaw", "unknown"] }, "lines" = { "type" = "integer", "minimum" = 1, "maximum" = 500 } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "service_control", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service_control.status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service.status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service.verify", "effect" = "validate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "verify" }, { "name" = "service.logs", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type", "lines"], "timeout_seconds" = 30, "action" = "logs" }, { "name" = "service.start", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "start" }, { "name" = "service_control.start", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "start" }, { "name" = "service.stop", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "service_control.stop", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "service.restart", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "restart" }, { "name" = "service_control.restart", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "restart" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

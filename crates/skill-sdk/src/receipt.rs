@@ -13,7 +13,9 @@ use crate::manifest::{
 use crate::platform::HostPlatform;
 use crate::{SkillSdkError, SkillSdkResult};
 
-pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 1;
+pub const LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 1;
+pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_INSTALL_POINTER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +72,8 @@ pub struct InstallReceipt {
     pub skill_name: String,
     pub version: String,
     pub manifest_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_contract_digest: Option<String>,
     pub source_digest: String,
     #[serde(default)]
     pub lockfile_digests: BTreeMap<String, String>,
@@ -96,7 +100,10 @@ pub struct CurrentInstallPointer {
 
 impl InstallReceipt {
     pub fn validate(&self) -> SkillSdkResult<()> {
-        if self.schema_version != INSTALL_RECEIPT_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version,
+            LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION | INSTALL_RECEIPT_SCHEMA_VERSION
+        ) {
             return Err(SkillSdkError::new(
                 "receipt_schema_unsupported",
                 format!("schema_version={}", self.schema_version),
@@ -104,6 +111,27 @@ impl InstallReceipt {
         }
         validate_safe_name(&self.skill_name, "receipt.skill_name")?;
         validate_sha256(&self.manifest_digest, "receipt.manifest_digest")?;
+        match (
+            self.schema_version,
+            self.semantic_contract_digest.as_deref(),
+        ) {
+            (INSTALL_RECEIPT_SCHEMA_VERSION, Some(digest)) => {
+                validate_sha256(digest, "receipt.semantic_contract_digest")?;
+            }
+            (INSTALL_RECEIPT_SCHEMA_VERSION, None) => {
+                return Err(SkillSdkError::new(
+                    "receipt_semantic_contract_missing",
+                    format!("skill={}", self.skill_name),
+                ));
+            }
+            (LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION, Some(_)) => {
+                return Err(SkillSdkError::new(
+                    "receipt_semantic_contract_unexpected",
+                    format!("skill={}", self.skill_name),
+                ));
+            }
+            _ => {}
+        }
         validate_sha256(&self.source_digest, "receipt.source_digest")?;
         if self.version.trim().is_empty()
             || self.adapter_version.trim().is_empty()
@@ -202,6 +230,13 @@ impl InstallReceipt {
         Ok(hex::encode(Sha256::digest(serde_json::to_vec(self)?)))
     }
 
+    pub fn artifact_set_digest(&self) -> SkillSdkResult<String> {
+        self.validate()?;
+        Ok(hex::encode(Sha256::digest(serde_json::to_vec(
+            &self.artifacts,
+        )?)))
+    }
+
     pub fn verifies_manifest(&self, manifest: &PackageManifest) -> SkillSdkResult<()> {
         if self.skill_name != manifest.package.name || self.version != manifest.package.version {
             return Err(SkillSdkError::new(
@@ -218,6 +253,24 @@ impl InstallReceipt {
                 "receipt_manifest_digest_mismatch",
                 format!("expected={} actual={digest}", self.manifest_digest),
             ));
+        }
+        if self.schema_version == INSTALL_RECEIPT_SCHEMA_VERSION {
+            if manifest.schema_version != crate::manifest::SKILL_MANIFEST_SCHEMA_VERSION {
+                return Err(SkillSdkError::new(
+                    "receipt_manifest_schema_mismatch",
+                    format!(
+                        "receipt_schema={} manifest_schema={}",
+                        self.schema_version, manifest.schema_version
+                    ),
+                ));
+            }
+            let semantic_digest = manifest.capability_request_digest()?;
+            if self.semantic_contract_digest.as_deref() != Some(semantic_digest.as_str()) {
+                return Err(SkillSdkError::new(
+                    "receipt_semantic_contract_mismatch",
+                    format!("skill={}", self.skill_name),
+                ));
+            }
         }
         Ok(())
     }
@@ -316,7 +369,7 @@ impl InstallReceiptStore {
             atomic_write(&previous_path, &current)?;
         }
         let pointer = CurrentInstallPointer {
-            schema_version: INSTALL_RECEIPT_SCHEMA_VERSION,
+            schema_version: CURRENT_INSTALL_POINTER_SCHEMA_VERSION,
             version: receipt.version.clone(),
             install_dir: install_dir_name.to_string(),
             receipt_digest: receipt.digest()?,
@@ -407,7 +460,7 @@ pub fn digest_file(path: &Path) -> SkillSdkResult<String> {
 }
 
 fn validate_pointer(pointer: &CurrentInstallPointer) -> SkillSdkResult<()> {
-    if pointer.schema_version != INSTALL_RECEIPT_SCHEMA_VERSION {
+    if pointer.schema_version != CURRENT_INSTALL_POINTER_SCHEMA_VERSION {
         return Err(SkillSdkError::new(
             "receipt_pointer_schema_unsupported",
             format!("schema_version={}", pointer.schema_version),

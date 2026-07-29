@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "audio_transcribe"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "required"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "audio_transcribe"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_transcribe", "transcribe"] }, "audio_path" = { "type" = "string" }, "path" = { "type" = "string" }, "url" = { "type" = "string" }, "audio" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" } } }] }, "file" = { "type" = "string" }, "language" = { "type" = "string" }, "response_language" = { "type" = "string" }, "vendor" = { "type" = "string" }, "model" = { "type" = "string" }, "timeout_seconds" = { "type" = "integer", "minimum" = 1 } } }
+output_schema = { "type" = "object" }
+config_entry_points = []
+capabilities = [{ "name" = "audio.preview_transcribe", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["audio_path|path|url|audio|file"], "optional" = ["language", "response_language", "vendor", "model", "timeout_seconds"], "timeout_seconds" = 120, "action" = "preview_transcribe" }, { "name" = "audio.transcribe", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["audio_path|path|url|audio|file"], "optional" = ["language", "response_language", "vendor", "model", "timeout_seconds"], "timeout_seconds" = 120, "action" = "transcribe" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = true
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

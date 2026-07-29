@@ -526,13 +526,15 @@ async fn install_skill_store_package(
             )
         })?;
     }
-    let manifest = PackageManifest::load(&spec.manifest_path).map_err(|error| {
-        SkillStoreOperationError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            SkillStoreErrorCode::InstallFailed,
-            error,
-        )
-    })?;
+    let manifest = PackageManifest::load(&spec.manifest_path)
+        .and_then(PackageManifest::into_current)
+        .map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?;
     let store = InstallReceiptStore::new(skill_package_root(state));
     let identity = manifest.digest().map_err(|error| {
         SkillStoreOperationError::new(
@@ -620,6 +622,13 @@ async fn install_skill_store_package(
         skill_name: spec.skill_name.clone(),
         version: manifest.package.version.clone(),
         manifest_digest: identity,
+        semantic_contract_digest: Some(manifest.capability_request_digest().map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?),
         source_digest: artifact_digest.clone(),
         lockfile_digests: BTreeMap::new(),
         adapter: spec.adapter,
@@ -644,7 +653,13 @@ async fn install_skill_store_package(
             remote_endpoint: None,
         },
         sandbox_profile: manifest.security.sandbox,
-        runtime_network: manifest.security.runtime_network,
+        runtime_network: manifest.requested_runtime_network().map_err(|error| {
+            SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::InstallFailed,
+                error,
+            )
+        })?,
         protocol_smoke: ProtocolSmokeReceipt {
             protocol: rustclaw_skill_sdk::RUSTCLAW_JSONL_PROTOCOL.to_string(),
             passed: true,

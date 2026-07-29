@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "log_analyze"
@@ -47,3 +47,29 @@ migration_owner = "log_analyze"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["analyze"] }, "path" = { "type" = "string" }, "requested_path" = { "type" = "string" }, "pattern" = { "type" = "string" }, "keywords" = { "type" = "array", "items" = { "type" = "string" } }, "max_lines" = { "type" = "integer", "minimum" = 1 }, "max_matches" = { "type" = "integer", "minimum" = 1 }, "tail_lines" = { "type" = "integer", "minimum" = 0 }, "tail" = { "type" = "integer", "minimum" = 0 }, "n" = { "type" = "integer", "minimum" = 0 }, "continuation" = { "type" = "string" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "log_analyze", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n", "continuation"], "timeout_seconds" = 30, "action" = "analyze" }, { "name" = "logs.analyze", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n", "continuation"], "timeout_seconds" = 30, "action" = "analyze" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

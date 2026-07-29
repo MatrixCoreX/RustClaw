@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "process_basic"
@@ -47,3 +47,29 @@ migration_owner = "process_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["ps", "port_list", "kill", "tail_log"] }, "service" = { "type" = "string" }, "process" = { "type" = "string" }, "query" = { "type" = "string" }, "filter" = { "type" = "string" }, "name" = { "type" = "string" }, "port" = { "type" = "integer" }, "pid" = { "type" = "integer", "minimum" = 1 }, "limit" = { "type" = "integer", "minimum" = 1 }, "continuation" = { "type" = "string" }, "path" = { "type" = "string" }, "n" = { "type" = "integer", "minimum" = 1 }, "signal" = { "type" = "string", "enum" = ["TERM", "KILL", "INT", "HUP"] } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "process.ps", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit", "filter", "query", "name", "continuation"], "timeout_seconds" = 30, "action" = "ps" }, { "name" = "process.port_list", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["filter", "query", "port"], "timeout_seconds" = 30, "action" = "port_list" }, { "name" = "process.kill", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["pid"], "optional" = ["signal"], "timeout_seconds" = 30, "action" = "kill" }, { "name" = "process.tail_log", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["n"], "timeout_seconds" = 30, "action" = "tail_log" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

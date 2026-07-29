@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "archive_basic"
@@ -47,3 +47,29 @@ migration_owner = "archive_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["action"], "properties" = { "action" = { "type" = "string", "enum" = ["list", "read", "pack", "unpack"] }, "archive" = { "type" = "string" }, "archive_path" = { "type" = "string" }, "path" = { "type" = "string" }, "member" = { "type" = "string" }, "entry" = { "type" = "string" }, "file" = { "type" = "string" }, "file_path" = { "type" = "string" }, "source" = { "type" = "string" }, "source_path" = { "type" = "string" }, "dest" = { "type" = "string" }, "dest_path" = { "type" = "string" }, "format" = { "type" = "string", "enum" = ["zip", "tar.gz", "tgz"] }, "continuation" = { "type" = "string", "pattern" = "^archive-members:[0-9]+$" } } }
+output_schema = { "type" = "object", "required" = ["text", "extra"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object", "required" = ["action", "authority_scope"], "properties" = { "action" = { "type" = "string", "enum" = ["list", "read", "pack", "unpack"] }, "authority_scope" = { "type" = "string", "enum" = ["workspace", "unrestricted_admin"] }, "archive" = { "type" = "string" }, "source" = { "type" = "string" }, "dest" = { "type" = "string" }, "member" = { "type" = "string" }, "member_count" = { "type" = "integer", "minimum" = 0 }, "expanded_bytes" = { "type" = "integer", "minimum" = 0 }, "complete" = { "type" = "boolean" }, "continuation" = { "anyOf" = [{ "type" = "object" }, { "type" = "null" }] }, "artifacts" = { "type" = "array", "items" = { "type" = "object" } }, "bounded_result" = { "type" = "object" }, "field_value" = { "type" = "object" } } } } }
+config_entry_points = []
+capabilities = [{ "name" = "archive.list", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["archive"], "optional" = ["continuation"], "timeout_seconds" = 30, "action" = "list" }, { "name" = "archive.read", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["archive", "member"], "optional" = [], "timeout_seconds" = 30, "action" = "read" }, { "name" = "archive.pack", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["source", "archive"], "optional" = ["format"], "timeout_seconds" = 30, "action" = "pack" }, { "name" = "archive.unpack", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["archive", "dest"], "optional" = [], "timeout_seconds" = 30, "action" = "unpack" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

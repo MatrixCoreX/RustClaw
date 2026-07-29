@@ -6,6 +6,7 @@
 ## Capability Summary
 - Return a short success text for action ping.
 - This scaffold is intentionally generated in a disabled state; registration and enablement must be explicit.
+- This document teaches usage only; it cannot grant permissions or lower host-assigned risk. The machine capability request and host admission receipt are authoritative.
 
 ## Config Entry Points
 - No dedicated config file, environment variable, local database, API session, or external dependency is required.

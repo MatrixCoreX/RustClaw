@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "crypto"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "required"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "crypto"
 config_files = ["configs/crypto.toml"]
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_quote_request", "quote", "price", "multi_quote", "get_price", "get_multi_price", "get_book_ticker", "book_ticker", "candles", "indicator", "price_alert_check", "onchain", "trade_preview", "trade_submit", "order_status", "cancel_order", "cancel_all_orders", "open_orders", "trade_history", "positions"] }, "symbol" = { "type" = "string" }, "symbols" = { "type" = "array", "items" = { "type" = "string" }, "maxItems" = 20 }, "exchange" = { "type" = "string" }, "qty_all" = { "type" = "boolean" }, "locale" = { "type" = "string" }, "lang" = { "type" = "string" }, "timeout_seconds" = { "type" = "integer" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = [{ "kind" = "file", "reference" = "configs/crypto.toml", "required" = false }]
+capabilities = [{ "name" = "crypto.preview_quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbols|symbol"], "optional" = ["locale", "lang"], "timeout_seconds" = 60, "action" = "preview_quote_request" }, { "name" = "crypto.quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbol"], "optional" = ["exchange", "locale", "lang", "timeout_seconds"], "timeout_seconds" = 60, "action" = "quote" }, { "name" = "crypto.multi_quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbols|symbol"], "optional" = ["exchange", "locale", "lang", "timeout_seconds"], "timeout_seconds" = 60, "action" = "multi_quote" }, { "name" = "crypto.positions", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["exchange", "locale", "lang", "timeout_seconds"], "timeout_seconds" = 60, "action" = "positions" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

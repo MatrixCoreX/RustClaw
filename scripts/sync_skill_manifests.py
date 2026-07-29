@@ -123,12 +123,113 @@ def sandbox_profile(entry: dict[str, object]) -> str:
     return "workspace_write" if writes else "required"
 
 
+def toml_literal(value: object) -> str:
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(toml_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{ " + ", ".join(
+            f"{json.dumps(str(key), ensure_ascii=False)} = {toml_literal(item)}"
+            for key, item in value.items()
+        ) + " }"
+    raise ValueError(f"unsupported TOML projection value: {value!r}")
+
+
+def capability_request_projection(
+    skill: CargoSkill,
+    entry: dict[str, object],
+    timeout: int,
+) -> dict[str, object]:
+    mappings = [
+        value for value in entry.get("planner_capabilities", []) if isinstance(value, dict)
+    ]
+    capabilities: list[dict[str, object]] = []
+    for mapping in mappings:
+        capability: dict[str, object] = {
+            "name": str(mapping.get("name") or f"{skill.name}.run"),
+            "effect": str(mapping.get("effect") or "external"),
+            "execution_mode": str(mapping.get("execution_mode") or "sync_short"),
+            "required": mapping.get("required") or [],
+            "optional": mapping.get("optional") or [],
+            "timeout_seconds": int(mapping.get("timeout_seconds") or timeout),
+        }
+        if mapping.get("action") is not None:
+            capability["action"] = str(mapping["action"])
+        if mapping.get("description"):
+            capability["description"] = str(mapping["description"])
+        capabilities.append(capability)
+    if not capabilities:
+        capabilities.append(
+            {
+                "name": f"{skill.name}.run",
+                "effect": "external",
+                "execution_mode": "sync_short",
+                "required": [],
+                "optional": [],
+                "timeout_seconds": timeout,
+            }
+        )
+
+    capability_tokens = {str(value) for value in entry.get("capabilities", [])}
+    credential_refs = sorted(
+        token.removeprefix("secrets.")
+        for token in capability_tokens
+        if token.startswith("secrets.")
+    )
+    mapping_flag = lambda key: any(mapping.get(key) is True for mapping in mappings)
+    output_kind = str(entry.get("output_kind") or "text")
+    artifact_kinds = {
+        "file": ["file"],
+        "image": ["image"],
+        "mixed": ["file", "structured_data"],
+    }.get(output_kind, [])
+    matrix = entry.get("matrix_admission")
+    matrix = matrix if isinstance(matrix, dict) else {}
+    evidence_selectors = [
+        f"extra.{field}" for field in matrix.get("required_extra_fields", [])
+    ]
+    return {
+        "input_schema": entry.get("input_schema") or {"type": "object"},
+        "output_schema": entry.get("output_schema") or {"type": "object"},
+        "capabilities": capabilities,
+        "permissions": {
+            "llm_gateway": "llm" in capability_tokens,
+            "network": bool({"net", "llm"} & capability_tokens)
+            or mapping_flag("network_access"),
+            "filesystem_read": "fs.read" in capability_tokens,
+            "filesystem_write": "fs.write" in capability_tokens
+            or mapping_flag("filesystem_write"),
+            "subprocess": "exec" in capability_tokens or mapping_flag("subprocess"),
+            "package_install": mapping_flag("package_install"),
+            "privilege_escalation": "exec.sudo" in capability_tokens
+            or mapping_flag("privilege_escalation"),
+            "external_publish": mapping_flag("external_publish"),
+            "credential_refs": credential_refs,
+        },
+        "artifact_contract": {
+            "kinds": artifact_kinds,
+            "output_fields": ["extra.artifacts"] if artifact_kinds else [],
+        },
+        "evidence_contract": {
+            "required": bool(matrix.get("eligible")),
+            "selectors": evidence_selectors,
+        },
+        "config_entry_points": [
+            {"kind": "file", "reference": str(path), "required": False}
+            for path in entry.get("config_files", [])
+        ],
+    }
+
+
 def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -> str:
     supported_os = entry.get("supported_os") or ["linux", "macos"]
     description = str(entry.get("description") or f"RustClaw {skill.name} skill")
     timeout = int(entry.get("timeout_seconds") or 30)
-    capabilities = {str(value) for value in entry.get("capabilities", [])}
-    runtime_network = bool({"net", "llm"} & capabilities)
     storage = entry.get("storage") if isinstance(entry.get("storage"), dict) else None
     storage_kind = str(storage.get("kind")) if storage else "none"
     storage_version = int(storage.get("schema_version") or 1) if storage else 1
@@ -136,8 +237,9 @@ def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -
     config_files = entry.get("config_files") or []
     environment_allowlist = runtime_environment_allowlist(skill, entry)
     sandbox = sandbox_profile(entry)
+    request = capability_request_projection(skill, entry, timeout)
     return f"""{MARKER}
-schema_version = 1
+schema_version = 2
 
 [package]
 name = {json.dumps(skill.name)}
@@ -173,7 +275,7 @@ smoke_args = {{}}
 [security]
 capability_policy_source = "registry"
 sandbox = {json.dumps(sandbox)}
-runtime_network = {str(runtime_network).lower()}
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -185,6 +287,32 @@ migration_owner = {json.dumps(migration_owner)}
 config_files = {json.dumps(config_files)}
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = {toml_literal(request["input_schema"])}
+output_schema = {toml_literal(request["output_schema"])}
+config_entry_points = {toml_literal(request["config_entry_points"])}
+capabilities = {toml_literal(request["capabilities"])}
+
+[capability_request.permissions]
+llm_gateway = {toml_literal(request["permissions"]["llm_gateway"])}
+network = {toml_literal(request["permissions"]["network"])}
+filesystem_read = {toml_literal(request["permissions"]["filesystem_read"])}
+filesystem_write = {toml_literal(request["permissions"]["filesystem_write"])}
+subprocess = {toml_literal(request["permissions"]["subprocess"])}
+package_install = {toml_literal(request["permissions"]["package_install"])}
+privilege_escalation = {toml_literal(request["permissions"]["privilege_escalation"])}
+external_publish = {toml_literal(request["permissions"]["external_publish"])}
+credential_refs = {toml_literal(request["permissions"]["credential_refs"])}
+
+[capability_request.artifact_contract]
+kinds = {toml_literal(request["artifact_contract"]["kinds"])}
+output_fields = {toml_literal(request["artifact_contract"]["output_fields"])}
+
+[capability_request.evidence_contract]
+required = {toml_literal(request["evidence_contract"]["required"])}
+selectors = {toml_literal(request["evidence_contract"]["selectors"])}
 """
 
 

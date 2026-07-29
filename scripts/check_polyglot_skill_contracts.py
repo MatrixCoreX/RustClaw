@@ -15,14 +15,19 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = (
     "skill-manifest-v1.schema.json",
+    "skill-manifest-v2.schema.json",
     "rustclaw-jsonl-v1-request.schema.json",
     "rustclaw-jsonl-v1-response.schema.json",
     "skill-install-receipt-v1.schema.json",
+    "skill-install-receipt-v2.schema.json",
+    "skill-host-policy-grant-v1.schema.json",
+    "skill-admission-receipt-v1.schema.json",
     "skill-launch-spec-v1.schema.json",
 )
 SKILL_ROOTS = ("crates/skills", "optional_skills", "external_skills")
 ADAPTERS = {"cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"}
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
+CAPABILITY_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
 REGISTRIES = ("configs/skills_registry.toml", "docker/config/skills_registry.toml")
 LEGACY_REGISTRY_FIELDS = {
     "install_package",
@@ -64,8 +69,9 @@ def validate_manifest(path: Path) -> dict[str, object]:
         value = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise ContractError(f"{path}: parse failed: {error}") from error
-    if value.get("schema_version") != 1:
-        raise ContractError(f"{path}: schema_version must be 1")
+    schema_version = value.get("schema_version")
+    if schema_version not in {1, 2}:
+        raise ContractError(f"{path}: schema_version must be 1 or 2")
     package = required_table(value, "package", path)
     registry = required_table(value, "registry", path)
     build = required_table(value, "build", path)
@@ -84,6 +90,15 @@ def validate_manifest(path: Path) -> dict[str, object]:
         raise ContractError(f"{path}: security must reference registry policy")
     if security.get("inherit_credentials", False):
         raise ContractError(f"{path}: credential inheritance is forbidden")
+    if schema_version == 1:
+        if value.get("capability_request") is not None:
+            raise ContractError(f"{path}: v1 cannot declare capability_request")
+    else:
+        validate_capability_request(value, path)
+        if security.get("runtime_network", False):
+            raise ContractError(
+                f"{path}: v2 security.runtime_network is forbidden; request network permission"
+            )
     if build.get("lifecycle_scripts", False):
         raise ContractError(f"{path}: dependency lifecycle scripts are forbidden")
     adapter = build.get("adapter")
@@ -118,14 +133,95 @@ def validate_manifest(path: Path) -> dict[str, object]:
         authority = endpoint.split("/", 3)[2] if isinstance(endpoint, str) and endpoint.startswith("https://") else ""
         if build.get("network") != "approval_required":
             raise ContractError(f"{path}: http_json build.network must be approval_required")
-        if security.get("runtime_network") is not True:
-            raise ContractError(f"{path}: http_json security.runtime_network must be true")
+        if schema_version == 1:
+            runtime_network = security.get("runtime_network") is True
+        else:
+            request = required_table(value, "capability_request", path)
+            permissions = required_table(request, "permissions", path)
+            runtime_network = permissions.get("network") is True
+        if not runtime_network:
+            raise ContractError(f"{path}: http_json must request runtime network")
         if not authority or "@" in authority:
             raise ContractError(f"{path}: http_json endpoint must be credential-free HTTPS")
     forbidden = find_forbidden_keys(value)
     if forbidden:
         raise ContractError(f"{path}: arbitrary command fields are forbidden: {sorted(forbidden)}")
     return value
+
+
+def validate_capability_request(value: dict[str, object], path: Path) -> None:
+    request = required_table(value, "capability_request", path)
+    if request.get("schema_version") != 1:
+        raise ContractError(f"{path}: capability_request.schema_version must be 1")
+    if not isinstance(request.get("input_schema"), dict) or not isinstance(
+        request.get("output_schema"), dict
+    ):
+        raise ContractError(f"{path}: capability request schemas must be objects")
+    permissions = required_table(request, "permissions", path)
+    required_table(request, "artifact_contract", path)
+    required_table(request, "evidence_contract", path)
+    grant_shaped = {
+        "risk_level",
+        "auto_invocable",
+        "admin",
+        "granted",
+        "granted_permissions",
+        "approval_source",
+    }
+    forbidden = grant_shaped.intersection(request)
+    if forbidden:
+        raise ContractError(
+            f"{path}: package request contains host grant fields: {sorted(forbidden)}"
+        )
+    for key, item in permissions.items():
+        if key == "credential_refs":
+            if not isinstance(item, list) or not all(
+                isinstance(name, str) and SAFE_NAME.fullmatch(name) for name in item
+            ):
+                raise ContractError(f"{path}: credential_refs must contain names only")
+        elif key not in {
+            "llm_gateway",
+            "network",
+            "filesystem_read",
+            "filesystem_write",
+            "subprocess",
+            "package_install",
+            "privilege_escalation",
+            "external_publish",
+        } or not isinstance(item, bool):
+            raise ContractError(f"{path}: invalid requested permission={key!r}")
+    capabilities = request.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        raise ContractError(f"{path}: capability request must not be empty")
+    identities: set[tuple[str, object]] = set()
+    for capability in capabilities:
+        if not isinstance(capability, dict):
+            raise ContractError(f"{path}: capability request row must be a table")
+        name = capability.get("name")
+        if not isinstance(name, str) or CAPABILITY_NAME.fullmatch(name) is None:
+            raise ContractError(f"{path}: invalid requested capability name={name!r}")
+        action = capability.get("action")
+        if action is not None and (
+            not isinstance(action, str) or CAPABILITY_NAME.fullmatch(action) is None
+        ):
+            raise ContractError(f"{path}: invalid requested action={action!r}")
+        identity = (name, action)
+        if identity in identities:
+            raise ContractError(f"{path}: duplicate requested capability={identity!r}")
+        identities.add(identity)
+        if capability.get("effect") not in {"observe", "mutate", "validate", "external"}:
+            raise ContractError(f"{path}: invalid requested effect")
+        if capability.get("execution_mode") not in {
+            "sync_short",
+            "async_preferred",
+            "async_required",
+        }:
+            raise ContractError(f"{path}: invalid requested execution_mode")
+    for config in request.get("config_entry_points", []):
+        if not isinstance(config, dict) or not isinstance(config.get("reference"), str):
+            raise ContractError(f"{path}: invalid config entry point")
+        if config.get("kind") == "file":
+            safe_relative(config["reference"], "capability_request.config_entry_points")
 
 
 def required_table(value: dict[str, object], key: str, path: Path) -> dict[str, object]:

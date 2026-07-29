@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/skill-admission-receipt-v1.schema.json",
+  "title": "RustClaw skill admission receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_name", "version", "package_digest", "manifest_digest", "artifact_set_digest", "install_receipt_digest", "semantic_contract_digest", "registry_generation", "platform", "state", "admitted_at_unix"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "skill_name": { "$ref": "#/$defs/name" },
+    "version": { "type": "string", "minLength": 1 },
+    "package_digest": { "$ref": "#/$defs/sha256" },
+    "manifest_digest": { "$ref": "#/$defs/sha256" },
+    "artifact_set_digest": { "$ref": "#/$defs/sha256" },
+    "install_receipt_digest": { "$ref": "#/$defs/sha256" },
+    "semantic_contract_digest": { "$ref": "#/$defs/sha256" },
+    "granted_policy_digest": { "$ref": "#/$defs/sha256" },
+    "registry_generation": { "type": "integer", "minimum": 1 },
+    "platform": { "type": "object", "required": ["os", "arch"], "properties": { "os": { "type": "string" }, "arch": { "type": "string" }, "target": { "type": "string" } } },
+    "state": { "enum": ["awaiting_policy_approval", "installed_disabled", "enabled", "tombstoned"] },
+    "approval_source": { "enum": ["release_baseline", "operator", "admin_api", "policy_automation", "migration"] },
+    "approved_at_unix": { "type": "integer", "minimum": 1 },
+    "admitted_at_unix": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$" },
+    "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+  }
+}

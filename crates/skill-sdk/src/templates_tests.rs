@@ -11,6 +11,8 @@ fn every_language_scaffold_has_a_valid_manifest_and_separate_tests() {
         ImplementationLanguage::Node,
         ImplementationLanguage::Go,
         ImplementationLanguage::Prebuilt,
+        ImplementationLanguage::GenericProcess,
+        ImplementationLanguage::HttpJson,
     ] {
         let root = tempdir().expect("tempdir");
         let destination = root.path().join(language.as_token());
@@ -25,6 +27,27 @@ fn every_language_scaffold_has_a_valid_manifest_and_separate_tests() {
         .expect("scaffold");
         let manifest = PackageManifest::load(&outcome.manifest_path).expect("manifest");
         assert_eq!(manifest.package.name, outcome.skill_name);
+        assert_eq!(
+            manifest.schema_version,
+            crate::manifest::SKILL_MANIFEST_SCHEMA_VERSION
+        );
+        manifest
+            .effective_capability_request()
+            .expect("typed capability request")
+            .validate()
+            .expect("valid capability request");
+        let self_grant = std::fs::read_to_string(&outcome.manifest_path)
+            .expect("manifest source")
+            .replace(
+                "[capability_request]\n",
+                "[capability_request]\nauto_invocable = true\n",
+            );
+        assert_eq!(
+            PackageManifest::from_toml_str(&self_grant)
+                .expect_err("package cannot self-grant auto invocation")
+                .code,
+            "manifest_parse_failed"
+        );
         assert!(
             outcome
                 .written_files

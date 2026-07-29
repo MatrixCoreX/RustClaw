@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "http_basic"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "workspace_write"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "http_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["url"], "properties" = { "action" = { "type" = "string", "enum" = ["get", "download", "post_json"] }, "url" = { "type" = "string" }, "headers" = { "type" = "object" }, "body" = {  }, "timeout_seconds" = { "type" = "integer", "minimum" = 1, "maximum" = 120 }, "max_response_bytes" = { "type" = "integer", "minimum" = 1, "maximum" = 67108864 }, "max_redirects" = { "type" = "integer", "minimum" = 0, "maximum" = 10 }, "domains_allow" = { "type" = "array", "items" = { "type" = "string" } }, "domains_deny" = { "type" = "array", "items" = { "type" = "string" } }, "expect_status" = { "anyOf" = [{ "type" = "integer" }, { "type" = "string" }] }, "expect_success" = { "type" = "boolean" }, "expect_contains" = { "type" = "string" }, "accept_non_success" = { "type" = "boolean" }, "download" = { "type" = "boolean" }, "output_path" = { "type" = "string" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "http.get", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["url"], "optional" = ["headers", "timeout_seconds", "max_response_bytes", "max_redirects", "domains_allow", "domains_deny", "expect_status", "expect_success", "expect_contains", "accept_non_success"], "timeout_seconds" = 30, "action" = "get" }, { "name" = "http.download", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["url"], "optional" = ["headers", "timeout_seconds", "max_response_bytes", "max_redirects", "domains_allow", "domains_deny", "output_path", "expect_status", "expect_success"], "timeout_seconds" = 30, "action" = "download" }, { "name" = "http.post_json", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["url"], "optional" = ["headers", "body", "timeout_seconds", "max_response_bytes", "max_redirects", "domains_allow", "domains_deny", "expect_status", "expect_success", "expect_contains", "accept_non_success", "download", "output_path"], "timeout_seconds" = 30, "action" = "post_json" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = false
+filesystem_write = true
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

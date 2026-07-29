@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "web_search_extract"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "required"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "web_search_extract"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["action", "query"], "properties" = { "action" = { "type" = "string", "enum" = ["search", "search_extract"] }, "query" = { "type" = "string" }, "cursor" = { "type" = "integer", "minimum" = 0 }, "continuation" = { "type" = "string" }, "top_k" = { "type" = "integer", "minimum" = 1, "maximum" = 20 }, "lang" = { "type" = "string" }, "time_range" = { "type" = "string" }, "domains_allow" = { "type" = "array", "items" = { "type" = "string" } }, "domains_deny" = { "type" = "array", "items" = { "type" = "string" } }, "backend" = { "type" = "string", "enum" = ["serpapi", "duckduckgo_html", "bing_html"] }, "include_snippet" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "web.search_results", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], "timeout_seconds" = 25, "action" = "search_extract" }, { "name" = "web.search", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], "timeout_seconds" = 25, "action" = "search" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

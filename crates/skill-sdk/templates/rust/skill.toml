@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "__SKILL_NAME__"
@@ -45,3 +45,29 @@ migration_owner = "__SKILL_NAME__"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { type = "object" }
+output_schema = { type = "object" }
+config_entry_points = []
+capabilities = [{ name = "__SKILL_NAME__.run", action = "__FIRST_ACTION__", effect = "external", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 30 }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

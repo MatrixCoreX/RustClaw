@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/skill-install-receipt-v2.schema.json",
+  "title": "RustClaw immutable install receipt v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_name", "version", "manifest_digest", "semantic_contract_digest", "source_digest", "lockfile_digests", "adapter", "adapter_version", "platform", "artifacts", "launch", "sandbox_profile", "runtime_network", "protocol_smoke", "installed_at_unix"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "skill_name": { "$ref": "#/$defs/name" },
+    "version": { "type": "string", "minLength": 1 },
+    "manifest_digest": { "$ref": "#/$defs/sha256" },
+    "semantic_contract_digest": { "$ref": "#/$defs/sha256" },
+    "source_digest": { "$ref": "#/$defs/sha256" },
+    "lockfile_digests": { "type": "object", "additionalProperties": { "$ref": "#/$defs/sha256" } },
+    "adapter": { "enum": ["cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"] },
+    "adapter_version": { "type": "string", "minLength": 1 },
+    "platform": { "type": "object", "required": ["os", "arch"], "properties": { "os": { "type": "string" }, "arch": { "type": "string" }, "target": { "type": "string" } } },
+    "artifacts": { "type": "array", "items": { "type": "object" } },
+    "launch": { "type": "object" },
+    "sandbox_profile": { "enum": ["required", "read_only", "workspace_write", "networked"] },
+    "runtime_network": { "type": "boolean" },
+    "protocol_smoke": { "type": "object" },
+    "installed_at_unix": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$" },
+    "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+  }
+}

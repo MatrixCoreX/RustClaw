@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "invest_copy"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "required"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "invest_copy"
 config_files = ["configs/invest_copy.toml"]
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["draft", "list_investors"] }, "data" = {  }, "person" = { "type" = "string" }, "source_note" = { "type" = "string" }, "channel" = { "type" = "string" }, "compliance" = { "type" = "string" }, "locale" = { "type" = "string" }, "language" = { "type" = "string" }, "use_heuristic" = { "type" = "boolean" }, "continuation" = { "type" = "string" } } }
+output_schema = { "type" = "object" }
+config_entry_points = [{ "kind" = "file", "reference" = "configs/invest_copy.toml", "required" = false }]
+capabilities = [{ "name" = "invest_copy.draft", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["data", "person"], "optional" = ["source_note", "channel", "compliance", "locale", "language", "use_heuristic", "continuation"], "timeout_seconds" = 90, "action" = "draft" }, { "name" = "invest_copy.list_investors", "effect" = "observe", "execution_mode" = "async_preferred", "required" = [], "optional" = [], "timeout_seconds" = 90, "action" = "list_investors" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "docker_basic"
@@ -47,3 +47,29 @@ migration_owner = "docker_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["ps", "images", "version", "logs", "restart", "start", "stop", "inspect"] }, "container" = { "type" = "string" }, "image" = { "type" = "string" }, "name" = { "type" = "string" }, "limit" = { "type" = "integer" }, "tail" = { "type" = "integer" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "docker.list_containers", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "ps" }, { "name" = "docker.ps", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "ps" }, { "name" = "docker_basic.ps", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "ps" }, { "name" = "docker.list_images", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "images" }, { "name" = "docker.images", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "images" }, { "name" = "docker_basic.images", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["limit"], "timeout_seconds" = 30, "action" = "images" }, { "name" = "docker.version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 30, "action" = "version" }, { "name" = "docker.inspect_container", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "inspect" }, { "name" = "docker.read_logs", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = ["tail"], "timeout_seconds" = 30, "action" = "logs" }, { "name" = "docker.logs", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = ["tail"], "timeout_seconds" = 30, "action" = "logs" }, { "name" = "docker_basic.logs", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = ["tail"], "timeout_seconds" = 30, "action" = "logs" }, { "name" = "docker.restart_container", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "restart" }, { "name" = "docker.restart", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "restart" }, { "name" = "docker_basic.restart", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "restart" }, { "name" = "docker.start_container", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "start" }, { "name" = "docker.start", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "start" }, { "name" = "docker_basic.start", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "start" }, { "name" = "docker.stop_container", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "docker.stop", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "docker_basic.stop", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["container"], "optional" = [], "timeout_seconds" = 30, "action" = "stop" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

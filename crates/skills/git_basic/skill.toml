@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "git_basic"
@@ -47,3 +47,29 @@ migration_owner = "git_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "additionalProperties" = false, "properties" = { "action" = { "type" = "string", "enum" = ["status", "log", "diff", "diff_cached", "branch", "current_branch", "remote", "changed_files", "show", "show_file_at_rev", "rev_parse", "stage", "commit", "create_branch", "checkout_branch"] }, "path" = { "type" = "string" }, "paths" = { "type" = "array", "minItems" = 1, "maxItems" = 512, "items" = { "type" = "string" } }, "repo" = { "type" = "string", "description" = "Workspace-relative repository directory or a workspace-contained absolute path." }, "target" = { "type" = "string" }, "ref" = { "type" = "string" }, "message" = { "type" = "string", "minLength" = 1, "maxLength" = 16384 }, "branch_name" = { "type" = "string", "minLength" = 1, "maxLength" = 512 }, "start_point" = { "type" = "string", "minLength" = 1, "maxLength" = 512 }, "cursor" = { "type" = "integer", "minimum" = 0 }, "limit" = { "type" = "integer", "minimum" = 1, "maximum" = 200 }, "n" = { "type" = "integer", "minimum" = 1, "maximum" = 200 } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "git_basic", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "git.status", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "git.repository_state", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "git.current_branch", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo"], "timeout_seconds" = 30, "action" = "current_branch" }, { "name" = "git.branch", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "branch" }, { "name" = "git.remote", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "remote" }, { "name" = "git.changed_files", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "repo", "cursor", "limit"], "timeout_seconds" = 30, "action" = "changed_files" }, { "name" = "git.log", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "cursor", "n", "limit"], "timeout_seconds" = 30, "action" = "log" }, { "name" = "git.diff", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "repo"], "timeout_seconds" = 30, "action" = "diff" }, { "name" = "git.diff_cached", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "repo"], "timeout_seconds" = 30, "action" = "diff_cached" }, { "name" = "git.rev_parse", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "ref"], "timeout_seconds" = 30, "action" = "rev_parse" }, { "name" = "git.show", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["repo", "target"], "timeout_seconds" = 30, "action" = "show" }, { "name" = "git.show_file_at_rev", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["repo", "target"], "timeout_seconds" = 30, "action" = "show_file_at_rev" }, { "name" = "git.stage", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["paths"], "optional" = ["repo"], "timeout_seconds" = 30, "action" = "stage" }, { "name" = "git.commit", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["message"], "optional" = ["repo"], "timeout_seconds" = 30, "action" = "commit" }, { "name" = "git.create_branch", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["branch_name"], "optional" = ["repo", "start_point"], "timeout_seconds" = 30, "action" = "create_branch" }, { "name" = "git.checkout_branch", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["branch_name"], "optional" = ["repo"], "timeout_seconds" = 30, "action" = "checkout_branch" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = true
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []
