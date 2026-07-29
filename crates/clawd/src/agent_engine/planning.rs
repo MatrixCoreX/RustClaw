@@ -1159,8 +1159,8 @@ fn native_contract_repair_signal_with_context(
     available_tool_names: &[String],
     suggested_capability_groups: &[String],
 ) -> String {
-    let respond_contract_error = error_code.starts_with("native_respond_")
-        || error_code == "native_plan_respond_tool_required";
+    let respond_contract_error = error_code.starts_with("native_respond_");
+    let missing_native_function_call = error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
     let unknown_tool_error = error_code == "native_plan_unknown_tool";
     let unknown_load_recovery = unknown_tool_error && !suggested_capability_groups.is_empty();
@@ -1180,6 +1180,12 @@ fn native_contract_repair_signal_with_context(
             .map(str::to_string)
             .collect::<Vec<_>>(),
             "retry_native_respond_call",
+        )
+    } else if missing_native_function_call {
+        (
+            NATIVE_CALL_CAPABILITY_TOOL,
+            Vec::new(),
+            "retry_with_required_native_function",
         )
     } else if loader_contract_error {
         (
@@ -1210,7 +1216,9 @@ fn native_contract_repair_signal_with_context(
     };
     let exact_failed_tool = failed_call.is_some() && expected_schema.is_some();
     let failed_tool_name = failed_call.map(|call| call.name.as_str());
-    let tool_name = if unknown_tool_error {
+    let tool_name = if missing_native_function_call {
+        None
+    } else if unknown_tool_error {
         unknown_load_recovery.then_some(default_tool_name)
     } else {
         Some(failed_tool_name.unwrap_or(default_tool_name))
@@ -1252,6 +1260,17 @@ fn native_contract_repair_signal_with_context(
                     "observed_fields": "non_empty",
                     "exact_field_count": "must_equal_observed_fields_length"
                 }
+            }),
+        );
+    }
+    if missing_native_function_call {
+        argument_constraints.insert(
+            "required_native_function_outcome".to_string(),
+            json!({
+                "execution_remaining": "select_an_available_structured_capability_function",
+                "execution_complete": "select_respond_with_the_complete_user_visible_answer",
+                "bare_text": "rejected",
+                "serialized_action_in_respond": "rejected"
             }),
         );
     }

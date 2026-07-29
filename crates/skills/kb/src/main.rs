@@ -536,6 +536,7 @@ fn do_delete_namespace(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         "status": "ok",
         "namespace": namespace,
         "deleted": true,
+        "cleanup_status": "cleaned",
         "removed_documents": removed.removed_docs,
         "removed_chunks": removed.removed_chunks,
     }))

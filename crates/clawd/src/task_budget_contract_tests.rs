@@ -326,6 +326,25 @@ fn verified_machine_plan_facts_select_profiles_without_user_text() {
     );
     assert_eq!(
         profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            action_count: 1,
+            observe_count: 1,
+            required_tool_timeout_seconds: 90,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::GroundedSummary
+    );
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
+            action_count: 1,
+            observe_count: 1,
+            required_tool_timeout_seconds: 90,
+            has_long_tail_action: true,
+            ..VerifiedPlanBudgetFacts::default()
+        }),
+        TaskBudgetProfile::MultiStepWorkspace
+    );
+    assert_eq!(
+        profile_for_verified_plan(VerifiedPlanBudgetFacts {
             action_count: 2,
             observe_count: 2,
             evidence_required: true,

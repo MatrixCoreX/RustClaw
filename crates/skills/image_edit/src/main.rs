@@ -24,6 +24,7 @@ const IMAGE_REFERENCE_RESOLVER_SCHEMA_RAW: &str =
     include_str!("../../../../prompts/schemas/image_reference_resolver.schema.json");
 const SKILL_NAME: &str = "image_edit";
 const UNSUPPORTED_ACTION: &str = "unsupported_action";
+const NOT_APPLIED_ERROR_PREFIX: &str = "__RC_MEDIA_NOT_APPLIED__:";
 
 static IMAGE_REFERENCE_RESOLVER_SCHEMA: OnceLock<Value> = OnceLock::new();
 
@@ -211,13 +212,7 @@ fn main() -> anyhow::Result<()> {
                     extra: Some(extra),
                     error_text: None,
                 },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
-                },
+                Err(err) => execution_error_response(req.request_id, err),
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
@@ -243,6 +238,70 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn execution_error_response(request_id: String, err: String) -> Resp {
+    let classified = decode_not_applied_error(&err);
+    let error_text = classified
+        .as_ref()
+        .map(|(_, message)| message.clone())
+        .unwrap_or(err);
+    let mut extra = error_extra("execution_failed");
+    if let (Some((failure_phase, _)), Some(object)) = (classified, extra.as_object_mut()) {
+        object.insert("failure_phase".to_string(), json!(failure_phase));
+        object.insert("side_effect_applied".to_string(), json!(false));
+    }
+    Resp {
+        request_id,
+        status: "error".to_string(),
+        text: String::new(),
+        extra: Some(extra),
+        error_text: Some(error_text),
+    }
+}
+
+fn not_applied_error(failure_phase: &str, message: impl Into<String>) -> String {
+    format!(
+        "{NOT_APPLIED_ERROR_PREFIX}{}",
+        json!({
+            "failure_phase": failure_phase,
+            "message": message.into(),
+        })
+    )
+}
+
+fn decode_not_applied_error(error: &str) -> Option<(String, String)> {
+    let payload = error.trim().strip_prefix(NOT_APPLIED_ERROR_PREFIX)?;
+    let value: Value = serde_json::from_str(payload).ok()?;
+    let failure_phase = value.get("failure_phase")?.as_str()?.trim();
+    let message = value.get("message")?.as_str()?.trim();
+    if failure_phase.is_empty() || message.is_empty() {
+        return None;
+    }
+    Some((failure_phase.to_string(), message.to_string()))
+}
+
+fn aggregate_provider_errors(provider_errors: Vec<String>) -> String {
+    let all_not_applied = !provider_errors.is_empty()
+        && provider_errors
+            .iter()
+            .all(|error| decode_not_applied_error(error).is_some());
+    let failure_phase = provider_errors
+        .iter()
+        .filter_map(|error| decode_not_applied_error(error).map(|(phase, _)| phase))
+        .find(|phase| phase == "provider_rejected")
+        .unwrap_or_else(|| "pre_dispatch".to_string());
+    let detail = provider_errors
+        .last()
+        .and_then(|error| decode_not_applied_error(error).map(|(_, message)| message))
+        .or_else(|| provider_errors.last().cloned())
+        .unwrap_or_else(|| "unknown error".to_string());
+    let message = format!("all providers failed: {detail}");
+    if all_not_applied {
+        not_applied_error(&failure_phase, message)
+    } else {
+        message
+    }
 }
 
 fn object_has_image_source(obj: &serde_json::Map<String, Value>) -> bool {
@@ -699,13 +758,7 @@ fn execute(
             Err(err) => provider_errors.push(err),
         }
     }
-    Err(format!(
-        "all providers failed: {}",
-        provider_errors
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "unknown error".to_string())
-    ))
+    Err(aggregate_provider_errors(provider_errors))
 }
 
 fn build_success_response(

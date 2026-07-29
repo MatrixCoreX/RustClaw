@@ -22,14 +22,14 @@ fn async_job_protocol_hint_exposes_machine_contract() {
         "required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
     ));
     assert!(hint.contains(
-        "canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|error_code|retryable"
+        "canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|runtime_deadline_at|retention_deadline_at|error_code|retryable"
     ));
     assert!(hint.contains("legacy_compat_fields:poll_after_seconds|cancel_ref"));
     assert!(hint.contains(
         "poll_adapter_kinds:skill_poll|local_process_poll|http_job_poll|mcp_job_poll|media_job_poll|browser_job_poll|remote_job_poll"
     ));
     assert!(hint.contains("adapter_result_key:async_poll_adapter_result"));
-    assert!(hint.contains("adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable"));
+    assert!(hint.contains("adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|runtime_deadline_at|retention_deadline_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable"));
     assert!(hint.contains("user_text_fields_forbidden:text|error_text"));
 }
 
@@ -51,9 +51,12 @@ fn async_job_contract_json_uses_only_machine_fields() {
     assert_eq!(contract["poll_adapter_kinds"][4], "media_job_poll");
     assert_eq!(contract["canonical_job_fields"][1], "provider");
     assert_eq!(contract["canonical_job_fields"][3], "poll_after_ms");
+    assert_eq!(contract["canonical_job_fields"][6], "runtime_deadline_at");
+    assert_eq!(contract["canonical_job_fields"][7], "retention_deadline_at");
     assert_eq!(contract["legacy_compat_fields"][1], "cancel_ref");
     assert_eq!(contract["adapter_result_fields"][3], "poll_after_ms");
-    assert_eq!(contract["adapter_result_fields"][5], "result_ref");
+    assert_eq!(contract["adapter_result_fields"][5], "runtime_deadline_at");
+    assert_eq!(contract["adapter_result_fields"][7], "result_ref");
     assert_eq!(contract["timeout_policy_fields"][0], "adapter_kind");
     assert_eq!(contract["forbidden_user_text_fields"][0], "text");
 }
@@ -65,6 +68,8 @@ fn pending_async_job_timeout_policy_uses_adapter_family() {
         status: crate::task_lifecycle::AsyncJobStatus::Accepted,
         poll_after_seconds: 5,
         expires_at: 1_900,
+        runtime_deadline_at: Some(1_600),
+        retention_deadline_at: Some(1_900),
         cancel_ref: "provider:video_generate:minimax:task-1".to_string(),
         message_key: "clawd.task.async_job_pending".to_string(),
     };
@@ -72,10 +77,15 @@ fn pending_async_job_timeout_policy_uses_adapter_family() {
 
     let policy = pending_async_job_timeout_policy(Some(&adapter), &job, 1_000);
 
-    assert_eq!(policy["policy_source"], "async_job_contract");
+    assert_eq!(policy["policy_source"], "pending_async_job_contract");
     assert_eq!(policy["adapter_kind"], "media_job_poll");
-    assert_eq!(policy["max_runtime_seconds"], 900);
-    assert_eq!(policy["max_runtime_deadline_ts"], 1_900);
+    assert_eq!(
+        policy["timeout_role"],
+        "runtime_and_poll_retention_separated"
+    );
+    assert_eq!(policy["runtime_remaining_seconds"], 600);
+    assert_eq!(policy["runtime_deadline_at"], 1_600);
+    assert_eq!(policy["retention_remaining_seconds"], 900);
     assert_eq!(policy["deadline_ts"], 1_900);
     assert_eq!(policy["effective_deadline_ts"], 1_900);
     assert_eq!(policy["remaining_seconds"], 900);
@@ -90,6 +100,8 @@ fn pending_async_job_timeout_policy_infers_local_process_without_adapter() {
         status: crate::task_lifecycle::AsyncJobStatus::Running,
         poll_after_seconds: 5,
         expires_at: 900,
+        runtime_deadline_at: None,
+        retention_deadline_at: Some(900),
         cancel_ref: "local_process:/tmp/job-1".to_string(),
         message_key: "clawd.task.async_job_pending".to_string(),
     };
@@ -97,7 +109,8 @@ fn pending_async_job_timeout_policy_infers_local_process_without_adapter() {
     let policy = pending_async_job_timeout_policy(None, &job, 1_000);
 
     assert_eq!(policy["adapter_kind"], "local_process_poll");
-    assert_eq!(policy["max_runtime_seconds"], 3600);
+    assert!(policy["runtime_remaining_seconds"].is_null());
+    assert!(policy["runtime_deadline_at"].is_null());
     assert_eq!(policy["effective_deadline_ts"], 900);
     assert_eq!(policy["remaining_seconds"], 0);
 }

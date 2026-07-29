@@ -3,7 +3,7 @@ use super::{
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
     budget_replan_cause, child_loop_budget_limits, coding_workflow_ready_for_model_finalization,
     commit_answer_verifier_retry_answer, forced_boundary_observation_clarify_intent,
-    initial_execution_recipe_spec, next_resumable_budget_action,
+    initial_execution_recipe_spec, initial_round_for_agent_loop, next_resumable_budget_action,
     observe_only_round_should_continue, planner_owned_observation_round_should_continue,
     post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate,
@@ -13,7 +13,8 @@ use super::{
     structured_field_selector_observation_can_finalize,
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied, terminal_user_answer_stop_signal,
-    try_recover_inconsistent_boundary_clarify, AgentLoopGuardPolicy, RoundOutcome,
+    try_recover_inconsistent_boundary_clarify, verified_action_budget_requirements,
+    AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -29,6 +30,71 @@ use crate::{
     OutputResponseShape,
 };
 use serde_json::json;
+
+#[test]
+fn resumed_agent_loop_starts_after_the_checkpoint_round() {
+    let mut loop_state = LoopState::new();
+    assert_eq!(initial_round_for_agent_loop(&loop_state), 1);
+
+    loop_state.round_no = 7;
+    assert_eq!(initial_round_for_agent_loop(&loop_state), 8);
+}
+
+fn state_with_workspace_registry() -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skills registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    state
+}
+
+#[test]
+fn verified_action_budget_uses_registry_timeout_and_execution_mode() {
+    let state = state_with_workspace_registry();
+    assert_eq!(
+        verified_action_budget_requirements(
+            &state,
+            &AgentAction::CallSkill {
+                skill: "image_vision".to_string(),
+                args: json!({"action": "describe", "image": "fixture.jpg"}),
+            },
+        ),
+        (90, true)
+    );
+    assert_eq!(
+        verified_action_budget_requirements(
+            &state,
+            &AgentAction::CallSkill {
+                skill: "office_workspace".to_string(),
+                args: json!({"action": "office.inspect", "path": "fixture.docx"}),
+            },
+        ),
+        (120, false)
+    );
+    assert_eq!(
+        verified_action_budget_requirements(
+            &state,
+            &AgentAction::CallCapability {
+                capability: "system.run_command".to_string(),
+                args: json!({"command": "sleep 120", "async_start": true}),
+            },
+        ),
+        (60, true)
+    );
+}
 
 #[test]
 fn child_loop_budget_comes_only_from_structured_child_contract() {

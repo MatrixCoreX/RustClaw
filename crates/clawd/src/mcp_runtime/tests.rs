@@ -43,6 +43,7 @@ async fn stdio_runtime_discovers_paginated_tools_calls_bounds_and_stops() {
     let lookup = runtime
         .tool("mcp.fixture.lookup")
         .expect("lookup descriptor");
+    assert_eq!(lookup.timeout_seconds, 1);
     assert_eq!(lookup.required_args, vec!["query"]);
     assert_eq!(lookup.policy.effect, "observe");
     assert_eq!(lookup.policy.risk_level, "low");

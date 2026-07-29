@@ -44,6 +44,30 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn missing_explicit_source_is_a_verified_pre_dispatch_failure() {
+    let root =
+        std::env::temp_dir().join(format!("rustclaw-photo-preflight-{}", std::process::id()));
+    let args = serde_json::json!({
+        "action": "organize",
+        "mode": "copy",
+        "source_dir": "definitely-missing"
+    });
+    let catalog = load_catalog(&root, &PhotoOrganizeConfig::default(), "en");
+
+    let failure = explicit_source_dir_preflight(&args, &root, &catalog)
+        .expect("missing source should fail before dispatch");
+    let extra = preflight_error_extra(&failure);
+
+    assert_eq!(failure.error_code, "source_dir_not_found");
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_code"], "source_dir_not_found");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["source_dir"], "definitely-missing");
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn installed_runner_resolves_relative_source_against_workspace() {
     let workspace = Path::new("/workspace/rustclaw");
     let installed_version = Path::new("/packages/photo/versions/0.1.8");

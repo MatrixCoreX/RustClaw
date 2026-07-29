@@ -69,6 +69,8 @@ fn async_poll_claimed_dispatch(
             status: crate::task_lifecycle::AsyncJobStatus::Running,
             poll_after_seconds: 7,
             expires_at: 2_000,
+            runtime_deadline_at: None,
+            retention_deadline_at: Some(2_000),
             cancel_ref: "cancel:job-async-poll-adapter".to_string(),
             message_key: "tool.msg.job.running".to_string(),
         }),
@@ -199,6 +201,7 @@ fn async_poll_large_output_keeps_exact_artifact_and_bounded_preview() {
 fn async_poll_local_process_cancel_marker_becomes_cancelled_result() {
     let dir = TempDirGuard::new("async_poll_local_process_cancelled");
     std::fs::write(dir.path.join("cancel_requested_at"), "1000\n").expect("write cancel marker");
+    std::fs::write(dir.path.join("exit_code"), "143\n").expect("write post-cancel exit");
 
     let mut claimed = async_poll_claimed_dispatch(None);
     let job_id = "local_process:cancelled-job";
@@ -220,8 +223,149 @@ fn async_poll_local_process_cancel_marker_becomes_cancelled_result() {
         payload["cancellation_result_json"]["source"],
         "local_process_async_job"
     );
+    assert_eq!(payload["cancellation_result_json"]["exit_code"], 143);
+    assert_eq!(
+        payload["cancellation_result_json"]["terminal_reason"],
+        "cancelled"
+    );
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn async_poll_quiet_local_process_stays_running_and_advances_cursor() {
+    use std::process::{Command, Stdio};
+
+    let workspace = TempDirGuard::new("async_poll_quiet_local_process");
+    let job_dir = workspace.root_job_dir("quiet-job");
+    let run_script = job_dir.join("run.sh");
+    std::fs::write(
+        &run_script,
+        "#!/usr/bin/env bash\nprintf 'ready\\n'\nsleep 30\n",
+    )
+    .expect("write run script");
+    let stdout = std::fs::File::create(job_dir.join("stdout")).expect("stdout file");
+    let stderr = std::fs::File::create(job_dir.join("stderr")).expect("stderr file");
+    let mut child = Command::new("bash")
+        .arg(&run_script)
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .expect("spawn quiet process");
+    std::fs::write(job_dir.join("pid"), child.id().to_string()).expect("write pid");
+    std::fs::write(job_dir.join("started_at"), "1000").expect("write started at");
+    std::fs::write(job_dir.join("runtime_timeout_seconds"), "120").expect("write runtime timeout");
+    std::fs::write(job_dir.join("retention_seconds"), "600").expect("write retention");
+    std::thread::sleep(std::time::Duration::from_millis(40));
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:quiet-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+        job.expires_at = 1_005;
+        job.runtime_deadline_at = Some(1_120);
+        job.retention_deadline_at = Some(1_005);
+    }
+
+    let first = super::execute_async_poll_dispatch_result(&claimed, 1_010, 30)
+        .expect("quiet process remains pollable");
+    assert_eq!(first["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(first["process_observation"]["process_alive"], true);
+    assert_eq!(first["expires_at"], 1_610);
+    assert_eq!(first["process_observation"]["retention_deadline_at"], 1_610);
+    assert_eq!(first["process_observation"]["stdout"], "ready\n");
+    assert_eq!(first["process_observation"]["stdout_start_cursor"], 0);
+    assert_eq!(first["process_observation"]["stdout_cursor"], 6);
+
+    let second = super::execute_async_poll_dispatch_result(&claimed, 1_011, 30)
+        .expect("second quiet poll remains pollable");
+    assert_eq!(second["process_observation"]["stdout"], "");
+    assert_eq!(second["process_observation"]["stdout_start_cursor"], 6);
+    assert_eq!(second["process_observation"]["stdout_cursor"], 6);
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn async_poll_requires_a_second_missing_process_observation_before_failure() {
+    let workspace = TempDirGuard::new("async_poll_missing_process_grace");
+    let job_dir = workspace.root_job_dir("missing-job");
+    std::fs::write(job_dir.join("run.sh"), "#!/usr/bin/env bash\nexit 0\n")
+        .expect("write identity script");
+    std::fs::write(job_dir.join("pid"), "4294967294").expect("write missing pid");
+    std::fs::write(job_dir.join("started_at"), "1000").expect("write started at");
+    std::fs::write(job_dir.join("retention_seconds"), "600").expect("write retention");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:missing-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let first = super::execute_async_poll_dispatch_result(&claimed, 1_010, 30)
+        .expect("first missing observation is a terminal-record grace state");
+    assert_eq!(first["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(first["process_observation"]["process_alive"], false);
+    assert_eq!(first["process_observation"]["process_loss_stable"], false);
+
+    let second = super::execute_async_poll_dispatch_result(&claimed, 1_015, 30)
+        .expect("stable missing process becomes a machine failure");
+    assert_eq!(second["executor_result_status"], "async_poll_failed");
+    assert_eq!(second["error_code"], "local_process_process_missing");
+    assert_eq!(second["failure_result_json"]["process_loss_stable"], true);
+}
+
+#[test]
+fn async_poll_missing_pid_metadata_is_a_stable_machine_failure() {
+    let workspace = TempDirGuard::new("async_poll_missing_pid");
+    let job_dir = workspace.root_job_dir("missing-pid-job");
+    std::fs::write(job_dir.join("started_at"), "1000").expect("write partial metadata");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:missing-pid-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_010, 30)
+        .expect("partial metadata becomes a terminal machine result");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(payload["error_code"], "local_process_pid_missing");
+    assert_eq!(payload["failure_result_json"]["process_loss_stable"], true);
+}
+
+#[test]
+fn async_poll_invalid_exit_record_is_a_stable_machine_failure() {
+    let workspace = TempDirGuard::new("async_poll_invalid_exit_record");
+    let job_dir = workspace.root_job_dir("invalid-exit-job");
+    std::fs::write(job_dir.join("exit_code"), "not-an-exit-code\n")
+        .expect("write invalid exit record");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:invalid-exit-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_010, 30)
+        .expect("invalid exit record becomes a terminal machine result");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(payload["error_code"], "local_process_exit_record_invalid");
+    assert_eq!(payload["retryable"], false);
 }
 
 #[test]
@@ -249,6 +393,83 @@ fn async_poll_adapter_success_becomes_machine_terminal_result() {
 }
 
 #[test]
+fn agent_loop_async_poll_success_carries_next_planner_checkpoint() {
+    let mut claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "succeeded",
+        "final_result_json": {
+            "status": "ok",
+            "result_ref": "artifact:job-async-poll-adapter"
+        }
+    })));
+    claimed.checkpoint_id =
+        "agent-loop:task-async-poll-adapter:round-1:step-1:async-job:provider:1".to_string();
+    claimed.task_checkpoint.checkpoint_id = claimed.checkpoint_id.clone();
+    claimed.task_checkpoint.boundary_context = json!({
+        "schema_version": 1,
+        "agent_loop_resume_state": {
+            "schema_version": 1,
+            "stage": "tool_execution",
+            "task_observations": [],
+            "executed_step_results": []
+        }
+    });
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll completed continuation payload");
+    let continuation = &payload["continuation_result_json"];
+    let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(continuation)
+        .expect("next planner checkpoint");
+
+    assert_eq!(payload["executor_result_status"], "async_poll_completed");
+    assert_eq!(continuation["task_lifecycle"]["state"], "background");
+    assert_eq!(
+        checkpoint.resume_entrypoint,
+        crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound
+    );
+    assert_eq!(checkpoint.pending_async_job, None);
+    assert_eq!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["last_output"],
+        json!({
+            "status": "ok",
+            "result_ref": "artifact:job-async-poll-adapter"
+        })
+        .to_string()
+    );
+}
+
+#[test]
+fn single_action_agent_async_success_needs_no_provider_continuation() {
+    let mut claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "succeeded",
+        "final_result_json": {
+            "status": "ok",
+            "output": "RUSTCLAW_LONG_COMMAND_COMPLETE",
+            "exit_code": 0
+        }
+    })));
+    claimed.checkpoint_id =
+        "agent-loop:task-single-action:round-1:step-1:async-job:provider:1".to_string();
+    claimed.task_checkpoint.checkpoint_id = claimed.checkpoint_id.clone();
+    claimed.task_checkpoint.boundary_context["async_completion_policy"] = json!({
+        "schema_version": 1,
+        "mode": "direct_terminal",
+        "continuation_action_count": 0,
+        "continuation_actions": [],
+    });
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("single action async poll completed payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_completed");
+    assert_eq!(
+        payload["final_result_json"]["output"],
+        "RUSTCLAW_LONG_COMMAND_COMPLETE"
+    );
+    assert!(payload.get("continuation_result_json").is_none());
+}
+
+#[test]
 fn async_poll_adapter_running_becomes_machine_reschedule() {
     let claimed = async_poll_claimed_dispatch(Some(json!({
         "job_id": "job-async-poll-adapter",
@@ -263,7 +484,7 @@ fn async_poll_adapter_running_becomes_machine_reschedule() {
     assert_eq!(payload["reason_code"], "async_poll_running");
     assert_eq!(payload["defer_reason_code"], "async_poll_running");
     assert_eq!(payload["next_check_after"], 1_013);
-    assert_eq!(payload["expires_at"], 1_050);
+    assert_eq!(payload["expires_at"], 1_060);
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
 }
@@ -291,7 +512,7 @@ fn async_poll_adapter_accepted_becomes_machine_reschedule() {
 }
 
 #[test]
-fn async_poll_adapter_running_after_expiry_becomes_machine_failure() {
+fn async_poll_adapter_running_after_poll_window_renews_retention() {
     let claimed = async_poll_claimed_dispatch(Some(json!({
         "job_id": "job-async-poll-adapter",
         "status": "running",
@@ -300,13 +521,32 @@ fn async_poll_adapter_running_after_expiry_becomes_machine_failure() {
     })));
 
     let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
-        .expect("async poll expired payload");
-    assert_eq!(payload["executor_result_status"], "async_poll_failed");
-    assert_eq!(payload["error_code"], "async_poll_expired");
-    assert_eq!(payload["message_key"], "clawd.task.async_poll_expired");
+        .expect("running observation renews poll retention");
+    assert_eq!(payload["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(payload["reason_code"], "async_poll_running");
+    assert_eq!(payload["retention_renewed"], true);
+    assert_eq!(payload["expires_at"], 1_060);
     assert_eq!(payload["adapter_status"], "running");
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn explicit_async_adapter_expired_status_is_terminal() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "expired",
+        "expires_at": 999,
+        "error_code": "provider_job_expired",
+        "message_key": "provider.job.expired",
+        "failure_result_json": {"status": "expired"}
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("explicit adapter expiry is terminal");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(payload["adapter_status"], "expired");
+    assert_eq!(payload["error_code"], "async_poll_expired");
 }
 
 #[test]

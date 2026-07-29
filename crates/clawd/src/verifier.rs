@@ -296,27 +296,24 @@ fn normalize_schema_token(value: &str) -> String {
         .collect()
 }
 
-fn action_scoped_required_args(
+fn planner_mapping_required_args(
     state: &AppState,
     normalized_skill: &str,
     args: &serde_json::Value,
-) -> Vec<String> {
+) -> Option<Vec<String>> {
     let action = args
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
         .map(normalize_schema_token)
         .filter(|value| !value.is_empty());
-    state
-        .skill_manifest(normalized_skill)
-        .and_then(|manifest| {
-            claw_core::skill_registry::select_planner_capability_mapping(
-                &manifest.planner_capabilities,
-                action.as_deref(),
-            )
-            .map(|mapping| mapping.required.clone())
-        })
-        .unwrap_or_default()
+    state.skill_manifest(normalized_skill).and_then(|manifest| {
+        claw_core::skill_registry::select_planner_capability_mapping(
+            &manifest.planner_capabilities,
+            action.as_deref(),
+        )
+        .map(|mapping| mapping.required.clone())
+    })
 }
 
 fn action_scoped_risk_level(
@@ -549,21 +546,21 @@ fn verify_step_args(
             missing_fields: vec![violation.field],
         });
     }
-    let manifest_required = manifest_required_args(state, normalized_skill);
-    let fallback_required = required_args_for_skill(normalized_skill);
-    let mut required: Vec<String> = if manifest_required.is_empty() {
-        fallback_required
-            .iter()
-            .map(|key| (*key).to_string())
-            .collect()
+    let required: Vec<String> = if let Some(mapping_required) =
+        planner_mapping_required_args(state, normalized_skill, &step.args)
+    {
+        mapping_required
     } else {
-        manifest_required
-    };
-    for key in action_scoped_required_args(state, normalized_skill, &step.args) {
-        if !required.iter().any(|existing| existing == &key) {
-            required.push(key);
+        let manifest_required = manifest_required_args(state, normalized_skill);
+        if manifest_required.is_empty() {
+            required_args_for_skill(normalized_skill)
+                .iter()
+                .map(|key| (*key).to_string())
+                .collect()
+        } else {
+            manifest_required
         }
-    }
+    };
     if has_unresolved_template {
         issues.push(VerifyIssue {
             step_id: step.step_id.clone(),

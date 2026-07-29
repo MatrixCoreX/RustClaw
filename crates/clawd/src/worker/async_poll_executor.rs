@@ -119,7 +119,25 @@ fn local_process_async_poll_adapter_result(
     let expires_at = job.expires_at;
     let exit_code_path = job_dir.join("exit_code");
     let cancel_requested_path = job_dir.join("cancel_requested_at");
-    if !exit_code_path.exists() && cancel_requested_path.exists() {
+    if cancel_requested_path.exists() {
+        let cancel_escalation = crate::local_process_job::maybe_escalate_cancel(job_dir, now_ts);
+        let pid = crate::local_process_job::read_pid(job_dir);
+        let identity_state = pid
+            .map(|pid| crate::local_process_job::process_identity_state(job_dir, pid))
+            .unwrap_or(crate::local_process_job::ProcessIdentityState::Missing);
+        let exit_code = std::fs::read_to_string(&exit_code_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<i32>().ok());
+        let stdout = crate::local_process_job::read_output_delta(
+            &job_dir.join("stdout"),
+            &job_dir.join("stdout_poll_cursor"),
+            16 * 1024,
+        );
+        let stderr = crate::local_process_job::read_output_delta(
+            &job_dir.join("stderr"),
+            &job_dir.join("stderr_poll_cursor"),
+            16 * 1024,
+        );
         return Some(json!({
             "job_id": job_id,
             "adapter_kind": "local_process_poll",
@@ -132,25 +150,138 @@ fn local_process_async_poll_adapter_result(
                 "source": "local_process_async_job",
                 "job_id": job_id,
                 "cancel_ref": job.cancel_ref,
+                "terminal_reason": "cancelled",
+                "pid": pid,
+                "exit_code": exit_code,
+                "process_identity_state": identity_state.as_token(),
+                "cancel_escalation": cancel_escalation,
+                "stdout": stdout.text,
+                "stdout_start_cursor": stdout.start_cursor,
+                "stdout_cursor": stdout.end_cursor,
+                "stdout_total_bytes": stdout.total_bytes,
+                "stderr": stderr.text,
+                "stderr_start_cursor": stderr.start_cursor,
+                "stderr_cursor": stderr.end_cursor,
+                "stderr_total_bytes": stderr.total_bytes,
             }
         }));
     }
     if !exit_code_path.exists() {
+        let pid = crate::local_process_job::read_pid(job_dir);
+        let identity_state = pid
+            .map(|pid| crate::local_process_job::process_identity_state(job_dir, pid))
+            .unwrap_or(crate::local_process_job::ProcessIdentityState::Missing);
+        let process_loss_stable = pid.is_none()
+            || crate::local_process_job::process_loss_is_stable(job_dir, identity_state, now_ts, 5);
+        let stdout = crate::local_process_job::read_output_delta(
+            &job_dir.join("stdout"),
+            &job_dir.join("stdout_poll_cursor"),
+            16 * 1024,
+        );
+        let stderr = crate::local_process_job::read_output_delta(
+            &job_dir.join("stderr"),
+            &job_dir.join("stderr_poll_cursor"),
+            16 * 1024,
+        );
+        let started_at = crate::local_process_job::read_i64(job_dir, "started_at");
+        let runtime_timeout_seconds =
+            crate::local_process_job::read_runtime_timeout_seconds(job_dir);
+        let runtime_deadline_at =
+            started_at
+                .zip(runtime_timeout_seconds)
+                .map(|(started_at, timeout_seconds)| {
+                    started_at.saturating_add(timeout_seconds.min(i64::MAX as u64) as i64)
+                });
+        let retention_seconds = crate::local_process_job::read_retention_seconds(job_dir)
+            .unwrap_or_else(|| expires_at.saturating_sub(now_ts).max(1) as u64);
+        let renewed_retention_deadline_at =
+            now_ts.saturating_add(retention_seconds.min(i64::MAX as u64) as i64);
+        let process_observation = json!({
+            "schema_version": 1,
+            "source": "local_process_job_supervisor",
+            "job_id": job_id,
+            "pid": pid,
+            "process_identity_state": identity_state.as_token(),
+            "process_alive": identity_state.alive(),
+            "process_loss_stable": process_loss_stable,
+            "started_at": started_at,
+            "updated_at": now_ts,
+            "runtime_timeout_seconds": runtime_timeout_seconds,
+            "runtime_deadline_at": runtime_deadline_at,
+            "retention_seconds": retention_seconds,
+            "retention_deadline_at": renewed_retention_deadline_at,
+            "stdout": stdout.text,
+            "stdout_start_cursor": stdout.start_cursor,
+            "stdout_cursor": stdout.end_cursor,
+            "stdout_total_bytes": stdout.total_bytes,
+            "stdout_truncated": stdout.truncated,
+            "stdout_cursor_reset": stdout.cursor_reset,
+            "stdout_encoding": stdout.encoding,
+            "stderr": stderr.text,
+            "stderr_start_cursor": stderr.start_cursor,
+            "stderr_cursor": stderr.end_cursor,
+            "stderr_total_bytes": stderr.total_bytes,
+            "stderr_truncated": stderr.truncated,
+            "stderr_cursor_reset": stderr.cursor_reset,
+            "stderr_encoding": stderr.encoding,
+        });
+        if process_loss_stable {
+            return Some(json!({
+                "job_id": job_id,
+                "adapter_kind": "local_process_poll",
+                "status": "failed",
+                "poll_after_seconds": job.poll_after_seconds,
+                "expires_at": renewed_retention_deadline_at,
+                "error_code": match (pid, identity_state) {
+                    (None, _) => "local_process_pid_missing",
+                    (Some(_), crate::local_process_job::ProcessIdentityState::IdentityMismatch) => {
+                        "local_process_identity_mismatch"
+                    }
+                    _ => "local_process_process_missing",
+                },
+                "message_key": "clawd.task.async_job_process_lost",
+                "retryable": false,
+                "failure_result_json": process_observation,
+            }));
+        }
         return Some(json!({
             "job_id": job_id,
             "adapter_kind": "local_process_poll",
-            "status": if now_ts >= expires_at { "expired" } else { "running" },
+            "status": "running",
             "poll_after_seconds": job.poll_after_seconds,
-            "expires_at": expires_at,
+            "expires_at": renewed_retention_deadline_at,
+            "runtime_deadline_at": runtime_deadline_at,
+            "retention_deadline_at": renewed_retention_deadline_at,
             "message_key": job.message_key,
+            "retryable": true,
+            "process_observation": process_observation,
         }));
     }
-    let exit_code_text = std::fs::read_to_string(&exit_code_path).ok()?;
-    let exit_code = exit_code_text.trim().parse::<i32>().ok()?;
+    let exit_code_text = match std::fs::read_to_string(&exit_code_path) {
+        Ok(value) => value,
+        Err(_) => {
+            return Some(local_process_exit_record_failure(
+                job,
+                job_id,
+                "local_process_exit_record_unreadable",
+            ));
+        }
+    };
+    let exit_code = match exit_code_text.trim().parse::<i32>() {
+        Ok(value) => value,
+        Err(_) => {
+            return Some(local_process_exit_record_failure(
+                job,
+                job_id,
+                "local_process_exit_record_invalid",
+            ));
+        }
+    };
     let stdout = read_bounded_output(&job_dir.join("stdout"), 32 * 1024);
     let stderr = read_bounded_output(&job_dir.join("stderr"), 32 * 1024);
     let result_json =
         local_process_terminal_result_json(claimed, job_id, job_dir, exit_code, &stdout, &stderr);
+    let terminal_reason = local_process_terminal_reason(job_dir, exit_code);
     if exit_code == 0 {
         Some(json!({
             "job_id": job_id,
@@ -158,6 +289,8 @@ fn local_process_async_poll_adapter_result(
             "status": "succeeded",
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
+            "runtime_deadline_at": job.runtime_deadline_at,
+            "retention_deadline_at": job.retention_deadline_at.unwrap_or(expires_at),
             "message_key": job.message_key,
             "final_result_json": result_json
         }))
@@ -168,11 +301,45 @@ fn local_process_async_poll_adapter_result(
             "status": "failed",
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
-            "error_code": "local_process_nonzero_exit",
-            "message_key": "clawd.task.async_job_failed",
+            "runtime_deadline_at": job.runtime_deadline_at,
+            "retention_deadline_at": job.retention_deadline_at.unwrap_or(expires_at),
+            "error_code": match terminal_reason {
+                "runtime_timeout" => "local_process_runtime_timeout",
+                "timeout_backend_unavailable" => "local_process_timeout_backend_unavailable",
+                _ => "local_process_nonzero_exit",
+            },
+            "message_key": match terminal_reason {
+                "runtime_timeout" => "clawd.task.async_job_runtime_timeout",
+                "timeout_backend_unavailable" => "clawd.task.async_job_timeout_backend_unavailable",
+                _ => "clawd.task.async_job_failed",
+            },
+            "retryable": false,
             "failure_result_json": result_json
         }))
     }
+}
+
+fn local_process_exit_record_failure(
+    job: &crate::task_lifecycle::AsyncJobRef,
+    job_id: &str,
+    error_code: &str,
+) -> Value {
+    json!({
+        "job_id": job_id,
+        "adapter_kind": "local_process_poll",
+        "status": "failed",
+        "poll_after_seconds": job.poll_after_seconds,
+        "expires_at": job.expires_at,
+        "error_code": error_code,
+        "message_key": "clawd.task.async_job_exit_record_invalid",
+        "retryable": false,
+        "failure_result_json": {
+            "schema_version": 1,
+            "source": "local_process_job_supervisor",
+            "job_id": job_id,
+            "error_code": error_code,
+        },
+    })
 }
 
 struct BoundedProcessOutput {
@@ -220,12 +387,21 @@ fn local_process_terminal_result_json(
         "schema_version": 1,
         "source": "local_process_async_job",
         "job_id": job_id,
+        "pid": crate::local_process_job::read_pid(job_dir),
         "exit_code": exit_code,
+        "terminal_reason": local_process_terminal_reason(job_dir, exit_code),
+        "started_at": crate::local_process_job::read_i64(job_dir, "started_at"),
+        "finished_at": crate::local_process_job::read_i64(job_dir, "finished_at"),
+        "runtime_timeout_seconds": crate::local_process_job::read_runtime_timeout_seconds(job_dir),
         "stdout": stdout.text,
         "stderr": stderr.text,
         "output": output,
         "stdout_total_bytes": stdout.total_bytes,
+        "stdout_start_cursor": 0,
+        "stdout_cursor": stdout.preview_bytes,
         "stderr_total_bytes": stderr.total_bytes,
+        "stderr_start_cursor": 0,
+        "stderr_cursor": stderr.preview_bytes,
         "stdout_preview_bytes": stdout.preview_bytes,
         "stderr_preview_bytes": stderr.preview_bytes,
         "stdout_encoding": stdout.encoding,
@@ -237,6 +413,26 @@ fn local_process_terminal_result_json(
         "range_handles": range_handles,
         "artifact_publish_status": artifact_publish_status,
     })
+}
+
+fn local_process_terminal_reason(job_dir: &Path, exit_code: i32) -> &'static str {
+    if job_dir.join("cancel_requested_at").exists() {
+        "cancelled"
+    } else if exit_code == 125
+        && std::fs::read_to_string(job_dir.join("stderr"))
+            .ok()
+            .is_some_and(|stderr| stderr.contains("portable_timeout_backend_unavailable"))
+    {
+        "timeout_backend_unavailable"
+    } else if matches!(exit_code, 124 | 125)
+        && crate::local_process_job::read_runtime_timeout_seconds(job_dir).is_some()
+    {
+        "runtime_timeout"
+    } else if exit_code == 0 {
+        "exited_success"
+    } else {
+        "exited_nonzero"
+    }
 }
 
 fn publish_local_process_artifacts(
@@ -457,18 +653,23 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
         base_async_poll_result_payload(claimed, adapter_result, job_id, adapter_status);
     match adapter_status {
         "accepted" | "running" => {
-            let expires_at = poll_expires_at(claimed, adapter_result)?;
-            if expires_at <= now_ts {
-                return async_poll_failure_payload(
-                    payload,
-                    "async_poll_failed",
-                    "async_poll_expired",
-                    "clawd.task.async_poll_expired",
-                    None,
-                );
-            }
             let retry_after_seconds =
                 poll_retry_after_seconds(claimed, adapter_result, default_retry_after_seconds);
+            let supplied_expires_at = poll_expires_at(claimed, adapter_result).unwrap_or(0);
+            // A successful `running` observation proves that the adapter job is
+            // alive. A stale poll/retention window must be renewed, not rewritten
+            // as an underlying runtime failure. Only explicit adapter status
+            // `expired` is terminal.
+            let minimum_retention_seconds = adapter_result
+                .get("retention_seconds")
+                .and_then(Value::as_i64)
+                .filter(|seconds| *seconds > 0)
+                .unwrap_or_else(|| retry_after_seconds.saturating_mul(4).max(60));
+            let renewed_expires_at = now_ts.saturating_add(minimum_retention_seconds);
+            let expires_at = supplied_expires_at
+                .max(renewed_expires_at)
+                .max(now_ts.saturating_add(retry_after_seconds).saturating_add(1));
+            let retention_renewed = expires_at != supplied_expires_at;
             let next_check_after = now_ts.saturating_add(retry_after_seconds).min(expires_at);
             let obj = payload.as_object_mut()?;
             obj.insert(
@@ -495,6 +696,8 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
             );
             obj.insert("next_check_after".to_string(), json!(next_check_after));
             obj.insert("expires_at".to_string(), json!(expires_at));
+            obj.insert("retention_deadline_at".to_string(), json!(expires_at));
+            obj.insert("retention_renewed".to_string(), json!(retention_renewed));
             Some(payload)
         }
         "succeeded" => {
@@ -502,6 +705,13 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
                 .get("final_result_json")
                 .cloned()
                 .filter(Value::is_object)?;
+            let continuation_result_json =
+                crate::agent_engine::completed_async_job_continuation_result(
+                    &claimed.task.kind,
+                    &claimed.task_checkpoint,
+                    &final_result_json,
+                    now_ts,
+                );
             let obj = payload.as_object_mut()?;
             obj.insert(
                 "executor_result_status".to_string(),
@@ -509,6 +719,12 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
             );
             obj.insert("reason_code".to_string(), json!("async_poll_completed"));
             obj.insert("final_result_json".to_string(), final_result_json);
+            if let Some(continuation_result_json) = continuation_result_json {
+                obj.insert(
+                    "continuation_result_json".to_string(),
+                    continuation_result_json,
+                );
+            }
             Some(payload)
         }
         "failed" => {
@@ -581,6 +797,16 @@ fn base_async_poll_result_payload(
         "adapter_status": adapter_status,
     });
     if let Some(obj) = payload.as_object_mut() {
+        for key in [
+            "process_observation",
+            "retryable",
+            "runtime_deadline_at",
+            "retention_deadline_at",
+        ] {
+            if let Some(value) = adapter_result.get(key) {
+                obj.insert(key.to_string(), value.clone());
+            }
+        }
         for key in ["cancel_ref", "message_key"] {
             if let Some(value) = claimed
                 .execution_plan

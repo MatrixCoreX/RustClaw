@@ -337,6 +337,17 @@ pub(super) async fn cancel_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
+    if matches!(target.status.as_str(), "canceled" | "cancelled") {
+        return super::api_ok(json!({
+            "status": "task_already_cancelled",
+            "canceled": 0,
+            "already_terminal": true,
+            "task_id": target.task_id,
+            "user_id": target.user_id,
+            "chat_id": target.chat_id,
+            "channel": target.channel,
+        }));
+    }
     if !matches!(target.status.as_str(), "queued" | "running") {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_active");
     }

@@ -374,7 +374,7 @@ async fn run_readonly_child_agent_loop(
         );
         return Ok(result);
     }
-    let result = parse_child_loop_result(raw_result, role, &context_refs);
+    let result = parse_child_loop_result(raw_result, role, &context_refs, &result_contract);
     finalize_inline_child_success(state, &child_task, &child_payload, &result)?;
     Ok(result)
 }
@@ -474,7 +474,12 @@ fn finalize_inline_child_failure(
     );
 }
 
-fn parse_child_loop_result(raw: &str, role: &str, context_refs: &Value) -> Value {
+fn parse_child_loop_result(
+    raw: &str,
+    role: &str,
+    context_refs: &Value,
+    result_contract: &Value,
+) -> Value {
     let parsed = serde_json::from_str::<Value>(raw.trim())
         .ok()
         .filter(Value::is_object)
@@ -488,7 +493,27 @@ fn parse_child_loop_result(raw: &str, role: &str, context_refs: &Value) -> Value
     let Some(parsed) = parsed else {
         return child_loop_error_result("subagent_child_json_parse_failed", raw);
     };
-    let result = parse_child_model_result(&parsed.to_string());
+    let mut result = if valid_child_model_result(&parsed) {
+        let mut result = parsed.clone();
+        normalize_child_model_result(&mut result);
+        result
+    } else if let Some(result) =
+        wrap_satisfied_child_result_contract(&parsed, role, context_refs, result_contract)
+    {
+        result
+    } else {
+        child_loop_error_result("subagent_child_result_contract_invalid", "")
+    };
+    if result.get("status").and_then(Value::as_str) == Some("completed") {
+        let Some(contract_result) = child_result_contract_projection(&parsed, result_contract)
+        else {
+            return child_loop_error_result("subagent_child_result_contract_invalid", "");
+        };
+        if let Some(object) = result.as_object_mut() {
+            object.insert("role".to_string(), json!(role));
+            object.insert("result".to_string(), contract_result);
+        }
+    }
     if result.get("status").and_then(Value::as_str) == Some("failed")
         && result.get("role").is_none()
     {
@@ -505,6 +530,118 @@ fn parse_child_loop_result(raw: &str, role: &str, context_refs: &Value) -> Value
     result
 }
 
+fn child_result_contract_projection(candidate: &Value, result_contract: &Value) -> Option<Value> {
+    let required_keys = result_contract
+        .get("required_keys")
+        .and_then(Value::as_array)
+        .map(|keys| {
+            keys.iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if required_keys.is_empty() {
+        return Some(json!({}));
+    }
+    let source = candidate
+        .get("result")
+        .and_then(Value::as_object)
+        .or_else(|| candidate.as_object())?;
+    let mut projection = serde_json::Map::new();
+    for key in required_keys {
+        projection.insert(key.to_string(), source.get(key)?.clone());
+    }
+    Some(Value::Object(projection))
+}
+
+fn child_result_evidence_refs(candidate: &Value, context_refs: &Value) -> Vec<Value> {
+    let mut refs = candidate
+        .get("evidence_refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| json!(value))
+        .collect::<Vec<_>>();
+    for key in ["evidence_ref", "evidence_path"] {
+        if let Some(value) = candidate
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            refs.push(json!(value));
+        }
+    }
+    refs.extend(
+        context_refs
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| json!(value)),
+    );
+    refs.dedup();
+    refs
+}
+
+fn wrap_satisfied_child_result_contract(
+    candidate: &Value,
+    role: &str,
+    context_refs: &Value,
+    result_contract: &Value,
+) -> Option<Value> {
+    let result = child_result_contract_projection(candidate, result_contract)?;
+    let evidence_refs = child_result_evidence_refs(candidate, context_refs);
+    if result_contract
+        .get("require_evidence")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && evidence_refs.is_empty()
+    {
+        return None;
+    }
+    let status = candidate
+        .get("status")
+        .and_then(Value::as_str)
+        .filter(|status| matches!(*status, "completed" | "needs_more_evidence" | "failed"))
+        .unwrap_or("completed");
+    let findings = candidate
+        .get("findings")
+        .and_then(Value::as_array)
+        .filter(|items| items.iter().all(Value::is_object))
+        .cloned()
+        .unwrap_or_else(|| {
+            vec![json!({
+                "code": "result_contract_satisfied",
+                "summary": "child returned every required result-contract key"
+            })]
+        });
+    let confidence = candidate
+        .get("confidence")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        .unwrap_or(0.8);
+    Some(json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_model_child",
+        "output_format": "machine_json",
+        "status": status,
+        "role": role,
+        "findings": findings,
+        "evidence_refs": evidence_refs,
+        "confidence": confidence,
+        "result": result,
+    }))
+}
+
+#[cfg(test)]
 fn parse_child_model_result(raw: &str) -> Value {
     let parsed = serde_json::from_str::<Value>(raw.trim())
         .ok()
@@ -520,6 +657,7 @@ fn parse_child_model_result(raw: &str) -> Value {
     value
 }
 
+#[cfg(test)]
 fn extract_child_result_object(raw: &str) -> Option<Value> {
     json_object_candidates(raw)
         .into_iter()
@@ -560,6 +698,7 @@ fn valid_child_model_result(value: &Value) -> bool {
         .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
 }
 
+#[cfg(test)]
 fn child_result_object_score(value: &Value) -> usize {
     let Some(object) = value.as_object() else {
         return 0;
@@ -681,6 +820,7 @@ fn normalize_child_model_result(value: &mut Value) {
                 | "confidence"
                 | "error_code"
                 | "message_key"
+                | "result"
         )
     });
 }
@@ -969,4 +1109,14 @@ fn bounded_error(value: &str) -> String {
 #[cfg(test)]
 pub(super) fn parse_child_model_result_for_test(raw: &str) -> Value {
     parse_child_model_result(raw)
+}
+
+#[cfg(test)]
+pub(super) fn parse_child_loop_result_for_test(
+    raw: &str,
+    role: &str,
+    context_refs: &Value,
+    result_contract: &Value,
+) -> Value {
+    parse_child_loop_result(raw, role, context_refs, result_contract)
 }

@@ -76,6 +76,9 @@ Protocol rules:
   result bounds, pass the user's corresponding constraints in that capability
   call. Prefer a bounded, already ordered observation over fetching a broad
   result and manually reordering or truncating it after context compaction.
+- Do not delegate a step that one disclosed domain capability can complete
+  directly. `agent.subagent` is not a substitute for an available typed
+  capability.
 - When the runtime map exposes `agent.subagent`, use that capability for one
   explicitly delegated read-only review, exploration, or verification child
   instead of performing the delegated work in the parent loop. First gather

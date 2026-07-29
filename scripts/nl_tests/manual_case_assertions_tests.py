@@ -12,6 +12,7 @@ def result_with_steps(
     steps: list[dict],
     completed_side_effect_count: int = 0,
     text: str = "machine result",
+    task_observations: list[dict] | None = None,
 ) -> dict:
     return {
         "ok": True,
@@ -38,7 +39,10 @@ def result_with_steps(
                             },
                         },
                     },
-                    "trace": {"step_results": steps},
+                    "trace": {
+                        "step_results": steps,
+                        "task_observations": task_observations or [],
+                    },
                 },
             },
         },
@@ -50,6 +54,25 @@ def terminal_step() -> dict:
         "requested_action_type": "respond",
         "action_kind": "respond",
         "status": "ok",
+    }
+
+
+def capability_group_load_step() -> dict:
+    return {
+        "requested_action_type": "call_tool",
+        "action_kind": "call_tool",
+        "requested_capability": "load_capability_groups",
+        "resolved_tool_or_skill": "load_capability_groups",
+        "status": "ok",
+    }
+
+
+def capability_resolution_observation(capability: str) -> dict:
+    return {
+        "observation_kind": "capability_resolution",
+        "outcome": "resolved",
+        "requested_capability": capability,
+        "resolved_capability": capability,
     }
 
 
@@ -132,6 +155,22 @@ def row_for(path: Path, tags: str, expect: str = "contains:machine") -> dict:
     )
 
 
+def row_for_status(path: Path, tags: str, status: str) -> dict:
+    return build_summary_row(
+        source_line=1,
+        case_name="fixture",
+        tags=tags,
+        prompt="fixture",
+        task_id="task-fixture",
+        final_json_path=str(path),
+        effective_status=status,
+        started_at=10,
+        ended_at=12,
+        expectation_spec="contains:machine",
+        mode="ask",
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="manual-case-assertions-") as tmp:
         root = Path(tmp)
@@ -161,6 +200,33 @@ def main() -> int:
             "capability:fixture.other;requires_tool_call=true;dry_run",
         )
         assert wrong_capability_row["assertion"] == "fail"
+
+        pre_dispatch_rejection = write_result(
+            root,
+            "pre-dispatch-rejection.json",
+            result_with_steps(
+                [capability_group_load_step(), terminal_step()],
+                task_observations=[
+                    capability_resolution_observation("fixture.preview")
+                ],
+            ),
+        )
+        pre_dispatch_row = row_for(
+            pre_dispatch_rejection,
+            "capability:fixture.preview;requires_tool_call:false",
+        )
+        assert pre_dispatch_row["assertion"] == "pass"
+        assert any(
+            detail.get("tag") == "capability"
+            and detail.get("matched_resolution_count") == 1
+            for detail in pre_dispatch_row["assertion_details"]
+        )
+
+        missing_real_call_row = row_for(
+            pre_dispatch_rejection,
+            "capability:fixture.preview;requires_tool_call:true",
+        )
+        assert missing_real_call_row["assertion"] == "fail"
 
         missing_dry_run = write_result(
             root,
@@ -216,6 +282,27 @@ def main() -> int:
             "requires_tool_call=false;local_readonly",
         )
         assert no_tool["assertion"] == "pass"
+
+        allowed_failure = row_for_status(
+            direct,
+            "requires_tool_call=false;allow_terminal_failure",
+            "failed",
+        )
+        assert allowed_failure["assertion"] == "pass"
+
+        allowed_success = row_for_status(
+            direct,
+            "requires_tool_call=false;allow_terminal_failure",
+            "succeeded",
+        )
+        assert allowed_success["assertion"] == "pass"
+
+        disallowed_timeout = row_for_status(
+            direct,
+            "requires_tool_call=false;allow_terminal_failure",
+            "timeout",
+        )
+        assert disallowed_timeout["assertion"] == "fail"
 
         unexpected_tool = row_for(
             capability,

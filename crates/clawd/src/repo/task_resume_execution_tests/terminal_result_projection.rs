@@ -890,3 +890,130 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
     );
     assert_eq!(result["task_lifecycle"]["state"], "succeeded");
 }
+
+#[test]
+fn completed_agent_loop_async_poll_projects_successor_planner_checkpoint() {
+    let state = state_with_tasks_table();
+    let now = 9_800;
+    let task_id = "ask-async-continuation";
+    let checkpoint_id =
+        "agent-loop:ask-async-continuation:round-1:step-1:async-job:provider:video:1";
+    let successor_checkpoint_id = format!("{checkpoint_id}:completion");
+    let mut seed = terminal_projection_seed(
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now,
+    );
+    seed["task_checkpoint"]["resume_entrypoint"] = json!("poll_async_job");
+    insert_task(&state, task_id, "running", Some(&seed), now);
+    activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
+
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now + 1,
+        10,
+    )
+    .expect("claim completion projection")
+    .expect("completion projection claimed");
+    let projection = json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "checkpoint_id": checkpoint_id,
+        "executor_state": "executing_async_poll",
+        "executor_action": "poll_async_job",
+        "executor_status": "async_poll_adapter_pending",
+        "dispatch_state": "ready_to_poll_async_job",
+        "executor_result_status": "async_poll_completed",
+        "result_projection_state": "project_async_poll_completed",
+        "final_result_json": {
+            "status": "Success",
+            "file_id": "video-1"
+        },
+        "continuation_result_json": {
+            "schema_version": 1,
+            "task_lifecycle": {
+                "schema_version": 1,
+                "state": "background",
+                "source": "async_job_completion_checkpoint",
+                "resume_reason": "async_job_completed_continue_planning",
+                "next_check_after": now + 2,
+                "checkpoint_id": successor_checkpoint_id
+            },
+            "task_checkpoint": {
+                "schema_version": 1,
+                "checkpoint_id": successor_checkpoint_id,
+                "boundary_context": {
+                    "schema_version": 1,
+                    "async_job_terminal_observation": {
+                        "status": "succeeded",
+                        "final_result_json": {
+                            "status": "Success",
+                            "file_id": "video-1"
+                        }
+                    }
+                },
+                "observations": [],
+                "evidence_refs": [],
+                "artifact_refs": [],
+                "completed_side_effect_refs": ["video_generate:hash"],
+                "budget": {
+                    "round": 1,
+                    "step": 1,
+                    "llm_calls": 1,
+                    "tool_calls": 1,
+                    "elapsed_ms": 10
+                },
+                "resume_entrypoint": "next_planner_round"
+            }
+        }
+    });
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            CLAIM_ATTEMPT,
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_completed",
+            &projection,
+            now + 2,
+        )
+        .expect("project successor checkpoint")
+    );
+
+    let (status, error_text, result) = stored_task_status_error_result(&state, task_id);
+    assert_eq!(status, "running");
+    assert_eq!(error_text, None);
+    assert_eq!(result["task_lifecycle"]["state"], "background");
+    assert_eq!(
+        result["task_lifecycle"]["checkpoint_id"],
+        successor_checkpoint_id
+    );
+    assert_eq!(
+        result["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["resume_executor_result_projection"]["projection_result_status"],
+        "rescheduled_checkpoint"
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["task_metrics"]["tool_calls"],
+        1
+    );
+}

@@ -21,10 +21,11 @@ REGISTRY = ROOT / "configs/skills_registry.toml"
 # protocol maintenance without allowing the old catalog to return.
 MAX_GLOBAL_TOOL_OVERLAY_BYTES = 10_000
 MAX_EAGER_NATIVE_GROUPS = 7
-# Exact replace/image discovery and confirmation-gated local Git writes are
-# core coding-loop actions. They extend existing eager groups without adding a
-# new group or restoring domain catalogs to the global prompt.
-MAX_EAGER_PLANNER_CAPABILITIES = 78
+# Exact replace/image discovery, confirmation-gated local Git writes, and the
+# explicit command deadline/no-deadline modes are core execution-loop actions.
+# They extend existing eager groups without adding a new group or restoring
+# domain catalogs to the global prompt.
+MAX_EAGER_PLANNER_CAPABILITIES = 80
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 
@@ -152,7 +153,7 @@ planner_capabilities = [{ name = "demo.hidden" }]
         assert findings_for(oversized) == [
             f"global_tool_overlay_bytes_grew:{MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1}>{MAX_GLOBAL_TOOL_OVERLAY_BYTES}",
             "eager_native_groups_grew:8>7",
-            "eager_planner_capabilities_grew:79>78",
+            "eager_planner_capabilities_grew:81>80",
         ]
         overlay.write_text("generic protocol\n### visible\n", encoding="utf-8")
         named_heading = inventory(overlay, registry)

@@ -111,6 +111,8 @@ pub(crate) struct McpToolDescriptor {
     pub(crate) capability: String,
     pub(crate) server_id: String,
     pub(crate) tool_name: String,
+    /// One MCP request deadline owned by the configured server transport.
+    pub(crate) timeout_seconds: u64,
     pub(crate) description: Option<String>,
     pub(crate) input_schema: Value,
     pub(crate) required_args: Vec<String>,

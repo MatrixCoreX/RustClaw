@@ -157,6 +157,21 @@ fn build_pending_async_job_checkpoint_progress_payload(
             .as_ref()
             .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
     });
+    let continuation_actions = loop_state
+        .active_verified_actions
+        .get(step_in_round..)
+        .unwrap_or_default();
+    let continuation_action_count = continuation_actions.len();
+    boundary_context["async_completion_policy"] = json!({
+        "schema_version": 1,
+        "mode": if continuation_actions.is_empty() {
+            "direct_terminal"
+        } else {
+            "continue_planning"
+        },
+        "continuation_action_count": continuation_action_count,
+        "continuation_actions": continuation_actions,
+    });
     if let (Some(obj), Some(adapter)) = (
         boundary_context.as_object_mut(),
         poll_adapter.filter(|value| value.is_object()),
@@ -197,6 +212,8 @@ fn build_pending_async_job_checkpoint_progress_payload(
             "cancel_ref": job.cancel_ref,
             "poll_after_seconds": job.poll_after_seconds,
             "async_job_expires_at": job.expires_at,
+            "async_job_runtime_deadline_at": job.runtime_deadline_at,
+            "async_job_retention_deadline_at": job.retention_deadline_at.unwrap_or(job.expires_at),
             "async_job_message_key": job.message_key,
             "async_timeout_policy": timeout_policy,
             "budget": budget_json,
@@ -237,6 +254,8 @@ fn pending_async_job_visible_reply_from_progress_payload(payload: &Value) -> Opt
         for key in [
             "poll_after_seconds",
             "async_job_expires_at",
+            "async_job_runtime_deadline_at",
+            "async_job_retention_deadline_at",
             "async_job_message_key",
             "async_timeout_policy",
             "can_poll",

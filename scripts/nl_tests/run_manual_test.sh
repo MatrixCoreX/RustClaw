@@ -284,7 +284,13 @@ from pathlib import Path
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
-print(str(data.get("status") or ""))
+status = str(data.get("status") or "")
+lifecycle = data.get("lifecycle") or {}
+lifecycle_state = str(lifecycle.get("state") or "").strip()
+if status == "running" and lifecycle_state == "needs_user":
+    print("needs_user")
+else:
+    print(status)
 PY
 }
 
@@ -406,6 +412,62 @@ from pathlib import Path
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
+if str(data.get("status") or "") not in {"failed", "timeout"}:
+    raise SystemExit(1)
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+def decoded_object(value):
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+journal_summary = ((result.get("task_journal") or {}).get("summary") or {})
+machine_objects = list(walk(result))
+for candidate in (
+    result.get("text"),
+    journal_summary.get("final_answer"),
+    data.get("error_text"),
+):
+    parsed = decoded_object(candidate)
+    if parsed is not None:
+        machine_objects.extend(walk(parsed))
+
+for item in machine_objects:
+    external_blocked = item.get("external_provider_blocked") is True
+    attribution = str(item.get("failure_attribution") or "").strip().lower()
+    codes = {
+        str(item.get(field) or "").strip().lower()
+        for field in (
+            "error_code",
+            "provider_blocker_status_code",
+            "reason_code",
+            "status_code",
+        )
+    }
+    provider_code = any(
+        code == "rate_limited"
+        or code.startswith("provider_")
+        or code.startswith("llm_provider_")
+        for code in codes
+    )
+    if external_blocked and (attribution == "provider_gap" or provider_code):
+        raise SystemExit(0)
+
 messages = result.get("messages") or []
 error_text = str(data.get("error_text") or "").strip().lower()
 result_text = str(result.get("text") or "").strip().lower()
@@ -583,7 +645,7 @@ poll_until_terminal() {
       last_status="$status"
     fi
     case "$status" in
-      succeeded|failed|canceled|timeout)
+      succeeded|failed|canceled|timeout|needs_user)
         log_terminal_result_flags "$out_file"
         return 0
         ;;
@@ -964,6 +1026,7 @@ bad_statuses = {
     "timeout",
     "provider_unavailable",
     "network_error",
+    "needs_user",
     "unknown",
     "",
 }
@@ -974,7 +1037,16 @@ for raw in path.read_text(encoding="utf-8").splitlines():
     if not raw:
         continue
     row = json.loads(raw)
-    if str(row.get("status") or "") in bad_statuses:
+    tags = {
+        token.strip().lower()
+        for token in str(row.get("tags") or "").replace(";", ",").split(",")
+        if token.strip()
+    }
+    allow_terminal_failure = "allow_terminal_failure" in tags
+    status = str(row.get("status") or "")
+    if status in bad_statuses and not (
+        allow_terminal_failure and status == "failed"
+    ):
         bad = True
     if row.get("assertion") == "fail":
         bad = True

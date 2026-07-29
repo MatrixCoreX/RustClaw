@@ -299,6 +299,40 @@ fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
 }
 
 #[test]
+fn execution_evidence_prompt_includes_structured_plan_verifier_rejections() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-plan-verifier-evidence",
+        "ask",
+        "validate coordinates",
+    );
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "observation_kind": "plan_verifier_rejection",
+        "owner_layer": "plan_verifier",
+        "status": "error",
+        "issues": [{
+            "status": "error",
+            "error_code": "invalid_argument_value",
+            "message_key": "clawd.verify.invalid_argument_value",
+            "retryable": false,
+            "planner_repairable": true,
+            "argument_constraints": [{
+                "field": "latitude",
+                "constraint": "maximum",
+                "schema": {"type": "number", "minimum": -90, "maximum": 90}
+            }]
+        }]
+    }));
+
+    let block = execution_evidence_prompt_block(&journal);
+
+    assert!(block.contains("plan_verifier_rejection_evidence"));
+    assert!(block.contains("invalid_argument_value"));
+    assert!(block.contains("\"minimum\": -90"));
+    assert!(block.contains("\"maximum\": 90"));
+}
+
+#[test]
 fn execution_evidence_prompt_excludes_prior_synthesis_candidates() {
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-provider-safe-observations-only",

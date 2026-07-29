@@ -340,7 +340,7 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
             .iter()
             .map(|group| group.capability_names.len())
             .sum::<usize>(),
-        78
+        80
     );
     assert_eq!(loadable.len(), 28);
     assert_eq!(full.len(), initial.len() + loadable.len());

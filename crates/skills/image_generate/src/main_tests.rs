@@ -16,6 +16,34 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn provider_rejection_proves_no_mutation_was_applied() {
+    let encoded = aggregate_provider_errors(vec![not_applied_error(
+        "provider_rejected",
+        "insufficient balance",
+    )]);
+    let response = execution_error_response("req-1".to_string(), encoded);
+    let extra = response.extra.expect("error extra");
+
+    assert_eq!(response.status, "error");
+    assert_eq!(
+        response.error_text.as_deref(),
+        Some("all providers failed: insufficient balance")
+    );
+    assert_eq!(extra["failure_phase"], "provider_rejected");
+    assert_eq!(extra["side_effect_applied"], false);
+}
+
+#[test]
+fn unknown_provider_failure_does_not_claim_a_safe_retry() {
+    let encoded = aggregate_provider_errors(vec!["transport response lost".to_string()]);
+    let response = execution_error_response("req-2".to_string(), encoded);
+    let extra = response.extra.expect("error extra");
+
+    assert!(extra.get("failure_phase").is_none());
+    assert!(extra.get("side_effect_applied").is_none());
+}
+
+#[test]
 fn parse_vendor_aliases() {
     assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
     assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));

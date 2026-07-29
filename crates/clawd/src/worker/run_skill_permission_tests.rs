@@ -68,6 +68,7 @@ fn direct_high_risk_skill_stops_at_one_shot_approval_boundary() {
     );
 
     assert!(verification.needs_confirmation());
+    assert_eq!(verification.plan.steps[0].args["action"], "exec");
     assert_eq!(
         verification.verify.permission_decision["decision"],
         "require_confirmation"

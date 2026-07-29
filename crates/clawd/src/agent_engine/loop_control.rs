@@ -641,6 +641,10 @@ fn initialize_task_budget_slice(
     );
 }
 
+fn initial_round_for_agent_loop(loop_state: &LoopState) -> usize {
+    loop_state.round_no.saturating_add(1).max(1)
+}
+
 fn apply_task_budget_profile(
     loop_state: &mut LoopState,
     task_budget_policy: &crate::task_budget_contract::TaskBudgetPolicy,
@@ -670,6 +674,41 @@ fn verified_action_effect(
         | AgentAction::SynthesizeAnswer { .. }
         | AgentAction::Respond { .. } => crate::execution_recipe::ActionEffect::default(),
     }
+}
+
+fn verified_action_budget_requirements(state: &AppState, action: &AgentAction) -> (u64, bool) {
+    let resolved =
+        crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+    let (skill, args) = match resolved {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            (tool, args)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => return (0, false),
+    };
+    let canonical = state.resolve_canonical_skill_name(&skill);
+    if let Some(descriptor) = state.mcp_tool(&canonical) {
+        return (descriptor.timeout_seconds, false);
+    }
+    let Some(manifest) = state.skill_manifest(&canonical) else {
+        return (0, false);
+    };
+    let action = args.get("action").and_then(Value::as_str);
+    let long_tail = claw_core::skill_registry::select_planner_capability_mapping(
+        &manifest.planner_capabilities,
+        action,
+    )
+    .and_then(|mapping| mapping.execution_mode)
+    .is_some_and(|mode| {
+        matches!(
+            mode,
+            claw_core::skill_registry::CapabilityExecutionMode::AsyncPreferred
+                | claw_core::skill_registry::CapabilityExecutionMode::AsyncRequired
+        )
+    });
+    (manifest.timeout_seconds.unwrap_or_default(), long_tail)
 }
 
 fn budget_profile_for_prepared_round(
@@ -712,6 +751,10 @@ fn budget_profile_for_prepared_round(
         facts.observe_count += usize::from(effect.observes);
         facts.mutate_count += usize::from(effect.mutates);
         facts.validate_count += usize::from(effect.validates);
+        let (timeout_seconds, long_tail) = verified_action_budget_requirements(state, action);
+        facts.required_tool_timeout_seconds =
+            facts.required_tool_timeout_seconds.max(timeout_seconds);
+        facts.has_long_tail_action |= long_tail;
     }
     crate::task_budget_contract::profile_for_verified_plan(facts)
 }
@@ -1002,6 +1045,12 @@ async fn run_agent_round(
         }
         loop_state.task_observations.push(observation);
     }
+    super::plan_verifier_observation::record_plan_verifier_rejection_observation(
+        state,
+        loop_state,
+        &prepared_round.plan_result,
+        &prepared_round.verify_result,
+    );
     crate::task_event_transport::publish_loop_state_snapshot(state, task, user_text, loop_state);
     record_agent_loop_decision_envelope_output_vars(loop_state, &prepared_round.plan_result);
     let first_verified_plan_profile = !loop_state
@@ -1390,7 +1439,10 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         policy.max_actions_per_turn,
         policy.repeat_action_limit
     );
-    let mut round = 1usize;
+    // A resumed checkpoint carries settled `turn:<round>` allocations. Reusing
+    // round 1 makes TaskBudgetSlice::allocate reject the restored planner turn
+    // as a duplicate and skips directly to finalization.
+    let mut round = initial_round_for_agent_loop(&loop_state);
     let loop_started_at = Instant::now();
     let worker_task_timeout_seconds = crate::worker::task_budget::task_execution_timeout_seconds(
         state.worker.worker_task_timeout_seconds,

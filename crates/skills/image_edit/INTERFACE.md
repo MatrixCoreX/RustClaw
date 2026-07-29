@@ -67,6 +67,8 @@
 5. **2+ paths** → call an OpenAI-compatible **`/v1/chat/completions`** resolver using `prompts/image_reference_resolver_prompt.md` (or bundled default) with `__MEMORY_TEXT__` from `_memory.context` and `__GOAL__` = `instruction`. Expect JSON `{"selected_index":N}`. Invalid / negative index / LLM failure → **`error_text`** listing candidate indices and asking the user to set `image.path` or choose an index.
 
 ## Error Contract
+
+- A pre-dispatch adapter rejection or provider rejection that returns no job/image is reported with `side_effect_applied=false` and its stable `failure_phase`; transport loss and ambiguous provider outcomes do not claim this proof.
 - Missing `instruction`.
 - Unsupported action.
 - Missing/invalid source image when it cannot be recovered from context.

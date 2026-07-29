@@ -54,6 +54,7 @@
 | preview_edit | `output_path` | no | string(path) | auto | Planned output path; no file or directory is created. |
 
 ## Error Contract (from interface)
+- A pre-dispatch adapter rejection or provider rejection that returns no job/image is reported with `side_effect_applied=false` and its stable `failure_phase`; transport loss and ambiguous provider outcomes do not claim this proof.
 - Missing `instruction`.
 - Unsupported action.
 - Missing/invalid source image when it cannot be recovered from context.

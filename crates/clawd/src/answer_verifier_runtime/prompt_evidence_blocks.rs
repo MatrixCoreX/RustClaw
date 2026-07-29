@@ -247,10 +247,25 @@ pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
                 == Some("canonical_evidence_store")
         })
         .collect::<Vec<_>>();
+    let plan_verifier_rejections = journal
+        .task_observations
+        .iter()
+        .filter(|observation| {
+            observation
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("plan_verifier")
+                && observation
+                    .get("observation_kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("plan_verifier_rejection")
+        })
+        .collect::<Vec<_>>();
     serde_json::to_string_pretty(&json!({
         "step_evidence": steps,
         "capability_result_evidence": capability_results,
         "canonical_evidence_catalogs": canonical_evidence_catalogs,
+        "plan_verifier_rejection_evidence": plan_verifier_rejections,
     }))
     .unwrap_or_else(|_| "{}".to_string())
 }

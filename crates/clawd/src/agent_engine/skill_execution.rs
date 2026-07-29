@@ -800,6 +800,16 @@ async fn compose_policy_block_delivery(
     .await
 }
 
+fn normalize_subagent_stop_signal(stop_signal: Option<String>) -> (Option<String>, bool) {
+    let recoverable_invalid_role =
+        stop_signal.as_deref() == Some(super::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
+    if recoverable_invalid_role {
+        (Some("recoverable_failure_continue_round".to_string()), true)
+    } else {
+        (stop_signal, false)
+    }
+}
+
 pub(super) async fn execute_prepared_skill_action(
     state: &AppState,
     task: &ClaimedTask,
@@ -966,6 +976,10 @@ pub(super) async fn execute_prepared_skill_action(
             if stop_signal.is_some() { "error" } else { "ok" },
         )
         .await;
+        let (stop_signal, recoverable_invalid_role) = normalize_subagent_stop_signal(stop_signal);
+        if recoverable_invalid_role {
+            loop_state.has_recoverable_failure_context = true;
+        }
         return Ok(SkillActionOutcome {
             ended_with_user_visible_output: false,
             stop_signal,
@@ -1212,11 +1226,26 @@ pub(super) async fn execute_prepared_skill_action(
     let mcp_descriptor = state.mcp_tool(normalized_skill);
     let is_mcp_tool = mcp_descriptor.is_some();
     let mcp_started_at = is_mcp_tool.then(Instant::now);
+    let declared_tool_timeout_seconds = mcp_descriptor
+        .as_ref()
+        .map(|descriptor| descriptor.timeout_seconds)
+        .or_else(|| {
+            state
+                .skill_manifest(normalized_skill)
+                .and_then(|manifest| manifest.timeout_seconds)
+        })
+        .unwrap_or_default();
     let tool_timeout = loop_state.task_budget_slice.as_ref().map(|slice| {
-        (
-            slice.tool_call_timeout_seconds(),
-            slice.tool_timeout_class.as_str(),
-        )
+        let administrator_ceiling_seconds = slice
+            .hard_ceilings
+            .non_resumable_tool_runtime_ms
+            .saturating_add(999)
+            / 1_000;
+        let timeout_seconds = slice
+            .tool_call_timeout_seconds()
+            .max(declared_tool_timeout_seconds)
+            .min(administrator_ceiling_seconds.max(1));
+        (timeout_seconds, slice.tool_timeout_class.as_str())
     });
     let tool_cancellation = state.worker.task_cancellation_token(&task.task_id);
     let mut step_execution =
@@ -1441,9 +1470,7 @@ pub(super) async fn execute_prepared_skill_action(
             }
             let err = step_execution.error.clone().unwrap_or_default();
             let mutation_not_dispatched = mutation_guard.as_ref().is_some_and(|lease| {
-                super::mutation_ledger::settle_policy_blocked_mutation_as_not_applied(
-                    state, lease, &err,
-                )
+                super::mutation_ledger::settle_verified_not_applied_mutation(state, lease, &err)
             });
             let failure_outcome = handle_skill_step_failure(
                 state,

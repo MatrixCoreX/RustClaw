@@ -28,12 +28,10 @@ BEHAVIOR_CATEGORIES = {
     "clarify",
     "cleanup",
     "cancel_job",
-    "dry_run",
     "external_network",
     "failure",
     "local_readonly",
     "local_side_effect",
-    "no_external_side_effect",
     "resumable_job",
 }
 
@@ -108,6 +106,17 @@ def row_categories(row: CaseRow, core: set[str]) -> set[str]:
     return categories
 
 
+def row_uses_non_x_dry_run(row: CaseRow) -> bool:
+    if "x" in row.covers:
+        return False
+    metadata_tokens = {
+        token.strip()
+        for token in re.split(r"[;,]", row.metadata)
+        if token.strip()
+    }
+    return "dry_run" in metadata_tokens or "side_effect_mode:dry_run" in metadata_tokens
+
+
 def select_minimal(
     rows: list[CaseRow], core: set[str], optional: set[str]
 ) -> tuple[list[CaseRow], set[str], set[str], int]:
@@ -116,6 +125,7 @@ def select_minimal(
         for row in rows
         if not (row.covers & optional)
         and "optional_skill_deferred" not in row.metadata
+        and not row_uses_non_x_dry_run(row)
     ]
     required = {f"skill:{name}" for name in core}
     required.update(f"behavior:{name}" for name in BEHAVIOR_CATEGORIES)
@@ -195,7 +205,8 @@ def render_output(selected: list[CaseRow], required: set[str], source_sha: str) 
             f"# selected_rows={len(selected)} required_categories={len(required)} missing_categories=0",
             "# Selection: exact minimum-cardinality set cover over registry skills, safety/lifecycle classes, and zh/en.",
             "# Scope: core/fixed built-ins only; on-demand Skill Store packages are excluded.",
-            "# Safety: mutations are confined fixtures/tmp; package/service/media mutations use preview or dry-run.",
+            "# Execution: every selected capability performs a real call; no non-X dry-run is eligible.",
+            "# Safety: local mutations use disposable tmp fixtures and include cleanup or restoration.",
             "# Format: suite|name|tags|prompt|expect=optional substring",
             "",
             *(row.line for row in selected),
@@ -219,6 +230,9 @@ def report_payload(
         "selection_algorithm": "exact_minimum_cardinality_set_cover",
         "minimum_proven": True,
         "excluded_optional_row_count": excluded_rows,
+        "selected_non_x_dry_run_count": sum(
+            1 for row in selected if row_uses_non_x_dry_run(row)
+        ),
         "missing_categories": sorted(required - covered),
         "covered_categories": sorted(required & covered),
         "selected_cases": [row.name for row in selected],
@@ -241,13 +255,13 @@ def build() -> tuple[str, str, dict[str, object]]:
 def self_test() -> None:
     rows = [
         CaseRow(1, "a", "a_zh", "local_readonly", frozenset({"one", "two"})),
-        CaseRow(2, "b", "b_en", "dry_run", frozenset({"two"})),
-        CaseRow(3, "c", "c_en", "dry_run", frozenset({"three"})),
+        CaseRow(2, "b", "b_en", "cleanup", frozenset({"two"})),
+        CaseRow(3, "c", "c_en", "cleanup", frozenset({"three"})),
     ]
     original = set(BEHAVIOR_CATEGORIES)
     try:
         BEHAVIOR_CATEGORIES.clear()
-        BEHAVIOR_CATEGORIES.update({"local_readonly", "dry_run"})
+        BEHAVIOR_CATEGORIES.update({"local_readonly", "cleanup"})
         selected, required, missing, excluded = select_minimal(
             rows, {"one", "two", "three"}, set()
         )

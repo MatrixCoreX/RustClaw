@@ -110,6 +110,39 @@ fn preview_action_forces_dry_run_without_writing_file() {
 }
 
 #[test]
+fn empty_optional_routing_strings_use_configured_defaults() {
+    let root = unique_temp_root("audio-synthesize-empty-routing");
+    let cfg = RootConfig {
+        audio_synthesize: AudioSynthesizeConfig {
+            default_vendor: Some("minimax".to_string()),
+            default_model: Some("speech-2.8-turbo".to_string()),
+            default_voice: Some("male-qn-qingse".to_string()),
+            default_format: Some("mp3".to_string()),
+            ..AudioSynthesizeConfig::default()
+        },
+        ..RootConfig::default()
+    };
+    let (_, extra) = execute(
+        &cfg,
+        &root,
+        json!({
+            "text": "configured defaults",
+            "output_path": "audio/defaults.mp3",
+            "format": "mp3",
+            "dry_run": true,
+            "vendor": "",
+            "model": "",
+            "voice": ""
+        }),
+    )
+    .expect("empty optional strings must not override configured defaults");
+
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "speech-2.8-turbo");
+    assert_eq!(extra["voice"], "male-qn-qingse");
+}
+
+#[test]
 fn poll_dry_run_returns_structured_adapter_result() {
     let root = unique_temp_root("audio-synthesize-poll-dry-run");
     let (text, extra) = execute(

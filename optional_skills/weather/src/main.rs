@@ -79,10 +79,17 @@ struct GeocodeResult {
 #[derive(Debug, Deserialize)]
 struct ForecastResponse {
     current_weather: Option<CurrentWeather>,
+    #[serde(default)]
+    timezone: Option<String>,
+    #[serde(default)]
+    timezone_abbreviation: Option<String>,
+    #[serde(default)]
+    utc_offset_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CurrentWeather {
+    time: String,
     temperature: f64,
     windspeed: f64,
     winddirection: f64,
@@ -93,6 +100,10 @@ struct CurrentWeather {
 #[derive(Debug, Clone)]
 struct CurrentWeatherResult {
     text: String,
+    provider_observed_at: String,
+    provider_timezone: Option<String>,
+    provider_timezone_abbreviation: Option<String>,
+    provider_utc_offset_seconds: Option<i64>,
     temperature: f64,
     weather_code: u32,
     weather_desc: String,
@@ -389,6 +400,10 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
             "temperature": current.temperature,
             "weather_code": current.weather_desc,
             "weather_code_raw": current.weather_code,
+            "provider_observed_at": current.provider_observed_at,
+            "provider_timezone": current.provider_timezone,
+            "provider_timezone_abbreviation": current.provider_timezone_abbreviation,
+            "provider_utc_offset_seconds": current.provider_utc_offset_seconds,
         });
         Ok((current.text, extra))
     }
@@ -594,9 +609,16 @@ fn fetch_current_weather(
         )
     })?;
 
+    let provider_timezone = body.timezone.clone();
+    let provider_timezone_abbreviation = body.timezone_abbreviation.clone();
+    let provider_utc_offset_seconds = body.utc_offset_seconds;
     let cur = body
         .current_weather
         .ok_or_else(|| tr(cat, "weather.err.current_no_data"))?;
+    let provider_observed_at = cur.time.trim();
+    if provider_observed_at.is_empty() {
+        return Err("code=current_weather_observed_at_missing".to_string());
+    }
 
     let desc = wmo_weather_desc(cat, cur.weathercode);
     let day_night_key = if cur.is_day == 1 {
@@ -619,6 +641,10 @@ fn fetch_current_weather(
     );
     Ok(CurrentWeatherResult {
         text,
+        provider_observed_at: provider_observed_at.to_string(),
+        provider_timezone,
+        provider_timezone_abbreviation,
+        provider_utc_offset_seconds,
         temperature: cur.temperature,
         weather_code: cur.weathercode,
         weather_desc: desc,

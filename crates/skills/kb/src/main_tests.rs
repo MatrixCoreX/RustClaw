@@ -479,6 +479,7 @@ fn document_management_actions_are_structured_and_transactional() {
     let deleted =
         do_delete_namespace(&runtime, &json!({"namespace": "docs"})).expect("delete namespace");
     assert_eq!(deleted["deleted"], true);
+    assert_eq!(deleted["cleanup_status"], "cleaned");
     assert_eq!(deleted["removed_documents"], 1);
     assert!(do_list_documents(&runtime, &json!({"namespace": "docs"})).is_err());
     let _ = fs::remove_dir_all(root);

@@ -33,6 +33,20 @@ export interface TaskLifecycleProjection {
   evidence_ref_count?: number;
   state_source?: string;
   terminal_reason?: string;
+  async_job_runtime_deadline_at?: number;
+  async_job_retention_deadline_at?: number;
+  process_observation?: {
+    process_alive?: boolean | null;
+    process_identity_state?: string;
+    started_at?: number;
+    updated_at?: number;
+    runtime_deadline_at?: number | null;
+    retention_deadline_at?: number;
+    stdout_cursor?: number;
+    stdout_total_bytes?: number;
+    stderr_cursor?: number;
+    stderr_total_bytes?: number;
+  };
   parent_task_id?: string;
   child_task_id?: string;
   role?: string;
@@ -124,6 +138,17 @@ function timestampLabel(lang: TaskLifecycleLang, ts: number | undefined): string
   });
 }
 
+function elapsedLabel(lang: TaskLifecycleLang, startedAt: number | undefined, updatedAt: number | undefined): string | null {
+  if (!Number.isFinite(startedAt) || !Number.isFinite(updatedAt)) return null;
+  const seconds = Math.max(0, Number(updatedAt) - Number(startedAt));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  if (hours > 0) return t(lang, `${hours}小时${minutes}分`, `${hours}h ${minutes}m`);
+  if (minutes > 0) return t(lang, `${minutes}分${remainingSeconds}秒`, `${minutes}m ${remainingSeconds}s`);
+  return `${remainingSeconds}s`;
+}
+
 export function buildResumeLifecycleMachineTokens(
   lifecycle: TaskLifecycleProjection | null | undefined,
 ): string[] {
@@ -166,6 +191,10 @@ export function buildTaskLifecycleView(
   const nextCheck = timestampLabel(lang, lifecycle?.next_check_after);
   const nextPoll = timestampLabel(lang, lifecycle?.next_poll_after);
   const heartbeat = timestampLabel(lang, lifecycle?.last_heartbeat_ts);
+  const runtimeDeadline = timestampLabel(lang, lifecycle?.async_job_runtime_deadline_at);
+  const retentionDeadline = timestampLabel(lang, lifecycle?.async_job_retention_deadline_at);
+  const processObservation = lifecycle?.process_observation;
+  const elapsed = elapsedLabel(lang, processObservation?.started_at, processObservation?.updated_at);
   const meta: string[] = [];
   if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
   if (Number.isFinite(lifecycle?.resume_wait_seconds)) {
@@ -179,6 +208,19 @@ export function buildTaskLifecycleView(
     `${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle?.can_cancel)}`,
   );
   if (heartbeat) meta.push(`${t(lang, "最近心跳", "Last heartbeat")}: ${heartbeat}`);
+  if (processObservation?.process_alive === true) {
+    meta.push(t(lang, "后台进程: 正在运行", "Background process: Running"));
+  } else if (processObservation?.process_alive === false) {
+    meta.push(t(lang, "后台进程: 已停止", "Background process: Stopped"));
+  }
+  if (elapsed) meta.push(`${t(lang, "已运行", "Elapsed")}: ${elapsed}`);
+  if (runtimeDeadline) meta.push(`${t(lang, "运行期限", "Runtime deadline")}: ${runtimeDeadline}`);
+  if (retentionDeadline) meta.push(`${t(lang, "状态保留至", "Status retained until")}: ${retentionDeadline}`);
+  if (Number.isFinite(processObservation?.stdout_total_bytes) || Number.isFinite(processObservation?.stderr_total_bytes)) {
+    meta.push(
+      `${t(lang, "输出进度", "Output progress")}: stdout ${Number(processObservation?.stdout_total_bytes ?? 0)} B / stderr ${Number(processObservation?.stderr_total_bytes ?? 0)} B`,
+    );
+  }
   if (lifecycle?.lease_owner) meta.push(`${t(lang, "执行者", "Worker")}: ${lifecycle.lease_owner}`);
   if (Number.isFinite(lifecycle?.claim_attempt)) meta.push(`${t(lang, "尝试次数", "Claim attempts")}: ${Number(lifecycle?.claim_attempt)}`);
   if (nextCheck) meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
@@ -195,7 +237,13 @@ export function buildTaskLifecycleView(
 
   let detail = t(lang, "任务状态来自当前任务记录。", "Status comes from the current task record.");
   if (state === "waiting" || state === "background") {
-    if (lifecycle?.resume_due === true) {
+    if (processObservation?.process_alive === true) {
+      detail = t(
+        lang,
+        "后台任务仍在运行。刷新页面不会中断它，系统会继续检查进度。",
+        "The background task is still running. Refreshing will not interrupt it, and progress checks will continue.",
+      );
+    } else if (lifecycle?.resume_due === true) {
       detail = t(lang, "恢复窗口已到，系统可以继续处理。", "The resume window is due and the system can continue.");
     } else {
       detail = lifecycle?.resume_reason
@@ -295,6 +343,8 @@ export function buildTaskPollingView(
   if (!lifecycle) return null;
   const nextPoll = timestampLabel(lang, lifecycle.next_poll_after);
   const nextCheck = timestampLabel(lang, lifecycle.next_check_after);
+  const runtimeDeadline = timestampLabel(lang, lifecycle.async_job_runtime_deadline_at);
+  const retentionDeadline = timestampLabel(lang, lifecycle.async_job_retention_deadline_at);
   const visible = Boolean(
     lifecycle.can_poll ||
       lifecycle.pending_job_ref ||
@@ -318,6 +368,12 @@ export function buildTaskPollingView(
   if (nextCheck) {
     meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
   }
+  if (runtimeDeadline) {
+    meta.push(`${t(lang, "运行期限", "Runtime deadline")}: ${runtimeDeadline}`);
+  }
+  if (retentionDeadline) {
+    meta.push(`${t(lang, "状态保留至", "Status retained until")}: ${retentionDeadline}`);
+  }
   meta.push(`${t(lang, "可查询", "Pollable")}: ${boolLabel(lang, lifecycle.can_poll)}`);
   meta.push(`${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle.can_cancel)}`);
   if (lifecycle.cancel_ref) {
@@ -326,7 +382,9 @@ export function buildTaskPollingView(
 
   return {
     detail:
-      lifecycle.resume_due === true
+      lifecycle.process_observation?.process_alive === true
+        ? t(lang, "后台任务仍在运行，系统会使用同一个任务编号继续检查。", "The background task is still running and will be checked using the same job ID.")
+        : lifecycle.resume_due === true
         ? t(lang, "轮询窗口已到，可以继续检查后台结果。", "The polling window is due; the background result can be checked.")
         : t(lang, "这个任务可以在后台等待，并通过机器字段继续轮询。", "This task can wait in the background and continue polling through machine fields."),
     meta,

@@ -151,6 +151,61 @@ fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
         payload["task_lifecycle"]["task_budget_slice"]["soft_slice_ms"],
         30_000
     );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["async_completion_policy"]["mode"],
+        "direct_terminal"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["async_completion_policy"]
+            ["continuation_action_count"],
+        0
+    );
+}
+
+#[test]
+fn pending_async_job_checkpoint_preserves_unexecuted_plan_tail() {
+    let mut loop_state = LoopState::new();
+    loop_state.active_verified_actions = vec![
+        crate::AgentAction::CallCapability {
+            capability: "system.run_command".to_string(),
+            args: json!({"command": "sleep 1", "async_start": true}),
+        },
+        crate::AgentAction::CallCapability {
+            capability: "system.health_check".to_string(),
+            args: json!({}),
+        },
+    ];
+    let job = pending_async_job_ref_from_extra(Some(&json!({
+        "pending_async_job": {
+            "job_id": "job-with-tail",
+            "status": "accepted",
+            "poll_after_seconds": 2,
+            "expires_at": 3000,
+            "cancel_ref": "cancel:job-with-tail",
+            "message_key": "clawd.task.async_job_pending"
+        }
+    })))
+    .expect("parse")
+    .expect("job");
+
+    let payload = build_pending_async_job_checkpoint_progress_payload(
+        &test_task(),
+        &loop_state,
+        "run_cmd",
+        1,
+        1,
+        &job,
+        None,
+        1000,
+        test_budget(&loop_state, 1),
+    );
+    let policy = &payload["task_checkpoint"]["boundary_context"]["async_completion_policy"];
+    assert_eq!(policy["mode"], "continue_planning");
+    assert_eq!(policy["continuation_action_count"], 1);
+    assert_eq!(
+        policy["continuation_actions"][0]["capability"],
+        "system.health_check"
+    );
 }
 
 #[test]
@@ -248,7 +303,7 @@ fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
     );
     assert_eq!(
         payload["task_lifecycle"]["async_timeout_policy"]["policy_source"],
-        "async_job_contract"
+        "pending_async_job_contract"
     );
     assert!(
         payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]

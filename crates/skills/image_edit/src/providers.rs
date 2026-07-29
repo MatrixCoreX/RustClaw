@@ -700,14 +700,17 @@ pub(super) fn minimax_reference_edit(
     output_path: &Path,
 ) -> Result<(), String> {
     let ImageSource::Url(image_url) = image else {
-        return Err(
-            "minimax reference edit requires image.url; local path/base64 input is not supported by this adapter"
-                .to_string(),
-        );
+        return Err(not_applied_error(
+            "pre_dispatch",
+            "minimax reference edit requires image.url; local path/base64 input is not supported by this adapter",
+        ));
     };
     let image_url = image_url.trim();
     if image_url.is_empty() {
-        return Err("minimax reference edit requires non-empty image.url".to_string());
+        return Err(not_applied_error(
+            "pre_dispatch",
+            "minimax reference edit requires non-empty image.url",
+        ));
     }
     let mut prompt = format!(
         "Use the reference image as the source. Preserve the main subject and composition, then apply this edit: {instruction}"
@@ -747,9 +750,24 @@ pub(super) fn minimax_reference_edit(
         )
     })?;
     if status >= 300 {
-        return Err(format!(
-            "minimax error status={status}: {}",
-            truncate(&v.to_string(), 400)
+        return Err(not_applied_error(
+            "provider_rejected",
+            format!(
+                "minimax error status={status}: {}",
+                truncate(&v.to_string(), 400)
+            ),
+        ));
+    }
+    if v.pointer("/base_resp/status_code")
+        .and_then(Value::as_i64)
+        .is_some_and(|code| code != 0)
+    {
+        return Err(not_applied_error(
+            "provider_rejected",
+            format!(
+                "minimax rejected image edit: {}",
+                truncate(&v.to_string(), 400)
+            ),
         ));
     }
     if let Some(url) = minimax_response_image_url(&v) {

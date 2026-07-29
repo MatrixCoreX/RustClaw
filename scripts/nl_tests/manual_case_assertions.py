@@ -18,6 +18,7 @@ except ImportError as exc:  # pragma: no cover - environment preflight
 
 _MISSING = object()
 _CALL_ACTION_TYPES = {"call_capability", "call_tool", "call_skill"}
+_PLANNER_INTERNAL_DISCOVERY_CALLS = {"load_capability_groups"}
 
 
 def json_pointer_get(root: Any, pointer: str) -> Any:
@@ -57,7 +58,7 @@ def value_to_compare_text(value: Any) -> str | None:
 
 def boolean_tag(tags: str, name: str) -> bool | None:
     match = re.search(
-        rf"(?:^|[,;])\s*{re.escape(name)}\s*=\s*(true|false)\s*(?=$|[,;])",
+        rf"(?:^|[,;])\s*{re.escape(name)}\s*[:=]\s*(true|false)\s*(?=$|[,;])",
         tags,
         flags=re.IGNORECASE,
     )
@@ -100,11 +101,28 @@ def step_results(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [step for step in steps if isinstance(step, dict)]
 
 
+def task_observations(result: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = task_journal(result).get("trace")
+    if not isinstance(trace, dict):
+        return []
+    observations = trace.get("task_observations")
+    if not isinstance(observations, list):
+        return []
+    return [observation for observation in observations if isinstance(observation, dict)]
+
+
 def actual_call_steps(result: dict[str, Any]) -> list[dict[str, Any]]:
     calls = []
     for step in step_results(result):
         action_type = str(step.get("requested_action_type") or step.get("action_kind") or "")
-        if action_type in _CALL_ACTION_TYPES:
+        subject = str(
+            step.get("requested_capability")
+            or step.get("resolved_capability")
+            or step.get("resolved_tool_or_skill")
+            or step.get("skill")
+            or ""
+        )
+        if action_type in _CALL_ACTION_TYPES and subject not in _PLANNER_INTERNAL_DISCOVERY_CALLS:
             calls.append(step)
     return calls
 
@@ -462,13 +480,27 @@ def structural_assertions(
                 str(step.get("resolved_capability") or ""),
             }
         ]
+        matched_resolutions = []
+        if requires_tool_call is False:
+            matched_resolutions = [
+                observation
+                for observation in task_observations(result)
+                if observation.get("observation_kind") == "capability_resolution"
+                and observation.get("outcome") == "resolved"
+                and required_capability
+                in {
+                    str(observation.get("requested_capability") or ""),
+                    str(observation.get("resolved_capability") or ""),
+                }
+            ]
         details.append(
             {
                 "kind": "tag",
                 "tag": "capability",
                 "expected": required_capability,
                 "matched_call_count": len(matched_steps),
-                "ok": bool(matched_steps),
+                "matched_resolution_count": len(matched_resolutions),
+                "ok": bool(matched_steps or matched_resolutions),
             }
         )
 
@@ -558,13 +590,17 @@ def evaluate_expectations(
     if not has_assertions:
         return "-", []
 
-    all_ok = final_status == "succeeded"
-    if final_status != "succeeded":
+    allow_terminal_failure = has_tag(tags, "allow_terminal_failure")
+    expected_statuses = {"succeeded", "failed"} if allow_terminal_failure else {"succeeded"}
+    all_ok = final_status in expected_statuses
+    if final_status not in expected_statuses:
         details.insert(
             0,
             {
                 "kind": "status",
-                "expected": "succeeded",
+                "expected": "succeeded_or_failed"
+                if allow_terminal_failure
+                else "succeeded",
                 "actual": final_status,
                 "ok": False,
             },

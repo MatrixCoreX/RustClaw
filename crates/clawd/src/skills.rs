@@ -195,9 +195,25 @@ fn structured_error_allows_bounded_replan(structured: &StructuredSkillError) -> 
         return false;
     };
     extra.get("retryable").and_then(Value::as_bool) == Some(true)
-        && extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
-        && extra.get("failure_phase").and_then(Value::as_str) == Some("pre_dispatch")
+        && structured_error_proves_not_applied(structured)
         && extra.get("recovery_action").and_then(Value::as_str) == Some("replan_arguments")
+}
+
+fn structured_error_proves_not_applied(structured: &StructuredSkillError) -> bool {
+    let Some(extra) = structured.extra.as_ref().and_then(Value::as_object) else {
+        return false;
+    };
+    extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
+        && matches!(
+            extra.get("failure_phase").and_then(Value::as_str),
+            Some("pre_dispatch" | "provider_rejected")
+        )
+}
+
+pub(crate) fn structured_skill_error_proves_not_applied(err: &str) -> bool {
+    parse_structured_skill_error(err)
+        .as_ref()
+        .is_some_and(structured_error_proves_not_applied)
 }
 
 pub(crate) fn structured_skill_error_requests_replan(err: &str) -> bool {
@@ -474,7 +490,13 @@ struct SkillExecutionIsolation {
     artifact_refs: Vec<Value>,
 }
 
-fn prepare_builtin_run_cmd_async_start_args(workspace_root: &Path, args: &mut Value) {
+fn prepare_builtin_run_cmd_async_start_args(
+    workspace_root: &Path,
+    default_runtime_timeout_seconds: u64,
+    default_retention_seconds: u64,
+    terminate_grace_seconds: u64,
+    args: &mut Value,
+) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
@@ -496,12 +518,41 @@ fn prepare_builtin_run_cmd_async_start_args(workspace_root: &Path, args: &mut Va
         .and_then(Value::as_u64)
         .unwrap_or(5)
         .clamp(1, 3600);
-    let expires_in_seconds = obj
+    let retention_seconds = obj
         .get("expires_in_seconds")
         .and_then(Value::as_u64)
-        .unwrap_or(3600)
-        .clamp(1, 86_400);
-    let expires_at = (crate::now_ts_u64() as i64).saturating_add(expires_in_seconds as i64);
+        .unwrap_or(default_retention_seconds)
+        .max(1);
+    let action = obj.get("action").and_then(Value::as_str);
+    let disable_timeout = action == Some("exec_without_deadline")
+        || obj
+            .get("disable_timeout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    let runtime_timeout_seconds = match action {
+        // Planner-facing capabilities use distinct actions so a provider cannot
+        // turn an ordinary command into a short-deadline command by filling an
+        // optional field. Direct/legacy calls without an action keep the
+        // existing configurable policy default.
+        Some("exec") => Some(default_runtime_timeout_seconds.max(1)),
+        Some("exec_with_deadline") => obj
+            .get("timeout_seconds")
+            .and_then(Value::as_u64)
+            .map(|seconds| seconds.max(1)),
+        Some("exec_without_deadline") => None,
+        _ if disable_timeout => None,
+        _ => Some(
+            obj.get("timeout_seconds")
+                .and_then(Value::as_u64)
+                .unwrap_or(default_runtime_timeout_seconds)
+                .max(1),
+        ),
+    };
+    let now_ts = crate::now_ts_u64() as i64;
+    let retention_seconds_i64 = retention_seconds.min(i64::MAX as u64) as i64;
+    let retention_deadline_at = now_ts.saturating_add(retention_seconds_i64);
+    let runtime_deadline_at = runtime_timeout_seconds
+        .map(|seconds| now_ts.saturating_add(seconds.min(i64::MAX as u64) as i64));
     obj.insert("_clawd_async_job_id".to_string(), json!(job_id));
     obj.insert(
         "_clawd_async_job_dir".to_string(),
@@ -511,7 +562,28 @@ fn prepare_builtin_run_cmd_async_start_args(workspace_root: &Path, args: &mut Va
         "_clawd_async_poll_after_seconds".to_string(),
         json!(poll_after_seconds),
     );
-    obj.insert("_clawd_async_expires_at".to_string(), json!(expires_at));
+    obj.insert(
+        "_clawd_async_runtime_timeout_seconds".to_string(),
+        json!(runtime_timeout_seconds),
+    );
+    obj.insert(
+        "_clawd_async_runtime_deadline_at".to_string(),
+        json!(runtime_deadline_at),
+    );
+    obj.insert(
+        "_clawd_async_retention_deadline_at".to_string(),
+        json!(retention_deadline_at),
+    );
+    obj.insert(
+        "_clawd_async_terminate_grace_seconds".to_string(),
+        json!(terminate_grace_seconds.max(1)),
+    );
+    // Legacy checkpoint field: for local processes this is now the poll/retention
+    // deadline, never the process runtime deadline.
+    obj.insert(
+        "_clawd_async_expires_at".to_string(),
+        json!(retention_deadline_at),
+    );
 }
 
 fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) -> Option<Value> {
@@ -541,6 +613,14 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 .get("_clawd_async_expires_at")
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
+            let runtime_deadline_at = obj
+                .get("_clawd_async_runtime_deadline_at")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let retention_deadline_at = obj
+                .get("_clawd_async_retention_deadline_at")
+                .cloned()
+                .unwrap_or_else(|| json!(expires_at));
             if job_id.is_empty() || job_dir.is_empty() || expires_at <= 0 {
                 return None;
             }
@@ -555,6 +635,8 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                     "poll_after_seconds": poll_after_seconds,
                     "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
                     "expires_at": expires_at,
+                    "runtime_deadline_at": runtime_deadline_at,
+                    "retention_deadline_at": retention_deadline_at,
                     "cancel_ref": format!("local_process:{}", job_dir),
                     "cancel_token": format!("local_process:{}", job_dir),
                     "result_ref": job_id,
@@ -1597,6 +1679,9 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             if skill_name == "run_cmd" {
                 prepare_builtin_run_cmd_async_start_args(
                     &execution_state.skill_rt.workspace_root,
+                    execution_state.skill_rt.cmd_async_timeout_seconds,
+                    execution_state.skill_rt.cmd_async_retention_seconds,
+                    execution_state.skill_rt.cmd_terminate_grace_seconds,
                     &mut args,
                 );
             }
@@ -1797,3 +1882,7 @@ mod tests;
 #[cfg(test)]
 #[path = "skills_success_extra_tests.rs"]
 mod success_extra_tests;
+
+#[cfg(test)]
+#[path = "skills_async_start_args_tests.rs"]
+mod async_start_args_tests;

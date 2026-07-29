@@ -41,6 +41,9 @@ pub(super) async fn execute_schedule_workflow_for_task(
     }
     let intent =
         intent.ok_or_else(|| schedule_workflow_error("schedule_intent_not_detected", None))?;
+    if intent.needs_clarify {
+        return Err(schedule_replan_error(&intent));
+    }
     Box::pin(crate::schedule_service::try_handle_schedule_request(
         state,
         task,
@@ -69,7 +72,7 @@ pub(super) fn schedule_workflow_prompt(
         .to_string()
 }
 
-fn explicit_schedule_intent_from_args(
+pub(super) fn explicit_schedule_intent_from_args(
     args: &Value,
     action: &str,
     prompt: &str,
@@ -84,7 +87,7 @@ fn explicit_schedule_intent_from_args(
                 )
             });
     }
-    if !schedule_args_contain_structured_intent(args) {
+    if !schedule_args_contain_structured_intent(args) && action != "list" {
         return Ok(None);
     }
     let mut obj = serde_json::Map::new();
@@ -126,6 +129,27 @@ fn explicit_schedule_intent_from_args(
 
 fn schedule_workflow_error(error_kind: &'static str, extra: Option<Value>) -> String {
     builtin_error("schedule", error_kind, error_kind, None, None, extra)
+}
+
+pub(super) fn schedule_replan_error(intent: &crate::ScheduleIntentOutput) -> String {
+    let detail = [intent.clarify_question.trim(), intent.reason.trim()]
+        .into_iter()
+        .find(|value| !value.is_empty())
+        .unwrap_or("schedule input is incomplete");
+    builtin_error(
+        "schedule",
+        "schedule_needs_more_info",
+        detail,
+        None,
+        None,
+        Some(serde_json::json!({
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "recovery_action": "replan_arguments",
+            "required_input": ["time", "content"],
+        })),
+    )
 }
 
 pub(super) fn schedule_args_contain_structured_intent(args: &Value) -> bool {

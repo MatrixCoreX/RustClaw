@@ -1268,7 +1268,7 @@ fn cancel_task_by_id_runs_local_process_cancel_adapter() {
     std::fs::write(dir.path.join("pid"), "not-a-pid\n").expect("write pid");
     let cancel_ref = format!("local_process:{}", dir.path.display());
     let result_json = json!({
-        "task_checkpoint": {
+        "task_journal": { "summary": { "task_checkpoint": {
             "pending_async_job": {
                 "job_id": "local_process:test-cancel",
                 "status": "running",
@@ -1277,20 +1277,15 @@ fn cancel_task_by_id_runs_local_process_cancel_adapter() {
                 "cancel_ref": cancel_ref,
                 "message_key": "clawd.task.async_job_pending"
             }
-        }
+        } } }
     });
     insert_task(&state, &task_id, "running", Some(&result_json), 1234);
 
     let canceled = cancel_task_by_id(&state, &task_id).expect("cancel task");
 
     assert_eq!(canceled, 1);
-    assert!(dir.path.join("cancel_requested_at").exists());
-    assert_eq!(
-        std::fs::read_to_string(dir.path.join("cancel_signal"))
-            .expect("read cancel signal")
-            .trim(),
-        "TERM"
-    );
+    assert!(!dir.path.join("cancel_requested_at").exists());
+    assert!(!dir.path.join("cancel_signal").exists());
     let result = stored_result_json(&state, &task_id);
     assert_eq!(
         result["cancel_adapter_result"]["adapter_kind"],
@@ -1323,10 +1318,11 @@ fn cancel_task_by_id_terminates_local_process_group() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();
     let dir = TempDirGuard::new("task_admin_local_process_group_cancel");
+    let run_script = dir.path.join("run.sh");
+    std::fs::write(&run_script, "#!/usr/bin/env bash\nsleep 60\n").expect("write run script");
     let mut child = Command::new("bash");
     child
-        .arg("-lc")
-        .arg("sleep 60")
+        .arg(&run_script)
         .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1336,7 +1332,7 @@ fn cancel_task_by_id_terminates_local_process_group() {
     std::fs::write(dir.path.join("pid"), pid.to_string()).expect("write pid");
     let cancel_ref = format!("local_process:{}", dir.path.display());
     let result_json = json!({
-        "task_checkpoint": {
+        "task_journal": { "summary": { "task_checkpoint": {
             "pending_async_job": {
                 "job_id": "local_process:test-process-group-cancel",
                 "status": "running",
@@ -1345,7 +1341,7 @@ fn cancel_task_by_id_terminates_local_process_group() {
                 "cancel_ref": cancel_ref,
                 "message_key": "clawd.task.async_job_pending"
             }
-        }
+        } } }
     });
     insert_task(&state, &task_id, "running", Some(&result_json), 1234);
 

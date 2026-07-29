@@ -169,22 +169,36 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args, &runtime) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(stock_error_extra("stock_quote_failed")),
-                    error_text: Some(err),
-                },
-            },
+            Ok(req) => {
+                let requested_symbol = requested_symbol_from_args(&req.args).map(str::to_string);
+                match execute(req.args, &runtime) {
+                    Ok((text, extra)) => Resp {
+                        request_id: req.request_id,
+                        status: "ok".to_string(),
+                        text,
+                        extra: Some(extra),
+                        error_text: None,
+                    },
+                    Err(err) => {
+                        let mut extra = stock_error_extra("stock_quote_failed");
+                        if let (Some(extra), Some(requested_symbol)) =
+                            (extra.as_object_mut(), requested_symbol)
+                        {
+                            extra.insert(
+                                "requested_symbol".to_string(),
+                                Value::String(requested_symbol),
+                            );
+                        }
+                        Resp {
+                            request_id: req.request_id,
+                            status: "error".to_string(),
+                            text: String::new(),
+                            extra: Some(extra),
+                            error_text: Some(err),
+                        }
+                    }
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -197,6 +211,16 @@ fn main() -> anyhow::Result<()> {
         stdout.flush()?;
     }
     Ok(())
+}
+
+fn requested_symbol_from_args(args: &Value) -> Option<&str> {
+    let obj = args.as_object()?;
+    obj.get("symbol")
+        .or_else(|| obj.get("code"))
+        .or_else(|| obj.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), String> {
@@ -487,14 +511,20 @@ fn parse_sina_hq(
     let volume = parts.get(8).unwrap_or(&"");
     let date = parts.get(30).unwrap_or(&"");
     let time = parts.get(31).unwrap_or(&"");
+    let normalized_code = code.to_uppercase();
+    let observed_at =
+        (!date.is_empty() && !time.is_empty()).then(|| format!("{date}T{time}+08:00"));
 
     let mut lines = vec![
         "message_key=stock.msg.quote".to_string(),
         "reason_code=stock_quote_observed".to_string(),
-        format!("code={}", code.to_uppercase()),
+        format!("code={normalized_code}"),
+        format!("normalized_code={normalized_code}"),
         format!("symbol={code}"),
         format!("name={name}"),
         format!("current={current}"),
+        format!("price={current}"),
+        "provider=sina_finance".to_string(),
         format!("open={open}"),
         format!("prev_close={prev_close}"),
         format!("high={high}"),
@@ -503,6 +533,9 @@ fn parse_sina_hq(
         format!("date={date}"),
         format!("time={time}"),
     ];
+    if let Some(observed_at) = observed_at.as_deref() {
+        lines.push(format!("observed_at={observed_at}"));
+    }
     if let Some(correction) = correction {
         lines.push(format!("correction.input={}", correction.input));
         lines.push(format!(
@@ -532,14 +565,20 @@ fn parse_sina_hq(
         })
     });
     let extra = json!({
+        "schema_version": 1,
         "message_key": "stock.msg.quote",
         "reason_code": "stock_quote_observed",
         "action": "quote",
         "source_skill": "stock",
         "status": "ok",
-        "code": code.to_uppercase(),
+        "code": normalized_code,
+        "normalized_code": normalized_code,
         "symbol": code,
         "name": name,
+        "price": current,
+        "provider": "sina_finance",
+        "provider_id": "sina_finance",
+        "observed_at": observed_at,
         "open": open,
         "prev_close": prev_close,
         "current": current,
@@ -551,9 +590,13 @@ fn parse_sina_hq(
         "change_pct": change_pct_value,
         "correction": correction_value,
         "quote": {
-            "code": code.to_uppercase(),
+            "code": normalized_code,
+            "normalized_code": normalized_code,
             "symbol": code,
             "name": name,
+            "price": current,
+            "provider": "sina_finance",
+            "observed_at": observed_at,
             "open": open,
             "prev_close": prev_close,
             "current": current,

@@ -781,6 +781,47 @@ fn subagent_model_child_parser_rejects_unstructured_completion() {
 }
 
 #[test]
+fn subagent_child_loop_wraps_satisfied_custom_result_contract() {
+    let raw =
+        r##"{"first_line_text":"# RustClaw","names_rustclaw":true,"evidence_ref":"README.md"}"##;
+    let parsed = parse_child_loop_result_for_test(
+        raw,
+        "reviewer",
+        &json!(["README.md"]),
+        &json!({
+            "output_format": "machine_json",
+            "require_evidence": true,
+            "required_keys": ["first_line_text", "names_rustclaw", "evidence_ref"]
+        }),
+    );
+
+    assert_eq!(parsed["status"], "completed");
+    assert_eq!(parsed["role"], "reviewer");
+    assert_eq!(parsed["result"]["first_line_text"], "# RustClaw");
+    assert_eq!(parsed["result"]["names_rustclaw"], true);
+    assert_eq!(parsed["evidence_refs"], json!(["README.md"]));
+}
+
+#[test]
+fn subagent_child_loop_rejects_missing_custom_result_key() {
+    let raw = r##"{"first_line_text":"# RustClaw","evidence_ref":"README.md"}"##;
+    let parsed = parse_child_loop_result_for_test(
+        raw,
+        "reviewer",
+        &json!(["README.md"]),
+        &json!({
+            "required_keys": ["first_line_text", "names_rustclaw", "evidence_ref"]
+        }),
+    );
+
+    assert_eq!(parsed["status"], "failed");
+    assert_eq!(
+        parsed["error_code"],
+        "subagent_child_result_contract_invalid"
+    );
+}
+
+#[test]
 fn subagent_new_role_tokens_preserve_readonly_policy() {
     let mut loop_state = LoopState::new();
 

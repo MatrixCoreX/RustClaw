@@ -225,6 +225,8 @@ pub(crate) struct VerifiedPlanBudgetFacts {
     pub(crate) evidence_required: bool,
     pub(crate) delivery_required: bool,
     pub(crate) has_continuation: bool,
+    pub(crate) required_tool_timeout_seconds: u64,
+    pub(crate) has_long_tail_action: bool,
     pub(crate) ops_closed_loop: bool,
 }
 
@@ -234,6 +236,8 @@ pub(crate) fn profile_for_verified_plan(facts: VerifiedPlanBudgetFacts) -> TaskB
     }
     if facts.delivery_required
         || facts.has_continuation
+        || facts.has_long_tail_action
+        || facts.required_tool_timeout_seconds > BudgetTimeoutClass::Standard.call_ceiling_seconds()
         || facts.needs_confirmation
         || facts.mutate_count > 0
         || facts.action_count >= 4
@@ -241,6 +245,7 @@ pub(crate) fn profile_for_verified_plan(facts: VerifiedPlanBudgetFacts) -> TaskB
         return TaskBudgetProfile::MultiStepWorkspace;
     }
     if facts.evidence_required
+        || facts.required_tool_timeout_seconds > BudgetTimeoutClass::Short.call_ceiling_seconds()
         || facts.validate_count > 0
         || facts.observe_count >= 2
         || facts.action_count >= 2

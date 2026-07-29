@@ -43,7 +43,7 @@ FULL_SKILL_SECTION_HEADINGS = (
     "### Action",
 )
 MAX_GENERATED_SKILL_PROMPT_LINES = 320
-MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES = 6000
+MAX_GENERATED_SKILL_PROMPT_AVERAGE_LINES = 128
 MAX_RENDERED_PROMPT_LINES = 900
 MAX_RENDERED_PROMPT_BYTES = 260_000
 MAX_RENDERED_SKILL_PROMPT_LINES = 420
@@ -250,11 +250,13 @@ def check_generated_skill_prompt_budget() -> list[str]:
             "Generated skill prompt exceeds per-skill budget:\n"
             + "\n".join(f"  - {item}" for item in over_limit)
         )
-    if total_lines > MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES:
+    total_budget = len(prompt_files) * MAX_GENERATED_SKILL_PROMPT_AVERAGE_LINES
+    if total_lines > total_budget:
         errors.append(
-            "Generated skill prompts exceed total budget: "
+            "Generated skill prompts exceed adaptive aggregate budget: "
             f"{total_lines} lines across {len(prompt_files)} files; "
-            f"max {MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES}"
+            f"max average {MAX_GENERATED_SKILL_PROMPT_AVERAGE_LINES} lines per skill "
+            f"({total_budget} total)"
         )
     return errors
 

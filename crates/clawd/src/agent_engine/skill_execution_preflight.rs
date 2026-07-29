@@ -122,27 +122,36 @@ fn run_cmd_async_start_policy_error(
     {
         return None;
     }
-    if positive_bounded_i64_arg(classification_args, "poll_after_seconds", 1, 86_400)
-        && positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800)
-    {
+    let poll_invalid = classification_args.get("poll_after_seconds").is_some()
+        && !positive_bounded_i64_arg(classification_args, "poll_after_seconds", 1, 86_400);
+    let retention_invalid = classification_args.get("expires_in_seconds").is_some()
+        && !positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800);
+    if !poll_invalid && !retention_invalid {
         return None;
     }
+    let invalid_fields = [
+        ("poll_after_seconds", poll_invalid),
+        ("expires_in_seconds", retention_invalid),
+    ]
+    .into_iter()
+    .filter_map(|(field, invalid)| invalid.then_some(field))
+    .collect::<Vec<_>>();
     Some(crate::skills::structured_skill_error_from_parts(
         normalized_skill,
         "contract_action_rejected",
-        "async_start_requires_bounded_poll_and_expiry",
+        "async_start_invalid_lifecycle_bound",
         None,
         Some(json!({
-            "reason_code": "async_start_requires_bounded_poll_and_expiry",
+            "reason_code": "async_start_invalid_lifecycle_bound",
             "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
             "action": "run_cmd",
-            "required_fields": ["poll_after_seconds", "expires_in_seconds"],
+            "invalid_fields": invalid_fields,
             "permission_decision": preflight_permission_decision(
                 state,
                 normalized_skill,
                 classification_args,
-                "async_start_requires_bounded_poll_and_expiry",
+                "async_start_invalid_lifecycle_bound",
                 "run_cmd_async_start_preflight",
             ),
         })),

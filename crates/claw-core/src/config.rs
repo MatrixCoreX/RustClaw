@@ -1452,6 +1452,12 @@ pub struct ToolsConfig {
     pub cmd_timeout_seconds: u64,
     #[serde(default = "default_tool_cmd_idle_timeout_seconds")]
     pub cmd_idle_timeout_seconds: u64,
+    #[serde(default = "default_tool_cmd_async_timeout_seconds")]
+    pub cmd_async_timeout_seconds: u64,
+    #[serde(default = "default_tool_cmd_async_retention_seconds")]
+    pub cmd_async_retention_seconds: u64,
+    #[serde(default = "default_tool_cmd_terminate_grace_seconds")]
+    pub cmd_terminate_grace_seconds: u64,
     #[serde(default = "default_tool_cmd_max_output_bytes")]
     pub cmd_max_output_bytes: usize,
     #[serde(default = "default_tool_max_cmd_length")]
@@ -1475,6 +1481,9 @@ impl Default for ToolsConfig {
             deny: Vec::new(),
             cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),
             cmd_idle_timeout_seconds: default_tool_cmd_idle_timeout_seconds(),
+            cmd_async_timeout_seconds: default_tool_cmd_async_timeout_seconds(),
+            cmd_async_retention_seconds: default_tool_cmd_async_retention_seconds(),
+            cmd_terminate_grace_seconds: default_tool_cmd_terminate_grace_seconds(),
             cmd_max_output_bytes: default_tool_cmd_max_output_bytes(),
             max_cmd_length: default_tool_max_cmd_length(),
             allow_path_outside_workspace: false,

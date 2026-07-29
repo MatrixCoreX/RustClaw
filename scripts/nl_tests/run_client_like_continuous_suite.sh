@@ -1435,7 +1435,13 @@ PY
   if [[ "$case_tags_l" == *",expect_terminal_failure,"* ]]; then
     expected_terminal_failure=1
   fi
-  if [[ "$status" != "succeeded" && ! ( "$expected_terminal_failure" -eq 1 && "$status" == "failed" ) ]]; then
+  local allow_terminal_failure=0
+  if [[ "$case_tags_l" == *",allow_terminal_failure,"* ]]; then
+    allow_terminal_failure=1
+  fi
+  if [[ "$status" != "succeeded" \
+    && ! ( "$status" == "failed" \
+      && ( "$expected_terminal_failure" -eq 1 || "$allow_terminal_failure" -eq 1 ) ) ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then

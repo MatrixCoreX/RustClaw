@@ -371,7 +371,7 @@ pub(super) fn skill_input_contract_error(
             "status": "error",
             "error_code": "input_contract_violation",
             "message_key": "clawd.contract.input_contract_violation",
-            "retryable": true,
+            "retryable": false,
             "contract_error": error,
         })),
     ))

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::process::Command;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -312,8 +311,11 @@ fn cancel_task_records_with_reason(
             continue;
         }
         append_child_task_ids_from_result(record.result_json.as_deref(), &mut child_task_ids);
-        let cancel_adapter_result =
-            cancel_adapter_result_from_task_result(record.result_json.as_deref(), now_ts);
+        let cancel_adapter_result = cancel_adapter_result_from_task_result(
+            record.result_json.as_deref(),
+            now_ts,
+            state.skill_rt.cmd_terminate_grace_seconds,
+        );
         let result_json = cancelled_task_result_json(
             record.result_json.as_deref(),
             reason,
@@ -494,13 +496,18 @@ fn cancelled_task_result_json(
 fn cancel_adapter_result_from_task_result(
     raw_result_json: Option<&str>,
     now_ts: i64,
+    terminate_grace_seconds: u64,
 ) -> Option<Value> {
     let result = raw_result_json
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .filter(Value::is_object)?;
     let cancel_ref = task_cancel_ref(&result)?;
     if cancel_ref.starts_with("local_process:") {
-        return Some(cancel_local_process_job(cancel_ref, now_ts));
+        return Some(cancel_local_process_job(
+            cancel_ref,
+            now_ts,
+            terminate_grace_seconds,
+        ));
     }
     if provider_cancel_ref_kind(cancel_ref).is_some() {
         return Some(provider_cancel_adapter_required_result(
@@ -516,6 +523,14 @@ fn task_cancel_ref(result: &Value) -> Option<&str> {
         "/task_checkpoint/pending_async_job/cancel_token",
         "/task_lifecycle/cancel_ref",
         "/task_lifecycle/cancel_token",
+        "/task_journal/summary/task_checkpoint/pending_async_job/cancel_ref",
+        "/task_journal/summary/task_checkpoint/pending_async_job/cancel_token",
+        "/task_journal/summary/task_lifecycle/cancel_ref",
+        "/task_journal/summary/task_lifecycle/cancel_token",
+        "/task_journal/trace/task_checkpoint/pending_async_job/cancel_ref",
+        "/task_journal/trace/task_checkpoint/pending_async_job/cancel_token",
+        "/task_journal/trace/task_lifecycle/cancel_ref",
+        "/task_journal/trace/task_lifecycle/cancel_token",
         "/cancel_ref",
         "/cancel_token",
     ]
@@ -613,7 +628,7 @@ fn provider_cancel_contract(cancel_ref: &str) -> Value {
     })
 }
 
-fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
+fn cancel_local_process_job(cancel_ref: &str, now_ts: i64, terminate_grace_seconds: u64) -> Value {
     let Some(job_dir_raw) = cancel_ref.strip_prefix("local_process:").map(str::trim) else {
         return local_process_cancel_result(
             cancel_ref,
@@ -642,8 +657,6 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
             Some(job_dir),
         );
     }
-    let _ = std::fs::write(job_dir.join("cancel_requested_at"), now_ts.to_string());
-    let _ = std::fs::write(job_dir.join("cancel_signal"), "TERM");
     if job_dir.join("exit_code").exists() {
         return local_process_cancel_result(
             cancel_ref,
@@ -653,11 +666,16 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
             Some(job_dir),
         );
     }
-    let pid = match std::fs::read_to_string(job_dir.join("pid"))
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u32>().ok())
-        .filter(|pid| *pid > 0)
-    {
+    if job_dir.join("cancel_requested_at").exists() {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "already_requested",
+            None,
+            Some(job_dir),
+        );
+    }
+    let pid = match crate::local_process_job::read_pid(job_dir) {
         Some(pid) => pid,
         None => {
             return local_process_cancel_result(
@@ -669,7 +687,37 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
             );
         }
     };
-    let status = terminate_local_process(pid);
+    let identity_state = crate::local_process_job::process_identity_state(job_dir, pid);
+    if identity_state != crate::local_process_job::ProcessIdentityState::AliveVerified {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "failed",
+            Some(match identity_state {
+                crate::local_process_job::ProcessIdentityState::IdentityMismatch => {
+                    "local_process_cancel_identity_mismatch"
+                }
+                crate::local_process_job::ProcessIdentityState::Missing => {
+                    "local_process_cancel_process_missing"
+                }
+                _ => "local_process_cancel_identity_unavailable",
+            }),
+            Some(job_dir),
+        );
+    }
+    let status = crate::local_process_job::terminate_verified_process_group(job_dir, pid, "TERM");
+    if status {
+        let _ = crate::local_process_job::write_atomic(
+            &job_dir.join("terminate_grace_seconds"),
+            &terminate_grace_seconds.max(1).to_string(),
+        );
+        let _ = crate::local_process_job::write_atomic(&job_dir.join("cancel_signal"), "TERM");
+        let _ = crate::local_process_job::write_atomic(
+            &job_dir.join("cancel_requested_at"),
+            &now_ts.to_string(),
+        );
+        crate::local_process_job::schedule_kill_after_grace(job_dir, pid, terminate_grace_seconds);
+    }
     let mut result = local_process_cancel_result(
         cancel_ref,
         now_ts,
@@ -681,6 +729,10 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
         obj.insert("pid".to_string(), json!(pid));
         obj.insert("signal".to_string(), json!("TERM"));
         obj.insert("signal_scope".to_string(), json!("process_group_or_pid"));
+        obj.insert(
+            "terminate_grace_seconds".to_string(),
+            json!(terminate_grace_seconds.max(1)),
+        );
     }
     result
 }
@@ -712,42 +764,6 @@ fn local_process_cancel_result(
         }
     }
     result
-}
-
-#[cfg(unix)]
-fn terminate_local_process(pid: u32) -> bool {
-    if terminate_local_process_group(pid) {
-        return true;
-    }
-    terminate_local_process_pid(pid)
-}
-
-#[cfg(unix)]
-fn terminate_local_process_group(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    Command::new("kill")
-        .arg("-TERM")
-        .arg(format!("-{pid}"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(unix)]
-fn terminate_local_process_pid(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn terminate_local_process(_pid: u32) -> bool {
-    false
 }
 
 fn update_paused_checkpoint_schedule(

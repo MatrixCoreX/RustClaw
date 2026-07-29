@@ -1,0 +1,151 @@
+use super::*;
+
+fn poll_checkpoint() -> TaskCheckpoint {
+    TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "agent-loop:task-1:round-1:step-1:async-job:provider:1".to_string(),
+        boundary_context: json!({
+            "schema_version": 1,
+            "source": "async_job_start_adapter",
+            "agent_loop_resume_state": {
+                "schema_version": 1,
+                "stage": "tool_execution",
+                "last_output": "pending",
+                "history_compact": [],
+                "task_observations": [],
+                "executed_step_results": [{
+                    "step_id": "step-1",
+                    "skill": "video_generate",
+                    "status": "ok",
+                    "output": "pending",
+                    "error": null,
+                    "started_at": 10,
+                    "finished_at": 11
+                }]
+            }
+        }),
+        last_successful_round: Some(1),
+        last_successful_step: Some("step-1".to_string()),
+        pending_action: None,
+        observations: Vec::new(),
+        capability_results: Vec::new(),
+        evidence_refs: vec!["step-1".to_string()],
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: vec!["video_generate:hash".to_string()],
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 1,
+            step: 1,
+            llm_calls: 1,
+            tool_calls: 1,
+            elapsed_ms: 20,
+            llm_elapsed_ms: 10,
+            tool_elapsed_ms: 10,
+        },
+        attempt_ledger: None,
+        pending_async_job: Some(crate::task_lifecycle::AsyncJobRef {
+            job_id: "provider:video:1".to_string(),
+            status: crate::task_lifecycle::AsyncJobStatus::Running,
+            poll_after_seconds: 2,
+            expires_at: 1_000,
+            runtime_deadline_at: None,
+            retention_deadline_at: Some(1_000),
+            cancel_ref: "provider:video:1".to_string(),
+            message_key: "clawd.task.async_job_pending".to_string(),
+        }),
+        repair_signal: None,
+        resume_entrypoint: ResumeEntrypoint::PollAsyncJob,
+    }
+}
+
+#[test]
+fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
+    let result = completed_async_job_continuation_result(
+        "ask",
+        &poll_checkpoint(),
+        &json!({"status": "Success", "file_id": "file-1"}),
+        100,
+    )
+    .expect("continuation result");
+    let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&result)
+        .expect("successor checkpoint");
+
+    assert_eq!(result["task_lifecycle"]["state"], "background");
+    assert_eq!(result["task_lifecycle"]["next_check_after"], 100);
+    assert!(checkpoint.checkpoint_id.ends_with(":completion"));
+    assert_eq!(checkpoint.pending_async_job, None);
+    assert_eq!(
+        checkpoint.resume_entrypoint,
+        ResumeEntrypoint::NextPlannerRound
+    );
+    assert_eq!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["last_output"],
+        json!({"status": "Success", "file_id": "file-1"}).to_string()
+    );
+    assert_eq!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["stage"],
+        "planning"
+    );
+    assert_eq!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["async_completion_continuation"]
+            ["continue_original_request"],
+        true
+    );
+    assert!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["history_compact"]
+            .as_array()
+            .is_some_and(|history| history.iter().any(|entry| entry
+                .as_str()
+                .is_some_and(|entry| entry.contains("continue_original_request=true"))))
+    );
+    assert_eq!(
+        checkpoint.boundary_context["agent_loop_resume_state"]["executed_step_results"][0]
+            ["output"],
+        json!({"status": "Success", "file_id": "file-1"}).to_string()
+    );
+    assert_eq!(checkpoint.observations.len(), 1);
+    assert_eq!(
+        checkpoint.completed_side_effect_refs,
+        ["video_generate:hash"]
+    );
+}
+
+#[test]
+fn only_ask_agent_loop_poll_checkpoints_continue_planning() {
+    let checkpoint = poll_checkpoint();
+    assert!(completed_async_job_continuation_result(
+        "run_skill",
+        &checkpoint,
+        &json!({"status": "ok"}),
+        100
+    )
+    .is_none());
+
+    let mut non_agent = checkpoint.clone();
+    non_agent.checkpoint_id = "skill-job:1".to_string();
+    assert!(completed_async_job_continuation_result(
+        "ask",
+        &non_agent,
+        &json!({"status": "ok"}),
+        100
+    )
+    .is_none());
+}
+
+#[test]
+fn completed_single_action_async_job_projects_terminal_without_provider_round() {
+    let mut checkpoint = poll_checkpoint();
+    checkpoint.boundary_context["async_completion_policy"] = json!({
+        "schema_version": 1,
+        "mode": "direct_terminal",
+        "continuation_action_count": 0,
+        "continuation_actions": [],
+    });
+
+    assert!(completed_async_job_continuation_result(
+        "ask",
+        &checkpoint,
+        &json!({"status": "ok", "output": "done", "exit_code": 0}),
+        100
+    )
+    .is_none());
+}

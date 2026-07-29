@@ -35,7 +35,7 @@
 - 运行时也可在 `context` 中传 `locale` / `language` / `lang`（与 `args` 规则一致，但 `args` 优先）。
 
 ## Success `extra`（`status=ok`）
-- 当前天气：`action`=`query`，`mode`=`current`，`locale`，`location`（优先为 `display_location`，否则为 city，再否则为 provider 地名），`resolved_location`（provider 地名），`latitude`，`longitude`，`temperature`，`weather_code`（本地化描述），`weather_code_raw`（WMO 数字码）。
+- 当前天气：`action`=`query`，`mode`=`current`，`locale`，`location`（优先为 `display_location`，否则为 city，再否则为 provider 地名），`resolved_location`（provider 地名），`latitude`，`longitude`，`temperature`，`weather_code`（本地化描述），`weather_code_raw`（WMO 数字码），以及 provider 原样返回的 `provider_observed_at`、`provider_timezone`、`provider_timezone_abbreviation`、`provider_utc_offset_seconds`。
 - 多日预报：`action`=`query`，`mode`=`daily`，`locale`，`location`，`resolved_location`，`latitude`，`longitude`，`forecast_days_requested`（用户请求天数），`forecast_days_applied`（实际查询天数，≤ 上限），`forecast_days_capped`（是否因上限被钳制）。
 
 ## Error Contract
@@ -52,7 +52,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"w1","status":"ok","text":"…","extra":{"action":"query","mode":"current","locale":"zh-CN","location":"北京","resolved_location":"Beijing, Beijing Municipality, China","temperature":25.2,"weather_code":"多云","weather_code_raw":3},"error_text":null}
+{"request_id":"w1","status":"ok","text":"…","extra":{"action":"query","mode":"current","locale":"zh-CN","location":"北京","resolved_location":"Beijing, Beijing Municipality, China","temperature":25.2,"weather_code":"多云","weather_code_raw":3,"provider_observed_at":"2026-07-29T18:45","provider_timezone":"GMT","provider_timezone_abbreviation":"GMT","provider_utc_offset_seconds":0},"error_text":null}
 ```
 
 ### Example 2：未来多天预报（请求超过上限时 extra 标注）

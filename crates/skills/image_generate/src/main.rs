@@ -21,6 +21,7 @@ use i18n::*;
 use response_projection::{build_dry_run_response, build_success_response};
 
 const SKILL_NAME: &str = "image_generate";
+const NOT_APPLIED_ERROR_PREFIX: &str = "__RC_MEDIA_NOT_APPLIED__:";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -181,13 +182,7 @@ fn main() -> anyhow::Result<()> {
                     extra: Some(extra),
                     error_text: None,
                 },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
-                },
+                Err(err) => execution_error_response(req.request_id, err),
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
@@ -213,6 +208,70 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn execution_error_response(request_id: String, err: String) -> Resp {
+    let classified = decode_not_applied_error(&err);
+    let error_text = classified
+        .as_ref()
+        .map(|(_, message)| message.clone())
+        .unwrap_or(err);
+    let mut extra = error_extra("execution_failed");
+    if let (Some((failure_phase, _)), Some(object)) = (classified, extra.as_object_mut()) {
+        object.insert("failure_phase".to_string(), json!(failure_phase));
+        object.insert("side_effect_applied".to_string(), json!(false));
+    }
+    Resp {
+        request_id,
+        status: "error".to_string(),
+        text: String::new(),
+        extra: Some(extra),
+        error_text: Some(error_text),
+    }
+}
+
+fn not_applied_error(failure_phase: &str, message: impl Into<String>) -> String {
+    format!(
+        "{NOT_APPLIED_ERROR_PREFIX}{}",
+        json!({
+            "failure_phase": failure_phase,
+            "message": message.into(),
+        })
+    )
+}
+
+fn decode_not_applied_error(error: &str) -> Option<(String, String)> {
+    let payload = error.trim().strip_prefix(NOT_APPLIED_ERROR_PREFIX)?;
+    let value: Value = serde_json::from_str(payload).ok()?;
+    let failure_phase = value.get("failure_phase")?.as_str()?.trim();
+    let message = value.get("message")?.as_str()?.trim();
+    if failure_phase.is_empty() || message.is_empty() {
+        return None;
+    }
+    Some((failure_phase.to_string(), message.to_string()))
+}
+
+fn aggregate_provider_errors(provider_errors: Vec<String>) -> String {
+    let all_not_applied = !provider_errors.is_empty()
+        && provider_errors
+            .iter()
+            .all(|error| decode_not_applied_error(error).is_some());
+    let failure_phase = provider_errors
+        .iter()
+        .filter_map(|error| decode_not_applied_error(error).map(|(phase, _)| phase))
+        .find(|phase| phase == "provider_rejected")
+        .unwrap_or_else(|| "pre_dispatch".to_string());
+    let detail = provider_errors
+        .last()
+        .and_then(|error| decode_not_applied_error(error).map(|(_, message)| message))
+        .or_else(|| provider_errors.last().cloned())
+        .unwrap_or_else(|| "unknown error".to_string());
+    let message = format!("all providers failed: {detail}");
+    if all_not_applied {
+        not_applied_error(&failure_phase, message)
+    } else {
+        message
+    }
 }
 
 fn execute(
@@ -375,13 +434,7 @@ fn execute_generate(
             })),
         ));
     }
-    Err(format!(
-        "all providers failed: {}",
-        provider_errors
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "unknown error".to_string())
-    ))
+    Err(aggregate_provider_errors(provider_errors))
 }
 
 fn first_model_candidate<'a>(
@@ -1054,9 +1107,24 @@ fn minimax_generate(
         )
     })?;
     if status >= 300 {
-        return Err(format!(
-            "minimax error status={status}: {}",
-            truncate(&v.to_string(), 400)
+        return Err(not_applied_error(
+            "provider_rejected",
+            format!(
+                "minimax error status={status}: {}",
+                truncate(&v.to_string(), 400)
+            ),
+        ));
+    }
+    if v.pointer("/base_resp/status_code")
+        .and_then(Value::as_i64)
+        .is_some_and(|code| code != 0)
+    {
+        return Err(not_applied_error(
+            "provider_rejected",
+            format!(
+                "minimax rejected image generation: {}",
+                truncate(&v.to_string(), 400)
+            ),
         ));
     }
 

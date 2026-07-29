@@ -97,7 +97,10 @@
 - `args` 不是 object。
 - `action` 不支持。
 - `source_dir` 缺失且无法唯一发现外接盘时不报错，而是返回询问文本和外接盘候选路径。
-- `source_dir` 不存在、不可访问或不是目录时返回可读 `error_text`。
+- `source_dir` 不存在、不可访问或不是目录时返回可读 `error_text`，并在
+  `extra` 返回稳定的 `source_dir_not_found|source_dir_inaccessible|
+  source_dir_not_directory`、`failure_phase="pre_dispatch"`、
+  `side_effect_applied=false` 和原始 `source_dir`，使 mutation ledger 能证明没有写入。
 - 指定目录下没有照片文件时返回可读 `error_text`。
 - 若目录里有照片，但都读不到可识别 EXIF，会明确返回“本次不做操作”错误。
 - 若指定了 `capture_year` / `capture_month` / `capture_date` 但没有匹配照片，会返回明确的“筛选条件无照片”错误；只有单独指定 `capture_month` 时保留兼容的“该月份无照片”错误。

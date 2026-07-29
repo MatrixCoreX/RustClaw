@@ -390,7 +390,7 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
 }
 
 pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<RequestedPlanCapability> {
-    let mut requested = Vec::new();
+    let mut requested = checkpoint_requested_capabilities(&journal.task_observations);
     for round in &journal.rounds {
         if let Some(plan) = round.plan_result.as_ref() {
             let mut round_requested = requested_capabilities_for_plan(plan);
@@ -409,6 +409,103 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
     attach_dispatch_capability_resolutions(&mut requested, &journal.task_observations);
     attach_executed_dispatches(&mut requested, &journal.task_observations);
     requested
+}
+
+fn checkpoint_requested_capabilities(observations: &[Value]) -> Vec<RequestedPlanCapability> {
+    observations
+        .iter()
+        .filter(|value| {
+            value.get("observation_kind").and_then(Value::as_str)
+                == Some("checkpoint_step_provenance")
+        })
+        .filter_map(|value| {
+            let action_type = value.get("requested_action_type")?.as_str()?.trim();
+            let capability = value.get("requested_capability")?.as_str()?.trim();
+            if action_type.is_empty() || capability.is_empty() {
+                return None;
+            }
+            Some(RequestedPlanCapability {
+                action_type: action_type.to_string(),
+                capability: capability.to_string(),
+                resolved_capability: optional_trimmed_string(value, "resolved_capability"),
+                resolved_tool_or_skill: optional_trimmed_string(value, "resolved_tool_or_skill"),
+                action_ref: optional_trimmed_string(value, "requested_action_ref"),
+                args_fingerprint: optional_trimmed_string(value, "args_fingerprint"),
+                round_no: value
+                    .get("round_no")
+                    .and_then(Value::as_u64)
+                    .map(|number| number as usize),
+                step_in_round: value
+                    .get("step_in_round")
+                    .and_then(Value::as_u64)
+                    .map(|number| number as usize),
+                dispatch_executed: true,
+            })
+        })
+        .collect()
+}
+
+fn optional_trimmed_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+}
+
+pub(crate) fn checkpoint_step_provenance_records(
+    rounds: &[TaskJournalRoundTrace],
+    executed_steps: &[crate::executor::StepExecutionResult],
+) -> Vec<Value> {
+    let mut candidates = rounds
+        .iter()
+        .flat_map(|round| {
+            let Some(plan) = round.plan_result.as_ref() else {
+                return Vec::new();
+            };
+            plan.steps
+                .iter()
+                .zip(requested_capabilities_for_plan(plan))
+                .enumerate()
+                .map(|(step_index, (step, mut requested))| {
+                    requested.round_no = Some(round.round_no);
+                    requested.step_in_round = Some(step_index + 1);
+                    (step.step_id.clone(), requested)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    executed_steps
+        .iter()
+        .filter_map(|step| {
+            let candidate_index = candidates
+                .iter()
+                .rposition(|(step_id, _)| step_id == &step.step_id)
+                .or_else(|| {
+                    candidates.iter().rposition(|(_, requested)| {
+                        requested_capability_matches_executed(requested, &step.skill)
+                    })
+                })?;
+            let (_, requested) = candidates.remove(candidate_index);
+            Some(json!({
+                "schema_version": 1,
+                "observation_kind": "checkpoint_step_provenance",
+                "owner_layer": "task_journal",
+                "step_id": step.step_id,
+                "requested_action_type": requested.action_type,
+                "requested_capability": requested.capability,
+                "requested_action_ref": requested.action_ref,
+                "args_fingerprint": requested.args_fingerprint,
+                "resolved_capability": requested.resolved_capability,
+                "resolved_tool_or_skill": step.skill,
+                "round_no": requested.round_no,
+                "step_in_round": requested.step_in_round,
+                "dispatch_executed": true,
+            }))
+        })
+        .collect()
 }
 
 fn attach_dispatch_capability_resolutions(

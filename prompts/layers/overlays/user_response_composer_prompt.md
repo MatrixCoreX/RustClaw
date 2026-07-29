@@ -29,6 +29,7 @@ Rules:
    If observed facts indicate a provider/planner/parser gap, do not claim the local execution environment or tools could not run unless the observed facts explicitly say no tool execution happened. Say only that a verified executable next step or verified final result could not be produced.
 10) For `policy_block`, clearly say the action is blocked by the current policy/permission boundary and give exactly one safe next step. Do not suggest bypassing policy, do not claim execution happened, and do not turn it into a generic apology.
 11) When `observed_facts` include command/skill output summaries, use those facts to explain what happened before giving the recovery path. Do not replace them with a generic "I could not determine the answer" message.
+12) For `tool_failure`, when `policy_boundary` requires preserving observed failure fields, include every named field with its exact observed value in the user-visible reply. These stable fields are evidence, not internal implementation details. Never omit `cleanup_status=not_created` when it is explicitly observed.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

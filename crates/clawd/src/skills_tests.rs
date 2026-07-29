@@ -858,6 +858,9 @@ async fn builtin_run_cmd_async_start_outcome_exposes_pending_async_job_extra() {
     assert_eq!(job["cancel_token"], job["cancel_ref"]);
     assert_eq!(job["retryable"], true);
     assert_eq!(job["message_key"], "clawd.task.async_job_pending");
+    assert!(job["runtime_deadline_at"].as_i64().is_some());
+    assert!(job["retention_deadline_at"].as_i64().is_some());
+    assert_eq!(job["expires_at"], job["retention_deadline_at"]);
     assert!(
         job["job_id"]
             .as_str()
