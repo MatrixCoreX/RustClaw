@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "doc_parse"
@@ -47,3 +47,29 @@ migration_owner = "doc_parse"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["parse_doc", "parse"] }, "path" = { "type" = "string" }, "max_chars" = { "type" = "integer", "minimum" = 100, "maximum" = 2000000 }, "start_char" = { "type" = "integer", "minimum" = 0 }, "continuation" = { "type" = "string" }, "max_bytes" = { "type" = "integer", "minimum" = 1 }, "section" = { "type" = "string" }, "include_metadata" = { "type" = "boolean" }, "mode" = { "type" = "string", "enum" = ["full", "text_only"] } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "doc_parse", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["max_chars", "start_char", "continuation", "max_bytes", "section", "include_metadata", "mode"], "timeout_seconds" = 20, "action" = "parse_doc", "description" = "Extract readable semantic content, sections, and tables for grounded document synthesis; use office.inspect instead for OOXML package structure, integrity, or artifact revision checks." }, { "name" = "document.parse", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["max_chars", "start_char", "continuation", "max_bytes", "section", "include_metadata", "mode"], "timeout_seconds" = 20, "action" = "parse_doc", "description" = "Extract readable semantic content, sections, and tables for grounded document synthesis; use office.inspect instead for OOXML package structure, integrity, or artifact revision checks." }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

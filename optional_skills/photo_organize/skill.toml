@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "photo_organize"
@@ -47,3 +47,29 @@ migration_owner = "photo_organize"
 config_files = ["configs/photo_organize.toml"]
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["prepare", "preview", "plan", "dry_run", "organize"] }, "source_dir" = { "type" = "string" }, "output_dir" = { "type" = "string" }, "mode" = { "type" = "string" }, "organize_mode" = { "type" = "string" }, "group_by" = { "type" = "array", "items" = { "type" = "string", "enum" = ["brand", "model", "lens", "focal_length", "year", "year_month", "date"] }, "uniqueItems" = true }, "capture_year" = { "anyOf" = [{ "type" = "string" }, { "type" = "integer" }] }, "capture_month" = { "anyOf" = [{ "type" = "string" }, { "type" = "integer" }] }, "capture_date" = { "type" = "string" }, "selected_brands" = { "type" = "array", "items" = { "type" = "string" } }, "selected_models" = { "type" = "array", "items" = { "type" = "string" } }, "selected_lenses" = { "type" = "array", "items" = { "type" = "string" } }, "include_subdirs" = { "type" = "boolean" }, "preview_limit" = { "type" = "integer", "minimum" = 1, "maximum" = 100 } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = [{ "kind" = "file", "reference" = "configs/photo_organize.toml", "required" = false }]
+capabilities = [{ "name" = "photo.preview_organization", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["source_dir", "output_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], "timeout_seconds" = 180, "action" = "preview" }, { "name" = "photo.prepare_source_candidates", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 180, "action" = "prepare" }, { "name" = "photo.apply_organization", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["source_dir"], "optional" = ["output_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], "timeout_seconds" = 180, "action" = "organize" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

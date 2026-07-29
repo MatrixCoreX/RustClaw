@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "package_manager"
@@ -47,3 +47,29 @@ migration_owner = "package_manager"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, "package" = { "type" = "string" }, "packages" = { "type" = "array", "items" = { "type" = "string" } }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "items" = { "type" = "string" } }, "manager" = { "type" = "string", "enum" = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, "path" = { "type" = "string" }, "root" = { "type" = "string" }, "project_path" = { "type" = "string" }, "workspace" = { "type" = "string" }, "dry_run" = { "type" = "boolean" }, "use_sudo" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "package.detect_manager", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["manager", "path", "root", "project_path", "workspace"], "timeout_seconds" = 30, "action" = "detect" }, { "name" = "package.install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "install" }, { "name" = "package.smart_install_preview", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install_preview" }, { "name" = "package.smart_install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install" }, { "name" = "package.uninstall", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "uninstall" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = true
+package_install = true
+privilege_escalation = true
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

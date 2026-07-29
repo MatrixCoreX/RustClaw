@@ -53,7 +53,7 @@ fn run(args: Vec<String>) -> Result<Value, SkillSdkError> {
         "help" | "--help" | "-h" => Ok(json!({
             "ok": true,
             "commands": [
-                "init <rust|python|node|go|prebuilt> <skill_name> <destination>",
+                "init <rust|python|node|go|prebuilt|generic_process|http_json> <skill_name> <destination>",
                 "validate <skill.toml>",
                 "build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
                 "protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
@@ -103,13 +103,18 @@ fn init_command(args: &[String]) -> Result<Value, SkillSdkError> {
 fn validate_command(args: &[String]) -> Result<Value, SkillSdkError> {
     let path = required_arg(args, 1, "manifest_path")?;
     let manifest = PackageManifest::load(Path::new(path))?;
+    let capability_request = manifest.effective_capability_request()?;
     Ok(json!({
         "ok": true,
         "command": "validate",
         "skill_name": manifest.package.name,
         "version": manifest.package.version,
+        "manifest_schema_version": manifest.schema_version,
         "adapter": manifest.build.adapter.as_token(),
         "manifest_digest": manifest.digest()?,
+        "semantic_contract_digest": manifest.capability_request_digest()?,
+        "requested_capabilities": capability_request.capabilities.len(),
+        "requested_permissions": capability_request.permissions,
     }))
 }
 

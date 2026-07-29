@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "kb"
@@ -47,3 +47,29 @@ migration_owner = "kb"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["action"], "properties" = { "action" = { "type" = "string", "enum" = ["ingest", "search", "list_namespaces", "list_documents", "remove_documents", "delete_namespace", "reindex", "resume_ingest", "ingest_job_status", "cancel_ingest", "stats"] }, "namespace" = { "type" = "string" }, "paths" = { "type" = "array", "items" = { "type" = "string" } }, "path" = { "type" = "string" }, "job_id" = { "type" = "string" }, "query" = { "type" = "string" }, "top_k" = { "type" = "integer" }, "chunk_size" = { "type" = "integer", "minimum" = 200, "maximum" = 8000 }, "chunk_overlap" = { "type" = "integer", "minimum" = 0, "maximum" = 400 }, "overwrite" = { "type" = "boolean" }, "file_types" = { "type" = "array", "items" = { "type" = "string" } }, "max_file_size" = { "type" = "integer", "minimum" = 1 }, "max_files_per_run" = { "type" = "integer", "minimum" = 1, "maximum" = 1000000 }, "max_bytes_per_run" = { "type" = "integer", "minimum" = 1, "maximum" = 1099511627776 }, "max_chunks_per_run" = { "type" = "integer", "minimum" = 1, "maximum" = 10000000 }, "max_depth" = { "type" = "integer", "minimum" = 1, "maximum" = 256 }, "max_run_seconds" = { "type" = "integer", "minimum" = 1, "maximum" = 300 } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "kb.ingest", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["namespace", "paths|path"], "optional" = ["chunk_size", "chunk_overlap", "overwrite", "file_types", "max_file_size", "max_files_per_run", "max_bytes_per_run", "max_chunks_per_run", "max_depth", "max_run_seconds"], "timeout_seconds" = 30, "action" = "ingest" }, { "name" = "kb.search", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["namespace", "query"], "optional" = ["top_k"], "timeout_seconds" = 30, "action" = "search" }, { "name" = "kb.list_namespaces", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 30, "action" = "list_namespaces" }, { "name" = "kb.list_documents", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["namespace"], "optional" = [], "timeout_seconds" = 30, "action" = "list_documents" }, { "name" = "kb.remove_documents", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["namespace", "paths|path"], "optional" = [], "timeout_seconds" = 30, "action" = "remove_documents" }, { "name" = "kb.delete_namespace", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["namespace"], "optional" = [], "timeout_seconds" = 30, "action" = "delete_namespace" }, { "name" = "kb.reindex", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["namespace"], "optional" = ["max_file_size", "max_files_per_run", "max_bytes_per_run", "max_chunks_per_run", "max_depth", "max_run_seconds"], "timeout_seconds" = 30, "action" = "reindex" }, { "name" = "kb.resume_ingest", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["job_id"], "optional" = [], "timeout_seconds" = 30, "action" = "resume_ingest" }, { "name" = "kb.ingest_job_status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["job_id"], "optional" = [], "timeout_seconds" = 30, "action" = "ingest_job_status" }, { "name" = "kb.cancel_ingest", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["job_id"], "optional" = [], "timeout_seconds" = 30, "action" = "cancel_ingest" }, { "name" = "kb.stats", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["namespace"], "timeout_seconds" = 30, "action" = "stats" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = true
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

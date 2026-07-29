@@ -25,6 +25,9 @@ SCAN_ROOTS = (
     Path("crates/skills/extension_manager/src"),
 )
 MIGRATION_PATH_TOKENS = ("legacy", "historical", "compat")
+CONTRACT_AUTHORITY_PATHS = {
+    "crates/skill-sdk/src/admission.rs",
+}
 
 SURFACE_PATTERNS = {
     "registration_write_or_reload": re.compile(
@@ -146,7 +149,11 @@ def scan(root: Path) -> tuple[dict[str, Any], list[str]]:
                 if surface_pattern.search(code):
                     surfaces.append(
                         {
-                            "surface": surface,
+                            "surface": (
+                                "contract_authority"
+                                if relative.as_posix() in CONTRACT_AUTHORITY_PATHS
+                                else surface
+                            ),
                             "path": relative.as_posix(),
                             "line": line_number,
                         }
@@ -170,7 +177,9 @@ def snapshot(inventory: dict[str, Any]) -> dict[str, Any]:
         if row["category"] != "test_fixture"
     )
     surface_counts = Counter(
-        f"{row['surface']}|{row['path']}" for row in inventory["coupling_surfaces"]
+        f"{row['surface']}|{row['path']}"
+        for row in inventory["coupling_surfaces"]
+        if row["surface"] != "contract_authority"
     )
     return {
         "schema_version": 1,

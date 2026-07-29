@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "health_check"
@@ -47,3 +47,29 @@ migration_owner = "health_check"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["check"] }, "service" = { "type" = "string" }, "target" = { "type" = "string" }, "log_dir" = { "type" = "string" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "health_check", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["log_dir"], "timeout_seconds" = 30, "action" = "check", "description" = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields." }, { "name" = "system.health_check", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["log_dir"], "timeout_seconds" = 30, "action" = "check", "description" = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields." }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

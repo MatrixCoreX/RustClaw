@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "db_basic"
@@ -47,3 +47,29 @@ migration_owner = "db_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["schema_version", "sqlite_schema_version", "user_version", "sqlite_user_version", "list_tables", "table_names", "sqlite_table_names", "sqlite_tables", "sqlite_query", "sqlite_execute"] }, "db_path" = { "type" = "string" }, "path" = { "type" = "string" }, "query" = { "type" = "string" }, "sql" = { "type" = "string" }, "confirm" = { "type" = "boolean" }, "table" = { "type" = "string" }, "limit" = { "type" = "integer" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "database.query", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["sql"], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "sqlite_query" }, { "name" = "db.query", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["sql"], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "sqlite_query" }, { "name" = "db.sqlite_query", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["sql"], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "sqlite_query" }, { "name" = "sqlite.query", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["sql"], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "sqlite_query" }, { "name" = "sqlite.sqlite_query", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["sql"], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "sqlite_query" }, { "name" = "database.list_tables", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "database.list", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "db.list_tables", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "db.list", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "sqlite.list_tables", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "sqlite.list", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path", "limit"], "timeout_seconds" = 30, "action" = "list_tables" }, { "name" = "database.schema_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "schema_version" }, { "name" = "db.schema_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "schema_version" }, { "name" = "sqlite.schema_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "schema_version" }, { "name" = "database.user_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "user_version" }, { "name" = "db.user_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "user_version" }, { "name" = "sqlite.user_version", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "user_version" }, { "name" = "database.execute", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["sql", "confirm"], "optional" = ["db_path", "path"], "timeout_seconds" = 30, "action" = "sqlite_execute" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

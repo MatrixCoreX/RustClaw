@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "system_basic"
@@ -47,3 +47,29 @@ migration_owner = "system_basic"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "read_artifact_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, "kind" = { "type" = "string", "enum" = ["current_user", "host_name", "kernel_release", "current_time", "current_working_directory"] }, "query" = { "type" = "string" }, "name" = { "type" = "string" }, "pattern" = { "type" = "string" }, "field" = { "type" = "string" }, "path" = { "type" = "string" }, "paths" = { "type" = "array", "items" = { "type" = "string" } }, "field_path" = { "type" = "string" }, "field_paths" = { "type" = "array", "items" = { "type" = "string" } }, "field_selector" = { "type" = "string" }, "files_only" = { "type" = "boolean" }, "dirs_only" = { "type" = "boolean" }, "include_hidden" = { "type" = "boolean" }, "respect_ignore" = { "type" = "boolean" }, "names_only" = { "type" = "boolean" }, "recursive" = { "type" = "boolean" }, "count_files" = { "type" = "boolean" }, "count_dirs" = { "type" = "boolean" }, "kind_filter" = { "type" = "string", "enum" = ["any", "file", "dir"] }, "target_kind" = { "type" = "string", "enum" = ["any", "file", "dir"] }, "match_mode" = { "type" = "string", "enum" = ["contains", "exact", "starts_with", "ends_with", "fuzzy"] }, "sort_by" = { "type" = "string", "enum" = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, "ext_filter" = { "anyOf" = [{ "type" = "string" }, { "type" = "array", "items" = { "type" = "string" } }] }, "max_entries" = { "type" = "integer", "minimum" = 1, "maximum" = 1000 }, "max_results" = { "type" = "integer", "minimum" = 1, "maximum" = 200 }, "cursor" = { "type" = "integer", "minimum" = 0 }, "start_byte" = { "type" = "integer", "minimum" = 0 }, "max_bytes" = { "type" = "integer", "minimum" = 256, "maximum" = 1048576 }, "max_depth" = { "type" = "integer", "minimum" = 1 }, "max_children_per_dir" = { "type" = "integer", "minimum" = 1 }, "max_nodes" = { "type" = "integer", "minimum" = 1 }, "mode" = { "type" = "string", "enum" = ["head", "tail", "range", "last_non_empty"] }, "n" = { "type" = "integer", "minimum" = 1 }, "start_line" = { "type" = "integer", "minimum" = 1 }, "end_line" = { "type" = "integer", "minimum" = 1 }, "max_line_chars" = { "type" = "integer", "minimum" = 80, "maximum" = 4000 }, "raw" = { "type" = "boolean" }, "format" = { "type" = "string" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "system.info", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 45, "action" = "info" }, { "name" = "system.runtime_status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["kind"], "optional" = [], "timeout_seconds" = 45, "action" = "runtime_status" }, { "name" = "system.inventory_dir", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "files_only", "dirs_only", "include_hidden", "names_only", "sort_by", "ext_filter", "max_entries", "cursor"], "timeout_seconds" = 45, "action" = "inventory_dir" }, { "name" = "system.count_inventory", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "recursive", "include_hidden", "kind_filter", "count_files", "count_dirs", "files_only", "dirs_only", "ext_filter"], "timeout_seconds" = 45, "action" = "count_inventory" }, { "name" = "system.tree_summary", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "include_hidden", "max_depth", "max_children_per_dir", "max_nodes"], "timeout_seconds" = 45, "action" = "tree_summary" }, { "name" = "system.read_range", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["mode", "n", "start_line", "end_line", "max_bytes", "max_line_chars", "raw", "field_selector"], "timeout_seconds" = 45, "action" = "read_range" }, { "name" = "system_basic.read_text_range", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path"], "optional" = ["mode", "n", "start_line", "end_line", "max_bytes", "max_line_chars", "raw", "field_selector"], "timeout_seconds" = 45, "action" = "read_range" }, { "name" = "system_basic.extract_field", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path", "field_path"], "optional" = ["format"], "timeout_seconds" = 45, "action" = "extract_field" }, { "name" = "system_basic.extract_fields", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["path", "field_paths"], "optional" = ["format"], "timeout_seconds" = 45, "action" = "extract_fields" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

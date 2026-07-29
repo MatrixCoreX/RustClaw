@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "video_generate"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "workspace_write"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "video_generate"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_generate", "generate", "poll", "cancel"] }, "prompt" = { "type" = "string" }, "task_id" = { "type" = "string" }, "job_id" = { "type" = "string" }, "cancel_token" = { "type" = "string" }, "cancel_ref" = { "type" = "string" }, "first_frame_image" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "first_frame" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "image" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "last_frame_image" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "last_frame" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "duration" = { "type" = "integer", "minimum" = 1 }, "resolution" = { "type" = "string" }, "output_path" = { "type" = "string" }, "wait_for_completion" = { "type" = "boolean" }, "download" = { "type" = "boolean" }, "dry_run" = { "type" = "boolean" }, "vendor" = { "type" = "string" }, "model" = { "type" = "string" }, "max_poll_seconds" = { "type" = "integer", "minimum" = 1 }, "poll_after_seconds" = { "type" = "integer", "minimum" = 0 }, "poll_after_ms" = { "type" = "integer", "minimum" = 0 }, "expires_at" = { "type" = "integer", "minimum" = 0 }, "mock_status" = { "type" = "string" }, "mock_file_id" = { "type" = "string" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "video.preview_generate", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["prompt"], "optional" = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "vendor", "model", "max_poll_seconds"], "timeout_seconds" = 900, "action" = "preview_generate" }, { "name" = "video.generate", "effect" = "external", "execution_mode" = "async_required", "required" = ["prompt"], "optional" = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "wait_for_completion", "download", "dry_run", "vendor", "model", "max_poll_seconds"], "timeout_seconds" = 900, "action" = "generate" }, { "name" = "video.poll", "effect" = "external", "execution_mode" = "async_required", "required" = ["task_id"], "optional" = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "download", "output_path", "dry_run", "mock_status", "mock_file_id"], "timeout_seconds" = 900, "action" = "poll" }, { "name" = "video.cancel", "effect" = "mutate", "execution_mode" = "async_required", "required" = ["task_id"], "optional" = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], "timeout_seconds" = 900, "action" = "cancel" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = true
+filesystem_write = true
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["file"]
+output_fields = ["extra.artifacts"]
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

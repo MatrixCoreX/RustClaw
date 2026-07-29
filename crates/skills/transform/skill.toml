@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "transform"
@@ -47,3 +47,29 @@ migration_owner = "transform"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["transform_data"] }, "input" = {  }, "data" = {  }, "records" = { "type" = "array" }, "csv" = { "type" = "string" }, "csv_text" = { "type" = "string" }, "operation" = { "type" = "string" }, "fields" = { "type" = "array", "items" = { "type" = "string" } }, "ops" = { "type" = "array", "items" = { "type" = "object" } }, "output_format" = { "type" = "string", "enum" = ["json", "md_table", "csv"] }, "result_shape" = { "type" = "string", "enum" = ["array", "single_object", "object", "scalar", "value", "single_value"] }, "strict" = { "type" = "boolean" }, "null_policy" = { "type" = "string", "enum" = ["keep", "drop", "zero"] } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "transform", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["data|records|csv_text|csv|input"], "optional" = ["ops", "output_format", "result_shape", "strict", "null_policy"], "timeout_seconds" = 20, "action" = "transform_data" }, { "name" = "data.transform", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["data|records|csv_text|csv|input"], "optional" = ["ops", "output_format", "result_shape", "strict", "null_policy"], "timeout_seconds" = 20, "action" = "transform_data" }, { "name" = "data.transform_records", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["data|records|csv_text|csv|input"], "optional" = ["ops", "output_format", "result_shape", "strict", "null_policy"], "timeout_seconds" = 20, "action" = "transform_data" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

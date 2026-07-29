@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "install_module"
@@ -47,3 +47,29 @@ migration_owner = "install_module"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_install", "install"] }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "minItems" = 1, "maxItems" = 64, "items" = { "type" = "string", "minLength" = 1, "maxLength" = 256 } }, "ecosystem" = { "type" = "string", "enum" = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, "version" = { "type" = "string", "maxLength" = 128 }, "scope" = { "type" = "string", "enum" = ["project", "tool_cache"] }, "project_path" = { "type" = "string" }, "dry_run" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "module.preview_install", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["module|modules"], "optional" = ["ecosystem", "version", "scope", "project_path"], "timeout_seconds" = 30, "action" = "preview_install" }, { "name" = "module.install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["module|modules"], "optional" = ["ecosystem", "version", "scope", "project_path"], "timeout_seconds" = 30, "action" = "install" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = true
+package_install = true
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

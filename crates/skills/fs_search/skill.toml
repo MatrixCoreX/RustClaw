@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "fs_search"
@@ -47,3 +47,29 @@ migration_owner = "fs_search"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object" }
+output_schema = { "type" = "object" }
+config_entry_points = []
+capabilities = [{ "name" = "fs_search.run", "effect" = "external", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 30 }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

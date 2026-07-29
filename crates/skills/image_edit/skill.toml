@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "image_edit"
@@ -35,7 +35,7 @@ smoke_args = {}
 [security]
 capability_policy_source = "registry"
 sandbox = "workspace_write"
-runtime_network = true
+runtime_network = false
 inherit_credentials = false
 
 [storage]
@@ -47,3 +47,29 @@ migration_owner = "image_edit"
 config_files = []
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["instruction"], "properties" = { "action" = { "type" = "string", "enum" = ["edit", "preview_edit", "outpaint", "restyle", "add_remove"] }, "instruction" = { "type" = "string" }, "image" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" }, "base64" = { "type" = "string" } } }] }, "images" = { "type" = "array", "items" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" }, "base64" = { "type" = "string" } } }] } }, "mask" = { "anyOf" = [{ "type" = "string" }, { "type" = "object" }] }, "size" = { "type" = "string" }, "quality" = { "type" = "string" }, "n" = { "type" = "integer" }, "output_path" = { "type" = "string" }, "response_language" = { "type" = "string" }, "language" = { "type" = "string" }, "vendor" = { "type" = "string" }, "model" = { "type" = "string" }, "timeout_seconds" = { "type" = "integer" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "image.preview_edit", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["instruction"], "optional" = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model"], "timeout_seconds" = 180, "action" = "preview_edit" }, { "name" = "image.edit", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["instruction"], "optional" = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], "timeout_seconds" = 180, "action" = "edit" }, { "name" = "image.outpaint", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["instruction"], "optional" = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], "timeout_seconds" = 180, "action" = "outpaint" }, { "name" = "image.restyle", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["instruction"], "optional" = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], "timeout_seconds" = 180, "action" = "restyle" }]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = false
+filesystem_write = true
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["image"]
+output_fields = ["extra.artifacts"]
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

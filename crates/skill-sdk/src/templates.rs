@@ -14,6 +14,8 @@ pub enum ImplementationLanguage {
     Node,
     Go,
     Prebuilt,
+    GenericProcess,
+    HttpJson,
 }
 
 impl ImplementationLanguage {
@@ -24,6 +26,8 @@ impl ImplementationLanguage {
             "node" | "javascript" | "typescript" | "js" | "ts" => Ok(Self::Node),
             "go" | "golang" => Ok(Self::Go),
             "prebuilt" | "native" => Ok(Self::Prebuilt),
+            "generic_process" | "generic-process" | "process" => Ok(Self::GenericProcess),
+            "http_json" | "http-json" | "http" => Ok(Self::HttpJson),
             other => Err(SkillSdkError::new(
                 "implementation_language_unsupported",
                 format!("language={other}"),
@@ -38,6 +42,8 @@ impl ImplementationLanguage {
             Self::Node => "node",
             Self::Go => "go",
             Self::Prebuilt => "prebuilt",
+            Self::GenericProcess => "generic_process",
+            Self::HttpJson => "http_json",
         }
     }
 }
@@ -206,12 +212,36 @@ fn language_files(language: ImplementationLanguage) -> Vec<(&'static str, &'stat
                 include_str!("../templates/prebuilt/artifacts/README.md"),
             ),
         ],
+        ImplementationLanguage::GenericProcess => vec![
+            (
+                "skill.toml",
+                include_str!("../templates/generic_process/skill.toml"),
+            ),
+            (
+                "runtime/README.md",
+                include_str!("../templates/generic_process/runtime/README.md"),
+            ),
+            (
+                "tests/README.md",
+                include_str!("../templates/generic_process/tests/README.md"),
+            ),
+        ],
+        ImplementationLanguage::HttpJson => vec![
+            (
+                "skill.toml",
+                include_str!("../templates/http_json/skill.toml"),
+            ),
+            (
+                "tests/README.md",
+                include_str!("../templates/http_json/tests/README.md"),
+            ),
+        ],
     }
 }
 
 const README_TEMPLATE: &str = "# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\n";
 
-const INTERFACE_TEMPLATE: &str = "# __SKILL_NAME__ Interface\n\n## Capability Summary\n\n__SUMMARY__\n\n## Actions\n\n__ACTIONS__\n## Error Contract\n\nErrors return `status=error`, readable `error_text`, and stable `extra.error_code` / `extra.message_key`.\n\n## Config Entry Points\n\nNo configuration is required by the starter template.\n";
+const INTERFACE_TEMPLATE: &str = "# __SKILL_NAME__ Interface\n\n## Capability Summary\n\n__SUMMARY__\n\nThis document teaches usage only. It is not a permission, risk, or host-policy grant; the machine manifest request and host admission receipt are authoritative.\n\n## Actions\n\n__ACTIONS__\n## Error Contract\n\nErrors return `status=error`, readable `error_text`, and stable `extra.error_code` / `extra.message_key`.\n\n## Config Entry Points\n\nNo configuration is required by the starter template.\n";
 
 #[cfg(test)]
 #[path = "templates_tests.rs"]

@@ -4,10 +4,16 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::capability_request::{
+    ArtifactContractRequest, CapabilityActionRequest, CapabilityRequestSet, ConfigEntryPointKind,
+    ConfigEntryPointRequest, EvidenceContractRequest, RequestedEffect, RequestedExecutionMode,
+    RuntimePermissionRequest, CAPABILITY_REQUEST_SCHEMA_VERSION,
+};
 use crate::platform::{normalize_arch, normalize_os, HostPlatform};
 use crate::{SkillSdkError, SkillSdkResult};
 
-pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const LEGACY_SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const RUSTCLAW_JSONL_PROTOCOL: &str = "rustclaw-jsonl-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +102,8 @@ pub struct PackageManifest {
     pub storage: StorageSpec,
     #[serde(default)]
     pub lifecycle: LifecycleSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_request: Option<CapabilityRequestSet>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +285,41 @@ impl PackageManifest {
         Ok(hex::encode(Sha256::digest(bytes)))
     }
 
+    pub fn capability_request_digest(&self) -> SkillSdkResult<String> {
+        let request = self.effective_capability_request()?;
+        Ok(hex::encode(Sha256::digest(serde_json::to_vec(&request)?)))
+    }
+
+    pub fn effective_capability_request(&self) -> SkillSdkResult<CapabilityRequestSet> {
+        match self.schema_version {
+            SKILL_MANIFEST_SCHEMA_VERSION => self.capability_request.clone().ok_or_else(|| {
+                SkillSdkError::new(
+                    "capability_request_missing",
+                    "schema version 2 requires capability_request",
+                )
+            }),
+            LEGACY_SKILL_MANIFEST_SCHEMA_VERSION => Ok(self.legacy_capability_request()),
+            _ => Err(SkillSdkError::new(
+                "manifest_schema_unsupported",
+                format!("schema_version={}", self.schema_version),
+            )),
+        }
+    }
+
+    pub fn requested_runtime_network(&self) -> SkillSdkResult<bool> {
+        Ok(self.effective_capability_request()?.permissions.network)
+    }
+
+    pub fn into_current(mut self) -> SkillSdkResult<Self> {
+        if self.schema_version == LEGACY_SKILL_MANIFEST_SCHEMA_VERSION {
+            self.capability_request = Some(self.legacy_capability_request());
+            self.schema_version = SKILL_MANIFEST_SCHEMA_VERSION;
+            self.security.runtime_network = false;
+        }
+        self.validate()?;
+        Ok(self)
+    }
+
     pub fn validate_for_platform(&self, platform: &HostPlatform) -> SkillSdkResult<()> {
         self.validate()?;
         if !platform.matches(&self.package.supported_os, &self.package.supported_arch) {
@@ -293,11 +336,40 @@ impl PackageManifest {
     }
 
     pub fn validate(&self) -> SkillSdkResult<()> {
-        if self.schema_version != SKILL_MANIFEST_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version,
+            LEGACY_SKILL_MANIFEST_SCHEMA_VERSION | SKILL_MANIFEST_SCHEMA_VERSION
+        ) {
             return Err(SkillSdkError::new(
                 "manifest_schema_unsupported",
                 format!("schema_version={}", self.schema_version),
             ));
+        }
+        match self.schema_version {
+            LEGACY_SKILL_MANIFEST_SCHEMA_VERSION if self.capability_request.is_some() => {
+                return Err(SkillSdkError::new(
+                    "capability_request_unexpected",
+                    "schema version 1 is read-only compatibility and cannot declare capability_request",
+                ));
+            }
+            SKILL_MANIFEST_SCHEMA_VERSION => {
+                self.capability_request
+                    .as_ref()
+                    .ok_or_else(|| {
+                        SkillSdkError::new(
+                            "capability_request_missing",
+                            "schema version 2 requires capability_request",
+                        )
+                    })?
+                    .validate()?;
+                if self.security.runtime_network {
+                    return Err(SkillSdkError::new(
+                        "manifest_grant_field_forbidden",
+                        "schema version 2 must request network under capability_request.permissions; security.runtime_network is a legacy grant-shaped field",
+                    ));
+                }
+            }
+            _ => {}
         }
         validate_safe_name(&self.package.name, "package.name")?;
         validate_safe_name(&self.registry.name, "registry.name")?;
@@ -374,7 +446,7 @@ impl PackageManifest {
         if self.build.lifecycle_scripts {
             return Err(SkillSdkError::new(
                 "manifest_lifecycle_scripts_forbidden",
-                "dependency lifecycle scripts are not supported by schema version 1",
+                "dependency lifecycle scripts are not supported",
             ));
         }
         if self.registry.capability_policy_source != "registry"
@@ -566,7 +638,7 @@ impl PackageManifest {
                     || !endpoint.username().is_empty()
                     || endpoint.password().is_some()
                     || self.build.network != BuildNetworkPolicy::ApprovalRequired
-                    || !self.security.runtime_network
+                    || !self.requested_runtime_network()?
                 {
                     return Err(SkillSdkError::new(
                         "manifest_http_endpoint_invalid",
@@ -576,6 +648,56 @@ impl PackageManifest {
             }
         }
         Ok(())
+    }
+
+    fn legacy_capability_request(&self) -> CapabilityRequestSet {
+        let filesystem_write = matches!(
+            self.security.sandbox,
+            SandboxProfile::WorkspaceWrite | SandboxProfile::Networked
+        );
+        CapabilityRequestSet {
+            schema_version: CAPABILITY_REQUEST_SCHEMA_VERSION,
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: serde_json::json!({"type": "object"}),
+            permissions: RuntimePermissionRequest {
+                network: self.security.runtime_network
+                    || matches!(self.security.sandbox, SandboxProfile::Networked),
+                filesystem_write,
+                ..RuntimePermissionRequest::default()
+            },
+            artifact_contract: ArtifactContractRequest {
+                kinds: Vec::new(),
+                output_fields: Vec::new(),
+            },
+            evidence_contract: EvidenceContractRequest {
+                required: false,
+                selectors: Vec::new(),
+            },
+            config_entry_points: self
+                .lifecycle
+                .config_files
+                .iter()
+                .map(|reference| ConfigEntryPointRequest {
+                    kind: ConfigEntryPointKind::File,
+                    reference: reference.clone(),
+                    required: false,
+                })
+                .collect(),
+            capabilities: vec![CapabilityActionRequest {
+                name: format!("{}.run", self.package.name),
+                action: None,
+                description: Some(
+                    "Conservative capability request migrated from a schema v1 manifest"
+                        .to_string(),
+                ),
+                effect: RequestedEffect::External,
+                execution_mode: RequestedExecutionMode::SyncShort,
+                required: Vec::new(),
+                optional: Vec::new(),
+                input_roles: BTreeMap::new(),
+                timeout_seconds: Some(self.run.timeout_seconds),
+            }],
+        }
     }
 }
 

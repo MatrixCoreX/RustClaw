@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.dev/schemas/skill-manifest-v2.schema.json",
+  "title": "RustClaw skill.toml v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "package", "registry", "build", "run", "security", "capability_request"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "description", "protocol", "supported_os", "supported_arch", "license"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "version": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "protocol": { "const": "rustclaw-jsonl-v1" },
+        "supported_os": { "type": "array", "minItems": 1, "items": { "enum": ["linux", "macos", "windows", "any"] } },
+        "supported_arch": { "type": "array", "minItems": 1, "items": { "enum": ["x86_64", "aarch64", "armv7", "any"] } },
+        "license": { "type": "string", "minLength": 1 },
+        "source": { "type": "string" },
+        "attribution": { "type": "string" }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "capability_policy_source": { "const": "registry" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "$ref": "#/$defs/adapter" },
+        "source_root": { "$ref": "#/$defs/relativePath" },
+        "package": { "$ref": "#/$defs/name" },
+        "binary": { "$ref": "#/$defs/name" },
+        "lockfile": { "$ref": "#/$defs/relativePath" },
+        "network": { "enum": ["deny", "approval_required"] },
+        "lifecycle_scripts": { "const": false },
+        "artifacts": { "type": "array", "items": { "type": "object" } },
+        "options": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launcher", "entrypoint"],
+      "properties": {
+        "launcher": { "enum": ["native", "python", "node", "java", "dotnet", "process", "http_json"] },
+        "entrypoint": { "$ref": "#/$defs/relativePath" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "working_directory": { "$ref": "#/$defs/relativePath" },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "environment_allowlist": { "type": "array", "items": { "$ref": "#/$defs/environmentName" } },
+        "smoke_args": { "type": "object" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_policy_source"],
+      "properties": {
+        "capability_policy_source": { "const": "registry" },
+        "sandbox": { "enum": ["required", "read_only", "workspace_write", "networked"] },
+        "runtime_network": { "const": false },
+        "inherit_credentials": { "const": false }
+      }
+    },
+    "storage": { "$ref": "#/$defs/storage" },
+    "lifecycle": { "$ref": "#/$defs/lifecycle" },
+    "capability_request": { "$ref": "#/$defs/capabilityRequest" }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$" },
+    "capabilityName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$" },
+    "relativePath": { "type": "string", "minLength": 1, "not": { "pattern": "(^/|(^|/)\\.\\.(/|$)|\\u0000)" } },
+    "environmentName": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+    "adapter": { "enum": ["cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"] },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schema_version", "migration_owner"],
+      "properties": {
+        "kind": { "type": "string" },
+        "schema_version": { "type": "integer", "minimum": 1 },
+        "migration_owner": { "type": "string" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config_files": { "type": "array", "items": { "$ref": "#/$defs/relativePath" } },
+        "preserve_data_on_uninstall": { "type": "boolean" },
+        "update_strategy": { "const": "atomic_replace" }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "llm_gateway": { "type": "boolean" },
+        "network": { "type": "boolean" },
+        "filesystem_read": { "type": "boolean" },
+        "filesystem_write": { "type": "boolean" },
+        "subprocess": { "type": "boolean" },
+        "package_install": { "type": "boolean" },
+        "privilege_escalation": { "type": "boolean" },
+        "external_publish": { "type": "boolean" },
+        "credential_refs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/name" } }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "effect", "execution_mode"],
+      "properties": {
+        "name": { "$ref": "#/$defs/capabilityName" },
+        "action": { "$ref": "#/$defs/name" },
+        "description": { "type": "string", "minLength": 1 },
+        "effect": { "enum": ["observe", "mutate", "validate", "external"] },
+        "execution_mode": { "enum": ["sync_short", "async_preferred", "async_required"] },
+        "required": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "optional": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "input_roles": { "type": "object", "additionalProperties": { "enum": ["input_file", "input_directory", "output_file", "output_directory", "workspace_root", "credential_reference", "continuation"] } },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "capabilityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "input_schema", "output_schema", "permissions", "artifact_contract", "evidence_contract", "capabilities"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "input_schema": { "type": "object" },
+        "output_schema": { "type": "object" },
+        "permissions": { "$ref": "#/$defs/permissions" },
+        "artifact_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kinds": { "type": "array", "uniqueItems": true, "items": { "enum": ["file", "directory", "image", "audio", "video", "structured_data"] } },
+            "output_fields": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/capabilityName" } }
+          }
+        },
+        "evidence_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": { "type": "boolean" },
+            "selectors": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/capabilityName" } }
+          }
+        },
+        "config_entry_points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "reference"],
+            "properties": {
+              "kind": { "enum": ["file", "environment", "credential", "private_storage", "api", "login_state", "dependency"] },
+              "reference": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" }
+            }
+          }
+        },
+        "capabilities": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/capability" } }
+      }
+    }
+  }
+}

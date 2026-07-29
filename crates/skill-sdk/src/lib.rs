@@ -2,7 +2,9 @@
 //! RustClaw skills.
 
 pub mod adapter;
+pub mod admission;
 pub mod bounded_result;
+pub mod capability_request;
 pub mod error;
 pub mod installer;
 pub mod manifest;
@@ -19,8 +21,18 @@ pub mod sandbox;
 mod secret_scan;
 pub mod templates;
 
+pub use admission::{
+    AdmissionReceipt, AdmissionState, ApprovalSource, GrantedCapability, HostPolicyGrant,
+    HostRiskLevel, ADMISSION_RECEIPT_SCHEMA_VERSION, HOST_POLICY_GRANT_SCHEMA_VERSION,
+};
 pub use bounded_result::{
     ArtifactDescriptor, ArtifactSpill, BoundedResult, ContinuationDescriptor, FieldTruncation,
+};
+pub use capability_request::{
+    ArtifactContractRequest, ArtifactKindRequest, CapabilityActionRequest, CapabilityRequestSet,
+    ConfigEntryPointKind, ConfigEntryPointRequest, EvidenceContractRequest, InputSemanticRole,
+    RequestedEffect, RequestedExecutionMode, RuntimePermissionRequest,
+    CAPABILITY_REQUEST_SCHEMA_VERSION,
 };
 pub use error::{SkillSdkError, SkillSdkResult};
 pub use installer::{
@@ -29,7 +41,7 @@ pub use installer::{
 };
 pub use manifest::{
     ArchiveFormat, BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest, SandboxProfile,
-    RUSTCLAW_JSONL_PROTOCOL, SKILL_MANIFEST_SCHEMA_VERSION,
+    LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, RUSTCLAW_JSONL_PROTOCOL, SKILL_MANIFEST_SCHEMA_VERSION,
 };
 pub use operation::{
     OperationAction, OperationFailure, OperationStage, OperationStageRecord, OperationStatus,
@@ -43,7 +55,8 @@ pub use protocol::{
 };
 pub use receipt::{
     digest_file, ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,
-    ProtocolSmokeReceipt, INSTALL_RECEIPT_SCHEMA_VERSION,
+    ProtocolSmokeReceipt, CURRENT_INSTALL_POINTER_SCHEMA_VERSION, INSTALL_RECEIPT_SCHEMA_VERSION,
+    LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 pub use runtime::{SkillLaunchSpec, SkillRuntimeResolver, SKILL_LAUNCH_SCHEMA_VERSION};
 pub use safe_archive::{
@@ -60,6 +73,14 @@ pub use templates::{scaffold_skill, ImplementationLanguage, ScaffoldOutcome, Sca
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "capability_request_tests.rs"]
+mod capability_request_tests;
+
+#[cfg(test)]
+#[path = "admission_tests.rs"]
+mod admission_tests;
 
 #[cfg(test)]
 #[path = "reference_conformance_tests.rs"]

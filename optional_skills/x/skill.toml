@@ -1,5 +1,5 @@
 # AUTO-GENERATED: sync_skill_manifests.py
-schema_version = 1
+schema_version = 2
 
 [package]
 name = "x"
@@ -47,3 +47,29 @@ migration_owner = "x"
 config_files = ["configs/x.toml"]
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "required" = ["text"], "properties" = { "action" = { "type" = "string", "enum" = ["post", "draft", "preview", "publish"] }, "text" = { "type" = "string" }, "dry_run" = { "type" = "boolean" }, "send" = { "type" = "boolean" }, "confirm_send" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = [{ "kind" = "file", "reference" = "configs/x.toml", "required" = false }]
+capabilities = [{ "name" = "x.draft_preview", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["text"], "optional" = ["dry_run", "send"], "timeout_seconds" = 30, "action" = "preview" }, { "name" = "x.publish", "effect" = "external", "execution_mode" = "async_preferred", "required" = ["text", "send"], "optional" = ["dry_run"], "timeout_seconds" = 30, "action" = "publish" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

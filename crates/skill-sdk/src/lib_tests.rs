@@ -14,7 +14,7 @@ use crate::receipt::{
 };
 use crate::runtime::SkillRuntimeResolver;
 
-fn manifest_source() -> &'static str {
+pub(crate) fn manifest_source() -> &'static str {
     r#"
 schema_version = 1
 
@@ -66,6 +66,10 @@ update_strategy = "atomic_replace"
 #[test]
 fn manifest_is_strict_versioned_and_deterministic() {
     let manifest = PackageManifest::from_toml_str(manifest_source()).expect("valid manifest");
+    assert_eq!(
+        manifest.schema_version,
+        crate::manifest::LEGACY_SKILL_MANIFEST_SCHEMA_VERSION
+    );
     assert_eq!(manifest.build.adapter, BuildAdapter::Cargo);
     assert_eq!(manifest.digest().expect("digest").len(), 64);
     assert_eq!(
@@ -74,6 +78,33 @@ fn manifest_is_strict_versioned_and_deterministic() {
             .expect("reparse")
             .digest()
             .expect("second digest")
+    );
+
+    let current = manifest.into_current().expect("migrate v1 manifest");
+    assert_eq!(
+        current.schema_version,
+        crate::manifest::SKILL_MANIFEST_SCHEMA_VERSION
+    );
+    assert!(current.capability_request.is_some());
+    assert!(!current.security.runtime_network);
+    let encoded = current.to_toml_string().expect("encode v2 manifest");
+    let reparsed = PackageManifest::from_toml_str(&encoded).expect("parse v2 manifest");
+    assert_eq!(
+        current.capability_request_digest().expect("v2 digest"),
+        reparsed
+            .capability_request_digest()
+            .expect("reparsed digest")
+    );
+
+    let self_grant = encoded.replace(
+        "[capability_request]\n",
+        "[capability_request]\nrisk_level = \"low\"\n",
+    );
+    assert_eq!(
+        PackageManifest::from_toml_str(&self_grant)
+            .expect_err("package cannot self-grant risk")
+            .code,
+        "manifest_parse_failed"
     );
 }
 
@@ -231,7 +262,10 @@ fn http_manifest_requires_https_network_approval_and_runtime_permission() {
 fn receipt_activation_and_resolution_verify_every_digest() {
     let temp = tempdir().expect("tempdir");
     let store = InstallReceiptStore::new(temp.path().join("packages"));
-    let manifest = PackageManifest::from_toml_str(manifest_source()).expect("manifest");
+    let manifest = PackageManifest::from_toml_str(manifest_source())
+        .expect("manifest")
+        .into_current()
+        .expect("current manifest");
     let manifest_digest = manifest.digest().expect("manifest digest");
     let install_dir = store
         .version_dir(
@@ -255,6 +289,11 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         skill_name: manifest.package.name.clone(),
         version: manifest.package.version.clone(),
         manifest_digest,
+        semantic_contract_digest: Some(
+            manifest
+                .capability_request_digest()
+                .expect("semantic digest"),
+        ),
         source_digest: "1".repeat(64),
         lockfile_digests: BTreeMap::new(),
         adapter: BuildAdapter::Cargo,
@@ -340,6 +379,11 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
             skill_name: manifest.package.name.clone(),
             version: manifest.package.version.clone(),
             manifest_digest,
+            semantic_contract_digest: Some(
+                manifest
+                    .capability_request_digest()
+                    .expect("semantic digest"),
+            ),
             source_digest: hex::encode(sha2::Sha256::digest(bytes)),
             lockfile_digests: BTreeMap::new(),
             adapter: BuildAdapter::Cargo,
@@ -380,11 +424,16 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
         binary
     };
 
-    let first = PackageManifest::from_toml_str(manifest_source()).expect("first manifest");
+    let first = PackageManifest::from_toml_str(manifest_source())
+        .expect("first manifest")
+        .into_current()
+        .expect("current first manifest");
     let second = PackageManifest::from_toml_str(
         &manifest_source().replace("version = \"0.1.0\"", "version = \"0.2.0\""),
     )
-    .expect("second manifest");
+    .expect("second manifest")
+    .into_current()
+    .expect("current second manifest");
     let first_binary = install_version(&first, b"first-version");
     let _second_binary = install_version(&second, b"second-version");
     let current_before = store

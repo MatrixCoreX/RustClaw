@@ -168,7 +168,7 @@ impl SkillInstaller {
                 manifest_path.display().to_string(),
             )
         })?;
-        let manifest = PackageManifest::load(&manifest_path)?;
+        let manifest = PackageManifest::load(&manifest_path)?.into_current()?;
         crate::secret_scan::scan_package_source(manifest_dir)?;
         let platform = match request.target.as_deref() {
             Some(target) => HostPlatform::from_target(target)?,
@@ -216,6 +216,7 @@ impl SkillInstaller {
             skill_name: manifest.package.name.clone(),
             version: manifest.package.version.clone(),
             manifest_digest: manifest_digest.clone(),
+            semantic_contract_digest: Some(manifest.capability_request_digest()?),
             source_digest: source_digest.clone(),
             lockfile_digests: lockfile_digests(&manifest, &workspace_root)?,
             adapter: manifest.build.adapter,
@@ -224,7 +225,7 @@ impl SkillInstaller {
             artifacts: prepared.artifacts,
             launch: prepared.launch,
             sandbox_profile: manifest.security.sandbox,
-            runtime_network: manifest.security.runtime_network,
+            runtime_network: manifest.requested_runtime_network()?,
             protocol_smoke: smoke,
             installed_at_unix: now_unix()?,
         };
@@ -281,7 +282,7 @@ impl SkillInstaller {
                 manifest_path.display().to_string(),
             )
         })?;
-        let manifest = PackageManifest::load(&manifest_path)?;
+        let manifest = PackageManifest::load(&manifest_path)?.into_current()?;
         if manifest.build.adapter != BuildAdapter::Cargo {
             return Err(SkillSdkError::new(
                 "adopt_adapter_unsupported",
@@ -364,6 +365,7 @@ impl SkillInstaller {
             skill_name: manifest.package.name.clone(),
             version: manifest.package.version.clone(),
             manifest_digest: manifest_digest.clone(),
+            semantic_contract_digest: Some(manifest.capability_request_digest()?),
             source_digest: source_digest.clone(),
             lockfile_digests: lockfile_digests(&manifest, &workspace_root)?,
             adapter: manifest.build.adapter,
@@ -372,7 +374,7 @@ impl SkillInstaller {
             artifacts: prepared.artifacts,
             launch: prepared.launch,
             sandbox_profile: manifest.security.sandbox,
-            runtime_network: manifest.security.runtime_network,
+            runtime_network: manifest.requested_runtime_network()?,
             protocol_smoke: smoke,
             installed_at_unix: now_unix()?,
         };
@@ -425,7 +427,7 @@ impl SkillInstaller {
             )
             .phase("preflight"));
         }
-        let manifest = PackageManifest::load(&manifest_path)?;
+        let mut manifest = PackageManifest::load(&manifest_path)?;
         if manifest.build.adapter != BuildAdapter::Cargo {
             return Err(SkillSdkError::new(
                 "precompiled_adapter_unsupported",
@@ -470,6 +472,9 @@ impl SkillInstaller {
         let receipt: InstallReceipt =
             serde_json::from_slice(&fs::read(source_install.join("install-receipt.json"))?)?;
         receipt.validate()?;
+        if receipt.schema_version == INSTALL_RECEIPT_SCHEMA_VERSION {
+            manifest = manifest.into_current()?;
+        }
         if receipt.digest()? != pointer.receipt_digest {
             return Err(SkillSdkError::new(
                 "precompiled_receipt_digest_mismatch",

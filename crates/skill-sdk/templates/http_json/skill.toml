@@ -1,0 +1,71 @@
+schema_version = 2
+
+[package]
+name = "__SKILL_NAME__"
+version = "0.1.0"
+description = "__SUMMARY__"
+protocol = "rustclaw-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "__SKILL_NAME__"
+capability_policy_source = "registry"
+
+[build]
+adapter = "http_json"
+source_root = "__SOURCE_ROOT__"
+network = "approval_required"
+lifecycle_scripts = false
+options = { endpoint = "https://api.example.invalid/v1/skill" }
+
+[run]
+launcher = "http_json"
+entrypoint = "runtime/http-json-adapter"
+working_directory = "."
+timeout_seconds = 30
+environment_allowlist = []
+smoke_args = { action = "__FIRST_ACTION__" }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "networked"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "__SKILL_NAME__"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { type = "object" }
+output_schema = { type = "object" }
+config_entry_points = [{ kind = "api", reference = "host_managed_http_endpoint", required = true }]
+capabilities = [{ name = "__SKILL_NAME__.run", action = "__FIRST_ACTION__", effect = "external", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 30 }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = false
+filesystem_write = false
+subprocess = false
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["structured_data"]
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []
