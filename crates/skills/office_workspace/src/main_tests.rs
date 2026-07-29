@@ -50,3 +50,33 @@ fn skill_protocol_exposes_a_bounded_model_observation() {
     );
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn preview_protocol_omits_absent_optional_contract_fields() {
+    let output_path = temp_path("docx");
+    std::fs::remove_file(&output_path).ok();
+    let response = process_line(
+        &json!({
+            "request_id": "office-preview-1",
+            "args": {
+                "action": "word.preview_create",
+                "output_path": output_path,
+                "operations": [
+                    {"op": "add_heading", "level": 1, "text": "Preview"},
+                    {"op": "add_paragraph", "text": "No write"}
+                ]
+            }
+        })
+        .to_string(),
+    );
+
+    assert_eq!(response.status, "ok");
+    assert_eq!(response.extra["preview"], true);
+    assert_eq!(response.extra["writes_performed"], false);
+    let text: Value = serde_json::from_str(&response.text).expect("compact JSON response");
+    assert_eq!(text["preview"], true);
+    assert_eq!(text["writes_performed"], false);
+    assert!(text.get("cursor").is_none());
+    assert!(text.get("source").is_none());
+    assert!(!output_path.exists());
+}

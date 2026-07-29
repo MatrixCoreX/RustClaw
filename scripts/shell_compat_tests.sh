@@ -46,6 +46,19 @@ TEST_ROOT="$(mktemp -d)"
 trap 'find "$TEST_ROOT" -type f -delete 2>/dev/null || true; rmdir "$TEST_ROOT/.cargo" "$TEST_ROOT" 2>/dev/null || true' EXIT
 mkdir -p "$TEST_ROOT/.cargo"
 
+PATH_HEAD="$TEST_ROOT/rustup-bin"
+PATH_TAIL="$TEST_ROOT/homebrew-bin"
+mkdir -p "$PATH_HEAD" "$PATH_TAIL"
+SAVED_PATH="$PATH"
+PATH="$PATH_HEAD"
+append_existing_command_path "$PATH_TAIL"
+[[ "$PATH" == "$PATH_HEAD:$PATH_TAIL" ]]
+append_existing_command_path "$PATH_TAIL"
+[[ "$PATH" == "$PATH_HEAD:$PATH_TAIL" ]]
+PATH="$SAVED_PATH"
+export PATH
+rmdir "$PATH_HEAD" "$PATH_TAIL"
+
 unset RUSTC_WRAPPER CARGO_INCREMENTAL CI
 HOME="$TEST_ROOT"
 CARGO_HOME="$TEST_ROOT/.cargo"

@@ -125,16 +125,60 @@ def step_has_structured_dry_run(step: dict[str, Any]) -> bool:
     items = observed.get("items")
     if not isinstance(items, list):
         return False
+    preview_true = False
+    writes_false = False
+    no_output_write_verified = False
     for item in items:
         if not isinstance(item, dict):
             continue
         field = str(item.get("field") or "")
+        excerpt = item.get("excerpt")
+        normalized_excerpt = str(excerpt).lower()
+        if (field == "preview" or field.endswith(".preview")) and (
+            excerpt is True or normalized_excerpt == "true"
+        ):
+            preview_true = True
+        if (field == "writes_performed" or field.endswith(".writes_performed")) and (
+            excerpt is False or normalized_excerpt in {"false", "0"}
+        ):
+            writes_false = True
+        if field.endswith(".validation.checks") and isinstance(item.get("sample_values"), list):
+            no_output_write_verified = "no_output_written" in item["sample_values"]
         if field != "dry_run" and not field.endswith(".dry_run"):
             continue
-        excerpt = item.get("excerpt")
-        if excerpt is True or str(excerpt).lower() == "true":
+        if excerpt is True or normalized_excerpt == "true":
             return True
-    return False
+    return preview_true and (writes_false or no_output_write_verified)
+
+
+def step_has_structured_mutation(step: dict[str, Any]) -> bool:
+    if step.get("structured_workspace_mutation") is not None or step.get("mutation_id") is not None:
+        return True
+    action_ref = str(
+        step.get("requested_action_ref")
+        or step.get("requested_capability")
+        or step.get("resolved_capability")
+        or ""
+    )
+    if action_ref in {
+        "filesystem.write_file",
+        "filesystem.append_text",
+        "filesystem.make_dir",
+        "filesystem.remove_path",
+        "workspace.apply_patch",
+        "workspace.apply_child_patch",
+        "workspace.revert_checkpoint",
+    }:
+        return True
+    observed = step.get("observed_evidence")
+    extractor = observed.get("extractor") if isinstance(observed, dict) else None
+    source_action_ref = str(extractor.get("source_action_ref") or "") if isinstance(extractor, dict) else ""
+    return source_action_ref in {
+        "fs_basic.write_text",
+        "fs_basic.make_dir",
+        "fs_basic.remove_path",
+        "workspace.apply_patch",
+    }
 
 
 def completed_side_effect_count(result: dict[str, Any]) -> int:
@@ -431,25 +475,24 @@ def structural_assertions(
     requires_dry_run_evidence = has_tag(tags, "dry_run") and requires_tool_call is True
     if requires_dry_run_evidence:
         dry_run_calls = [step for step in calls if step_has_structured_dry_run(step)]
+        mutation_calls = [
+            step for step in successful_calls if step_has_structured_mutation(step)
+        ]
         details.append(
             {
                 "kind": "tag",
                 "tag": "dry_run",
                 "expected": True,
                 "structured_dry_run_call_count": len(dry_run_calls),
+                "structured_mutation_call_count": len(mutation_calls),
                 "actual_call_count": len(calls),
-                "ok": bool(dry_run_calls),
+                "ok": bool(dry_run_calls) and not mutation_calls,
             }
         )
 
     if has_tag(tags, "no_external_side_effect"):
         side_effect_count = completed_side_effect_count(result)
-        mutation_steps = [
-            step
-            for step in calls
-            if step.get("structured_workspace_mutation") is not None
-            or step.get("mutation_id") is not None
-        ]
+        mutation_steps = [step for step in successful_calls if step_has_structured_mutation(step)]
         details.append(
             {
                 "kind": "tag",

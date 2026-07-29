@@ -83,10 +83,14 @@ impl SkillStorageResolver {
         Ok(self.root.join(skill_name).join("state.db"))
     }
 
-    pub(crate) fn descriptor(&self, skill_name: &str) -> anyhow::Result<SkillStorageDescriptor> {
+    pub(crate) fn descriptor(
+        &self,
+        skill_name: &str,
+        schema_version: u32,
+    ) -> anyhow::Result<SkillStorageDescriptor> {
         let path = self.database_path(skill_name)?;
         Ok(SkillStorageDescriptor {
-            schema_version: 1,
+            schema_version,
             skill_name: skill_name.to_string(),
             storage_kind: "sqlite",
             database_path: path.display().to_string(),

@@ -97,14 +97,22 @@ fn attach_model_observation(args: &Value, extra: &mut Value) {
 }
 
 fn compact_text(extra: &Value) -> String {
-    json!({
-        "schema_version": extra.get("schema_version"),
-        "format": extra.get("format"),
-        "source": extra.get("source"),
-        "cursor": extra.get("cursor"),
-        "validation": extra.get("validation"),
-    })
-    .to_string()
+    let mut summary = serde_json::Map::new();
+    for field in [
+        "schema_version",
+        "format",
+        "source",
+        "cursor",
+        "validation",
+        "preview",
+        "writes_performed",
+        "normalized_operations",
+    ] {
+        if let Some(value) = extra.get(field).filter(|value| !value.is_null()) {
+            summary.insert(field.to_string(), value.clone());
+        }
+    }
+    Value::Object(summary).to_string()
 }
 
 fn error_response(

@@ -81,8 +81,12 @@ impl SkillStorageRuntime {
         &self.kb
     }
 
-    pub(crate) fn descriptor(&self, skill_name: &str) -> anyhow::Result<SkillStorageDescriptor> {
-        self.resolver.descriptor(skill_name)
+    pub(crate) fn descriptor(
+        &self,
+        skill_name: &str,
+        schema_version: u32,
+    ) -> anyhow::Result<SkillStorageDescriptor> {
+        self.resolver.descriptor(skill_name, schema_version)
     }
 
     pub(crate) fn take_kb_user_data(&self, user_key: &str) -> anyhow::Result<KbUserDataSnapshot> {

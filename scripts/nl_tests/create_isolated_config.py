@@ -14,6 +14,7 @@ from pathlib import Path
 TARGETS = {
     ("database", "sqlite_path"): "sqlite_path",
     ("database", "audit_sqlite_path"): "audit_sqlite_path",
+    ("database", "skill_data_root"): "skill_data_root",
     ("prompts", "config_path"): "config_path",
 }
 
@@ -27,11 +28,13 @@ def render_isolated_config(
     *,
     sqlite_path: str,
     audit_sqlite_path: str,
+    skill_data_root: str,
     config_path: str,
 ) -> str:
     replacements = {
         "sqlite_path": sqlite_path,
         "audit_sqlite_path": audit_sqlite_path,
+        "skill_data_root": skill_data_root,
         "config_path": config_path,
     }
     counts = {name: 0 for name in replacements}
@@ -64,6 +67,7 @@ def render_isolated_config(
     expected = {
         ("database", "sqlite_path"): sqlite_path,
         ("database", "audit_sqlite_path"): audit_sqlite_path,
+        ("database", "skill_data_root"): skill_data_root,
         ("prompts", "config_path"): config_path,
     }
     for (owner, key), value in expected.items():
@@ -77,6 +81,7 @@ def run_self_test() -> int:
 [database]
 sqlite_path = "data/main.db"
 audit_sqlite_path = "data/audit.db"
+skill_data_root = "data/skills"
 
 [prompts]
 config_path = "configs/config.toml"
@@ -89,6 +94,7 @@ config_path = "configs/config.toml"
                 fixture,
                 sqlite_path=str(root / "tasks.sqlite"),
                 audit_sqlite_path=str(root / "audit.sqlite"),
+                skill_data_root=str(root / "skills"),
                 config_path=str(output),
             ),
             encoding="utf-8",
@@ -96,6 +102,7 @@ config_path = "configs/config.toml"
         parsed = tomllib.loads(output.read_text(encoding="utf-8"))
         assert parsed["database"]["sqlite_path"] == str(root / "tasks.sqlite")
         assert parsed["database"]["audit_sqlite_path"] == str(root / "audit.sqlite")
+        assert parsed["database"]["skill_data_root"] == str(root / "skills")
         assert parsed["prompts"]["config_path"] == str(output)
     print("ISOLATED_NL_CONFIG_SELF_TEST ok")
     return 0
@@ -107,6 +114,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--sqlite-path")
     parser.add_argument("--audit-sqlite-path")
+    parser.add_argument("--skill-data-root")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -117,6 +125,7 @@ def main() -> int:
         "--output": args.output,
         "--sqlite-path": args.sqlite_path,
         "--audit-sqlite-path": args.audit_sqlite_path,
+        "--skill-data-root": args.skill_data_root,
     }
     missing = [flag for flag, value in required.items() if not value]
     if missing:
@@ -128,6 +137,7 @@ def main() -> int:
             args.source.read_text(encoding="utf-8"),
             sqlite_path=args.sqlite_path,
             audit_sqlite_path=args.audit_sqlite_path,
+            skill_data_root=args.skill_data_root,
             config_path=str(args.output.resolve()),
         ),
         encoding="utf-8",

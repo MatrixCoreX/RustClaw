@@ -25,3 +25,10 @@ fn rejects_traversal_and_non_machine_names() {
         assert!(resolver.database_path(value).is_err(), "{value}");
     }
 }
+
+#[test]
+fn descriptor_preserves_the_declared_schema_version() {
+    let resolver = SkillStorageResolver::test_default();
+    let descriptor = resolver.descriptor("kb", 3).expect("KB descriptor");
+    assert_eq!(descriptor.schema_version, 3);
+}

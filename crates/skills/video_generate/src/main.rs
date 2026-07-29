@@ -716,6 +716,7 @@ fn execute_poll(
                     .clamp(5, 900) as i64,
             )
         });
+    let dry_run = optional_bool(obj, "dry_run").unwrap_or(false);
     if expires_at <= unix_ts() as i64 {
         return Ok(video_poll_response(
             task_id,
@@ -725,6 +726,7 @@ fn execute_poll(
             adapter_kind,
             poll_after_seconds,
             expires_at,
+            dry_run,
             video_poll_adapter_result(
                 &job_id,
                 "expired",
@@ -737,16 +739,24 @@ fn execute_poll(
             json!({"status": "expired"}),
         ));
     }
-    if optional_bool(obj, "dry_run").unwrap_or(false) {
+    if dry_run {
         let status = obj
             .get("mock_status")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("running");
+        let normalized_status = normalize_video_status(status);
+        let mock_file_id = obj.get("mock_file_id").cloned().unwrap_or_else(|| {
+            if normalized_status == "Success" {
+                json!(job_id)
+            } else {
+                Value::Null
+            }
+        });
         let query = json!({
-            "status": status,
-            "file_id": obj.get("mock_file_id").cloned().unwrap_or(Value::Null),
+            "status": normalized_status,
+            "file_id": mock_file_id,
         });
         let adapter_result = adapter_result_from_video_query(
             workspace_root,
@@ -775,6 +785,7 @@ fn execute_poll(
             adapter_kind,
             poll_after_seconds,
             expires_at,
+            true,
             adapter_result,
             query,
         ));
@@ -853,6 +864,7 @@ fn execute_poll(
         adapter_kind,
         poll_after_seconds,
         expires_at,
+        false,
         adapter_result,
         query,
     ))
@@ -1146,6 +1158,7 @@ fn video_poll_response(
     model_kind: VideoAdapterKind,
     poll_after_seconds: u64,
     expires_at: i64,
+    dry_run: bool,
     adapter_result: Value,
     query: Value,
 ) -> (String, Value) {
@@ -1160,10 +1173,34 @@ fn video_poll_response(
             "status": query.get("status").cloned().unwrap_or(Value::Null),
             "poll_after_seconds": poll_after_seconds,
             "expires_at": expires_at,
+            "dry_run": dry_run,
             "query": query,
             "async_poll_adapter_result": adapter_result,
         }),
     )
+}
+
+fn normalize_video_status(status: &str) -> &str {
+    if status.eq_ignore_ascii_case("success")
+        || status.eq_ignore_ascii_case("succeeded")
+        || status.eq_ignore_ascii_case("completed")
+    {
+        "Success"
+    } else if status.eq_ignore_ascii_case("fail") || status.eq_ignore_ascii_case("failed") {
+        "Fail"
+    } else if status.eq_ignore_ascii_case("queueing")
+        || status.eq_ignore_ascii_case("queued")
+        || status.eq_ignore_ascii_case("accepted")
+    {
+        "Queueing"
+    } else if status.eq_ignore_ascii_case("processing")
+        || status.eq_ignore_ascii_case("running")
+        || status.eq_ignore_ascii_case("pending")
+    {
+        "Processing"
+    } else {
+        status
+    }
 }
 
 fn create_video_task(

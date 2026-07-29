@@ -60,6 +60,19 @@ pub(crate) fn build_checkpoint_resume_state(
         "last_user_visible_respond": loop_state.last_user_visible_respond,
         "last_publishable_synthesis_output": loop_state.last_publishable_synthesis_output,
         "last_capability_synthesis_output": loop_state.last_capability_synthesis_output,
+        "executed_step_results": loop_state
+            .executed_step_results
+            .iter()
+            .map(|step| json!({
+                "step_id": step.step_id,
+                "skill": step.skill,
+                "status": step.status.as_str(),
+                "output": step.output,
+                "error": step.error,
+                "started_at": step.started_at,
+                "finished_at": step.finished_at,
+            }))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -116,7 +129,44 @@ pub(crate) fn restore_checkpoint_resume_state(
         string_field(resume_state, "last_publishable_synthesis_output");
     loop_state.last_capability_synthesis_output =
         string_field(resume_state, "last_capability_synthesis_output");
+    if loop_state.executed_step_results.is_empty() {
+        loop_state
+            .executed_step_results
+            .extend(step_results(resume_state, "executed_step_results"));
+    }
     stage
+}
+
+fn step_results(value: &Value, key: &str) -> Vec<crate::executor::StepExecutionResult> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let status = match item.get("status").and_then(Value::as_str)? {
+                "ok" => crate::executor::StepExecutionStatus::Ok,
+                "error" => crate::executor::StepExecutionStatus::Error,
+                _ => return None,
+            };
+            Some(crate::executor::StepExecutionResult {
+                step_id: item.get("step_id")?.as_str()?.to_string(),
+                skill: item.get("skill")?.as_str()?.to_string(),
+                status,
+                output: optional_string(item, "output"),
+                error: optional_string(item, "error"),
+                started_at: item.get("started_at").and_then(Value::as_u64).unwrap_or(0),
+                finished_at: item
+                    .get("finished_at")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn optional_string(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
 fn string_field(value: &Value, key: &str) -> Option<String> {

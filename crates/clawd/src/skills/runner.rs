@@ -796,7 +796,7 @@ fn storage_descriptor_for_skill(
         return Ok(None);
     };
     if declaration.kind != "sqlite"
-        || declaration.schema_version != 1
+        || declaration.schema_version == 0
         || declaration.migration_owner != canonical_skill_name
     {
         return Err(format!(
@@ -806,7 +806,7 @@ fn storage_descriptor_for_skill(
     state
         .core
         .skill_storage
-        .descriptor(canonical_skill_name)
+        .descriptor(canonical_skill_name, declaration.schema_version)
         .map(Some)
         .map_err(|error| {
             format!("skill storage unavailable: skill={canonical_skill_name} error={error}")

@@ -80,6 +80,34 @@ def preview_capability_step_without_dry_run_evidence() -> dict:
     return step
 
 
+def office_preview_step() -> dict:
+    step = capability_step(dry_run=False, capability="office_workspace")
+    step["observed_evidence"] = {
+        "items": [
+            {"field": "extra.preview", "excerpt": "true"},
+            {"field": "extra.writes_performed", "excerpt": "false"},
+            {"field": "extra.normalized_operations", "kind": "array", "count": 2},
+        ]
+    }
+    return step
+
+
+def office_preview_step_with_truncated_tail() -> dict:
+    step = capability_step(dry_run=False, capability="office_workspace")
+    step["observed_evidence"] = {
+        "items": [
+            {"field": "extra.model_observation.preview", "excerpt": "true"},
+            {
+                "field": "extra.model_observation.validation.checks",
+                "kind": "array",
+                "sample_values": ["operation_schema_valid", "no_output_written"],
+            },
+        ],
+        "truncated": True,
+    }
+    return step
+
+
 def write_result(root: Path, name: str, value: dict) -> Path:
     import json
 
@@ -161,6 +189,28 @@ def main() -> int:
         )
         assert preview_dry_run_row["assertion"] == "pass"
 
+        office_preview = write_result(
+            root,
+            "office-preview.json",
+            result_with_steps([office_preview_step()]),
+        )
+        office_preview_row = row_for(
+            office_preview,
+            "requires_tool_call=true;dry_run,no_external_side_effect",
+        )
+        assert office_preview_row["assertion"] == "pass"
+
+        office_preview_truncated = write_result(
+            root,
+            "office-preview-truncated.json",
+            result_with_steps([office_preview_step_with_truncated_tail()]),
+        )
+        office_preview_truncated_row = row_for(
+            office_preview_truncated,
+            "requires_tool_call=true;dry_run,no_external_side_effect",
+        )
+        assert office_preview_truncated_row["assertion"] == "pass"
+
         no_tool = row_for(
             direct,
             "requires_tool_call=false;local_readonly",
@@ -183,6 +233,25 @@ def main() -> int:
             "requires_tool_call=true;dry_run,no_external_side_effect",
         )
         assert side_effect_row["assertion"] == "fail"
+
+        untracked_host_write = capability_step(
+            dry_run=False,
+            capability="filesystem.write_file",
+        )
+        untracked_host_write["observed_evidence"] = {
+            "extractor": {"source_action_ref": "fs_basic.write_text"},
+            "items": [{"field": "extra.action", "excerpt": "write_text"}],
+        }
+        mutation_without_checkpoint = write_result(
+            root,
+            "mutation-without-checkpoint.json",
+            result_with_steps([untracked_host_write, capability_step()]),
+        )
+        mutation_without_checkpoint_row = row_for(
+            mutation_without_checkpoint,
+            "requires_tool_call=true;dry_run,no_external_side_effect",
+        )
+        assert mutation_without_checkpoint_row["assertion"] == "fail"
 
         misleading_field_value = write_result(
             root,
