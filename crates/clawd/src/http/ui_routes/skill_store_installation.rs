@@ -257,9 +257,28 @@ fn skill_package_root(state: &AppState) -> PathBuf {
     state.skill_rt.workspace_root.join("data/skill-packages")
 }
 
+fn precompiled_skill_package_root_for(workspace_root: &Path, target: Option<&str>) -> PathBuf {
+    let packaged = workspace_root.join("prebuilt/skill-packages");
+    if packaged.is_dir() {
+        return packaged;
+    }
+    target
+        .map(|target| {
+            workspace_root
+                .join("target/prebuilt-skill-packages")
+                .join(target)
+        })
+        .filter(|path| path.is_dir())
+        .unwrap_or(packaged)
+}
+
 #[cfg(not(test))]
 fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
-    state.skill_rt.workspace_root.join("prebuilt/skill-packages")
+    let platform = rustclaw_skill_sdk::HostPlatform::current();
+    precompiled_skill_package_root_for(
+        &state.skill_rt.workspace_root,
+        platform.target.as_deref(),
+    )
 }
 
 fn skill_store_package_available(

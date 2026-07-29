@@ -9,9 +9,9 @@ use tower::ServiceExt;
 use super::{
     activate_imported_bundle, begin_skill_store_mutation, build_ui_router,
     finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
-    precompiled_source_fallback_allowed, remove_skill_registry_block, render_skill_store_config,
-    skill_store_install_spec, skill_store_operation_store, transition_skill_store_operation,
-    write_runtime_config_to_paths,
+    precompiled_skill_package_root_for, precompiled_source_fallback_allowed,
+    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
+    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -33,6 +33,40 @@ fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
     ] {
         assert!(!precompiled_source_fallback_allowed(code), "code={code}");
     }
+}
+
+#[test]
+fn source_checkout_uses_target_scoped_precompiled_skill_store() {
+    let workspace = std::env::temp_dir().join(format!(
+        "rustclaw-precompiled-root-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let target_root = workspace.join("target/prebuilt-skill-packages/test-target");
+    std::fs::create_dir_all(&target_root).expect("create target precompile root");
+
+    assert_eq!(
+        precompiled_skill_package_root_for(&workspace, Some("test-target")),
+        target_root
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn packaged_precompiled_skill_store_takes_priority() {
+    let workspace = std::env::temp_dir().join(format!(
+        "rustclaw-precompiled-root-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let packaged = workspace.join("prebuilt/skill-packages");
+    let target_root = workspace.join("target/prebuilt-skill-packages/test-target");
+    std::fs::create_dir_all(&packaged).expect("create packaged precompile root");
+    std::fs::create_dir_all(target_root).expect("create target precompile root");
+
+    assert_eq!(
+        precompiled_skill_package_root_for(&workspace, Some("test-target")),
+        packaged
+    );
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 fn isolated_skill_store_state() -> (AppState, PathBuf) {
