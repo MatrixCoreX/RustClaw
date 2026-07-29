@@ -20,7 +20,7 @@ impl HostPlatform {
             arch: normalize_arch(std::env::consts::ARCH)
                 .unwrap_or(std::env::consts::ARCH)
                 .to_string(),
-            target: option_env!("TARGET").map(ToString::to_string),
+            target: Some(env!("RUSTCLAW_BUILD_TARGET").to_string()),
         }
     }
 
@@ -87,3 +87,7 @@ pub fn normalize_arch(value: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "platform_tests.rs"]
+mod tests;
