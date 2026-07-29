@@ -48,9 +48,7 @@ pub(crate) fn evidence_coverage_for_output_contract(
         observed_evidence_field_sets(journal);
     augment_output_contract_canonical_evidence(
         output_contract,
-        &required_evidence,
         &observed_fields,
-        &observed_extractors,
         &mut observed_canonical,
     );
     let evidence_expression = if action_override.is_some() {
@@ -417,9 +415,7 @@ fn ingest_observed_evidence_value(
 
 pub(super) fn augment_output_contract_canonical_evidence(
     output_contract: &crate::IntentOutputContract,
-    required_evidence: &[String],
     observed_fields: &BTreeSet<String>,
-    observed_extractors: &BTreeSet<String>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
     if let Some(fields) = output_contract
@@ -432,14 +428,6 @@ pub(super) fn augment_output_contract_canonical_evidence(
             if observed_field_present(observed_fields, &field) {
                 observed_canonical.insert(field);
             }
-        }
-    }
-    for required in required_evidence {
-        if observed_extractors
-            .iter()
-            .any(|extractor_ref| explicit_text_extractor_provides(extractor_ref, required))
-        {
-            observed_canonical.insert(required.clone());
         }
     }
     if output_contract.requests_exact_command_output()
@@ -552,7 +540,7 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
         return true;
     }
     crate::skills::parse_structured_skill_error(error)
-        .is_some_and(|structured| structured.error_kind == "not_found")
+        .is_some_and(|structured| structured.error_code == "not_found")
 }
 
 pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
@@ -650,6 +638,7 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "body",
                 "content",
                 "text",
+                "draft_text",
                 "lines",
                 "text_excerpt",
                 "recent_matches",
@@ -718,7 +707,7 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "mtime_ts",
                 "exit",
                 "exit_code",
-                "error_kind",
+                "error_code",
                 "keyword_counts",
                 "level_counts",
                 "hostname",
@@ -851,7 +840,7 @@ pub(super) fn structured_error_failure_attribution(
             .or(Some(raw));
     }
     structured_error
-        .and_then(|value| failure_attribution_for_structured_error_kind(&value.error_kind))
+        .and_then(|value| failure_attribution_for_structured_error_kind(&value.error_code))
         .map(|kind| kind.as_str().to_string())
 }
 
@@ -868,7 +857,7 @@ pub(crate) fn failure_attribution_for_error_text(
                 return Some(kind);
             }
         }
-        if let Some(kind) = failure_attribution_for_structured_error_kind(&structured.error_kind) {
+        if let Some(kind) = failure_attribution_for_structured_error_kind(&structured.error_code) {
             return Some(kind);
         }
     }
@@ -959,7 +948,7 @@ pub(super) fn contract_policy_trace_json(
     structured_error: Option<&crate::skills::StructuredSkillError>,
 ) -> Option<Value> {
     let structured_error = structured_error?;
-    if structured_error.error_kind != "contract_action_rejected" {
+    if structured_error.error_code != "contract_action_rejected" {
         return None;
     }
     let extra = structured_error.extra.as_ref()?;

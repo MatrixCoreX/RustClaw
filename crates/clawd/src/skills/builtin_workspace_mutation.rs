@@ -705,7 +705,7 @@ fn write_manifest(
         mutation_error(
             "checkpoint_encode_failed",
             "workspace.mutation.checkpoint_encode_failed",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })?;
     let temporary = checkpoint_dir.join("manifest.json.tmp");
@@ -728,7 +728,7 @@ fn read_manifest_value(checkpoint_dir: &Path) -> Result<Value, String> {
         mutation_error(
             "checkpoint_invalid",
             "workspace.mutation.checkpoint_invalid",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })
 }
@@ -739,7 +739,7 @@ fn read_manifest(checkpoint_dir: &Path) -> Result<MutationCheckpointManifest, St
         mutation_error(
             "checkpoint_invalid",
             "workspace.mutation.checkpoint_invalid",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })?;
     if manifest.schema_version != CHECKPOINT_SCHEMA_VERSION
@@ -807,7 +807,7 @@ fn encode_result(value: Value) -> Result<String, String> {
         mutation_error(
             "result_encode_failed",
             "workspace.mutation.result_encode_failed",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })
 }

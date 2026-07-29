@@ -25,7 +25,7 @@ fn execution_output_not_found_projects_machine_json() {
     );
     assert_eq!(
         value
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );
@@ -41,7 +41,7 @@ fn execution_output_structured_error_projects_machine_json_without_error_text() 
     let step = err_step_result(
         "step_1",
         "run_cmd",
-        r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"Command failed with exit code 127","extra":{"command":"missing-bin","exit_code":127,"stderr":"missing-bin: command not found"}}"#,
+        r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_code":"nonzero_exit","error_text":"Command failed with exit code 127","extra":{"command":"missing-bin","exit_code":127,"stderr":"missing-bin: command not found"}}"#,
     );
 
     let output = output_text_from_execution_result(&step).expect("machine output");
@@ -55,7 +55,7 @@ fn execution_output_structured_error_projects_machine_json_without_error_text() 
     );
     assert_eq!(
         value
-            .pointer("/error_kind")
+            .pointer("/error_code")
             .and_then(serde_json::Value::as_str),
         Some("nonzero_exit")
     );

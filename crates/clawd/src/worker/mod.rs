@@ -74,7 +74,7 @@ pub(crate) fn schedule_notify_observation(outcome: &ScheduleNotifyOutcome) -> Va
     });
     if !outcome.delivered {
         if let Some(obj) = value.as_object_mut() {
-            obj.insert("error_kind".to_string(), json!("channel_send_failed"));
+            obj.insert("error_code".to_string(), json!("channel_send_failed"));
             obj.insert(
                 "failure_attribution".to_string(),
                 json!(crate::evidence_policy::FailureAttribution::DeliveryError.as_str()),

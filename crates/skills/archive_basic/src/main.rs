@@ -2,6 +2,11 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+use rustclaw_skill_sdk::{
+    extract_safe_archive, inspect_safe_archive, read_safe_archive_member, ArtifactSpill,
+    BoundedResult, ContinuationDescriptor, ExpectedPathKind, SafeArchiveInspection,
+    SafeArchiveLimits, SkillPathPolicy, MAX_PROTOCOL_LINE_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -9,7 +14,6 @@ const SKILL_NAME: &str = "archive_basic";
 
 #[derive(Debug)]
 struct ArchiveListing {
-    output: String,
     entries: Vec<String>,
 }
 
@@ -17,6 +21,8 @@ struct ArchiveListing {
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,7 +32,6 @@ struct Resp {
     text: String,
     extra: Option<Value>,
     error_text: Option<String>,
-    error_kind: Option<String>,
 }
 
 #[derive(Debug)]
@@ -74,14 +79,13 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args) {
+            Ok(req) => match execute_with_context(req.args, req.context.as_ref()) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
                     extra: Some(extra),
                     error_text: None,
-                    error_kind: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
@@ -89,7 +93,6 @@ fn main() -> anyhow::Result<()> {
                     text: String::new(),
                     extra: Some(error_extra_with_details(err.kind, err.extra)),
                     error_text: Some(err.text),
-                    error_kind: Some(err.kind.to_string()),
                 },
             },
             Err(err) => Resp {
@@ -98,7 +101,6 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
-                error_kind: Some("invalid_input".to_string()),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -107,18 +109,17 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
-    error_extra_with_details(error_kind, None)
+fn error_extra(error_code: &str) -> Value {
+    error_extra_with_details(error_code, None)
 }
 
-fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+fn error_extra_with_details(error_code: &str, details: Option<Value>) -> Value {
     let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
     });
     if let Some(details) = details {
@@ -133,21 +134,64 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
     extra
 }
 
-fn execute(args: Value) -> Result<(String, Value), SkillError> {
+fn execute_with_context(
+    args: Value,
+    context: Option<&Value>,
+) -> Result<(String, Value), SkillError> {
+    execute_with_root_and_context(args, &workspace_root(), context)
+}
+
+fn execute_with_root_and_context(
+    args: Value,
+    workspace_root: &Path,
+    context: Option<&Value>,
+) -> Result<(String, Value), SkillError> {
     let obj = args
         .as_object()
         .ok_or_else(|| SkillError::invalid_input("args must be object"))?;
     let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("list");
-    let root = workspace_root();
+    let path_policy = SkillPathPolicy::new(workspace_root, context).map_err(path_policy_error)?;
+    let authority_scope = if path_policy.authority().is_unrestricted_admin() {
+        "unrestricted_admin"
+    } else {
+        "workspace"
+    };
+    let inline_budget = archive_inline_budget();
+    let artifact_spill =
+        ArtifactSpill::from_request_context(context, SKILL_NAME).map_err(archive_sdk_error)?;
 
     match action {
         "list" => {
             let archive = required_str_any(obj, &["archive", "archive_path", "path"])?;
-            let archive = resolve_path(&root, archive, false)?;
-            list_archive(&archive).map(|listing| {
+            let archive = path_policy
+                .resolve_existing(archive, ExpectedPathKind::File)
+                .map_err(path_policy_error)?;
+            let requested_offset = list_continuation_offset(obj)?;
+            list_archive(&archive).and_then(|listing| {
+                if requested_offset > listing.entries.len() {
+                    return Err(SkillError::invalid_input(
+                        "archive list continuation is beyond the current member set",
+                    ));
+                }
                 let archive_path = archive.display().to_string();
-                let entries = listing
-                    .entries
+                let offset = requested_offset;
+                let (page_members, next_offset) = archive_member_page(
+                    &listing.entries,
+                    offset,
+                    (inline_budget / 8).max(16 * 1024),
+                );
+                let continuation = next_offset.map(|next_offset| ContinuationDescriptor {
+                    kind: "archive_member_page".to_string(),
+                    token: Some(format!("archive-members:{next_offset}")),
+                    state: json!({"next_offset": next_offset}),
+                });
+                let bounded = BoundedResult::page(
+                    page_members.clone(),
+                    page_members.len() as u64,
+                    listing.entries.len() as u64,
+                    continuation.clone(),
+                );
+                let entries = page_members
                     .iter()
                     .map(|name| {
                         json!({
@@ -156,77 +200,80 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                         })
                     })
                     .collect::<Vec<_>>();
-                let candidates = listing.entries.clone();
+                let output = format!("exit=0\n{}", page_members.join("\n"));
                 let payload = json!({
                     "action": "list",
+                    "authority_scope": authority_scope,
                     "archive": archive_path,
-                    "count": candidates.len(),
-                    "member_count": candidates.len(),
-                    "members": candidates,
+                    "count": listing.entries.len(),
+                    "member_count": listing.entries.len(),
+                    "members": page_members.clone(),
                     "entries": entries,
-                    "candidates": listing.entries.clone(),
-                    "output": listing.output,
+                    "candidates": page_members.clone(),
+                    "output": output,
+                    "complete": bounded.complete,
+                    "partial_reason": bounded.partial_reason.clone(),
+                    "continuation": continuation.clone(),
+                    "bounded_result": bounded.clone(),
                     "field_value": {
                         "action": "list",
                         "archive": archive_path,
                         "count": listing.entries.len(),
                         "member_count": listing.entries.len(),
-                        "members": listing.entries,
+                        "members": page_members,
                     }
                 });
-                (payload.to_string(), payload)
+                Ok((payload.to_string(), payload))
             })
         }
         "read" => {
             let archive = required_str_any(obj, &["archive", "archive_path", "path"])?;
             let member = required_str_any(obj, &["member", "entry", "file", "file_path"])?;
-            let archive = resolve_path(&root, archive, false)?;
+            let archive = path_policy
+                .resolve_existing(archive, ExpectedPathKind::File)
+                .map_err(path_policy_error)?;
             let member = normalize_archive_member(member)?;
-            read_archive_member(&archive, &member).map(|text| {
-                let content_excerpt = content_excerpt_for_machine_field(&text);
-                let payload = json!({
-                    "action":"read",
-                    "archive":archive.display().to_string(),
-                    "path":member,
-                    "member":member,
-                    "member_path":member,
-                    "content":text,
-                    "content_excerpt":content_excerpt,
-                });
-                (
-                    payload.to_string(),
-                    json!({
+            read_archive_member(&archive, &member, artifact_spill.as_ref(), inline_budget).map(
+                |bounded| {
+                    let content_excerpt = content_excerpt_for_machine_field(&bounded.value);
+                    let payload = json!({
                         "action":"read",
+                        "authority_scope":authority_scope,
                         "archive":archive.display().to_string(),
-                        "path":payload.get("path").and_then(Value::as_str).unwrap_or_default(),
-                        "member":payload.get("member").and_then(Value::as_str).unwrap_or_default(),
-                        "member_path":payload.get("member_path").and_then(Value::as_str).unwrap_or_default(),
-                        "content":payload.get("content").and_then(Value::as_str).unwrap_or_default(),
-                        "content_excerpt":payload.get("content_excerpt").and_then(Value::as_str).unwrap_or_default(),
+                        "path":member,
+                        "member":member,
+                        "member_path":member,
+                        "content":bounded.value.clone(),
+                        "content_excerpt":content_excerpt,
+                        "complete":bounded.complete,
+                        "partial_reason":bounded.partial_reason.clone(),
+                        "continuation":bounded.continuation.clone(),
+                        "artifacts":bounded.artifacts.clone(),
+                        "bounded_result":bounded.clone(),
                         "field_value": {
                             "action": "read",
                             "archive": archive.display().to_string(),
-                            "path": payload.get("path").and_then(Value::as_str).unwrap_or_default(),
-                            "member": payload.get("member").and_then(Value::as_str).unwrap_or_default(),
-                            "member_path": payload.get("member_path").and_then(Value::as_str).unwrap_or_default(),
-                            "content_excerpt": payload.get("content_excerpt").and_then(Value::as_str).unwrap_or_default(),
+                            "path": member,
+                            "member": member,
+                            "member_path": member,
+                            "content_excerpt": content_excerpt,
                         }
-                    }),
-                )
-            })
+                    });
+                    (payload.to_string(), payload)
+                },
+            )
         }
         "pack" => {
             let format = obj.get("format").and_then(|v| v.as_str()).unwrap_or("zip");
-            let source = resolve_path(
-                &root,
-                required_str_any(obj, &["source", "source_path"])?,
-                false,
-            )?;
-            let archive = resolve_path(
-                &root,
-                required_str_any(obj, &["archive", "archive_path"])?,
-                true,
-            )?;
+            let source = path_policy
+                .resolve_existing(
+                    required_str_any(obj, &["source", "source_path"])?,
+                    ExpectedPathKind::Any,
+                )
+                .map_err(path_policy_error)?;
+            let archive = path_policy
+                .resolve_create_target(required_str_any(obj, &["archive", "archive_path"])?)
+                .map_err(path_policy_error)?;
             pack_archive(format, &source, &archive).map(|text| {
                 let archive_path = archive.display().to_string();
                 let source_path = source.display().to_string();
@@ -234,6 +281,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                     format!("archive_path={archive_path}\n{text}"),
                     json!({
                         "action":"pack",
+                        "authority_scope":authority_scope,
                         "format":format,
                         "source":source_path,
                         "archive":archive_path,
@@ -256,20 +304,33 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             })
         }
         "unpack" => {
-            let archive = resolve_path(
-                &root,
-                required_str_any(obj, &["archive", "archive_path", "path"])?,
-                false,
-            )?;
-            let dest = resolve_path(&root, required_str_any(obj, &["dest", "dest_path"])?, true)?;
-            unpack_archive(&archive, &dest).map(|text| {
+            let archive = path_policy
+                .resolve_existing(
+                    required_str_any(obj, &["archive", "archive_path", "path"])?,
+                    ExpectedPathKind::File,
+                )
+                .map_err(path_policy_error)?;
+            let dest = path_policy
+                .resolve_create_target(required_str_any(obj, &["dest", "dest_path"])?)
+                .map_err(path_policy_error)?;
+            unpack_archive(&archive, &dest).map(|inspection| {
                 let dest_path = dest.display().to_string();
+                let text = format!(
+                    "archive extracted safely: format={} entries={} expanded_bytes={}",
+                    inspection.format, inspection.entry_count, inspection.expanded_bytes
+                );
                 (
                     format!("dest_path={dest_path}\n{text}"),
                     json!({
                         "action":"unpack",
+                        "authority_scope":authority_scope,
                         "archive":archive.display().to_string(),
                         "dest":dest_path,
+                        "format":inspection.format,
+                        "member_count":inspection.entry_count,
+                        "expanded_bytes":inspection.expanded_bytes,
+                        "preflight_verified":true,
+                        "atomic_promotion":true,
                         "output":text,
                         "field_value": {
                             "dest": dest_path,
@@ -284,6 +345,25 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
     }
 }
 
+fn path_policy_error(error: rustclaw_skill_sdk::SkillSdkError) -> SkillError {
+    let kind = match error.code.as_str() {
+        "path_outside_workspace" => "path_outside_workspace",
+        "path_traversal_forbidden" => "path_traversal_forbidden",
+        "path_not_found" => "not_found",
+        "path_kind_mismatch" => "path_kind_mismatch",
+        "path_target_symlink_forbidden" => "path_target_symlink_forbidden",
+        _ => "invalid_input",
+    };
+    SkillError::new(
+        kind,
+        error.detail,
+        Some(json!({
+            "sdk_error_code": error.code,
+            "sdk_message_key": error.message_key,
+        })),
+    )
+}
+
 fn content_excerpt_for_machine_field(text: &str) -> String {
     text.lines()
         .map(str::trim)
@@ -294,48 +374,76 @@ fn content_excerpt_for_machine_field(text: &str) -> String {
         .collect()
 }
 
+fn archive_inline_budget() -> usize {
+    std::env::var("SKILL_RESULT_INLINE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|value| value.clamp(64 * 1024, MAX_PROTOCOL_LINE_BYTES / 2))
+        .unwrap_or(MAX_PROTOCOL_LINE_BYTES / 2)
+}
+
+fn list_continuation_offset(obj: &serde_json::Map<String, Value>) -> Result<usize, SkillError> {
+    let Some(token) = obj.get("continuation").and_then(Value::as_str) else {
+        return Ok(0);
+    };
+    token
+        .trim()
+        .strip_prefix("archive-members:")
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| SkillError::invalid_input("invalid archive list continuation"))
+}
+
+fn archive_member_page(
+    entries: &[String],
+    offset: usize,
+    byte_budget: usize,
+) -> (Vec<String>, Option<usize>) {
+    let mut page = Vec::new();
+    let mut used = 0_usize;
+    for entry in entries.iter().skip(offset) {
+        let cost = entry.len().saturating_add(32);
+        if !page.is_empty() && used.saturating_add(cost) > byte_budget {
+            break;
+        }
+        used = used.saturating_add(cost);
+        page.push(entry.clone());
+    }
+    let next = offset.saturating_add(page.len());
+    (page, (next < entries.len()).then_some(next))
+}
+
 fn list_archive(archive: &Path) -> Result<ArchiveListing, SkillError> {
     if !archive.is_file() {
         return Err(SkillError::not_found(archive, "archive"));
     }
-    let name = archive.to_string_lossy().to_string();
-    let raw_entries = if name.ends_with(".zip") {
-        run_raw_stdout("unzip", &[String::from("-Z1"), name])?
-    } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-        run_raw_stdout("tar", &[String::from("-tzf"), name])?
-    } else {
-        return Err(SkillError::unsupported_format(
-            "unsupported archive format for list",
-        ));
-    };
-    let entries = parse_archive_member_listing(&raw_entries);
-    let output = format!("exit=0\n{}", entries.join("\n"));
-    Ok(ArchiveListing { output, entries })
+    let parent = archive.parent().ok_or_else(|| {
+        SkillError::invalid_input(format!("archive has no parent: {}", archive.display()))
+    })?;
+    let limits = SafeArchiveLimits::adaptive_for(archive, parent).map_err(archive_sdk_error)?;
+    let inspection = inspect_safe_archive(archive, limits).map_err(archive_sdk_error)?;
+    let entries = inspection
+        .entries
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect::<Vec<_>>();
+    Ok(ArchiveListing { entries })
 }
 
-fn parse_archive_member_listing(output: &str) -> Vec<String> {
-    output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn read_archive_member(archive: &Path, member: &str) -> Result<String, SkillError> {
+fn read_archive_member(
+    archive: &Path,
+    member: &str,
+    spill: Option<&ArtifactSpill>,
+    inline_bytes: usize,
+) -> Result<BoundedResult<String>, SkillError> {
     if !archive.is_file() {
         return Err(SkillError::not_found(archive, "archive"));
     }
-    let name = archive.to_string_lossy().to_string();
-    if name.ends_with(".zip") {
-        run_raw_stdout("unzip", &[String::from("-p"), name, member.to_string()])
-    } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-        run_raw_stdout("tar", &[String::from("-xOzf"), name, member.to_string()])
-    } else {
-        Err(SkillError::unsupported_format(
-            "unsupported archive format for read",
-        ))
-    }
+    let parent = archive.parent().ok_or_else(|| {
+        SkillError::invalid_input(format!("archive has no parent: {}", archive.display()))
+    })?;
+    let limits = SafeArchiveLimits::adaptive_for(archive, parent).map_err(archive_sdk_error)?;
+    read_safe_archive_member(archive, member, limits, inline_bytes, spill)
+        .map_err(archive_sdk_error)
 }
 
 fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, SkillError> {
@@ -350,7 +458,7 @@ fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, S
     }
 
     match format {
-        "zip" => run("zip", &[String::from("-r"), out, src]),
+        "zip" => run("zip", &[String::from("-q"), String::from("-r"), out, src]),
         "tar.gz" | "tgz" => run("tar", &[String::from("-czf"), out, src]),
         _ => Err(SkillError::unsupported_format(
             "unsupported format; use zip|tar.gz",
@@ -358,25 +466,56 @@ fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, S
     }
 }
 
-fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, SkillError> {
+fn unpack_archive(archive: &Path, dest: &Path) -> Result<SafeArchiveInspection, SkillError> {
     if !archive.is_file() {
         return Err(SkillError::not_found(archive, "archive"));
     }
-    std::fs::create_dir_all(dest)
-        .map_err(|err| SkillError::command_failed(format!("mkdir failed: {err}")))?;
-    let arc = archive.to_string_lossy().to_string();
-    let dst = dest.to_string_lossy().to_string();
-    if arc.ends_with(".zip") {
-        // Non-interactive default: overwrite existing files to avoid hanging on prompts.
-        run("unzip", &[String::from("-o"), arc, String::from("-d"), dst])
-    } else if arc.ends_with(".tar.gz") || arc.ends_with(".tgz") {
-        // Avoid GNU-only flags so both bsdtar (macOS) and GNU tar work.
-        run("tar", &[String::from("-xzf"), arc, String::from("-C"), dst])
-    } else {
-        Err(SkillError::unsupported_format(
-            "unsupported archive format for unpack",
-        ))
+    if dest.exists() {
+        return Err(SkillError::new(
+            "destination_exists",
+            format!("destination already exists: {}", dest.display()),
+            Some(json!({"dest": dest.display().to_string()})),
+        ));
     }
+    let parent = dest.parent().ok_or_else(|| {
+        SkillError::invalid_input(format!("destination has no parent: {}", dest.display()))
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| SkillError::command_failed(format!("mkdir failed: {error}")))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|error| SkillError::command_failed(format!("canonicalize failed: {error}")))?;
+    let limits =
+        SafeArchiveLimits::adaptive_for(archive, &canonical_parent).map_err(archive_sdk_error)?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".rustclaw-archive-")
+        .tempdir_in(&canonical_parent)
+        .map_err(|error| SkillError::command_failed(format!("tempdir failed: {error}")))?;
+    let staging = temporary.path().join("payload");
+    let inspection = extract_safe_archive(archive, &staging, limits).map_err(archive_sdk_error)?;
+    std::fs::rename(&staging, dest)
+        .map_err(|error| SkillError::command_failed(format!("atomic promote failed: {error}")))?;
+    Ok(inspection)
+}
+
+fn archive_sdk_error(error: rustclaw_skill_sdk::SkillSdkError) -> SkillError {
+    let kind = match error.code.as_str() {
+        "archive_format_unsupported" => "unsupported_format",
+        "archive_path_unsafe" => "archive_path_unsafe",
+        "archive_entry_type_forbidden" => "archive_entry_type_forbidden",
+        "archive_budget_exceeded" => "archive_budget_exceeded",
+        "archive_destination_exists" => "destination_exists",
+        _ => "archive_invalid",
+    };
+    SkillError::new(
+        kind,
+        error.detail,
+        Some(json!({
+            "sdk_error_code": error.code,
+            "sdk_message_key": error.message_key,
+            "phase": error.phase,
+        })),
+    )
 }
 
 fn run(bin: &str, args: &[String]) -> Result<String, SkillError> {
@@ -395,31 +534,6 @@ fn run(bin: &str, args: &[String]) -> Result<String, SkillError> {
     }
 }
 
-fn run_raw_stdout(bin: &str, args: &[String]) -> Result<String, SkillError> {
-    let output = Command::new(bin)
-        .args(args)
-        .output()
-        .map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
-    if output.status.success() {
-        Ok(truncate_output(stdout))
-    } else {
-        let text = format_command_output(&output.stdout, &output.stderr);
-        Err(SkillError::command_failed(format!(
-            "archive command failed: exit={exit_code}\n{text}"
-        )))
-    }
-    .map(|text| {
-        if text.is_empty() && !stderr.trim().is_empty() {
-            truncate_output(stderr)
-        } else {
-            text
-        }
-    })
-}
-
 fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
     let mut text = String::new();
     text.push_str(&String::from_utf8_lossy(stdout));
@@ -428,13 +542,6 @@ fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
             text.push('\n');
         }
         text.push_str(&String::from_utf8_lossy(stderr));
-    }
-    truncate_output(text)
-}
-
-fn truncate_output(mut text: String) -> String {
-    if text.len() > 10000 {
-        text.truncate(10000);
     }
     text
 }
@@ -498,31 +605,6 @@ fn workspace_root() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-fn resolve_path(
-    workspace_root: &Path,
-    input: &str,
-    allow_absolute: bool,
-) -> Result<PathBuf, SkillError> {
-    let raw = Path::new(input);
-    let mut normalized = PathBuf::new();
-    for comp in raw.components() {
-        match comp {
-            Component::ParentDir => {
-                return Err(SkillError::invalid_input("path with '..' is not allowed"));
-            }
-            Component::CurDir => {}
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    if raw.is_absolute() {
-        if !allow_absolute {
-            return Ok(normalized);
-        }
-        return Ok(normalized);
-    }
-    Ok(workspace_root.join(normalized))
 }
 
 #[cfg(test)]

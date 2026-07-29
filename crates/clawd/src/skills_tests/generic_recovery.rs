@@ -12,7 +12,7 @@ fn structured_pre_dispatch_argument_failure_allows_generic_bounded_replan() {
             "status": "error",
             "error_text": "configured selector was not found",
             "extra": {
-                "error_kind": "selector_not_configured",
+                "error_code": "selector_not_configured",
                 "retryable": true,
                 "failure_phase": "pre_dispatch",
                 "side_effect_applied": false,
@@ -45,7 +45,7 @@ fn generic_bounded_replan_contract_fails_closed_after_possible_side_effect() {
             "status": "error",
             "error_text": "mutation status is uncertain",
             "extra": {
-                "error_kind": "argument_rejected",
+                "error_code": "argument_rejected",
                 "retryable": true,
                 "failure_phase": "pre_dispatch",
                 "side_effect_applied": true,
@@ -76,6 +76,6 @@ fn standard_error_code_is_promoted_for_generic_recovery_observation() {
     );
 
     let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
-    assert_eq!(parsed.error_kind, "invalid_cursor");
+    assert_eq!(parsed.error_code, "invalid_cursor");
     assert!(is_recoverable_skill_error("custom_observer", &encoded));
 }

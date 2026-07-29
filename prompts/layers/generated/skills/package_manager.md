@@ -18,16 +18,18 @@
 ## Actions (from interface)
 - `detect`
 - `install`
+- `smart_install_preview`
 - `smart_install`
 - `uninstall`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| all | `action` | yes | string | - | Must be one of `detect|install|smart_install`. |
+| all | `action` | yes | string | - | Must be one of `detect|install|smart_install_preview|smart_install|uninstall`. |
 | `detect` | `path` / `root` / `project_path` / `workspace` | no | string(path) | - | Optional project directory or manifest path. If supplied, detect project package/build tool from marker files before falling back to system manager. |
-| `install`/`smart_install`/`uninstall` | `packages` or `package` | yes | array/string | - | Non-empty package list. Prefer these canonical fields. Structured compatibility aliases `modules` and `module` are accepted but should not be emitted by new planners. |
+| `install`/`smart_install_preview`/`smart_install`/`uninstall` | `packages` or `package` | yes | array/string | - | Non-empty package list. Prefer these canonical fields. Structured compatibility aliases `modules` and `module` are accepted but should not be emitted by new planners. |
 | `install` | `manager` | no | string | auto | Explicit package manager override. |
+| `smart_install_preview` | `dry_run` | no | boolean | true | Forced true; never executes an install or writes a skill-local log. |
 | `install`/`smart_install`/`uninstall` | `dry_run` | no | boolean | impl default | Preview package operation without changes. |
 | `install`/`smart_install`/`uninstall` | `use_sudo` | no | boolean | impl default | Use elevated package operation when needed. |
 
@@ -67,7 +69,7 @@
   - `output`: string bounded install observation; fallback evidence only.
   - `output_result`: shared bounded-result envelope; when partial, use its `continuation.state.read_capability` and artifact reference to retrieve the remaining bytes.
 - Sensitive fields: package names and command strings are usually low sensitivity, but provider-facing traces should still avoid full stderr dumps unless needed.
-- Error responses include readable `error_text`; top-level or `extra.error_kind` should be preferred over matching error text when present.
+- Error responses include readable `error_text`; use canonical `extra.error_code` instead of matching error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1

@@ -174,6 +174,16 @@ fn protocol_rejects_multiple_records_and_requires_structured_errors() {
 }
 
 #[test]
+fn protocol_reads_legacy_error_kind_but_serializes_error_code() {
+    let legacy = br#"{"request_id":"r1","status":"error","text":"","error_text":"failed","error_kind":"execution_failed","extra":{"error_code":"execution_failed","message_key":"skill.sample.execution_failed"}}"#;
+    let response = validate_response_line(legacy, "r1").expect("legacy response readable");
+    assert_eq!(response.error_code.as_deref(), Some("execution_failed"));
+    let serialized = serde_json::to_value(response).expect("serialize response");
+    assert_eq!(serialized["error_code"], "execution_failed");
+    assert!(serialized.get("error_kind").is_none());
+}
+
+#[test]
 fn http_manifest_requires_https_network_approval_and_runtime_permission() {
     let base = manifest_source()
         .replace("adapter = \"cargo\"", "adapter = \"http_json\"")

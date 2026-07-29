@@ -62,7 +62,7 @@ fn invalid_flag_combo_returns_structured_error_kind() {
 
     assert_eq!(err.kind, "invalid_input");
     assert_eq!(
-        err.extra().get("error_kind").and_then(Value::as_str),
+        err.extra().get("error_code").and_then(Value::as_str),
         Some("invalid_input")
     );
     assert_eq!(

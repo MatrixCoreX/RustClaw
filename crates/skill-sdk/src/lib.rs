@@ -7,12 +7,14 @@ pub mod error;
 pub mod installer;
 pub mod manifest;
 pub mod operation;
+pub mod path_policy;
 pub mod platform;
 mod prebuilt;
 mod process;
 pub mod protocol;
 pub mod receipt;
 pub mod runtime;
+pub mod safe_archive;
 pub mod sandbox;
 mod secret_scan;
 pub mod templates;
@@ -33,16 +35,21 @@ pub use operation::{
     OperationAction, OperationFailure, OperationStage, OperationStageRecord, OperationStatus,
     SkillOperation, SkillOperationStore,
 };
+pub use path_policy::{ExpectedPathKind, PathAuthority, SkillPathPolicy};
 pub use platform::HostPlatform;
 pub use protocol::{
     validate_response_line, ProtocolRequest, ProtocolResponse, ProtocolStatus,
     MAX_PROTOCOL_LINE_BYTES,
 };
 pub use receipt::{
-    ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,
+    digest_file, ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,
     ProtocolSmokeReceipt, INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 pub use runtime::{SkillLaunchSpec, SkillRuntimeResolver, SKILL_LAUNCH_SCHEMA_VERSION};
+pub use safe_archive::{
+    extract_safe_archive, inspect_safe_archive, read_safe_archive_member, SafeArchiveEntry,
+    SafeArchiveInspection, SafeArchiveLimits,
+};
 pub use sandbox::{
     prepare_sandboxed_command, PreparedSandboxCommand, SandboxNetwork, PARENT_SANDBOX_BACKEND_ENV,
     SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,

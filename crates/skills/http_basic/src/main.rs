@@ -126,7 +126,6 @@ fn error_extra_with_detail(error_kind: &str, retryable: bool, detail: Option<Val
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": retryable,
@@ -226,6 +225,7 @@ enum RequestMethod {
     PostJson,
 }
 
+#[cfg(test)]
 fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), HttpBasicError> {
     execute_with_permissions(args, req_user_key, false)
 }
@@ -995,6 +995,7 @@ fn workspace_root() -> Result<PathBuf, std::io::Error> {
         .unwrap_or_else(std::env::current_dir)
 }
 
+#[cfg(test)]
 fn resolve_output_path(
     workspace_root: &Path,
     default_dir: &str,

@@ -12,7 +12,8 @@ Use it when the user wants RustClaw to:
 - inspect basic namespace/library statistics
 
 Current runtime notes:
-- Namespace snapshots and retrieval rows live only in the KB-owned SQLite
+- Normalized namespace, document, chunk, FTS/vector retrieval, and revision rows
+  live only in the KB-owned SQLite
   database resolved from `database.skill_data_root` (normally
   `data/skills/kb/state.db`).
 - `clawd` may query the KB-owned retrieval index during recall, but KB rows are
@@ -42,6 +43,13 @@ Natural-language intent mapping:
   - best for requests like `看看现在有哪些知识库`、`列出所有资料库`
   - does not require `namespace`
   - response JSON includes `namespaces` plus machine fields `names`, `count`, and `namespace_count`
+- `list_documents`: list typed document metadata for one namespace
+- `remove_documents`: remove selected document paths and their chunks/retrieval rows in one transaction
+- `delete_namespace`: delete one owned namespace and all of its private rows
+- `reindex`: rebuild an existing namespace from its recorded source paths
+- `resume_ingest`: continue a persisted ingest/reindex job from its last atomic checkpoint
+- `ingest_job_status`: inspect persisted progress without changing the job
+- `cancel_ingest`: stop a waiting/running ingest job; already committed documents remain searchable
 - `stats`: inspect namespace-level or global KB stats
   - best for requests like `看 docs 知识库的统计`、`看看知识库现在一共有多少库`
   - `namespace` is optional; omitted means global KB stats
@@ -61,6 +69,11 @@ Natural-language intent mapping:
 | `ingest` | `overwrite` | no | bool | `false` | Rebuild namespace from scratch. |
 | `ingest` | `file_types` | no | string[] | - | Extension whitelist such as `["md","txt","json"]`. |
 | `ingest` | `max_file_size` | no | integer | `2097152` | Skip files larger than this many bytes. |
+| `ingest`/`reindex` | `max_files_per_run` | no | integer | `1000` | Adaptive per-call file budget; incomplete work returns a continuation. |
+| `ingest`/`reindex` | `max_bytes_per_run` | no | integer | `268435456` | Adaptive per-call source-byte budget. |
+| `ingest`/`reindex` | `max_chunks_per_run` | no | integer | `100000` | Adaptive per-call produced-chunk budget. |
+| `ingest`/`reindex` | `max_depth` | no | integer | `64` | Directory traversal depth budget; skipped deeper directories are reported. |
+| `ingest`/`reindex` | `max_run_seconds` | no | integer | `20` | Cooperative wall-clock budget below the runner timeout. |
 | `search` | `action` | yes | string | - | Must be `search`. |
 | `search` | `namespace` | yes | string | - | Namespace to search. |
 | `search` | `query` | yes | string | - | Search query. |
@@ -72,19 +85,35 @@ Natural-language intent mapping:
 | `search` | `filters.time_to` or `time_to` | no | integer/string | - | Inclusive upper bound for source file `mtime_epoch`. |
 | `search` | `min_score` | no | float | `0` | Minimum retrieval score. |
 | `list_namespaces` | `action` | yes | string | - | Must be `list_namespaces`. |
+| `list_documents` | `namespace` | yes | string | - | Namespace whose documents should be listed. |
+| `remove_documents` | `namespace` | yes | string | - | Namespace to mutate. |
+| `remove_documents` | `paths` or `path` | yes | string[]/string | - | Recorded source paths to remove. |
+| `delete_namespace` | `namespace` | yes | string | - | Namespace to delete. |
+| `reindex` | `namespace` | yes | string | - | Existing namespace to rebuild from source paths. |
+| `resume_ingest` | `job_id` | yes | string | - | Persisted job returned by `ingest` or `reindex`. |
+| `ingest_job_status` | `job_id` | yes | string | - | Job to inspect. |
+| `cancel_ingest` | `job_id` | yes | string | - | Job to cancel. |
 | `stats` | `action` | yes | string | - | Must be `stats`. |
 | `stats` | `namespace` | no | string | - | Namespace to inspect; omit for global KB stats. |
 
 - `overwrite=true`: rebuild namespace from scratch
-- `overwrite=false`: incremental update by path + mtime + size
+- `overwrite=false`: incremental update by path + full content SHA-256 + parser/chunker version; mtime and size alone never prove identity
 - `paths` may be a single string or an array. Prefer `paths[]` in new plans; `path` exists only as a protocol compatibility alias for one source path.
-- per-doc metadata: `path`, `file_type`, `mtime_epoch`, `size`, `chunks`
-- per-chunk metadata: `chunk_id`, `offset`, `path`, `file_type`, `mtime_epoch`
+- per-doc metadata: `path`, `file_type`, `mtime_epoch`, `size`, `chunks`, `content_sha256`, `parser_version`, `chunker_version`
+- per-chunk metadata: `chunk_id`, `offset`, `path`, `file_type`, `mtime_epoch`, `text_sha256`
 - `ingest` prefers Markdown heading / paragraph boundaries when chunking, then falls back to bounded overlapping windows.
+- KB-owned manifests/checkpoints atomically commit each bounded batch with its next-file cursor, making restart/resume safe.
+- UTF-8 text/Markdown, normalized JSON, row-preserving CSV/TSV, and visible HTML text are supported; binary or invalid UTF-8 input is skipped with structured warnings.
+- Incomplete work returns `complete=false`, `job_status=waiting`, and a `resume_ingest` continuation with `job_id`.
 - `search` accepts filter fields either nested under `filters` or as top-level aliases; the nested value is checked first.
 - Successful `ingest` responses expose `stats.retrieval_index_synced` and
   `stats.retrieval_index_rows`; they never expose or mutate the main runtime
   database.
+- Search selects a bounded FTS5 candidate set before BM25 ranking and reports
+  `stats.retrieval_mode`, `total_candidates`, and `retrieval_candidates`.
+- Non-admin source paths are confined to the canonical workspace root. A
+  verified `unrestricted_admin` runner context may index absolute paths visible
+  to the RustClaw operating-system user; request arguments cannot grant this.
 
 ## Config Entry Points
 
@@ -92,12 +121,12 @@ Natural-language intent mapping:
   `[database].skill_data_root` in `configs/config.toml`; the default is
   `data/skills`.
 - The `kb` registry entry declares
-  `storage = { kind = "sqlite", schema_version = 1, migration_owner = "kb" }`.
+  `storage = { kind = "sqlite", schema_version = 3, migration_owner = "kb" }`.
 - `skill-runner` supplies the resolved `context.skill_storage` descriptor.
   Callers and the model must not invent a database path or reuse
   `[database].sqlite_path`.
 - Direct protocol tests must pass a descriptor whose `skill_name` is `kb`,
-  `storage_kind` is `sqlite`, and `schema_version` is `1`.
+  `storage_kind` is `sqlite`, and `schema_version` is `3`.
 - No third-party account, API key, or external database is required.
 
 ## Error Contract

@@ -530,16 +530,23 @@ fn contract_runtime_rejects_natural_language_evidence_profile() {
 
 #[test]
 fn configured_observation_extractors_must_exist_in_registry() {
-    let source = format!(
-        "{}\n[[generic_profiles.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
-        include_str!("../../../../configs/task_contract_matrix.toml")
-    );
-    let err = parse_contract_matrix_source(&source)
-        .expect_err("unregistered explicit extractor should fail validation");
+    let mut matrix = load_workspace_matrix();
+    let profile = matrix
+        .generic_profiles
+        .last_mut()
+        .expect("workspace matrix profile");
+    profile.observation_sources = vec!["missing_action".to_string()];
+    profile.observation_extractors = vec![ObservationExtractor {
+        source: "missing_action".to_string(),
+        extractor_kind: "structured_json".to_string(),
+    }];
 
-    assert!(err.contains("contract_validation.observation_extractor_registry_missing"));
-    assert!(err.contains("source=run_cmd"));
-    assert!(err.contains("extractor_kind=structured_json"));
+    let errors = matrix.validate_shape();
+    assert!(errors.iter().any(|error| {
+        error.contains("contract_validation.observation_extractor_registry_missing")
+            && error.contains("source=missing_action")
+            && error.contains("extractor_kind=structured_json")
+    }));
 }
 
 #[test]

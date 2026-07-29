@@ -210,7 +210,6 @@ fn error_extra(error_code: &str, retryable: bool, details: Option<&Value>) -> Va
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_code,
         "error_code": error_code,
         "message_key": format!(
             "skill.{}.{}",

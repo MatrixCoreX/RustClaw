@@ -377,7 +377,7 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
 }
 
 #[test]
-fn exact_observation_observation_source_defaults_to_text_legacy_extractor() {
+fn exact_observation_source_defaults_to_structured_json_extractor() {
     let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
         selection: crate::OutputSelectionContract {
@@ -393,7 +393,7 @@ fn exact_observation_observation_source_defaults_to_text_legacy_extractor() {
         .and_then(Value::as_array)
         .is_some_and(|items| items.iter().any(|item| {
             item.get("source").and_then(Value::as_str) == Some("run_cmd")
-                && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
+                && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
         })));
 }
 
@@ -412,9 +412,14 @@ fn archive_count_uses_structured_action_observation() {
         .get("observation_extractors")
         .and_then(Value::as_array)
         .expect("scalar observation extractors");
-    assert!(!scalar_extractors.iter().any(|item| {
-        item.get("source").and_then(Value::as_str) == Some("archive_basic")
-            && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
+    assert!(scalar_extractors.iter().any(|item| {
+        item.get("source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source.starts_with("archive_basic"))
+            && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
+    }));
+    assert!(scalar_extractors.iter().all(|item| {
+        item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
     }));
 
     let scalar_contract = IntentOutputContract {
@@ -514,7 +519,7 @@ fn action_trace_records_contract_decision_and_shape() {
 }
 
 #[test]
-fn action_trace_marks_run_cmd_extractor_as_text_legacy() {
+fn action_trace_marks_run_cmd_extractor_as_structured_json() {
     let trace = action_trace_for_output_contract(
         &IntentOutputContract {
             response_shape: crate::OutputResponseShape::Strict,
@@ -542,13 +547,13 @@ fn action_trace_marks_run_cmd_extractor_as_text_legacy() {
         trace
             .pointer("/observation_extractor/extractor_kind")
             .and_then(Value::as_str),
-        Some("text_legacy")
+        Some("structured_json")
     );
     assert_eq!(
         trace
             .pointer("/observation_extractor/registry/extractor_ref")
             .and_then(Value::as_str),
-        Some("run_cmd.text_legacy_v1")
+        Some("run_cmd.structured_json_v1")
     );
 }
 

@@ -4,7 +4,7 @@ fn observed_outputs_include_structured_run_cmd_error() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 128",
             "platform": "linux",
             "extra": {

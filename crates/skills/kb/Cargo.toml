@@ -13,6 +13,7 @@ anyhow.workspace = true
 claw-core = { path = "../../claw-core" }
 regex.workspace = true
 rusqlite.workspace = true
+rustclaw-skill-sdk = { path = "../../skill-sdk" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

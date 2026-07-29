@@ -12,3 +12,5 @@ path = "src/main.rs"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rustclaw-skill-sdk = { path = "../../skill-sdk" }
+tempfile = "3"

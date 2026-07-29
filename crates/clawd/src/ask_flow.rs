@@ -131,14 +131,9 @@ fn audio_failure_fields(error: &str) -> (String, String, bool) {
     let error_code = extra
         .and_then(|value| value.get("error_code"))
         .and_then(Value::as_str)
-        .or_else(|| {
-            extra
-                .and_then(|value| value.get("error_kind"))
-                .and_then(Value::as_str)
-        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(structured.error_kind.trim())
+        .unwrap_or(structured.error_code.trim())
         .to_string();
     let message_key = extra
         .and_then(|value| value.get("message_key"))

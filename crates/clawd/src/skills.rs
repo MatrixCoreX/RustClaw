@@ -137,6 +137,7 @@ pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
 }
 
 mod builtin;
+mod error_contract;
 mod memory_context;
 mod output_dirs;
 mod result_enrichment;
@@ -148,6 +149,12 @@ pub(crate) use builtin::run_safe_command;
 // `execute_builtin_skill`（无 task 版本）只在 `builtin.rs` 内部测试用，
 // 不再向 crate 外暴露，避免再产生绕过 LLM 预算/日志的调用点。
 // 详见 `builtin.rs` 上对 `execute_builtin_skill` 的注释。
+use error_contract::structured_skill_error_string;
+#[cfg(test)]
+use error_contract::STRUCTURED_SKILL_ERROR_PREFIX;
+pub(crate) use error_contract::{
+    parse_structured_skill_error, structured_skill_error_from_parts, StructuredSkillError,
+};
 pub(crate) use memory_context::inject_skill_memory_context;
 pub(crate) use output_dirs::ensure_default_output_dir_for_skill_args;
 use result_enrichment::enrich_runtime_owned_skill_extra;
@@ -159,7 +166,6 @@ use crate::{AppState, ClaimedTask, RuntimeChannel};
 const READ_FILE_NOT_FOUND_PREFIX: &str = "__RC_READ_FILE_NOT_FOUND__:";
 const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
-const STRUCTURED_SKILL_ERROR_PREFIX: &str = "__RC_SKILL_ERROR__:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyBlockError {
@@ -167,91 +173,6 @@ pub(crate) struct PolicyBlockError {
     pub(crate) reason_code: String,
     pub(crate) observed_facts: Vec<String>,
     pub(crate) policy_boundary: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct StructuredSkillError {
-    pub(crate) skill: String,
-    pub(crate) error_kind: String,
-    pub(crate) error_text: String,
-    pub(crate) platform: Option<String>,
-    pub(crate) manager_type: Option<String>,
-    pub(crate) service_name: Option<String>,
-    pub(crate) extra: Option<Value>,
-}
-
-fn string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-}
-
-fn child_extra_object(value: &Value) -> Option<&Value> {
-    value.get("extra").filter(|extra| extra.is_object())
-}
-
-fn structured_skill_error_string(skill: &str, value: &Value) -> String {
-    let extra_object = child_extra_object(value);
-    let error_kind = string_field(value, "error_kind")
-        .or_else(|| extra_object.and_then(|extra| string_field(extra, "error_kind")))
-        .or_else(|| string_field(value, "error_code"))
-        .or_else(|| extra_object.and_then(|extra| string_field(extra, "error_code")))
-        .unwrap_or_else(|| "unknown".to_string());
-    let error_text = string_field(value, "error_text")
-        .or_else(|| extra_object.and_then(|extra| string_field(extra, "failure_reason")))
-        .unwrap_or_else(|| "skill execution failed".to_string());
-    let payload = json!({
-        "skill": skill.trim(),
-        "error_kind": error_kind,
-        "error_text": error_text,
-        "platform": string_field(value, "platform")
-            .or_else(|| extra_object.and_then(|extra| string_field(extra, "platform"))),
-        "manager_type": extra_object.and_then(|extra| string_field(extra, "manager_type")),
-        "service_name": extra_object.and_then(|extra| string_field(extra, "service_name")),
-        "extra": value.get("extra").cloned().unwrap_or(Value::Null),
-        "text": Value::Null,
-    });
-    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
-    format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
-}
-
-pub(crate) fn structured_skill_error_from_parts(
-    skill: &str,
-    error_kind: &str,
-    error_text: &str,
-    platform: Option<&str>,
-    extra: Option<Value>,
-) -> String {
-    let payload = json!({
-        "skill": skill.trim(),
-        "error_kind": error_kind,
-        "error_text": error_text,
-        "platform": platform,
-        "extra": extra.unwrap_or(Value::Null),
-        "text": Value::Null,
-    });
-    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
-    format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
-}
-
-pub(crate) fn parse_structured_skill_error(err: &str) -> Option<StructuredSkillError> {
-    let payload = err.trim().strip_prefix(STRUCTURED_SKILL_ERROR_PREFIX)?;
-    let value = serde_json::from_str::<Value>(payload).ok()?;
-    let error_kind = string_field(&value, "error_kind").unwrap_or_else(|| "unknown".to_string());
-    let error_text =
-        string_field(&value, "error_text").unwrap_or_else(|| "skill execution failed".to_string());
-    Some(StructuredSkillError {
-        skill: string_field(&value, "skill").unwrap_or_default(),
-        error_kind,
-        error_text,
-        platform: string_field(&value, "platform"),
-        manager_type: string_field(&value, "manager_type"),
-        service_name: string_field(&value, "service_name"),
-        extra: value.get("extra").cloned().filter(|value| !value.is_null()),
-    })
 }
 
 fn structured_extra_value<'a>(
@@ -446,13 +367,10 @@ fn parse_crypto_account_access_error(err: &str) -> Option<(String, String)> {
 fn crypto_account_access_error_from_structured_extra(
     structured: &StructuredSkillError,
 ) -> Option<(String, String)> {
-    let extra_kind = structured_extra_string(structured, "error_kind");
     let message_key = structured_extra_string(structured, "message_key");
-    let structured_kind = structured.error_kind.trim();
+    let structured_kind = structured.error_code.trim();
     let is_account_access = structured_kind == "account_access_failed"
         || structured_kind == "crypto_account_access_failed"
-        || extra_kind.as_deref() == Some("account_access_failed")
-        || extra_kind.as_deref() == Some("crypto_account_access_failed")
         || message_key.as_deref() == Some("crypto.err.account_access_failed");
     if !is_account_access {
         return None;
@@ -514,11 +432,10 @@ fn crypto_recoverable_i18n_error_from_structured(
     if !is_crypto_recoverable_i18n_message_key(&message_key) {
         return None;
     }
-    let error_kind = structured_extra_string(structured, "error_kind")
-        .unwrap_or_else(|| structured.error_kind.trim().to_string());
+    let error_code = structured.error_code.trim().to_string();
     let exchange = structured_extra_string(structured, "exchange").unwrap_or_default();
     let action = structured_extra_string(structured, "action").unwrap_or_default();
-    Some((message_key, error_kind, exchange, action))
+    Some((message_key, error_code, exchange, action))
 }
 
 pub(crate) fn policy_block_default_text(
@@ -837,7 +754,7 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
             effective_skill,
             &["system_basic", "read_file", "list_dir"],
         ) && matches!(
-            structured.error_kind.as_str(),
+            structured.error_code.as_str(),
             "not_found"
                 | "permission_denied"
                 | "not_a_directory"
@@ -874,7 +791,7 @@ pub(crate) fn is_missing_target_skill_error(skill_name: &str, err: &str) -> bool
         return matches_ignore_ascii_case(
             effective_skill,
             &["system_basic", "read_file", "list_dir"],
-        ) && structured.error_kind == "not_found";
+        ) && structured.error_code == "not_found";
     }
     skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX)
 }
@@ -906,7 +823,7 @@ pub(crate) fn skill_error_machine_observation(skill_name: &str, err: &str) -> Op
                 "message_key": "clawd.msg.skill.error_observation",
                 "reason_code": "read_file_not_found",
                 "skill": if skill_name.trim().is_empty() { "read_file" } else { skill_name.trim() },
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "path": path,
             })
             .to_string(),
@@ -918,7 +835,7 @@ pub(crate) fn skill_error_machine_observation(skill_name: &str, err: &str) -> Op
                 "message_key": "crypto.err.account_access_failed",
                 "reason_code": "crypto_account_access_failed",
                 "skill": if skill_name.trim().is_empty() { "crypto" } else { skill_name.trim() },
-                "error_kind": "account_access_failed",
+                "error_code": "account_access_failed",
                 "exchange": exchange,
                 "detail": detail,
             })
@@ -943,7 +860,7 @@ fn structured_skill_error_machine_observation(
         "message_key": "clawd.msg.skill.error_observation",
         "reason_code": "structured_skill_error",
         "skill": effective_skill,
-        "error_kind": structured.error_kind.trim(),
+        "error_code": structured.error_code.trim(),
         "platform": structured.platform,
         "manager_type": structured.manager_type,
         "service_name": structured.service_name,
@@ -981,7 +898,7 @@ pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
     };
     effective_skill.eq_ignore_ascii_case("run_cmd")
         && matches!(
-            structured.error_kind.as_str(),
+            structured.error_code.as_str(),
             "nonzero_exit"
                 | "timeout"
                 | "idle_timeout"
@@ -994,7 +911,7 @@ pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
 
 pub(crate) fn error_looks_like_os_permission_denied(error: &str) -> bool {
     parse_structured_skill_error(error)
-        .is_some_and(|structured| structured.error_kind == "permission_denied")
+        .is_some_and(|structured| structured.error_code == "permission_denied")
 }
 
 fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {

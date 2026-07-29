@@ -42,7 +42,7 @@ struct SkillResponse {
     text: String,
     buttons: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_kind: Option<String>,
+    error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     platform: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,7 +59,8 @@ struct ChildSkillResponse {
     status: Option<String>,
     text: Option<String>,
     buttons: Option<Value>,
-    error_kind: Option<String>,
+    #[serde(alias = "error_kind")]
+    error_code: Option<String>,
     platform: Option<String>,
     exit_code: Option<i32>,
     validation: Option<Value>,
@@ -129,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 buttons: None,
-                error_kind: Some("invalid_input".to_string()),
+                error_code: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
                 exit_code: None,
                 validation: None,
@@ -166,7 +167,7 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                 status: "error".to_string(),
                 text: String::new(),
                 buttons: None,
-                error_kind: Some("runner_resolution_failed".to_string()),
+                error_code: Some("runner_resolution_failed".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
                 exit_code: None,
                 validation: None,
@@ -204,7 +205,7 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                     status: v.status.unwrap_or_else(|| "ok".to_string()),
                     text: v.text.unwrap_or_default(),
                     buttons: v.buttons,
-                    error_kind: v.error_kind,
+                    error_code: v.error_code,
                     platform: v.platform,
                     exit_code: v.exit_code,
                     validation: v.validation,
@@ -216,7 +217,7 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                     status: "error".to_string(),
                     text: String::new(),
                     buttons: None,
-                    error_kind: Some(err.error_code.clone()),
+                    error_code: Some(err.error_code.clone()),
                     platform: Some(std::env::consts::OS.to_string()),
                     exit_code: None,
                     validation: None,
@@ -237,7 +238,7 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
             status: "error".to_string(),
             text: String::new(),
             buttons: None,
-            error_kind: Some(err.error_code.to_string()),
+            error_code: Some(err.error_code.to_string()),
             platform: Some(std::env::consts::OS.to_string()),
             exit_code: err.exit_code,
             validation: None,
@@ -371,7 +372,7 @@ fn protocol_response_to_child(response: ProtocolResponse) -> ChildSkillResponse 
         ),
         text: Some(response.text),
         buttons: response.buttons,
-        error_kind: response.error_kind.or_else(|| {
+        error_code: response.error_code.or_else(|| {
             response
                 .extra
                 .as_ref()

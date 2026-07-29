@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Context, Result};
+use rustclaw_skill_sdk::SkillPathPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -11,10 +13,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const DEFAULT_CHUNK_SIZE: usize = 1200;
 const DEFAULT_CHUNK_OVERLAP: usize = 180;
 const DEFAULT_TOP_K: usize = 5;
-const DEFAULT_MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
 const SKILL_NAME: &str = "kb";
 
+mod ingest;
+mod ingest_extract;
+mod ingest_scan;
 mod storage;
+
+#[cfg(test)]
+use ingest::parse_ingest_args;
+use ingest::{
+    do_cancel_ingest, do_ingest, do_ingest_job_status, do_reindex, do_resume_ingest,
+    parse_ingest_paths,
+};
+#[cfg(test)]
+use ingest_scan::build_scan_targets;
 
 #[derive(Debug, Deserialize)]
 struct SkillRequest {
@@ -22,23 +35,13 @@ struct SkillRequest {
     #[serde(default)]
     args: Value,
     #[serde(default)]
-    context: Option<SkillContext>,
+    context: Option<Value>,
     #[serde(default)]
     user_id: i64,
     #[serde(default)]
     chat_id: i64,
     #[serde(default)]
     user_key: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct SkillContext {
-    #[serde(default)]
-    user_key: Option<String>,
-    #[serde(default)]
-    workspace_root: Option<String>,
-    #[serde(default)]
-    skill_storage: Option<SkillStorageContext>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +68,7 @@ struct KbRuntime {
     workspace_root: PathBuf,
     storage_database_path: PathBuf,
     storage_busy_timeout_ms: u64,
+    path_policy: SkillPathPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +78,12 @@ struct DocMeta {
     mtime_epoch: i64,
     size: u64,
     chunks: usize,
+    #[serde(default)]
+    content_sha256: String,
+    #[serde(default = "default_parser_version")]
+    parser_version: String,
+    #[serde(default = "default_chunker_version")]
+    chunker_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +95,8 @@ struct Chunk {
     text: String,
     len_tokens: usize,
     mtime_epoch: i64,
+    #[serde(default)]
+    text_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -94,19 +106,16 @@ struct NamespaceIndex {
     owner_user_key: String,
     updated_at_epoch: i64,
     next_chunk_seq: u64,
+    #[serde(default)]
+    revision: u64,
+    #[serde(default = "default_parser_version")]
+    parser_version: String,
+    #[serde(default = "default_chunker_version")]
+    chunker_version: String,
+    #[serde(default = "default_embedding_version")]
+    embedding_version: String,
     docs: HashMap<String, DocMeta>, // key: path
     chunks: Vec<Chunk>,
-}
-
-#[derive(Debug, Clone)]
-struct IngestArgs {
-    namespace: String,
-    paths: Vec<String>,
-    chunk_size: usize,
-    chunk_overlap: usize,
-    overwrite: bool,
-    file_types: HashSet<String>,
-    max_file_size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -174,9 +183,16 @@ fn execute_request(req: SkillRequest) -> SkillResponse {
         "ingest" => do_ingest(&runtime, &req.args),
         "search" => do_search(&runtime, &req.args),
         "list_namespaces" => do_list_namespaces(&runtime),
+        "list_documents" => do_list_documents(&runtime, &req.args),
+        "remove_documents" => do_remove_documents(&runtime, &req.args),
+        "delete_namespace" => do_delete_namespace(&runtime, &req.args),
+        "reindex" => do_reindex(&runtime, &req.args),
+        "resume_ingest" => do_resume_ingest(&runtime, &req.args),
+        "ingest_job_status" => do_ingest_job_status(&runtime, &req.args),
+        "cancel_ingest" => do_cancel_ingest(&runtime, &req.args),
         "stats" => do_stats(&runtime, &req.args),
         _ => Err(anyhow!(
-            "action must be ingest|search|list_namespaces|stats"
+            "action must be ingest|search|list_namespaces|list_documents|remove_documents|delete_namespace|reindex|resume_ingest|ingest_job_status|cancel_ingest|stats"
         )),
     });
     match result {
@@ -202,7 +218,6 @@ fn error_extra(error_kind: &str) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -213,7 +228,12 @@ fn build_runtime_context(req: &SkillRequest) -> Result<KbRuntime> {
     let scope_user_key = req
         .user_key
         .as_deref()
-        .or_else(|| req.context.as_ref().and_then(|ctx| ctx.user_key.as_deref()))
+        .or_else(|| {
+            req.context
+                .as_ref()
+                .and_then(|ctx| ctx.get("user_key"))
+                .and_then(Value::as_str)
+        })
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
@@ -221,258 +241,40 @@ fn build_runtime_context(req: &SkillRequest) -> Result<KbRuntime> {
     let workspace_root = req
         .context
         .as_ref()
-        .and_then(|ctx| ctx.workspace_root.as_deref())
+        .and_then(|ctx| ctx.get("workspace_root"))
+        .and_then(Value::as_str)
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .unwrap_or_else(workspace_root);
     let storage = req
         .context
         .as_ref()
-        .and_then(|context| context.skill_storage.as_ref())
+        .and_then(|context| context.get("skill_storage"))
+        .cloned()
         .ok_or_else(|| anyhow!("KB skill storage descriptor is required"))?;
-    if storage.schema_version != 1
+    let storage: SkillStorageContext =
+        serde_json::from_value(storage).context("KB skill storage descriptor is malformed")?;
+    if storage.schema_version != 3
         || storage.skill_name != SKILL_NAME
         || storage.storage_kind != "sqlite"
     {
         return Err(anyhow!("KB skill storage descriptor is invalid"));
     }
+    let path_policy = SkillPathPolicy::new(&workspace_root, req.context.as_ref())
+        .map_err(|error| anyhow!("{}: {}", error.code, error.detail))?;
     let runtime = KbRuntime {
         scope_user_key,
         workspace_root,
         storage_database_path: PathBuf::from(&storage.database_path),
         storage_busy_timeout_ms: storage.database_busy_timeout_ms.max(1),
+        path_policy,
     };
     storage::initialize(&runtime)?;
     Ok(runtime)
 }
 
-fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
-    let ingest = parse_ingest_args(args)?;
-    let scan_targets = build_scan_targets(runtime, &ingest.paths)?;
-    let mut index = if ingest.overwrite {
-        NamespaceIndex {
-            namespace: ingest.namespace.clone(),
-            owner_user_key: runtime.scope_user_key.clone(),
-            updated_at_epoch: now_epoch(),
-            next_chunk_seq: 1,
-            docs: HashMap::new(),
-            chunks: vec![],
-        }
-    } else {
-        if storage::namespace_exists(runtime, &ingest.namespace)? {
-            storage::load_namespace(runtime, &ingest.namespace)?
-        } else {
-            NamespaceIndex {
-                namespace: ingest.namespace.clone(),
-                owner_user_key: runtime.scope_user_key.clone(),
-                updated_at_epoch: now_epoch(),
-                next_chunk_seq: 1,
-                docs: HashMap::new(),
-                chunks: vec![],
-            }
-        }
-    };
-    index.owner_user_key = runtime.scope_user_key.clone();
-
-    let all_files = collect_target_files(&scan_targets)?;
-    let current_paths = all_files
-        .iter()
-        .map(|path| storage_path_for(path, &runtime.workspace_root))
-        .collect::<HashSet<_>>();
-
-    let mut warnings = vec![];
-    let mut ingested_docs = 0usize;
-    let mut skipped_files = 0usize;
-    let mut removed_docs = 0usize;
-
-    for file in all_files {
-        let meta =
-            fs::metadata(&file).with_context(|| format!("stat failed: {}", file.display()))?;
-        if !meta.is_file() {
-            continue;
-        }
-        let size = meta.len();
-        let file_type = file
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if !ingest.file_types.is_empty() && !ingest.file_types.contains(&file_type) {
-            skipped_files += 1;
-            continue;
-        }
-        if size > ingest.max_file_size {
-            skipped_files += 1;
-            warnings.push(format!(
-                "skip large file {} ({} bytes > max_file_size {})",
-                file.display(),
-                size,
-                ingest.max_file_size
-            ));
-            continue;
-        }
-
-        let path_str = storage_path_for(&file, &runtime.workspace_root);
-        let legacy_absolute_path = normalize_path_string(&file);
-        let mtime = mtime_epoch(&meta);
-        let unchanged = index
-            .docs
-            .get(&path_str)
-            .or_else(|| index.docs.get(&legacy_absolute_path))
-            .map(|d| d.mtime_epoch == mtime && d.size == size)
-            .unwrap_or(false);
-        if unchanged && !ingest.overwrite {
-            continue;
-        }
-
-        let before =
-            index.docs.contains_key(&path_str) || index.docs.contains_key(&legacy_absolute_path);
-        remove_doc_from_index(&mut index, &path_str);
-        if legacy_absolute_path != path_str {
-            remove_doc_from_index(&mut index, &legacy_absolute_path);
-        }
-        if before {
-            removed_docs += 1;
-        }
-
-        let text = read_text_lossy(&file)?;
-        if text.trim().is_empty() {
-            skipped_files += 1;
-            warnings.push(format!("skip empty text file {}", path_str));
-            continue;
-        }
-        let chunks = split_chunks(&text, ingest.chunk_size, ingest.chunk_overlap);
-        let mut chunk_count = 0usize;
-        for (offset, chunk_text) in chunks.into_iter().enumerate() {
-            let chunk_id = format!("{}-{}", ingest.namespace, index.next_chunk_seq);
-            index.next_chunk_seq += 1;
-            let len_tokens = tokenize(&chunk_text).len();
-            index.chunks.push(Chunk {
-                chunk_id,
-                path: path_str.clone(),
-                file_type: file_type.clone(),
-                offset,
-                text: chunk_text,
-                len_tokens,
-                mtime_epoch: mtime,
-            });
-            chunk_count += 1;
-        }
-        index.docs.insert(
-            path_str.clone(),
-            DocMeta {
-                path: path_str,
-                file_type,
-                mtime_epoch: mtime,
-                size,
-                chunks: chunk_count,
-            },
-        );
-        ingested_docs += 1;
-    }
-
-    if !ingest.overwrite {
-        let stale_paths = index
-            .docs
-            .keys()
-            .filter(|path| {
-                !current_paths.contains(*path)
-                    && path_matches_any_scan_target(Path::new(path), &scan_targets)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        for path in stale_paths {
-            remove_doc_from_index(&mut index, &path);
-            removed_docs += 1;
-        }
-    }
-
-    index.updated_at_epoch = now_epoch();
-    storage::save_namespace(runtime, &index)?;
-    let (retrieval_index_synced, retrieval_index_rows) =
-        match storage::sync_namespace_to_index(runtime, &index) {
-            Ok(row_count) => (true, row_count),
-            Err(err) => {
-                warnings.push(format!("skill-owned retrieval index sync failed: {err}"));
-                return Err(anyhow!(warnings.join("; ")));
-            }
-        };
-    let total_docs = index.docs.len();
-    let total_chunks = index.chunks.len();
-    let warnings_empty = warnings.is_empty();
-    let effective_success = kb_ingest_effective_success(
-        ingested_docs,
-        total_docs,
-        retrieval_index_synced,
-        warnings_empty,
-    );
-    let idempotent_success = ingested_docs == 0 && effective_success;
-    let result_kind = kb_ingest_result_kind(
-        ingested_docs,
-        total_docs,
-        retrieval_index_synced,
-        retrieval_index_rows,
-        warnings_empty,
-    );
-
-    Ok(json!({
-        "action": "ingest",
-        "status":"ok",
-        "effective_status": if effective_success { "ok" } else { "needs_attention" },
-        "result_kind": result_kind,
-        "effective_success": effective_success,
-        "idempotent_success": idempotent_success,
-        "namespace": ingest.namespace,
-        "path": ingest.paths.first().cloned().unwrap_or_default(),
-        "paths": ingest.paths,
-        "summary": result_kind,
-        "stats": {
-            "ingested_docs": ingested_docs,
-            "removed_docs": removed_docs,
-            "total_docs": total_docs,
-            "total_chunks": total_chunks,
-            "skipped_files": skipped_files,
-            "chunk_size": ingest.chunk_size,
-            "chunk_overlap": ingest.chunk_overlap,
-            "retrieval_index_synced": retrieval_index_synced,
-            "retrieval_index_rows": retrieval_index_rows,
-            "warnings": warnings
-        }
-    }))
-}
-
-fn kb_ingest_effective_success(
-    ingested_docs: usize,
-    total_docs: usize,
-    retrieval_index_synced: bool,
-    warnings_empty: bool,
-) -> bool {
-    warnings_empty && retrieval_index_synced && (ingested_docs > 0 || total_docs > 0)
-}
-
-fn kb_ingest_result_kind(
-    ingested_docs: usize,
-    total_docs: usize,
-    retrieval_index_synced: bool,
-    retrieval_index_rows: usize,
-    warnings_empty: bool,
-) -> &'static str {
-    if ingested_docs > 0 {
-        "updated"
-    } else if warnings_empty && total_docs > 0 && retrieval_index_synced && retrieval_index_rows > 0
-    {
-        "already_indexed"
-    } else if total_docs > 0 {
-        "no_new_documents"
-    } else {
-        "no_documents_indexed"
-    }
-}
-
 fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let s = parse_search_args(args)?;
-    let index = storage::load_namespace(runtime, &s.namespace)
-        .map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
     if s.query.trim().is_empty() {
         return Err(anyhow!("query is required"));
     }
@@ -482,6 +284,16 @@ fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             json!({"status":"ok","hits":[],"summary":"no effective query terms","stats":{"total_candidates":0}}),
         );
     }
+    let candidates = storage::load_search_candidates(
+        runtime,
+        &s.namespace,
+        &q_terms,
+        s.top_k.saturating_mul(64).max(256),
+    )
+    .map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
+    let index = candidates.index;
+    let total_chunks = candidates.total_chunks;
+    let retrieval_mode = candidates.retrieval_mode;
 
     let normalized_path_prefix = s
         .path_prefix
@@ -504,9 +316,20 @@ fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let after_filters = filtered_chunks.len();
     let n_docs = filtered_chunks.len() as f64;
     if n_docs <= 0.0 {
-        return Ok(
-            json!({"status":"ok","hits":[],"summary":"no matching chunks under filters","stats":{"total_candidates":0}}),
-        );
+        return Ok(json!({
+            "action": "search",
+            "status":"ok",
+            "namespace": s.namespace,
+            "namespace_revision": index.revision,
+            "hits":[],
+            "summary":"no matching chunks under filters",
+            "stats":{
+                "total_candidates": total_chunks,
+                "retrieval_candidates": index.chunks.len(),
+                "after_filters": 0,
+                "retrieval_mode": retrieval_mode,
+            }
+        }));
     }
 
     let avgdl = filtered_chunks
@@ -579,13 +402,19 @@ fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         "action": "search",
         "status":"ok",
         "namespace": s.namespace,
+        "namespace_revision": index.revision,
+        "parser_version": index.parser_version,
+        "chunker_version": index.chunker_version,
+        "embedding_version": index.embedding_version,
         "hits": hits,
         "summary": format!("found {} hit(s) for query", hits.len()),
         "stats": {
-            "total_candidates": index.chunks.len(),
+            "total_candidates": total_chunks,
+            "retrieval_candidates": index.chunks.len(),
             "after_filters": after_filters,
             "returned_hits": hits.len(),
-            "top_k": s.top_k
+            "top_k": s.top_k,
+            "retrieval_mode": retrieval_mode
         }
     }))
 }
@@ -598,6 +427,10 @@ fn do_list_namespaces(runtime: &KbRuntime) -> Result<Value> {
             "docs": index.docs.len(),
             "chunks": index.chunks.len(),
             "updated_at_epoch": index.updated_at_epoch,
+            "namespace_revision": index.revision,
+            "parser_version": index.parser_version,
+            "chunker_version": index.chunker_version,
+            "embedding_version": index.embedding_version,
             "storage_kind": "sqlite"
         }));
     }
@@ -624,6 +457,90 @@ fn do_list_namespaces(runtime: &KbRuntime) -> Result<Value> {
     }))
 }
 
+fn do_list_documents(runtime: &KbRuntime, args: &Value) -> Result<Value> {
+    let namespace = required_namespace(args, "list_documents")?;
+    let index = storage::load_namespace(runtime, &namespace)
+        .map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
+    let mut documents = index
+        .docs
+        .values()
+        .map(|doc| {
+            json!({
+                "path": doc.path,
+                "file_type": doc.file_type,
+                "mtime_epoch": doc.mtime_epoch,
+                "size": doc.size,
+                "chunk_count": doc.chunks,
+                "content_sha256": doc.content_sha256,
+                "parser_version": doc.parser_version,
+                "chunker_version": doc.chunker_version,
+            })
+        })
+        .collect::<Vec<_>>();
+    documents.sort_by(|left, right| {
+        left.get("path")
+            .and_then(Value::as_str)
+            .cmp(&right.get("path").and_then(Value::as_str))
+    });
+    let document_count = documents.len();
+    Ok(json!({
+        "action": "list_documents",
+        "status": "ok",
+        "namespace": namespace,
+        "namespace_revision": index.revision,
+        "documents": documents,
+        "document_count": document_count,
+        "chunk_count": index.chunks.len(),
+        "summary": format!("found {} document(s)", document_count),
+    }))
+}
+
+fn do_remove_documents(runtime: &KbRuntime, args: &Value) -> Result<Value> {
+    let namespace = required_namespace(args, "remove_documents")?;
+    let requested = parse_ingest_paths(args)?;
+    let mut index = storage::load_namespace(runtime, &namespace)
+        .map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
+    let mut removed_paths = Vec::new();
+    let mut missing_paths = Vec::new();
+    for path in requested {
+        let normalized = normalize_managed_document_path(&runtime.workspace_root, &path)?;
+        if index.docs.contains_key(&normalized) {
+            remove_doc_from_index(&mut index, &normalized);
+            removed_paths.push(normalized);
+        } else {
+            missing_paths.push(normalized);
+        }
+    }
+    index.updated_at_epoch = now_epoch();
+    let persisted = storage::save_namespace(runtime, &index)?;
+    let removed_count = removed_paths.len();
+    Ok(json!({
+        "action": "remove_documents",
+        "status": "ok",
+        "namespace": namespace,
+        "namespace_revision": persisted.revision,
+        "removed_paths": removed_paths,
+        "removed_count": removed_count,
+        "missing_paths": missing_paths,
+        "remaining_documents": persisted.total_docs,
+        "remaining_chunks": persisted.total_chunks,
+        "idempotent_success": removed_count == 0,
+    }))
+}
+
+fn do_delete_namespace(runtime: &KbRuntime, args: &Value) -> Result<Value> {
+    let namespace = required_namespace(args, "delete_namespace")?;
+    let removed = storage::delete_namespace(runtime, &namespace)?;
+    Ok(json!({
+        "action": "delete_namespace",
+        "status": "ok",
+        "namespace": namespace,
+        "deleted": true,
+        "removed_documents": removed.removed_docs,
+        "removed_chunks": removed.removed_chunks,
+    }))
+}
+
 fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let stats = parse_stats_args(args)?;
     if let Some(namespace) = stats.namespace {
@@ -645,6 +562,10 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             "namespace": namespace,
             "document_count": document_count,
             "chunk_count": chunk_count,
+            "namespace_revision": index.revision,
+            "parser_version": index.parser_version,
+            "chunker_version": index.chunker_version,
+            "embedding_version": index.embedding_version,
             "stats": {
                 "docs": document_count,
                 "chunks": chunk_count,
@@ -671,90 +592,6 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         },
         "summary": format!("{} namespace(s) available", count)
     }))
-}
-
-fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
-    let namespace = args
-        .get("namespace")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("ingest requires namespace"))?
-        .trim()
-        .to_string();
-    if namespace.is_empty() {
-        return Err(anyhow!("ingest requires namespace"));
-    }
-    let paths = parse_ingest_paths(args)?;
-    if paths.is_empty() {
-        return Err(anyhow!("paths[] must not be empty"));
-    }
-    let chunk_size = args
-        .get("chunk_size")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(DEFAULT_CHUNK_SIZE)
-        .clamp(200, 8000);
-    let chunk_overlap = args
-        .get("chunk_overlap")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(DEFAULT_CHUNK_OVERLAP)
-        .min(chunk_size / 3)
-        .min(400);
-    let overwrite = args
-        .get("overwrite")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let file_types = args
-        .get("file_types")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(|s| s.trim_start_matches('.').to_ascii_lowercase())
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
-    let max_file_size = args
-        .get("max_file_size")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_MAX_FILE_SIZE);
-    Ok(IngestArgs {
-        namespace,
-        paths,
-        chunk_size,
-        chunk_overlap,
-        overwrite,
-        file_types,
-        max_file_size,
-    })
-}
-
-fn parse_ingest_paths(args: &Value) -> Result<Vec<String>> {
-    let mut paths = match args.get("paths") {
-        Some(Value::Array(arr)) => arr
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-        Some(Value::String(path)) if !path.trim().is_empty() => vec![path.trim().to_string()],
-        _ => Vec::new(),
-    };
-    if paths.is_empty() {
-        if let Some(path) = args
-            .get("path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            paths.push(path.to_string());
-        }
-    }
-    if paths.is_empty() {
-        return Err(anyhow!("ingest requires paths[]"));
-    }
-    Ok(paths)
 }
 
 fn parse_search_args(args: &Value) -> Result<SearchArgs> {
@@ -820,6 +657,35 @@ fn parse_stats_args(args: &Value) -> Result<StatsArgs> {
     Ok(StatsArgs { namespace })
 }
 
+fn required_namespace(args: &Value, action: &str) -> Result<String> {
+    args.get("namespace")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|namespace| !namespace.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{action} requires namespace"))
+}
+
+fn normalize_managed_document_path(workspace_root: &Path, raw: &str) -> Result<String> {
+    let path = Path::new(raw.trim());
+    if raw.trim().is_empty()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(anyhow!("managed document path is invalid"));
+    }
+    Ok(if path.is_absolute() {
+        storage_path_for(path, workspace_root)
+    } else {
+        normalize_path_string(path)
+    })
+}
+
+fn parse_chunker_setting(version: &str, index: usize) -> Option<usize> {
+    version.split(':').nth(index)?.parse().ok()
+}
+
 fn pass_filters(
     c: &Chunk,
     path_prefix: Option<&str>,
@@ -873,102 +739,6 @@ fn term_freq(text: &str) -> HashMap<String, usize> {
 
 fn tokenize(text: &str) -> Vec<String> {
     tokenize_terms(text)
-}
-
-#[derive(Debug, Clone)]
-struct ScanTarget {
-    root: PathBuf,
-    is_file: bool,
-    storage_prefix: String,
-}
-
-fn build_scan_targets(runtime: &KbRuntime, raw_paths: &[String]) -> Result<Vec<ScanTarget>> {
-    let mut out = Vec::new();
-    for raw in raw_paths {
-        let resolved = resolve_input_path(&runtime.workspace_root, raw);
-        let canonical = fs::canonicalize(&resolved)
-            .with_context(|| format!("path not found: {}", resolved.display()))?;
-        let meta = fs::metadata(&canonical)
-            .with_context(|| format!("stat failed: {}", canonical.display()))?;
-        let storage_prefix = storage_path_for(&canonical, &runtime.workspace_root);
-        out.push(ScanTarget {
-            root: canonical,
-            is_file: meta.is_file(),
-            storage_prefix,
-        });
-    }
-    Ok(out)
-}
-
-fn collect_target_files(targets: &[ScanTarget]) -> Result<Vec<PathBuf>> {
-    let mut seen = HashSet::new();
-    let mut visited_dirs = HashSet::new();
-    let mut out = Vec::new();
-    for target in targets {
-        collect_files(&target.root, &mut out, &mut seen, &mut visited_dirs)?;
-    }
-    out.sort();
-    Ok(out)
-}
-
-fn collect_files(
-    path: &Path,
-    out: &mut Vec<PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-    visited_dirs: &mut HashSet<PathBuf>,
-) -> Result<()> {
-    if !path.exists() {
-        return Err(anyhow!("path not found: {}", path.display()));
-    }
-    if path.is_file() {
-        let canonical = fs::canonicalize(path)
-            .with_context(|| format!("canonicalize failed: {}", path.display()))?;
-        if seen.insert(canonical.clone()) {
-            out.push(canonical);
-        }
-        return Ok(());
-    }
-    let canonical_dir = fs::canonicalize(path)
-        .with_context(|| format!("canonicalize failed: {}", path.display()))?;
-    if !visited_dirs.insert(canonical_dir) {
-        return Ok(());
-    }
-    for ent in fs::read_dir(path).with_context(|| format!("read_dir failed: {}", path.display()))? {
-        let ent = ent?;
-        let p = ent.path();
-        if p.is_dir() {
-            collect_files(&p, out, seen, visited_dirs)?;
-        } else if p.is_file() {
-            let canonical = fs::canonicalize(&p)
-                .with_context(|| format!("canonicalize failed: {}", p.display()))?;
-            if seen.insert(canonical.clone()) {
-                out.push(canonical);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn path_matches_any_scan_target(path: &Path, targets: &[ScanTarget]) -> bool {
-    let stored = normalize_path_string(path);
-    targets.iter().any(|target| {
-        let absolute_match = if target.is_file {
-            path == target.root
-        } else {
-            path.starts_with(&target.root)
-        };
-        if absolute_match {
-            return true;
-        }
-        if target.is_file {
-            return stored == target.storage_prefix;
-        }
-        if target.storage_prefix.is_empty() {
-            return !Path::new(path).is_absolute();
-        }
-        stored == target.storage_prefix
-            || stored.starts_with(&format!("{}/", target.storage_prefix))
-    })
 }
 
 fn split_chunks(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String> {
@@ -1047,16 +817,20 @@ fn tail_chars(text: &str, keep: usize) -> String {
         .to_string()
 }
 
-fn read_text_lossy(path: &Path) -> Result<String> {
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let text = String::from_utf8(bytes.clone())
-        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
-    Ok(text)
-}
-
 fn remove_doc_from_index(index: &mut NamespaceIndex, path: &str) {
     index.docs.remove(path);
     index.chunks.retain(|c| c.path != path);
+}
+
+fn document_is_current(
+    doc: &DocMeta,
+    content_sha256: &str,
+    parser_version: &str,
+    chunker_version: &str,
+) -> bool {
+    doc.content_sha256 == content_sha256
+        && doc.parser_version == parser_version
+        && doc.chunker_version == chunker_version
 }
 
 fn now_epoch() -> i64 {
@@ -1113,15 +887,6 @@ fn tokenize_terms(text: &str) -> Vec<String> {
     out
 }
 
-fn resolve_input_path(workspace_root: &Path, raw: &str) -> PathBuf {
-    let path = PathBuf::from(raw);
-    if path.is_absolute() {
-        path
-    } else {
-        workspace_root.join(path)
-    }
-}
-
 fn storage_path_for(path: &Path, workspace_root: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(workspace_root) {
         return normalize_path_string(rel);
@@ -1158,6 +923,26 @@ fn workspace_root() -> PathBuf {
     }
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     find_workspace_root(&cwd).unwrap_or(cwd)
+}
+
+fn default_parser_version() -> String {
+    "typed-content-v2".to_string()
+}
+
+fn default_chunker_version() -> String {
+    chunker_version(DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
+}
+
+fn chunker_version(chunk_size: usize, chunk_overlap: usize) -> String {
+    format!("heading-window-v1:{chunk_size}:{chunk_overlap}")
+}
+
+fn default_embedding_version() -> String {
+    "local-hash-v1".to_string()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 #[cfg(test)]

@@ -1,9 +1,11 @@
 use claw_core::capability_result::{
-    is_machine_ref, ArtifactRef, CapabilityResultEnvelope, CapabilityResultStatus, Continuation,
-    ContinuationKind, EvidenceRef, RetryDirective, StructuredError,
+    is_machine_ref, ArtifactRef, CapabilityResultEnvelope, CapabilityResultStatus,
+    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef,
+    ResultCompleteness, RetryDirective, StructuredError,
 };
 use serde_json::{json, Map as JsonMap, Value};
 
+#[cfg(test)]
 pub(crate) fn successful_execution_envelope(
     capability: &str,
     step_id: &str,
@@ -11,6 +13,17 @@ pub(crate) fn successful_execution_envelope(
     output: &str,
     extra: Option<&Value>,
 ) -> CapabilityResultEnvelope {
+    build_successful_execution_envelope(capability, step_id, args, output, extra)
+        .expect("test capability result fixture must be valid")
+}
+
+fn build_successful_execution_envelope(
+    capability: &str,
+    step_id: &str,
+    args: &Value,
+    output: &str,
+    extra: Option<&Value>,
+) -> Result<CapabilityResultEnvelope, CapabilityResultValidationError> {
     let mut envelope =
         CapabilityResultEnvelope::ok(capability, machine_action(args), result_data(output, extra));
     envelope.artifacts = artifact_refs_from_sources(output, extra);
@@ -48,16 +61,27 @@ pub(crate) fn successful_execution_envelope(
             state: continuation_state(extra),
         });
     }
-    debug_assert!(envelope.validate().is_ok());
-    envelope
+    envelope.validate()?;
+    Ok(envelope)
 }
 
+#[cfg(test)]
 pub(crate) fn failed_execution_envelope(
     capability: &str,
     step_id: &str,
     args: &Value,
     error: &str,
 ) -> CapabilityResultEnvelope {
+    build_failed_execution_envelope(capability, step_id, args, error)
+        .expect("test capability error fixture must be valid")
+}
+
+fn build_failed_execution_envelope(
+    capability: &str,
+    step_id: &str,
+    args: &Value,
+    error: &str,
+) -> Result<CapabilityResultEnvelope, CapabilityResultValidationError> {
     let structured = structured_error(error);
     let mut envelope =
         CapabilityResultEnvelope::failed(capability, machine_action(args), structured);
@@ -80,8 +104,8 @@ pub(crate) fn failed_execution_envelope(
             "content_trust": "untrusted_tool_error",
         }),
     });
-    debug_assert!(envelope.validate().is_ok());
-    envelope
+    envelope.validate()?;
+    Ok(envelope)
 }
 
 pub(crate) fn envelope_for_step_execution(
@@ -89,13 +113,19 @@ pub(crate) fn envelope_for_step_execution(
     args: &Value,
     step: &crate::executor::StepExecutionResult,
     extra: Option<&Value>,
-) -> CapabilityResultEnvelope {
+) -> Result<CapabilityResultEnvelope, CapabilityResultValidationError> {
     if step.status == crate::executor::StepExecutionStatus::Ok {
         if let Some(output) = step.output.as_deref() {
-            return successful_execution_envelope(capability, &step.step_id, args, output, extra);
+            return build_successful_execution_envelope(
+                capability,
+                &step.step_id,
+                args,
+                output,
+                extra,
+            );
         }
     }
-    failed_execution_envelope(
+    build_failed_execution_envelope(
         capability,
         &step.step_id,
         args,
@@ -269,9 +299,9 @@ fn redact_for_model(value: Value) -> Value {
 fn structured_error(error: &str) -> StructuredError {
     if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
         let extra = structured.extra.unwrap_or(Value::Null);
-        let code = machine_string(&extra, &["error_code", "error_kind", "code"])
+        let code = machine_string(&extra, &["error_code"])
             .filter(|value| is_machine_ref(value))
-            .unwrap_or(structured.error_kind.as_str())
+            .unwrap_or(structured.error_code.as_str())
             .to_string();
         let code = if is_machine_ref(&code) {
             code
@@ -293,7 +323,7 @@ fn structured_error(error: &str) -> StructuredError {
             details: json!({
                 "structured_error": {
                     "skill": structured.skill,
-                    "error_kind": code,
+                    "error_code": code,
                     "error_text": redact_for_model(Value::String(structured.error_text)),
                     "platform": structured.platform,
                     "manager_type": structured.manager_type,
@@ -306,7 +336,7 @@ fn structured_error(error: &str) -> StructuredError {
     let parsed = serde_json::from_str::<Value>(error.trim()).ok();
     let code = parsed
         .as_ref()
-        .and_then(|value| machine_string(value, &["error_code", "error_kind", "code"]))
+        .and_then(|value| machine_string(value, &["error_code"]))
         .filter(|value| is_machine_ref(value))
         .unwrap_or("capability_execution_failed")
         .to_string();
@@ -499,6 +529,38 @@ fn apply_result_metadata(
     envelope.truncated = result_metadata_value(output, extra, "truncated")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    if envelope.truncated {
+        if let Some(page) = envelope.page.as_ref() {
+            if let Some(next_cursor) = page.get("next_cursor").filter(|value| !value.is_null()) {
+                envelope.continuation = Some(Continuation {
+                    kind: ContinuationKind::Opaque,
+                    reference: Some(sanitized_reference(&format!("cursor:{next_cursor}"))),
+                    poll_after_ms: None,
+                    state: json!({
+                        "cursor": page.get("cursor"),
+                        "next_cursor": next_cursor,
+                        "snapshot_sha256": page.get("snapshot_sha256"),
+                    }),
+                });
+            }
+        }
+        let returned_count = envelope
+            .page
+            .as_ref()
+            .and_then(|page| page.get("returned_count"))
+            .and_then(Value::as_u64);
+        let known_total = envelope
+            .page
+            .as_ref()
+            .and_then(|page| page.get("total_count").or_else(|| page.get("known_total")))
+            .and_then(Value::as_u64);
+        envelope.completeness = Some(ResultCompleteness::partial(
+            "bounded_result",
+            returned_count,
+            known_total,
+            envelope.continuation.is_none() && envelope.artifacts.is_empty(),
+        ));
+    }
     envelope.effect = result_metadata_value(output, extra, "effect")
         .and_then(Value::as_str)
         .map(str::trim)
@@ -520,7 +582,6 @@ fn apply_result_metadata(
         .or_else(|| envelope.error.as_ref().map(|error| error.retryable))
         .unwrap_or(false);
     let retry_class = result_metadata_value(output, extra, "retry_class")
-        .or_else(|| result_metadata_value(output, extra, "error_kind"))
         .or_else(|| result_metadata_value(output, extra, "error_code"))
         .and_then(Value::as_str)
         .map(str::trim)

@@ -98,8 +98,6 @@ struct Resp {
     #[serde(skip_serializing_if = "Option::is_none")]
     extra: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     platform: Option<String>,
     error_text: Option<String>,
 }
@@ -204,7 +202,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
 struct OutputContract {
     status: String,
     #[serde(skip_serializing_if = "String::is_empty")]
-    error_kind: String,
+    error_code: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     target: String,
     service_name: String,
@@ -228,7 +226,7 @@ impl OutputContract {
     }
     fn fail_kind(&mut self, kind: &str, reason: &str) {
         self.status = "error".to_string();
-        self.error_kind = kind.trim().to_string();
+        self.error_code = kind.trim().to_string();
         self.failure_reason = reason.to_string();
     }
     fn add_evidence(&mut self, s: impl AsRef<str>) {
@@ -298,11 +296,14 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             let is_business_error = out.status == "error";
             if is_business_error {
                 if let Some(fields) = extra.as_mut().and_then(Value::as_object_mut) {
-                    fields.insert("error_code".to_string(), json!(&out.error_kind));
+                    fields.insert("schema_version".to_string(), json!(1));
+                    fields.insert("source_skill".to_string(), json!("service_control"));
+                    fields.insert("error_code".to_string(), json!(&out.error_code));
                     fields.insert(
                         "message_key".to_string(),
-                        json!(format!("skill.service_control.{}", out.error_kind)),
+                        json!(format!("skill.service_control.{}", out.error_code)),
                     );
+                    fields.insert("retryable".to_string(), json!(false));
                 }
             }
             Resp {
@@ -314,9 +315,6 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
                 },
                 text: text.clone(),
                 extra,
-                error_kind: is_business_error
-                    .then(|| out.error_kind.trim().to_string())
-                    .filter(|kind| !kind.is_empty()),
                 platform: is_business_error.then(|| std::env::consts::OS.to_string()),
                 error_text: if is_business_error {
                     Some(if out.failure_reason.is_empty() {
@@ -335,12 +333,13 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             text: String::new(),
             extra: Some(json!({
                 "status": "error",
-                "error_kind": "skill_execution_failed",
                 "error_code": "skill_execution_failed",
                 "message_key": "skill.service_control.skill_execution_failed",
+                "schema_version": 1,
+                "source_skill": "service_control",
+                "retryable": false,
                 "platform": std::env::consts::OS,
             })),
-            error_kind: Some("skill_execution_failed".to_string()),
             platform: Some(std::env::consts::OS.to_string()),
             error_text: Some(err),
         },
@@ -387,12 +386,13 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 extra: Some(json!({
                     "status": "error",
-                    "error_kind": "invalid_input",
                     "error_code": "invalid_input",
                     "message_key": "skill.service_control.invalid_input",
+                    "schema_version": 1,
+                    "source_skill": "service_control",
+                    "retryable": false,
                     "platform": std::env::consts::OS,
                 })),
-                error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
                 error_text: Some(format!("invalid input: {err}")),
             },

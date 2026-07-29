@@ -22,7 +22,7 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "EXECUTION_FAILED");
+    assert_eq!(extra["error_code"], "EXECUTION_FAILED");
     assert_eq!(extra["message_key"], "skill.browser_web.execution_failed");
     assert_eq!(extra["retryable"], true);
     assert_eq!(extra["details"]["exit_code"], 9);
@@ -43,7 +43,7 @@ fn non_object_args_return_outer_error() {
         response
             .extra
             .as_ref()
-            .and_then(|value| value.get("error_kind"))
+            .and_then(|value| value.get("error_code"))
             .and_then(Value::as_str),
         Some("INVALID_INPUT")
     );

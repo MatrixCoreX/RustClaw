@@ -480,7 +480,7 @@ fn rss_fetch_extra_field_value_counts_as_structured_rss_evidence() {
 }
 
 #[test]
-fn trace_json_includes_observed_evidence_for_text_output() {
+fn trace_json_does_not_treat_unstructured_text_as_machine_evidence() {
     let mut journal = TaskJournal::for_task("task-observed-text", "ask", "运行命令");
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -493,45 +493,9 @@ fn trace_json_includes_observed_evidence_for_text_output() {
     });
 
     let trace = journal.to_trace_json();
-    let observed = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .expect("observed evidence should be present");
-    assert_eq!(observed.get("format").and_then(Value::as_str), Some("text"));
-    assert_eq!(
-        observed.pointer("/extractor/kind").and_then(Value::as_str),
-        Some("text_legacy")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("run_cmd.text_legacy_v1")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/source_action_ref")
-            .and_then(Value::as_str),
-        Some("run_cmd")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/fallback")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    assert!(observed
-        .get("items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("field").and_then(Value::as_str) == Some("text_excerpt")
-                    && item.get("excerpt").and_then(Value::as_str) == Some("first line second line")
-                    && item.get("hash").and_then(Value::as_str).is_some()
-            })
-        }));
+    assert!(trace
+        .pointer("/step_results/0/observed_evidence")
+        .is_none_or(Value::is_null));
 }
 
 #[test]
@@ -804,55 +768,14 @@ fn matrix_admitted_external_marker_enables_strict_structured_evidence() {
 }
 
 #[test]
-fn text_observed_evidence_extracts_count_path_and_candidates() {
+fn unstructured_text_is_not_promoted_to_machine_evidence() {
     let archive_listing = "exit=0\nArchive: /tmp/test.zip\n  Length Name\n  22 notes.txt\n  20 nested/config.ini\n  42 2 files";
-    let observed = observed_evidence_from_output(Some(archive_listing))
-        .expect("text evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("2")
-    }));
-
-    let observed = observed_evidence_from_output(Some("/home/guagua/rustclaw/Cargo.toml"))
-        .expect("path evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("path evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("source").and_then(Value::as_str) == Some("text_output.extractor")
-    }));
-    let observed = observed_evidence_from_output(Some(
+    assert!(observed_evidence_from_output(Some(archive_listing)).is_none());
+    assert!(observed_evidence_from_output(Some("/home/guagua/rustclaw/Cargo.toml")).is_none());
+    assert!(observed_evidence_from_output(Some(
         "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
     ))
-    .expect("path token evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("path token evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("/home/guagua/rustclaw/document/pwd_line.txt")
-    }));
-    let observed = observed_evidence_from_output(Some(
-        "archive_path=/home/guagua/rustclaw/tmp/bundle.zip\nexit=0\n  adding: /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md (deflated 32%)",
-    ))
-    .expect("labeled archive path evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("labeled path evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("/home/guagua/rustclaw/tmp/bundle.zip")
-    }));
+    .is_none());
 
     let mut git_json_journal =
         TaskJournal::for_task("task-json-git-subjects", "ask", "write a release note");
@@ -926,20 +849,9 @@ fn text_observed_evidence_extracts_count_path_and_candidates() {
     });
 
     let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
-    assert!(coverage.is_complete());
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("count"));
-
-    let observed = observed_evidence_from_output(Some(".git\nREADME.md\n.env\nsrc\n"))
-        .expect("hidden list evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("hidden list evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("hidden_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("2")
-    }));
+    assert!(coverage.observed_canonical.is_empty());
+    assert!(coverage.observed_extractors.is_empty());
+    assert!(observed_evidence_from_output(Some(".git\nREADME.md\n.env\nsrc\n")).is_none());
 }
 
 #[test]
@@ -1416,7 +1328,7 @@ fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
 }
 
 #[test]
-fn docker_unavailable_text_counts_as_generic_command_evidence() {
+fn docker_unavailable_structured_output_counts_as_generic_command_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
     let route = crate::IntentOutputContract {
@@ -1428,7 +1340,15 @@ fn docker_unavailable_text_counts_as_generic_command_evidence() {
         step_id: "step_1".to_string(),
         skill: "docker_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
+        output: Some(
+            json!({
+                "action": "version",
+                "available": false,
+                "command_succeeded": false,
+                "output": "docker unavailable: No such file or directory (os error 2)"
+            })
+            .to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,

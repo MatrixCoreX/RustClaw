@@ -981,7 +981,7 @@ fn single_file_delivery_ignores_prior_read_range_rejections_after_path_fact() {
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint = file.display().to_string();
 
-    let contract_error = "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
+    let contract_error = "__RC_SKILL_ERROR__:{\"error_code\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.read_range` is rejected by contract `generic_delivery` (rejected_not_allowed)\",\"extra\":{\"action\":\"system_basic.read_range\",\"contract_match\":\"generic_delivery\",\"decision\":\"rejected_not_allowed\"},\"skill\":\"system_basic\"}";
     let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results

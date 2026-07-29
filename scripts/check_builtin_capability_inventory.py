@@ -13,17 +13,44 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from builtin_contract_source_scan import (
+    error_field_inventory,
+    output_contract_pipeline,
+    path_authority_inventory,
+    self_test as source_scan_self_test,
+    skill_producer_files,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "configs" / "skills_registry.toml"
+POLICY = ROOT / "scripts" / "baselines" / "builtin_capability_inventory_policy.json"
+
+TEXT_OUTPUT_DISPOSITIONS = {
+    "structured_extra_schema_drift",
+    "direct_json_schema_drift",
+    "true_text_producer",
+    "non_public_compatibility_wrapper",
+}
+UNCONSTRAINED_ACTION_DISPOSITIONS = {"constrain_schema", "internal_nonplanner"}
+UNMAPPED_ACTION_DISPOSITIONS = {
+    "add_canonical_mapping",
+    "alias_existing",
+    "admin_direct",
+    "internal",
+    "deprecate",
+    "remove",
+}
 
 # Baseline captured on 2026-07-27. These ceilings only prevent regression;
 # completed vertical slices must lower them instead of adding exemptions.
-MAX_TEXT_ONLY_OUTPUT_SKILLS = 24
-MAX_UNCONSTRAINED_ACTION_SKILLS = 12
+MAX_TEXT_ONLY_OUTPUT_SKILLS = 0
+MAX_UNCONSTRAINED_ACTION_SKILLS = 0
 MAX_MISSING_PLANNER_ARGUMENTS = 0
 MAX_EXPOSED_DUPLICATE_ACTION_GROUPS = 0
-MAX_UNMAPPED_PUBLIC_ACTIONS = 36
+# Finite action enums exposed nine previously implicit compatibility/internal
+# executor actions during the 2026-07-29 contract hardening rebaseline.
+MAX_UNMAPPED_PUBLIC_ACTIONS = 45
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,6 +81,18 @@ def load_skills(path: Path) -> list[dict[str, Any]]:
     if not isinstance(skills, list):
         raise SystemExit(f"invalid_registry_skills path={path}")
     return skills
+
+
+def load_policy(path: Path) -> dict[str, Any]:
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit(f"failed_to_read_inventory_policy path={path} error={exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"failed_to_parse_inventory_policy path={path} error={exc}") from exc
+    if not isinstance(policy, dict) or policy.get("schema_version") != 1:
+        raise SystemExit(f"invalid_inventory_policy path={path}")
+    return policy
 
 
 def planner_argument_tokens(capability: dict[str, Any]) -> set[str]:
@@ -252,6 +291,13 @@ def inventory(skills: list[dict[str, Any]], root: Path = ROOT) -> dict[str, Any]
             "planner_capability_aliases": aliases,
             **source_inventory(skill, root),
         }
+        producer_files = skill_producer_files(root, skill)
+        row["output_contract_pipeline"] = output_contract_pipeline(
+            root, skill, producer_files
+        )
+        row["path_authority"] = path_authority_inventory(
+            root, skill, properties, producer_files
+        )
         rows.append(row)
 
     metrics = InventoryMetrics(
@@ -287,6 +333,125 @@ def inventory(skills: list[dict[str, Any]], root: Path = ROOT) -> dict[str, Any]
         },
         "skills": sorted(rows, key=lambda row: row["name"]),
     }
+
+
+def _policy_entry_findings(
+    category: str,
+    key: str,
+    entry: Any,
+    allowed_dispositions: set[str],
+) -> list[str]:
+    if not isinstance(entry, dict):
+        return [f"{category}_classification_invalid:{key}"]
+    findings: list[str] = []
+    disposition = str(entry.get("disposition") or "").strip()
+    if disposition not in allowed_dispositions:
+        findings.append(f"{category}_disposition_invalid:{key}:{disposition or '<empty>'}")
+    if not str(entry.get("owner_wave") or "").strip():
+        findings.append(f"{category}_owner_wave_missing:{key}")
+    if not str(entry.get("rationale") or "").strip():
+        findings.append(f"{category}_rationale_missing:{key}")
+    if disposition == "alias_existing" and not str(entry.get("target") or "").strip():
+        findings.append(f"{category}_alias_target_missing:{key}")
+    return findings
+
+
+def classify_debt(
+    result: dict[str, Any], policy: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    findings: list[str] = []
+    classifications: dict[str, Any] = {}
+
+    text_debt = set(result["debt"]["text_only_output_skills"])
+    text_policy = policy.get("text_only_outputs") or {}
+    if not isinstance(text_policy, dict):
+        text_policy = {}
+        findings.append("text_output_policy_not_object")
+    text_policy_keys = set(text_policy)
+    for name in sorted(text_debt - text_policy_keys):
+        findings.append(f"text_output_classification_missing:{name}")
+    for name in sorted(text_policy_keys - text_debt):
+        findings.append(f"text_output_classification_stale:{name}")
+    for name in sorted(text_debt & text_policy_keys):
+        findings.extend(
+            _policy_entry_findings(
+                "text_output", name, text_policy[name], TEXT_OUTPUT_DISPOSITIONS
+            )
+        )
+    classifications["text_only_outputs"] = [
+        {"skill": name, **text_policy[name]}
+        for name in sorted(text_debt & text_policy_keys)
+        if isinstance(text_policy[name], dict)
+    ]
+
+    unconstrained_debt = set(result["debt"]["unconstrained_action_skills"])
+    unconstrained_policy = policy.get("unconstrained_actions") or {}
+    if not isinstance(unconstrained_policy, dict):
+        unconstrained_policy = {}
+        findings.append("unconstrained_action_policy_not_object")
+    unconstrained_policy_keys = set(unconstrained_policy)
+    for name in sorted(unconstrained_debt - unconstrained_policy_keys):
+        findings.append(f"unconstrained_action_classification_missing:{name}")
+    for name in sorted(unconstrained_policy_keys - unconstrained_debt):
+        findings.append(f"unconstrained_action_classification_stale:{name}")
+    for name in sorted(unconstrained_debt & unconstrained_policy_keys):
+        findings.extend(
+            _policy_entry_findings(
+                "unconstrained_action",
+                name,
+                unconstrained_policy[name],
+                UNCONSTRAINED_ACTION_DISPOSITIONS,
+            )
+        )
+    classifications["unconstrained_actions"] = [
+        {"skill": name, **unconstrained_policy[name]}
+        for name in sorted(unconstrained_debt & unconstrained_policy_keys)
+        if isinstance(unconstrained_policy[name], dict)
+    ]
+
+    unmapped_debt = {
+        (str(item["skill"]), str(item["action"]))
+        for item in result["debt"]["unmapped_public_actions"]
+    }
+    unmapped_policy_list = policy.get("unmapped_public_actions") or []
+    if not isinstance(unmapped_policy_list, list):
+        unmapped_policy_list = []
+        findings.append("unmapped_action_policy_not_array")
+    unmapped_policy: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw in unmapped_policy_list:
+        if not isinstance(raw, dict):
+            findings.append("unmapped_action_classification_invalid:<non-object>")
+            continue
+        key = (
+            str(raw.get("skill") or "").strip(),
+            str(raw.get("action") or "").strip(),
+        )
+        printable = ".".join(key)
+        if not all(key):
+            findings.append(f"unmapped_action_key_invalid:{printable}")
+            continue
+        if key in unmapped_policy:
+            findings.append(f"unmapped_action_classification_duplicate:{printable}")
+            continue
+        unmapped_policy[key] = raw
+    for key in sorted(unmapped_debt - set(unmapped_policy)):
+        findings.append(f"unmapped_action_classification_missing:{'.'.join(key)}")
+    for key in sorted(set(unmapped_policy) - unmapped_debt):
+        findings.append(f"unmapped_action_classification_stale:{'.'.join(key)}")
+    for key in sorted(unmapped_debt & set(unmapped_policy)):
+        findings.extend(
+            _policy_entry_findings(
+                "unmapped_action",
+                ".".join(key),
+                unmapped_policy[key],
+                UNMAPPED_ACTION_DISPOSITIONS,
+            )
+        )
+    classifications["unmapped_public_actions"] = [
+        dict(unmapped_policy[key])
+        for key in sorted(unmapped_debt & set(unmapped_policy))
+    ]
+    return classifications, findings
 
 
 def findings_for(metrics: dict[str, int]) -> list[str]:
@@ -356,6 +521,48 @@ output_schema = { type = "object", required = ["status"], properties = { status 
     assert findings_for(over) == [
         f"text_only_output_skills_grew:{MAX_TEXT_ONLY_OUTPUT_SKILLS + 1}>{MAX_TEXT_ONLY_OUTPUT_SKILLS}"
     ]
+    positive_policy = {
+        "schema_version": 1,
+        "text_only_outputs": {
+            "demo": {
+                "disposition": "true_text_producer",
+                "owner_wave": "3",
+                "rationale": "fixture",
+            }
+        },
+        "unconstrained_actions": {
+            "demo": {
+                "disposition": "constrain_schema",
+                "owner_wave": "1",
+                "rationale": "fixture",
+            }
+        },
+        "unmapped_public_actions": [
+            {
+                "skill": "broken",
+                "action": "inspect",
+                "disposition": "alias_existing",
+                "target": "broken.run",
+                "owner_wave": "3",
+                "rationale": "fixture",
+            }
+        ],
+    }
+    classifications, policy_findings = classify_debt(result, positive_policy)
+    assert not policy_findings
+    assert len(classifications["text_only_outputs"]) == 1
+    negative_policy = json.loads(json.dumps(positive_policy))
+    negative_policy["unmapped_public_actions"][0].pop("target")
+    negative_policy["text_only_outputs"]["stale"] = {
+        "disposition": "true_text_producer",
+        "owner_wave": "3",
+        "rationale": "fixture",
+    }
+    _, negative_findings = classify_debt(result, negative_policy)
+    assert "unmapped_action_alias_target_missing:broken.inspect" in negative_findings
+    assert "text_output_classification_stale:stale" in negative_findings
+    with tempfile.TemporaryDirectory(prefix="builtin-contract-source-scan-") as tmp:
+        source_scan_self_test(Path(tmp))
     print("BUILTIN_CAPABILITY_INVENTORY_SELF_TEST ok")
     return 0
 
@@ -363,6 +570,9 @@ output_schema = { type = "object", required = ["status"], properties = { status 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=REGISTRY)
+    parser.add_argument("--policy", type=Path, default=POLICY)
+    parser.add_argument("--compare-registry", type=Path)
+    parser.add_argument("--output", type=Path, help="write the full JSON inventory")
     parser.add_argument("--json", action="store_true", help="print full JSON inventory")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -370,9 +580,33 @@ def main() -> int:
         return run_self_test()
 
     result = inventory(load_skills(args.registry))
+    result["error_field_inventory"] = error_field_inventory(ROOT)
+    classifications, policy_findings = classify_debt(result, load_policy(args.policy))
+    result["debt_classifications"] = classifications
+    result["registry"] = str(args.registry)
     findings = findings_for(result["metrics"])
+    findings.extend(policy_findings)
+    findings.extend(
+        f"unowned_legacy_error_writer:{skill}"
+        for skill in result["error_field_inventory"]["unowned_skill_writers"]
+    )
+    if args.compare_registry is not None:
+        comparison = inventory(load_skills(args.compare_registry))
+        comparable = {
+            key: value
+            for key, value in result.items()
+            if key not in {"debt_classifications", "error_field_inventory", "registry"}
+        }
+        result["comparison_registry"] = str(args.compare_registry)
+        result["comparison_equal"] = comparison == comparable
+        if not result["comparison_equal"]:
+            findings.append("registry_inventory_differs")
+    rendered = json.dumps(result, ensure_ascii=True, indent=2, sort_keys=True)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{rendered}\n", encoding="utf-8")
     if args.json:
-        print(json.dumps(result, ensure_ascii=True, indent=2, sort_keys=True))
+        print(rendered)
     else:
         metrics = " ".join(f"{key}={value}" for key, value in result["metrics"].items())
         print(f"BUILTIN_CAPABILITY_INVENTORY findings={len(findings)} {metrics}")

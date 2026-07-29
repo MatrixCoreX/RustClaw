@@ -97,7 +97,7 @@ fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "fs_basic",
-        r#"__RC_SKILL_ERROR__:{"error_kind":"is_directory","error_text":"directory target","extra":null}"#,
+        r#"__RC_SKILL_ERROR__:{"error_code":"is_directory","error_text":"directory target","extra":null}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",

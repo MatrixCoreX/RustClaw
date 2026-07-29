@@ -8,7 +8,7 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["schema_version"], 2);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["error_code"], "execution_failed");
     assert_eq!(extra["message_key"], "skill.fs_search.execution_failed");
     assert_eq!(extra["retryable"], false);
 }

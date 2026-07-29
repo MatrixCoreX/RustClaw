@@ -7,9 +7,49 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["error_code"], "execution_failed");
+    assert!(extra.get("error_kind").is_none());
     assert_eq!(extra["message_key"], "skill.process_basic.execution_failed");
     assert_eq!(extra["retryable"], false);
+}
+
+#[test]
+fn kill_signal_contract_is_finite_and_normalized() {
+    assert_eq!(normalize_signal(None).unwrap(), "TERM");
+    assert_eq!(normalize_signal(Some("sigint")).unwrap(), "INT");
+    assert!(normalize_signal(Some("USR1")).is_err());
+    assert!(validate_kill_target(1).is_err());
+    assert!(validate_kill_target(i64::from(std::process::id())).is_err());
+}
+
+#[test]
+fn tail_log_honors_runner_admin_path_authority() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let external = tempfile::NamedTempFile::new().expect("external log");
+    std::fs::write(external.path(), "line one\nline two\n").expect("write external log");
+
+    let denied = execute_with_root_and_context(
+        json!({"action":"tail_log","path":external.path(),"n":1}),
+        workspace.path(),
+        None,
+    );
+    assert!(denied.unwrap_err().contains("path_outside_workspace"));
+
+    let context = json!({
+        "authority_scope": "unrestricted_admin",
+        "permissions": {
+            "unrestricted_admin": true,
+            "allow_path_outside_workspace": true
+        }
+    });
+    let (text, extra) = execute_with_root_and_context(
+        json!({"action":"tail_log","path":external.path(),"n":1}),
+        workspace.path(),
+        Some(&context),
+    )
+    .expect("admin external tail");
+    assert_eq!(text, "line two");
+    assert_eq!(extra["authority_scope"], "unrestricted_admin");
 }
 
 #[test]

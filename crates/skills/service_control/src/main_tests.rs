@@ -19,7 +19,7 @@ fn target_missing_returns_structured_error() {
     let out =
         execute("req-1".to_string(), args, None).expect("execute must return Ok(OutputContract)");
     assert_eq!(out.status, "error");
-    assert_eq!(out.error_kind, "missing_input");
+    assert_eq!(out.error_code, "missing_input");
     assert!(!out.failure_reason.is_empty(), "failure_reason must be set");
     assert!(!out.next_step.is_empty());
 }
@@ -44,7 +44,13 @@ fn business_failure_produces_runner_error() {
     assert_eq!(out.status, "error");
     let resp = build_runner_response("req-bf".to_string(), Ok(out));
     assert_eq!(resp.status, "error");
-    assert_eq!(resp.error_kind.as_deref(), Some("missing_input"));
+    assert_eq!(
+        resp.extra
+            .as_ref()
+            .and_then(|extra| extra.get("error_code"))
+            .and_then(Value::as_str),
+        Some("missing_input")
+    );
     assert_eq!(resp.platform.as_deref(), Some(std::env::consts::OS));
     assert!(resp.error_text.is_some());
 }
@@ -158,7 +164,7 @@ fn output_contract_has_required_keys() {
         "executed_actions",
         "key_evidence",
         "failure_reason",
-        "error_kind",
+        "error_code",
     ];
     for key in required {
         assert!(

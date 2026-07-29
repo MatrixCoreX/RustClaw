@@ -129,7 +129,7 @@ fn child_rejects_missing_or_out_of_scope_capability() {
     let parsed = crate::skills::parse_structured_skill_error(&scope_error)
         .expect("child policy error should be structured");
     let extra = parsed.extra.expect("extra");
-    assert_eq!(parsed.error_kind, "child_task_policy_violation");
+    assert_eq!(parsed.error_code, "child_task_policy_violation");
     assert_eq!(
         extra["owner_layer"],
         serde_json::json!("child_task_execution_policy")
@@ -269,7 +269,7 @@ fn local_worktree_child_rejects_unbound_primary_workspace() {
     let parsed = crate::skills::parse_structured_skill_error(&error).expect("structured error");
     let extra = parsed.extra.expect("extra");
 
-    assert_eq!(parsed.error_kind, "child_task_policy_violation");
+    assert_eq!(parsed.error_code, "child_task_policy_violation");
     assert!(extra["violations"]
         .as_array()
         .expect("violations")

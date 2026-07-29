@@ -72,7 +72,7 @@
   - `limit`, `filter`, `pid`, `signal`, `path`, or `n`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
   - `output`: string bounded process/log observation; fallback evidence only.
 - Sensitive fields: process command lines and log tails can contain secrets or user data. Provider-facing traces should prefer counts, selected fields, excerpts, or hashes.
-- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+- Error responses include readable `error_text`; use canonical `extra.error_code` for machine decisions.
 
 ## Request/Response Examples (from interface)
 ### Example 1

@@ -22,7 +22,7 @@ async fn content_evidence_step_failure_answer_reports_real_error() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "system_basic",
-                "error_kind": "permission_denied",
+                "error_code": "permission_denied",
                 "error_text": "read_range failed for /etc/shadow",
                 "platform": "linux",
                 "extra": {
@@ -100,7 +100,7 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "fs_basic",
-                "error_kind": "permission_denied",
+                "error_code": "permission_denied",
                 "error_text": "read operation failed: permission denied by the operating system",
                 "platform": "linux"
             })
@@ -155,7 +155,7 @@ async fn content_evidence_recoverable_crypto_account_error_is_completion() {
     .expect("recoverable crypto account error should be publishable");
 
     assert!(!answer.contains("message_key="));
-    assert!(!answer.contains("error_kind="));
+    assert!(!answer.contains("error_code="));
     assert!(!answer.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
     assert!(!answer.trim().is_empty());
     assert_eq!(summary.completion_ok, Some(true));
@@ -180,7 +180,7 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "crypto",
-            "error_kind": "unknown",
+            "error_code": "unknown",
             "error_text": marker,
             "extra": null
         })
@@ -203,7 +203,7 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
 
     assert!(!answer.contains("message_key="));
     assert!(answer.contains("reason_code=content_evidence_step_failed"));
-    assert!(answer.contains("error_kind=unknown"));
+    assert!(answer.contains("error_code=unknown"));
     assert!(answer.contains("structured_skill=crypto"));
     assert!(!answer.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
     assert!(!answer.trim().is_empty());
@@ -228,10 +228,10 @@ async fn content_evidence_crypto_credential_error_is_completion() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "crypto",
-            "error_kind": "credential_not_bound",
+            "error_code": "credential_not_bound",
             "error_text": "credential binding unavailable",
             "extra": {
-                "error_kind": "credential_not_bound",
+                "error_code": "credential_not_bound",
                 "message_key": "crypto.err.okx_not_bound",
                 "exchange": "okx",
                 "action": "cancel_all_orders",
@@ -257,7 +257,7 @@ async fn content_evidence_crypto_credential_error_is_completion() {
     .expect("recoverable crypto credential error should be publishable");
 
     assert!(answer.contains("reason_code=content_evidence_step_failed"));
-    assert!(answer.contains("error_kind=credential_not_bound"));
+    assert!(answer.contains("error_code=credential_not_bound"));
     assert!(answer.contains("structured_skill=crypto"));
     assert!(!answer.contains("OKX_BINDING_REQUIRED"));
     assert_eq!(summary.completion_ok, Some(true));
@@ -282,7 +282,7 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "crypto",
-            "error_kind": "unknown",
+            "error_code": "unknown",
             "error_text": marker,
             "extra": null
         })
@@ -314,7 +314,7 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
     assert!(reply
         .text
         .contains("reason_code=content_evidence_step_failed"));
-    assert!(reply.text.contains("error_kind=unknown"));
+    assert!(reply.text.contains("error_code=unknown"));
     assert!(reply.text.contains("structured_skill=crypto"));
     assert!(!reply.text.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
     assert!(!reply.text.trim().is_empty());
@@ -368,7 +368,7 @@ async fn content_evidence_db_query_error_is_completion() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "db_basic",
-                "error_kind": "sqlite_query_failed",
+                "error_code": "sqlite_query_failed",
                 "error_text": "prepare query failed: no such table: missing_table",
                 "platform": "linux"
             })
@@ -418,7 +418,7 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "system_basic",
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "error_text": "path was not found: document/missing.txt",
                 "platform": "linux",
                 "extra": {
@@ -500,7 +500,7 @@ async fn missing_read_target_reply_prefers_original_user_language() {
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "system_basic",
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "error_text": "path was not found: ./NO_SUCH_RUSTCLAW_TEST_987654.txt",
                 "platform": "linux",
                 "extra": {
@@ -559,7 +559,7 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
             "__RC_SKILL_ERROR__:{}",
             serde_json::json!({
                 "skill": "system_basic",
-                "error_kind": "not_found",
+                "error_code": "not_found",
                 "error_text": "path was not found: ./NO_SUCH_RUSTCLAW_TEST_987654.txt",
                 "platform": "linux",
                 "extra": {

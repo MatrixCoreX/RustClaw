@@ -8,67 +8,57 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `install_module` installs or previews development/runtime modules in common language ecosystems.
-- It accepts single or multiple module names and optional ecosystem/version hints.
-- Preview requests use `action=preview_install`; they return a structured installation plan and never execute installer commands.
-- `action=install` performs the installation. Direct callers may still set `dry_run=true`, but planner-facing preview requests must use the dedicated preview action so policy remains machine-verifiable.
+- Installs or previews language dependencies without implicit host-global writes.
+- `scope=project` updates a detected project manifest/lockfile or a project-local isolated Python dependency directory.
+- `scope=tool_cache` installs a standalone tool into RustClaw's versioned `data/tool-cache/modules` tree.
+- Preview returns exact scope, argv, working directory, target files and the confirmation requirement without creating directories or running an installer.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
-- `preview_install`: produce a read-only command and ecosystem preview without installation.
-- `install`: execute installation; this is a high-risk mutating action.
+- `preview_install`: read-only installation plan; always forces `dry_run=true`.
+- `install`: confirmed mutating installation with bounded command output and a structured operation receipt.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| preview_install/install | `modules` or `module` | yes | array/string | - | At least one valid module name. |
-| preview_install/install | `ecosystem` | no | string | python | One of `python|node|rust|go` when known. |
-| preview_install/install | `version` | no | string | latest | Optional version pin/range hint. |
-| preview_install | `dry_run` | no | boolean | true | Forced to true even when a caller supplies false. |
-| install | `dry_run` | no | boolean | false | Direct-call preview compatibility; planners should use `preview_install` instead. |
+| all | `modules` or `module` | yes | array/string | - | One or more ecosystem-valid package names. |
+| all | `ecosystem` | no | string | python | `python`, `node`, `rust`, or `go` (registry aliases are accepted). |
+| all | `version` | no | string | latest | Optional version selector. |
+| all | `scope` | no | enum | auto | `project` or `tool_cache`; auto selects project only when its ecosystem manifest exists. |
+| all | `project_path` | no | string | `.` | Project directory; non-admin requests remain workspace-confined and verified admin context may select an external directory. |
+| preview_install | `dry_run` | no | boolean | true | Always true even if the caller supplies false. |
+| install | `dry_run` | no | boolean | false | Compatibility preview; planners should call `preview_install`. |
 
 ## Error Contract (from interface)
-- Empty module list/name.
-- Invalid/unsafe module tokens.
-- Unsupported ecosystem value.
-- Installation failures return readable command/tool errors.
+- TODO: list error conventions.
 
 ## Structured Evidence Contract (from interface)
-- Success responses include structured `extra`; downstream runtime must prefer `extra` over parsing user-visible `text`.
-- Success `extra` fields:
-  - `skill`: string, always `install_module`; evidence role `status`.
-  - `action`: string, `preview_install` or `install`; evidence role `status`.
-  - `ecosystem`: string selected ecosystem; evidence role `field_value`.
-  - `module`: string when exactly one module was requested; evidence role `field_value`.
-  - `modules`: string array requested or installed modules; evidence role `entries`.
-  - `version`: string or null; evidence role `field_value`.
-  - `dry_run`: boolean preview flag; evidence role `status`.
-  - `installer_available`: boolean read-only installer availability probe; evidence role `status`.
-  - `commands`: string array command previews or executed commands; evidence role `entries`.
-  - `output`: string machine-field summary; fallback evidence only.
+Success `extra` includes `action`, `ecosystem`, `scope`, `modules`, `version`, `dry_run`, `would_write`, `installer_available`, `commands`, `command_argv`, `working_directories`, `target_files`, and `output`. Preview also includes `confirmation_required_for_install=true`. Actual installation includes bounded `output_results` and `operation_receipt.artifacts` with SDK digests for resulting files.
+
+Errors use `extra.error_code` plus `message_key`, `retryable`, and readable `error_text`.
 
 ## Request/Response Examples (from interface)
-### Example 1
-Request:
+Project preview request:
+
 ```json
-{"request_id":"demo-1","args":{"modules":["requests"],"ecosystem":"python"}}
-```
-Response:
-```json
-{"request_id":"demo-1","status":"ok","text":"skill=install_module\naction=install\necosystem=python\ndry_run=false\ninstaller_available=true\nmodules=requests\nmodule=requests\ncommand_0=python3 -m pip install --user requests","extra":{"skill":"install_module","action":"install","ecosystem":"python","module":"requests","modules":["requests"],"version":null,"dry_run":false,"installer_available":true,"commands":["python3 -m pip install --user requests"],"output":"skill=install_module\naction=install\necosystem=python\ndry_run=false\ninstaller_available=true\nmodules=requests\nmodule=requests\ncommand_0=python3 -m pip install --user requests"},"error_text":null}
+{"request_id":"demo-1","args":{"action":"preview_install","module":"typescript","ecosystem":"node","scope":"project","project_path":"."}}
 ```
 
-### Example 2
-Request:
+Project preview response shape:
+
 ```json
-{"request_id":"demo-2","args":{"action":"preview_install","modules":["requests"],"ecosystem":"python"}}
+{"request_id":"demo-1","status":"ok","text":"skill=install_module\naction=preview_install\necosystem=node\nscope=project\ndry_run=true","extra":{"action":"preview_install","ecosystem":"node","scope":"project","dry_run":true,"would_write":false,"confirmation_required_for_install":true,"command_argv":[["npm","install","--save","typescript"]],"target_files":["/workspace/package.json","/workspace/package-lock.json"]},"error_text":null}
 ```
-Response:
+
+Tool-cache preview request:
+
 ```json
-{"request_id":"demo-2","status":"ok","text":"skill=install_module\naction=preview_install\necosystem=python\ndry_run=true\ninstaller_available=true\nmodules=requests\nmodule=requests\ncommand_0=python3 -m pip install --user requests","extra":{"skill":"install_module","action":"preview_install","ecosystem":"python","module":"requests","modules":["requests"],"version":null,"dry_run":true,"installer_available":true,"commands":["python3 -m pip install --user requests"],"output":"skill=install_module\naction=preview_install\necosystem=python\ndry_run=true\ninstaller_available=true\nmodules=requests\nmodule=requests\ncommand_0=python3 -m pip install --user requests"},"error_text":null}
+{"request_id":"demo-2","args":{"action":"preview_install","module":"ripgrep","ecosystem":"rust","scope":"tool_cache","version":"14.1.1"}}
 ```
+
+The returned command uses `cargo install --root <workspace>/data/tool-cache/modules/rust/ripgrep/14.1.1`, and preview does not create that directory.
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.

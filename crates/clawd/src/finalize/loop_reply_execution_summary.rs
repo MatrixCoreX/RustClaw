@@ -173,7 +173,7 @@ pub(super) fn output_text_from_execution_result(
             "step_id": &step.step_id,
             "skill": &step.skill,
             "status": step.status.as_str(),
-            "error_kind": "not_found",
+            "error_code": "not_found",
         })));
     }
     if let Some(path) = crate::skills::read_file_not_found_path(trimmed) {
@@ -183,7 +183,7 @@ pub(super) fn output_text_from_execution_result(
             "step_id": &step.step_id,
             "skill": &step.skill,
             "status": step.status.as_str(),
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "path": path,
         })));
     }
@@ -197,7 +197,7 @@ pub(super) fn output_text_from_execution_result(
             "step_id": &step.step_id,
             "skill": &step.skill,
             "status": step.status.as_str(),
-            "error_kind": "recoverable_error",
+            "error_code": "recoverable_error",
         })));
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
@@ -226,7 +226,7 @@ fn structured_execution_error_summary(
         "step_id": &step.step_id,
         "skill": effective_skill,
         "status": step.status.as_str(),
-        "error_kind": &structured.error_kind,
+        "error_code": &structured.error_code,
         "platform": &structured.platform,
         "manager_type": &structured.manager_type,
         "service_name": &structured.service_name,

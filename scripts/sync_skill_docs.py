@@ -136,7 +136,7 @@ def interface_template(skill: str) -> str:
 - Matrix admission status: not eligible by default.
 - To request matrix evidence eligibility, declare stable success `extra` fields per action.
 - For each field, document type, meaning, sensitivity, and which evidence role it can satisfy (`field_value`, `count`, `path`, `results`, `delivery_artifact`, etc.).
-- Error responses should include `extra.error_kind` when feasible.
+- Error responses must use canonical `extra.error_code` and `extra.message_key`; do not write generic `error_kind` aliases.
 - Do not rely on natural-language `text` as strict matrix evidence.
 
 ## Request/Response Examples

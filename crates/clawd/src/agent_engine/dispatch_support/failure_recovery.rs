@@ -186,7 +186,7 @@ fn run_cmd_literal_failure_is_repairable(args: Option<&Value>) -> bool {
 }
 
 fn structured_error_kind(err: &str) -> Option<String> {
-    crate::skills::parse_structured_skill_error(err).map(|structured| structured.error_kind)
+    crate::skills::parse_structured_skill_error(err).map(|structured| structured.error_code)
 }
 
 fn planner_can_repair_structured_skill_error(err: &str) -> bool {
@@ -227,7 +227,7 @@ fn structured_read_permission_denial_is_terminal(normalized_skill: &str, err: &s
     let Some(structured) = crate::skills::parse_structured_skill_error(err) else {
         return false;
     };
-    if structured.error_kind != "permission_denied" {
+    if structured.error_code != "permission_denied" {
         return false;
     }
     let effective_skill = if structured.skill.trim().is_empty() {

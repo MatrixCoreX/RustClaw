@@ -20,8 +20,6 @@ struct Resp {
     status: String,
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     platform: Option<String>,
     extra: Option<Value>,
     error_text: Option<String>,
@@ -70,7 +68,6 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
-                    error_kind: None,
                     platform: None,
                     extra: Some(extra),
                     error_text: None,
@@ -79,7 +76,6 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    error_kind: Some(err.kind.to_string()),
                     platform: Some(std::env::consts::OS.to_string()),
                     extra: Some(error_extra_with_details(err.kind, err.extra)),
                     error_text: Some(err.text),
@@ -89,7 +85,6 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
                 extra: Some(error_extra_with_details(
                     "invalid_input",
@@ -109,7 +104,6 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -232,7 +226,6 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                     "sqlite_execute requires confirm=true",
                 )
                 .with_extra(json!({
-                    "error_kind": "confirmation_required",
                     "action": "sqlite_execute",
                     "db_path": db_path_text,
                 })));
@@ -240,7 +233,6 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             let changed = conn.execute(&sql, []).map_err(|err| {
                 SkillError::new("sqlite_execute_failed", format!("execute failed: {err}"))
                     .with_extra(json!({
-                        "error_kind": "sqlite_execute_failed",
                         "action": "sqlite_execute",
                         "db_path": db_path_text,
                         "sql": sql,
@@ -262,7 +254,6 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             "unsupported action; use sqlite_query|sqlite_execute|schema_version|user_version|list_tables",
         )
         .with_extra(json!({
-            "error_kind": "unsupported_action",
             "action": action,
             "allowed_actions": ["sqlite_query", "sqlite_execute", "schema_version", "user_version", "list_tables"],
         }))),
@@ -279,7 +270,6 @@ fn open_connection(db: &Path, action: &str) -> Result<Connection, SkillError> {
                 "path_metadata_failed"
             };
             SkillError::new(kind, machine_error_text(kind, &err.to_string())).with_extra(json!({
-                "error_kind": kind,
                 "action": action,
                 "db_path": db.display().to_string(),
             }))
@@ -289,7 +279,6 @@ fn open_connection(db: &Path, action: &str) -> Result<Connection, SkillError> {
             return Err(
                 SkillError::new(kind, machine_error_text(kind, &db.display().to_string()))
                     .with_extra(json!({
-                        "error_kind": "not_regular_file",
                         "action": action,
                         "db_path": db.display().to_string(),
                     })),
@@ -305,7 +294,6 @@ fn open_connection(db: &Path, action: &str) -> Result<Connection, SkillError> {
     connection.map_err(|err| {
         SkillError::new("sqlite_open_failed", format!("open sqlite failed: {err}")).with_extra(
             json!({
-                "error_kind": "sqlite_open_failed",
                 "action": action,
                 "db_path": db.display().to_string(),
             }),
@@ -442,7 +430,6 @@ fn run_query(
         return Err(
             SkillError::new("unsafe_sql", "sqlite_query only allows SELECT/PRAGMA/WITH")
                 .with_extra(json!({
-                    "error_kind": "unsafe_sql",
                     "action": "sqlite_query",
                     "allowed_statement_kinds": ["SELECT", "PRAGMA", "WITH"],
                 })),
@@ -518,7 +505,6 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, SkillErro
                     "path with '..' is not allowed",
                 )
                 .with_extra(json!({
-                    "error_kind": "path_outside_workspace",
                     "db_path": input,
                 })))
             }

@@ -42,7 +42,7 @@ pub(super) fn execute_workspace_replace_for_root(
     let requested_path = required_nonempty_string(args, "path")?;
     let target = validate_replace_path(&root, requested_path).map_err(|error| {
         if crate::skills::parse_structured_skill_error(&error)
-            .is_some_and(|parsed| parsed.error_kind == "invalid_patch_path")
+            .is_some_and(|parsed| parsed.error_code == "invalid_patch_path")
         {
             replace_error(
                 "path_outside_workspace",
@@ -123,7 +123,7 @@ pub(super) fn execute_workspace_replace_for_root(
         replace_error(
             "replacement_result_invalid",
             "workspace.replace.result_invalid",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })?;
     let object = result.as_object_mut().ok_or_else(|| {
@@ -489,7 +489,7 @@ fn encode_result(value: Value) -> Result<String, String> {
         replace_error(
             "replacement_result_encode_failed",
             "workspace.replace.result_encode_failed",
-            json!({"error_kind": format!("{:?}", error.classify())}),
+            json!({"error_code": format!("{:?}", error.classify())}),
         )
     })
 }

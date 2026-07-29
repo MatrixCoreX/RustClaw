@@ -14,7 +14,7 @@ fn crypto_error_extra_wraps_existing_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "credential_not_bound");
+    assert_eq!(extra["error_code"], "credential_not_bound");
     assert_eq!(extra["message_key"], "skill.crypto.credential_not_bound");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["exchange"], "binance");
@@ -301,7 +301,7 @@ fn account_access_errors_use_stable_prefix_and_safe_detail() {
         Some("binance")
     );
     assert_eq!(
-        parsed.get("error_kind").and_then(|v| v.as_str()),
+        parsed.get("error_code").and_then(|v| v.as_str()),
         Some("account_access_failed")
     );
     assert_eq!(
@@ -315,7 +315,7 @@ fn account_access_errors_use_stable_prefix_and_safe_detail() {
         .contains("Invalid API-key"));
     let extra = crypto_account_access_error_extra_from_text(&err).expect("structured extra");
     assert_eq!(
-        extra.get("error_kind").and_then(|v| v.as_str()),
+        extra.get("error_code").and_then(|v| v.as_str()),
         Some("account_access_failed")
     );
     assert_eq!(

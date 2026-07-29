@@ -367,7 +367,7 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
         "__RC_SKILL_ERROR__:{}",
         json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "platform": "linux",
             "extra": {

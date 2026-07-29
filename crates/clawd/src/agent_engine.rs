@@ -625,12 +625,12 @@ fn register_structured_failed_step_fields(loop_state: &mut LoopState, key_prefix
             .insert("failed_step.skill".to_string(), structured.skill.clone());
     }
     loop_state.output_vars.insert(
-        "failed_step.error_kind".to_string(),
-        structured.error_kind.clone(),
+        "failed_step.error_code".to_string(),
+        structured.error_code.clone(),
     );
     loop_state.output_vars.insert(
-        format!("{key_prefix}.error_kind"),
-        structured.error_kind.clone(),
+        format!("{key_prefix}.error_code"),
+        structured.error_code.clone(),
     );
     if let Some(extra) = structured.extra.as_ref().and_then(Value::as_object) {
         for field in ["error_code", "status_code"] {
@@ -732,7 +732,7 @@ fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value>
     if let Some(path) = crate::skills::read_file_not_found_path(raw) {
         return Some(json!({
             "skill": "read_file",
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "platform": Value::Null,
             "manager_type": Value::Null,
             "service_name": Value::Null,
@@ -746,7 +746,7 @@ fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value>
     let structured = crate::skills::parse_structured_skill_error(raw)?;
     Some(json!({
         "skill": structured.skill,
-        "error_kind": structured.error_kind,
+        "error_code": structured.error_code,
         "platform": structured.platform,
         "manager_type": structured.manager_type,
         "service_name": structured.service_name,

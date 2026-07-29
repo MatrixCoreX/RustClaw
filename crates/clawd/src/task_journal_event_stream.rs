@@ -123,7 +123,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                     .map(|value| capability_resolution_source(&value.action_type))
                     .unwrap_or("step_trace_fallback"),
                 "status": step.status.as_str(),
-                "error_kind": step_trace.get("error_kind"),
+                "error_code": step_trace.get("error_code"),
                 "failure_attribution": step_trace.get("failure_attribution"),
                 "output_evidence_count": step_trace.get("output_evidence_count"),
                 "artifact_ref_count": step_trace.get("artifact_ref_count"),
@@ -422,7 +422,7 @@ fn tool_lifecycle_event_payload(
             .map(|value| capability_resolution_source(&value.action_type))
             .unwrap_or("step_trace_fallback"),
         "status": step.status.as_str(),
-        "error_kind": step_trace.get("error_kind"),
+        "error_code": step_trace.get("error_code"),
         "failure_attribution": step_trace.get("failure_attribution"),
         "output_evidence_count": step_trace.get("output_evidence_count"),
         "artifact_ref_count": step_trace.get("artifact_ref_count"),
@@ -1137,7 +1137,6 @@ fn collect_failure_fields(
             .unwrap_or(Value::Null),
         "error_code": map
             .get("error_code")
-            .or_else(|| map.get("error_kind"))
             .cloned()
             .unwrap_or(Value::Null),
     });

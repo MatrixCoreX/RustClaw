@@ -224,6 +224,68 @@ pub(super) struct CommandRunFailure {
     output_artifacts: Option<output_artifact::CommandOutputArtifactSummary>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct CommandRunSuccess {
+    command_output: String,
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    output_artifacts: Option<output_artifact::CommandOutputArtifactSummary>,
+}
+
+impl CommandRunSuccess {
+    pub(super) fn machine_projection(&self, command: &str, cwd: &Path) -> Value {
+        let artifact_projection = self
+            .output_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.machine_projection(&self.command_output, self.exit_code));
+        let artifact_refs = artifact_projection
+            .as_ref()
+            .and_then(|value| value.get("artifact_refs"))
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let range_handles = artifact_projection
+            .as_ref()
+            .and_then(|value| value.get("range_handles"))
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let complete = self.output_artifacts.is_none();
+        serde_json::json!({
+            "schema_version": 1,
+            "source": "run_cmd",
+            "status": "ok",
+            "action": "exec",
+            "command": command.trim(),
+            "cwd": cwd.display().to_string(),
+            "shell_mode": "bash_pipefail",
+            "exit_code": self.exit_code,
+            "exit_category": "success",
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "command_output": self.command_output,
+            "output_truncated": !complete,
+            "complete": complete,
+            "artifacts": artifact_refs,
+            "continuation": (!complete).then_some(serde_json::json!({
+                "kind": "artifact_range",
+                "ranges": range_handles,
+            })),
+        })
+    }
+
+    #[cfg(test)]
+    fn legacy_test_output(self) -> String {
+        self.output_artifacts
+            .as_ref()
+            .map(|artifacts| {
+                artifacts
+                    .machine_projection(&self.command_output, self.exit_code)
+                    .to_string()
+            })
+            .unwrap_or(self.command_output)
+    }
+}
+
 impl CommandRunFailure {
     fn new(kind: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -384,6 +446,7 @@ pub(crate) async fn run_safe_command(
         "test-task",
     )
     .await
+    .map(CommandRunSuccess::legacy_test_output)
     .map_err(RunSafeCommandError::into_text)
 }
 
@@ -414,6 +477,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
         "direct",
     )
     .await
+    .map(CommandRunSuccess::legacy_test_output)
     .map_err(RunSafeCommandError::into_text)
 }
 
@@ -429,7 +493,7 @@ pub(super) async fn run_safe_command_detailed(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     output_artifact_task_id: &str,
-) -> Result<String, RunSafeCommandError> {
+) -> Result<CommandRunSuccess, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
             "invalid_input",
@@ -619,20 +683,13 @@ pub(super) async fn run_safe_command_detailed(
     })?;
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
-        if let Some(output_artifacts) = output_artifacts {
-            serde_json::to_string(&output_artifacts.machine_projection(&text, exit_code)).map_err(
-                |error| {
-                    RunSafeCommandError::Command(CommandRunFailure::new(
-                        "output_artifact_projection_failed",
-                        format!("run_cmd.output_artifact_projection_failed error={error}"),
-                    ))
-                },
-            )
-        } else if text.trim().is_empty() {
-            Ok(format!("exit=0 command={}", command.trim()))
-        } else {
-            Ok(text)
-        }
+        Ok(CommandRunSuccess {
+            command_output: text,
+            stdout: stdout_text,
+            stderr: stderr_text,
+            exit_code,
+            output_artifacts,
+        })
     } else if text.trim().is_empty() {
         Err(RunSafeCommandError::Command(
             CommandRunFailure::new(

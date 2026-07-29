@@ -34,10 +34,10 @@ use trade_handlers::*;
 
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
 const CRYPTO_CONFIG_ERROR_PREFIX: &str = "__RC_CRYPTO_CONFIG_ERROR__:";
-const CRYPTO_ACCOUNT_ACCESS_ERROR_KIND: &str = "account_access_failed";
+const CRYPTO_ACCOUNT_ACCESS_ERROR_CODE: &str = "account_access_failed";
 const CRYPTO_ACCOUNT_ACCESS_MESSAGE_KEY: &str = "crypto.err.account_access_failed";
-const CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_KIND: &str = "credential_not_bound";
-const CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_KIND: &str = "credential_incomplete";
+const CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_CODE: &str = "credential_not_bound";
+const CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_CODE: &str = "credential_incomplete";
 const SKILL_NAME: &str = "crypto";
 
 fn crypto_account_access_error(exchange: &str, err: impl AsRef<str>) -> String {
@@ -52,7 +52,7 @@ fn crypto_account_access_error(exchange: &str, err: impl AsRef<str>) -> String {
     let payload = json!({
         "exchange": exchange.trim(),
         "detail": detail,
-        "error_kind": CRYPTO_ACCOUNT_ACCESS_ERROR_KIND,
+        "error_code": CRYPTO_ACCOUNT_ACCESS_ERROR_CODE,
         "message_key": CRYPTO_ACCOUNT_ACCESS_MESSAGE_KEY,
         "recoverable": true,
     });
@@ -72,10 +72,10 @@ fn crypto_account_access_error_extra_from_text(error_text: &str) -> Option<Value
         .strip_prefix(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)?;
     let parsed = serde_json::from_str::<Value>(payload).ok()?;
     Some(json!({
-        "error_kind": parsed
-            .get("error_kind")
+        "error_code": parsed
+            .get("error_code")
             .and_then(|value| value.as_str())
-            .unwrap_or(CRYPTO_ACCOUNT_ACCESS_ERROR_KIND),
+            .unwrap_or(CRYPTO_ACCOUNT_ACCESS_ERROR_CODE),
         "message_key": parsed
             .get("message_key")
             .and_then(|value| value.as_str())
@@ -86,30 +86,29 @@ fn crypto_account_access_error_extra_from_text(error_text: &str) -> Option<Value
             .unwrap_or(true),
         "exchange": parsed.get("exchange").cloned().unwrap_or(Value::Null),
         "detail": parsed.get("detail").cloned().unwrap_or(Value::Null),
-        "status_code": CRYPTO_ACCOUNT_ACCESS_ERROR_KIND,
+        "status_code": CRYPTO_ACCOUNT_ACCESS_ERROR_CODE,
     }))
 }
 
 fn crypto_config_error(
     exchange: &str,
     action: &str,
-    error_kind: &str,
+    error_code: &str,
     message_key: &str,
 ) -> String {
     let payload = json!({
         "exchange": exchange.trim(),
         "action": action.trim(),
-        "error_kind": error_kind,
-        "error_code": error_kind,
+        "error_code": error_code,
         "message_key": message_key,
         "recoverable": true,
-        "status_code": error_kind,
+        "status_code": error_code,
     });
     let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| {
         json!({
             "exchange": exchange.trim(),
             "action": action.trim(),
-            "error_kind": error_kind,
+            "error_code": error_code,
             "message_key": message_key,
             "recoverable": true,
         })
@@ -126,8 +125,8 @@ fn crypto_config_error_payload_from_text(error_text: &str) -> Option<Value> {
 fn crypto_config_error_extra_from_text(error_text: &str) -> Option<Value> {
     let parsed = crypto_config_error_payload_from_text(error_text)?;
     Some(json!({
-        "error_kind": parsed
-            .get("error_kind")
+        "error_code": parsed
+            .get("error_code")
             .and_then(|value| value.as_str())
             .unwrap_or("credential_error"),
         "message_key": parsed.get("message_key").cloned().unwrap_or(Value::Null),
@@ -140,7 +139,7 @@ fn crypto_config_error_extra_from_text(error_text: &str) -> Option<Value> {
         "status_code": parsed
             .get("status_code")
             .cloned()
-            .or_else(|| parsed.get("error_kind").cloned())
+            .or_else(|| parsed.get("error_code").cloned())
             .unwrap_or(Value::Null),
     }))
 }
@@ -148,12 +147,12 @@ fn crypto_config_error_extra_from_text(error_text: &str) -> Option<Value> {
 fn crypto_error_extra_from_text(error_text: &str) -> Option<Value> {
     let details = crypto_account_access_error_extra_from_text(error_text)
         .or_else(|| crypto_config_error_extra_from_text(error_text))?;
-    let error_kind = details
-        .get("error_kind")
+    let error_code = details
+        .get("error_code")
         .and_then(Value::as_str)
         .unwrap_or("execution_failed")
         .to_string();
-    Some(crypto_error_extra_with_details(&error_kind, Some(details)))
+    Some(crypto_error_extra_with_details(&error_code, Some(details)))
 }
 
 fn crypto_error_extra_for_response(error_text: &str) -> Value {
@@ -161,18 +160,17 @@ fn crypto_error_extra_for_response(error_text: &str) -> Value {
         .unwrap_or_else(|| crypto_error_extra("execution_failed"))
 }
 
-fn crypto_error_extra(error_kind: &str) -> Value {
-    crypto_error_extra_with_details(error_kind, None)
+fn crypto_error_extra(error_code: &str) -> Value {
+    crypto_error_extra_with_details(error_code, None)
 }
 
-fn crypto_error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+fn crypto_error_extra_with_details(error_code: &str, details: Option<Value>) -> Value {
     let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
     });
     if let Some(details) = details {

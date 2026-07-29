@@ -682,7 +682,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         crate::executor::StepExecutionStatus::Error,
         Some("exit=101 command=cargo test -p clawd".to_string()),
         Some(
-            r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"exit_status","error_text":"failed","text":null}"#
+            r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_code":"exit_status","error_text":"failed","text":null}"#
                 .to_string(),
         ),
     ));
@@ -1036,7 +1036,7 @@ fn trace_json_projects_tool_step_error_machine_fields() {
         crate::executor::StepExecutionStatus::Error,
         None,
         Some(
-            r#"__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"contract_action_rejected","error_text":"blocked","text":null}"#
+            r#"__RC_SKILL_ERROR__:{"skill":"archive_basic","error_code":"contract_action_rejected","error_text":"blocked","text":null}"#
                 .to_string(),
         ),
     ));
@@ -1052,7 +1052,7 @@ fn trace_json_projects_tool_step_error_machine_fields() {
         .expect("tool_step event");
 
     assert_eq!(
-        event.pointer("/payload/error_kind").and_then(Value::as_str),
+        event.pointer("/payload/error_code").and_then(Value::as_str),
         Some("contract_action_rejected")
     );
     assert_eq!(

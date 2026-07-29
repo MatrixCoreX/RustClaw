@@ -31,14 +31,14 @@ fn validation_signal_from_step(step: &TaskJournalStepTrace, code_context: bool) 
         .and_then(crate::skills::parse_structured_skill_error)
     {
         if matches!(
-            error.error_kind.as_str(),
+            error.error_code.as_str(),
             "validation_failed" | "validation_inconclusive"
         ) {
             return Some(json!({
                 "step_id": &step.step_id,
                 "source": "step_error",
-                "status": error.error_kind.as_str(),
-                "status_code": error.error_kind.as_str(),
+                "status": error.error_code.as_str(),
+                "status_code": error.error_code.as_str(),
                 "message_key": error
                     .extra
                     .as_ref()

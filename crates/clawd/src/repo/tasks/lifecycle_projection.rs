@@ -214,7 +214,7 @@ fn worker_failure_reason_code(error_text: &str) -> &'static str {
     let Some(structured) = crate::skills::parse_structured_skill_error(error_text.trim()) else {
         return "worker_runtime_error";
     };
-    let error_kind = structured.error_kind.trim().to_ascii_lowercase();
+    let error_kind = structured.error_code.trim().to_ascii_lowercase();
     if matches!(error_kind.as_str(), "timeout" | "idle_timeout") {
         return crate::task_lifecycle::TerminalFailureReason::ToolTimeoutWithoutAsyncResume
             .status_code();

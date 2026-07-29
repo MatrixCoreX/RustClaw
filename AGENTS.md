@@ -92,6 +92,8 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
   On failure, return `status=error` and a readable `error_text`.
 - `text/error_text` 可作为用户可见兜底，但运行时不得解析这些自然语言字段来决定路由、重试、成功判定或最终答案形态；需要程序判断时，在 `extra` 中提供稳定的 `error_code`、`message_key`、`status_code` 或结构化字段。
   `text/error_text` may be user-visible fallbacks, but runtime must not parse those natural-language fields to decide routing, retry, success, or final answer shape; when program logic is needed, provide stable `error_code`, `message_key`, `status_code`, or structured fields in `extra`.
+- 错误响应统一写入 `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`；新代码不得写通用 `error_kind` 或 `code` 别名。旧字段只能由运行时集中兼容解码器按明确生产者白名单读取，迁移生产者后必须缩减白名单。`provider_error_kind` 等有明确领域含义的字段不受此规则影响。
+  Error responses must write `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`. New code must not write generic `error_kind` or `code` aliases. Legacy fields may only be read by the runtime's centralized compatibility decoder for an explicit producer allowlist, which must shrink after producer migration. Domain-specific fields such as `provider_error_kind` are unaffected.
 - 不得阻塞不退出（遵循 `SKILL_TIMEOUT_SECONDS` 预期）。
   Do not hang indefinitely; respect `SKILL_TIMEOUT_SECONDS` expectations.
 - 基础 skill 的 `text/extra/error_text` 响应约定、推荐字段名与当前门禁范围，见 [docs/base_skill_response_contract.md](docs/base_skill_response_contract.md)。

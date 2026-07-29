@@ -46,13 +46,13 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
             skill: "fs_search".to_string(),
             status: crate::executor::StepExecutionStatus::Error,
             output: None,
-            error: Some("__RC_SKILL_ERROR__:{\"error_kind\":\"not_found\"}".to_string()),
+            error: Some("__RC_SKILL_ERROR__:{\"error_code\":\"not_found\"}".to_string()),
             started_at: 1,
             finished_at: 2,
         });
     let ledger = build_attempt_ledger_compact(&loop_state);
     assert!(ledger.contains("\"tool_or_skill\": \"fs_search\""));
-    assert!(ledger.contains("\"error_kind\": \"not_found\""));
+    assert!(ledger.contains("\"error_code\": \"not_found\""));
     assert!(ledger.contains("\"retryable\": true"));
     assert!(ledger.contains("do_not_retry_same_target"));
     let value = ledger_value(&ledger);
@@ -147,7 +147,7 @@ fn successful_recorded_attempt_keeps_observed_output_out_of_control_fields() {
         Some("ok")
     );
     assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
-    assert!(value.pointer("/0/error_kind").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
     assert!(value.pointer("/0/exit_code").is_some_and(Value::is_null));
     assert_eq!(
         value
@@ -206,7 +206,7 @@ fn successful_fallback_attempt_keeps_observed_output_out_of_control_fields() {
 
     let value = ledger_value(&build_attempt_ledger_compact(&loop_state));
     assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
-    assert!(value.pointer("/0/error_kind").is_some_and(Value::is_null));
+    assert!(value.pointer("/0/error_code").is_some_and(Value::is_null));
     assert!(value.pointer("/0/exit_code").is_some_and(Value::is_null));
     assert_eq!(
         value
@@ -338,7 +338,7 @@ fn attempt_ledger_marks_policy_block_non_retryable() {
         "unsafe SQL requires refusal or confirmation",
     );
     let ledger = build_attempt_ledger_compact(&loop_state);
-    assert!(ledger.contains("\"error_kind\": \"unsafe_sql\""));
+    assert!(ledger.contains("\"error_code\": \"unsafe_sql\""));
     assert!(ledger.contains("\"retryable\": false"));
 }
 
@@ -365,7 +365,7 @@ fn attempt_ledger_marks_contract_rejections_non_retryable() {
             "contract preflight rejected the action",
         );
         let ledger = build_attempt_ledger_compact(&loop_state);
-        assert!(ledger.contains(&format!("\"error_kind\": \"{kind}\"")));
+        assert!(ledger.contains(&format!("\"error_code\": \"{kind}\"")));
         assert!(ledger.contains("\"retryable\": false"));
         assert!(ledger.contains(hint));
     }
@@ -517,7 +517,7 @@ fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
         value
             .pointer("/0/error_code")
             .and_then(serde_json::Value::as_str),
-        Some("exit_status")
+        Some("command_failed")
     );
     assert_eq!(
         value
@@ -665,7 +665,7 @@ fn attempt_ledger_marks_terminal_failures_non_retryable() {
             "terminal failure",
         );
         let ledger = build_attempt_ledger_compact(&loop_state);
-        assert!(ledger.contains(&format!("\"error_kind\": \"{kind}\"")));
+        assert!(ledger.contains(&format!("\"error_code\": \"{kind}\"")));
         assert!(ledger.contains("\"retryable\": false"));
         let value = ledger_value(&ledger);
         let expected = match kind {

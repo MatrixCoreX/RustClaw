@@ -264,7 +264,6 @@ fn error_extra(error_text: &str) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_code,
         "error_code": error_code,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,

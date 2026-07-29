@@ -18,7 +18,7 @@ pub(super) fn text_looks_like_missing_file_target(text: &str) -> bool {
     let trimmed = text.trim();
     crate::skills::read_file_not_found_path(trimmed).is_some()
         || crate::skills::parse_structured_skill_error(trimmed)
-            .is_some_and(|structured| structured.error_kind == "not_found")
+            .is_some_and(|structured| structured.error_code == "not_found")
 }
 
 fn machine_token(value: &str) -> Option<&str> {
@@ -115,7 +115,7 @@ fn structured_error_is_directory_lookup_failure(
     error: &crate::skills::StructuredSkillError,
 ) -> bool {
     matches!(
-        error.error_kind.as_str(),
+        error.error_code.as_str(),
         "read_dir_failed" | "directory_not_found" | "directory_lookup_failed"
     ) || structured_error_has_machine_token(
         error,
@@ -137,7 +137,7 @@ fn structured_error_is_directory_lookup_failure(
 }
 
 fn structured_error_is_missing_target(error: &crate::skills::StructuredSkillError) -> bool {
-    error.error_kind == "not_found"
+    error.error_code == "not_found"
         || structured_error_has_machine_token(error, "reason_code", &["not_found", "missing"])
         || structured_error_has_machine_token(error, "error_code", &["not_found", "missing"])
 }
@@ -526,7 +526,7 @@ fn resume_context_structured_skill_error_from_value(
 ) -> Option<crate::skills::StructuredSkillError> {
     Some(crate::skills::StructuredSkillError {
         skill: resume_context_string_field(value, "skill")?,
-        error_kind: resume_context_string_field(value, "error_kind")?,
+        error_code: resume_context_string_field(value, "error_code")?,
         error_text: String::new(),
         platform: resume_context_string_field(value, "platform"),
         manager_type: resume_context_string_field(value, "manager_type"),
@@ -586,15 +586,12 @@ pub(super) fn resume_context_execution_summary_messages(
     });
     if let Some(structured) = resume_context_failed_structured_skill_error(resume_ctx) {
         payload["skill"] = serde_json::json!(structured.skill);
-        payload["error_kind"] = serde_json::json!(structured.error_kind);
+        payload["error_code"] = serde_json::json!(structured.error_code);
         if let Some(command) = resume_context_extra_string(&structured, "command") {
             payload["command"] = serde_json::json!(command);
         }
         if let Some(exit_code) = resume_context_extra_i64(&structured, "exit_code") {
             payload["exit_code"] = serde_json::json!(exit_code);
-        }
-        if let Some(error_code) = resume_context_extra_string(&structured, "error_code") {
-            payload["error_code"] = serde_json::json!(error_code);
         }
         if let Some(status_code) = resume_context_extra_string(&structured, "status_code") {
             payload["status_code"] = serde_json::json!(status_code);
@@ -609,7 +606,7 @@ pub(super) fn resume_context_execution_summary_messages(
         payload["error"] =
             serde_json::json!(crate::truncate_for_agent_trace(&error).replace("```", "'''"));
     } else {
-        payload["error_kind"] = serde_json::json!("unstructured_failure");
+        payload["error_code"] = serde_json::json!("unstructured_failure");
     }
     vec![payload.to_string()]
 }

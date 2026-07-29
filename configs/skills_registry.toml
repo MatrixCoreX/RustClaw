@@ -42,7 +42,7 @@ planner_capabilities = [
   { name = "run_cmd", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_command_permission", "preview_background_command", "inspect_cli_help", "terminal_start", "terminal_write", "terminal_poll", "terminal_resize", "terminal_signal", "terminal_terminate"] }, command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" }, max_bytes = { type = "integer", minimum = 1 }, async_start = { type = "boolean" }, poll_after_seconds = { type = "integer" }, expires_in_seconds = { type = "integer" }, session_id = { type = "string" }, data = { type = "string" }, data_base64 = { type = "string" }, append_newline = { type = "boolean" }, cursor = { type = "integer", minimum = 0 }, rows = { type = "integer", minimum = 2, maximum = 500 }, cols = { type = "integer", minimum = 2, maximum = 1000 }, signal = { type = "string", enum = ["TERM", "INT", "HUP", "KILL", "WINCH", "CONT", "STOP"] } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["schema_version"], properties = { schema_version = { type = "integer", minimum = 1 }, source = { type = "string" }, status = { type = "string" }, status_code = { type = "string" }, action = { type = "string" }, command = { type = "string" }, cwd = { type = "string" }, shell_mode = { type = "string" }, exit_code = { type = ["integer", "null"] }, exit_category = { type = "string" }, stdout = { type = "string" }, stderr = { type = "string" }, command_output = { type = "string" }, output_truncated = { type = "boolean" }, complete = { type = "boolean" }, artifacts = { type = "array", items = { type = "object" } }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, session_id = { type = "string" }, job_id = { type = "string" }, checkpoint_id = { type = "string" }, poll_ref = { type = "string" }, cancel_ref = { type = "string" }, permission = { type = "object" } } }
 
 [[skills]]
 name = "read_file"
@@ -63,8 +63,8 @@ side_effect = false
 retryable = true
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
-input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 } } }
+output_schema = { type = "object", required = ["schema_version", "status", "path", "content", "complete"], properties = { schema_version = { type = "integer", minimum = 1 }, status = { type = "string", enum = ["ok"] }, requested_path = { type = "string" }, path = { type = "string" }, canonical_path = { type = "string" }, start_byte = { type = "integer", minimum = 0 }, end_byte = { type = "integer", minimum = 0 }, returned_bytes = { type = "integer", minimum = 0 }, size_bytes = { type = "integer", minimum = 0 }, sha256 = { type = "string", minLength = 64, maxLength = 64 }, encoding = { type = "string", enum = ["utf-8", "utf-8-lossy"] }, lossy = { type = "boolean" }, content = { type = "string" }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } } } }
 
 [[skills]]
 name = "write_file"
@@ -87,7 +87,7 @@ retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
 input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" }, append = { type = "boolean" }, mode = { type = "string", enum = ["overwrite", "replace", "write", "append"] }, create_parents = { type = "boolean" }, parents = { type = "boolean" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "workspace_patch"
@@ -136,8 +136,8 @@ runtime_skill = "system_basic"
 runtime_action = "inventory_dir"
 runtime_default_args = { names_only = true }
 runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions", "cursor", "offset"]
-input_schema = { type = "object", properties = { path = { type = "string" }, names_only = { type = "boolean" }, limit = { type = "integer" }, max_entries = { type = "integer" }, cursor = { type = "integer", minimum = 0 } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { path = { type = "string" }, names_only = { type = "boolean" }, limit = { type = "integer", minimum = 1, maximum = 200 }, max_entries = { type = "integer", minimum = 1, maximum = 200 }, cursor = { type = "integer", minimum = 0 } } }
+output_schema = { type = "object", required = ["schema_version", "status", "path", "entries", "count", "total_count", "complete"], properties = { schema_version = { type = "integer", minimum = 1 }, status = { type = "string", enum = ["ok"] }, requested_path = { type = "string" }, path = { type = "string" }, canonical_path = { type = "string" }, entries = { type = "array", items = { type = "object", required = ["name", "path", "kind", "is_symlink"], properties = { name = { type = "string" }, path = { type = "string" }, kind = { type = "string", enum = ["file", "directory", "symlink", "other"] }, is_symlink = { type = "boolean" }, size_bytes = { type = ["integer", "null"], minimum = 0 }, modified_ts = { type = ["integer", "null"], minimum = 0 } } } }, names = { type = "array", items = { type = "string" } }, count = { type = "integer", minimum = 0 }, total_count = { type = "integer", minimum = 0 }, cursor = { type = "integer", minimum = 0 }, next_cursor = { type = ["integer", "null"], minimum = 0 }, snapshot_hash = { type = "string", minLength = 64, maxLength = 64 }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } } } }
 
 [[skills]]
 name = "make_dir"
@@ -160,7 +160,7 @@ retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" }, parents = { type = "boolean" }, recursive = { type = "boolean" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "remove_file"
@@ -183,7 +183,7 @@ retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "fs_basic"
@@ -272,7 +272,7 @@ planner_capabilities = [
   { name = "workspace.reject_child_patch", action = "reject_child_patch", effect = "mutate", required = ["child_task_id"], optional = ["patch_ref"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "list_dir", "count_entries", "read_text_range", "read_artifact_range", "find_entries", "grep_text", "find_images", "compare_paths", "write_text", "append_text", "make_dir", "remove_path", "preview_replace_text", "replace_text", "apply_patch", "diff", "rewind", "review_child_patch", "apply_child_patch", "reject_child_patch"] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, root = { type = "string" }, pattern = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, glob = { type = "string" }, globs = { type = "array", items = { type = "string" } }, match_mode = { type = "string", enum = ["exact", "prefix", "suffix", "contains", "fuzzy", "glob"] }, file_match_mode = { type = "string", enum = ["exact", "prefix", "suffix", "contains", "fuzzy", "glob"] }, case_mode = { type = "string", enum = ["smart", "sensitive", "insensitive"] }, pattern_kind = { type = "string", enum = ["literal", "regex"] }, output_mode = { type = "string", enum = ["paths", "content", "count"] }, ext = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, exts = { type = "array", items = { type = "string" } }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, extension = { type = "string" }, extensions = { type = "array", items = { type = "string" } }, query = { type = "string" }, content = { type = "string" }, old_text = { type = "string" }, new_text = { type = "string" }, expected_occurrences = { type = "integer", minimum = 1, maximum = 1 }, expected_sha256 = { type = "string" }, preserve_line_endings = { type = "boolean" }, patch = { type = "string" }, checkpoint_id = { type = "string" }, child_task_id = { type = "string" }, patch_ref = { type = "string" }, precondition_hashes = { type = "object" }, target_kind = { type = "string" }, exact = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, parents = { type = "boolean" }, recursive = { type = "boolean" }, include_hidden = { type = "boolean" }, respect_ignore = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, names_only = { type = "boolean" }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, max_entries = { type = "integer" }, max_results = { type = "integer", minimum = 1, maximum = 1000 }, cursor = { type = "string" }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1, maximum = 256 }, max_dirs = { type = "integer", minimum = 1, maximum = 2000 }, max_line_chars = { type = "integer", minimum = 40, maximum = 2000 }, max_file_bytes = { type = "integer", minimum = 1, maximum = 67108864 }, max_scan_bytes = { type = "integer", minimum = 1, maximum = 536870912 }, context_before = { type = "integer", minimum = 0, maximum = 20 }, context_after = { type = "integer", minimum = 0, maximum = 20 }, multiline = { type = "boolean" }, case_insensitive = { type = "boolean" }, raw = { type = "boolean" }, mode = { type = "string" }, n = { type = "integer" }, start_line = { type = "integer" }, end_line = { type = "integer" }, field_selector = { type = "string" }, left_path = { type = "string" }, right_path = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "code_index"
@@ -298,7 +298,7 @@ preferred_over_run_cmd = true
 supported_os = ["linux", "macos", "windows"]
 platform_notes = ["Rust symbols use syn parser spans. Other recognized source languages participate in the file index until a parser adapter is configured."]
 planner_capabilities = [
-  { name = "code.refresh_index", action = "refresh", effect = "observe", optional = ["max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "code.refresh_index", action = "refresh", effect = "observe", optional = ["max_files", "scan_continuation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
   { name = "code.search_symbols", action = "search_symbols", effect = "observe", required = ["query"], optional = ["mode", "cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
   { name = "code.find_definitions", action = "find_definitions", effect = "observe", required = ["symbol"], optional = ["cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
   { name = "code.find_references", action = "find_references", effect = "observe", required = ["symbol"], optional = ["cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
@@ -306,8 +306,8 @@ planner_capabilities = [
   { name = "code.changed_impact", action = "changed_impact", effect = "observe", optional = ["paths", "cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
   { name = "code.retrieve_context", action = "retrieve_context", effect = "observe", required = ["symbols|paths"], optional = ["mode", "context_lines", "cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["refresh", "search_symbols", "find_definitions", "find_references", "list_tests", "changed_impact", "retrieve_context"] }, query = { type = "string" }, symbol = { type = "string" }, symbols = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, mode = { type = "string", enum = ["exact", "prefix", "contains"] }, context_lines = { type = "integer", minimum = 0, maximum = 20 }, cursor = { type = "integer", minimum = 0 }, max_results = { type = "integer", minimum = 1, maximum = 200 }, max_files = { type = "integer", minimum = 1, maximum = 50000 } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["refresh", "search_symbols", "find_definitions", "find_references", "list_tests", "changed_impact", "retrieve_context"] }, query = { type = "string" }, symbol = { type = "string" }, symbols = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, mode = { type = "string", enum = ["exact", "prefix", "contains"] }, context_lines = { type = "integer", minimum = 0, maximum = 20 }, cursor = { type = "integer", minimum = 0 }, max_results = { type = "integer", minimum = 1, maximum = 200 }, max_files = { type = "integer", minimum = 1, maximum = 50000 }, scan_continuation = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "config_basic"
@@ -341,7 +341,7 @@ planner_capabilities = [
   { name = "config.guard_rustclaw_config", action = "guard_rustclaw_config", description = "Run the authoritative RustClaw semantic safety and configuration risk check instead of reading raw file text.", semantic_tags = ["rustclaw_config_safety", "config_risk_scan", "config_problem_check"], effect = "validate", required = ["path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields", "list_keys", "summarize_structure", "validate", "guard_rustclaw_config"] }, path = { type = "string", minLength = 1 }, field_path = { type = "string", minLength = 1, description = "Dot/bracket structured path. For an array item selected by name/id/key, use a filter such as skills[?(@.name=='fs_basic')].prompt_file or rooted shorthand skills.fs_basic.prompt_file." }, field_paths = { anyOf = [ { type = "string", minLength = 1 }, { type = "array", minItems = 1, items = { type = "string", minLength = 1 } } ], description = "One or more field_path selectors; each supports array filters and rooted array-item shorthand." }, format = { type = "string" }, validation_profile = { type = "string", enum = ["syntax_only", "rustclaw_semantic_guard"] }, max_keys = { type = "integer", minimum = 1, maximum = 1000 }, max_paths = { type = "integer", minimum = 1, maximum = 1000 } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "config_edit"
@@ -391,7 +391,7 @@ planner_capabilities = [
   { name = "config.restart_if_requested", action = "restart_if_requested", effect = "external", optional = ["restart", "reason"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["plan_config_change", "apply_config_change", "validate_config", "guard_config", "read_back", "restart_if_requested"] }, path = { type = "string" }, field_path = { type = "string" }, value = {}, operation = { type = "string", enum = ["set"] }, format = { type = "string", enum = ["toml", "json"] }, restart = { type = "boolean" }, reason = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "schedule"
@@ -511,7 +511,7 @@ planner_capabilities = [
   { name = "system_basic.extract_fields", action = "extract_fields", effect = "observe", required = ["path", "field_paths"], optional = ["format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "read_artifact_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string", enum = ["current_user", "host_name", "kernel_release", "current_time", "current_working_directory"] }, query = { type = "string" }, name = { type = "string" }, pattern = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } }, field_path = { type = "string" }, field_paths = { type = "array", items = { type = "string" } }, field_selector = { type = "string" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, include_hidden = { type = "boolean" }, respect_ignore = { type = "boolean" }, names_only = { type = "boolean" }, recursive = { type = "boolean" }, count_files = { type = "boolean" }, count_dirs = { type = "boolean" }, kind_filter = { type = "string", enum = ["any", "file", "dir"] }, target_kind = { type = "string", enum = ["any", "file", "dir"] }, match_mode = { type = "string", enum = ["contains", "exact", "starts_with", "ends_with", "fuzzy"] }, sort_by = { type = "string", enum = ["name", "name_desc", "mtime_desc", "mtime_asc", "size_desc", "size_asc"] }, ext_filter = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, max_entries = { type = "integer", minimum = 1, maximum = 1000 }, max_results = { type = "integer", minimum = 1, maximum = 200 }, cursor = { type = "integer", minimum = 0 }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 }, max_depth = { type = "integer", minimum = 1 }, max_children_per_dir = { type = "integer", minimum = 1 }, max_nodes = { type = "integer", minimum = 1 }, mode = { type = "string", enum = ["head", "tail", "range", "last_non_empty"] }, n = { type = "integer", minimum = 1 }, start_line = { type = "integer", minimum = 1 }, end_line = { type = "integer", minimum = 1 }, max_line_chars = { type = "integer", minimum = 80, maximum = 4000 }, raw = { type = "boolean" }, format = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "http_basic"
@@ -617,10 +617,10 @@ confirmation_exempt_when = [
   { action = "install", dry_run = true },
 ]
 planner_capabilities = [
-  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
-  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = false },
+  { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], optional = ["ecosystem", "version", "scope", "project_path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version", "scope", "project_path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = false },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_install", "install"] }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_install", "install"] }, module = { type = "string" }, modules = { type = "array", minItems = 1, maxItems = 64, items = { type = "string", minLength = 1, maxLength = 256 } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string", maxLength = 128 }, scope = { type = "string", enum = ["project", "tool_cache"] }, project_path = { type = "string" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -649,8 +649,8 @@ planner_capabilities = [
   { name = "process.kill", action = "kill", effect = "mutate", required = ["pid"], optional = ["signal"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
   { name = "process.tail_log", action = "tail_log", effect = "observe", required = ["path"], optional = ["n"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, process = { type = "string" }, query = { type = "string" }, filter = { type = "string" }, name = { type = "string" }, port = { type = "integer" }, pid = { type = "integer" }, limit = { type = "integer", minimum = 1 }, continuation = { type = "string" }, path = { type = "string" }, n = { type = "integer", minimum = 1 }, signal = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["ps", "port_list", "kill", "tail_log"] }, service = { type = "string" }, process = { type = "string" }, query = { type = "string" }, filter = { type = "string" }, name = { type = "string" }, port = { type = "integer" }, pid = { type = "integer", minimum = 1 }, limit = { type = "integer", minimum = 1 }, continuation = { type = "string" }, path = { type = "string" }, n = { type = "integer", minimum = 1 }, signal = { type = "string", enum = ["TERM", "KILL", "INT", "HUP"] } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "package_manager"
@@ -677,11 +677,12 @@ preferred_over_run_cmd = true
 planner_capabilities = [
   { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager", "path", "root", "project_path", "workspace"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
-  { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
+  { name = "package.smart_install_preview", action = "smart_install_preview", effect = "observe", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "package.smart_install", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
   { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string" }, path = { type = "string" }, root = { type = "string" }, project_path = { type = "string" }, workspace = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string", enum = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, path = { type = "string" }, root = { type = "string" }, project_path = { type = "string" }, workspace = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "archive_basic"
@@ -691,6 +692,7 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 package_manifest = "crates/skills/archive_basic/skill.toml"
+storage = { kind = "sqlite", schema_version = 1, migration_owner = "archive_basic" }
 aliases = ["archive", "archive_tool"]
 description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
 semantic_tags = ["archive_catalog", "archive_content", "archive_artifact", "archive_extract"]
@@ -711,13 +713,13 @@ confirmation_exempt_when = [
   { action = "read" },
 ]
 planner_capabilities = [
-  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], optional = ["continuation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "archive.read", action = "read", effect = "observe", required = ["archive", "member"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "archive.pack", action = "pack", effect = "mutate", required = ["source", "archive"], optional = ["format"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string", enum = ["zip", "tar.gz", "tgz"] }, continuation = { type = "string", pattern = "^archive-members:[0-9]+$" } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["action", "authority_scope"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, authority_scope = { type = "string", enum = ["workspace", "unrestricted_admin"] }, archive = { type = "string" }, source = { type = "string" }, dest = { type = "string" }, member = { type = "string" }, member_count = { type = "integer", minimum = 0 }, expanded_bytes = { type = "integer", minimum = 0 }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } }, bounded_result = { type = "object" }, field_value = { type = "object" } } } } }
 
 [[skills]]
 name = "db_basic"
@@ -767,8 +769,8 @@ planner_capabilities = [
   { name = "sqlite.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], optional = ["db_path", "path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, sql = { type = "string" }, confirm = { type = "boolean" }, table = { type = "string" }, limit = { type = "integer" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["schema_version", "sqlite_schema_version", "user_version", "sqlite_user_version", "list_tables", "table_names", "sqlite_table_names", "sqlite_tables", "sqlite_query", "sqlite_execute"] }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, sql = { type = "string" }, confirm = { type = "boolean" }, table = { type = "string" }, limit = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "docker_basic"
@@ -811,8 +813,8 @@ planner_capabilities = [
   { name = "docker.stop", action = "stop", effect = "mutate", required = ["container"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
   { name = "docker_basic.stop", action = "stop", effect = "mutate", required = ["container"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" }, tail = { type = "integer" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["ps", "images", "version", "logs", "restart", "start", "stop", "inspect"] }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" }, tail = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "fs_search"
@@ -1025,7 +1027,7 @@ planner_capabilities = [
   { name = "audio.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
   { name = "audio.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, text = { type = "string" }, input = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, response_format = { type = "string" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_synthesize", "synthesize", "poll", "cancel"] }, text = { type = "string" }, input = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, response_format = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1050,7 +1052,7 @@ planner_capabilities = [
   { name = "video.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "download", "output_path", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
   { name = "video.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", required = ["prompt"], properties = { action = { type = "string" }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, first_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, first_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, duration = { type = "integer" }, resolution = { type = "string" }, output_path = { type = "string" }, wait_for_completion = { type = "boolean" }, download = { type = "boolean" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" }, max_poll_seconds = { type = "integer" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, first_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, first_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, duration = { type = "integer", minimum = 1 }, resolution = { type = "string" }, output_path = { type = "string" }, wait_for_completion = { type = "boolean" }, download = { type = "boolean" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" }, max_poll_seconds = { type = "integer", minimum = 1 }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1075,7 +1077,7 @@ planner_capabilities = [
   { name = "music.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
   { name = "music.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, prompt = { type = "string" }, description = { type = "string" }, lyrics = { type = "string" }, lyrics_optimizer = { type = "boolean" }, is_instrumental = { type = "boolean" }, format = { type = "string" }, response_format = { type = "string" }, output_path = { type = "string" }, audio_url = { type = "string" }, audio_base64 = { type = "string" }, cover_feature_id = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, description = { type = "string" }, lyrics = { type = "string" }, lyrics_optimizer = { type = "boolean" }, is_instrumental = { type = "boolean" }, format = { type = "string" }, response_format = { type = "string" }, output_path = { type = "string" }, audio_url = { type = "string" }, audio_base64 = { type = "string" }, cover_feature_id = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1104,8 +1106,8 @@ planner_capabilities = [
   { name = "health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "system.health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, log_dir = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["check"] }, service = { type = "string" }, target = { type = "string" }, log_dir = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "log_analyze"
@@ -1127,8 +1129,8 @@ planner_capabilities = [
   { name = "log_analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n", "continuation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "logs.analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches", "tail_lines", "tail", "n", "continuation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, keywords = { type = "array", items = { type = "string" } }, max_lines = { type = "integer" }, max_matches = { type = "integer" }, tail_lines = { type = "integer" }, tail = { type = "integer" }, n = { type = "integer" }, continuation = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["analyze"] }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, keywords = { type = "array", items = { type = "string" } }, max_lines = { type = "integer", minimum = 1 }, max_matches = { type = "integer", minimum = 1 }, tail_lines = { type = "integer", minimum = 0 }, tail = { type = "integer", minimum = 0 }, n = { type = "integer", minimum = 0 }, continuation = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "service_control"
@@ -1163,8 +1165,8 @@ planner_capabilities = [
   { name = "service.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },
   { name = "service_control.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, manager_type = { type = "string" }, lines = { type = "integer" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, service = { type = "string" }, target = { type = "string" }, manager_type = { type = "string", enum = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "rustclaw", "unknown"] }, lines = { type = "integer", minimum = 1, maximum = 500 } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "task_control"
@@ -1218,8 +1220,8 @@ output_kind = "text"
 description = "Inspect RustClaw configuration for missing, inconsistent, or risky structured values."
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
-input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, profile = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["scan"] }, path = { type = "string" }, profile = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "crypto"
@@ -1283,7 +1285,7 @@ planner_capabilities = [
   { name = "stock.quote", action = "quote", effect = "observe", required = ["symbol|code|name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_quote", "quote", "query"] }, symbol = { type = "string" }, code = { type = "string" }, name = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "weather"
@@ -1366,8 +1368,8 @@ supported_os = ["linux", "macos"]
 optional_bins = ["pdftotext", "pdfinfo"]
 platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses poppler tools when available."]
 semantic_tags = ["document_parsing", "document_summary", "key_point_extraction", "section_summary", "markdown_document", "readme_document", "grounded_document_synthesis", "table_extraction"]
-input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_chars = { type = "integer", minimum = 100, maximum = 2000000 }, start_char = { type = "integer", minimum = 0 }, continuation = { type = "string" }, max_bytes = { type = "integer" }, section = { type = "string" }, include_metadata = { type = "boolean" }, mode = { type = "string", enum = ["full", "text_only"] } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["parse_doc", "parse"] }, path = { type = "string" }, max_chars = { type = "integer", minimum = 100, maximum = 2000000 }, start_char = { type = "integer", minimum = 0 }, continuation = { type = "string" }, max_bytes = { type = "integer", minimum = 1 }, section = { type = "string" }, include_metadata = { type = "boolean" }, mode = { type = "string", enum = ["full", "text_only"] } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 planner_capability_aliases = { "document.parse" = "doc_parse" }
 planner_capabilities = [
   { name = "doc_parse", action = "parse_doc", description = "Extract readable semantic content, sections, and tables for grounded document synthesis; use office.inspect instead for OOXML package structure, integrity, or artifact revision checks.", semantic_tags = ["document_content_extraction", "grounded_document_reading", "section_and_table_extraction"], effect = "observe", required = ["path"], optional = ["max_chars", "start_char", "continuation", "max_bytes", "section", "include_metadata", "mode"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1697,8 +1699,8 @@ planner_capabilities = [
   { name = "data.transform", action = "transform_data", effect = "observe", required = ["data|records|csv_text|csv|input"], optional = ["ops", "output_format", "result_shape", "strict", "null_policy"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "data.transform_records", action = "transform_data", effect = "observe", required = ["data|records|csv_text|csv|input"], optional = ["ops", "output_format", "result_shape", "strict", "null_policy"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, input = {}, data = {}, records = { type = "array" }, csv = { type = "string" }, csv_text = { type = "string" }, operation = { type = "string" }, fields = { type = "array", items = { type = "string" } }, ops = { type = "array", items = { type = "object" } }, output_format = { type = "string", enum = ["json", "md_table", "csv"] }, result_shape = { type = "string", enum = ["array", "single_object", "object", "scalar", "value", "single_value"] }, strict = { type = "boolean" }, null_policy = { type = "string", enum = ["keep", "drop", "zero"] } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["transform_data"] }, input = {}, data = {}, records = { type = "array" }, csv = { type = "string" }, csv_text = { type = "string" }, operation = { type = "string" }, fields = { type = "array", items = { type = "string" } }, ops = { type = "array", items = { type = "object" } }, output_format = { type = "string", enum = ["json", "md_table", "csv"] }, result_shape = { type = "string", enum = ["array", "single_object", "object", "scalar", "value", "single_value"] }, strict = { type = "boolean" }, null_policy = { type = "string", enum = ["keep", "drop", "zero"] } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "invest_copy"
@@ -1765,19 +1767,26 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
 output_kind = "text"
 description = "Ingest local files into a namespace index and search or inspect indexed knowledge-base namespaces."
-storage = { kind = "sqlite", schema_version = 1, migration_owner = "kb" }
+storage = { kind = "sqlite", schema_version = 3, migration_owner = "kb" }
 semantic_tags = ["knowledge_base", "document_ingest", "retrieval_index"]
 capabilities = ["fs.read", "fs.write"]
 risk_level = "medium"
 auto_invocable = true
 side_effect = true
 planner_capabilities = [
-  { name = "kb.ingest", action = "ingest", effect = "mutate", required = ["namespace", "paths|path"], optional = ["chunk_size", "chunk_overlap", "overwrite", "file_types", "max_file_size"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "kb.ingest", action = "ingest", effect = "mutate", required = ["namespace", "paths|path"], optional = ["chunk_size", "chunk_overlap", "overwrite", "file_types", "max_file_size", "max_files_per_run", "max_bytes_per_run", "max_chunks_per_run", "max_depth", "max_run_seconds"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
   { name = "kb.search", action = "search", effect = "observe", required = ["namespace", "query"], optional = ["top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "kb.list_namespaces", action = "list_namespaces", effect = "observe", optional = [], risk_level = "low", idempotent = true, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "kb.list_documents", action = "list_documents", effect = "observe", required = ["namespace"], optional = [], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "kb.remove_documents", action = "remove_documents", effect = "mutate", required = ["namespace", "paths|path"], optional = [], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "kb.delete_namespace", action = "delete_namespace", effect = "mutate", required = ["namespace"], optional = [], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "kb.reindex", action = "reindex", effect = "mutate", required = ["namespace"], optional = ["max_file_size", "max_files_per_run", "max_bytes_per_run", "max_chunks_per_run", "max_depth", "max_run_seconds"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "kb.resume_ingest", action = "resume_ingest", effect = "external", required = ["job_id"], optional = [], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "kb.ingest_job_status", action = "ingest_job_status", effect = "observe", required = ["job_id"], optional = [], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "kb.cancel_ingest", action = "cancel_ingest", effect = "mutate", required = ["job_id"], optional = [], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "kb.stats", action = "stats", effect = "observe", required = [], optional = ["namespace"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["ingest", "search", "list_namespaces", "stats"] }, namespace = { type = "string" }, paths = { type = "array", items = { type = "string" } }, path = { type = "string" }, query = { type = "string" }, top_k = { type = "integer" }, chunk_size = { type = "integer" }, chunk_overlap = { type = "integer" }, overwrite = { type = "boolean" }, file_types = { type = "array", items = { type = "string" } }, max_file_size = { type = "integer" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["ingest", "search", "list_namespaces", "list_documents", "remove_documents", "delete_namespace", "reindex", "resume_ingest", "ingest_job_status", "cancel_ingest", "stats"] }, namespace = { type = "string" }, paths = { type = "array", items = { type = "string" } }, path = { type = "string" }, job_id = { type = "string" }, query = { type = "string" }, top_k = { type = "integer" }, chunk_size = { type = "integer", minimum = 200, maximum = 8000 }, chunk_overlap = { type = "integer", minimum = 0, maximum = 400 }, overwrite = { type = "boolean" }, file_types = { type = "array", items = { type = "string" } }, max_file_size = { type = "integer", minimum = 1 }, max_files_per_run = { type = "integer", minimum = 1, maximum = 1000000 }, max_bytes_per_run = { type = "integer", minimum = 1, maximum = 1099511627776 }, max_chunks_per_run = { type = "integer", minimum = 1, maximum = 10000000 }, max_depth = { type = "integer", minimum = 1, maximum = 256 }, max_run_seconds = { type = "integer", minimum = 1, maximum = 300 } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1873,4 +1882,4 @@ planner_capabilities = [
   { name = "extension.register_skill", action = "register_external_skill", effect = "mutate", required = ["skill_name", "confirm"], optional = ["actions"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["assess_gap", "enable_external_skill", "implement_external_skill", "register_external_skill", "validate_external_skill", "permanent_extension_plan", "temporary_fix_plan", "temporary_fix_execute", "scaffold_external_skill"] }, request = { type = "string" }, mode_hint = { type = "string", enum = ["auto", "temporary_fix", "permanent_extension", "manual_review"] }, confirm = { type = "boolean" }, allow_package_install = { type = "boolean" }, plan = { type = "object" }, skill_name = { type = "string" }, capability_summary = { type = "string" }, actions = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }

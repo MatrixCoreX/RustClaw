@@ -12,6 +12,7 @@ SKIP=0
 RESULT_LINES=()
 TMP_DIR=""
 HTTP_SERVER_PID=""
+ARCHIVE_CONTRACT_RELATIVE="tmp/archive-basic-contract-${BASHPID}.zip"
 
 usage() {
   cat <<EOF
@@ -82,6 +83,7 @@ cleanup() {
   if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
     rm -rf "$TMP_DIR"
   fi
+  rm -f "$ROOT_DIR/$ARCHIVE_CONTRACT_RELATIVE"
 }
 trap cleanup EXIT
 
@@ -138,7 +140,7 @@ check_ok_extra() {
 check_error_contract() {
   local skill="$1"
   local args_json="$2"
-  local error_expr="${3:-((.extra.error_kind? // .error_kind?) | type == \"string\" and length > 0)}"
+  local error_expr="${3:-(.extra.error_code | type == \"string\" and length > 0)}"
   local wrapper="$ROOT_DIR/scripts/skill_calls/call_${skill}.sh"
   local stdout_log="$LOG_DIR/${skill}.error.stdout.log"
   local stderr_log="$LOG_DIR/${skill}.error.stderr.log"
@@ -205,7 +207,7 @@ check_ok_extra "health_check" '{}' '.extra != null and (.extra | has("workspace_
 check_ok_extra "process_basic" '{"action":"ps","limit":2}' '.extra != null and .extra.action == "ps" and .extra.exit_code == 0 and (.extra | has("output"))'
 check_ok_extra "git_basic" '{"action":"status"}' '.extra != null and .extra.action == "status" and .extra.subcommand == "status" and .extra.exit_code == 0 and (.extra | has("output"))'
 check_ok_extra "package_manager" '{"action":"detect"}' '.extra != null and .extra.action == "detect" and (.extra | has("manager")) and (.extra | has("output"))'
-check_ok_extra "archive_basic" '{"action":"pack","source":"scripts/skill_calls","archive":"tmp/archive-basic-contract.zip","format":"zip"}' '.extra != null and .extra.action == "pack" and .extra.format == "zip" and (.extra | has("source")) and (.extra | has("archive")) and (.extra | has("output"))'
+check_ok_extra "archive_basic" "{\"action\":\"pack\",\"source\":\"scripts/skill_calls\",\"archive\":\"$ARCHIVE_CONTRACT_RELATIVE\",\"format\":\"zip\"}" '.extra != null and .extra.action == "pack" and .extra.format == "zip" and (.extra | has("source")) and (.extra | has("archive")) and (.extra | has("output"))'
 check_ok_extra "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"PRAGMA schema_version;"}' '.extra != null and .extra.action == "sqlite_query" and (.extra | has("db_path")) and (.extra | has("sql")) and (.extra.result | has("columns")) and (.extra.result | has("rows"))'
 check_ok_extra "config_guard" '{"path":"configs/config.toml"}' '.extra != null and .extra.action == "scan" and (.extra | has("path")) and (.extra | has("risk_count")) and (.extra | has("risks"))'
 if start_http_contract_server; then
@@ -226,10 +228,10 @@ else
   skip_check "docker_basic" "docker command not available"
 fi
 
-check_error_contract "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"DELETE FROM demo"}' '.extra.error_kind == "unsafe_sql"'
-check_error_contract "config_guard" '{"path":"configs/does-not-exist.toml"}' '.extra.error_kind == "not_found"'
-check_error_contract "system_basic" '{"action":"read_range","path":"."}' '((.extra.error_kind? // .error_kind?) == "is_directory")'
-check_error_contract "archive_basic" '{"action":"nope"}' '((.extra.error_kind? // .error_kind?) == "invalid_input")'
+check_error_contract "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"DELETE FROM demo"}' '.extra.error_code == "unsafe_sql"'
+check_error_contract "config_guard" '{"path":"configs/does-not-exist.toml"}' '.extra.error_code == "not_found"'
+check_error_contract "system_basic" '{"action":"read_range","path":"."}' '.extra.error_code == "is_directory"'
+check_error_contract "archive_basic" '{"action":"nope"}' '.extra.error_code == "invalid_input"'
 
 echo
 echo "==== Base Skill Contract Summary ===="

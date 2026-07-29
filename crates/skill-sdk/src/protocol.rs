@@ -36,8 +36,10 @@ pub struct ProtocolResponse {
     pub error_text: Option<String>,
     #[serde(default)]
     pub buttons: Option<Value>,
-    #[serde(default)]
-    pub error_kind: Option<String>,
+    /// Canonical machine error identifier. Legacy `error_kind` is accepted on
+    /// deserialization only so older installed packages can still be read.
+    #[serde(default, alias = "error_kind", skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     #[serde(default)]
     pub platform: Option<String>,
     #[serde(default)]

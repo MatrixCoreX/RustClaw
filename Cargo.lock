@@ -142,8 +142,10 @@ name = "archive-basic-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1986,8 +1988,10 @@ name = "install-module-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2155,6 +2159,7 @@ dependencies = [
  "claw-core",
  "regex",
  "rusqlite",
+ "rustclaw-skill-sdk",
  "serde",
  "serde_json",
  "sha2",
@@ -2884,6 +2889,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -3491,6 +3497,7 @@ name = "rustclaw-skill-sdk"
 version = "0.1.8"
 dependencies = [
  "flate2",
+ "fs2",
  "hex",
  "libc",
  "reqwest 0.12.28",

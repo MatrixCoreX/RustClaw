@@ -39,10 +39,18 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if delivery_messages.is_empty() {
         return;
     }
-    if delivery_messages
-        .last()
-        .is_some_and(|message| delivery_message_is_json_object(message))
-    {
+    let planned_json_delivery = delivery_messages.last().is_some_and(|message| {
+        delivery_message_is_json_object(message)
+            && (loop_state
+                .last_user_visible_respond
+                .as_deref()
+                .is_some_and(|answer| answer.trim() == message.trim())
+                || loop_state
+                    .last_publishable_synthesis_output
+                    .as_deref()
+                    .is_some_and(|answer| answer.trim() == message.trim()))
+    });
+    if planned_json_delivery {
         info!(
             "delivery exact_contract_keep_planned_json task_id={}",
             task_id

@@ -460,7 +460,7 @@ fn verification_failure_checkpoint_payload_records_structured_attempt_evidence()
     let attempt = &payload["task_checkpoint"]["attempt_ledger"][0];
     assert_eq!(attempt["tool_or_skill"], "run_cmd");
     assert_eq!(attempt["status"], "error");
-    assert_eq!(attempt["error_kind"], "exit_status");
+    assert_eq!(attempt["error_code"], "exit_status");
     assert_eq!(attempt["error_code"], "exit_status");
     assert_eq!(attempt["exit_code"], 101);
     assert_eq!(attempt["retryable"], true);
@@ -1763,7 +1763,7 @@ fn append_delivery_message_sanitizes_structured_skill_errors() {
     append_delivery_message(
         "task-support-test",
         &mut messages,
-        r#"执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"unknown","error_text":"archive is required","text":null}。"#
+        r#"执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_code":"unknown","error_text":"archive is required","text":null}。"#
             .to_string(),
     );
 

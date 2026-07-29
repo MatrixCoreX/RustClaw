@@ -542,21 +542,9 @@ matrix_admission = { eligible = true, declared_actions = ["ping"], evidence_sour
         }],
         ..Default::default()
     };
-    let errors = text_legacy_matrix.external_observation_admission_errors(&admitted);
-    assert_eq!(errors.len(), 1);
-    assert!(errors[0].contains("text_legacy extractor"));
-
-    let text_legacy_admitted = load_registry_from_text(
-        r#"
-[[skills]]
-name = "demo_skill"
-kind = "runner"
-matrix_admission = { eligible = true, declared_actions = ["ping"], evidence_sources = ["text_legacy"], required_extra_fields = ["extra.message"], extractor_kind = "text_legacy", admission_version = "external-v1" }
-"#,
-    );
-    assert!(text_legacy_matrix
-        .external_observation_admission_errors(&text_legacy_admitted)
-        .is_empty());
+    assert!(text_legacy_matrix.validate_shape().iter().any(|error| {
+        error.contains("observation_extractor_invalid_kind") && error.contains("text_legacy")
+    }));
 }
 
 #[test]

@@ -4,7 +4,7 @@ use super::{audio_failure_fields, audio_failure_planner_text};
 fn structured_audio_failure_keeps_machine_fields_without_raw_marker() {
     let raw = concat!(
         "__RC_SKILL_ERROR__:",
-        r#"{"skill":"audio_transcribe","error_kind":"provider_request_failed","error_text":"private provider detail","extra":{"error_code":"provider_request_failed","message_key":"skill.audio_transcribe.provider_request_failed","retryable":true}}"#
+        r#"{"skill":"audio_transcribe","error_code":"provider_request_failed","error_text":"private provider detail","extra":{"error_code":"provider_request_failed","message_key":"skill.audio_transcribe.provider_request_failed","retryable":true}}"#
     );
 
     let (error_code, message_key, retryable) = audio_failure_fields(raw);

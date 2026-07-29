@@ -13,7 +13,7 @@ fn error_extra_merges_machine_contract_and_details() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "data_too_short");
+    assert_eq!(extra["error_code"], "data_too_short");
     assert_eq!(extra["message_key"], "skill.invest_copy.data_too_short");
     assert_eq!(extra["retryable"], false);
     assert_eq!(extra["current_chars"], 3);
@@ -37,7 +37,7 @@ fn draft_missing_person_returns_machine_error_extra() {
     );
     let extra = resp.extra.expect("error extra");
     assert_eq!(extra["source_skill"], SKILL_NAME);
-    assert_eq!(extra["error_kind"], "missing_person");
+    assert_eq!(extra["error_code"], "missing_person");
     assert_eq!(extra["message_key"], "skill.invest_copy.missing_person");
 }
 

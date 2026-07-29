@@ -247,7 +247,7 @@ fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() 
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "run_cmd",
-            "error_kind": "nonzero_exit",
+            "error_code": "nonzero_exit",
             "error_text": "Command failed with exit code 127",
             "platform": "linux",
             "extra": {
@@ -569,9 +569,22 @@ fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new();
-    let status =
-        "exit=0 command=echo \"Current working directory: $(pwd)\" > /home/guagua/rustclaw/pwd_line_abs.txt"
-            .to_string();
+    let status = serde_json::json!({
+        "schema_version": 1,
+        "action": "run",
+        "status": "ok",
+        "command": "echo \"Current working directory: $(pwd)\" > /home/guagua/rustclaw/pwd_line_abs.txt",
+        "command_output": "",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "complete": true,
+        "artifacts": [{
+            "kind": "file",
+            "path": "/home/guagua/rustclaw/pwd_line_abs.txt"
+        }]
+    })
+    .to_string();
     let answer = "/home/guagua/rustclaw/pwd_line_abs.txt".to_string();
     loop_state
         .executed_step_results

@@ -1,8 +1,6 @@
-use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustclaw_skill_sdk::{ArtifactSpill, BoundedResult};
 use serde::{Deserialize, Serialize};
@@ -78,14 +76,13 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
+fn error_extra(error_code: &str) -> Value {
     json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "error_code": error_code,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": false,
     })
 }
@@ -154,20 +151,25 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
                 }),
             ))
         }
-        "smart_install" => {
-            let manager = detect_manager()
+        "smart_install" | "smart_install_preview" => {
+            let manager = obj
+                .get("manager")
+                .and_then(|value| value.as_str())
+                .map(str::to_ascii_lowercase)
+                .or_else(detect_manager)
                 .ok_or_else(|| "cannot detect package manager; install manually or set args.manager and use action=install".to_string())?;
             let packages = extract_safe_packages(obj)?;
-            let dry_run = obj
-                .get("dry_run")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let dry_run = action == "smart_install_preview"
+                || obj
+                    .get("dry_run")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
             let use_sudo = obj
                 .get("use_sudo")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             manage_packages(
-                "smart_install",
+                action,
                 PackageOperation::Install,
                 &manager,
                 &packages,
@@ -224,7 +226,7 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
             )
         }
         _ => Err(
-            "unsupported action; use detect|install|smart_install|uninstall"
+            "unsupported action; use detect|install|smart_install_preview|smart_install|uninstall"
                 .to_string()
                 .into(),
         ),
@@ -485,18 +487,6 @@ fn manage_packages(
     full_cmd.extend(argv);
 
     if dry_run {
-        append_install_log(
-            "dry_run",
-            action,
-            manager,
-            packages,
-            &full_cmd,
-            None,
-            Some("dry_run only"),
-            None,
-            dry_run,
-            use_sudo,
-        );
         let command = full_cmd.join(" ");
         let output = package_manager_action_output(action, manager, packages, dry_run, &command);
         return Ok((
@@ -534,22 +524,6 @@ fn manage_packages(
             .map_err(|error| error.to_string())?;
     let text = bounded_output.value.clone();
     let exit_code = output.status.code().unwrap_or(-1);
-    append_install_log(
-        if output.status.success() {
-            "ok"
-        } else {
-            "failed"
-        },
-        action,
-        manager,
-        packages,
-        &full_cmd,
-        Some(exit_code),
-        Some(&text),
-        None,
-        dry_run,
-        use_sudo,
-    );
     if output.status.success() {
         let command = full_cmd.join(" ");
         let summary = package_manager_action_output(action, manager, packages, dry_run, &command);
@@ -607,7 +581,6 @@ fn package_command_failure(
             "schema_version": 1,
             "source_skill": SKILL_NAME,
             "status": "error",
-            "error_kind": "package_command_failed",
             "error_code": "package_command_failed",
             "message_key": "skill.package_manager.package_command_failed",
             "retryable": false,
@@ -690,74 +663,6 @@ fn is_safe_token(s: &str) -> bool {
         && s.len() <= 128
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+' | ':'))
-}
-
-fn append_install_log(
-    status: &str,
-    action: &str,
-    manager: &str,
-    packages: &[String],
-    command: &[String],
-    exit_code: Option<i32>,
-    output: Option<&str>,
-    error: Option<&str>,
-    dry_run: bool,
-    use_sudo: bool,
-) {
-    let root = workspace_root();
-    let log_dir = root.join("logs");
-    if let Err(err) = create_dir_all(&log_dir) {
-        eprintln!("create install logs dir failed: {err}");
-        return;
-    }
-    let file_path = log_dir.join("install_ops.log");
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file_path)
-    {
-        Ok(f) => f,
-        Err(err) => {
-            eprintln!("open install log failed: {err}");
-            return;
-        }
-    };
-
-    let line = serde_json::json!({
-        "ts": now_ts(),
-        "status": status,
-        "action": action,
-        "manager": manager,
-        "packages": packages,
-        "dry_run": dry_run,
-        "use_sudo": use_sudo,
-        "command": command.join(" "),
-        "exit_code": exit_code,
-        "output": output.map(truncate_for_log),
-        "error": error.map(truncate_for_log),
-    })
-    .to_string();
-
-    if let Err(err) = writeln!(file, "{line}") {
-        eprintln!("write install log failed: {err}");
-    }
-}
-
-fn truncate_for_log(s: &str) -> String {
-    const MAX: usize = 8000;
-    if s.len() <= MAX {
-        return s.to_string();
-    }
-    let mut out = s[..MAX].to_string();
-    out.push_str("...(truncated)");
-    out
-}
-
-fn now_ts() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[cfg(test)]

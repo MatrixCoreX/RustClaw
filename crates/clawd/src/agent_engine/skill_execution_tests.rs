@@ -228,7 +228,8 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
         "call_tool",
         None,
         "skill:subagent:batch",
-    );
+    )
+    .expect("valid subagent capability result");
 
     assert_eq!(loop_state.executed_step_results.len(), 1);
     let step = &loop_state.executed_step_results[0];
@@ -292,7 +293,8 @@ fn completed_subagent_step_persists_replay_fingerprint() {
         "call_capability",
         None,
         "skill:subagent:delegation-scope",
-    );
+    )
+    .expect("valid completed subagent capability result");
 
     assert_eq!(
         loop_state
@@ -314,7 +316,7 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
         .expect("unresolved template should be rejected");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("preflight error should be structured");
-    assert_eq!(parsed.error_kind, "invalid_args");
+    assert_eq!(parsed.error_code, "invalid_args");
     assert_eq!(
         parsed
             .extra
@@ -348,7 +350,8 @@ fn preflight_failure_records_generic_capability_result() {
         &args,
         &err,
         "call_capability",
-    );
+    )
+    .expect("valid preflight capability result");
 
     assert_eq!(loop_state.capability_results.len(), 1);
     let result = &loop_state.capability_results[0];
@@ -445,7 +448,7 @@ fn evidence_policy_preflight_rejects_unbounded_async_start_without_runtime_marke
         .expect("unbounded async starts still need an explicit runtime contract");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
 }
 
 #[test]
@@ -528,7 +531,7 @@ fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
 
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
     assert_eq!(parsed.error_text, "media_artifact_requires_media_skill");
     assert_eq!(
         parsed
@@ -891,7 +894,7 @@ fn structured_runtime_observation_path_arg_is_rejected_structurally() {
         .expect("structured observation in path should be rejected");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("preflight error should be structured");
-    assert_eq!(parsed.error_kind, "invalid_args");
+    assert_eq!(parsed.error_code, "invalid_args");
     assert_eq!(
         parsed
             .extra
@@ -1289,7 +1292,8 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
     assert!(validate_skill_output_contract(
         &state,
         "image_edit",
-        "Edited successfully and saved: /tmp/rustclaw-image.png"
+        "Edited successfully and saved: /tmp/rustclaw-image.png",
+        None,
     )
     .is_ok());
 }
@@ -1454,7 +1458,7 @@ async fn missing_target_failure_publishes_bounded_replan_progress() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "not_found",
+            "error_code": "not_found",
             "error_text": "path not found: missing.md"
         })
     );
@@ -1508,7 +1512,7 @@ async fn missing_target_failure_publishes_bounded_replan_progress() {
     );
     assert_eq!(
         failed_error_json
-            .get("error_kind")
+            .get("error_code")
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );
@@ -1528,7 +1532,7 @@ async fn patch_context_mismatch_publishes_bounded_replan_progress() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "workspace_patch",
-            "error_kind": "patch_context_mismatch",
+            "error_code": "patch_context_mismatch",
             "error_text": "patch check failed",
             "extra": {"error_code": "patch_context_mismatch"}
         })
@@ -1568,7 +1572,7 @@ async fn patch_context_mismatch_publishes_bounded_replan_progress() {
     assert_eq!(
         loop_state
             .output_vars
-            .get("failed_step.error_kind")
+            .get("failed_step.error_code")
             .map(String::as_str),
         Some("patch_context_mismatch")
     );
@@ -1585,7 +1589,7 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
         "__RC_SKILL_ERROR__:{}",
         serde_json::json!({
             "skill": "system_basic",
-            "error_kind": "unsupported_action",
+            "error_code": "unsupported_action",
             "error_text": "unknown action: check_exists",
             "extra": {
                 "error_code": "unsupported_action",
@@ -1636,7 +1640,7 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
     assert_eq!(
         loop_state
             .output_vars
-            .get("failed_step.error_kind")
+            .get("failed_step.error_code")
             .map(String::as_str),
         Some("unsupported_action")
     );
@@ -1650,7 +1654,7 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
     assert_eq!(
         loop_state
             .output_vars
-            .get("skill.system_basic.error_kind")
+            .get("skill.system_basic.error_code")
             .map(String::as_str),
         Some("unsupported_action")
     );

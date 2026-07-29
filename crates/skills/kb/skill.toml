@@ -40,7 +40,7 @@ inherit_credentials = false
 
 [storage]
 kind = "sqlite"
-schema_version = 1
+schema_version = 3
 migration_owner = "kb"
 
 [lifecycle]

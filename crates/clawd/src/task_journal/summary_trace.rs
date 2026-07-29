@@ -921,7 +921,7 @@ pub(super) fn step_trace_json(
             .map(|value| capability_resolution_source(&value.action_type))
             .unwrap_or("step_trace_fallback"),
         "status": step.status.as_str(),
-        "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
+        "error_code": structured_error.as_ref().map(|value| value.error_code.as_str()),
         "failure_attribution": failure_attribution.as_deref(),
         "contract_policy": contract_policy,
         "contract": step_contract_trace_json(output_contract, requested),

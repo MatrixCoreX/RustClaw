@@ -7,7 +7,6 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["status"], "error");
-    assert_eq!(extra["error_kind"], "execution_failed");
     assert_eq!(extra["error_code"], "execution_failed");
     assert_eq!(extra["message_key"], "skill.rss_fetch.execution_failed");
     assert_eq!(extra["retryable"], false);
@@ -26,7 +25,7 @@ fn persistence_conflict_cannot_return_success_at_response_boundary() {
         "persist-conflict".to_string(),
         successful_test_output(),
         Some(PersistenceError {
-            error_kind: "config_persist_failed",
+            error_code: "config_persist_failed",
             failure_phase: "config_persistence",
             cause_code: "config_write_conflict".to_string(),
             side_effect_applied: false,
@@ -56,7 +55,7 @@ fn lock_creation_failure_cannot_return_success_at_response_boundary() {
         "lock-failure".to_string(),
         successful_test_output(),
         Some(PersistenceError {
-            error_kind: "config_persist_failed",
+            error_code: "config_persist_failed",
             failure_phase: "config_persistence",
             cause_code: cause,
             side_effect_applied: false,
@@ -79,7 +78,7 @@ fn atomic_replace_failure_cannot_return_success_at_response_boundary() {
         "replace-failure".to_string(),
         successful_test_output(),
         Some(PersistenceError {
-            error_kind: "config_persist_failed",
+            error_code: "config_persist_failed",
             failure_phase: "config_persistence",
             cause_code: cause,
             side_effect_applied: false,
@@ -179,7 +178,7 @@ fn unknown_category_returns_bounded_machine_replan_contract_without_state_change
     )
     .expect_err("unknown category must fail before network dispatch");
 
-    assert_eq!(failure.extra["error_kind"], "category_not_configured");
+    assert_eq!(failure.extra["error_code"], "category_not_configured");
     assert_eq!(failure.extra["error_code"], "category_not_configured");
     assert_eq!(failure.extra["retryable"], true);
     assert_eq!(failure.extra["failure_phase"], "pre_dispatch");
@@ -380,7 +379,7 @@ fn removed_legacy_actions_are_rejected_by_machine_code() {
         )
         .expect_err("removed legacy action must not be normalized");
         assert_eq!(failure.error_text, "rss_fetch.unsupported_action");
-        assert_eq!(failure.extra["error_kind"], "invalid_input");
+        assert_eq!(failure.extra["error_code"], "invalid_input");
     }
 }
 

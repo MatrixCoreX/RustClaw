@@ -317,8 +317,8 @@ pub(super) fn skill_error_observation_or_raw(skill: &str, err: &str) -> String {
 pub(super) fn skill_error_progress_token(_skill: &str, err: &str) -> String {
     if let Some(structured) = crate::skills::parse_structured_skill_error(err) {
         return format!(
-            "error_kind={}",
-            crate::truncate_for_agent_trace(structured.error_kind.trim())
+            "error_code={}",
+            crate::truncate_for_agent_trace(structured.error_code.trim())
         );
     }
     if let Some(policy_block) = crate::skills::parse_policy_block_error(err) {
@@ -328,7 +328,7 @@ pub(super) fn skill_error_progress_token(_skill: &str, err: &str) -> String {
         );
     }
     if crate::skills::read_file_not_found_path(err).is_some() {
-        return "error_kind=not_found".to_string();
+        return "error_code=not_found".to_string();
     }
     compact_progress_error(err)
 }
@@ -433,7 +433,7 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
             &retry_args,
             &err,
             retry_trace_kind,
-        );
+        )?;
         return Ok(Some(outcome.stop_signal));
     }
     let pre_tool_use_evaluation = crate::agent_hooks::pre_tool_use_outcome_for_state(
@@ -509,7 +509,7 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
             &retry_args,
             &err,
             retry_trace_kind,
-        );
+        )?;
         return Ok(Some(outcome.stop_signal));
     }
     let progress_error = skill_error_progress_token(normalized_skill, err);
@@ -544,14 +544,15 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         },
     )
     .await;
-    loop_state
-        .capability_results
-        .push(crate::capability_result::envelope_for_step_execution(
+    loop_state.capability_results.push(
+        crate::capability_result::envelope_for_step_execution(
             "run_cmd",
             &retry_args,
             &retry_step,
             None,
-        ));
+        )
+        .map_err(|error| error.to_string())?,
+    );
     record_post_tool_use_hook_observations(
         state,
         task,

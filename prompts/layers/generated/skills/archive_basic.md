@@ -100,7 +100,7 @@
   - `output`: string command observation; fallback evidence only.
   - `field_value`: object containing `dest`.
 - Sensitive fields: archive member `content` may include user data. Provider-facing traces should prefer excerpt/hash/length metadata unless the user explicitly requested the content.
-- Error responses include top-level `error_kind`; `extra.error_kind` is present when the error has path/action context.
+- Error responses use canonical `extra.error_code` plus readable `error_text`; path/action context remains in `extra`.
 
 ## Request/Response Examples (from interface)
 ### Example 1

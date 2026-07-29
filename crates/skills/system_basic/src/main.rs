@@ -70,8 +70,6 @@ struct Resp {
     extra: Option<Value>,
     error_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     platform: Option<String>,
 }
 
@@ -157,7 +155,6 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
-                error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
             },
         };
@@ -182,7 +179,6 @@ fn handle(req: Req) -> Resp {
             extra: serde_json::from_str(&text).ok(),
             text,
             error_text: None,
-            error_kind: None,
             platform: None,
         },
         Err(err) => Resp {
@@ -191,7 +187,6 @@ fn handle(req: Req) -> Resp {
             text: String::new(),
             extra: Some(error_extra_with_details(err.kind, err.extra)),
             error_text: Some(err.message),
-            error_kind: Some(err.kind.to_string()),
             platform: Some(std::env::consts::OS.to_string()),
         },
     }
@@ -206,7 +201,6 @@ fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_kind": error_kind,
         "error_code": error_kind,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
@@ -1346,7 +1340,7 @@ fn validate_structured(
                 .map(str::to_string)
                 .unwrap_or_else(|| detect_format_from_path(&real)),
             "valid": false,
-            "error_kind": err.kind,
+            "error_code": err.kind,
             "error_text": err.message,
         })
         .to_string()),

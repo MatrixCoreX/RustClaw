@@ -123,7 +123,7 @@ pub(super) fn ensure_binance_config_for_action(
         return Err(crypto_config_error(
             "binance",
             action,
-            CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_KIND,
+            CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_CODE,
             "crypto.err.binance_not_bound",
         ));
     }
@@ -131,7 +131,7 @@ pub(super) fn ensure_binance_config_for_action(
         return Err(crypto_config_error(
             "binance",
             action,
-            CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_KIND,
+            CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_CODE,
             "crypto.err.binance_credentials_incomplete",
         ));
     }
@@ -147,7 +147,7 @@ pub(super) fn ensure_okx_config_for_action(cfg: &RootConfig, action: &str) -> Re
         return Err(crypto_config_error(
             "okx",
             action,
-            CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_KIND,
+            CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_CODE,
             "crypto.err.okx_not_bound",
         ));
     }
@@ -158,7 +158,7 @@ pub(super) fn ensure_okx_config_for_action(cfg: &RootConfig, action: &str) -> Re
         return Err(crypto_config_error(
             "okx",
             action,
-            CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_KIND,
+            CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_CODE,
             "crypto.err.okx_credentials_incomplete",
         ));
     }
