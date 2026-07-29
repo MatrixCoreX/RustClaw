@@ -701,7 +701,9 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
               <BookOpenCheck className="h-5 w-5" />
             </span>
             <div>
-              <p className="theme-kicker text-[10px] uppercase">{t("AI 学习", "AI Learning")}</p>
+              <p className="theme-kicker text-[10px] uppercase">
+                {t("Agent学习/维护", "Agent Learning / Maintenance")}
+              </p>
               <h2 className="mt-1 text-lg font-semibold text-[var(--theme-text-strong)]">
                 {t("从使用到架构，分阶段理解 AI Agent", "Learn AI agents from everyday use to architecture")}
               </h2>

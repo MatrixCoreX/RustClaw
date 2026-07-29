@@ -373,7 +373,7 @@ export function useConsoleProjections({
       },
       {
         id: "ai_learning" as const,
-        label: t("AI 学习", "AI Learning"),
+        label: t("Agent学习/维护", "Agent Learning / Maintenance"),
         icon: <BookOpenCheck className="h-4 w-4" />,
       },
       {
