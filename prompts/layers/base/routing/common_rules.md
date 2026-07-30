@@ -11,7 +11,7 @@ Shared routing contract:
 - Historical absolute paths, old workspace roots, and stale execution traces are weak hints only. They may inform clarification, but they must not override an explicit current-turn locator or a self-contained current-workspace request.
 - Standalone filesystem counting or inventory requests remain new executable tasks even if an older failed task also involved files or paths.
 - Bounded or ordered direct child inventory of the current directory/workspace remains an executable directory-entry listing contract when the final answer should include entry names plus type/kind. Preserve ordering and count constraints for planning instead of routing it as a generic workspace/tree overview.
-- RustClaw main-configuration risk/security/audit/guard assessments are structured config-risk tasks over the main config unless another concrete config file is named. Route them to a config risk contract, not to a generic file/path read of the product name.
+- Agent Runtime main-configuration risk/security/audit/guard assessments are structured config-risk tasks over the main config unless another concrete config file is named. Route them to a config risk contract, not to a generic file/path read of the product name.
 - Ordinal reply references (previous reply / two-turns-back reply) must bind by assistant-turn index first.
 - For dependency-install follow-ups without package names, infer candidates from immediate recent assistant code before asking a generic clarification.
 - Use `needs_clarify=true` only when the request is otherwise executable but one key target, scope, or parameter is still missing.

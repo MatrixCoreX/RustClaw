@@ -46,18 +46,51 @@ fn only_an_active_runtime_sandbox_is_inherited_by_the_skill_child() {
 fn declared_skill_storage_directory_is_an_explicit_sandbox_write_target() {
     let secret_directory = std::path::Path::new("/runtime/secret-tokens");
     let storage_directory = std::path::Path::new("/runtime/skill-data/fs_search");
-    let paths = runner_additional_writable_paths(Some(secret_directory), Some(storage_directory));
+    let artifact_directory = std::path::Path::new("/runtime/artifacts/invocation");
+    let paths = runner_additional_writable_paths(
+        Some(secret_directory),
+        Some(storage_directory),
+        Some(artifact_directory),
+    );
 
     assert_eq!(
         paths,
         vec![
             secret_directory.to_path_buf(),
-            storage_directory.to_path_buf()
+            storage_directory.to_path_buf(),
+            artifact_directory.to_path_buf(),
         ]
     );
     assert_eq!(
-        runner_additional_writable_paths(None, Some(storage_directory)),
-        vec![storage_directory.to_path_buf()]
+        runner_additional_writable_paths(None, Some(storage_directory), Some(artifact_directory)),
+        vec![
+            storage_directory.to_path_buf(),
+            artifact_directory.to_path_buf()
+        ]
+    );
+}
+
+#[test]
+fn artifact_paths_are_scoped_per_invocation_and_remapped_to_the_host() {
+    let root = std::path::Path::new("/workspace");
+    let first = invocation_artifact_output_directory(root, "task/one", "skill.demo");
+    let second = invocation_artifact_output_directory(root, "task/one", "skill.demo");
+    assert_ne!(first, second);
+    assert!(first.starts_with(root.join(".agent-runtime/artifacts/skill-invocations/task_one")));
+
+    let sandbox = std::path::Path::new("/run/agent-runtime-writable/2");
+    let host = std::path::Path::new("/workspace/.agent-runtime/artifacts/invocation");
+    let mut response = json!({
+        "extra": {
+            "outputs": [{"path": "/run/agent-runtime-writable/2/result.png"}]
+        }
+    });
+    remap_sandbox_artifact_paths(&mut response, sandbox, host);
+    assert_eq!(
+        response.pointer("/extra/outputs/0/path"),
+        Some(&json!(
+            "/workspace/.agent-runtime/artifacts/invocation/result.png"
+        ))
     );
 }
 
@@ -67,8 +100,8 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
     let storage_directory = std::path::PathBuf::from("/runtime/skill-data/fs_search");
     let sources = vec![secret_directory, storage_directory.clone()];
     let targets = vec![
-        std::path::PathBuf::from("/run/rustclaw-writable/0"),
-        std::path::PathBuf::from("/run/rustclaw-writable/1"),
+        std::path::PathBuf::from("/run/agent-runtime-writable/0"),
+        std::path::PathBuf::from("/run/agent-runtime-writable/1"),
     ];
     let sandbox_storage = sandbox_target_for_source(Some(&storage_directory), &sources, &targets)
         .expect("mapped storage target");
@@ -84,10 +117,13 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
         .expect("map descriptor")
         .expect("descriptor");
 
-    assert_eq!(mapped.database_path, "/run/rustclaw-writable/1/state.db");
+    assert_eq!(
+        mapped.database_path,
+        "/run/agent-runtime-writable/1/state.db"
+    );
     assert_eq!(
         sandbox_target_for_source(Some(&sources[0]), &sources, &targets),
-        Some(std::path::PathBuf::from("/run/rustclaw-writable/0"))
+        Some(std::path::PathBuf::from("/run/agent-runtime-writable/0"))
     );
 }
 
@@ -238,8 +274,8 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
         &state,
         &task,
         "ui",
-        serde_json::json!({}),
         None,
+        std::path::Path::new("/runtime/artifacts/invocation"),
         Some(&execution),
     );
 
@@ -258,6 +294,12 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
             .pointer("/execution/attempt_no")
             .and_then(serde_json::Value::as_i64),
         Some(2)
+    );
+    assert_eq!(
+        context
+            .get("artifact_output_directory")
+            .and_then(serde_json::Value::as_str),
+        Some("/runtime/artifacts/invocation")
     );
 }
 
@@ -285,8 +327,8 @@ fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
         &state,
         &task,
         "ui",
-        serde_json::json!({}),
         Some(descriptor),
+        std::path::Path::new("/runtime/artifacts/invocation"),
         None,
     );
     assert_eq!(
@@ -321,6 +363,7 @@ fn registry_storage_schema_version_is_forwarded_to_the_skill() {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });
@@ -329,4 +372,79 @@ fn registry_storage_schema_version_is_forwarded_to_the_skill() {
         .expect("KB storage descriptor");
     assert_eq!(descriptor.schema_version, 3);
     assert_eq!(descriptor.skill_name, "kb");
+}
+
+#[test]
+fn successful_runner_results_require_the_exact_execution_binding() {
+    let response = json!({
+        "status": "ok",
+        "extra": {
+            "execution_binding": {
+                "skill_name": "fixture_skill",
+                "version": "2.0.0",
+                "manifest_digest": "a".repeat(64),
+                "receipt_digest": "b".repeat(64),
+                "registry_generation": 7,
+                "registry_generation_digest": "c".repeat(64),
+                "base_registry_digest": "f".repeat(64),
+                "overlay_generation_digest": "0".repeat(64),
+                "policy_digest": "d".repeat(64),
+                "admission_receipt_digest": "e".repeat(64)
+            }
+        }
+    });
+    validate_runner_execution_binding(
+        &response,
+        "fixture_skill",
+        "2.0.0",
+        &"a".repeat(64),
+        &"b".repeat(64),
+        7,
+        Some(&"c".repeat(64)),
+        Some(&"f".repeat(64)),
+        Some(&"0".repeat(64)),
+        Some(&"d".repeat(64)),
+        Some(&"e".repeat(64)),
+    )
+    .expect("exact execution binding");
+
+    let mut mismatched = response;
+    mismatched["extra"]["execution_binding"]["version"] = json!("3.0.0");
+    assert!(validate_runner_execution_binding(
+        &mismatched,
+        "fixture_skill",
+        "2.0.0",
+        &"a".repeat(64),
+        &"b".repeat(64),
+        7,
+        Some(&"c".repeat(64)),
+        Some(&"f".repeat(64)),
+        Some(&"0".repeat(64)),
+        Some(&"d".repeat(64)),
+        Some(&"e".repeat(64)),
+    )
+    .expect_err("version mismatch must fail closed")
+    .contains("field=version"));
+}
+
+#[test]
+fn runner_resolution_errors_do_not_claim_an_execution_binding() {
+    let response = json!({
+        "status": "error",
+        "extra": {"error_code": "runner_resolution_failed"}
+    });
+    validate_runner_execution_binding(
+        &response,
+        "fixture_skill",
+        "2.0.0",
+        &"a".repeat(64),
+        &"b".repeat(64),
+        7,
+        Some(&"c".repeat(64)),
+        Some(&"f".repeat(64)),
+        Some(&"0".repeat(64)),
+        Some(&"d".repeat(64)),
+        Some(&"e".repeat(64)),
+    )
+    .expect("pre-execution structured failure is allowed without an actual binding");
 }

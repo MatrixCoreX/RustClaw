@@ -4,11 +4,11 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rustclaw_skill_sdk::{
-    digest_file, ArtifactReceipt, ArtifactSpill, BoundedResult, ExpectedPathKind, SkillPathPolicy,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use skill_sdk::{
+    digest_file, ArtifactReceipt, ArtifactSpill, BoundedResult, ExpectedPathKind, SkillPathPolicy,
+};
 
 const SKILL_NAME: &str = "install_module";
 
@@ -205,7 +205,7 @@ fn install_modules(args: Value, context: Option<&Value>) -> Result<(String, Valu
         }
         let full_output = command_output(&out.stdout, &out.stderr);
         let spill = ArtifactSpill::new(
-            workspace_root.join(".rustclaw/artifacts/skill-output"),
+            workspace_state_root(&workspace_root).join("artifacts/skill-output"),
             SKILL_NAME,
         )
         .map_err(|error| error.to_string())?;
@@ -432,7 +432,7 @@ fn project_install_command(
             Vec::new(),
         ),
         "python" => {
-            let target = project_root.join(".rustclaw/dependencies/python");
+            let target = workspace_state_root(project_root).join("dependencies/python");
             (
                 vec![
                     "python3".to_string(),
@@ -764,6 +764,12 @@ fn cache_path_token(value: &str) -> String {
             }
         })
         .collect()
+}
+
+fn workspace_state_root(workspace_root: &Path) -> PathBuf {
+    let state_dir =
+        std::env::var("APP_WORKSPACE_STATE_DIR").unwrap_or_else(|_| ".agent-runtime".to_string());
+    workspace_root.join(state_dir)
 }
 
 #[cfg(test)]

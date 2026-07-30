@@ -1,13 +1,13 @@
-# RustClaw Skill Setup Guide
+# Agent Runtime Skill Setup Guide
 
-This document is for RustClaw self-questions such as “how do I enable this skill”, “what does this skill need”, “where should I bind the API key”, or “what config should be changed”. The goal is not fixed wording. The goal is to ground answers in the real runtime entry points that exist in this repository.
+This document is for Agent Runtime self-questions such as “how do I enable this skill”, “what does this skill need”, “where should I bind the API key”, or “what config should be changed”. The goal is not fixed wording. The goal is to ground answers in the real runtime entry points that exist in this repository.
 
 ## Answering Pattern
 
 1. Start with the real entry point. Say whether the setup lives in a config file, an environment variable, a local database/API, a local dependency, or a login/session state.
 2. State the scope clearly. Distinguish machine-wide config, repo config, per-`user_key` binding, and per-session/channel login state.
 3. If the user is only missing one thing, ask for it. Do not stop at abstract documentation when the next step is obvious. For ordinary parameters or paths, ask directly. For secrets, tokens, passwords, or API keys, prefer a dedicated command, UI, local config, or API path instead of asking the user to paste the sensitive value into ordinary chat.
-4. Do not default to “edit this manually” when RustClaw can already inspect or change the workspace through existing skills.
+4. Do not default to “edit this manually” when Agent Runtime can already inspect or change the workspace through existing skills.
 5. Do not confuse config policy files with credential storage. Most importantly for `crypto`: exchange credentials are normally stored per `user_key` in the local database, not by editing `configs/crypto.toml`.
 6. Editing files under `configs/` is an admin-only capability. If the current task is not authenticated as admin, reply with a no-permission answer and do not attempt the change.
 
@@ -16,9 +16,9 @@ This document is for RustClaw self-questions such as “how do I enable this ski
 | Skill | Real setup entry point | What to emphasize and what to ask next |
 | --- | --- | --- |
 | `run_cmd` `read_file` `write_file` `list_dir` `make_dir` `remove_file` | No extra binding; depends on the current workspace and local permissions | These are base local capabilities. No separate enablement is required. |
-| `schedule` | No third-party binding; depends on RustClaw scheduling | Ask what task should run and when it should trigger. |
+| `schedule` | No third-party binding; depends on Agent Runtime scheduling | Ask what task should run and when it should trigger. |
 | `system_basic` `process_basic` `health_check` `log_analyze` `service_control` `task_control` `config_guard` | No third-party binding; local runtime and service state only | Usually zero-config. Failures are more likely to be permissions, missing targets, or missing services. |
-| `archive_basic` `fs_search` `git_basic` `package_manager` `install_module` `docker_basic` `db_basic` `http_basic` `doc_parse` `transform` | Mostly local commands, files, and network; `git_basic` reads `configs/git_basic.toml`; `db_basic` defaults to `data/rustclaw.db` | These are not account-binding skills. Ask for the concrete path, command, DB, or target if it is missing. |
+| `archive_basic` `fs_search` `git_basic` `package_manager` `install_module` `docker_basic` `db_basic` `http_basic` `doc_parse` `transform` | Mostly local commands, files, and network; `git_basic` reads `configs/git_basic.toml`; `db_basic` defaults to `data/agent-runtime.db` | These are not account-binding skills. Ask for the concrete path, command, DB, or target if it is missing. |
 | `rss_fetch` | Reads `configs/rss.toml` for categories, feed sources, and failure tracking | This is feed-config driven, not account-bound. Ask which category or feed URL should be added. |
 | `browser_web` | Requires `crates/skills/browser_web/browser_web.js`, Node.js, and Playwright; wait tuning lives in `configs/browser_web_wait_map.json` | Explain that this is a local browser dependency path. Ask whether to check/install Node.js and Playwright or adjust the wait map. |
 | `web_search_extract` | Backend comes from `args.backend` / `WEB_SEARCH_BACKEND`; `serpapi` needs `SERPAPI_API_KEY`; DuckDuckGo HTML can work without a key | Explain that this is a search-backend setup question, not mainly a repo config toggle. Ask whether to keep the DuckDuckGo fallback or add `SERPAPI_API_KEY`. |

@@ -606,7 +606,9 @@ fn normalize_agent_action_shape_rewrites_action_run_cmd_alias() {
 
 #[test]
 fn normalize_agent_action_shape_rewrites_action_builtin_skill_alias() {
-    let state = crate::AppState::test_default_with_fixture_provider();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     let normalized = super::parse_agent_action_json_with_repair(
         r#"{"action":"list_dir","path":"logs","limit":2}"#,
         &state,
@@ -670,7 +672,7 @@ fn normalize_agent_action_shape_rewrites_call_tool_run_cmd_aliases() {
 fn normalize_agent_action_shape_preserves_call_tool_run_cmd_async_contract() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let normalized = super::parse_agent_action_json_with_repair(
-        r#"{"type":"call_tool","tool":"run_cmd","args":{"command":"sleep 2 && echo RUSTCLAW_ASYNC_SMOKE","cwd":"/tmp/repo","async_start":true,"max_output_bytes":2048}}"#,
+        r#"{"type":"call_tool","tool":"run_cmd","args":{"command":"sleep 2 && echo APP_ASYNC_SMOKE","cwd":"/tmp/repo","async_start":true,"max_output_bytes":2048}}"#,
         &state,
     )
     .expect("call_tool run_cmd async contract should normalize");
@@ -680,7 +682,7 @@ fn normalize_agent_action_shape_preserves_call_tool_run_cmd_async_contract() {
             "type": "call_skill",
             "skill": "run_cmd",
             "args": {
-                "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+                "command": "sleep 2 && echo APP_ASYNC_SMOKE",
                 "cwd": "/tmp/repo",
                 "async_start": true,
                 "max_output_bytes": 2048,
@@ -741,7 +743,9 @@ fn normalize_agent_action_shape_preserves_call_tool_fs_basic_write_text() {
 
 #[test]
 fn normalize_agent_action_shape_rewrites_dotted_fs_basic_tool_action() {
-    let state = crate::AppState::test_default_with_fixture_provider();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     let normalized = super::parse_agent_action_json_with_repair(
         r#"{"type":"call_tool","tool":"fs_basic.read_text_range","args":{"path":"/tmp/calc_core.py","mode":"range","start_line":0,"end_line":200}}"#,
         &state,

@@ -12,6 +12,7 @@ use toml::Value as TomlValue;
 const DEFAULT_MODEL: &str = "MiniMax-Hailuo-2.3";
 const DEFAULT_RESOLUTION: &str = "768P";
 const SKILL_NAME: &str = "video_generate";
+const NOT_APPLIED_ERROR_PREFIX: &str = "__RC_MEDIA_NOT_APPLIED__:";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -62,6 +63,7 @@ struct LlmConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     api_key: String,
@@ -177,13 +179,7 @@ fn main() -> anyhow::Result<()> {
                     extra: Some(extra),
                     error_text: None,
                 },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
-                },
+                Err(err) => execution_error_response(req.request_id, err),
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
@@ -209,6 +205,47 @@ fn error_extra(error_kind: &str) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
         "retryable": false,
     })
+}
+
+fn execution_error_response(request_id: String, err: String) -> Resp {
+    let classified = decode_not_applied_error(&err);
+    let error_text = classified
+        .as_ref()
+        .map(|(_, message)| message.clone())
+        .unwrap_or(err);
+    let mut extra = error_extra("execution_failed");
+    if let (Some((failure_phase, _)), Some(object)) = (classified, extra.as_object_mut()) {
+        object.insert("failure_phase".to_string(), json!(failure_phase));
+        object.insert("side_effect_applied".to_string(), json!(false));
+    }
+    Resp {
+        request_id,
+        status: "error".to_string(),
+        text: String::new(),
+        extra: Some(extra),
+        error_text: Some(error_text),
+    }
+}
+
+fn not_applied_error(failure_phase: &str, message: impl Into<String>) -> String {
+    format!(
+        "{NOT_APPLIED_ERROR_PREFIX}{}",
+        json!({
+            "failure_phase": failure_phase,
+            "message": message.into(),
+        })
+    )
+}
+
+fn decode_not_applied_error(error: &str) -> Option<(String, String)> {
+    let payload = error.trim().strip_prefix(NOT_APPLIED_ERROR_PREFIX)?;
+    let value: Value = serde_json::from_str(payload).ok()?;
+    let failure_phase = value.get("failure_phase")?.as_str()?.trim();
+    let message = value.get("message")?.as_str()?.trim();
+    if failure_phase.is_empty() || message.is_empty() {
+        return None;
+    }
+    Some((failure_phase.to_string(), message.to_string()))
 }
 
 fn execute(
@@ -1220,12 +1257,17 @@ fn create_video_task(
         .json()
         .map_err(|err| format!("parse minimax video create response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!(
-            "minimax video create failed status={status}: {}",
-            truncate(&value.to_string(), 400)
+        return Err(not_applied_error(
+            "provider_rejected",
+            format!(
+                "minimax video create failed status={status}: {}",
+                truncate(&value.to_string(), 400)
+            ),
         ));
     }
-    check_base_resp(&value, "minimax video create")?;
+    if let Err(error) = check_base_resp(&value, "minimax video create") {
+        return Err(not_applied_error("provider_rejected", error));
+    }
     value
         .get("task_id")
         .and_then(value_to_string)
@@ -1794,7 +1836,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_allows_external_paths() -> bool {
-    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+    std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 #[cfg(test)]

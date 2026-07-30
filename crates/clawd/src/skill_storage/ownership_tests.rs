@@ -1,7 +1,11 @@
 #[test]
 fn rebind_moves_only_the_selected_users_kb_data() {
     let runtime = crate::skill_storage::SkillStorageRuntime::test_default();
-    let db = runtime.kb_pool().get().expect("KB db");
+    let db = runtime
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
     db.execute(
         "INSERT INTO kb_namespaces
             (owner_user_key, namespace, payload_json, updated_at_epoch)
@@ -33,7 +37,11 @@ fn rebind_moves_only_the_selected_users_kb_data() {
             .expect("rebind"),
         2
     );
-    let db = runtime.kb_pool().get().expect("KB db");
+    let db = runtime
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
     let payload: String = db
         .query_row(
             "SELECT payload_json FROM kb_namespaces WHERE owner_user_key='rk-new'",

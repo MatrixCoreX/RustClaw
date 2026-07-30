@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/finalizer_out.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/finalizer_out.schema.json",
   "title": "FinalizerOut",
   "description": "Schema for the JSON object returned by `prompts/observed_answer_fallback_prompt.md` (and other finalize-tier classifiers that share the same envelope). Mirrors `ObservedAnswerFallbackOut` in `crates/clawd/src/agent_engine/observed_output.rs` and is enforced by the `finalizer_out_schema_drift` unit test in the same file.\n\n§D2 (schema-driven prompt I/O 第三份样板, after intent_normalizer + plan_result): the finalizer always returns a flat object with `answer` text plus 5 boolean / numeric quality flags that the caller cross-checks against `semantic_judge` only on low confidence (< 0.55). All flags must be present (`#[serde(default)]` covers missing keys, but the schema documents the canonical shape).",
   "type": "object",

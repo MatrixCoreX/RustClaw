@@ -404,11 +404,7 @@ fn inline_child_budget(child_input: &Value, timeout_ms: u64) -> ChildTaskBudget 
 fn child_parent_context(task: &crate::ClaimedTask) -> ChildTaskParentContext {
     let execution_policy_stamp = serde_json::from_str::<Value>(&task.payload_json)
         .ok()
-        .and_then(|payload| {
-            payload
-                .get(crate::task_execution_policy::POLICY_PAYLOAD_FIELD)
-                .cloned()
-        });
+        .and_then(|payload| crate::task_execution_policy::policy_payload(&payload).cloned());
     ChildTaskParentContext {
         parent_task_id: task.task_id.clone(),
         user_id: task.user_id,

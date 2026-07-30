@@ -167,7 +167,7 @@ export function SkillStoreCatalog({
         <div className="mt-3 min-w-0">
           <h3 className="break-words text-sm font-semibold text-white/90">{item.name}</h3>
           <p className="mt-1 min-h-10 text-xs leading-5 text-white/55">
-            {skillDescription(lang, item.description)}
+            {skillDescription(lang, item.description, item.description_zh)}
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
@@ -268,7 +268,7 @@ export function SkillStoreCatalog({
           <p className="mt-1 text-sm text-white/55">
             {t(
               "安装、删除或重新安装可选技能。当前平台有预编译版本时会直接验证并启用；没有匹配版本时才单独构建这个技能。",
-              "Install, remove, or reinstall optional skills. RustClaw verifies and activates a matching platform precompile when available, and builds only this skill when no compatible precompile exists.",
+              "Install, remove, or reinstall optional skills. {product_name} verifies and activates a matching platform precompile when available, and builds only this skill when no compatible precompile exists.",
             )}
           </p>
         </div>

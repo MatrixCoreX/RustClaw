@@ -214,8 +214,8 @@ fn matches_provider_override(name: &str, provider_type: &str, override_name: &st
 }
 
 pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>> {
-    let model_override = std::env::var("RUSTCLAW_MODEL_OVERRIDE").ok();
-    let provider_override = std::env::var("RUSTCLAW_PROVIDER_OVERRIDE").ok();
+    let model_override = claw_core::product_identity::env_string("MODEL_OVERRIDE").ok();
+    let provider_override = claw_core::product_identity::env_string("PROVIDER_OVERRIDE").ok();
     build_providers_with_overrides(
         config,
         provider_override.as_deref(),

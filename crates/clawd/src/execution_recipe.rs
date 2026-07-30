@@ -1029,39 +1029,7 @@ pub(crate) fn classify_skill_action_effect(
 }
 
 pub(crate) fn dry_run_observes_only_action(normalized_skill: &str, args: &Value) -> bool {
-    args.get("dry_run").and_then(Value::as_bool) == Some(true)
-        && (package_manager_dry_run_install_action(normalized_skill, args)
-            || task_control_lifecycle_dry_run_action(normalized_skill, args)
-            || media_generation_dry_run_action(normalized_skill))
-}
-
-fn media_generation_dry_run_action(normalized_skill: &str) -> bool {
-    matches!(
-        normalized_skill,
-        "image_generate" | "image_edit" | "audio_synthesize" | "video_generate" | "music_generate"
-    )
-}
-
-fn package_manager_dry_run_install_action(normalized_skill: &str, args: &Value) -> bool {
-    if normalized_skill != "package_manager" {
-        return false;
-    }
-    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
-        return false;
-    }
-    let action = normalized_action_arg(args);
-    contains_any(&action, &["install", "uninstall", "smart_install"])
-}
-
-fn task_control_lifecycle_dry_run_action(normalized_skill: &str, args: &Value) -> bool {
-    if normalized_skill != "task_control" {
-        return false;
-    }
-    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
-        return false;
-    }
-    let action = normalized_action_arg(args);
-    contains_any(&action, &["resume", "pause"])
+    args.get("dry_run").and_then(Value::as_bool) == Some(true) && normalized_skill == "x"
 }
 
 fn service_state_is_healthy(state: &str) -> bool {

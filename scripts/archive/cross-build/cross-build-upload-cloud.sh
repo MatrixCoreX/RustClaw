@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 上传 RustClaw 到高配机，远程交叉编译 aarch64，结束后取回
+# 上传 Agent Runtime 到高配机，远程交叉编译 aarch64，结束后取回
 # 用法: ./scripts/archive/cross-build/cross-build-upload-cloud.sh [all|skill <name>|crate <name>|dir]
 #  dir 模式用环境变量指定上传/拉回：UPLOAD_PATHS BUILD_CMD PULL_REMOTE PULL_LOCAL
 # 依赖: 远程为 Linux，脚本会自动检测并安装 rustup/target/gcc-aarch64-linux-gnu
@@ -23,10 +23,10 @@ if [[ -z "${REMOTE_SSH_KEY}" ]]; then
 		REMOTE_SSH_KEY="${HOME}/.ssh/id_rsa"
 	fi
 fi
-REMOTE_DIR="/tmp/rustclaw-cross-new"
+REMOTE_DIR="/tmp/agent-runtime-cross-new"
 LOCAL_SOURCE="${SCRIPT_DIR}"
 LOCAL_OUTPUT="${SCRIPT_DIR}"
-TARGET="${TARGET:-${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}}"
+TARGET="${TARGET:-${APP_CROSS_TARGET:-aarch64-unknown-linux-gnu}}"
 LOCAL_RELEASE_DIR="$(target_release_dir "${LOCAL_OUTPUT}" "${TARGET}")"
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
@@ -276,7 +276,7 @@ skill)
 	IFS=$'\t' read -r CANONICAL_SKILL ADAPTER PACKAGE_NAME BIN_NAME MANIFEST_PATH _INSTALL_MODE <<<"$SKILL_SPEC"
 	if [[ "$ADAPTER" != "cargo" ]]; then
 		echo "Error: cross pull does not activate adapter=${ADAPTER} skill=${CANONICAL_SKILL}."
-		echo "Install ${MANIFEST_PATH} on the target through Skill Store or rustclaw-skill so its protocol smoke and receipt are verified on that platform."
+		echo "Install ${MANIFEST_PATH} on the target through Skill Store or skillctl so its protocol smoke and receipt are verified on that platform."
 		exit 3
 	fi
 	echo "[$(date)] remote cross-building skill ${BIN_NAME} (release only)..."

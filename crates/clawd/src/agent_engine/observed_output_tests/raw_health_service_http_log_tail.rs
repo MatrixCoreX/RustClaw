@@ -91,7 +91,7 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
-            r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=stopped","post_state":"telegramd=stopped","verified":true,"key_evidence":["telegramd process_count=0 memory_rss_bytes=Some(0)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=stopped"}"#,
+            r#"{"status":"ok","service_name":"telegramd","manager_type":"agent_runtime","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=stopped","post_state":"telegramd=stopped","verified":true,"key_evidence":["telegramd process_count=0 memory_rss_bytes=Some(0)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=stopped"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -119,7 +119,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
-            r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(1024)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
+            r#"{"status":"ok","service_name":"telegramd","manager_type":"agent_runtime","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(1024)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -147,7 +147,7 @@ fn direct_answer_uses_generic_selector_for_service_control_machine_value() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "service_control",
-            r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"summary":"Status: telegramd=running"}"#,
+            r#"{"status":"ok","service_name":"telegramd","manager_type":"agent_runtime","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"summary":"Status: telegramd=running"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,

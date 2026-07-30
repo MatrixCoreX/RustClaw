@@ -53,7 +53,7 @@ impl SkillStorageResolver {
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-skill-storage-test-{}",
+            "skillctl-storage-test-{}",
             uuid::Uuid::new_v4().simple()
         ));
         std::fs::create_dir_all(&root).expect("create test skill storage root");

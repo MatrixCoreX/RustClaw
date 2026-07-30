@@ -211,17 +211,17 @@ async fn step2b_self_check_full_loop_log_to_convert_to_replay() {
 /// 直接调起来的形态，让 `scripts/regen_fixture.sh` 不必自己解析 model_io.log。
 ///
 /// 由 4 个 env 驱动（其它 env 一律不读，避免与其它 fixture 测试互污染）：
-///   * `RUSTCLAW_REGEN_FIXTURE_CASE`（必填）—— case 名（fixture root 下的子目录）；
-///   * `RUSTCLAW_REGEN_FIXTURE_LOG`（必填）—— 待解析的 model_io.log 路径；
-///   * `RUSTCLAW_REGEN_FIXTURE_FORCE=1`—— 允许覆盖已存在的 calls.jsonl；
-///   * `RUSTCLAW_REGEN_FIXTURE_DRY=1`—— 只解析、不落盘。
+///   * `APP_REGEN_FIXTURE_CASE`（必填）—— case 名（fixture root 下的子目录）；
+///   * `APP_REGEN_FIXTURE_LOG`（必填）—— 待解析的 model_io.log 路径；
+///   * `APP_REGEN_FIXTURE_FORCE=1`—— 允许覆盖已存在的 calls.jsonl；
+///   * `APP_REGEN_FIXTURE_DRY=1`—— 只解析、不落盘。
 ///
 /// `#[ignore]` 表示默认 `cargo test` 不跑（避免 CI 误触发文件 I/O）。
 /// 调用形态（由 `scripts/regen_fixture.sh` 拼出来）：
 ///
 /// ```bash
-/// RUSTCLAW_REGEN_FIXTURE_CASE=act_find_service_file \
-/// RUSTCLAW_REGEN_FIXTURE_LOG=/tmp/log.jsonl \
+/// APP_REGEN_FIXTURE_CASE=act_find_service_file \
+/// APP_REGEN_FIXTURE_LOG=/tmp/log.jsonl \
 /// cargo test -p clawd --bin clawd \
 ///   fixture_replay_e2e::tests::regen_fixture_tool \
 ///   -- --ignored --nocapture
@@ -233,10 +233,10 @@ async fn step2b_self_check_full_loop_log_to_convert_to_replay() {
 #[test]
 #[ignore = "tool entry; only invoked by scripts/regen_fixture.sh with env vars"]
 fn regen_fixture_tool() {
-    const CASE_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_CASE";
-    const LOG_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_LOG";
-    const FORCE_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_FORCE";
-    const DRY_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_DRY";
+    const CASE_ENV: &str = "APP_REGEN_FIXTURE_CASE";
+    const LOG_ENV: &str = "APP_REGEN_FIXTURE_LOG";
+    const FORCE_ENV: &str = "APP_REGEN_FIXTURE_FORCE";
+    const DRY_ENV: &str = "APP_REGEN_FIXTURE_DRY";
 
     let case = std::env::var(CASE_ENV)
         .unwrap_or_else(|_| panic!("{CASE_ENV} env required (case name under fixture root)"));
@@ -544,12 +544,12 @@ async fn step4b1_self_check_appstate_with_fixture_provider_routes_through_task()
 /// `skill_views_snapshot` 真被替换（不是被静默丢弃）。
 ///
 /// 前置：`process_ask_task` 启动期会跑 `integrity_report().is_clean()`，缺
-/// 任何一条 [`claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS`] 就 bail；
+/// 任何一条 [`claw_core::skill_registry::HOST_TOOL_DESCRIPTORS`] 就 bail；
 /// 本测试是 e2e harness 启动这道门的 self-check 入口 —— 任何后续 builtin
 /// 增删漏在 helper 里都会让本测试先红，而不是污染 e2e 报错。
 #[tokio::test]
 async fn step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity() {
-    use claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS;
+    use claw_core::skill_registry::HOST_TOOL_DESCRIPTORS;
 
     let state =
         crate::AppState::test_default_with_fixture_provider().with_minimal_builtin_registry();
@@ -565,11 +565,12 @@ async fn step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity() {
     );
 
     let installed: std::collections::HashSet<String> = registry.all_names().into_iter().collect();
-    for required in REQUIRED_BUILTIN_SKILLS {
+    for descriptor in HOST_TOOL_DESCRIPTORS {
+        let required = descriptor.name;
         assert!(
-            installed.contains(*required),
+            installed.contains(required),
             "minimal registry missing REQUIRED builtin {required:?}; \
-             if you added a new builtin to REQUIRED_BUILTIN_SKILLS, also \
+             if you added a new host adapter to HOST_TOOL_DESCRIPTORS, also \
              extend with_minimal_builtin_registry to spit it into the toml"
         );
     }
@@ -577,7 +578,7 @@ async fn step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity() {
     let skills_list = state.get_skills_list();
     assert_eq!(
         skills_list.len(),
-        REQUIRED_BUILTIN_SKILLS.len(),
+        HOST_TOOL_DESCRIPTORS.len(),
         "skills_list snapshot must equal enabled builtin set, got {:?}",
         skills_list,
     );
@@ -788,7 +789,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
 
     // 反例 1：case 字段与目录名不符 → 报错。
     let tmp = std::env::temp_dir().join(format!(
-        "rustclaw_test_expected_case_mismatch_{}",
+        "agent_test_expected_case_mismatch_{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&tmp).unwrap();
@@ -806,7 +807,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
 
     // 反例 2：prior_turns.updated_at 空 → 报错。
     let tmp = std::env::temp_dir().join(format!(
-        "rustclaw_test_expected_prior_turn_updated_at_empty_{}",
+        "agent_test_expected_prior_turn_updated_at_empty_{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&tmp).unwrap();
@@ -831,7 +832,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
 
     // 反例 3：expected_llm_call_count 与 max 矛盾 → 报错。
     let tmp = std::env::temp_dir().join(format!(
-        "rustclaw_test_expected_count_conflict_{}",
+        "agent_test_expected_count_conflict_{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&tmp).unwrap();
@@ -852,7 +853,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
 
     // 反例 4：unknown field → deny_unknown_fields trip → parse 失败。
     let tmp = std::env::temp_dir().join(format!(
-        "rustclaw_test_expected_unknown_field_{}",
+        "agent_test_expected_unknown_field_{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&tmp).unwrap();

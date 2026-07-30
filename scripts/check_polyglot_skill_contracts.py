@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static gate for RustClaw polyglot skill package contracts."""
+"""Static gate for agent-runtime polyglot skill package contracts."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = (
     "skill-manifest-v1.schema.json",
     "skill-manifest-v2.schema.json",
-    "rustclaw-jsonl-v1-request.schema.json",
-    "rustclaw-jsonl-v1-response.schema.json",
+    "agent-jsonl-v1-request.schema.json",
+    "agent-jsonl-v1-response.schema.json",
     "skill-install-receipt-v1.schema.json",
     "skill-install-receipt-v2.schema.json",
     "skill-host-policy-grant-v1.schema.json",
@@ -82,7 +82,7 @@ def validate_manifest(path: Path) -> dict[str, object]:
         raise ContractError(f"{path}: invalid package.name")
     if registry.get("name") != name:
         raise ContractError(f"{path}: registry.name must equal package.name")
-    if package.get("protocol") != "rustclaw-jsonl-v1":
+    if package.get("protocol") != "agent-jsonl-v1":
         raise ContractError(f"{path}: unsupported protocol")
     if registry.get("capability_policy_source", "registry") != "registry":
         raise ContractError(f"{path}: registry must own capability policy")
@@ -376,7 +376,7 @@ schema_version = 1
 name = "fixture"
 version = "1.0.0"
 description = "fixture"
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux"]
 supported_arch = ["x86_64"]
 license = "MIT"

@@ -89,7 +89,7 @@ fn active_tool_event_is_machine_only_and_omits_arguments() {
 
 fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-execution-loop-registry-{}-{}",
+        "agent-runtime-execution-loop-registry-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
@@ -100,6 +100,7 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     let _ = std::fs::remove_dir_all(root);
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));

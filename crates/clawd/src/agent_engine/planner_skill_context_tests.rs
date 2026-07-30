@@ -99,7 +99,7 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
     assert!(
         context
             .text
-            .contains("summary=List, inspect, cancel, resume, and pause RustClaw tasks"),
+            .contains("summary=List, inspect, cancel, resume, and pause agent tasks"),
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));

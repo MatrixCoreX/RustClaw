@@ -1,4 +1,5 @@
 import type { TaskApprovalDecision, TaskEventEnvelope, TaskQueryResponse } from "../types/api";
+import { productCopy } from "./product-identity";
 import type { TaskLifecycleLang } from "./task-lifecycle";
 
 export interface TaskOutcomeView {
@@ -256,7 +257,7 @@ export function buildTaskGoalView(
 ): TaskGoalView | null {
   const goal = asRecord(result.goal);
   if (!goal) return null;
-  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const tLocal = (zh: string, en: string) => productCopy(lang === "zh" ? zh : en);
   const status = stringAt(goal, ["goal_status"]) ?? stringAt(goal, ["state"]) ?? "unknown";
   const objective = stringAt(goal, ["objective"]);
   const statusSource = stringAt(goal, ["goal_status_source"]);
@@ -557,7 +558,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
   const eventType = typeof event.event_type === "string" && event.event_type.trim()
     ? event.event_type.trim()
     : "task_event";
-  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const tLocal = (zh: string, en: string) => productCopy(lang === "zh" ? zh : en);
   const field = (key: string) => {
     const value = payload?.[key];
     if ((typeof value === "string" && value.trim()) || typeof value === "number" || typeof value === "boolean") {
@@ -695,11 +696,11 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
         decision === "finish"
           ? tLocal("任务已完成。", "The task is complete.")
           : decision === "checkpoint_requeue"
-            ? tLocal("已保存进度，系统会安全继续。", "Progress is saved and RustClaw will continue safely.")
+            ? tLocal("已保存进度，系统会安全继续。", "Progress is saved and {product_name} will continue safely.")
             : decision === "waiting"
-              ? tLocal("已保存进度，正在等待外部服务。", "Progress is saved while RustClaw waits for an external service.")
+              ? tLocal("已保存进度，正在等待外部服务。", "Progress is saved while {product_name} waits for an external service.")
               : decision === "needs_user"
-                ? tLocal("需要你的确认或补充后才能继续。", "RustClaw needs your confirmation or more information to continue.")
+                ? tLocal("需要你的确认或补充后才能继续。", "{product_name} needs your confirmation or more information to continue.")
                 : decision === "terminal" && limitReason
                   ? tLocal(
                       "已达到管理员设置的安全边界，任务已安全停止。",
@@ -707,7 +708,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
                     )
                   : decision === "terminal"
                     ? tLocal("任务已安全停止，请查看原因。", "The task stopped safely. Check the reason for details.")
-                    : tLocal("仍在处理，当前进度正常。", "RustClaw is still working and making normal progress."),
+                    : tLocal("仍在处理，当前进度正常。", "{product_name} is still working and making normal progress."),
       tone: budgetTone,
       meta,
     };
@@ -1131,7 +1132,7 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
   const finalShape =
     stringAt(trace, ["contract_matrix", "final_answer_shape"]) ??
     stringAt(summary, ["finalizer_summary", "final_answer_shape"]);
-  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const tLocal = (zh: string, en: string) => productCopy(lang === "zh" ? zh : en);
   const doneConditions = [
     ...valueMetaList(getPathValue(outcome, ["done_conditions"])),
     ...valueMetaList(getPathValue(outcome, ["acceptance"])),
@@ -1276,7 +1277,7 @@ export function buildTaskPermissionView(
   const permission = taskPermissionRoot(result);
   const permissionRecord = asRecord(permission);
   if (!permissionRecord) return null;
-  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const tLocal = (zh: string, en: string) => productCopy(lang === "zh" ? zh : en);
   const allowed = boolAt(permission, ["allowed"]);
   const needsConfirmation = boolAt(permission, ["needs_confirmation"]);
   const deniedByPolicy = boolAt(permission, ["denied_by_policy"]);
@@ -1329,7 +1330,7 @@ function buildTaskPermissionStepView(
   index: number,
   lang: TaskLifecycleLang,
 ): TaskPermissionStepView {
-  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const tLocal = (zh: string, en: string) => productCopy(lang === "zh" ? zh : en);
   const stepId = primitiveKeyValue(step.step_id);
   const skill = primitiveKeyValue(step.skill);
   const action = primitiveKeyValue(step.action);

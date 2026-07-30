@@ -206,7 +206,7 @@ fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
 
 #[test]
 fn compound_content_file_delivery_preserves_summary_after_existing_token() {
-    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let file_token = "FILE:/tmp/agent-runtime-config.toml";
     let summary = "observed summary";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(file_token.to_string());
@@ -242,7 +242,7 @@ fn compound_content_file_delivery_preserves_summary_after_existing_token() {
 
 #[test]
 fn compound_content_file_delivery_preserves_summary_without_delivery_intent() {
-    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let file_token = "FILE:/tmp/agent-runtime-config.toml";
     let summary = "observed summary";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(file_token.to_string());
@@ -274,16 +274,17 @@ fn compound_content_file_delivery_preserves_summary_without_delivery_intent() {
 
 #[test]
 fn compound_content_file_delivery_backfills_bounded_read_content_before_token() {
-    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let file_token = "FILE:/tmp/agent-runtime-config.toml";
     let summary = "observed summary";
-    let observed_content = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"\nport = 8787";
+    let observed_content =
+        "[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\"\nport = 8787";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.delivery_messages.push(summary.to_string());
     loop_state.delivery_messages.push(file_token.to_string());
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","mode":"head","requested_n":80,"start_line":1,"end_line":4,"excerpt":"1|[app]\n2|name = \"RustClaw NL Fixture\"\n3|mode = \"test\"\n4|port = 8787","path":"/tmp/rustclaw-config.toml"}}"#,
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":80,"start_line":1,"end_line":4,"excerpt":"1|[app]\n2|name = \"Agent Runtime NL Fixture\"\n3|mode = \"test\"\n4|port = 8787","path":"/tmp/agent-runtime-config.toml"}}"#,
     ));
     loop_state
         .executed_step_results

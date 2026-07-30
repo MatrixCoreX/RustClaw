@@ -4,7 +4,9 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
-REPOSITORY="${RUSTCLAW_RELEASE_REPO:-MatrixCoreX/RustClaw}"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/product_identity.sh"
+REPOSITORY="$APP_RELEASE_REPOSITORY"
 PLATFORM="auto"
 REQUESTED_TAG=""
 RESTART_MODE="auto"
@@ -12,7 +14,7 @@ CHECK_ONLY=0
 FORCE=0
 PACKAGE_MODE=0
 KEEP_BACKUPS=2
-SYSTEMD_UNIT="${RUSTCLAW_SYSTEMD_UNIT:-rustclaw.service}"
+SYSTEMD_UNIT="${APP_SERVICE_NAME}.service"
 
 WORK_DIR=""
 LOCK_DIR=""
@@ -36,9 +38,9 @@ Download, verify, and deploy the newest compatible GitHub Release.
 
 Options:
   --root DIR
-      RustClaw runtime root. Default: directory containing this script.
+      Agent runtime root. Default: directory containing this script.
   --repo OWNER/REPO
-      GitHub repository. Default: MatrixCoreX/RustClaw.
+      GitHub repository. Default: product identity release_repository.
   --platform auto|ubuntu-x86_64|pi-aarch64
       Release platform. Default: auto-detect Linux OS and CPU architecture.
   --tag TAG
@@ -197,12 +199,12 @@ fi
 case "$PLATFORM" in
   ubuntu-x86_64)
     RELEASE_PREFIX="ubuntu-x86_64-"
-    ASSET_PREFIX="RustClaw-ubuntu-x86_64-"
+    ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-ubuntu-x86_64-"
     ELF_MACHINE=62
     ;;
   pi-aarch64)
     RELEASE_PREFIX="pi-aarch64-"
-    ASSET_PREFIX="RustClaw-pi-aarch64-"
+    ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-pi-aarch64-"
     ELF_MACHINE=183
     ;;
   *)
@@ -243,7 +245,7 @@ import sys
 import urllib.request
 
 url, output = sys.argv[1:]
-headers = {"User-Agent": "RustClaw-release-deploy"}
+headers = {"User-Agent": "Agent-System-release-deploy"}
 token = os.environ.get("GITHUB_TOKEN", "").strip()
 if token and url.startswith("https://api.github.com/"):
     headers["Authorization"] = f"Bearer {token}"
@@ -280,7 +282,7 @@ elif runtime_pid_is_active; then
   RUNTIME_WAS_ACTIVE=1
 fi
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-release-deploy.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agent-release-deploy.XXXXXX")"
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   LOCK_DIR="$ROOT_PARENT/.${ROOT_NAME}-release-mode.lock"
 else
@@ -317,8 +319,8 @@ restart_runtime() {
   fi
 
   if [[ "$RUNTIME_WAS_ACTIVE" -eq 1 || "$RESTART_MODE" == "always" ]]; then
-    if [[ -x "$ROOT_DIR/stop-rustclaw.sh" ]]; then
-      "$ROOT_DIR/stop-rustclaw.sh"
+    if [[ -x "$ROOT_DIR/stop-agent.sh" ]]; then
+      "$ROOT_DIR/stop-agent.sh"
     fi
     (
       cd "$ROOT_DIR"
@@ -392,8 +394,9 @@ printf 'release_repo=%s\n' "$REPOSITORY"
 printf 'release_platform=%s\n' "$PLATFORM"
 
 RELEASES_JSON="$WORK_DIR/releases.json"
-if [[ -n "${RUSTCLAW_RELEASES_JSON_FILE:-}" ]]; then
-  cp "$RUSTCLAW_RELEASES_JSON_FILE" "$RELEASES_JSON"
+RELEASES_JSON_OVERRIDE="${APP_RELEASES_JSON_FILE:-}"
+if [[ -n "$RELEASES_JSON_OVERRIDE" ]]; then
+  cp "$RELEASES_JSON_OVERRIDE" "$RELEASES_JSON"
 else
   download_file \
     "https://api.github.com/repos/${REPOSITORY}/releases?per_page=50" \
@@ -405,12 +408,13 @@ python3 - \
   "$RELEASES_JSON" \
   "$RELEASE_PREFIX" \
   "$ASSET_PREFIX" \
-  "$REQUESTED_TAG" > "$RELEASE_META" <<'PY'
+  "$REQUESTED_TAG" \
+  "$APP_RELEASE_ARTIFACT_ID" > "$RELEASE_META" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-source, release_prefix, asset_prefix, requested_tag = sys.argv[1:]
+source, release_prefix, asset_prefix, requested_tag, app_id = sys.argv[1:]
 releases = json.loads(Path(source).read_text(encoding="utf-8"))
 if not isinstance(releases, list):
     raise SystemExit("release metadata is not a list")
@@ -434,7 +438,8 @@ for release in releases:
         if not name or any(not (char.isalnum() or char in "._-") for char in name):
             continue
         if name.endswith(".tar.gz") and (
-            name.startswith(asset_prefix) or name == f"RustClaw-{tag}.tar.gz"
+            name.startswith(asset_prefix)
+            or name == f"{app_id}-{tag}.tar.gz"
         ):
             archives.append(asset)
     if len(archives) != 1:
@@ -514,7 +519,7 @@ printf 'release_checksum=verified\n'
 
 EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
-python3 - "$ARCHIVE_PATH" "$EXTRACT_DIR" <<'PY'
+python3 - "$ARCHIVE_PATH" "$EXTRACT_DIR" "$APP_RELEASE_ARTIFACT_ID" <<'PY'
 from pathlib import Path, PurePosixPath
 import inspect
 import sys
@@ -522,6 +527,7 @@ import tarfile
 
 archive = Path(sys.argv[1])
 destination = Path(sys.argv[2])
+app_id = sys.argv[3]
 with tarfile.open(archive, "r:gz") as package:
     members = package.getmembers()
     if not members:
@@ -530,8 +536,8 @@ with tarfile.open(archive, "r:gz") as package:
         path = PurePosixPath(member.name)
         if path.is_absolute() or ".." in path.parts:
             raise SystemExit(f"unsafe release path: {member.name}")
-        if not path.parts or path.parts[0] != "RustClaw":
-            raise SystemExit(f"release path is outside RustClaw/: {member.name}")
+        if not path.parts or path.parts[0] != app_id:
+            raise SystemExit(f"release path is outside an accepted package root: {member.name}")
         if member.issym() or member.islnk() or member.isdev():
             raise SystemExit(f"unsupported release entry: {member.name}")
     if "filter" in inspect.signature(package.extractall).parameters:
@@ -540,7 +546,11 @@ with tarfile.open(archive, "r:gz") as package:
         package.extractall(destination, members=members)
 PY
 
-PACKAGE_DIR="$EXTRACT_DIR/RustClaw"
+if [[ -d "$EXTRACT_DIR/$APP_RELEASE_ARTIFACT_ID" ]]; then
+  PACKAGE_DIR="$EXTRACT_DIR/$APP_RELEASE_ARTIFACT_ID"
+else
+  die "release_package_root_missing:$APP_RELEASE_ARTIFACT_ID"
+fi
 [[ -x "$PACKAGE_DIR/target/release/clawd" ]] ||
   die "release_package_missing_clawd"
 python3 - "$PACKAGE_DIR/target/release/clawd" "$ELF_MACHINE" <<'PY'
@@ -577,7 +587,8 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
     data \
     logs \
     .pids \
-    .rustclaw \
+    .agent-system \
+    .agent-runtime \
     run \
     skills_output \
     external_skills \
@@ -603,7 +614,7 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
     "$ROOT_DIR"/.env.*.local \
     "$ROOT_DIR"/*.env \
     "$ROOT_DIR"/runtime_env*.sh \
-    "$ROOT_DIR"/pi_app/.rustclaw_small_screen_*; do
+    "$ROOT_DIR"/pi_app/.agent_small_screen_*; do
     [[ -f "$runtime_file" ]] || continue
     relative="${runtime_file#"$ROOT_DIR/"}"
     mkdir -p "$(dirname "$STAGED_ROOT/$relative")"
@@ -698,12 +709,12 @@ for relative in \
   README.zh-CN.md \
   USAGE.md \
   VERSION \
-  rustclaw \
-  install-rustclaw-cmd.sh \
+  agentctl \
+  install-agent-cmd.sh \
+  stop-agent.sh \
   build-ui-nginx.sh \
   start-all.sh \
   start-all-bin.sh \
-  stop-rustclaw.sh \
   deploy-github-release.sh; do
   [[ -e "$PACKAGE_DIR/$relative" ]] || continue
   printf '%s\n' "$relative" >> "$MANAGED_PATHS_FILE"
@@ -746,7 +757,7 @@ install_managed_path() {
   local target="$ROOT_DIR/$relative"
   local parent temp
   parent="$(dirname "$target")"
-  temp="$parent/.$(basename "$target").rustclaw-new.$$"
+  temp="$parent/.$(basename "$target").agent-new.$$"
   mkdir -p "$parent"
   rm -rf "$temp"
   cp -a "$source" "$temp"

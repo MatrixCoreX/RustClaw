@@ -159,10 +159,10 @@ function stageDefinitions(t: Translate): LearningStageDefinition[] {
   return [
     {
       id: "foundations",
-      title: t("认识 RustClaw", "Meet RustClaw"),
+      title: t("认识 {product_name}", "Meet {product_name}"),
       level: t("入门", "Start"),
       description: t(
-        "先建立产品边界和整体认识，知道 RustClaw 能做什么，以及各部分如何协作。",
+        "先建立产品边界和整体认识，知道 {product_name} 能做什么，以及各部分如何协作。",
         "Build a clear product-level mental model before moving into runtime details.",
       ),
       icon: Compass,
@@ -280,7 +280,7 @@ function MermaidDiagram({ source, lang }: { source: string; lang: UiLanguage }) 
     setRenderedSvg(null);
     bindFunctionsRef.current = undefined;
     void renderMermaid(
-      `rustclaw-${diagramId}-${theme}-${renderSequence}-${renderAttempt}`,
+      `agent-diagram-${diagramId}-${theme}-${renderSequence}-${renderAttempt}`,
       source,
       theme,
     )

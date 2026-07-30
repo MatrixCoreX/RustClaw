@@ -20,7 +20,7 @@
 # Recording prerequisites (do these BEFORE invoking this script):
 #   1. Set `[routing] debug_log_prompt = true` in your clawd config.
 #   2. Pin the prompt-`__NOW__` field by setting
-#      `RUSTCLAW_TEST_FREEZE_NOW=2026-04-19T12:00:00+08:00` in the clawd
+#      `APP_TEST_FREEZE_NOW=2026-04-19T12:00:00+08:00` in the clawd
 #      worker environment when triggering the case (any value is fine, but
 #      the SAME value must be used at replay time, otherwise the
 #      intent_normalizer prompt will hash differently).
@@ -84,10 +84,10 @@ configure_cargo_build_environment
 echo "regen_fixture.sh: case=$CASE log=$LOG_ABS force=${FORCE:-0} dry_run=${DRY:-0}"
 
 cd "$REPO_ROOT"
-RUSTCLAW_REGEN_FIXTURE_CASE="$CASE" \
-RUSTCLAW_REGEN_FIXTURE_LOG="$LOG_ABS" \
-RUSTCLAW_REGEN_FIXTURE_FORCE="${FORCE:-}" \
-RUSTCLAW_REGEN_FIXTURE_DRY="${DRY:-}" \
+APP_REGEN_FIXTURE_CASE="$CASE" \
+APP_REGEN_FIXTURE_LOG="$LOG_ABS" \
+APP_REGEN_FIXTURE_FORCE="${FORCE:-}" \
+APP_REGEN_FIXTURE_DRY="${DRY:-}" \
 cargo test \
   -p clawd --bin clawd \
   fixture_replay_e2e::tests::regen_fixture_tool \

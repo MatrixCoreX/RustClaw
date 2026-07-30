@@ -323,11 +323,13 @@ async fn finalize_loop_reply_inherits_language_for_missing_file_delivery_path_re
     route.response_shape = OutputResponseShape::FileToken;
     route.delivery_required = true;
     route.requires_content_evidence = true;
-    route.locator_hint = "/home/guagua/rustclaw/definitely_missing_named_file.txt".to_string();
+    route.locator_hint = "/home/guagua/agent-runtime/definitely_missing_named_file.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some("把那个文件发给我，不要贴内容".to_string()),
-        user_request: Some("/home/guagua/rustclaw/definitely_missing_named_file.txt".to_string()),
+        user_request: Some(
+            "/home/guagua/agent-runtime/definitely_missing_named_file.txt".to_string(),
+        ),
         ..Default::default()
     };
 
@@ -342,7 +344,7 @@ async fn finalize_loop_reply_inherits_language_for_missing_file_delivery_path_re
                 "action": "find_name",
                 "count": 0,
                 "results": [],
-                "root": "/home/guagua/rustclaw"
+                "root": "/home/guagua/agent-runtime"
             })
             .to_string(),
         ),
@@ -354,7 +356,7 @@ async fn finalize_loop_reply_inherits_language_for_missing_file_delivery_path_re
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "/home/guagua/rustclaw/definitely_missing_named_file.txt",
+        "/home/guagua/agent-runtime/definitely_missing_named_file.txt",
         loop_state,
         Some(&agent_run_context),
     )

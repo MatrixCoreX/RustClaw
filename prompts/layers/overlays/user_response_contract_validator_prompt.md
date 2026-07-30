@@ -60,4 +60,4 @@ Output examples:
 - “我无法访问本地文件系统”这类泛化说法通常是 false claim；除非 contract 明确说明权限或策略阻止访问。
 ### en
 - Do not require English wording. Validate the reply against the contract semantics.
-- Generic "I cannot access the local filesystem" claims are usually false for RustClaw unless grounded in the contract.
+- Generic "I cannot access the local filesystem" claims are usually false for Agent Runtime unless grounded in the contract.

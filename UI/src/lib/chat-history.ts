@@ -7,6 +7,7 @@ import type {
   TaskQueryResponse,
 } from "../types/api";
 import { normalizeTaskArtifacts } from "./task-artifacts";
+import { appStorageKey } from "./product-identity";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -26,7 +27,7 @@ export function conversationHistoryScope(
 
 export function conversationHistoryStorageKey(scope: string): string {
   const normalized = scope.trim();
-  return normalized ? `rustclaw.ui.chatThreads.v2.${normalized}` : "";
+  return normalized ? appStorageKey(`ui.chatThreads.v2.${normalized}`) : "";
 }
 
 export interface ServerTeachingRunProjection {
@@ -356,7 +357,7 @@ function withConversationBodyStart(value: string, startByte: number): string {
   if (!safeConversationBodyUrl(value)) {
     throw new Error("conversation_body_continuation_invalid");
   }
-  const url = new URL(value, "http://rustclaw.local");
+  const url = new URL(value, "http://agent.invalid");
   url.searchParams.set("start_byte", String(startByte));
   return `${url.pathname}?${url.searchParams.toString()}`;
 }

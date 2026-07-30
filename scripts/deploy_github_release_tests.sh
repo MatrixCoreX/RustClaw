@@ -3,10 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_SCRIPT="$ROOT_DIR/deploy-github-release.sh"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/product_identity.sh"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
-PACKAGE_DIR="$TMP_ROOT/package/RustClaw"
+PACKAGE_DIR="$TMP_ROOT/package/$APP_RELEASE_ARTIFACT_ID"
 mkdir -p \
   "$PACKAGE_DIR/target/release" \
   "$PACKAGE_DIR/configs/channels" \
@@ -18,8 +20,8 @@ printf 'new-default = true\n' > "$PACKAGE_DIR/configs/new-default.toml"
 printf 'release-channel = true\n' > "$PACKAGE_DIR/configs/channels/release.toml"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
 
-ARCHIVE="$TMP_ROOT/RustClaw-ubuntu-x86_64-test.tar.gz"
-tar -czf "$ARCHIVE" -C "$TMP_ROOT/package" RustClaw
+ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-test.tar.gz"
+tar -czf "$ARCHIVE" -C "$TMP_ROOT/package" "$APP_RELEASE_ARTIFACT_ID"
 ARCHIVE_HASH="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 CHECKSUM="$ARCHIVE.sha256"
 printf '%s  %s\n' "$ARCHIVE_HASH" "$(basename "$ARCHIVE")" > "$CHECKSUM"
@@ -68,7 +70,7 @@ printf 'ubuntu-x86_64-old\n' > "$RUNTIME/.release-tag"
 
 mkdir "$RUNTIME/.release-deploy.lock"
 printf '%s\n' "$$" > "$RUNTIME/.release-deploy.lock/pid"
-if RUSTCLAW_RELEASES_JSON_FILE="$RELEASES_JSON" \
+if APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
   "$DEPLOY_SCRIPT" \
     --root "$RUNTIME" \
     --platform ubuntu-x86_64 \
@@ -82,7 +84,7 @@ mkdir "$RUNTIME/.release-deploy.lock"
 printf 'stale\n' > "$RUNTIME/.release-deploy.lock/pid"
 
 CHECK_OUTPUT="$(
-  RUSTCLAW_RELEASES_JSON_FILE="$RELEASES_JSON" \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
     "$DEPLOY_SCRIPT" \
       --root "$RUNTIME" \
       --platform ubuntu-x86_64 \
@@ -93,7 +95,7 @@ grep -Fq 'release_update_status=available' <<< "$CHECK_OUTPUT"
 [[ ! -e "$RUNTIME/.release-deploy.lock" ]]
 
 OUTPUT="$(
-  RUSTCLAW_RELEASES_JSON_FILE="$RELEASES_JSON" \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
     "$DEPLOY_SCRIPT" \
       --root "$RUNTIME" \
       --platform ubuntu-x86_64 \
@@ -143,7 +145,7 @@ Path(output).write_text(
 PY
 
 BEFORE_HASH="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
-if RUSTCLAW_RELEASES_JSON_FILE="$BAD_RELEASES_JSON" \
+if APP_RELEASES_JSON_FILE="$BAD_RELEASES_JSON" \
   "$DEPLOY_SCRIPT" \
     --root "$RUNTIME" \
     --platform ubuntu-x86_64 \
@@ -157,7 +159,7 @@ AFTER_HASH="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
 grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
 
 FAIL_STAGE="$TMP_ROOT/fail-stage"
-FAIL_PACKAGE_ROOT="$FAIL_STAGE/RustClaw"
+FAIL_PACKAGE_ROOT="$FAIL_STAGE/$APP_RELEASE_ARTIFACT_ID"
 mkdir -p "$FAIL_STAGE"
 cp -a "$PACKAGE_DIR" "$FAIL_PACKAGE_ROOT"
 cp /bin/false "$FAIL_PACKAGE_ROOT/target/release/clawd"
@@ -166,8 +168,8 @@ cat > "$FAIL_PACKAGE_ROOT/build-ui-nginx.sh" <<'EOF'
 exit 9
 EOF
 chmod +x "$FAIL_PACKAGE_ROOT/build-ui-nginx.sh"
-FAIL_ARCHIVE="$TMP_ROOT/RustClaw-ubuntu-x86_64-rollback.tar.gz"
-tar -czf "$FAIL_ARCHIVE" -C "$FAIL_STAGE" RustClaw
+FAIL_ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-rollback.tar.gz"
+tar -czf "$FAIL_ARCHIVE" -C "$FAIL_STAGE" "$APP_RELEASE_ARTIFACT_ID"
 FAIL_HASH="$(sha256sum "$FAIL_ARCHIVE" | awk '{print $1}')"
 FAIL_CHECKSUM="$FAIL_ARCHIVE.sha256"
 printf '%s  %s\n' "$FAIL_HASH" "$(basename "$FAIL_ARCHIVE")" > "$FAIL_CHECKSUM"
@@ -198,7 +200,7 @@ Path(output).write_text(
 )
 PY
 
-if RUSTCLAW_RELEASES_JSON_FILE="$FAIL_RELEASES_JSON" \
+if APP_RELEASES_JSON_FILE="$FAIL_RELEASES_JSON" \
   "$DEPLOY_SCRIPT" \
     --root "$RUNTIME" \
     --platform ubuntu-x86_64 \
@@ -220,7 +222,7 @@ mkdir -p \
   "$SOURCE_RUNTIME/data" \
   "$SOURCE_RUNTIME/logs" \
   "$SOURCE_RUNTIME/.pids" \
-  "$SOURCE_RUNTIME/.rustclaw" \
+  "$SOURCE_RUNTIME/.agent-runtime" \
   "$SOURCE_RUNTIME/run" \
   "$SOURCE_RUNTIME/external_skills/local" \
   "$SOURCE_RUNTIME/optional_skills/local" \
@@ -228,14 +230,14 @@ mkdir -p \
 printf 'source-only\n' > "$SOURCE_RUNTIME/Cargo.toml"
 printf 'local-secret = "preserve"\n' > "$SOURCE_RUNTIME/configs/config.toml"
 printf 'runtime-state\n' > "$SOURCE_RUNTIME/data/state.db"
-printf 'checkpoint\n' > "$SOURCE_RUNTIME/.rustclaw/checkpoint"
+printf 'checkpoint\n' > "$SOURCE_RUNTIME/.agent-runtime/checkpoint"
 printf 'external\n' > "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
 printf 'optional\n' > "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
 printf '#!/usr/bin/env bash\n' > "$SOURCE_RUNTIME/target/release/optional-skill"
 chmod +x "$SOURCE_RUNTIME/target/release/optional-skill"
 
 PACKAGE_MODE_OUTPUT="$(
-  RUSTCLAW_RELEASES_JSON_FILE="$RELEASES_JSON" \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
     "$DEPLOY_SCRIPT" \
       --root "$SOURCE_RUNTIME" \
       --platform ubuntu-x86_64 \
@@ -250,7 +252,7 @@ test ! -e "$SOURCE_RUNTIME/Cargo.toml"
 grep -Fxq 'ubuntu-x86_64-test' "$SOURCE_RUNTIME/.release-tag"
 grep -Fxq 'local-secret = "preserve"' "$SOURCE_RUNTIME/configs/config.toml"
 grep -Fxq 'runtime-state' "$SOURCE_RUNTIME/data/state.db"
-grep -Fxq 'checkpoint' "$SOURCE_RUNTIME/.rustclaw/checkpoint"
+grep -Fxq 'checkpoint' "$SOURCE_RUNTIME/.agent-runtime/checkpoint"
 grep -Fxq 'external' "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
 grep -Fxq 'optional' "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
 test -x "$SOURCE_RUNTIME/target/release/optional-skill"

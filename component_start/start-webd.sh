@@ -22,7 +22,7 @@ if [[ ! -x "$WEBD_BIN" ]]; then
   exit 1
 fi
 
-export RUSTCLAW_UI_DIST="$SCRIPT_DIR/UI/dist"
-echo "Using UI assets at: $RUSTCLAW_UI_DIST"
+export APP_UI_DIST="$SCRIPT_DIR/UI/dist"
+echo "Using UI assets at: $APP_UI_DIST"
 echo "Starting webd ($COMPONENT_PROFILE)..."
 exec "$WEBD_BIN"

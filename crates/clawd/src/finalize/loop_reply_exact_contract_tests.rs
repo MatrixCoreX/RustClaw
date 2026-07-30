@@ -208,7 +208,7 @@ fn path_inspection_keeps_model_language_verdict_over_observation() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/agent-runtime-missing-ja.txt"}],"include_missing":true}"#,
     ));
     let planned = "ファイルは存在しません。".to_string();
     loop_state.last_user_visible_respond = Some(planned.clone());
@@ -217,7 +217,7 @@ fn path_inspection_keeps_model_language_verdict_over_observation() {
     route.response_shape = crate::OutputResponseShape::OneSentence;
     route.requires_content_evidence = false;
     route.locator_kind = crate::OutputLocatorKind::Path;
-    route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route.locator_hint = "/tmp/agent-runtime-missing-ja.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -292,7 +292,7 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
         skill: "system_basic".to_string(),
         status: StepExecutionStatus::Ok,
         output: Some(
-            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/home/guagua/rustclaw/README.md","size_bytes":24929},"path":"/home/guagua/rustclaw/README.md"}],"fields":["exists","size"],"include_missing":true}"#
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/home/guagua/agent-runtime/README.md","size_bytes":24929},"path":"/home/guagua/agent-runtime/README.md"}],"fields":["exists","size"],"include_missing":true}"#
                 .to_string(),
         ),
         error: None,
@@ -300,9 +300,9 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
         finished_at: 0,
     });
     loop_state.last_user_visible_respond =
-        Some(r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string());
+        Some(r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#.to_string());
     let mut delivery_messages =
-        vec![r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string()];
+        vec![r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#.to_string()];
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
     route.locator_hint = "README.md".to_string();
@@ -323,11 +323,11 @@ fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
 
     assert_eq!(
         delivery_messages,
-        vec![r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#]
+        vec![r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#]
     );
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some(r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#)
+        Some(r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#)
     );
     assert!(finalizer_summary.is_none());
 }

@@ -22,7 +22,7 @@ schema_version = 1
 name = "sample_weather"
 version = "0.1.0"
 description = "Protocol fixture"
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -320,7 +320,7 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         sandbox_profile: SandboxProfile::Required,
         runtime_network: false,
         protocol_smoke: ProtocolSmokeReceipt {
-            protocol: "rustclaw-jsonl-v1".to_string(),
+            protocol: "agent-jsonl-v1".to_string(),
             passed: true,
             request_id: "smoke-1".to_string(),
             checked_at_unix: SystemTime::now()
@@ -343,14 +343,82 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         fs::canonicalize(binary).expect("canonical bin")
     );
 
-    fs::write(&launch.program, b"tampered").expect("tamper");
+    let pinned = SkillRuntimeResolver::new(store.root())
+        .resolve_pinned(
+            "sample_weather",
+            &receipt.version,
+            &receipt.manifest_digest,
+            &receipt.digest().expect("receipt digest"),
+        )
+        .expect("resolve exact pinned launch");
+    assert_eq!(pinned.receipt_digest, launch.receipt_digest);
+    fs::remove_file(
+        store
+            .skill_root("sample_weather")
+            .expect("skill root")
+            .join("current.json"),
+    )
+    .expect("remove mutable current pointer");
+    let pinned_without_current = SkillRuntimeResolver::new(store.root())
+        .resolve_pinned(
+            "sample_weather",
+            &receipt.version,
+            &receipt.manifest_digest,
+            &receipt.digest().expect("receipt digest"),
+        )
+        .expect("pinned resolution must not read current pointer");
+    assert_eq!(pinned_without_current.program, launch.program);
     assert_eq!(
         SkillRuntimeResolver::new(store.root())
-            .resolve("sample_weather")
+            .resolve_pinned(
+                "sample_weather",
+                &receipt.version,
+                &receipt.manifest_digest,
+                &"0".repeat(64),
+            )
+            .expect_err("receipt mismatch rejected")
+            .code,
+        "launch_pinned_version_missing"
+    );
+
+    fs::write(&launch.program, b"tampered").expect("tamper");
+    SkillRuntimeResolver::new(store.root())
+        .pin_exact(
+            "sample_weather",
+            &receipt.version,
+            &receipt.manifest_digest,
+            &receipt.digest().expect("receipt digest"),
+        )
+        .expect("host pin reads immutable receipt identity without caching artifact verification");
+    assert_eq!(
+        SkillRuntimeResolver::new(store.root())
+            .resolve_pinned(
+                "sample_weather",
+                &receipt.version,
+                &receipt.manifest_digest,
+                &receipt.digest().expect("receipt digest"),
+            )
             .expect_err("tamper rejected")
             .code,
         "launch_artifact_digest_mismatch"
     );
+
+    let lease = store
+        .acquire_version_lease("sample_weather", &launch.install_root)
+        .expect("acquire version lease");
+    assert_eq!(
+        lease.install_dir(),
+        install_dir.file_name().unwrap().to_str().unwrap()
+    );
+    assert!(!store
+        .remove_installed_versions("sample_weather")
+        .expect("defer removal while leased"));
+    assert!(launch.install_root.is_dir());
+    drop(lease);
+    assert!(!store
+        .skill_root("sample_weather")
+        .expect("skill root")
+        .exists());
 }
 
 #[test]
@@ -410,7 +478,7 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
             sandbox_profile: SandboxProfile::Required,
             runtime_network: false,
             protocol_smoke: ProtocolSmokeReceipt {
-                protocol: "rustclaw-jsonl-v1".to_string(),
+                protocol: "agent-jsonl-v1".to_string(),
                 passed: true,
                 request_id: format!("smoke-{}", manifest.package.version),
                 checked_at_unix: 1,
@@ -435,11 +503,35 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
     .into_current()
     .expect("current second manifest");
     let first_binary = install_version(&first, b"first-version");
+    let first_launch = SkillRuntimeResolver::new(store.root())
+        .resolve("sample_weather")
+        .expect("resolve first version");
+    let first_lease = store
+        .acquire_version_lease("sample_weather", &first_launch.install_root)
+        .expect("lease first version");
     let _second_binary = install_version(&second, b"second-version");
     let current_before = store
         .current_pointer("sample_weather")
         .expect("current pointer");
     assert_eq!(current_before.version, "0.2.0");
+    let pinned_first = SkillRuntimeResolver::new(store.root())
+        .resolve_pinned(
+            "sample_weather",
+            &first_launch.version,
+            &first_launch.manifest_digest,
+            &first_launch.receipt_digest,
+        )
+        .expect("long-running first call keeps its exact version after update");
+    assert_eq!(pinned_first.version, "0.1.0");
+    assert_eq!(
+        SkillRuntimeResolver::new(store.root())
+            .resolve("sample_weather")
+            .expect("new calls use current version")
+            .version,
+        "0.2.0"
+    );
+    drop(first_lease);
+    assert!(first_launch.install_root.is_dir());
 
     fs::write(first_binary, b"tampered-previous-version").expect("tamper previous");
     assert_eq!(
@@ -454,5 +546,17 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
             .current_pointer("sample_weather")
             .expect("current remains active"),
         current_before
+    );
+
+    let third = PackageManifest::from_toml_str(
+        &manifest_source().replace("version = \"0.1.0\"", "version = \"0.3.0\""),
+    )
+    .expect("third manifest")
+    .into_current()
+    .expect("current third manifest");
+    install_version(&third, b"third-version");
+    assert!(
+        !first_launch.install_root.exists(),
+        "the version older than the rollback slot is collected after its lease drains"
     );
 }

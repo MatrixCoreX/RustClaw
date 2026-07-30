@@ -5,7 +5,7 @@ Compile natural-language scheduling requests into structured schedule plans.
 ## Capability
 - Converts user schedule requests into a normalized JSON plan.
 - Used by clawd schedule service as the workflow owner for scheduled jobs.
-- Create/list/delete/pause/resume actions persist through RustClaw `scheduled_jobs`; do not use shell, crontab, systemd timers, or ad-hoc command scheduling for ordinary reminders.
+- Create/list/delete/pause/resume actions persist through Agent Runtime `scheduled_jobs`; do not use shell, crontab, systemd timers, or ad-hoc command scheduling for ordinary reminders.
 
 ## Parameter contract
 | Param | Required | Type | Default | Description |

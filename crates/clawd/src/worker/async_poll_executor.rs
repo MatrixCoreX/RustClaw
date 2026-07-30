@@ -483,11 +483,13 @@ fn workspace_root_from_local_job_dir(job_dir: &Path) -> Option<PathBuf> {
     if async_jobs.file_name()?.to_str()? != "async_jobs" {
         return None;
     }
-    let rustclaw_dir = async_jobs.parent()?;
-    if rustclaw_dir.file_name()?.to_str()? != ".rustclaw" {
+    let state_dir = async_jobs.parent()?;
+    if !claw_core::workspace_state::is_known_workspace_state_dir_name(
+        state_dir.file_name()?.to_str()?,
+    ) {
         return None;
     }
-    rustclaw_dir.parent().map(Path::to_path_buf)
+    state_dir.parent().map(Path::to_path_buf)
 }
 
 fn combine_local_process_output(stdout: &str, stderr: &str) -> String {

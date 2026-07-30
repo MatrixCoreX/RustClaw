@@ -329,14 +329,14 @@ fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
         status: crate::executor::StepExecutionStatus::Ok,
         output: Some(
             json!({
-                "text": "FILE:/tmp/rustclaw-image.png",
+                "text": "FILE:/tmp/agent-runtime-image.png",
                 "extra": {
                     "provider": "local_fallback",
                     "model": "local-placeholder",
                     "model_kind": "local_fallback",
                     "outputs": [{
                         "type": "image_file",
-                        "path": "/tmp/rustclaw-image.png"
+                        "path": "/tmp/agent-runtime-image.png"
                     }]
                 }
             })
@@ -366,7 +366,7 @@ fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
         .expect("observed evidence items should be present");
     assert!(items.iter().any(|item| {
         item.get("field").and_then(Value::as_str) == Some("extra.outputs[0].path")
-            && item.get("excerpt").and_then(Value::as_str) == Some("/tmp/rustclaw-image.png")
+            && item.get("excerpt").and_then(Value::as_str) == Some("/tmp/agent-runtime-image.png")
     }));
 
     let mut route = route_for_contract(false);
@@ -558,12 +558,12 @@ fn read_text_range_evidence_preserves_grounding_scalars() {
                     "action": "read_range",
                     "path": "README.md",
                     "resolved_path": "/workspace/README.md",
-                    "excerpt": "1|# RustClaw",
+                    "excerpt": "1|# Agent Runtime",
                     "start_line": 1,
                     "end_line": 1,
                     "total_lines": 1277,
                     "line_count": 1277,
-                    "first_line": "# RustClaw"
+                    "first_line": "# Agent Runtime"
                 }
             })
             .to_string(),
@@ -771,9 +771,9 @@ fn matrix_admitted_external_marker_enables_strict_structured_evidence() {
 fn unstructured_text_is_not_promoted_to_machine_evidence() {
     let archive_listing = "exit=0\nArchive: /tmp/test.zip\n  Length Name\n  22 notes.txt\n  20 nested/config.ini\n  42 2 files";
     assert!(observed_evidence_from_output(Some(archive_listing)).is_none());
-    assert!(observed_evidence_from_output(Some("/home/guagua/rustclaw/Cargo.toml")).is_none());
+    assert!(observed_evidence_from_output(Some("/home/guagua/agent-runtime/Cargo.toml")).is_none());
     assert!(observed_evidence_from_output(Some(
-        "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        "written 40 bytes to /home/guagua/agent-runtime/document/pwd_line.txt",
     ))
     .is_none());
 

@@ -7,7 +7,7 @@ use super::*;
 
 fn temp_rules_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "rustclaw_main_flow_rules_{label}_{}.toml",
+        "agent_main_flow_rules_{label}_{}.toml",
         Uuid::new_v4()
     ))
 }

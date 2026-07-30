@@ -994,6 +994,15 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             claim_attempt
         ],
     )?;
+    drop(db);
+    if changed > 0 && db_status == "succeeded" {
+        crate::repo::tasks::attach_task_artifacts_after_success(
+            state,
+            task_id,
+            claim_attempt,
+            &updated_result_json,
+        );
+    }
     Ok(changed > 0)
 }
 

@@ -1,4 +1,4 @@
-# Minimal NL coverage for RustClaw basic skills.
+# Minimal NL coverage for Agent Runtime basic skills.
 # Created: 2026-06-21
 #
 # Purpose:
@@ -38,7 +38,7 @@ minimal_basic_skill_coverage|explicit_shell_process_ports_en|covers:run_cmd,proc
 
 minimal_basic_skill_coverage|git_package_status_zh|covers:git_basic,package_manager;requires_tool_call=true;local_readonly|检查当前仓库 git 分支、工作区变更文件数量和最近 1 条提交；再检测系统包管理器类型；用不超过 5 行回答。|expect=main
 
-minimal_basic_skill_coverage|runtime_ops_health_zh|covers:health_check,service_control,task_control,http_basic,system_basic;requires_tool_call=true;local_readonly|做一次 RustClaw 运行状态小体检：请求本机 clawd health 接口，检查 clawd 服务或进程状态，查看当前任务队列概况，并给出系统运行状态摘要；不要重启或停止任何服务。|expect=clawd
+minimal_basic_skill_coverage|runtime_ops_health_zh|covers:health_check,service_control,task_control,http_basic,system_basic;requires_tool_call=true;local_readonly|做一次 Agent Runtime 运行状态小体检：请求本机 clawd health 接口，检查 clawd 服务或进程状态，查看当前任务队列概况，并给出系统运行状态摘要；不要重启或停止任何服务。|expect=clawd
 
 minimal_basic_skill_coverage|logs_doc_transform_zh|covers:log_analyze,doc_parse,transform;requires_tool_call=true;local_readonly|分析 scripts/nl_tests/fixtures/device_local/logs/app.log 有没有 error/warn；解析 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 的主要内容；把 [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}] 按 score 降序转成 markdown 表格。|expect=beta
 
@@ -54,7 +54,7 @@ minimal_basic_skill_coverage|browser_page_extract_en|covers:browser_web,http_bas
 
 minimal_basic_skill_coverage|web_search_extract_readonly_en|covers:web_search_extract;requires_tool_call=true;external_network|Search the web for "Rust async tutorial" with top_k=3 and return only titles plus source domains. Do not open additional pages unless the search tool already returns extractable metadata.|expect=Rust
 
-minimal_basic_skill_coverage|schedule_boundary_dry_run_zh|covers:schedule;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 RustClaw 服务，请只解析日程意图并说明需要的结构化字段，不要创建真实提醒任务。|expect=9
+minimal_basic_skill_coverage|schedule_boundary_dry_run_zh|covers:schedule;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 Agent Runtime 服务，请只解析日程意图并说明需要的结构化字段，不要创建真实提醒任务。|expect=9
 
 minimal_basic_skill_coverage|extension_assess_gap_only_zh|covers:extension_manager,skill:extension_manager,requires_tool_call=true,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。
 

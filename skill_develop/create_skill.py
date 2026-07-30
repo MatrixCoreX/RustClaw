@@ -123,7 +123,7 @@ Response:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scaffold a new RustClaw runner skill.")
+    parser = argparse.ArgumentParser(description="Scaffold a new agent runtime skill.")
     parser.add_argument("skill_name", help="snake_case skill name, e.g. stock_quote")
     parser.add_argument(
         "--aliases",
@@ -208,7 +208,7 @@ def skill_manifest_text(skill_name: str, on_demand: bool, timeout: int) -> str:
 name = "{skill_name}"
 version = "0.1.0"
 description = "TODO: describe {skill_name}."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -403,11 +403,11 @@ def main() -> int:
 
     print("[next] 运行 python3 scripts/sync_skill_docs.py")
     print("[next] 如需 planner 常规自然语言调用，在 configs/skills_registry.toml 补 planner_capabilities")
-    print("[next] 运行 cargo check -p clawd -p skill-runner -p rustclaw-skill-sdk")
+    print("[next] 运行 cargo check -p clawd -p skill-runner -p agent-skill-sdk")
     if args.on_demand:
         print(
             "[next] 按需技能只通过 UI Skill Store 安装，或显式运行 "
-            f"target/release/rustclaw-skill install-local {skill_dir.relative_to(REPO_ROOT)}/skill.toml . data/skill-packages"
+            f"target/release/skillctl install-local {skill_dir.relative_to(REPO_ROOT)}/skill.toml . data/skill-packages"
         )
     else:
         print(

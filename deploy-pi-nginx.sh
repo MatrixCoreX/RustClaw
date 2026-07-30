@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在树莓派上部署现有的 UI/dist 到 nginx，并配置 RustClaw 反向代理。
+# 在树莓派上部署现有的 UI/dist 到 nginx，并配置 agent runtime 反向代理。
 # 说明:
 # - 只做 deploy，不做前端构建。
 # - 复用 build-ui-nginx.sh 里的 nginx 部署逻辑，避免维护两份配置。
@@ -19,7 +19,7 @@ usage() {
 	echo ""
 	echo "Examples:"
 	echo "  $0"
-	echo "  $0 --path /var/www/html/rustclaw"
+	echo "  $0 --path /var/www/html/agent-system"
 }
 
 for arg in "$@"; do

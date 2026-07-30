@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/agent_loop_decision_envelope.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/agent_loop_decision_envelope.schema.json",
   "title": "AgentLoopDecisionEnvelope",
   "description": "Machine envelope for planner-loop semantic decisions. It records whether the planner's first actionable step is to respond, clarify, call a capability, or synthesize an answer. Runtime must not parse user natural-language text to populate this shape.",
   "type": "object",

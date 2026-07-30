@@ -12,5 +12,5 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# External SDK packages remain independent of RustClaw's root workspace.
+# External SDK packages remain independent of the host runtime workspace.
 [workspace]

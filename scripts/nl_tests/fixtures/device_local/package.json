@@ -1,8 +1,8 @@
 {
-  "name": "rustclaw-nl-fixture",
+  "name": "agent-runtime-nl-fixture",
   "version": "1.0.0",
   "private": true,
-  "description": "Local fixture package for RustClaw NL regression tests",
+  "description": "Local fixture package for Agent Runtime NL regression tests",
   "scripts": {
     "build": "echo build",
     "dev": "echo dev",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create and push the latest RustClaw release tags.
+# Create and push the latest platform release tags.
 #
 # Default behavior:
 #   - push current main branch to origin
@@ -12,6 +12,10 @@
 #   ./release-latest.sh --platform pi --date 20260622
 #   ./release-latest.sh --dry-run
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/product_identity.sh"
 
 REMOTE="origin"
 REQUIRED_BRANCH="main"
@@ -279,7 +283,7 @@ done
 
 log "[4/5] Create local annotated tags..."
 for tag in "${TAGS[@]}"; do
-  run git tag -a "$tag" "$COMMIT" -m "RustClaw release ${tag} (${SHORT_COMMIT})"
+  run git tag -a "$tag" "$COMMIT" -m "${APP_DISPLAY_NAME} release ${tag} (${SHORT_COMMIT})"
 done
 
 log "[5/5] Push release tags..."

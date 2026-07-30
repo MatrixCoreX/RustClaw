@@ -63,7 +63,7 @@ fn default_telegram_commands_only_expose_transport_controls() {
         "/run weather {}",
         "/skills",
         "/sendfile report.txt",
-        "/rustclaw show",
+        "/agent-runtime show",
         "/cryptoapi show",
     ] {
         assert!(

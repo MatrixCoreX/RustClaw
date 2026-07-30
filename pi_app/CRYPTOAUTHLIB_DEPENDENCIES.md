@@ -95,7 +95,7 @@ sudo i2cdetect -y 0
 ### 检查 pi_app 当前使用的是哪份动态库
 
 ```bash
-python3 /home/pi/rustclaw/pi_app/signature.py tng_signer_cert
+python3 /home/pi/agent-runtime/pi_app/signature.py tng_signer_cert
 ```
 
 输出 JSON 里的 `lib_path` 可用于确认当前加载的是哪一个 `.so`。
@@ -137,7 +137,7 @@ sudo apt install -y build-essential cmake pkg-config python3 python3-venv i2c-to
 则还需要安装：
 
 ```bash
-python3 -m pip install -r /home/pi/rustclaw/pi_app/tng_server_example/requirements.txt
+python3 -m pip install -r /home/pi/agent-runtime/pi_app/tng_server_example/requirements.txt
 ```
 
 当前额外依赖为：

@@ -75,7 +75,14 @@ def discover_skill_dirs() -> dict[str, SkillEntry]:
             if not child.is_dir():
                 continue
             if source != "external":
-                if not (child / "Cargo.toml").exists():
+                # Repository-maintained skills may use any supported adapter.
+                # Cargo.toml is a legacy discovery marker; skill.toml is the
+                # adapter-neutral package contract used by Python/Node/Go and
+                # other non-Cargo bundled skills.
+                if not (
+                    (child / "Cargo.toml").exists()
+                    or (child / "skill.toml").exists()
+                ):
                     continue
             else:
                 if not (child / "INTERFACE.md").exists():

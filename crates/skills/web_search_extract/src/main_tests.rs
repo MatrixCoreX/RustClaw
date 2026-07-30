@@ -118,14 +118,14 @@ fn parse_bing_html_results_extracts_title_url_and_snippet() {
 #[test]
 fn duckduckgo_parser_accepts_multi_class_result_body_and_redirects() {
     let input = SearchInput {
-        query: "RustClaw GitHub".to_string(),
+        query: "Agent Runtime GitHub".to_string(),
         ..input_for_test()
     };
     let html = r#"
     <div class="result results_links results_links_deep web-result ">
       <div class="links_main links_deep result__body">
-        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FAdaimade%2FRustClaw&amp;rut=abc">RustClaw - GitHub</a>
-        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FAdaimade%2FRustClaw&amp;rut=abc"><b>RustClaw</b> repo.</a>
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FAdaimade%2FAgent Runtime&amp;rut=abc">Agent Runtime - GitHub</a>
+        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FAdaimade%2FAgent Runtime&amp;rut=abc"><b>Agent Runtime</b> repo.</a>
       </div>
     </div>
     "#;
@@ -134,10 +134,10 @@ fn duckduckgo_parser_accepts_multi_class_result_body_and_redirects() {
     normalize_and_filter(&mut items, &input);
 
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].title, "RustClaw - GitHub");
-    assert_eq!(items[0].url, "https://github.com/Adaimade/RustClaw");
+    assert_eq!(items[0].title, "Agent Runtime - GitHub");
+    assert_eq!(items[0].url, "https://github.com/Adaimade/Agent Runtime");
     assert_eq!(items[0].source, "github.com");
-    assert_eq!(items[0].snippet.as_deref(), Some("RustClaw repo."));
+    assert_eq!(items[0].snippet.as_deref(), Some("Agent Runtime repo."));
 }
 
 #[test]
@@ -191,8 +191,8 @@ fn query_without_site_operators_preserves_plain_terms() {
         "tokio task"
     );
     assert_eq!(
-        query_without_site_operators("RustClaw site:github.com"),
-        "RustClaw"
+        query_without_site_operators("Agent Runtime site:github.com"),
+        "Agent Runtime"
     );
 }
 

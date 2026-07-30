@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="${RUNNER:-$ROOT_DIR/target/release/skill-runner}"
-SDK_CLI="${SDK_CLI:-$ROOT_DIR/target/release/rustclaw-skill}"
-PACKAGE_ROOT="${RUSTCLAW_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
+SDK_CLI="${SDK_CLI:-$ROOT_DIR/target/release/skillctl}"
+PACKAGE_ROOT="${APP_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
 REPORT_PATH="${REPORT_PATH:-$ROOT_DIR/logs/regression_skills_upgrade_$(date +%Y%m%d_%H%M%S).md}"
 INCLUDE_WRAPPER_SMOKE=1
 WRAPPER_SMOKE_PROFILE="${WRAPPER_SMOKE_PROFILE:-release}"
@@ -140,7 +140,7 @@ run_skill() {
       skill_name: $skill,
       args: $args,
       context: null
-    }' | RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+    }' | APP_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
       WORKSPACE_ROOT="$ROOT_DIR" \
       "$RUNNER"
 }

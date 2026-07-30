@@ -46,7 +46,7 @@
 | generate | `model` | no | string | config default | Video generation model for the selected provider. |
 | generate | `max_poll_seconds` | no | integer | config default | Max polling window for async completion. |
 | poll | `task_id` | yes | string | - | Provider video task id returned by `generate`. |
-| poll | `job_id` | no | string | derived | RustClaw async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
+| poll | `job_id` | no | string | derived | Runtime async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
 | poll | `vendor` | no | string | config default | Provider key used to query the task. |
 | poll | `model` | no | string | config default | Model metadata preserved in final result. |
 | poll | `poll_after_seconds` | no | integer | config poll interval | Suggested next poll delay when the task is still pending. |
@@ -57,7 +57,7 @@
 | poll | `dry_run` | no | boolean | `false` | Return a mock adapter result without provider calls. |
 | poll | `mock_status` / `mock_file_id` | no | string | - | Dry-run-only provider status/file metadata for tests and smoke checks. |
 | cancel | `task_id` | yes | string | - | Provider video task id returned by `generate`. |
-| cancel | `job_id` | no | string | derived | RustClaw async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
+| cancel | `job_id` | no | string | derived | Runtime async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
 | cancel | `cancel_token` / `cancel_ref` | no | string | `job_id` | Async cancellation token produced by `pending_async_job`. |
 | cancel | `vendor` | no | string | config default | Provider key used to cancel the task. |
 | cancel | `model` | no | string | config default | Model metadata preserved in the cancellation result. |
@@ -69,6 +69,7 @@
 - Unsupported vendor, duration, resolution, or path outside workspace.
 - Missing API key for live generation.
 - Provider create/query/retrieve/download failures.
+- A provider create rejection that returns no task is reported with `failure_phase=provider_rejected` and `side_effect_applied=false`; transport loss and ambiguous provider outcomes do not claim this proof.
 - Live `cancel` returns `status=requires_provider_adapter` with `error_code=provider_cancel_adapter_missing` until a provider-native cancel adapter is available.
 
 ## Request/Response Examples (from interface)

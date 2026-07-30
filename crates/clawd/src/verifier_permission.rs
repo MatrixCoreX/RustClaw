@@ -38,7 +38,7 @@ fn step_permission_decision_json(
         && (state
             .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
             || is_confirmation_like_skill(&normalized_skill)
-            || high_risk_side_effect_requires_confirmation(effect, risk_level, &step.args));
+            || high_risk_side_effect_requires_confirmation(effect, risk_level));
     let action = step
         .args
         .as_object()

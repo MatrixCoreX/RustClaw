@@ -48,7 +48,7 @@ fn content_disposition_keeps_unicode_only_in_rfc5987_value() {
 #[tokio::test]
 async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-task-artifact-http-{}",
+        "agent-runtime-task-artifact-http-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&root).unwrap();
@@ -120,12 +120,12 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
         .unwrap();
 
     let mut wrong_headers = HeaderMap::new();
-    wrong_headers.insert("x-rustclaw-key", HeaderValue::from_static("wrong-key"));
+    wrong_headers.insert("x-agent-key", HeaderValue::from_static("wrong-key"));
     let denied = list_task_artifacts(State(state.clone()), wrong_headers, Path(task_id)).await;
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static("owner-key"));
+    headers.insert("x-agent-key", HeaderValue::from_static("owner-key"));
     headers.insert(RANGE, HeaderValue::from_static("bytes=2-5"));
     let response = get_task_artifact_content(
         State(state),

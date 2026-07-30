@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard RustClaw against growing oversized Rust source files.
+"""Guard the agent runtime against growing oversized Rust source files.
 
 This check treats oversized Rust files as an explicit violation. Historical
 long-file debt has been split down; future exemptions must be current,

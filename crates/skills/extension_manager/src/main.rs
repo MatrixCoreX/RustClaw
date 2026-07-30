@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use rustclaw_skill_sdk::{InstallReceiptStore, SkillRuntimeResolver};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -148,21 +147,17 @@ struct ExternalSkillValidationReport {
 
 #[derive(Debug, Clone, Serialize)]
 struct ExternalSkillRegistrationReport {
-    registry_entry_added: bool,
-    switch_recorded_enabled: bool,
-    package_manifest: String,
-    matrix_admission_eligible: bool,
+    registry_generation: u64,
+    registry_generation_digest: Option<String>,
+    build_adapter: String,
+    installed_version: String,
+    receipt_digest: String,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ExternalSkillEnableReport {
-    switch_enabled: bool,
-    install_ok: bool,
-    adapter: String,
-    installed_version: String,
-    receipt_digest: String,
-    install_root: String,
-    reload_required: bool,
+    admission: ExternalSkillRegistrationReport,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -227,11 +222,13 @@ async fn execute(request_id: &str, args: Value) -> Result<(String, Value), Strin
 
     match action {
         "assess_gap" => assess_gap(obj),
-        "enable_external_skill" => enable_external_skill_action(obj),
+        "enable_external_skill" => enable_external_skill_action(obj).await,
         "implement_external_skill" => {
             implement_external_skill_action(request_id, obj).await
         }
-        "register_external_skill" => register_external_skill_action(workspace_root(), obj),
+        "register_external_skill" => {
+            register_external_skill_action(workspace_root(), obj).await
+        }
         "validate_external_skill" => validate_external_skill_action(obj),
         "scaffold_external_skill" => scaffold_external_skill(workspace_root(), obj),
         "permanent_extension_plan" => permanent_extension_plan_action(request_id, obj).await,
@@ -366,7 +363,7 @@ async fn implement_external_skill_action(
         ));
     }
 
-    let manifest = rustclaw_skill_sdk::PackageManifest::load(&skill_dir.join("skill.toml"))
+    let manifest = skill_sdk::PackageManifest::load(&skill_dir.join("skill.toml"))
         .map_err(|error| format!("read external skill manifest failed: {error}"))?;
     let (source_entrypoint, _) = implementation_source_target(&manifest)?;
     let build_adapter = manifest.build.adapter;
@@ -421,7 +418,7 @@ fn validate_external_skill_action(obj: &Map<String, Value>) -> Result<(String, V
         json!({
             "action": "validate_external_skill",
             "skill_name": skill_name,
-            "report": report,
+            "report": &report,
             "default_enabled": false,
             "next_steps": [
                 "Review the generated files before registration.",
@@ -431,7 +428,7 @@ fn validate_external_skill_action(obj: &Map<String, Value>) -> Result<(String, V
     ))
 }
 
-fn register_external_skill_action(
+async fn register_external_skill_action(
     repo_root: PathBuf,
     obj: &Map<String, Value>,
 ) -> Result<(String, Value), String> {
@@ -442,64 +439,45 @@ fn register_external_skill_action(
 
     let actions = extract_actions(obj)?;
     let _validation = validate_external_skill(&repo_root, &skill_name, &actions)?;
-    let had_verified_install = SkillRuntimeResolver::new(external_package_root(&repo_root))
-        .resolve(&skill_name)
-        .is_ok();
-    let install = install_external_skill(&repo_root, &skill_name)?;
-    let report = match register_external_skill(&repo_root, &skill_name) {
-        Ok(report) => report,
-        Err(err) => {
-            let store = InstallReceiptStore::new(external_package_root(&repo_root));
-            if had_verified_install {
-                let _ = store.rollback(&skill_name);
-            } else {
-                let _ = store.remove_installed_versions(&skill_name);
-            }
-            return Err(err);
-        }
-    };
+    let report = register_external_skill(&repo_root, &skill_name).await?;
     Ok((
         format!(
-            "Registered external skill `{skill_name}`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it."
+            "Registered and enabled external skill `{skill_name}` through the host admission service."
         ),
         json!({
             "action": "register_external_skill",
             "skill_name": skill_name,
-            "report": report,
+            "report": &report,
             "default_enabled": true,
             "install_ok": true,
-            "adapter": install.adapter.as_token(),
-            "installed_version": install.version,
-            "receipt_digest": install.receipt_digest,
-            "install_root": path_string(&install.install_root),
-            "reload_required": true,
+            "adapter": &report.build_adapter,
+            "installed_version": &report.installed_version,
+            "receipt_digest": &report.receipt_digest,
+            "registry_generation": report.registry_generation,
+            "reload_required": false,
             "next_steps": [
-                "Reload skills via admin endpoint or restart clawd.",
                 "Run a run_skill happy path before normal runtime use."
             ]
         }),
     ))
 }
 
-fn enable_external_skill_action(obj: &Map<String, Value>) -> Result<(String, Value), String> {
+async fn enable_external_skill_action(obj: &Map<String, Value>) -> Result<(String, Value), String> {
     require_confirm(obj, "enable_external_skill")?;
     let skill_name = required_string(obj, "skill_name")?;
     validate_identifier("skill_name", &skill_name)?;
     let repo_root = workspace_root();
     ensure_external_skill_scaffold_ready(&repo_root, &skill_name)?;
 
-    let report = enable_external_skill(&repo_root, &skill_name)?;
+    let report = enable_external_skill(&repo_root, &skill_name).await?;
     Ok((
-        format!(
-            "Enabled external skill `{skill_name}` in config and installed its verified package. Reload skills or restart clawd before using it."
-        ),
+        format!("Enabled external skill `{skill_name}` through the host admission service."),
         json!({
             "action": "enable_external_skill",
             "skill_name": skill_name,
             "report": report,
             "default_enabled": true,
             "next_steps": [
-                "Reload skills via admin endpoint or restart clawd.",
                 "Keep human review in the loop before normal runtime use."
             ]
         }),
@@ -642,7 +620,7 @@ async fn build_external_skill_implementation(
     skill_name: &str,
     capability_summary: &str,
     actions: &[String],
-    build_adapter: rustclaw_skill_sdk::BuildAdapter,
+    build_adapter: skill_sdk::BuildAdapter,
     source_entrypoint: &str,
 ) -> Result<ExternalSkillImplementation, String> {
     let raw = llm_generate_external_skill_implementation(
@@ -815,7 +793,7 @@ async fn llm_generate_external_skill_implementation(
     skill_name: &str,
     capability_summary: &str,
     actions: &[String],
-    build_adapter: rustclaw_skill_sdk::BuildAdapter,
+    build_adapter: skill_sdk::BuildAdapter,
     source_entrypoint: &str,
 ) -> Result<String, String> {
     let timeout_secs = extension_manager_timeout_seconds(90);
@@ -921,11 +899,11 @@ async fn internal_llm_generate(
     max_tokens: u64,
     timeout_secs: u64,
 ) -> Option<Result<String, String>> {
-    let url = env::var("RUSTCLAW_INTERNAL_LLM_URL")
+    let url = env::var("AGENT_INTERNAL_LLM_URL")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())?;
-    let token = env::var("RUSTCLAW_INTERNAL_LLM_TOKEN")
+    let token = env::var("AGENT_INTERNAL_LLM_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())?;
@@ -944,7 +922,7 @@ async fn internal_llm_generate(
             .map_err(|e| format!("build internal llm http client failed: {e}"))?;
         let resp = client
             .post(url)
-            .header("x-rustclaw-internal-llm-token", token)
+            .header("x-agent-internal-llm-token", token)
             .json(&body)
             .send()
             .await

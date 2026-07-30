@@ -227,6 +227,8 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "ADAPTIVE_LIMIT_INVENTORY_CHECK ok",
         "ADAPTIVE_SEMANTIC_LIMIT_BASELINE_CHECK ok",
         "LONG_FILE_CHECK ok",
+        "PRODUCT_IDENTITY_CHECK self-test ok",
+        "PRODUCT_IDENTITY_CHECK ok",
         "CROSS_PLATFORM_CONTRACT_SELF_TEST ok",
         "CROSS_PLATFORM_CONTRACT_CHECK findings=0",
         "STARTUP_PREFLIGHT_CONTRACT ok",
@@ -1462,7 +1464,7 @@ def run_self_test() -> int:
                 set(),
             ),
             (
-                {"out_dir": "/home/user/rustclaw/logs/agent_parity_gate/run"},
+                {"out_dir": "/home/user/agent-runtime/logs/agent_parity_gate/run"},
                 {
                     "agent_parity_gate_summary_host_path:out_dir",
                     "agent_parity_gate_summary_legacy_out_dir",
@@ -1490,7 +1492,7 @@ def run_self_test() -> int:
         run_log_host_path_run = root / "agent-parity-run-log-host-path"
         write_minimal_self_test_run(run_log_host_path_run, content_checked=True)
         (run_log_host_path_run / "run.log").write_text(
-            "run_dir: /home/user/rustclaw/scripts/nl_suite_logs/agent_parity_gate/run\n",
+            "run_dir: /home/user/agent-runtime/scripts/nl_suite_logs/agent_parity_gate/run\n",
             encoding="utf-8",
         )
         run_log_host_path_findings = validate_text_artifact_no_host_paths(

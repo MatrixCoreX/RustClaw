@@ -53,7 +53,7 @@ fn observed_entries_keep_run_cmd_schema_excerpt_with_boundary_description() {
 File: intent_normalizer.schema.json (15570 bytes)
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/intent_normalizer.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/intent_normalizer.schema.json",
   "title": "IntentNormalizerOut",
   "description": "Schema for the JSON object returned by the unified intent normalizer prompt (prompts/intent_normalizer_prompt.md). Mirrors `IntentNormalizerOut` in crates/clawd/src/intent_router.rs and is enforced by the `intent_normalizer_schema_drift` unit test (any drift between this file and the parser fails the build). Runtime canonicalization fills missing compatibility slots with neutral defaults, so live model output should prefer the boundary_envelope and should not be forced to emit output_contract for ordinary requests.\n\nThis file is the reference template for schema-driven prompt I/O. Future schema-driven parsers should follow the same pattern.",
   "type": "object",

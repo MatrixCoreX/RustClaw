@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-读取当前 RustClaw SQLite 数据库的结构与内容摘要。
+读取当前 agent runtime SQLite 数据库的结构与内容摘要。
 用法: python scripts/db_schema_and_content.py [数据库文件路径]
-未指定路径时从 configs/config.toml 的 database.sqlite_path 读取，缺省为 data/rustclaw.db（相对仓库根）。
+未指定路径时从 configs/config.toml 的 database.sqlite_path 读取，缺省为 data/agent-runtime.db（相对仓库根）。
 输出到 stdout；若需落盘可重定向，例如: python scripts/db_schema_and_content.py > document/db_report.txt
 注意：报告可能包含敏感信息（如 api_key），请勿提交到版本库或分享。
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
 CONFIG = ROOT / "configs" / "config.toml"
-DEFAULT_DB = ROOT / "data" / "rustclaw.db"
+DEFAULT_DB = ROOT / "data" / "agent-runtime.db"
 SAMPLE_ROWS = 5
 
 

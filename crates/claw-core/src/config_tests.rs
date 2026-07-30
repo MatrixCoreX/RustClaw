@@ -1,13 +1,10 @@
-use super::{
-    base_skill_names, core_skills_always_enabled, llm_vendor_api_key_env_names, AppConfig,
-    ToolsConfig,
-};
+use super::{llm_vendor_api_key_env_names, AppConfig, SkillsConfig, ToolsConfig};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
-        "rustclaw-claw-core-config-{name}-{}-{}",
+        "agent-runtime-claw-core-config-{name}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -159,8 +156,8 @@ reconnect_max_seconds = 45
 trusted = true
 capability_prefix = "repo"
 allowed_tools = ["search", "read"]
-auth_token_env = "RUSTCLAW_TEST_MCP_TOKEN"
-env_refs = { REPO_TOKEN = "RUSTCLAW_TEST_REPO_TOKEN" }
+auth_token_env = "APP_TEST_MCP_TOKEN"
+env_refs = { REPO_TOKEN = "APP_TEST_REPO_TOKEN" }
 
 [mcp.servers.repo.tool_policies.search]
 effect = "observe"
@@ -177,8 +174,8 @@ url = "http://127.0.0.1:9000/events"
 enabled = false
 transport = "streamable_http"
 url = "https://mcp.example.invalid/mcp"
-oauth_client_id_env = "RUSTCLAW_TEST_MCP_OAUTH_CLIENT_ID"
-oauth_client_secret_env = "RUSTCLAW_TEST_MCP_OAUTH_CLIENT_SECRET"
+oauth_client_id_env = "APP_TEST_MCP_OAUTH_CLIENT_ID"
+oauth_client_secret_env = "APP_TEST_MCP_OAUTH_CLIENT_SECRET"
 oauth_scopes = ["read", "write"]
 oauth_resource = "https://mcp.example.invalid/mcp"
 "#,
@@ -205,13 +202,10 @@ oauth_resource = "https://mcp.example.invalid/mcp"
     assert_eq!(repo.reconnect_max_seconds, 45);
     assert!(repo.trusted);
     assert_eq!(repo.capability_prefix.as_deref(), Some("repo"));
-    assert_eq!(
-        repo.auth_token_env.as_deref(),
-        Some("RUSTCLAW_TEST_MCP_TOKEN")
-    );
+    assert_eq!(repo.auth_token_env.as_deref(), Some("APP_TEST_MCP_TOKEN"));
     assert_eq!(
         repo.env_refs.get("REPO_TOKEN").map(String::as_str),
-        Some("RUSTCLAW_TEST_REPO_TOKEN")
+        Some("APP_TEST_REPO_TOKEN")
     );
     assert_eq!(
         repo.allowed_tools,
@@ -232,11 +226,11 @@ oauth_resource = "https://mcp.example.invalid/mcp"
     assert_eq!(oauth.auth_mode_token(), "oauth_client_credentials");
     assert_eq!(
         oauth.oauth_client_id_env.as_deref(),
-        Some("RUSTCLAW_TEST_MCP_OAUTH_CLIENT_ID")
+        Some("APP_TEST_MCP_OAUTH_CLIENT_ID")
     );
     assert_eq!(
         oauth.oauth_client_secret_env.as_deref(),
-        Some("RUSTCLAW_TEST_MCP_OAUTH_CLIENT_SECRET")
+        Some("APP_TEST_MCP_OAUTH_CLIENT_SECRET")
     );
     assert_eq!(oauth.oauth_scopes, vec!["read", "write"]);
     assert_eq!(
@@ -261,15 +255,12 @@ fn tools_defaults_are_least_privilege_coding_defaults() {
 }
 
 #[test]
-fn default_workflow_knowledge_and_feed_skills_are_always_on_in_ui() {
-    for skill in [
-        "schedule",
-        "subagent",
-        "extension_manager",
-        "kb",
-        "rss_fetch",
-    ] {
-        assert!(base_skill_names().contains(&skill));
-        assert!(core_skills_always_enabled().contains(&skill));
-    }
+fn skill_config_defaults_do_not_duplicate_registry_membership() {
+    let skills = SkillsConfig::default();
+    assert!(skills.skills_list.is_empty());
+    assert!(skills.uninstalled_skills.is_empty());
+    assert_eq!(
+        skills.registry_path.as_deref(),
+        Some("configs/skills_registry.toml")
+    );
 }

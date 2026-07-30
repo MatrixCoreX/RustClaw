@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Software-only ATECC608 protocol simulator for local RustClaw testing."""
+"""Software-only ATECC608 protocol simulator for local host testing."""
 
 import hashlib
 import hmac
@@ -31,7 +31,7 @@ class SignatureSimulationError(RuntimeError):
 
 
 def simulation_state_path():
-    configured = os.environ.get("RUSTCLAW_SIGNATURE_SIMULATOR_STATE", "").strip()
+    configured = os.environ.get("APP_SIGNATURE_SIMULATOR_STATE", "").strip()
     if configured:
         return os.path.abspath(configured)
     return os.path.abspath(
@@ -259,12 +259,12 @@ def run_simulated_action(action, action_arg=None):
             raise SignatureSimulationError("challenge required", "challenge_required")
         digest = hashlib.sha256(challenge.encode("utf-8")).digest()
         return {"challenge": challenge, "signature": _sign_digest(device_key, digest).hex(), **metadata}
-    root_name = "RustClaw Simulated Root"
-    signer_name = "RustClaw Simulated Signer"
+    root_name = "Agent Runtime Simulated Root"
+    signer_name = "Agent Runtime Simulated Signer"
     if action == "tng_device_cert":
         cert = build_certificate(
             _public_key_bytes(device_key),
-            "RustClaw Simulated Device",
+            "Agent Runtime Simulated Device",
             signer_name,
             lambda digest: _sign_digest(signer_key, digest),
             False,

@@ -1,7 +1,7 @@
 # =============================================================================
 # [DEMO TEMPLATE - 不是生产默认值]
 #
-# 本文件是 rustclaw 自带的 demo / 开发模板，里面很多字段（tools.allow=["*"]、
+# 本文件是 agent runtime 自带的 demo / 开发模板，里面很多字段（tools.allow=["*"]、
 # tools.allow_sudo、worker.task_timeout_seconds=86400 等）
 # 为了演示方便而开到了"全权限/超长超时"。
 #
@@ -36,7 +36,7 @@ default_locale = "zh-CN"
 # SQLite busy 超时（毫秒） / SQLite busy timeout in milliseconds.
 busy_timeout_ms = 2000
 # SQLite 文件路径 / SQLite file path.
-sqlite_path = "data/rustclaw.db"
+sqlite_path = "data/agent-runtime.db"
 # 技能私有数据库根目录；每个持久化技能只访问自己的 `<skill>/state.db`。
 # Skill-owned database root; each persisted skill may access only its own
 # `<skill>/state.db`.
@@ -47,7 +47,7 @@ skill_data_root = "data/skills"
 # Audit logs are isolated to their own SQLite file/pool to avoid writer-lock
 # contention with tasks/schedule. On first boot any rows still in the main DB
 # are migrated here once and then cleared from main.
-audit_sqlite_path = "data/rustclaw_audit.db"
+audit_sqlite_path = "data/agent-runtime-audit.db"
 # audit pool 上限：审计写入是低并发 append-only，2 条够用 / cap is small because
 # audit writes are low-concurrency append-only.
 audit_pool_max_size = 2
@@ -383,8 +383,8 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
-uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "photo_organize", "stock", "weather", "x"]
+skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, media_download = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
+uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "media_download", "photo_organize", "stock", "weather", "x"]
 skill_max_concurrency = 2
 # Phase 0.1 收敛：86400 (24h, demo 演示值) → 600 (10 min)
 # 影响：单次 skill 执行超时；image_generate / browser_web 等慢技能若超过 10 min

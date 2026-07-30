@@ -10,7 +10,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-workspace-replace-{}",
+            "agent-runtime-workspace-replace-{}",
             uuid::Uuid::new_v4().simple()
         ));
         fs::create_dir_all(&root).expect("create workspace");
@@ -258,7 +258,7 @@ fn replace_accepts_an_absolute_path_inside_the_workspace() {
 fn replace_rejects_an_absolute_path_outside_the_workspace() {
     let dir = TestWorkspace::new();
     let outside = std::env::temp_dir().join(format!(
-        "rustclaw-workspace-replace-outside-{}",
+        "agent-runtime-workspace-replace-outside-{}",
         uuid::Uuid::new_v4().simple()
     ));
     fs::write(&outside, "before old after").expect("outside fixture");
@@ -408,7 +408,7 @@ fn replace_permission_failure_preserves_content_and_cleans_temporary_file() {
             .filter(|entry| entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".rustclaw-write-"))
+                .starts_with(".agent-runtime-write-"))
             .count(),
         0
     );

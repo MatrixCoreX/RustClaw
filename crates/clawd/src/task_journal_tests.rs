@@ -1732,7 +1732,7 @@ fn structured_listing_journal_does_not_parse_text_as_machine_json() {
 #[test]
 fn step_output_excerpt_compacts_write_text_without_truncating_json() {
     let long_path =
-        "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/test_calc_core.py";
+        "/home/guagua/agent-runtime/run/nl_eval_tmp/codex_cli_continuous_20260711_new/test_calc_core.py";
     let output = json!({
         "extra": {
             "action": "write_text",

@@ -1,6 +1,6 @@
-# RustClaw Polyglot Skill SDK Contract
+# Agent Runtime Polyglot Skill SDK Contract
 
-New RustClaw skill packages use `skill.toml` schema version 2. Version 1 remains
+New Agent Runtime skill packages use `skill.toml` schema version 2. Version 1 remains
 a centralized read-only compatibility input and is normalized to v2 before a
 new source installation is activated. Package/build/run metadata and a typed
 capability/permission request live in the manifest. The request includes input
@@ -15,7 +15,7 @@ they never contain a shell command. Build network is denied by default,
 dependencies are private to the package install root, and missing sandbox
 support must fail closed.
 
-Every local process uses `rustclaw-jsonl-v1`: one JSON request record on stdin
+Every local process uses `agent-jsonl-v1`: one JSON request record on stdin
 and exactly one JSON response record on stdout. Diagnostics belong on stderr.
 The response must echo `request_id`; errors require `error_text` plus stable
 `extra.error_code` and `extra.message_key`. Each record is limited to 1 MiB.
@@ -34,7 +34,7 @@ receipt, manifest and every artifact, then produces `SkillLaunchSpec`. Planner
 arguments cannot change the program, entrypoint, working directory,
 environment, sandbox profile or receipt identity.
 
-Machine schemas live under `docs/schemas/`. The `rustclaw-skill` binary emits
+Machine schemas live under `docs/schemas/`. The `skillctl` binary emits
 one JSON result for CI-friendly validation and receipt inspection.
 
 ## Package layout and canonical ownership
@@ -67,11 +67,11 @@ workspace members. External Cargo packages remain standalone workspaces.
 Build the SDK CLI once, then choose a language explicitly:
 
 ```bash
-CARGO_BUILD_JOBS=1 cargo build -p rustclaw-skill-sdk --bin rustclaw-skill
-target/debug/rustclaw-skill init python demo_skill external_skills/demo_skill --human
-target/debug/rustclaw-skill validate external_skills/demo_skill/skill.toml --human
-target/debug/rustclaw-skill build external_skills/demo_skill/skill.toml . data/skill-packages --human
-target/debug/rustclaw-skill receipt-verify data/skill-packages demo_skill --human
+CARGO_BUILD_JOBS=1 cargo build -p agent-skill-sdk --bin skillctl
+target/debug/skillctl init python demo_skill external_skills/demo_skill --human
+target/debug/skillctl validate external_skills/demo_skill/skill.toml --human
+target/debug/skillctl build external_skills/demo_skill/skill.toml . data/skill-packages --human
+target/debug/skillctl receipt-verify data/skill-packages demo_skill --human
 ```
 
 `build`, `protocol-test`, and `install-local` run the same verified install
@@ -152,5 +152,5 @@ artifact, waiting, needs-user, timeout, malformed/multiple/oversized stdout,
 and stderr-only diagnostic behavior. The test also performs an atomic update,
 verified rollback, failed-update preservation, build-network denial, and
 source-tree mutation check for every available adapter. Ubuntu and macOS CI set
-`RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS=1`, so all five adapters and the required
+`APP_REQUIRE_REFERENCE_ADAPTERS=1`, so all five adapters and the required
 sandbox must run instead of being skipped for a missing toolchain.

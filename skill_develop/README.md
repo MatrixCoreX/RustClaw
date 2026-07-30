@@ -1,6 +1,6 @@
 # Skill Develop
 
-这个目录用于集中存放“让 agent 开发 RustClaw 技能”的提示词和说明文档。
+这个目录用于集中存放“让 agent 开发 Agent Runtime 技能”的提示词和说明文档。
 
 ## 当前文件
 - `skill_authoring_strict.md`
@@ -74,7 +74,7 @@ python3 skill_develop/create_skill.py report_writer --on-demand
 可以给 agent 这样的任务：
 
 ```text
-请严格按照 `skill_develop/skill_authoring_strict.md` 的约束，为 RustClaw 新增一个 runner 技能 `<skill_name>`。
+请严格按照 `skill_develop/skill_authoring_strict.md` 的约束，为 Agent Runtime 新增一个 runner 技能 `<skill_name>`。
 
 目标：
 - <这里写技能目标>
@@ -93,7 +93,7 @@ python3 skill_develop/create_skill.py report_writer --on-demand
 4. 运行 `python3 scripts/sync_skill_docs.py`
 5. 如果该 skill 需要进入 planner 常规自然语言执行流，在 `configs/skills_registry.toml` 声明 `planner_capabilities`
 6. 如有 vendor 特化，再补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
-7. 运行 `rustclaw-skill validate` 与 `rustclaw-skill protocol-test`；仅 Cargo adapter 额外运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
+7. 运行 `skillctl validate` 与 `skillctl protocol-test`；仅 Cargo adapter 额外运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
 ## 外部 skill 标准接入步骤
 1. 准备或生成 `external_skills/<skill_name>`，目录内必须有 `skill.toml`、`README.md`、`INTERFACE.md`、对应语言源码与锁文件/产物声明

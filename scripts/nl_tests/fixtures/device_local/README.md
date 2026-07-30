@@ -1,6 +1,6 @@
 # Device Local Fixture
 
-This directory contains stable local files for RustClaw NL regression tests.
+This directory contains stable local files for Agent Runtime NL regression tests.
 
 - `configs/app_config.toml`: sample runtime config
 - `docs/`: sample docs and notes

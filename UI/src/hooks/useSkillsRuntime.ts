@@ -306,22 +306,22 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       );
       if (restartRequired) {
         const confirmed = await showConfirm({
-          title: t("重启 RustClaw", "Restart RustClaw"),
+          title: t("重启 {product_name}", "Restart {product_name}"),
           message: t(
-            "这些变更需要重启 RustClaw 才会生效。现在就自动重启吗？",
-            "These changes need a RustClaw restart to take effect. Restart now?",
+            "这些变更需要重启 {product_name} 才会生效。现在就自动重启吗？",
+            "These changes need a {product_name} restart to take effect. Restart now?",
           ),
           confirmLabel: t("立即重启", "Restart now"),
         });
         if (confirmed) {
           savedMessage = t(
-            "技能开关已保存，正在重启 RustClaw，请稍候。",
-            "Skill switches were saved. Restarting RustClaw now.",
+            "技能开关已保存，正在重启 {product_name}，请稍候。",
+            "Skill switches were saved. Restarting {product_name} now.",
           );
         } else {
           savedMessage = t(
-            "技能开关已保存。你可以稍后再重启 RustClaw 让它生效。",
-            "Skill switches were saved. You can restart RustClaw later to apply them.",
+            "技能开关已保存。你可以稍后再重启 {product_name} 让它生效。",
+            "Skill switches were saved. You can restart {product_name} later to apply them.",
           );
         }
         setSkillSwitchSaveMessage(savedMessage);
@@ -331,7 +331,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           const restarted = await restartSystem();
           setSkillSwitchSaveMessage(
             restarted
-              ? t("RustClaw 已重启完成，技能开关现在已经生效。", "RustClaw restarted successfully. Skill switches are now active.")
+              ? t("{product_name} 已重启完成，技能开关现在已经生效。", "{product_name} restarted successfully. Skill switches are now active.")
               : t("重启请求已经发出，请稍后刷新确认技能开关是否生效。", "Restart was requested. Please refresh shortly to confirm the skill switches are active."),
           );
         }
@@ -511,8 +511,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const confirmed = await showConfirm({
         title: t("允许安装时联网", "Allow network during installation"),
         message: t(
-          `${skillName} 的清单声明安装阶段需要联网。RustClaw 只会在隔离的安装任务中按清单获取依赖或验证端点；运行时联网权限仍单独受控。是否继续？`,
-          `${skillName} declares that installation needs network access. RustClaw will use it only in the isolated install job for declared dependencies or endpoint validation; runtime network access remains separately controlled. Continue?`,
+          `${skillName} 的清单声明安装阶段需要联网。{product_name} 只会在隔离的安装任务中按清单获取依赖或验证端点；运行时联网权限仍单独受控。是否继续？`,
+          `${skillName} declares that installation needs network access. {product_name} will use it only in the isolated install job for declared dependencies or endpoint validation; runtime network access remains separately controlled. Continue?`,
         ),
         confirmLabel: t("允许并安装", "Allow and install"),
       });

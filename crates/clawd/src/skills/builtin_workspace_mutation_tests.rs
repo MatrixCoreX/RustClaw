@@ -14,7 +14,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new(label: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-workspace-mutation-{label}-{}",
+            "agent-runtime-workspace-mutation-{label}-{}",
             uuid::Uuid::new_v4().simple()
         ));
         fs::create_dir_all(&root).expect("create workspace");
@@ -57,7 +57,7 @@ fn atomic_write_replaces_content_without_leaving_temporary_files() {
             entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".rustclaw-write-")
+                .starts_with(".agent-runtime-write-")
         })
         .count();
     assert_eq!(temporary_files, 0);
@@ -78,7 +78,7 @@ fn atomic_write_failure_removes_temporary_file() {
             entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".rustclaw-write-")
+                .starts_with(".agent-runtime-write-")
         })
         .count();
     assert_eq!(temporary_files, 0);

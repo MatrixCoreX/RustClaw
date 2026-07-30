@@ -28,7 +28,7 @@ flowchart TD
     I -->|crypto| E
     I -->|kb| F
     I -->|rss_fetch| N
-    J[rustclaw.db<br/>任务、认证、调度、运行时记忆] --> K[Agent runtime]
+    J[agent-runtime.db<br/>任务、认证、调度、运行时记忆] --> K[Agent runtime]
     F --> L[KB 召回 adapter]
     L --> K
     E --> M[凭据 repository]

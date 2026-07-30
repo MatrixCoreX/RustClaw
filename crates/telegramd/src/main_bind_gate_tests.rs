@@ -3,7 +3,10 @@ use std::path::Path;
 
 #[test]
 fn unbound_plain_text_requires_key_binding() {
-    assert_eq!(extract_bind_key_candidate("hello rustclaw", false), None);
+    assert_eq!(
+        extract_bind_key_candidate("hello agent-runtime", false),
+        None
+    );
 }
 
 #[test]

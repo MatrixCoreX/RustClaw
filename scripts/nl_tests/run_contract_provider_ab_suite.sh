@@ -43,7 +43,7 @@ Options:
   --prepare                  generate shared contract NL cases and expectations
   --run-side SIDE            run one side against the currently running clawd
   --compare                  compare two completed run directories
-  --provider NAME            provider label for --run-side; also exported as RUSTCLAW_PROVIDER_OVERRIDE
+  --provider NAME            provider label for --run-side; also exported as APP_PROVIDER_OVERRIDE
   --count N                  case count for --prepare, default 20
   --case-jsonl PATH          case JSONL to replay
   --expectations PATH        expectations JSONL; default is sibling of case JSONL
@@ -57,7 +57,7 @@ Options:
   --retry-sleep-seconds N    delay between attempts, default 30
 
 Important:
-  RUSTCLAW_PROVIDER_OVERRIDE is read by clawd when clawd starts. This script
+  APP_PROVIDER_OVERRIDE is read by clawd when clawd starts. This script
   does not change the provider inside an already running clawd process. Before
   each --run-side invocation, make sure clawd is running with the intended
   provider/config. The env var is exported here for setups that launch clawd
@@ -283,7 +283,7 @@ EOF
     attempt_output_file="${OUT_DIR}/${SIDE}/run.attempt_${attempt}.output.txt"
     echo "PROVIDER_AB_RUN_SIDE_ATTEMPT side=${SIDE} provider=${PROVIDER} attempt=${attempt}/${RUN_RETRIES}"
     set +e
-    RUSTCLAW_PROVIDER_OVERRIDE="${PROVIDER}" \
+    APP_PROVIDER_OVERRIDE="${PROVIDER}" \
     CLIENT_LIKE_TEST_ID="provider-ab-${SIDE}-${PROVIDER}-attempt-${attempt}-$(date +%Y%m%d_%H%M%S)" \
       bash "${ROOT_DIR}/scripts/nl_tests/run_client_like_continuous_suite.sh" \
         --skip-smoke \

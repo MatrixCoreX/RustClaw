@@ -2,7 +2,7 @@ locale = "en-US"
 
 [dict]
 "wechat.msg.bind_key_required_for_chat" = "Please send your key first to bind this account before chatting or using features."
-"wechat.msg.bind_help" = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account."
+"wechat.msg.bind_help" = "Welcome to {product_name}.\nPlease send /key <your_key> first to bind this account."
 "wechat.msg.bind_success" = "Key bound successfully. Please send your previous message again."
 "wechat.msg.bind_invalid" = "Invalid key. Please try again."
 "wechat.msg.bind_request_failed" = "Bind request failed, please try again later."

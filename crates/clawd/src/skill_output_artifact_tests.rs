@@ -8,8 +8,7 @@ struct TestWorkspace {
 
 impl TestWorkspace {
     fn new() -> Self {
-        let root =
-            std::env::temp_dir().join(format!("rustclaw-skill-output-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("skillctl-output-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).expect("create workspace");
         Self { root }
     }
@@ -33,7 +32,7 @@ fn small_output_remains_inline() {
     );
     assert_eq!(text, "small output");
     assert!(extra.is_none());
-    assert!(!workspace.root.join(".rustclaw").exists());
+    assert!(!workspace.root.join(".agent-runtime").exists());
 }
 
 #[test]
@@ -61,7 +60,7 @@ fn large_text_output_is_preserved_with_exact_resume_metadata() {
     assert!(artifact_path.starts_with(
         workspace
             .root
-            .join(".rustclaw/artifacts/skill-output/task-unsafe-path")
+            .join(".agent-runtime/artifacts/skill-output/task-unsafe-path")
     ));
     assert_eq!(extra["existing"], true);
     assert_eq!(extra["truncated"], true);
@@ -105,7 +104,7 @@ fn large_json_output_keeps_inline_projection_valid_json() {
 #[test]
 fn existing_async_output_is_published_without_losing_source() {
     let workspace = TestWorkspace::new();
-    let source_dir = workspace.root.join(".rustclaw/async_jobs/job");
+    let source_dir = workspace.root.join(".agent-runtime/async_jobs/job");
     fs::create_dir_all(&source_dir).unwrap();
     let source = source_dir.join("stdout");
     let content = "async output\n".repeat(5000);

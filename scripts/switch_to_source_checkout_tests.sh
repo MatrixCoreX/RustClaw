@@ -3,18 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-source-checkout-test.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agent-runtime-source-checkout-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 SOURCE_REPO="$TMP_DIR/source"
 RUNTIME_ROOT="$TMP_DIR/runtime"
 
 git init --quiet --initial-branch=main "$SOURCE_REPO"
-git -C "$SOURCE_REPO" config user.name "RustClaw Test"
-git -C "$SOURCE_REPO" config user.email "test@rustclaw.local"
+git -C "$SOURCE_REPO" config user.name "Agent Runtime Test"
+git -C "$SOURCE_REPO" config user.email "test@agent-runtime.invalid"
 mkdir -p "$SOURCE_REPO/UI" "$SOURCE_REPO/scripts" "$SOURCE_REPO/configs"
 printf '%s\n' '[workspace]' > "$SOURCE_REPO/Cargo.toml"
-printf '%s\n' '{"name":"rustclaw-test"}' > "$SOURCE_REPO/UI/package.json"
+printf '%s\n' '{"name":"agent-runtime-test"}' > "$SOURCE_REPO/UI/package.json"
 printf '%s\n' '#!/usr/bin/env bash' > "$SOURCE_REPO/start-all-bin.sh"
 printf '%s\n' '#!/usr/bin/env bash' > "$SOURCE_REPO/scripts/switch-to-source-checkout.sh"
 printf '%s\n' 'source_default=true' > "$SOURCE_REPO/configs/config.toml"
@@ -64,8 +64,8 @@ grep -Fq 'source_checkout_status=already_enabled' <<<"$SECOND_OUTPUT"
 INVALID_REPO="$TMP_DIR/invalid-source"
 UNCHANGED_ROOT="$TMP_DIR/unchanged-runtime"
 git init --quiet --initial-branch=main "$INVALID_REPO"
-git -C "$INVALID_REPO" config user.name "RustClaw Test"
-git -C "$INVALID_REPO" config user.email "test@rustclaw.local"
+git -C "$INVALID_REPO" config user.name "Agent Runtime Test"
+git -C "$INVALID_REPO" config user.email "test@agent-runtime.invalid"
 printf '%s\n' 'incomplete source' > "$INVALID_REPO/README.md"
 git -C "$INVALID_REPO" add README.md
 git -C "$INVALID_REPO" commit --quiet -m "invalid source fixture"

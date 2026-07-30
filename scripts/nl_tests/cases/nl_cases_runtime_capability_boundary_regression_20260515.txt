@@ -1,7 +1,7 @@
 # Focused regression set for runtime capability boundary convergence.
 # Run with:
 # bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_regression_20260515.txt --quality-guard --prompt-reply-only
-capability_boundary_regression|direct_intro_cn|direct,cn|你好，用一句话说明 RustClaw 适合帮我做什么
+capability_boundary_regression|direct_intro_cn|direct,cn|你好，用一句话说明 Agent Runtime 适合帮我做什么
 capability_boundary_regression|direct_translate_en|direct,en|Translate this sentence to English: 服务已经恢复
 capability_boundary_regression|direct_transform_json_cn|direct,cn|把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
 capability_boundary_regression|clarify_delete_that_file_cn|clarify,high-risk,cn|删除那个文件
@@ -20,4 +20,4 @@ capability_boundary_regression|db_table_names_cn|act,observe,database,cn|看看 
 capability_boundary_regression|archive_list_zip_cn|act,observe,archive,cn|查看 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里面有哪些文件，只列文件名
 capability_boundary_regression|mutate_make_dir_run_cn|act,mutate,fs,cn|在 run/nl_eval_tmp/capability_boundary_dir_20260515 创建目录，然后确认它存在
 capability_boundary_regression|mutate_write_file_run_cn|act,mutate,fs,cn|在 run/nl_eval_tmp/capability_boundary_note_20260515.txt 写入 capability-boundary-ok，然后读回确认内容
-capability_boundary_regression|run_cmd_pipeline_fallback_cn|act,observe,system,run-cmd,cn|运行命令 `printf rustclaw | wc -c`，只输出数字
+capability_boundary_regression|run_cmd_pipeline_fallback_cn|act,observe,system,run-cmd,cn|运行命令 `printf agent-runtime | wc -c`，只输出数字

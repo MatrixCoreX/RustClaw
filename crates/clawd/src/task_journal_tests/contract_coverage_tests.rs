@@ -162,7 +162,7 @@ fn structured_selector_evidence_coverage_accepts_guard_findings() {
                 "action": "guard_config",
                 "format": "toml",
                 "path": "configs/config.toml",
-                "resolved_path": "/home/guagua/rustclaw/configs/config.toml",
+                "resolved_path": "/home/guagua/agent-runtime/configs/config.toml",
                 "risk_count": 2,
                 "risks": [
                     "tools.allow_sudo=true",
@@ -338,7 +338,7 @@ fn structured_run_command_error_records_machine_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-run-cmd-failure-evidence",
         "ask",
-        "cat /definitely_missing_rustclaw_contract_case",
+        "cat /definitely_missing_agent_contract_case",
     );
     let route = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -356,9 +356,9 @@ fn structured_run_command_error_records_machine_evidence() {
             "Command failed with exit code 1",
             Some("linux"),
             Some(json!({
-                "command": "cat /definitely_missing_rustclaw_contract_case",
+                "command": "cat /definitely_missing_agent_contract_case",
                 "exit_code": 1,
-                "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n",
+                "stderr": "cat: /definitely_missing_agent_contract_case: No such file or directory (os error 2)\n",
                 "stdout": Value::Null,
             })),
         )),
@@ -869,12 +869,12 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
             json!({
                 "extra": {
                     "action": "runtime_status",
-                    "command_output": "/home/guagua/rustclaw",
-                    "field_value": "/home/guagua/rustclaw",
+                    "command_output": "/home/guagua/agent-runtime",
+                    "field_value": "/home/guagua/agent-runtime",
                     "kind": "current_working_directory",
-                    "value": "/home/guagua/rustclaw"
+                    "value": "/home/guagua/agent-runtime"
                 },
-                "text": "{\"action\":\"runtime_status\",\"command_output\":\"/home/guagua/rustclaw\",\"field_value\":\"/home/guagua/rustclaw\",\"kind\":\"current_working_directory\",\"value\":\"/home/guagua/rustclaw\"}"
+                "text": "{\"action\":\"runtime_status\",\"command_output\":\"/home/guagua/agent-runtime\",\"field_value\":\"/home/guagua/agent-runtime\",\"kind\":\"current_working_directory\",\"value\":\"/home/guagua/agent-runtime\"}"
             })
             .to_string(),
         ),

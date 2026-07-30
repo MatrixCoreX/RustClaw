@@ -21,6 +21,7 @@ fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -53,6 +54,7 @@ fn test_state_with_registry(toml: &str, skills: &[&str]) -> AppState {
     let _ = std::fs::remove_file(path);
     let mut state = test_state();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));
@@ -78,15 +80,15 @@ fn goal_overlay_includes_code_change_guidance_for_current_repo() {
 }
 
 #[test]
-fn package_manager_dry_run_install_is_observe_effect() {
+fn non_x_dry_run_does_not_downgrade_mutation_effect() {
     let state = test_state();
     let dry_run = classify_skill_action_effect(
         &state,
         "package_manager",
         &json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
     );
-    assert!(dry_run.observes);
-    assert!(!dry_run.mutates);
+    assert!(!dry_run.observes);
+    assert!(dry_run.mutates);
 
     let real_install = classify_skill_action_effect(
         &state,
@@ -97,7 +99,7 @@ fn package_manager_dry_run_install_is_observe_effect() {
 }
 
 #[test]
-fn media_generation_dry_run_is_observe_effect() {
+fn x_is_the_only_dry_run_observe_effect() {
     let state = test_state();
     for skill in [
         "image_generate",
@@ -111,9 +113,11 @@ fn media_generation_dry_run_is_observe_effect() {
             skill,
             &json!({"action":"generate","dry_run":true}),
         );
-        assert!(effect.observes, "skill={skill}");
-        assert!(!effect.mutates, "skill={skill}");
+        assert!(!effect.observes, "skill={skill}");
     }
+    let x = classify_skill_action_effect(&state, "x", &json!({"action":"preview","dry_run":true}));
+    assert!(x.observes);
+    assert!(!x.mutates);
 }
 
 #[test]
@@ -380,11 +384,11 @@ fn successful_exit_fallback_excludes_specialized_operational_probes() {
 fn structured_validation_marks_custom_run_cmd_as_code_validation() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case"
+            "validated_target": "/tmp/agent-runtime-validation-case"
         }
     });
     let effect = classify_skill_action_effect(&state, "run_cmd", &args);
@@ -456,11 +460,11 @@ fn classify_inline_python_with_write_signal_is_not_autonomous_validation() {
 fn structured_validation_success_fallback_accepts_custom_command_output() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case"
+            "validated_target": "/tmp/agent-runtime-validation-case"
         }
     });
     let observation = assess_validation_output(&state, "run_cmd", &args, "OK\n");
@@ -648,11 +652,11 @@ fn package_and_database_profiles_require_matching_validation() {
 fn structured_validation_success_marker_accepts_matching_output() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case",
+            "validated_target": "/tmp/agent-runtime-validation-case",
             "success_marker": {
                 "marker": "OK",
                 "match_mode": "contains",
@@ -668,11 +672,11 @@ fn structured_validation_success_marker_accepts_matching_output() {
 fn structured_validation_success_marker_contains_requires_marker_boundary() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case",
+            "validated_target": "/tmp/agent-runtime-validation-case",
             "success_marker": {
                 "marker": "OK",
                 "match_mode": "contains",
@@ -698,11 +702,11 @@ fn structured_validation_success_marker_contains_requires_marker_boundary() {
 fn structured_validation_success_marker_rejects_missing_output_marker() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case",
+            "validated_target": "/tmp/agent-runtime-validation-case",
             "success_marker": {
                 "marker": "OK",
                 "match_mode": "equals"
@@ -720,11 +724,11 @@ fn structured_validation_success_marker_rejects_missing_output_marker() {
 fn structured_validation_result_from_skill_output_takes_precedence() {
     let state = test_state();
     let args = json!({
-        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "command": "bash /tmp/agent-runtime-validation-case/check.sh",
         "_clawd_validation": {
             "profile": "code_change",
             "validator_type": "custom",
-            "validated_target": "/tmp/rustclaw-validation-case"
+            "validated_target": "/tmp/agent-runtime-validation-case"
         }
     });
     let observation = assess_validation_output(

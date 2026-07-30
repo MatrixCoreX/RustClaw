@@ -1,9 +1,9 @@
-# RustClaw 非商业源码可用许可 v1.0（中文说明）
+# Agent Runtime 非商业源码可用许可 v1.0（中文说明）
 
 > 本文件为 `LICENSE` 的中文说明版本。  
 > 如与英文 `LICENSE` 存在歧义，以英文版本为准。
 
-版权所有 (c) 2026 RustClaw Contributors
+版权所有 (c) 2026 Agent Runtime Contributors
 
 ## 1. 定义
 

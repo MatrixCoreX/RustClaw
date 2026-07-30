@@ -42,6 +42,28 @@ fn vendor_cfg(base_url: &str, api_key: &str) -> VendorConfig {
 }
 
 #[test]
+fn independent_provider_inherits_only_missing_main_connection_fields() {
+    let shared = Some(vendor_cfg("https://main.example/v1", "main-key"));
+    let mut missing_both = Some(vendor_cfg("", ""));
+    inherit_provider_connection_from_llm(&mut missing_both, &shared);
+    let missing_both = missing_both.expect("provider");
+    assert_eq!(missing_both.base_url, "https://main.example/v1");
+    assert_eq!(missing_both.api_key, "main-key");
+
+    let mut missing_key = Some(vendor_cfg("https://audio.example/v1", ""));
+    inherit_provider_connection_from_llm(&mut missing_key, &shared);
+    let missing_key = missing_key.expect("provider");
+    assert_eq!(missing_key.base_url, "https://audio.example/v1");
+    assert_eq!(missing_key.api_key, "main-key");
+
+    let mut dedicated = Some(vendor_cfg("https://audio.example/v1", "audio-key"));
+    inherit_provider_connection_from_llm(&mut dedicated, &shared);
+    let dedicated = dedicated.expect("provider");
+    assert_eq!(dedicated.base_url, "https://audio.example/v1");
+    assert_eq!(dedicated.api_key, "audio-key");
+}
+
+#[test]
 fn local_custom_provider_allows_missing_api_key() {
     let cfg = vendor_cfg("http://127.0.0.1:8178/v1", "");
     assert_eq!(provider_auth_token("custom", &cfg).unwrap(), None);
@@ -172,8 +194,10 @@ fn sanitize_oss_name_keeps_safe_chars() {
 
 #[test]
 fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
-    let root =
-        std::env::temp_dir().join(format!("rustclaw-audio-transcribe-preview-{}", unix_ts()));
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-audio-transcribe-preview-{}",
+        unix_ts()
+    ));
     let cfg = RootConfig {
         audio_transcribe: AudioTranscribeConfig {
             default_vendor: Some("qwen".to_string()),

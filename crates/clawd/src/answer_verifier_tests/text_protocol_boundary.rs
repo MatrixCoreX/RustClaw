@@ -42,8 +42,8 @@ fn verifier_scalar_observation_accepts_extra_machine_payload() {
                     "action": "read_field",
                     "field_path": "package.name",
                     "exists": true,
-                    "value": "rustclaw",
-                    "value_text": "rustclaw"
+                    "value": "agent-runtime",
+                    "value_text": "agent-runtime"
                 },
                 "text": "display only"
             })
@@ -52,7 +52,7 @@ fn verifier_scalar_observation_accepts_extra_machine_payload() {
 
     let values = recent_structured_scalar_values_from_journal(&journal, 1);
     assert!(
-        values.iter().any(|value| value.text == "rustclaw"),
+        values.iter().any(|value| value.text == "agent-runtime"),
         "{values:?}"
     );
 }

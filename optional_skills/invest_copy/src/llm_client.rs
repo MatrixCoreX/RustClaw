@@ -202,11 +202,11 @@ pub fn chat_completion_default(system: &str, user: &str) -> Result<LlmTextOutput
 }
 
 fn internal_chat_completion(system: &str, user: &str) -> Option<Result<LlmTextOutput, String>> {
-    let url = std::env::var("RUSTCLAW_INTERNAL_LLM_URL")
+    let url = std::env::var("AGENT_INTERNAL_LLM_URL")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())?;
-    let token = std::env::var("RUSTCLAW_INTERNAL_LLM_TOKEN")
+    let token = std::env::var("AGENT_INTERNAL_LLM_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())?;
@@ -231,7 +231,7 @@ fn internal_chat_completion(system: &str, user: &str) -> Option<Result<LlmTextOu
             .map_err(|e| format!("code=internal_llm_client_build_failed error={e}"))?;
         let resp = client
             .post(url)
-            .header("x-rustclaw-internal-llm-token", token)
+            .header("x-agent-internal-llm-token", token)
             .json(&body)
             .send()
             .map_err(|e| format!("code=internal_llm_request_failed error={e}"))?;

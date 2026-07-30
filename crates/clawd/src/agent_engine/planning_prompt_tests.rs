@@ -354,7 +354,7 @@ fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
         "",
         "auto",
         "zh-CN",
-        "rustclaw",
+        "agent-runtime",
         2,
         "history",
         &attempt_ledger,

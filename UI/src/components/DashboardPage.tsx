@@ -208,7 +208,7 @@ export function DashboardPage({
             <div className="max-w-3xl">
               <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("首次使用", "First run")}</p>
               <h3 className="mt-2 text-xl font-semibold tracking-tight sm:text-3xl">
-                {t("开始使用 RustClaw", "Start using RustClaw")}
+                {t("开始使用 {product_name}", "Start using {product_name}")}
               </h3>
               <p className="mt-3 text-sm leading-7 text-white/70 sm:text-base">
                 {t(
@@ -726,10 +726,10 @@ export function DashboardPage({
               type="button"
               onClick={async () => {
                 const confirmed = await showConfirm({
-                  title: t("重启 RustClaw", "Restart RustClaw"),
+                  title: t("重启 {product_name}", "Restart {product_name}"),
                   message: t(
-                    "现在重启 RustClaw？重启期间页面会短暂断开，稍后会自动恢复。",
-                    "Restart RustClaw now? The page may disconnect briefly and then recover.",
+                    "现在重启 {product_name}？重启期间页面会短暂断开，稍后会自动恢复。",
+                    "Restart {product_name} now? The page may disconnect briefly and then recover.",
                   ),
                   confirmLabel: t("重启", "Restart"),
                 });
@@ -739,7 +739,7 @@ export function DashboardPage({
               className="theme-secondary-btn px-3 py-2 text-sm"
             >
               {systemRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              {systemRestarting ? t("重启中", "Restarting") : t("重启 RustClaw", "Restart RustClaw")}
+              {systemRestarting ? t("重启中", "Restarting") : t("重启 {product_name}", "Restart {product_name}")}
             </button>
             {piAppStatus?.available ? (
               <button
@@ -1008,7 +1008,7 @@ export function DashboardPage({
               <p className="font-semibold text-amber-200">{t("现在有几项需要注意", "A few things need attention")}</p>
               {!isOnline ? (
                 <p className="text-amber-100">
-                  - {t("面板现在连不上 RustClaw。先检查服务地址是否正确，或者服务是否已经启动。", "The console cannot reach RustClaw right now. Check the service URL or start the service.")}
+                  - {t("面板现在连不上 {product_name}。先检查服务地址是否正确，或者服务是否已经启动。", "The console cannot reach {product_name} right now. Check the service URL or start the service.")}
                 </p>
               ) : null}
               {queuePressureHigh ? (

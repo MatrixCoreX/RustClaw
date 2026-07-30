@@ -272,7 +272,7 @@ fn memory_api_clear_all_removes_scoped_records_and_indexes() {
 #[test]
 fn memory_api_settings_updates_bool_without_duplicate_keys() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-memory-api-test-{}-{}",
+        "agent-runtime-memory-api-test-{}-{}",
         std::process::id(),
         crate::now_ts_u64()
     ));

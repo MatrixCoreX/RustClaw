@@ -22,10 +22,7 @@ fn error_extra_merges_machine_contract_and_details() {
 
 fn temp_root(name: &str) -> PathBuf {
     let mut root = std::env::temp_dir();
-    root.push(format!(
-        "rustclaw_system_basic_{name}_{}",
-        std::process::id()
-    ));
+    root.push(format!("agent_system_basic_{name}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create temp root");
     root
@@ -1365,7 +1362,7 @@ fn read_range_title_field_selector_projects_markdown_heading() {
     let target = root.join("service_notes.md");
     std::fs::write(
         &target,
-        "# Service Notes\n\nRustClaw test fixture service notes.\n",
+        "# Service Notes\n\nAgent Runtime test fixture service notes.\n",
     )
     .expect("write markdown");
     let mut obj = Map::new();

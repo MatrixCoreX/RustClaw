@@ -15,7 +15,7 @@ import os
 import tomllib
 from pathlib import Path
 
-cfg = tomllib.loads(Path(os.environ["RUSTCLAW_CONFIG_PATH"]).read_text(encoding="utf-8"))
+cfg = tomllib.loads(Path(os.environ["APP_CONFIG_PATH"]).read_text(encoding="utf-8"))
 adapters = cfg.get("adapters", {})
 enabled = []
 for name, conf in adapters.items():

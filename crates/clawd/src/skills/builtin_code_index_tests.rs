@@ -11,7 +11,7 @@ struct TempRepo {
 impl TempRepo {
     fn new() -> Self {
         let path =
-            std::env::temp_dir().join(format!("rustclaw-code-index-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("agent-runtime-code-index-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(path.join("src")).expect("create temp source");
         fs::write(
             path.join("src/lib.rs"),
@@ -94,7 +94,7 @@ fn observe_only_query_builds_fresh_ephemeral_index_without_workspace_writes() {
 
     assert_eq!(result["data"]["definitions"][0]["name"], "helper");
     assert_eq!(relative_file_snapshot(&repo.path), before);
-    assert!(!repo.path.join(".rustclaw").exists());
+    assert!(!repo.path.join(".agent-runtime").exists());
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn refresh_is_incremental_and_indexes_rust_symbols_references_and_tests() {
     assert_eq!(second["summary"]["parsed_files"], 0);
     assert!(repo
         .path
-        .join(".rustclaw/index/repository-v1.json")
+        .join(".agent-runtime/index/repository-v1.json")
         .is_file());
 }
 

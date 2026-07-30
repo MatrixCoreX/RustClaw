@@ -1,6 +1,6 @@
 use super::{
-    extract_bind_key_candidate, install_tls_crypto_provider, is_unbound_allowed_command,
-    lark_media_agent_context,
+    extract_bind_key_candidate, extract_pending_bind_token_candidate, install_tls_crypto_provider,
+    is_unbound_allowed_command, lark_media_agent_context,
 };
 use serde_json::Value;
 
@@ -23,6 +23,19 @@ fn unbound_key_command_keeps_binding_flow_available() {
         extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
         Some("rk_live_123")
     );
+}
+
+#[test]
+fn official_setup_bind_token_is_detected_without_treating_it_as_an_auth_key() {
+    assert_eq!(
+        extract_pending_bind_token_candidate("pb-abc123").as_deref(),
+        Some("pb-abc123")
+    );
+    assert_eq!(
+        extract_pending_bind_token_candidate("/start pb-abc123").as_deref(),
+        Some("pb-abc123")
+    );
+    assert_eq!(extract_pending_bind_token_candidate("/start"), None);
 }
 
 #[test]

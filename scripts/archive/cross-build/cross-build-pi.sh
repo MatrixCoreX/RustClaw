@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "${ARCHIVE_DIR}/../../.." && pwd)"
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "${SCRIPT_DIR}"
 
-TARGET="${RUSTCLAW_PI_TARGET:-aarch64-unknown-linux-gnu}"
+TARGET="${APP_PI_TARGET:-aarch64-unknown-linux-gnu}"
 BUILD_SCOPE="workspace"
 PACKAGE_NAME=""
 BIN_NAME=""
@@ -31,7 +31,7 @@ usage() {
 	cat <<'EOF'
 Usage: ./scripts/archive/cross-build/cross-build-pi.sh [options] [-- cargo-args...]
 
-Cross-build RustClaw locally for Raspberry Pi Linux.
+Cross-build the agent runtime locally for Raspberry Pi Linux.
 
 Targets:
   --target pi64                         aarch64-unknown-linux-gnu (default)
@@ -53,7 +53,7 @@ Options:
   -h, --help                             show this help
 
 Environment:
-  RUSTCLAW_PI_TARGET                     default target override
+  APP_PI_TARGET                     default target override
   INSTALL_DEPS=0                         same as --skip-deps
 
 Examples:
@@ -396,12 +396,12 @@ main() {
 
 	if [[ "${BUILD_SCOPE}" == "workspace" ]]; then
 		log "building the host receipt projection helper"
-		cargo build --release -p rustclaw-skill-sdk --bin rustclaw-skill
+		cargo build --release -p agent-skill-sdk --bin skillctl
 		log "protocol-testing target skill binaries and projecting verified receipts"
 		python3 "${SCRIPT_DIR}/scripts/project_skill_receipts.py" \
 			--target "${TARGET}" \
 			--binary-dir "$(target_release_dir "${SCRIPT_DIR}" "${TARGET}")" \
-			--sdk-cli "${SCRIPT_DIR}/target/release/rustclaw-skill" \
+			--sdk-cli "${SCRIPT_DIR}/target/release/skillctl" \
 			--package-root "${SCRIPT_DIR}/target/skill-packages/${TARGET}"
 		if [[ "${PRECOMPILE_SKILL_STORE}" == "1" ]]; then
 			log "precompiling platform-compatible Skill Store packages"

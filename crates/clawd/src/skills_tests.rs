@@ -26,6 +26,10 @@ static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 #[path = "skills_receipt_test_support.rs"]
 mod receipt_support;
 
+#[path = "skills_test_runner_support.rs"]
+mod runner_support;
+use runner_support::{make_echo_skill_runner, make_sandbox_probe_skill_runner};
+
 struct TempDirGuard {
     path: PathBuf,
 }
@@ -35,10 +39,7 @@ impl TempDirGuard {
         let path = std::env::current_dir()
             .expect("current test directory")
             .join("target/clawd-skills-tests")
-            .join(format!(
-                "rustclaw_{prefix}_{}",
-                uuid::Uuid::new_v4().simple()
-            ));
+            .join(format!("agent_{prefix}_{}", uuid::Uuid::new_v4().simple()));
         fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
@@ -63,6 +64,7 @@ fn test_state(locale: &str) -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -106,6 +108,7 @@ fn install_real_registry(state: &mut AppState) {
         .expect("load real skills registry");
     let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
     *state.core.skill_views_snapshot.write().unwrap() = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     });
@@ -118,6 +121,7 @@ fn install_registry_from_toml(state: &mut AppState, root: &Path, toml: &str, ena
         .expect("load registry fixture");
     let enabled = enabled.iter().map(|skill| (*skill).to_string()).collect();
     *state.core.skill_views_snapshot.write().unwrap() = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     });
@@ -133,72 +137,6 @@ fn allow_test_skills(state: &mut AppState, skills: &[&str]) {
         Arc::new(ToolsPolicy::from_config(&config).expect("test tools policy"));
 }
 
-fn make_echo_skill_runner(root: &Path) -> PathBuf {
-    let path = root.join("echo-skill-runner");
-    fs::write(
-            &path,
-            r#"#!/usr/bin/env bash
-python3 -c 'import json, sys; req=json.loads(sys.stdin.readline()); print(json.dumps({"request_id": req.get("request_id", ""), "status": "ok", "text": json.dumps(req.get("args", {}), ensure_ascii=False), "error_text": None}, ensure_ascii=False))'
-"#,
-        )
-        .expect("write fake skill runner");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&path)
-            .expect("fake runner metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&path, perms).expect("chmod fake runner");
-    }
-    path
-}
-
-fn make_sandbox_probe_skill_runner(root: &Path) -> PathBuf {
-    let path = root.join("sandbox-probe-skill-runner");
-    fs::write(
-        &path,
-        r#"#!/usr/bin/env python3
-import json
-import os
-import sys
-
-request = json.loads(sys.stdin.readline())
-args = request.get("args", {})
-
-def try_write(path):
-    try:
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write("probe")
-        return True
-    except OSError:
-        return False
-
-result = {
-    "workspace_write": try_write(os.path.join(os.environ["WORKSPACE_ROOT"], "workspace-probe.txt")),
-    "outside_write": try_write(args["outside_path"]),
-}
-print(json.dumps({
-    "request_id": request.get("request_id", ""),
-    "status": "ok",
-    "text": json.dumps(result),
-    "error_text": None,
-}))
-"#,
-    )
-    .expect("write sandbox probe skill runner");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&path)
-            .expect("sandbox probe metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&path, perms).expect("chmod sandbox probe");
-    }
-    path
-}
-
 fn init_git_fixture_repo(root: &Path) {
     let run = |args: &[&str]| {
         let status = Command::new("git")
@@ -211,7 +149,7 @@ fn init_git_fixture_repo(root: &Path) {
     };
     run(&["init", "-q"]);
     run(&["config", "user.email", "test@example.com"]);
-    run(&["config", "user.name", "RustClaw Test"]);
+    run(&["config", "user.name", "Agent Runtime Test"]);
     fs::write(root.join("README.md"), "base\n").expect("write git fixture README");
     run(&["add", "README.md"]);
     run(&["commit", "-q", "-m", "init"]);
@@ -285,7 +223,8 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
     let kb_db = state
         .core
         .skill_storage
-        .kb_pool()
+        .pool_for("kb")
+        .expect("KB storage owner")
         .get()
         .expect("KB db pool");
     insert_kb_doc_row(
@@ -1851,45 +1790,45 @@ fn policy_block_default_text_returns_machine_payload() {
 fn skill_env_strict_defaults_on_and_accepts_explicit_opt_out() {
     let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
     // 暂存 + 清掉避免邻测污染
-    let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
-    std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
+    let prev = claw_core::product_identity::env_os("SKILL_ENV_STRICT");
+    std::env::remove_var("APP_SKILL_ENV_STRICT");
     assert!(skill_runner_env_strict_enabled(), "default must be ON");
 
-    std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "");
+    std::env::set_var("APP_SKILL_ENV_STRICT", "");
     assert!(
         skill_runner_env_strict_enabled(),
         "empty value keeps default ON"
     );
 
     for val in ["0", "false", "FALSE", "off", "no"] {
-        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", val);
+        std::env::set_var("APP_SKILL_ENV_STRICT", val);
         assert!(
             !skill_runner_env_strict_enabled(),
-            "RUSTCLAW_SKILL_ENV_STRICT={val:?} must opt out"
+            "APP_SKILL_ENV_STRICT={val:?} must opt out"
         );
     }
 
     // 恢复
     match prev {
-        Some(v) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", v),
-        None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+        Some(v) => std::env::set_var("APP_SKILL_ENV_STRICT", v),
+        None => std::env::remove_var("APP_SKILL_ENV_STRICT"),
     }
 }
 
 #[test]
 fn skill_env_strict_on_for_truthy_values() {
     let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
-    let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
+    let prev = claw_core::product_identity::env_os("SKILL_ENV_STRICT");
     for val in ["1", "true", "TRUE", "True", "on", "yes"] {
-        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", val);
+        std::env::set_var("APP_SKILL_ENV_STRICT", val);
         assert!(
             skill_runner_env_strict_enabled(),
-            "RUSTCLAW_SKILL_ENV_STRICT={val:?} 应被识别为 ON"
+            "APP_SKILL_ENV_STRICT={val:?} 应被识别为 ON"
         );
     }
     match prev {
-        Some(v) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", v),
-        None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+        Some(v) => std::env::set_var("APP_SKILL_ENV_STRICT", v),
+        None => std::env::remove_var("APP_SKILL_ENV_STRICT"),
     }
 }
 
@@ -1904,7 +1843,7 @@ fn whitelist_keeps_only_listed_keys_and_drops_secrets_or_unknown() {
         ("MINIMAX_API_KEY", "sk-fake-leak2"),
         ("MIMO_API_KEY", "sk-fake-leak3"),
         ("XIAOMI_API_KEY", "sk-fake-leak4"),
-        ("RUSTCLAW_USER_KEY", "rk-leak"),
+        ("APP_USER_KEY", "rk-leak"),
         ("DATABASE_URL", "postgres://leak"),
         ("AWS_ACCESS_KEY_ID", "AKIA..."),
     ];
@@ -1944,8 +1883,8 @@ fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() 
         "XIAOMI_API_KEY",
         "QWEN_API_KEY",
         "ANTHROPIC_API_KEY",
-        "RUSTCLAW_USER_KEY",
-        "RUSTCLAW_ADMIN_KEY",
+        "APP_USER_KEY",
+        "APP_ADMIN_KEY",
         "DATABASE_URL",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -1961,14 +1900,14 @@ fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() 
 #[tokio::test]
 async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
     let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
-    let strict_before = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
-    let secret_before = std::env::var_os("RUSTCLAW_TEST_PARENT_SECRET");
-    std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
-    std::env::set_var("RUSTCLAW_TEST_PARENT_SECRET", "must-not-reach-child");
+    let strict_before = claw_core::product_identity::env_os("SKILL_ENV_STRICT");
+    let secret_before = claw_core::product_identity::env_os("TEST_PARENT_SECRET");
+    std::env::remove_var("APP_SKILL_ENV_STRICT");
+    std::env::set_var("APP_TEST_PARENT_SECRET", "must-not-reach-child");
 
     let output = run_safe_command(
         Path::new("."),
-        "printf '%s' \"${RUSTCLAW_TEST_PARENT_SECRET-unset}\"",
+        "printf '%s' \"${APP_TEST_PARENT_SECRET-unset}\"",
         256,
         5,
         5,
@@ -1980,12 +1919,12 @@ async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
     assert_eq!(output, "unset");
 
     match strict_before {
-        Some(value) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", value),
-        None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+        Some(value) => std::env::set_var("APP_SKILL_ENV_STRICT", value),
+        None => std::env::remove_var("APP_SKILL_ENV_STRICT"),
     }
     match secret_before {
-        Some(value) => std::env::set_var("RUSTCLAW_TEST_PARENT_SECRET", value),
-        None => std::env::remove_var("RUSTCLAW_TEST_PARENT_SECRET"),
+        Some(value) => std::env::set_var("APP_TEST_PARENT_SECRET", value),
+        None => std::env::remove_var("APP_TEST_PARENT_SECRET"),
     }
 }
 

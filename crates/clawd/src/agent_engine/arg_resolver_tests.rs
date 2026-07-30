@@ -1,5 +1,5 @@
 use super::{
-    normalize_skill_arg_aliases, resolve_arg_string, resolve_arg_value,
+    normalize_registry_argument_aliases, resolve_arg_string, resolve_arg_value,
     rewrite_args_with_auto_locator_path,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -8,6 +8,20 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn normalize_skill_arg_aliases(skill: &str, args: &mut serde_json::Value) -> bool {
+    static REGISTRY: std::sync::OnceLock<claw_core::skill_registry::SkillsRegistry> =
+        std::sync::OnceLock::new();
+    let registry = REGISTRY.get_or_init(|| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../configs/skills_registry.toml");
+        claw_core::skill_registry::SkillsRegistry::load_from_path(&path)
+            .expect("load argument alias registry")
+    });
+    let declared = normalize_registry_argument_aliases(Some(registry), skill, args);
+    let adapted = super::normalize_skill_arg_aliases(skill, args);
+    declared || adapted
+}
 
 struct TempDirGuard {
     path: PathBuf,
@@ -164,11 +178,11 @@ fn resolve_arg_value_maps_recent_placeholder_path_segment_from_latest_listing() 
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"inventory_dir","path":"/home/guagua/rustclaw/logs","resolved_path":"/home/guagua/rustclaw/logs","entries":[{"name":"model_io.log","path":"logs/model_io.log"},{"name":"act_plan.log","path":"logs/act_plan.log"}],"files_only":true}}"#,
+        r#"{"extra":{"action":"inventory_dir","path":"/home/guagua/agent-runtime/logs","resolved_path":"/home/guagua/agent-runtime/logs","entries":[{"name":"model_io.log","path":"logs/model_io.log"},{"name":"act_plan.log","path":"logs/act_plan.log"}],"files_only":true}}"#,
     ));
     let args = json!({
         "action": "read_text_range",
-        "path": "/home/guagua/rustclaw/logs/<recent2>"
+        "path": "/home/guagua/agent-runtime/logs/<recent2>"
     });
 
     let resolved = resolve_arg_value(&args, &loop_state);
@@ -342,10 +356,7 @@ fn run_cmd_shell_command_alias_normalizes_to_command() {
         args.get("command").and_then(|v| v.as_str()),
         Some("python3 test_calc_core.py")
     );
-    assert_eq!(
-        args.get("shell_command").and_then(|v| v.as_str()),
-        Some("python3 test_calc_core.py")
-    );
+    assert!(args.get("shell_command").is_none());
 }
 
 #[test]
@@ -385,7 +396,7 @@ fn browser_web_open_extract_numeric_ranges_normalize_to_skill_contract() {
 fn browser_web_search_aliases_normalize_to_skill_contract() {
     let mut args = json!({
         "action": "search_extract",
-        "query": "rustclaw",
+        "query": "agent-runtime",
         "max_results": 0,
         "max_pages": 99,
         "min_content_chars": "0"
@@ -440,7 +451,7 @@ fn image_edit_prompt_alias_normalizes_to_instruction() {
 #[test]
 fn image_generate_subject_and_dimensions_aliases_normalize() {
     let mut args = json!({
-        "subject": "RustClaw status card",
+        "subject": "Agent Runtime status card",
         "width": 512,
         "height": "512",
         "output_path": "document/media_dry_run/image_status_card.png",
@@ -450,7 +461,7 @@ fn image_generate_subject_and_dimensions_aliases_normalize() {
     assert!(normalize_skill_arg_aliases("image_generate", &mut args));
     assert_eq!(
         args.get("prompt").and_then(|value| value.as_str()),
-        Some("RustClaw status card")
+        Some("Agent Runtime status card")
     );
     assert_eq!(
         args.get("size").and_then(|value| value.as_str()),
@@ -461,7 +472,7 @@ fn image_generate_subject_and_dimensions_aliases_normalize() {
 #[test]
 fn audio_synthesize_input_alias_normalizes_to_text() {
     let mut args = json!({
-        "input": "RustClaw dry run audio check",
+        "input": "Agent Runtime dry run audio check",
         "output_path": "document/media_dry_run/audio_check.mp3",
         "dry_run": true
     });
@@ -469,7 +480,7 @@ fn audio_synthesize_input_alias_normalizes_to_text() {
     assert!(normalize_skill_arg_aliases("audio_synthesize", &mut args));
     assert_eq!(
         args.get("text").and_then(|value| value.as_str()),
-        Some("RustClaw dry run audio check")
+        Some("Agent Runtime dry run audio check")
     );
 }
 
@@ -544,13 +555,13 @@ fn kb_ingest_source_alias_normalizes_to_paths_array() {
     let mut args = json!({
         "action": "ingest",
         "namespace": "demo_docs_nl",
-        "source": "/home/guagua/rustclaw/README.md"
+        "source": "/home/guagua/agent-runtime/README.md"
     });
 
     assert!(normalize_skill_arg_aliases("kb", &mut args));
     assert_eq!(
         args.get("paths").and_then(|value| value.as_array()),
-        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+        Some(&vec![json!("/home/guagua/agent-runtime/README.md")])
     );
 }
 
@@ -574,13 +585,13 @@ fn kb_ingest_file_path_alias_normalizes_to_paths_array() {
     let mut args = json!({
         "action": "ingest",
         "namespace": "demo_docs_nl",
-        "file_path": "/home/guagua/rustclaw/README.md"
+        "file_path": "/home/guagua/agent-runtime/README.md"
     });
 
     assert!(normalize_skill_arg_aliases("kb", &mut args));
     assert_eq!(
         args.get("paths").and_then(|value| value.as_array()),
-        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+        Some(&vec![json!("/home/guagua/agent-runtime/README.md")])
     );
 }
 
@@ -588,7 +599,7 @@ fn kb_ingest_file_path_alias_normalizes_to_paths_array() {
 fn kb_ingest_file_path_and_kb_name_aliases_normalize() {
     let mut args = json!({
         "action": "ingest",
-        "file_path": "/home/guagua/rustclaw/README.md",
+        "file_path": "/home/guagua/agent-runtime/README.md",
         "kb_name": "demo_docs_nl"
     });
 
@@ -599,7 +610,7 @@ fn kb_ingest_file_path_and_kb_name_aliases_normalize() {
     );
     assert_eq!(
         args.get("paths").and_then(|value| value.as_array()),
-        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+        Some(&vec![json!("/home/guagua/agent-runtime/README.md")])
     );
 }
 

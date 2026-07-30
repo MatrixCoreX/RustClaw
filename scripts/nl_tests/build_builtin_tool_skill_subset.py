@@ -199,7 +199,7 @@ def select_minimal(
 def render_output(selected: list[CaseRow], required: set[str], source_sha: str) -> str:
     return "\n".join(
         [
-            "# Generated minimal NL suite for built-in RustClaw tools and skills.",
+            "# Generated minimal NL suite for built-in Agent Runtime tools and skills.",
             "# Do not edit by hand; run scripts/nl_tests/build_builtin_tool_skill_subset.py.",
             f"# source_sha256={source_sha}",
             f"# selected_rows={len(selected)} required_categories={len(required)} missing_categories=0",

@@ -67,7 +67,7 @@ const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
 const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/rustclaw/wechat/media/outbound-temp";
+const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
 
 fn default_wechat_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()

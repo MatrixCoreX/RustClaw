@@ -302,7 +302,7 @@ EOF
 esac
 
 cat >"$PROMPT_FILE" <<EOF
-You are fixing behavior in the RustClaw repository.
+You are fixing behavior in the agent-runtime repository.
 
 Workspace: ${ROOT_DIR}
 

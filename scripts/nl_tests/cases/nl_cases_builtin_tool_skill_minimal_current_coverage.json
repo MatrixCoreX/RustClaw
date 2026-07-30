@@ -105,5 +105,5 @@
   "selected_row_count": 34,
   "selection_algorithm": "exact_minimum_cardinality_set_cover",
   "source": "scripts/nl_tests/cases/nl_cases_basic_skill_100_coverage_20260629.txt",
-  "source_sha256": "9d2269edc44b3cfc94f2c7f200eeeb78d63243aa3b304e885c51a085232a1893"
+  "source_sha256": "ed8c492fbc1636bb49e40c232008f593ae7fec067089b7a9fbda0e57c08b464a"
 }

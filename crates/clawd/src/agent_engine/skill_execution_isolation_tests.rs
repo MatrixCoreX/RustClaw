@@ -154,7 +154,7 @@ planner_capabilities = [
 fn capability_isolation_artifact_refs_report_cleanup_workspace() {
     let mut state = test_state();
     state.skill_rt.workspace_root = std::env::temp_dir().join(format!(
-        "rustclaw_isolation_artifact_refs_{}_{}",
+        "agent_isolation_artifact_refs_{}_{}",
         std::process::id(),
         unique_suffix()
     ));

@@ -1,6 +1,6 @@
 # Raspberry Pi aarch64 Release Package
 
-RustClaw can publish a prebuilt Raspberry Pi package through GitHub Actions so
+Agent Runtime can publish a prebuilt Raspberry Pi package through GitHub Actions so
 the Pi does not need to run `cargo build`.
 
 ## Build And Publish
@@ -20,8 +20,8 @@ The workflow builds:
 
 - Rust workspace binaries for `aarch64-unknown-linux-gnu`
 - `UI/dist`
-- a runtime archive named `RustClaw-pi-aarch64-<tag>.tar.gz`
-  (`RustClaw-<tag>.tar.gz` when the tag already starts with `pi-aarch64-`)
+- a runtime archive named `Agent Runtime-pi-aarch64-<tag>.tar.gz`
+  (`Agent Runtime-<tag>.tar.gz` when the tag already starts with `pi-aarch64-`)
 - a matching `.sha256` checksum file
 
 The archive is uploaded both as a workflow artifact and as a GitHub Release
@@ -42,7 +42,7 @@ On the Pi, keep runtime state from the existing install:
 
 `data/` includes the main runtime database and every private skill database
 under `data/skills/`; preserve the whole directory rather than selecting only
-`rustclaw.db`.
+`agent-runtime.db`.
 
 Use the package as a source of updated binaries, scripts, prompts, migrations,
 and `UI/dist`. Do not overwrite live secrets or channel settings with packaged
@@ -56,6 +56,6 @@ The admin Release update path verifies the checksum, preserves runtime
 directories, atomically replaces each prebuilt binary so the running `clawd`
 executable can be upgraded, and then restarts `clawd`. A systemd-managed Linux
 installation schedules that restart in a separate transient unit so stopping
-the old service cannot kill its own restart process. If an existing RustClaw
+the old service cannot kill its own restart process. If an existing Agent Runtime
 nginx site is configured, packaged `UI/dist` is copied without a local UI
 build. A local Pi install without nginx is not configured for nginx.

@@ -8,12 +8,12 @@ act | act_read_readme_head | exec,no_write_file | 看看 README.md 在不在，�
 chat_act | chat_act_compare_sizes | exec,no_write_file | 先执行 df -h，再用大白话告诉我哪个挂载点最该担心
 chat_act | chat_act_dependency_poem | exec,no_write_file | 先执行 pwd，然后根据这个路径写一句打工人风格短诗
 chat_act | chat_act_whoami_signature | exec,no_write_file | 先执行 whoami，再执行 pwd，把这两个结果串成一句自嘲签名
-failure | mid_fail_then_summary | exec,resume_context,no_post_fail_steps | 先执行 pwd，再执行 definitely_missing_command_rustclaw_user_ops_67890，然后总结刚才成功和失败各是什么
-failure | mid_fail_then_reason_only | exec,resume_context,no_post_fail_steps | 先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了
+failure | mid_fail_then_summary | exec,resume_context,no_post_fail_steps | 先执行 pwd，再执行 definitely_missing_command_agent-runtime_user_ops_67890，然后总结刚才成功和失败各是什么
+failure | mid_fail_then_reason_only | exec,resume_context,no_post_fail_steps | 先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_agent-runtime_user_ops_13579，只告诉我哪一步挂了
 file | reply_only_poem | exec,no_write_file | 先执行 pwd，再根据这个路径写一句短诗，直接回复，不要保存成文件
 file | send_named_file_readme | deliver_file | 把 README.md 发给我
 file | send_named_file_cargo | deliver_file | 把 Cargo.toml 发给我
-file | send_named_file_missing | missing_file_graceful | 把 definitely_missing_named_file_rustclaw_user_ops_24686.md 发给我
+file | send_named_file_missing | missing_file_graceful | 把 definitely_missing_named_file_agent-runtime_user_ops_24686.md 发给我
 file | generate_hello_sh_and_send | write_and_deliver ,side_effect| 帮我写个打印 hello world 的 sh 脚本，保存，并且发给我
 file | generate_pwd_report_and_send | write_and_deliver ,side_effect| 执行 pwd，把路径写到 pwd_report.txt 里，然后把文件发给我
 file | save_path_only | exec | 执行 pwd，生成一句短句写入 path_note.txt，只回复该文件的绝对路径

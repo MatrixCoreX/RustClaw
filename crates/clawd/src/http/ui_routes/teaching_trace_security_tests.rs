@@ -118,7 +118,7 @@ fn teaching_trace_redacts_nested_and_free_text_secrets_without_hiding_prompt_str
 #[test]
 fn teaching_trace_reads_current_and_retained_dated_model_logs() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-teaching-log-paths-{}-{}",
+        "agent-runtime-teaching-log-paths-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -204,7 +204,7 @@ async fn teaching_trace_endpoint_rejects_cross_user_shared_channel_access() {
     drop(db);
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static("trace-other"));
+    headers.insert("x-agent-key", HeaderValue::from_static("trace-other"));
     let (status, Json(response)) = task_debug_detail(
         State(state),
         headers,
@@ -242,7 +242,7 @@ async fn teaching_trace_endpoint_requires_query_opt_in() {
     drop(db);
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static("trace-admin"));
+    headers.insert("x-agent-key", HeaderValue::from_static("trace-admin"));
     let (status, Json(response)) = task_debug_detail(
         State(state),
         headers,
@@ -289,7 +289,7 @@ async fn teaching_trace_endpoint_allows_exact_owner_and_labels_trace_layers() {
     drop(db);
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static("trace-owner"));
+    headers.insert("x-agent-key", HeaderValue::from_static("trace-owner"));
     let (status, Json(response)) = task_debug_detail(
         State(state),
         headers,
@@ -310,7 +310,7 @@ async fn teaching_trace_endpoint_allows_exact_owner_and_labels_trace_layers() {
         "redacted_provider_io"
     );
     assert_eq!(
-        data["trace_layers"]["rustclaw_decisions"]["classification"],
+        data["trace_layers"]["agent_decisions"]["classification"],
         "parsed_machine_decisions"
     );
     assert_eq!(data["trace_availability"]["status"], "unavailable");

@@ -165,7 +165,7 @@ fn request_allows_path_outside_workspace(context: Option<&Value>) -> bool {
         })
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+        || std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn is_loopback_url(url: &Url) -> bool {
@@ -178,7 +178,7 @@ fn is_loopback_url(url: &Url) -> bool {
     })
 }
 
-fn should_inject_rustclaw_key_for_base(url: &str, configured_base_url: Option<&str>) -> bool {
+fn should_inject_runtime_key_for_base(url: &str, configured_base_url: Option<&str>) -> bool {
     let Ok(target) = Url::parse(url) else {
         return false;
     };
@@ -197,9 +197,9 @@ fn should_inject_rustclaw_key_for_base(url: &str, configured_base_url: Option<&s
         && target.port_or_known_default() == configured.port_or_known_default()
 }
 
-fn should_inject_rustclaw_key(url: &str) -> bool {
+fn should_inject_runtime_key(url: &str) -> bool {
     let configured_base_url = std::env::var("CLAWD_BASE_URL").ok();
-    should_inject_rustclaw_key_for_base(url, configured_base_url.as_deref())
+    should_inject_runtime_key_for_base(url, configured_base_url.as_deref())
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +215,7 @@ struct FetchPolicy {
 struct ValidatedTarget {
     url: Url,
     resolved: Vec<SocketAddr>,
-    rustclaw_local: bool,
+    runtime_local: bool,
     proxy_mediated: bool,
 }
 
@@ -272,7 +272,7 @@ fn execute_with_permissions(
             let value = value.as_str().ok_or_else(|| {
                 HttpBasicError::new("headers_invalid", "header values must be strings")
             })?;
-            if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("x-rustclaw-key") {
+            if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("x-agent-key") {
                 return Err(HttpBasicError::new(
                     "header_blocked",
                     "protected header cannot be overridden",
@@ -283,12 +283,12 @@ fn execute_with_permissions(
     }
 
     let body = obj.get("body").cloned().unwrap_or(Value::Null);
-    let allow_rustclaw_local = req_user_key
+    let allow_runtime_local = req_user_key
         .map(str::trim)
         .is_some_and(|value| !value.is_empty());
-    let original = validate_target_url(url, &policy, allow_rustclaw_local)?;
+    let original = validate_target_url(url, &policy, allow_runtime_local)?;
     let original_origin = origin_key(&original.url);
-    let permit_local_redirect_target = original.rustclaw_local;
+    let permit_local_redirect_target = original.runtime_local;
     let mut current = original;
     let mut redirects = Vec::new();
 
@@ -298,7 +298,7 @@ fn execute_with_permissions(
             RequestMethod::Get => client.get(current.url.clone()),
             RequestMethod::PostJson => client.post(current.url.clone()),
         }
-        .header("User-Agent", "RustClaw/1.0");
+        .header("User-Agent", "Agent-System/1.0");
 
         let same_origin = origin_key(&current.url) == original_origin;
         for (name, value) in &headers {
@@ -306,12 +306,12 @@ fn execute_with_permissions(
                 request = request.header(name, value);
             }
         }
-        if current.rustclaw_local {
+        if current.runtime_local {
             if let Some(user_key) = req_user_key
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             {
-                request = request.header("X-RustClaw-Key", user_key);
+                request = request.header("X-Agent-Key", user_key);
             }
         }
         if method == RequestMethod::PostJson {
@@ -538,7 +538,7 @@ fn parse_domain_list(value: Option<&Value>) -> Result<Vec<String>, HttpBasicErro
 fn validate_target_url(
     raw: &str,
     policy: &FetchPolicy,
-    allow_rustclaw_local: bool,
+    allow_runtime_local: bool,
 ) -> Result<ValidatedTarget, HttpBasicError> {
     let mut url =
         Url::parse(raw).map_err(|error| HttpBasicError::new("url_invalid", error.to_string()))?;
@@ -563,12 +563,12 @@ fn validate_target_url(
     let port = url
         .port_or_known_default()
         .ok_or_else(|| HttpBasicError::new("url_port_invalid", "URL port is unavailable"))?;
-    let rustclaw_local = allow_rustclaw_local && should_inject_rustclaw_key(url.as_str());
+    let runtime_local = allow_runtime_local && should_inject_runtime_key(url.as_str());
     let resolved = resolve_host(&host, port)?;
     let proxy_mediated = host.parse::<IpAddr>().is_err()
         && !host_matches_no_proxy(&host, no_proxy_value().as_deref())
         && (proxy_configured(url.scheme()) || proxy_synthetic_dns_active());
-    if !rustclaw_local
+    if !runtime_local
         && resolved.iter().any(|address| {
             !is_public_ip(address.ip()) && !(proxy_mediated && is_proxy_synthetic_ip(address.ip()))
         })
@@ -582,7 +582,7 @@ fn validate_target_url(
     Ok(ValidatedTarget {
         url,
         resolved,
-        rustclaw_local,
+        runtime_local,
         proxy_mediated,
     })
 }
@@ -786,7 +786,7 @@ fn is_sensitive_header(name: &str) -> bool {
             | "proxy-authorization"
             | "x-api-key"
             | "x-auth-token"
-            | "x-rustclaw-key"
+            | "x-agent-key"
     )
 }
 

@@ -15,7 +15,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DetectFeishuBindSessionRequest,
+    DetectFeishuBindSessionResponse, FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
@@ -360,6 +361,51 @@ async fn bind_lark_identity(
     Ok(body.data)
 }
 
+fn extract_pending_bind_token_candidate(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if let Some(candidate) = trimmed.strip_prefix("/start").map(str::trim) {
+        if candidate.starts_with("pb-") {
+            return Some(candidate.to_string());
+        }
+    }
+    trimmed.starts_with("pb-").then(|| trimmed.to_string())
+}
+
+async fn detect_pending_lark_bind(
+    client: &Client,
+    base_url: &str,
+    open_id: &str,
+    chat_id: &str,
+    bind_token: &str,
+) -> Result<Option<FeishuBindSessionStatusResponse>, String> {
+    let url = format!(
+        "{}/v1/auth/channel-binds/lark/detect",
+        base_url.trim_end_matches('/')
+    );
+    let req = DetectFeishuBindSessionRequest {
+        bind_token: Some(bind_token.trim().to_string()),
+        external_user_id: open_id.to_string(),
+        external_chat_id: chat_id.to_string(),
+    };
+    let resp = client
+        .post(&url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|err| format!("detect request failed: {err}"))?;
+    let status = resp.status();
+    let body: ApiResponse<DetectFeishuBindSessionResponse> = resp
+        .json()
+        .await
+        .map_err(|err| format!("detect response parse failed: {err}"))?;
+    if !status.is_success() || !body.ok {
+        return Err(body.error.unwrap_or_else(|| "detect failed".to_string()));
+    }
+    Ok(body
+        .data
+        .and_then(|data| if data.matched { data.session } else { None }))
+}
+
 const LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY: &str = "lark.msg.identity_check_unavailable";
 const LARK_I18N_BIND_REQUIRED_KEY: &str = "lark.msg.bind_key_required_for_chat";
 const LARK_I18N_BIND_HELP_KEY: &str = "lark.msg.bind_help";
@@ -473,6 +519,26 @@ async fn handle_incoming_lark_text(
         chat_id
     );
     let trimmed = text.trim();
+    if let Some(bind_token) = extract_pending_bind_token_candidate(trimmed) {
+        match detect_pending_lark_bind(&client, &base, &open_id, &chat_id, &bind_token).await {
+            Ok(Some(_session)) => {
+                set_expect_key_reply(&state, &chat_id, false);
+                info!("larkd: pending bind finalized external_chat_id={}", chat_id);
+                let msg = lark_t(
+                    &config,
+                    LARK_I18N_BIND_SUCCESS_KEY,
+                    LARK_BIND_SUCCESS_FALLBACK,
+                );
+                let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
+                return;
+            }
+            Ok(None) => {}
+            Err(err) => warn!(
+                "larkd: pending bind detect failed err={} external_chat_id={}",
+                err, chat_id
+            ),
+        }
+    }
     if is_unbound_allowed_command(trimmed) {
         set_expect_key_reply(&state, &chat_id, true);
         let msg = lark_t(&config, LARK_I18N_BIND_HELP_KEY, LARK_BIND_HELP_FALLBACK);
@@ -791,7 +857,7 @@ fn handle_text_message_to_clawd(
             if let Some(ref key) = user_key_poll {
                 let k = key.trim();
                 if !k.is_empty() {
-                    req = req.header("X-RustClaw-Key", k);
+                    req = req.header("X-Agent-Key", k);
                 }
             }
             let resp = match req.send().await {

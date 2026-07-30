@@ -864,7 +864,7 @@ fn parse_projection_json(raw: Option<&str>, label: &str) -> anyhow::Result<Optio
 }
 
 fn mutation_idempotency_key(task_id: &str, fingerprint_hash: &str) -> String {
-    sha256_hex(format!("rustclaw:task-mutation:v2\0{task_id}\0{fingerprint_hash}").as_bytes())
+    sha256_hex(format!("agent-runtime:task-mutation:v2\0{task_id}\0{fingerprint_hash}").as_bytes())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# test_circuit_breaker.sh — observe RustClaw provider fallback + circuit
+# test_circuit_breaker.sh — observe agent-runtime provider fallback + circuit
 # breaker behaviour end-to-end, WITHOUT modifying config.toml or restarting
 # clawd.
 #

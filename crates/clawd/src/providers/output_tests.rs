@@ -46,7 +46,7 @@ fn raw_response_sanitizer_handles_json_lines() {
 #[test]
 fn model_io_rotation_does_not_drop_concurrent_appends() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-model-io-{}-{}",
+        "agent-runtime-model-io-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -94,11 +94,11 @@ fn model_io_rotation_does_not_drop_concurrent_appends() {
 
 #[test]
 fn model_io_cross_process_append_child() {
-    let Ok(path) = std::env::var("RUSTCLAW_MODEL_IO_TEST_CHILD_PATH") else {
+    let Ok(path) = claw_core::product_identity::env_string("MODEL_IO_TEST_CHILD_PATH") else {
         return;
     };
-    let writer =
-        std::env::var("RUSTCLAW_MODEL_IO_TEST_CHILD_WRITER").expect("child writer identifier");
+    let writer = claw_core::product_identity::env_string("MODEL_IO_TEST_CHILD_WRITER")
+        .expect("child writer identifier");
     let payload = "x".repeat(32 * 1024);
     for logical_call_index in 1..=40_u64 {
         let line = json!({
@@ -116,7 +116,7 @@ fn model_io_cross_process_append_child() {
 #[test]
 fn model_io_lock_preserves_cross_process_jsonl_during_rotation() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-model-io-process-{}-{}",
+        "agent-runtime-model-io-process-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -130,8 +130,8 @@ fn model_io_lock_preserves_cross_process_jsonl_during_rotation() {
         .map(|writer| {
             std::process::Command::new(std::env::current_exe().expect("current test binary"))
                 .args(["--exact", test_name, "--nocapture"])
-                .env("RUSTCLAW_MODEL_IO_TEST_CHILD_PATH", &path)
-                .env("RUSTCLAW_MODEL_IO_TEST_CHILD_WRITER", writer.to_string())
+                .env("APP_MODEL_IO_TEST_CHILD_PATH", &path)
+                .env("APP_MODEL_IO_TEST_CHILD_WRITER", writer.to_string())
                 .spawn()
                 .expect("spawn model io writer")
         })

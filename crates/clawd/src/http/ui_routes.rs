@@ -59,12 +59,14 @@ const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
 const FEISHU_BIND_SESSION_MIN_TTL_SECONDS: u64 = 60;
 const FEISHU_BIND_SESSION_MAX_TTL_SECONDS: u64 = 1800;
 const FEISHU_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.feishu.cn";
+const LARK_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.larksuite.com";
 const WORKSPACE_UPDATE_LOG_MAX_CHARS: usize = 12000;
 const WORKSPACE_UPDATE_PATH_BATCH_SIZE: usize = 128;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_BYTES: usize = 32 * 1024 * 1024;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_ITEMS: usize = 250_000;
 const NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS: u64 = 12;
 const FEISHU_CONFIG_TEMPLATE: &str = include_str!("../../templates/feishu_china_config.toml");
+const LARK_CONFIG_TEMPLATE: &str = include_str!("../../templates/lark_international_config.toml");
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 
 #[derive(Debug, Clone, Serialize)]
@@ -215,6 +217,11 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_feishu_config).post(update_feishu_config),
         )
         .route("/admin/feishu/reset", post(reset_feishu_config_handler))
+        .route(
+            "/lark/config",
+            get(get_lark_config).post(update_lark_config),
+        )
+        .route("/admin/lark/reset", post(reset_lark_config_handler))
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
@@ -319,6 +326,18 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_feishu_bind_session_handler),
         )
         .route(
+            "/admin/channel-binds/lark/start",
+            post(start_lark_bind_session_handler),
+        )
+        .route(
+            "/admin/channel-binds/lark/:session_id",
+            get(get_lark_bind_session_handler),
+        )
+        .route(
+            "/auth/channel-binds/lark/detect",
+            post(detect_lark_bind_session_handler),
+        )
+        .route(
             "/admin/auth-keys/:key_id",
             put(update_auth_key_handler).delete(delete_auth_key_handler),
         )
@@ -327,6 +346,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(webd_internal_verify_login),
         )
         .route("/internal/llm/text", post(internal_llm_text))
+        .route("/internal/skills/admit", post(internal_skill_admit))
         .route("/admin/webd-accounts", post(admin_upsert_webd_account))
 }
 
@@ -356,6 +376,19 @@ struct InternalLlmTextResponse {
     prompt_source: String,
     model: String,
     provider: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalSkillAdmissionRequest {
+    source: String,
+    #[serde(default = "default_true_bool")]
+    enabled: bool,
+    #[serde(default)]
+    allow_network: bool,
+}
+
+fn default_true_bool() -> bool {
+    true
 }
 
 #[derive(Debug)]

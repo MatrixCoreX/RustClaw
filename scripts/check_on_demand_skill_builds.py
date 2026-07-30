@@ -30,18 +30,18 @@ REQUIRED_SNIPPETS = {
         "configure_cargo_build_environment",
         '--package-root "$SCRIPT_DIR/data/skill-packages"',
     ),
-    "install-rustclaw-cmd.sh": (
+    "install-agent-cmd.sh": (
         "--scope build-excludes --target \"$INSTALL_TARGET\" --format packages",
         "bash ./build-all.sh no-ui --target",
         "configure_cargo_build_environment",
     ),
     "package-release.sh": (
-        "--scope build-excludes --target \"$RUSTCLAW_PACKAGE_TARGET\" --format packages",
+        "--scope build-excludes --target \"$APP_PACKAGE_TARGET\" --format packages",
         "pkg.get(\"name\") in excluded_packages",
-        'RUSTCLAW_PACKAGE_TARGET="${RUSTCLAW_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
-        "target/skill-packages/$RUSTCLAW_PACKAGE_TARGET",
-        "target/prebuilt-skill-packages/$RUSTCLAW_PACKAGE_TARGET",
-        "--scope platform-precompiled --target \"$RUSTCLAW_PACKAGE_TARGET\" --format skills",
+        'APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
+        "target/skill-packages/$APP_PACKAGE_TARGET",
+        "target/prebuilt-skill-packages/$APP_PACKAGE_TARGET",
+        "--scope platform-precompiled --target \"$APP_PACKAGE_TARGET\" --format skills",
         "prebuilt/skill-packages",
     ),
     "scripts/archive/cross-build/cross-build-upload.sh": (
@@ -76,7 +76,7 @@ REQUIRED_SNIPPETS = {
     ),
     "scripts/skill_calls/_run_skill.sh": (
         "--scope selected --target host --skill \"$SKILL_NAME\" --format records",
-        "cargo build -p rustclaw-skill-sdk --release",
+        "cargo build -p agent-skill-sdk --release",
         "install-local \"$manifest_path\" \"$ROOT_DIR\" \"$PACKAGE_ROOT\"",
         "configure_cargo_build_environment",
     ),
@@ -114,14 +114,16 @@ REQUIRED_SNIPPETS = {
         'exec cc "$@"',
     ),
     "scripts/shell_compat.sh": (
-        '"$mem_kb" -le 16777216',
+        "cargo_jobs_for_host_capacity",
+        '"$available_kb" -ge 8388608',
+        '"$cpu_count" -ge 4',
         "configure_cargo_build_environment",
         "CARGO_INCREMENTAL=1",
     ),
 }
 
 DIRECT_WORKSPACE_BUILD_FORBIDDEN = (
-    "install-rustclaw-cmd.sh",
+    "install-agent-cmd.sh",
     "scripts/archive/cross-build/cross-build-upload.sh",
     "scripts/archive/cross-build/cross-build-upload-cloud.sh",
     "scripts/archive/cross-build/local-cross-build-upload-pi.sh",
@@ -129,7 +131,7 @@ DIRECT_WORKSPACE_BUILD_FORBIDDEN = (
 
 PROACTIVE_BUILD_ENTRYPOINTS = (
     "build-all.sh",
-    "install-rustclaw-cmd.sh",
+    "install-agent-cmd.sh",
     "package-release.sh",
     "setup-config.sh",
     "start-all.sh",

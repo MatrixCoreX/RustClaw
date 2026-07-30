@@ -100,6 +100,7 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
         runtime_action: None,
         runtime_default_args: None,
         runtime_rewrite_arg_keys: Vec::new(),
+        argument_aliases: BTreeMap::new(),
         risk_level: None,
         auto_invocable: None,
         requires_confirmation: None,
@@ -138,6 +139,7 @@ fn test_planner_capability(name: &str, action: &str, preferred: bool) -> Planner
         dedup_fields: Vec::new(),
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::SyncShort),
+        timeout_seconds: None,
         async_adapter_kind: None,
         isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
         network_access: Some(false),
@@ -168,6 +170,7 @@ fn quick_index_includes_planner_capability_metadata() {
         dedup_fields: Vec::new(),
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncPreferred),
+        timeout_seconds: None,
         async_adapter_kind: Some("local_process_poll".to_string()),
         isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
         network_access: Some(false),
@@ -261,6 +264,7 @@ fn quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable() {
             dedup_fields: Vec::new(),
             idempotent: Some(true),
             execution_mode: Some(CapabilityExecutionMode::SyncShort),
+            timeout_seconds: None,
             async_adapter_kind: None,
             isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
             network_access: Some(false),
@@ -1237,6 +1241,6 @@ fn test_observed_read_path_matches_request() {
     assert!(!crate::finalize::observed_read_path_matches_request(
         ws,
         user_text,
-        Some("/home/guagua/rustclaw/README.md")
+        Some("/home/guagua/agent-runtime/README.md")
     ));
 }

@@ -10,7 +10,7 @@ fn process_name_matches_binary_and_cargo_run_forms() {
         pid: 1,
         rss_bytes: Some(1024),
         comm: "feishud".to_string(),
-        args: "/tmp/rustclaw-workspace/target/release/feishud".to_string(),
+        args: "/tmp/agent-runtime-workspace/target/release/feishud".to_string(),
     };
     assert!(process_name_matches(&direct, "feishud"));
 
@@ -27,7 +27,7 @@ fn process_name_matches_binary_and_cargo_run_forms() {
 fn process_basename_handles_paths_and_quotes() {
     assert_eq!(process_basename("/usr/local/bin/clawd"), "clawd");
     assert_eq!(
-        process_basename("\"/Applications/RustClaw/feishud\""),
+        process_basename("\"/Applications/Agent Runtime/feishud\""),
         "feishud"
     );
 }
@@ -39,7 +39,7 @@ fn collect_matching_pids_filters_self_and_matches_cross_platform_forms() {
             pid: 41,
             rss_bytes: Some(1024),
             comm: "telegramd".to_string(),
-            args: "/tmp/rustclaw-workspace/target/release/telegramd".to_string(),
+            args: "/tmp/agent-runtime-workspace/target/release/telegramd".to_string(),
         },
         ProcessSnapshot {
             pid: 42,
@@ -51,7 +51,7 @@ fn collect_matching_pids_filters_self_and_matches_cross_platform_forms() {
             pid: 43,
             rss_bytes: Some(1024),
             comm: "telegramd".to_string(),
-            args: "/tmp/rustclaw-workspace/target/release/telegramd".to_string(),
+            args: "/tmp/agent-runtime-workspace/target/release/telegramd".to_string(),
         },
     ];
 

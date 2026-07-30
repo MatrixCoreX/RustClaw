@@ -3,7 +3,7 @@ use std::path::Path;
 
 #[test]
 fn preview_recommendation_uses_no_external_provider() {
-    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-agent-runtime-test-root"));
     let req = Req {
         request_id: "preview-map".to_string(),
         args: json!({
@@ -29,7 +29,7 @@ fn preview_recommendation_uses_no_external_provider() {
 
 #[test]
 fn preview_recommendation_rejects_partial_coordinates() {
-    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-agent-runtime-test-root"));
     let req = Req {
         request_id: "preview-map-invalid".to_string(),
         args: json!({
@@ -67,7 +67,7 @@ fn error_extra_exposes_machine_contract() {
 
 #[test]
 fn search_keyword_deduplicates_identical_machine_arguments() {
-    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-rustclaw-test-root"));
+    let cfg = config::resolve_runtime_config(Path::new("/nonexistent-agent-runtime-test-root"));
 
     assert_eq!(
         build_search_keyword(

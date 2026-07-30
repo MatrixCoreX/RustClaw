@@ -103,7 +103,7 @@ fn replay_bundle_prefers_versioned_archived_events() {
 fn replay_run_summary_is_recorded_only_machine_result() {
     let bundle = serde_json::json!({
         "schema_version": 1,
-        "bundle_kind": "rustclaw_task_replay",
+        "bundle_kind": "agent_task_replay",
         "task_id": "task-replay-summary",
         "status": "succeeded",
         "lifecycle_state": "succeeded",
@@ -174,7 +174,7 @@ fn replay_run_summary_is_recorded_only_machine_result() {
 fn replay_view_json_filters_llm_tools_and_checkpoints() {
     let bundle = serde_json::json!({
         "schema_version": 1,
-        "bundle_kind": "rustclaw_task_replay",
+        "bundle_kind": "agent_task_replay",
         "task_id": "task-replay-view",
         "status": "running",
         "lifecycle_state": "background",
@@ -346,7 +346,7 @@ fn replay_run_summary_reports_failing_task_fixture_coverage() {
 fn replay_diff_summary_reports_machine_field_changes() {
     let left = serde_json::json!({
         "schema_version": 1,
-        "bundle_kind": "rustclaw_task_replay",
+        "bundle_kind": "agent_task_replay",
         "task_id": "task-left",
         "status": "succeeded",
         "lifecycle_state": "succeeded",
@@ -397,7 +397,7 @@ fn replay_diff_summary_reports_machine_field_changes() {
     });
     let right = serde_json::json!({
         "schema_version": 1,
-        "bundle_kind": "rustclaw_task_replay",
+        "bundle_kind": "agent_task_replay",
         "task_id": "task-right",
         "status": "failed",
         "lifecycle_state": "failed",
@@ -442,7 +442,7 @@ fn replay_diff_summary_reports_machine_field_changes() {
 
     let diff = replay_diff_summary(&left, &right);
 
-    assert_eq!(diff["bundle_kind"], "rustclaw_task_replay_diff");
+    assert_eq!(diff["bundle_kind"], "agent_task_replay_diff");
     assert_eq!(diff["changed"], true);
     assert_eq!(diff["diff"]["status_changed"], true);
     assert_eq!(diff["diff"]["lifecycle_changed"], true);
@@ -539,7 +539,7 @@ fn replay_fixture_bundle(
 ) -> serde_json::Value {
     serde_json::json!({
         "schema_version": 1,
-        "bundle_kind": "rustclaw_task_replay",
+        "bundle_kind": "agent_task_replay",
         "task_id": task_id,
         "status": "failed",
         "lifecycle_state": "failed",

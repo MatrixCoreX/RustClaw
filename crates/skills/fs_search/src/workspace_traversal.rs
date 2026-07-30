@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use rustclaw_fs_discovery::{
+use fs_discovery::{
     discover, resolve_root, BackendPreference, Completeness, DiscoveryBackend, DiscoveryBudget,
     DiscoveryPolicy, DiscoveryRequest, DiscoverySelector, TargetKind,
 };
@@ -143,7 +143,7 @@ pub(super) fn walk_collect(
 }
 
 pub(super) fn to_rel(root: &Path, path: &Path) -> String {
-    rustclaw_fs_discovery::relative_path(root, path)
+    fs_discovery::relative_path(root, path)
 }
 
 pub(super) fn workspace_root() -> PathBuf {

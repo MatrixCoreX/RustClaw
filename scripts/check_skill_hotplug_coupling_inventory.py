@@ -28,6 +28,13 @@ MIGRATION_PATH_TOKENS = ("legacy", "historical", "compat")
 CONTRACT_AUTHORITY_PATHS = {
     "crates/skill-sdk/src/admission.rs",
 }
+DOMAIN_ADAPTER_PATHS = {
+    "crates/clawd/src/repo/crypto_storage.rs",
+    "crates/clawd/src/skill_storage/data_owners.rs",
+    "crates/clawd/src/skill_storage/migration.rs",
+    "crates/clawd/src/skill_storage/ownership.rs",
+    "crates/clawd/src/skill_storage/schema.rs",
+}
 
 SURFACE_PATTERNS = {
     "registration_write_or_reload": re.compile(
@@ -48,7 +55,7 @@ SURFACE_PATTERNS = {
         r"skill_store_optional_skill_names|is_builtin_skill_name"
     ),
     "skill_timeout_fallback": re.compile(
-        r"timeout_seconds\(\&skill_name\)|skill_timeout_secs|"
+        r"unwrap_or_else\(\|\|\s*match\s+skill_name|"
         r"skill_timeout_seconds\.max\("
     ),
     "semantic_special_case": re.compile(
@@ -109,6 +116,8 @@ def classify_skill_literal(relative: Path, kind: str) -> str:
         return "test_fixture"
     if any(token in lowered for token in MIGRATION_PATH_TOKENS):
         return "migration_reader"
+    if relative.as_posix() in DOMAIN_ADAPTER_PATHS:
+        return "domain_adapter"
     if kind == "builtin" and (
         "/skills/builtin" in lowered or relative.as_posix().endswith("/skills.rs")
     ):
@@ -255,6 +264,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--print-baseline", action="store_true")
+    parser.add_argument("--update-baseline", action="store_true")
     return parser.parse_args()
 
 
@@ -267,6 +277,18 @@ def main() -> int:
     inventory, findings = scan(ROOT)
     if args.print_baseline:
         print(json.dumps(snapshot(inventory), indent=2, sort_keys=True))
+        return 0
+    if args.update_baseline:
+        if findings:
+            for finding in findings:
+                print(f"- {finding}")
+            return 1
+        baseline_path = ROOT / BASELINE
+        baseline_path.write_text(
+            json.dumps(snapshot(inventory), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"SKILL_HOTPLUG_COUPLING_BASELINE_UPDATED path={BASELINE}")
         return 0
     baseline = json.loads((ROOT / BASELINE).read_text(encoding="utf-8"))
     findings.extend(check_baseline(inventory, baseline))

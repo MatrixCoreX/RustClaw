@@ -923,7 +923,7 @@ fn search_github_repositories(input: &SearchInput) -> Result<Vec<SearchItem>> {
     }
     let res = client
         .get(url)
-        .header("user-agent", "rustclaw-web-search-extract")
+        .header("user-agent", "agent-system-web-search-extract")
         .send()
         .context("github search request failed")?
         .error_for_status()

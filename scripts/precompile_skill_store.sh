@@ -48,10 +48,10 @@ if [[ "$TARGET" == "$HOST_TARGET" ]]; then
 else
 	BINARY_DIR="$SCRIPT_DIR/target/$TARGET/release"
 fi
-SDK_CLI="$SCRIPT_DIR/target/release/rustclaw-skill"
+SDK_CLI="$SCRIPT_DIR/target/release/skillctl"
 if [[ ! -x "$SDK_CLI" ]]; then
 	echo "Building host receipt verification helper..."
-	cargo build --release --locked -p rustclaw-skill-sdk --bin rustclaw-skill
+	cargo build --release --locked -p agent-skill-sdk --bin skillctl
 fi
 
 PACKAGE_ROOT="$SCRIPT_DIR/target/prebuilt-skill-packages/$TARGET"

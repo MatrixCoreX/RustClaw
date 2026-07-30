@@ -68,7 +68,7 @@ fn exact_scalar_path_allows_image_generation_path_output() {
         }),
         "image_generate",
         &serde_json::json!({
-            "prompt": "minimal RustClaw smoke test card",
+            "prompt": "minimal Agent Runtime smoke test card",
             "output_path": "document/skill_generate_smoke.png"
         }),
     )
@@ -96,7 +96,7 @@ fn exact_scalar_path_allows_audio_synthesis_path_output() {
         }),
         "audio_synthesize",
         &serde_json::json!({
-            "text": "RustClaw skill test passed",
+            "text": "Agent Runtime skill test passed",
             "output_path": "document/skill_audio_smoke.mp3"
         }),
     )
@@ -216,7 +216,7 @@ fn generic_file_delivery_allows_audio_synthesis_file_output() {
         }),
         "audio_synthesize",
         &serde_json::json!({
-            "text": "RustClaw skill test passed",
+            "text": "Agent Runtime skill test passed",
             "output_path": "document/skill_audio_smoke.mp3"
         }),
     )
@@ -238,7 +238,7 @@ fn generic_file_delivery_allows_image_generation_file_output() {
         }),
         "image_generate",
         &serde_json::json!({
-            "prompt": "minimal RustClaw smoke test card",
+            "prompt": "minimal Agent Runtime smoke test card",
             "output_path": "document/skill_generate_smoke.png"
         }),
     )

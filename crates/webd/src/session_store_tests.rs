@@ -5,7 +5,7 @@ use super::*;
 
 fn test_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "rustclaw-webd-session-{label}-{}-{}.json",
+        "agent-runtime-webd-session-{label}-{}-{}.json",
         std::process::id(),
         uuid::Uuid::new_v4()
     ))

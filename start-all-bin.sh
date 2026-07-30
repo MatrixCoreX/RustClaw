@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
-print_rustclaw_version "$SCRIPT_DIR"
+print_app_version "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/component_start/common.sh"
 # shellcheck source=/dev/null
@@ -15,7 +15,7 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
-RUNTIME_ENV_SCRIPT="${RUSTCLAW_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
+RUNTIME_ENV_SCRIPT="${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
 if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
   # Source runtime secrets/env before starting any daemon so child processes inherit them.
   # shellcheck source=/dev/null
@@ -25,8 +25,8 @@ configure_platform_command_path
 configure_python3_with_tomllib
 
 # Enable colored log tags on interactive terminals unless overridden.
-if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-  export RUSTCLAW_LOG_COLOR=1
+if [[ -t 1 && -z "${APP_LOG_COLOR:-}" ]]; then
+  export APP_LOG_COLOR=1
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -55,7 +55,7 @@ FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
 LARKD_BIN="$SCRIPT_DIR/target/$PROFILE/larkd"
 WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
-SKILL_RECEIPT_CLI="$SCRIPT_DIR/target/$PROFILE/rustclaw-skill"
+SKILL_RECEIPT_CLI="$SCRIPT_DIR/target/$PROFILE/skillctl"
 
 read_enabled() {
   local config_path="$1"
@@ -75,7 +75,7 @@ if not path.exists():
 
 # Startup only needs one boolean from a known table. Keep this parser limited
 # to that contract so Python 3.10 hosts do not require the Python 3.11 tomllib
-# module or an extra tomli package before RustClaw can start.
+# module or an extra tomli package before the agent runtime can start.
 current_section = ""
 enabled = default
 for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -121,7 +121,7 @@ require_binary "$SKILL_RECEIPT_CLI" "skill receipt verifier" || preflight_failed
 if [[ "$WEBD_ENABLED" == "1" ]]; then
   require_binary "$WEBD_BIN" "webd" || preflight_failed=1
 fi
-if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" != "1" && "$TELEGRAM_ENABLED" == "1" ]]; then
+if [[ "${APP_SKIP_TELEGRAMD:-0}" != "1" && "$TELEGRAM_ENABLED" == "1" ]]; then
   require_binary "$TELEGRAMD_BIN" "telegramd" || preflight_failed=1
 fi
 if [[ "$WHATSAPP_ENABLED" == "1" ]]; then
@@ -140,7 +140,7 @@ if [[ "$LARK_ENABLED" == "1" ]]; then
   require_binary "$LARKD_BIN" "larkd" || preflight_failed=1
 fi
 if [[ "$preflight_failed" -ne 0 ]]; then
-  echo "Startup preflight failed; existing RustClaw processes were left unchanged." >&2
+	echo "Startup preflight failed; existing agent processes were left unchanged." >&2
   echo "Run: ./build-all.sh $PROFILE" >&2
   exit 1
 fi
@@ -164,11 +164,11 @@ done < <(
     --scope proactive --target host --format specs
 )
 
-# Stop managed RustClaw processes only after every enabled component passes
+# Stop managed agent-runtime processes only after every enabled component passes
 # preflight. A partial build must never take a healthy deployment offline.
-if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
-  if ! "$SCRIPT_DIR/stop-rustclaw.sh"; then
-    echo "Startup aborted because existing RustClaw processes could not be stopped cleanly." >&2
+if [[ -f "$SCRIPT_DIR/stop-agent.sh" ]]; then
+  if ! "$SCRIPT_DIR/stop-agent.sh"; then
+	echo "Startup aborted because existing agent processes could not be stopped cleanly." >&2
     exit 1
   fi
 fi
@@ -178,8 +178,8 @@ start_clawd() {
     echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
     return 0
   fi
-  nohup "$CLAWD_BIN" >"$LOG_DIR/clawd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/clawd.log" "$CLAWD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "clawd" "$pid"
   echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
   sleep 2
@@ -203,8 +203,8 @@ start_webd() {
     echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
     return 0
   fi
-  nohup "$WEBD_BIN" >"$LOG_DIR/webd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/webd.log" "$WEBD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "webd" "$pid"
   echo "Starting webd, PID=$pid, log: $LOG_DIR/webd.log" # zh: webd 启动中，PID=$pid, 日志: $LOG_DIR/webd.log
   sleep 2
@@ -223,8 +223,8 @@ start_telegramd() {
     echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
     return 0
   fi
-  nohup "$TELEGRAMD_BIN" >"$LOG_DIR/telegramd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/telegramd.log" "$TELEGRAMD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "telegramd" "$pid"
   echo "Starting telegramd binary, PID=$pid, log: $LOG_DIR/telegramd.log" # zh: telegramd 二进制启动中，PID=$pid, 日志: $LOG_DIR/telegramd.log
   sleep 2
@@ -248,8 +248,12 @@ start_whatsapp_webd() {
     echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
     return 0
   fi
-  nohup "$WHATSAPP_WEBD_BIN" >"$LOG_DIR/whatsapp_webd.log" 2>&1 &
-  local pid=$!
+  if ! bash "$SCRIPT_DIR/scripts/whatsapp_web_bridge_deps.sh" --ensure; then
+    echo "Failed to prepare WhatsApp Web bridge dependencies."
+    return 1
+  fi
+  component_launch_detached "$LOG_DIR/whatsapp_webd.log" "$WHATSAPP_WEBD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "whatsapp_webd" "$pid"
   echo "Starting whatsapp_webd, PID=$pid, log: $LOG_DIR/whatsapp_webd.log" # zh: whatsapp_webd 启动中，PID=$pid, 日志: $LOG_DIR/whatsapp_webd.log
   sleep 2
@@ -273,8 +277,8 @@ start_whatsappd() {
     echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
     return 0
   fi
-  nohup "$WHATSAPPD_BIN" >"$LOG_DIR/whatsappd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/whatsappd.log" "$WHATSAPPD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "whatsappd" "$pid"
   echo "Starting whatsappd binary, PID=$pid, log: $LOG_DIR/whatsappd.log" # zh: whatsappd 二进制启动中，PID=$pid, 日志: $LOG_DIR/whatsappd.log
   sleep 2
@@ -298,8 +302,8 @@ start_feishud() {
     return 0
   fi
   export FEISHU_CONFIG_PATH="${FEISHU_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/feishu.toml}"
-  nohup "$FEISHUD_BIN" >"$LOG_DIR/feishud.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/feishud.log" "$FEISHUD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "feishud" "$pid"
   echo "Starting feishud binary, PID=$pid, log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动中，PID=$pid, 日志: $LOG_DIR/feishud.log
   sleep 2
@@ -323,8 +327,8 @@ start_wechatd() {
     return 0
   fi
   export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
-  nohup "$WECHATD_BIN" >"$LOG_DIR/wechatd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/wechatd.log" "$WECHATD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "wechatd" "$pid"
   echo "Starting wechatd binary, PID=$pid, log: $LOG_DIR/wechatd.log"
   sleep 2
@@ -344,8 +348,8 @@ start_larkd() {
     return 0
   fi
   export LARK_CONFIG_PATH="${LARK_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/lark.toml}"
-  nohup "$LARKD_BIN" >"$LOG_DIR/larkd.log" 2>&1 &
-  local pid=$!
+  component_launch_detached "$LOG_DIR/larkd.log" "$LARKD_BIN"
+  local pid="$COMPONENT_LAUNCHED_PID"
   component_write_pid_file "larkd" "$pid"
   echo "Starting larkd binary, PID=$pid, log: $LOG_DIR/larkd.log"
   sleep 2
@@ -379,8 +383,8 @@ start_optional_component() {
 start_optional_component "whisper-server" start_local_whisper
 start_clawd
 start_optional_component "webd" start_webd
-if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" == "1" ]]; then
-  echo "RUSTCLAW_SKIP_TELEGRAMD=1, skipping telegramd startup."
+if [[ "${APP_SKIP_TELEGRAMD:-0}" == "1" ]]; then
+  echo "APP_SKIP_TELEGRAMD=1, skipping telegramd startup."
 else
   start_optional_component "telegramd" start_telegramd
 fi

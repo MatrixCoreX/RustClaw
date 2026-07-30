@@ -3,6 +3,26 @@ use crate::finalize::loop_reply::{
     enforce_delivery_output_contract, replace_delivery_with_direct_structured_observed_answer,
 };
 
+fn wrapped_current_dir_path_facts(path: &str) -> String {
+    let extra = serde_json::json!({
+        "action": "path_batch_facts",
+        "count": 1,
+        "facts": [{
+            "exists": true,
+            "fact": {
+                "kind": "dir",
+                "path": "",
+                "resolved_path": path,
+                "size_bytes": 4096
+            },
+            "path": "."
+        }],
+        "include_missing": true
+    });
+    let text = extra.to_string();
+    serde_json::json!({"extra": extra, "text": text}).to_string()
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error() {
     let state = test_state();
@@ -106,13 +126,13 @@ async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let summary = "Working directory: /home/guagua/rustclaw. A clawd process and a listening port are both visible in the current task evidence.";
+    let summary = "Working directory: /home/guagua/agent-runtime. A clawd process and a listening port are both visible in the current task evidence.";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -333,7 +353,7 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw","size_bytes":4096},"path":"/home/guagua/rustclaw"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw\",\"size_bytes\":4096},\"path\":\"/home/guagua/rustclaw\"}],\"include_missing\":true}"}"#;
+    let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/agent-runtime","size_bytes":4096},"path":"/home/guagua/agent-runtime"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/agent-runtime\",\"size_bytes\":4096},\"path\":\"/home/guagua/agent-runtime\"}],\"include_missing\":true}"}"#;
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -352,14 +372,18 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
     .await
     .expect("finalize should unwrap scalar path");
 
-    assert_eq!(reply.text, "/home/guagua/rustclaw");
-    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert_eq!(reply.text, "/home/guagua/agent-runtime");
+    assert_eq!(
+        reply.messages,
+        vec!["/home/guagua/agent-runtime".to_string()]
+    );
     assert!(!reply.text.contains(r#""action":"#));
 }
 
 #[tokio::test]
 async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_observed_path() {
     let state = test_state();
+    let expected_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
     let task = claimed_task("task-recoverable-scalar-path-dot");
     let mut route = scalar_route_result();
     route.selection.structured_field_selector = Some("resolved_path".to_string());
@@ -369,19 +393,17 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
+    let observed = wrapped_current_dir_path_facts(&expected_path);
     let failure_candidate =
-        "observed candidate path: /home/guagua/rustclaw; checkpoint_state=waiting";
+        format!("observed candidate path: {expected_path}; checkpoint_state=waiting");
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.has_recoverable_failure_context = true;
     loop_state
         .executed_step_results
-        .push(ok_step_result("step_1", "fs_basic", observed));
-    loop_state
-        .delivery_messages
-        .push(failure_candidate.to_string());
-    loop_state.last_user_visible_respond = Some(failure_candidate.to_string());
+        .push(ok_step_result("step_1", "fs_basic", &observed));
+    loop_state.delivery_messages.push(failure_candidate.clone());
+    loop_state.last_user_visible_respond = Some(failure_candidate);
 
     let reply = finalize_loop_reply(
         &state,
@@ -393,8 +415,8 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
     .await
     .expect("finalize should prefer normalized observed scalar path");
 
-    assert_eq!(reply.text, "/home/guagua/rustclaw");
-    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert_eq!(reply.text, expected_path);
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
     assert!(!reply.should_fail_task);
 }
 
@@ -449,6 +471,7 @@ async fn finalize_loop_reply_preserves_richer_generic_path_facts_delivery() {
 #[tokio::test]
 async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_path() {
     let state = test_state();
+    let expected_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
     let task = claimed_task("task-scalar-path-field-placeholder");
     let mut route = scalar_route_result();
     route.selection.structured_field_selector = Some("resolved_path".to_string());
@@ -458,12 +481,12 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_pat
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
+    let observed = wrapped_current_dir_path_facts(&expected_path);
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
         .executed_step_results
-        .push(ok_step_result("step_1", "fs_basic", observed));
+        .push(ok_step_result("step_1", "fs_basic", &observed));
     loop_state.delivery_messages.push("field_value".to_string());
     loop_state.last_user_visible_respond = Some("field_value".to_string());
 
@@ -477,8 +500,8 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_pat
     .await
     .expect("finalize should replace scalar field placeholder");
 
-    assert_eq!(reply.text, "/home/guagua/rustclaw");
-    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert_eq!(reply.text, expected_path);
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
     assert!(!reply.should_fail_task);
 }
 
@@ -504,7 +527,7 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "respond",
-        "/home/guagua/rustclaw",
+        "/home/guagua/agent-runtime",
     ));
     loop_state.delivery_messages.push("field_value".to_string());
     loop_state.last_user_visible_respond = Some("field_value".to_string());
@@ -519,8 +542,11 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
     .await
     .expect("finalize should prefer terminal scalar path respond over field placeholder");
 
-    assert_eq!(reply.text, "/home/guagua/rustclaw");
-    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert_eq!(reply.text, "/home/guagua/agent-runtime");
+    assert_eq!(
+        reply.messages,
+        vec!["/home/guagua/agent-runtime".to_string()]
+    );
     assert!(!reply.should_fail_task);
 }
 
@@ -532,7 +558,7 @@ async fn finalize_loop_reply_projects_file_basename_from_capability_result() {
     route.selection.structured_field_selector = Some("basename".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
             .to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -547,10 +573,10 @@ async fn finalize_loop_reply_projects_file_basename_from_capability_result() {
             "fact": {
                 "kind": "file",
                 "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
-                "resolved_path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                "resolved_path": "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
                 "size_bytes": 120
             },
-            "path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            "path": "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
         }],
         "include_missing": true
     });
@@ -1152,7 +1178,7 @@ fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
         skill: "system_basic".to_string(),
         status: StepExecutionStatus::Ok,
         output: Some(
-            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/tmp/rustclaw-workspace/rustclaw.service","size_bytes":1190},"path":"/tmp/rustclaw-workspace/rustclaw.service"}],"include_missing":true}"#
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"agent-runtime.service","resolved_path":"/tmp/agent-runtime-workspace/agent-runtime.service","size_bytes":1190},"path":"/tmp/agent-runtime-workspace/agent-runtime.service"}],"include_missing":true}"#
                 .to_string(),
         ),
         error: None,
@@ -1162,7 +1188,7 @@ fn direct_structured_finalize_defers_path_inspection_to_model_synthesis() {
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::Free;
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.locator_hint = "rustclaw.service".to_string();
+    route.locator_hint = "agent-runtime.service".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1248,7 +1274,7 @@ async fn direct_publishable_observed_answer_accepts_plain_observation_without_ex
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("/home/guagua/rustclaw\n".to_string()),
+        output: Some("/home/guagua/agent-runtime\n".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -1264,7 +1290,7 @@ async fn direct_publishable_observed_answer_accepts_plain_observation_without_ex
         direct_publishable_observed_answer(&state, &task, &loop_state, Some(&agent_run_context))
             .await
             .expect("publishable plain observation");
-    assert_eq!(answer, "/home/guagua/rustclaw");
+    assert_eq!(answer, "/home/guagua/agent-runtime");
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -1281,7 +1307,7 @@ async fn direct_publishable_observed_answer_accepts_exact_plain_observation() {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("/home/guagua/rustclaw\n".to_string()),
+        output: Some("/home/guagua/agent-runtime\n".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -1298,7 +1324,7 @@ async fn direct_publishable_observed_answer_accepts_exact_plain_observation() {
         direct_publishable_observed_answer(&state, &task, &loop_state, Some(&agent_run_context))
             .await
             .expect("publishable exact observation");
-    assert_eq!(answer, "/home/guagua/rustclaw");
+    assert_eq!(answer, "/home/guagua/agent-runtime");
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -1411,7 +1437,7 @@ fn direct_scalar_finalize_skips_strict_exact_observation_output_contract() {
 
 #[test]
 fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
-    let raw = r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#;
+    let raw = r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"agent-runtime","value":"agent-runtime","value_type":"string"}"#;
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(raw.to_string());
@@ -1476,13 +1502,15 @@ fn structured_user_input_delivery_is_not_dropped_as_observed_passthrough() {
 fn qualified_scalar_passthrough_is_not_dropped() {
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
-    loop_state.last_user_visible_respond = Some("rustclaw".to_string());
-    loop_state.delivery_messages.push("rustclaw".to_string());
+    loop_state.last_user_visible_respond = Some("agent-runtime".to_string());
+    loop_state
+        .delivery_messages
+        .push("agent-runtime".to_string());
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("rustclaw\n".to_string()),
+        output: Some("agent-runtime\n".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -1496,7 +1524,7 @@ fn qualified_scalar_passthrough_is_not_dropped() {
             &loop_state,
             true,
             Some(&agent_run_context),
-            "rustclaw"
+            "agent-runtime"
         ),
         Some(false)
     );
@@ -1504,7 +1532,7 @@ fn qualified_scalar_passthrough_is_not_dropped() {
 
 #[test]
 fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
-    let path = "/home/guagua/rustclaw/document/pwd_line.txt";
+    let path = "/home/guagua/agent-runtime/document/pwd_line.txt";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(path.to_string());
@@ -1512,12 +1540,12 @@ fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "write_file",
-        "written 48 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        "written 48 bytes to /home/guagua/agent-runtime/document/pwd_line.txt",
     ));
     loop_state
         .output_vars
@@ -1552,7 +1580,7 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
         skill: "fs_search".to_string(),
         status: StepExecutionStatus::Ok,
         output: Some(
-            r#"{"action":"find_name","count":1,"results":["rustclaw.service"],"root":""}"#
+            r#"{"action":"find_name","count":1,"results":["agent-runtime.service"],"root":""}"#
                 .to_string(),
         ),
         error: None,
@@ -1571,7 +1599,7 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
     assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
     assert!(answer.contains("reason_code=path_fact_observed"));
     assert!(answer.contains("exists=true"));
-    assert!(answer.contains("path=rustclaw.service"));
+    assert!(answer.contains("path=agent-runtime.service"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -1588,7 +1616,9 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         step_id: "step_1".to_string(),
         skill: "archive_basic".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n".to_string()),
+        output: Some(
+            "exit=0\nupdating: tmp/agent-runtime-workspace/scripts/skill_calls/\n".to_string(),
+        ),
         error: None,
         started_at: 0,
         finished_at: 0,

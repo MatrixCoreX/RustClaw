@@ -1,5 +1,36 @@
 use super::*;
 
+fn connection_cfg(base_url: &str, api_key: &str) -> VendorConfig {
+    VendorConfig {
+        base_url: base_url.to_string(),
+        api_key: api_key.to_string(),
+        model: "multimodal-model".to_string(),
+        timeout_seconds: None,
+    }
+}
+
+#[test]
+fn independent_provider_inherits_only_missing_main_connection_fields() {
+    let shared = Some(connection_cfg("https://main.example/v1", "main-key"));
+    let mut missing_both = Some(connection_cfg("", ""));
+    inherit_provider_connection_from_llm(&mut missing_both, &shared);
+    let missing_both = missing_both.expect("provider");
+    assert_eq!(missing_both.base_url, "https://main.example/v1");
+    assert_eq!(missing_both.api_key, "main-key");
+
+    let mut missing_key = Some(connection_cfg("https://image.example/v1", ""));
+    inherit_provider_connection_from_llm(&mut missing_key, &shared);
+    let missing_key = missing_key.expect("provider");
+    assert_eq!(missing_key.base_url, "https://image.example/v1");
+    assert_eq!(missing_key.api_key, "main-key");
+
+    let mut dedicated = Some(connection_cfg("https://image.example/v1", "image-key"));
+    inherit_provider_connection_from_llm(&mut dedicated, &shared);
+    let dedicated = dedicated.expect("provider");
+    assert_eq!(dedicated.base_url, "https://image.example/v1");
+    assert_eq!(dedicated.api_key, "image-key");
+}
+
 #[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
@@ -43,7 +74,7 @@ fn unknown_edit_failure_does_not_claim_a_safe_retry() {
 #[test]
 fn success_response_exposes_media_machine_fields() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-image-edit-success-{}",
+        "agent-runtime-image-edit-success-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
@@ -76,7 +107,7 @@ fn success_response_exposes_media_machine_fields() {
 #[test]
 fn preview_edit_returns_machine_payload_without_writing() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-image-edit-preview-{}",
+        "agent-runtime-image-edit-preview-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")

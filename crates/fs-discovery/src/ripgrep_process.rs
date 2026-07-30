@@ -175,7 +175,7 @@ fn resolve_binary_uncached() -> Result<RipgrepBinary, String> {
 }
 
 fn explicit_candidate() -> Option<PathBuf> {
-    std::env::var_os("RUSTCLAW_RG_PATH")
+    std::env::var_os("APP_RG_PATH")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }

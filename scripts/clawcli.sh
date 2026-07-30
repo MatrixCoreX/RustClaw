@@ -7,21 +7,21 @@
 #   3) 仓库根下 target/debug/clawcli
 #   4) PATH 中的 clawcli
 #
-# 若未设置 RUSTCLAW_WORKSPACE，则自动设为本仓库根（含 configs/config.toml），
+# 若未设置 APP_WORKSPACE，则自动设为本仓库根（含 configs/config.toml），
 # 便于从数据库读取 admin key（与 clawcli 行为一致）。
 #
 # 用法：与直接运行 clawcli 相同，例如：
 #   scripts/clawcli.sh --help
 #   scripts/clawcli.sh health
-#   RUSTCLAW_BASE_URL=http://127.0.0.1:9000 scripts/clawcli.sh chat
+#   APP_BASE_URL=http://127.0.0.1:9000 scripts/clawcli.sh chat
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [[ -z "${RUSTCLAW_WORKSPACE:-}" && -f "$REPO_ROOT/configs/config.toml" ]]; then
-  export RUSTCLAW_WORKSPACE="$REPO_ROOT"
+if [[ -z "${APP_WORKSPACE:-}" && -f "$REPO_ROOT/configs/config.toml" ]]; then
+  export APP_WORKSPACE="$REPO_ROOT"
 fi
 
 resolve_clawcli() {

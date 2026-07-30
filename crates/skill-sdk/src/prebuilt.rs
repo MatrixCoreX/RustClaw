@@ -161,7 +161,7 @@ fn download_https(
         })?;
     let mut response = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "rustclaw-skill-sdk/1")
+        .header(reqwest::header::USER_AGENT, "agent-skill-sdk/1")
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
         .map_err(|error| {

@@ -299,8 +299,8 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["field_value", "valid"],
     ),
     step_json_extractor(
-        "config_basic.guard_rustclaw_config",
-        "config_basic.guard_rustclaw_config.structured_json_v1",
+        "config_edit.guard_config",
+        "config_edit.guard_config.structured_json_v1",
         &["candidates", "count", "valid"],
     ),
     step_json_extractor(

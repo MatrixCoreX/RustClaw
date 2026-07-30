@@ -16,8 +16,37 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn provider_create_rejection_proves_no_mutation_was_applied() {
+    let response = execution_error_response(
+        "req-1".to_string(),
+        not_applied_error("provider_rejected", "token plan limit reached"),
+    );
+    let extra = response.extra.expect("error extra");
+
+    assert_eq!(response.status, "error");
+    assert_eq!(
+        response.error_text.as_deref(),
+        Some("token plan limit reached")
+    );
+    assert_eq!(extra["failure_phase"], "provider_rejected");
+    assert_eq!(extra["side_effect_applied"], false);
+}
+
+#[test]
+fn ambiguous_provider_failure_does_not_claim_no_side_effect() {
+    let response = execution_error_response(
+        "req-2".to_string(),
+        "provider connection closed before a response".to_string(),
+    );
+    let extra = response.extra.expect("error extra");
+
+    assert!(extra.get("failure_phase").is_none());
+    assert!(extra.get("side_effect_applied").is_none());
+}
+
+#[test]
 fn resolve_output_path_uses_workspace_relative_path() {
-    let workspace = PathBuf::from("/tmp/rustclaw-video-test");
+    let workspace = PathBuf::from("/tmp/agent-runtime-video-test");
     let out = resolve_output_path(&workspace, "video/download", Some("tmp/out.mp4"))
         .expect("output path");
     assert_eq!(out, workspace.join("tmp/out.mp4"));
@@ -183,7 +212,7 @@ fn empty_resolution_argument_falls_back_to_default_token() {
 }
 
 #[test]
-fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
+fn dedicated_provider_empty_connection_falls_back_to_shared_minimax_connection() {
     let mut cfg = RootConfig::default();
     cfg.llm.minimax = Some(VendorConfig {
         base_url: "https://shared.example/v1".to_string(),
@@ -193,7 +222,7 @@ fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
         adapter_kind: None,
     });
     cfg.video_generation.providers.minimax = Some(VendorConfig {
-        base_url: "https://dedicated.example/v1".to_string(),
+        base_url: String::new(),
         api_key: String::new(),
         model: "MiniMax-Hailuo-2.3".to_string(),
         timeout_seconds: None,
@@ -202,7 +231,7 @@ fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
 
     let resolved = resolved_vendor_config(&cfg, VendorKind::MiniMax).expect("provider");
 
-    assert_eq!(resolved.base_url, "https://dedicated.example/v1");
+    assert_eq!(resolved.base_url, "https://shared.example/v1");
     assert_eq!(resolved.api_key, "shared-key");
     assert_eq!(resolved.model, "MiniMax-Hailuo-2.3");
     assert_eq!(resolved.timeout_seconds, Some(77));
@@ -548,7 +577,7 @@ fn local_image_path_converts_to_data_url() {
 fn unique_temp_root(name: &str) -> PathBuf {
     let mut root = std::env::temp_dir();
     root.push(format!(
-        "rustclaw-{name}-{}",
+        "agent-runtime-{name}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")

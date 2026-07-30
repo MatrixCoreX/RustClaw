@@ -8,7 +8,7 @@ use crate::chat_session::working_directory_identity;
 
 fn workspace(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-clawcli-attachment-{name}-{}",
+        "agent-runtime-clawcli-attachment-{name}-{}",
         uuid::Uuid::new_v4()
     ));
     fs::create_dir_all(&root).unwrap();

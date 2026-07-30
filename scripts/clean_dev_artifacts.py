@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clean RustClaw development artifacts that are safe to regenerate.
+"""Clean agent-runtime development artifacts that are safe to regenerate.
 
 Default mode is a dry run. Pass --apply to delete.
 """
@@ -67,7 +67,7 @@ def node_modules_dirs() -> list[Path]:
 
 
 def default_targets() -> list[Path]:
-    targets = [ROOT / "target", ROOT / ".rustclaw"]
+    targets = [ROOT / ".agent-runtime"]
     targets.extend(contents(ROOT / "scripts" / "nl_suite_logs"))
     targets.extend(contents(ROOT / "tmp"))
     targets.extend(contents(ROOT / "logs" / "nl_tests"))

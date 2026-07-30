@@ -1,4 +1,5 @@
 export type FeishuBindStatus = "pending" | "detected" | "bound" | "failed" | "expired";
+export type AgentAppChannel = "feishu" | "lark";
 
 export interface FeishuBindSessionResponse {
   session_id: number;
@@ -12,6 +13,7 @@ export interface FeishuBindSessionResponse {
   updated_at: string;
   expires_at: string;
   entry_url?: string | null;
+  poll_interval_seconds?: number | null;
 }
 
 export interface FeishuStepStatusInput {
@@ -54,23 +56,33 @@ export interface FeishuSetupGuidance {
 
 type ApiFetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-export function getFeishuBindStatusCopy(status: string): FeishuBindStatusCopy {
+function channelNames(platform: AgentAppChannel) {
+  return platform === "lark"
+    ? { zh: "Lark", en: "Lark" }
+    : { zh: "飞书", en: "Feishu" };
+}
+
+export function getChannelBindStatusCopy(
+  platform: AgentAppChannel,
+  status: string,
+): FeishuBindStatusCopy {
+  const name = channelNames(platform);
   switch (status) {
     case "detected":
       return {
         tone: "attention",
         zhLabel: "已识别账号",
         enLabel: "Recognized",
-        zhDescription: "已识别飞书账号，正在完成绑定。",
-        enDescription: "Your Feishu account has been recognized and binding is being completed.",
+        zhDescription: `已识别${name.zh}账号，正在完成绑定。`,
+        enDescription: `Your ${name.en} account has been recognized and binding is being completed.`,
       };
     case "bound":
       return {
         tone: "success",
         zhLabel: "绑定成功",
         enLabel: "Bound",
-        zhDescription: "现在可以直接在飞书里发消息了。",
-        enDescription: "You can now chat in Feishu directly.",
+        zhDescription: `现在可以直接在${name.zh}里发消息了。`,
+        enDescription: `You can now chat in ${name.en} directly.`,
       };
     case "failed":
       return {
@@ -100,6 +112,10 @@ export function getFeishuBindStatusCopy(status: string): FeishuBindStatusCopy {
   }
 }
 
+export function getFeishuBindStatusCopy(status: string): FeishuBindStatusCopy {
+  return getChannelBindStatusCopy("feishu", status);
+}
+
 export function isFeishuBindTerminalStatus(status: string): boolean {
   return status === "bound" || status === "failed" || status === "expired";
 }
@@ -113,14 +129,18 @@ export function getFeishuStepStatus(input: FeishuStepStatusInput): "done" | "att
   return "todo";
 }
 
-export function getFeishuSetupGuidance(input: FeishuSetupGuidanceInput): FeishuSetupGuidance {
+export function getChannelSetupGuidance(
+  platform: AgentAppChannel,
+  input: FeishuSetupGuidanceInput,
+): FeishuSetupGuidance {
+  const name = channelNames(platform);
   if (input.bound) {
     return {
       status: "bound",
-      zhSummary: "飞书已经接入完成。",
-      enSummary: "Feishu setup is complete.",
-      zhHint: "后续直接在飞书里发消息就可以。",
-      enHint: "You can now chat in Feishu directly.",
+      zhSummary: `${name.zh}已经接入完成。`,
+      enSummary: `${name.en} setup is complete.`,
+      zhHint: `后续直接在${name.zh}里发消息就可以。`,
+      enHint: `You can now chat in ${name.en} directly.`,
       canStartService: false,
       canStartBind: false,
     };
@@ -150,8 +170,8 @@ export function getFeishuSetupGuidance(input: FeishuSetupGuidanceInput): FeishuS
   if (!input.serviceHealthy) {
     return {
       status: "ready_to_start",
-      zhSummary: "飞书服务还没启动。",
-      enSummary: "The Feishu service is not running yet.",
+      zhSummary: `${name.zh}服务还没启动。`,
+      enSummary: `The ${name.en} service is not running yet.`,
       zhHint: "先启动服务，再开始扫码。",
       enHint: "Start the service first, then scan.",
       canStartService: true,
@@ -160,8 +180,8 @@ export function getFeishuSetupGuidance(input: FeishuSetupGuidanceInput): FeishuS
   }
   return {
     status: "ready_to_bind",
-    zhSummary: "飞书已经就绪。",
-    enSummary: "Feishu is ready.",
+    zhSummary: `${name.zh}已经就绪。`,
+    enSummary: `${name.en} is ready.`,
     zhHint: "开始后扫码打开机器人，再发送绑定码。",
     enHint: "Start, scan to open the bot, then send the bind code.",
     canStartService: true,
@@ -169,8 +189,19 @@ export function getFeishuSetupGuidance(input: FeishuSetupGuidanceInput): FeishuS
   };
 }
 
+export function getFeishuSetupGuidance(input: FeishuSetupGuidanceInput): FeishuSetupGuidance {
+  return getChannelSetupGuidance("feishu", input);
+}
+
 export async function startFeishuBindSession(apiFetch: ApiFetchLike): Promise<FeishuBindSessionResponse> {
-  const res = await apiFetch("/v1/admin/channel-binds/feishu/start", {
+  return startChannelBindSession(apiFetch, "feishu");
+}
+
+export async function startChannelBindSession(
+  apiFetch: ApiFetchLike,
+  platform: AgentAppChannel,
+): Promise<FeishuBindSessionResponse> {
+  const res = await apiFetch(`/v1/admin/channel-binds/${platform}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -181,7 +212,8 @@ export async function startFeishuBindSession(apiFetch: ApiFetchLike): Promise<Fe
     error?: string | null;
   };
   if (!res.ok || !body.ok || !body.data) {
-    throw new Error(body.error || `飞书绑定启动失败 (${res.status})`);
+    const name = channelNames(platform);
+    throw new Error(body.error || `${name.zh}绑定启动失败 (${res.status})`);
   }
   return body.data;
 }
@@ -190,14 +222,23 @@ export async function fetchFeishuBindSession(
   apiFetch: ApiFetchLike,
   sessionId: number,
 ): Promise<FeishuBindSessionResponse> {
-  const res = await apiFetch(`/v1/admin/channel-binds/feishu/${sessionId}`);
+  return fetchChannelBindSession(apiFetch, "feishu", sessionId);
+}
+
+export async function fetchChannelBindSession(
+  apiFetch: ApiFetchLike,
+  platform: AgentAppChannel,
+  sessionId: number,
+): Promise<FeishuBindSessionResponse> {
+  const res = await apiFetch(`/v1/admin/channel-binds/${platform}/${sessionId}`);
   const body = (await res.json()) as {
     ok: boolean;
     data?: FeishuBindSessionResponse;
     error?: string | null;
   };
   if (!res.ok || !body.ok || !body.data) {
-    throw new Error(body.error || `飞书绑定状态获取失败 (${res.status})`);
+    const name = channelNames(platform);
+    throw new Error(body.error || `${name.zh}绑定状态获取失败 (${res.status})`);
   }
   return body.data;
 }

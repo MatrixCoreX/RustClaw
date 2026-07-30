@@ -150,7 +150,7 @@ if [[ -n "$VENDOR" ]] || [[ -n "$PROMPT_NAME" ]]; then
 fi
 
 cat > "$PROMPT_FILE" <<EOF
-You are fixing a bug in the RustClaw repository by adjusting PROMPT FILES ONLY.
+You are fixing a bug in the agent-runtime repository by adjusting PROMPT FILES ONLY.
 
 Workspace: ${ROOT_DIR}
 Primary signal: log excerpt for the last ${TASKS} task(s) from ${LOG_FILE}

@@ -1,6 +1,6 @@
-# RustClaw UI
+# Agent Runtime UI
 
-本目录是 RustClaw 的浏览器控制台前端项目。
+本目录是 Agent Runtime 的浏览器控制台前端项目。
 
 它不是独立产品，而是给 `clawd` 提供本地或静态托管的 Web 管理界面，用于查看运行状态、提交任务、配置部分运行参数、查看日志和做日常管理。
 
@@ -65,7 +65,7 @@ npm run lint
 
 ## 部署方式
 
-RustClaw 当前常见的 UI 使用方式有两种：
+Agent Runtime 当前常见的 UI 使用方式有两种：
 
 1. 随仓库一起本地构建，供 `clawd` 或本地静态目录使用
 2. 构建后复制到 nginx 静态目录
@@ -79,14 +79,14 @@ RustClaw 当前常见的 UI 使用方式有两种：
 # 单独构建并复制到 nginx 目录
 ./build-ui-nginx.sh
 
-# 安装 rustclaw 启动器时一并部署 UI 到 nginx
-bash install-rustclaw-cmd.sh
+# 安装 agentctl 启动器时一并部署 UI 到 nginx
+bash install-agent-cmd.sh
 ```
 
 如果你只想本地安装而不部署 nginx，建议显式加上：
 
 ```bash
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+bash install-agent-cmd.sh --user --no-deploy-ui
 ```
 
 ## 与后端的关系

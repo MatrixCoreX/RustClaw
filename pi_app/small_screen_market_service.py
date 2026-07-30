@@ -253,7 +253,7 @@ def fetch_a_share_quotes(stock_items=None):
         try:
             req = urllib.request.Request(SINA_HQ_URL + ",".join(stock_codes))
             req.add_header("Referer", SINA_REFERER)
-            req.add_header("User-Agent", "RustClaw-Small-Screen/1.0")
+            req.add_header("User-Agent", "agent-small-screen/1.0")
             with urllib.request.urlopen(req, timeout=8) as r:
                 quotes = _parse_sina_quotes(_decode_sina_body(r.read()))
         except Exception as exc:

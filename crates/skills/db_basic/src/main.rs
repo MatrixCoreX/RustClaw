@@ -134,7 +134,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("data/rustclaw.db");
+        .ok_or_else(|| SkillError::new("invalid_input", "db_path is required"))?;
     let sql = match action {
         "schema_version" | "sqlite_schema_version" => "PRAGMA schema_version;".to_string(),
         "user_version" | "sqlite_user_version" => "PRAGMA user_version;".to_string(),

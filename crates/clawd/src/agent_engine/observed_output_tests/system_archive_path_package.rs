@@ -4,7 +4,7 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"info","hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
+            r#"{"action":"info","hostname":"agent-runtime-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/agent-runtime-workspace"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -35,7 +35,7 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "archive_basic",
-            r#"{"action":"pack","format":"zip","source":"/tmp/rustclaw-workspace/scripts/skill_calls","archive":"/tmp/rustclaw-workspace/tmp/nl_archive_case.zip","output":"exit=0\nupdating: skill_calls/\n"}"#,
+            r#"{"action":"pack","format":"zip","source":"/tmp/agent-runtime-workspace/scripts/skill_calls","archive":"/tmp/agent-runtime-workspace/tmp/nl_archive_case.zip","output":"exit=0\nupdating: skill_calls/\n"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -67,7 +67,7 @@ fn direct_scalar_reads_unique_scalar_from_multi_read_fields_with_container_noise
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",
-        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"scripts","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"},{"exists":true,"field_path":"name","resolved_field_path":"name","value":"rustclaw-nl-fixture","value_text":"rustclaw-nl-fixture","value_type":"string"}]}"#,
+        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"scripts","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"},{"exists":true,"field_path":"name","resolved_field_path":"name","value":"agent-runtime-nl-fixture","value_text":"agent-runtime-nl-fixture","value_type":"string"}]}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     route_result.requires_content_evidence = true;
@@ -80,7 +80,7 @@ fn direct_scalar_reads_unique_scalar_from_multi_read_fields_with_container_noise
 
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("rustclaw-nl-fixture")
+        Some("agent-runtime-nl-fixture")
     );
 }
 
@@ -90,7 +90,7 @@ fn direct_scalar_keeps_multi_read_fields_ambiguous_when_multiple_scalars_exist()
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "config_basic",
-        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"name","resolved_field_path":"name","value":"rustclaw-nl-fixture","value_text":"rustclaw-nl-fixture","value_type":"string"},{"exists":true,"field_path":"version","resolved_field_path":"version","value":"0.1.0","value_text":"0.1.0","value_type":"string"}]}"#,
+        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"name","resolved_field_path":"name","value":"agent-runtime-nl-fixture","value_text":"agent-runtime-nl-fixture","value_type":"string"},{"exists":true,"field_path":"version","resolved_field_path":"version","value":"0.1.0","value_text":"0.1.0","value_type":"string"}]}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     route_result.requires_content_evidence = true;
@@ -113,7 +113,7 @@ fn direct_answer_defers_system_basic_info_summary_without_action_field() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
+            r#"{"hostname":"agent-runtime-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/agent-runtime-workspace"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -144,7 +144,7 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw"}"#,
+            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/agent-runtime"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -175,7 +175,7 @@ fn direct_answer_defers_system_basic_info_to_synthesis() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"extra":{"arch":"x86_64","current_user":"guagua","cwd":"/home/guagua/rustclaw","hostname":"ThinkPad-X1","os":"linux","pid":2488573,"process_rss_bytes":3055616,"uptime_seconds":"894677.25","workspace_root":"/home/guagua/rustclaw"},"text":"{\"arch\":\"x86_64\",\"current_user\":\"guagua\",\"cwd\":\"/home/guagua/rustclaw\",\"hostname\":\"ThinkPad-X1\",\"os\":\"linux\",\"pid\":2488573,\"process_rss_bytes\":3055616,\"uptime_seconds\":\"894677.25\",\"workspace_root\":\"/home/guagua/rustclaw\"}"}"#,
+        r#"{"extra":{"arch":"x86_64","current_user":"guagua","cwd":"/home/guagua/agent-runtime","hostname":"ThinkPad-X1","os":"linux","pid":2488573,"process_rss_bytes":3055616,"uptime_seconds":"894677.25","workspace_root":"/home/guagua/agent-runtime"},"text":"{\"arch\":\"x86_64\",\"current_user\":\"guagua\",\"cwd\":\"/home/guagua/agent-runtime\",\"hostname\":\"ThinkPad-X1\",\"os\":\"linux\",\"pid\":2488573,\"process_rss_bytes\":3055616,\"uptime_seconds\":\"894677.25\",\"workspace_root\":\"/home/guagua/agent-runtime\"}"}"#,
     ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -204,7 +204,7 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
+            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/agent-runtime","workspace_root":"/home/guagua/agent-runtime"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -225,7 +225,7 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/home/guagua/rustclaw")
+        Some("/home/guagua/agent-runtime")
     );
 }
 
@@ -235,7 +235,7 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
+            r#"{"hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/agent-runtime","workspace_root":"/home/guagua/agent-runtime"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -256,7 +256,7 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
     };
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/home/guagua/rustclaw")
+        Some("/home/guagua/agent-runtime")
     );
 }
 
@@ -265,7 +265,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
     let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw"));
+        .push(ok_step("step_1", "run_cmd", "/home/guagua/agent-runtime"));
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "write_file",
@@ -273,7 +273,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
             "schema_version": 1,
             "action": "write_file",
             "status": "ok",
-            "path": "/home/guagua/rustclaw/document/pwd_line.txt",
+            "path": "/home/guagua/agent-runtime/document/pwd_line.txt",
             "size_bytes": 40,
             "complete": true
         })
@@ -281,10 +281,10 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
     ));
     loop_state.output_vars.insert(
         "last_file_path".to_string(),
-        "/home/guagua/rustclaw/document/pwd_line.txt".to_string(),
+        "/home/guagua/agent-runtime/document/pwd_line.txt".to_string(),
     );
     loop_state.last_written_file_path =
-        Some("/home/guagua/rustclaw/document/pwd_line.txt".to_string());
+        Some("/home/guagua/agent-runtime/document/pwd_line.txt".to_string());
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
@@ -305,7 +305,7 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
 
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/home/guagua/rustclaw/document/pwd_line.txt")
+        Some("/home/guagua/agent-runtime/document/pwd_line.txt")
     );
 }
 
@@ -315,7 +315,7 @@ fn generic_workspace_summary_is_not_hard_summarized_by_observed_output() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "list_dir",
-            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
+            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nagent-runtime.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,

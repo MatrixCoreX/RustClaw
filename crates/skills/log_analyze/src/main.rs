@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use skill_sdk::{BoundedResult, ContinuationDescriptor};
 
 const MATCH_LINE_MAX_CHARS: usize = 240;
 const RECOVERY_KEYWORDS: &[&str] = &["retry", "recover", "recovered", "succeeded", "success"];
@@ -103,11 +103,13 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .ok_or_else(|| "args must be object".to_string())?;
     let root = workspace_root();
     let default_path = root.join("logs/clawd.log");
-    let path = obj
+    let requested_path = obj
         .get("path")
         .and_then(|v| v.as_str())
         .map(PathBuf::from)
         .unwrap_or(default_path);
+    let requested_path_display = requested_path.display().to_string();
+    let path = resolve_input_path(&root, requested_path);
     let max_matches = obj
         .get("max_matches")
         .and_then(|v| v.as_u64())
@@ -147,9 +149,18 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .filter(|v: &Vec<String>| !v.is_empty())
         .unwrap_or_else(|| default_keywords.iter().map(|s| s.to_string()).collect());
 
-    let analysis = analyze_log_target(&path, &keywords, max_matches, tail_lines, continuation)?;
+    let mut analysis = analyze_log_target(&path, &keywords, max_matches, tail_lines, continuation)?;
+    analysis.requested_path = requested_path_display;
     let extra = log_analysis_extra(analysis);
     Ok((extra.to_string(), extra))
+}
+
+fn resolve_input_path(workspace_root: &Path, requested_path: PathBuf) -> PathBuf {
+    if requested_path.is_absolute() {
+        requested_path
+    } else {
+        workspace_root.join(requested_path)
+    }
 }
 
 fn log_analysis_extra(analysis: LogAnalysis) -> Value {

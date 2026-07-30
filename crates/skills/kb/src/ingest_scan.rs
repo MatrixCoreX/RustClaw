@@ -1,6 +1,6 @@
 use super::{storage_path_for, KbRuntime};
 use anyhow::{anyhow, Context, Result};
-use rustclaw_skill_sdk::ExpectedPathKind;
+use skill_sdk::ExpectedPathKind;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};

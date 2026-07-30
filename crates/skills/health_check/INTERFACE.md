@@ -5,11 +5,11 @@
 
 ## Capability Summary
 - `health_check` runs baseline diagnostics and status checks for environment/runtime health.
-- It returns RustClaw runtime fields, runtime-owned `overall_status` / `clawd_visible` / `db_available` probes, and a structured `system_health` host block; the skill never receives the main database path.
+- It returns agent-runtime fields, runtime-owned `overall_status` / `clawd_visible` / `db_available` probes, and a structured `system_health` host block; the skill never receives the main database path.
 - `system_health.os_family` explicitly distinguishes `linux` and `macos` so downstream logic can branch cleanly.
 - It is read-only and should not perform mutating operations.
-- For RustClaw or `clawd` runtime self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
-- If an HTTP endpoint observation is also requested, the RustClaw API health endpoint is `/v1/health` and may require `X-RustClaw-Key`; a plain `/health` response is not sufficient RustClaw daemon health evidence by itself.
+- For agent-runtime or `clawd` self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
+- If an HTTP endpoint observation is also requested, the agent API health endpoint is `/v1/health` and may require `X-Agent-Key`; a plain `/health` response is not sufficient daemon health evidence by itself.
 - Combine this with `task_control.list` only when the user also asks for task queue or task history status.
 
 ## Actions
@@ -28,7 +28,7 @@
 - Successful responses also mirror the parsed diagnostic object into the optional `extra` field.
 
 ## Response Notes
-- RustClaw runtime fields remain top-level for compatibility:
+- Agent-runtime fields remain top-level:
   - `clawd_process_count`
   - `telegramd_process_count`
   - `clawd_health_port_open`, `clawd_visible`, `db_available`, `overall_status`, `runtime_probe`

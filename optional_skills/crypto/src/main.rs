@@ -242,7 +242,7 @@ struct SkillContext {
     #[serde(default)]
     user_key: Option<String>,
     #[serde(default)]
-    exchange_credentials: HashMap<String, ExchangeCredentialInput>,
+    skill_storage: Option<SkillStorageContext>,
     /// Present when the skill is invoked from a scheduled job (injected by `clawd` into `context`).
     #[serde(default)]
     schedule_job_id: Option<String>,
@@ -268,6 +268,11 @@ struct ExchangeCredentialInput {
     api_secret: String,
     #[serde(default)]
     passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillStorageContext {
+    database_path: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -924,7 +929,7 @@ fn load_root_config() -> RootConfig {
 
 fn apply_context_credentials(base: &RootConfig, context: &SkillContext) -> RootConfig {
     let mut cfg = base.clone();
-    let _ = context
+    let user_key = context
         .user_key
         .as_deref()
         .map(str::trim)
@@ -936,7 +941,8 @@ fn apply_context_credentials(base: &RootConfig, context: &SkillContext) -> RootC
     cfg.okx.api_key.clear();
     cfg.okx.api_secret.clear();
     cfg.okx.passphrase.clear();
-    if let Some(binance) = context.exchange_credentials.get("binance") {
+    let exchange_credentials = skill_owned_exchange_credentials(context, user_key);
+    if let Some(binance) = exchange_credentials.get("binance") {
         let api_key = binance.api_key.trim();
         let api_secret = binance.api_secret.trim();
         if !api_key.is_empty() && !api_secret.is_empty() {
@@ -945,7 +951,7 @@ fn apply_context_credentials(base: &RootConfig, context: &SkillContext) -> RootC
             cfg.binance.api_secret = api_secret.to_string();
         }
     }
-    if let Some(okx) = context.exchange_credentials.get("okx") {
+    if let Some(okx) = exchange_credentials.get("okx") {
         let api_key = okx.api_key.trim();
         let api_secret = okx.api_secret.trim();
         let passphrase = okx.passphrase.as_deref().unwrap_or("").trim();
@@ -957,6 +963,41 @@ fn apply_context_credentials(base: &RootConfig, context: &SkillContext) -> RootC
         }
     }
     cfg
+}
+
+fn skill_owned_exchange_credentials(
+    context: &SkillContext,
+    user_key: Option<&str>,
+) -> HashMap<String, ExchangeCredentialInput> {
+    let (Some(storage), Some(user_key)) = (context.skill_storage.as_ref(), user_key) else {
+        return HashMap::new();
+    };
+    let Ok(db) = rusqlite::Connection::open_with_flags(
+        &storage.database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return HashMap::new();
+    };
+    let Ok(mut statement) = db.prepare(
+        "SELECT exchange, api_key, api_secret, passphrase
+         FROM exchange_api_credentials
+         WHERE user_key = ?1 AND enabled = 1",
+    ) else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([user_key], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            ExchangeCredentialInput {
+                api_key: row.get(1)?,
+                api_secret: row.get(2)?,
+                passphrase: row.get(3)?,
+            },
+        ))
+    }) else {
+        return HashMap::new();
+    };
+    rows.filter_map(Result::ok).collect()
 }
 
 fn workspace_root() -> PathBuf {

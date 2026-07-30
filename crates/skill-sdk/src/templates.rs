@@ -239,7 +239,7 @@ fn language_files(language: ImplementationLanguage) -> Vec<(&'static str, &'stat
     }
 }
 
-const README_TEMPLATE: &str = "# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\n";
+const README_TEMPLATE: &str = "# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `agent-jsonl-v1`. Run `skillctl validate skill.toml` before installation.\n";
 
 const INTERFACE_TEMPLATE: &str = "# __SKILL_NAME__ Interface\n\n## Capability Summary\n\n__SUMMARY__\n\nThis document teaches usage only. It is not a permission, risk, or host-policy grant; the machine manifest request and host admission receipt are authoritative.\n\n## Actions\n\n__ACTIONS__\n## Error Contract\n\nErrors return `status=error`, readable `error_text`, and stable `extra.error_code` / `extra.message_key`.\n\n## Config Entry Points\n\nNo configuration is required by the starter template.\n";
 

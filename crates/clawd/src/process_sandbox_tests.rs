@@ -364,3 +364,49 @@ async fn read_only_backend_limits_writes_to_explicit_internal_path() {
     );
     assert!(!root.path().join("workspace.txt").exists());
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn explicit_writable_mount_preserves_system_resolver_configuration() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new_in_system_temp("resolver_visible");
+    let internal = TestDir::new_in_system_temp("resolver_internal_write");
+    let writable_paths = vec![internal.path().to_path_buf()];
+    let mut prepared = prepare_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Inherit,
+            additional_writable_paths: &writable_paths,
+        },
+    )
+    .expect("sandbox command");
+    let internal_target = prepared
+        .additional_writable_targets
+        .first()
+        .expect("internal target")
+        .clone();
+    prepared
+        .command
+        .arg("-lc")
+        .arg(format!(
+            "test -e /etc/resolv.conf; test -e \"$(readlink -f /etc/resolv.conf)\"; printf ok > {}/probe",
+            internal_target.display()
+        ))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let status = prepared.command.status().await.expect("sandbox status");
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read_to_string(internal.path().join("probe")).expect("resolver probe"),
+        "ok"
+    );
+}

@@ -69,9 +69,9 @@ export function safeArtifactUrl(value: unknown): value is string {
     return false;
   }
   try {
-    const parsed = new URL(value, "http://rustclaw.local");
+    const parsed = new URL(value, "http://agent.invalid");
     return (
-      parsed.origin === "http://rustclaw.local" &&
+      parsed.origin === "http://agent.invalid" &&
       /^\/v1\/tasks\/[A-Za-z0-9-]+\/artifacts\/[A-Za-z0-9_.:%-]+\/content$/.test(
         parsed.pathname,
       )

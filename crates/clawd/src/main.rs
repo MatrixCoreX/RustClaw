@@ -87,6 +87,7 @@ mod schedule_service;
 mod scheduled_run_contract;
 mod schema_contract;
 mod semantic_judge;
+mod skill_admission;
 mod skill_availability;
 mod skill_output_artifact;
 mod skill_storage;
@@ -185,15 +186,16 @@ pub(crate) use repo::{
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
-    build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
-    AgentAction, AgentRuntimeConfig, AppState, AskReply, AskState, AskStateRegistry, AskTransition,
+    assemble_skill_views_snapshot, build_skill_views_with_overlay, llm_model_kind, llm_vendor_name,
+    load_skill_admission_snapshot, log_ask_transition, reload_skill_views, AgentAction,
+    AgentRuntimeConfig, AppState, AskReply, AskState, AskStateRegistry, AskTransition,
     ChannelConfig, ClaimedTask, CommandIntentRuntime, CoreServices, LlmCallSequenceEntry,
     LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
     PolicyConfig, RateLimiter, ReloadContext, RuntimeChannel, ScheduleIntentOutput,
     ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskCostBlocker,
     TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
-pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
+pub(crate) use skills::canonical_skill_name;
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
     active_running_task_count, active_running_task_count_for_user, channel_gateway_process_stats,
@@ -281,7 +283,19 @@ fn api_ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
     )
 }
 
+pub(crate) fn auth_key_from_headers(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(claw_core::product_identity::AUTH_KEY_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
 fn api_cors_layer() -> CorsLayer {
+    let allowed_headers = vec![
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderName::from_static("last-event-id"),
+        axum::http::HeaderName::from_static(claw_core::product_identity::AUTH_KEY_HEADER),
+        axum::http::HeaderName::from_static(claw_core::product_identity::CLIENT_ORIGIN_HEADER),
+    ];
     CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([
@@ -291,12 +305,7 @@ fn api_cors_layer() -> CorsLayer {
             axum::http::Method::DELETE,
             axum::http::Method::OPTIONS,
         ])
-        .allow_headers([
-            axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderName::from_static("last-event-id"),
-            axum::http::HeaderName::from_static("x-rustclaw-key"),
-            axum::http::HeaderName::from_static("x-rustclaw-client"),
-        ])
+        .allow_headers(allowed_headers)
 }
 
 fn resolve_startup_config_path_from<I>(
@@ -337,8 +346,41 @@ where
 fn resolve_startup_config_path() -> anyhow::Result<String> {
     resolve_startup_config_path_from(
         std::env::args().skip(1),
-        std::env::var("RUSTCLAW_CONFIG_PATH").ok(),
+        claw_core::product_identity::env_string("CONFIG_PATH").ok(),
     )
+}
+
+fn resolve_offline_bundled_repair_skill_from<I>(args: I) -> anyhow::Result<Option<String>>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let mut skill_name = None;
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--repair-bundled-skill=") {
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("--repair-bundled-skill requires a non-empty skill name");
+            }
+            skill_name = Some(value.to_string());
+            continue;
+        }
+        if arg == "--repair-bundled-skill" {
+            let Some(value) = args.next() else {
+                anyhow::bail!("--repair-bundled-skill requires a skill name");
+            };
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("--repair-bundled-skill requires a non-empty skill name");
+            }
+            skill_name = Some(value.to_string());
+        }
+    }
+    Ok(skill_name)
+}
+
+fn resolve_offline_bundled_repair_skill() -> anyhow::Result<Option<String>> {
+    resolve_offline_bundled_repair_skill_from(std::env::args().skip(1))
 }
 
 #[cfg(test)]
@@ -359,7 +401,7 @@ fn tokio_worker_stack_bytes(raw: Option<&str>) -> usize {
 
 fn main() -> anyhow::Result<()> {
     let worker_stack_bytes = tokio_worker_stack_bytes(
-        std::env::var("RUSTCLAW_TOKIO_WORKER_STACK_BYTES")
+        claw_core::product_identity::env_string("TOKIO_WORKER_STACK_BYTES")
             .ok()
             .as_deref(),
     );
@@ -383,6 +425,25 @@ async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(&config_path)?;
     let workspace_root = std::env::current_dir()?;
     info!("startup config_path={}", config_path);
+    if let Some(skill_name) = resolve_offline_bundled_repair_skill()? {
+        let snapshot = http::ui_routes::repair_bundled_skill_admission_offline(
+            &workspace_root,
+            &config,
+            &skill_name,
+        )
+        .map_err(anyhow::Error::msg)?;
+        println!(
+            "{}",
+            json!({
+                "command": "repair-bundled-skill",
+                "skill_name": skill_name,
+                "registry_generation": snapshot.generation,
+                "registry_generation_digest": snapshot.generation_digest,
+                "status": "ok"
+            })
+        );
+        return Ok(());
+    }
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db_pool = init_db(&config)?;
@@ -428,12 +489,12 @@ async fn run() -> anyhow::Result<()> {
         warn!("============================================================");
         warn!("No auth key found in database. Generated initial admin key.");
         warn!("Initial admin key: {}", user_key);
-        warn!("Default web login: username=rustclaw password=123456");
+        warn!("Default web login: username=admin password=123456");
         warn!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         warn!("============================================================");
         eprintln!("============================================================");
         eprintln!("Initial admin key: {}", user_key);
-        eprintln!("Default web login: username=rustclaw password=123456");
+        eprintln!("Default web login: username=admin password=123456");
         eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         eprintln!("============================================================");
     }
@@ -640,12 +701,17 @@ async fn run() -> anyhow::Result<()> {
     };
 
     // Phase 4: 统一 skill 视图重建（启动与 reload 复用）
-    let views = build_skill_views(
+    let admission_overlay =
+        load_skill_admission_snapshot(&workspace_root, &config).map_err(|e| {
+            error!("startup: skill admission overlay failed: {}", e);
+            anyhow::anyhow!(e)
+        })?;
+    let views = build_skill_views_with_overlay(
         &workspace_root,
         config.skills.registry_path.as_deref(),
         &config.skills.skill_switches,
-        &config.skills.skills_list,
         &config.skills.uninstalled_skills,
+        Some(&admission_overlay),
     )
     .map_err(|e| {
         error!("startup: build_skill_views failed: {}", e);
@@ -664,7 +730,7 @@ async fn run() -> anyhow::Result<()> {
         views.planner_visible.len()
     );
 
-    // §P4.1 收尾：registry 必须覆盖所有 REQUIRED_BUILTIN_SKILLS（且 kind=builtin），
+    // §P4.1 收尾：registry 必须覆盖所有 HOST_TOOL_DESCRIPTORS（且 kind=builtin），
     // 否则 chat / run_cmd / read_file 这些核心技能在 dispatch 时会被走 runner
     // 子进程，行为静默回退。这里在启动期一次性 bail，便于早发现别名漂移或
     // 误改 kind。
@@ -728,6 +794,8 @@ async fn run() -> anyhow::Result<()> {
             "mcp_server_lifecycle"
         );
     }
+    let initial_skill_views: SkillViewsSnapshot =
+        assemble_skill_views_snapshot(views, &admission_overlay);
 
     let state = AppState {
         core: crate::CoreServices {
@@ -737,10 +805,7 @@ async fn run() -> anyhow::Result<()> {
             llm_providers,
             agents_by_id: Arc::new(agents_by_id),
             http_client: Client::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: views.registry,
-                skills_list: Arc::new(views.execution_skills),
-            }))),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
             mcp_runtime,
         },
@@ -815,9 +880,6 @@ async fn run() -> anyhow::Result<()> {
         },
         reload_ctx: ReloadContext {
             config_path_for_reload: config_path.clone(),
-            _registry_path_for_reload: config.skills.registry_path.clone(),
-            _skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
-            _initial_skills_list_for_reload: config.skills.skills_list.clone(),
         },
         ask_states: AskStateRegistry::default(),
     };
@@ -927,7 +989,7 @@ async fn run() -> anyhow::Result<()> {
 }
 
 fn clawd_internal_listen() -> anyhow::Result<String> {
-    let listen = std::env::var("RUSTCLAW_INTERNAL_LISTEN")
+    let listen = claw_core::product_identity::env_string("INTERNAL_LISTEN")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_LISTEN.to_string());
@@ -935,11 +997,11 @@ fn clawd_internal_listen() -> anyhow::Result<String> {
 }
 
 fn validate_clawd_internal_listen(listen: &str) -> anyhow::Result<String> {
-    let address = listen.parse::<std::net::SocketAddr>().map_err(|_| {
-        anyhow::anyhow!("RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address")
-    })?;
+    let address = listen
+        .parse::<std::net::SocketAddr>()
+        .map_err(|_| anyhow::anyhow!("APP_INTERNAL_LISTEN must be a loopback socket address"))?;
     if !address.ip().is_loopback() {
-        anyhow::bail!("RUSTCLAW_INTERNAL_LISTEN must use a loopback address");
+        anyhow::bail!("APP_INTERNAL_LISTEN must use a loopback address");
     }
     Ok(address.to_string())
 }
@@ -1020,9 +1082,7 @@ async fn submit_task(
         }
     }
     if req.user_key.is_none() {
-        req.user_key = headers
-            .get("x-rustclaw-key")
-            .and_then(|v| v.to_str().ok())
+        req.user_key = auth_key_from_headers(&headers)
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(|v| v.to_string());
@@ -1059,12 +1119,8 @@ async fn submit_task(
     let normalized_external_user_id = submit_ctx.normalized_external_user_id.clone();
     let normalized_external_chat_id = submit_ctx.normalized_external_chat_id.clone();
     let effective_chat_id = submit_ctx.effective_chat_id;
-    let client_origin = headers
-        .get(task_execution_policy::CLIENT_ORIGIN_HEADER)
-        .and_then(|value| value.to_str().ok());
-    let requested_execution_mode = headers
-        .get(task_execution_policy::EXECUTION_MODE_HEADER)
-        .and_then(|value| value.to_str().ok());
+    let client_origin = task_execution_policy::client_origin_from_headers(&headers);
+    let requested_execution_mode = task_execution_policy::execution_mode_from_headers(&headers);
     if let Err(error) = task_execution_policy::stamp_authenticated_submission_policy(
         &mut req.payload,
         submit_ctx.resolved_identity.as_ref(),
@@ -1266,10 +1322,7 @@ async fn get_task(
 
     match read_result {
         Ok(Some((task, task_user_key, channel))) => {
-            let provided_key = headers
-                .get("x-rustclaw-key")
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string);
+            let provided_key = auth_key_from_headers(&headers).map(str::to_string);
             match check_task_view_access(
                 &state,
                 task_user_key.as_deref(),
@@ -1327,9 +1380,7 @@ fn require_auth_identity_for_api<T: Serialize>(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<T>>)> {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|v| v.to_str().ok())
+    let Some(raw_key) = auth_key_from_headers(headers)
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
@@ -1682,7 +1733,7 @@ struct ActiveTaskItem {
     lifecycle: Option<serde_json::Value>,
 }
 
-/// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-rustclaw-key 鉴权。
+/// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-agent-key 鉴权。
 async fn reload_skills_handler(
     State(state): State<AppState>,
     headers: HeaderMap,

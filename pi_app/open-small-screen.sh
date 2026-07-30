@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 在小屏（480x320）上全屏打开 RustClaw 状态页（网页版）。可放桌面双击运行。
+# 在小屏（480x320）上全屏打开 agent runtime 状态页（网页版）。可放桌面双击运行。
 # 需先启动 clawd（8787）。用法: ./open-small-screen.sh
 
 set -euo pipefail
-# pi_app 的上级目录为 RustClaw 根
-RUSTCLAW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# pi_app 的上级目录为项目根
+APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="${BASE:-http://127.0.0.1:8787}"
 URL="${BASE}/small-screen.html"
 

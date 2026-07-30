@@ -30,7 +30,7 @@ const LLM_POOL_IDLE_TIMEOUT_SECS: u64 = 90;
 /// TCP keep-alive 心跳间隔；对长 idle 的 LLM 流式/长文本请求能降低 NAT
 /// 或中间网关静默断链导致的"首次失败 + 再 retry"开销。
 const LLM_TCP_KEEPALIVE_SECS: u64 = 60;
-const LLM_RATE_LIMIT_RETRY_TIMES_ENV: &str = "RUSTCLAW_LLM_RATE_LIMIT_RETRY_TIMES";
+const LLM_RATE_LIMIT_RETRY_TIMES_ENV_SUFFIX: &str = "LLM_RATE_LIMIT_RETRY_TIMES";
 const DEFAULT_LLM_RATE_LIMIT_RETRY_TIMES: usize = 4;
 const MAX_LLM_RATE_LIMIT_RETRY_TIMES: usize = 8;
 
@@ -459,7 +459,7 @@ fn retry_limit_for_provider_error_with_rate_limit_retries(
 }
 
 fn configured_rate_limit_retry_times() -> usize {
-    let raw = std::env::var(LLM_RATE_LIMIT_RETRY_TIMES_ENV).ok();
+    let raw = claw_core::product_identity::env_string(LLM_RATE_LIMIT_RETRY_TIMES_ENV_SUFFIX).ok();
     effective_rate_limit_retry_times(raw.as_deref())
 }
 

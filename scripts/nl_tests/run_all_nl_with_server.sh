@@ -22,7 +22,7 @@ REUSE_SERVER=0
 BUILD_RELEASE=0
 EXTRA_SUITE_ARGS=()
 SUITE_SELECTION=(--category all)
-USER_KEY_VALUE="${USER_KEY:-${RUSTCLAW_USER_KEY:-}}"
+USER_KEY_VALUE="${USER_KEY:-${APP_USER_KEY:-}}"
 INSTALL_ON_DEMAND_SKILLS=()
 INSTALLED_ON_DEMAND_SKILLS=()
 
@@ -185,7 +185,7 @@ curl_health() {
     return 1
   fi
   local -a auth_args=()
-  auth_args=(-H "X-RustClaw-Key: ${USER_KEY_VALUE}")
+  auth_args=(-H "X-Agent-Key: ${USER_KEY_VALUE}")
   curl -fsS --max-time 5 "${auth_args[@]}" "${health_url}" >/dev/null
 }
 
@@ -216,7 +216,7 @@ wait_for_skill_store_operation() {
   }
   while (( elapsed <= WAIT_SECONDS )); do
     response="$(curl -fsS \
-      -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+      -H "X-Agent-Key: ${USER_KEY_VALUE}" \
       "${BASE_URL%/}/v1/skills/store/operations/${operation_id}")" || return 1
     status="$(jq -r '.data.operation.status // ""' <<<"$response")"
     case "$status" in
@@ -243,7 +243,7 @@ wait_for_skill_store_operation() {
 }
 
 project_proactive_skill_receipts() {
-  local sdk_cli="${ROOT_DIR}/target/release/rustclaw-skill"
+  local sdk_cli="${ROOT_DIR}/target/release/skillctl"
   if [[ ! -x "$sdk_cli" ]]; then
     echo "skill receipt CLI not found: ${sdk_cli}" >&2
     echo "Run: ./build-all.sh no-ui" >&2
@@ -264,7 +264,7 @@ install_on_demand_skill() {
   fi
   local response
   response="$(curl -fsS \
-    -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+    -H "X-Agent-Key: ${USER_KEY_VALUE}" \
     -H "Content-Type: application/json" \
     --data "{\"skill_name\":\"${skill_name}\"}" \
     "${BASE_URL%/}/v1/skills/store/install")"
@@ -284,7 +284,7 @@ remove_installed_on_demand_skills() {
   for ((index=${#INSTALLED_ON_DEMAND_SKILLS[@]} - 1; index >= 0; index--)); do
     skill_name="${INSTALLED_ON_DEMAND_SKILLS[$index]}"
     response="$(curl -fsS \
-      -H "X-RustClaw-Key: ${USER_KEY_VALUE}" \
+      -H "X-Agent-Key: ${USER_KEY_VALUE}" \
       -H "Content-Type: application/json" \
       --data "{\"skill_name\":\"${skill_name}\",\"preserve_config\":true,\"preserve_data\":true}" \
       "${BASE_URL%/}/v1/skills/store/remove" 2>/dev/null || true)"
@@ -341,7 +341,7 @@ if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"} 
 print(f"127.0.0.1:{parsed.port}")
 PY
 )"
-  ISOLATION_ROOT="$(mktemp -d "${LOG_DIR%/}/rustclaw-nl-isolated-XXXXXX")"
+  ISOLATION_ROOT="$(mktemp -d "${LOG_DIR%/}/agent-runtime-nl-isolated-XXXXXX")"
   ISOLATED_CONFIG="${ISOLATION_ROOT}/config.toml"
   ISOLATED_DB="${ISOLATION_ROOT}/tasks.sqlite"
   ISOLATED_AUDIT_DB="${ISOLATION_ROOT}/audit.sqlite"
@@ -376,9 +376,9 @@ elif [[ -n "${RUNTIME_ENV_FILE}" ]]; then
 fi
 BASE_URL="${SELECTED_BASE_URL}"
 if [[ "${REUSE_SERVER}" -eq 0 ]]; then
-  export RUSTCLAW_CONFIG_PATH="${ISOLATED_CONFIG}"
-  export RUSTCLAW_DB_PATH="${ISOLATED_DB}"
-  export RUSTCLAW_INTERNAL_LISTEN="${isolated_listen}"
+  export APP_CONFIG_PATH="${ISOLATED_CONFIG}"
+  export APP_DB_PATH="${ISOLATED_DB}"
+  export APP_INTERNAL_LISTEN="${isolated_listen}"
   export CLIENT_LIKE_CHANNEL="ui"
   # An isolated database gets its own generated admin key. Never reuse a key
   # inherited from the developer's normal runtime against that database.
@@ -386,12 +386,12 @@ if [[ "${REUSE_SERVER}" -eq 0 ]]; then
 fi
 health_url="${BASE_URL%/}/v1/health"
 if [[ "${REUSE_SERVER}" -eq 1 ]]; then
-  USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${RUSTCLAW_USER_KEY:-}}}"
+  USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${APP_USER_KEY:-}}}"
 fi
 resolve_user_key
 if [[ -n "${USER_KEY_VALUE:-}" ]]; then
   export USER_KEY="${USER_KEY_VALUE}"
-  export RUSTCLAW_USER_KEY="${RUSTCLAW_USER_KEY:-${USER_KEY_VALUE}}"
+  export APP_USER_KEY="${APP_USER_KEY:-${USER_KEY_VALUE}}"
   echo "auth_key=resolved"
 else
   echo "auth_key=missing"
@@ -436,7 +436,7 @@ else
       resolve_user_key
       if [[ -n "${USER_KEY_VALUE:-}" ]]; then
         export USER_KEY="${USER_KEY_VALUE}"
-        export RUSTCLAW_USER_KEY="${USER_KEY_VALUE}"
+        export APP_USER_KEY="${USER_KEY_VALUE}"
         echo "auth_key=resolved_from_isolated_db"
       fi
     fi
@@ -465,7 +465,7 @@ if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
 fi
 
 stamp="$(date +%Y%m%d_%H%M%S)"
-SUITE_LOG="${LOG_DIR%/}/rustclaw_full_nl_${stamp}.out"
+SUITE_LOG="${LOG_DIR%/}/agent_full_nl_${stamp}.out"
 
 suite_cmd=(
   bash "${SCRIPT_DIR}/run_suite.sh"

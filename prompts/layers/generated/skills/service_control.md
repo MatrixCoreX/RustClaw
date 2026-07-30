@@ -9,19 +9,19 @@
 
 ## Capability Summary (from interface)
 - `service_control` performs service lifecycle operations and diagnosis with **structured input/output**.
-- **Managers implemented**: `rustclaw` (HTTP to clawd), `systemd`, `service`, `brew_services`, `launchd`.
+- **Managers implemented**: `agent_runtime` (HTTP to clawd), `systemd`, `service`, `brew_services`, `launchd`.
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
 - **Status questions**: Runtime status must come from `status` / `verify` (or another real runtime check), not from binary-file existence.
-- For RustClaw daemon status, use `target: "clawd"` and `manager_type: "rustclaw"` when checking the running RustClaw API service. Do not replace that with a generic service/unit name unless the user explicitly asks for host service-manager state.
-- **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service/brew services/launchd.
+- For runtime daemon status, use `target: "clawd"` and `manager_type: "agent_runtime"` when checking the running agent API service. Do not replace that with a generic service/unit name unless the user explicitly asks for host service-manager state.
+- **Security**: Target validation; no arbitrary shell; agent-service allowlist for the HTTP path; safe unit names for systemd/service/brew services/launchd.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
-- `status` — Get running state. When `target` is omitted, default to RustClaw aggregate status for the built-in RustClaw services.
-- `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for rustclaw).
-- `logs` — Bounded recent logs (rustclaw: fixed log files; systemd: journalctl; macOS managers provide bounded diagnostic guidance/evidence).
+- `status` — Get running state. When `target` is omitted, default to aggregate status for the built-in agent services.
+- `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for `agent_runtime`).
+- `logs` — Bounded recent logs (`agent_runtime`: fixed log files; systemd: journalctl; macOS managers provide bounded diagnostic guidance/evidence).
 - `verify` — Explicit post-check (running/stopped/unknown).
 - `diagnose_start_failure`, `diagnose_unhealthy_state` — status + logs + evidence summary.
 
@@ -29,15 +29,15 @@
 | Param         | Required | Type   | Default | Description |
 |---------------|----------|--------|---------|-------------|
 | `action`      | yes      | string | -       | One of: `status`, `start`, `stop`, `restart`, `reload`, `logs`, `verify`, `diagnose_start_failure`, `diagnose_unhealthy_state`. |
-| `target`      | yes*     | string | -       | Service/unit name. *Optional for `status`; omitted target checks RustClaw aggregate status for built-in RustClaw services by default. |
+| `target`      | yes*     | string | -       | Service/unit name. *Optional for `status`; omitted target checks aggregate status for built-in agent services by default. |
 | `service`     | no       | string | -       | Alias for `target` (backward compatible). |
-| `manager_type`| no       | string | -       | One of: `brew_services`, `launchd`, `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `rustclaw`, `unknown`. Auto when target in rustclaw whitelist or resolved through service discovery. |
+| `manager_type`| no       | string | -       | One of: `brew_services`, `launchd`, `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `agent_runtime`, `unknown`. Auto when target is in the agent-service allowlist or resolved through service discovery. |
 | `tail_lines`  | no       | number | 100     | Max 500. For `logs` and for auto-logs on failure. |
 | `lines`       | no       | number | 100     | Alias for `tail_lines`. |
 | `verify`      | no       | bool   | true    | After start/restart/reload, run verify step. |
 | `allow_risky` | no       | bool   | false   | If true, allow stop/restart even when target is ambiguous (not recommended). |
 
-- **Target missing**: Required for all actions except `status` without target. `status` without target defaults to RustClaw aggregate status; other missing-target actions return structured error with `failure_reason` and `next_step`.
+- **Target missing**: Required for all actions except `status` without target. `status` without target defaults to agent-runtime aggregate status; other missing-target actions return structured error with `failure_reason` and `next_step`.
 - **Target aliases (skill-internal)**: The skill normalizes common machine/service names before discovery: e.g. `mysql`/`mysqld` → `mysql`, `redis`/`redis-server` → `redis`, `postgres`/`postgresql` → `postgresql`, `docker`/`dockerd` → `docker`, `ssh`/`sshd` → `sshd`, `cron`/`crond` → `cron`, `nginx` → `nginx`, `caddy` → `caddy`. Trailing ` service` / `.service` suffix is stripped for lookup. Only the target name is affected; `action` is unchanged.
 - **Service discovery**: Before executing control (when manager is not explicitly set), the skill discovers candidates via Homebrew services, launchd, systemd, and `service --status-all` where those tools are available. Exact match > prefix > contains; candidate count is limited. If **0 candidates**: returns `error_kind=not_found` with machine failure fields and a `next_step` asking for a more specific service name (do not invent a service name). If **>1 candidates**: returns `failure_reason="ambiguous: multiple matching services"` and `next_step` listing the candidates so the user can pick one. Only when exactly **1 candidate** is the control command executed. When `manager_type` is explicitly set, discovery is skipped and the normalized target is used as given.
 - **Ambiguous target (vague wording)**: Canonical broad tokens like `all` and `*`, plus configured aliases in `configs/service_control.toml` / `docker/config/service_control.toml`, block high-risk actions unless `allow_risky` is true. Runtime Rust must not add localized group phrases directly.
@@ -49,7 +49,7 @@
 - `clawd` → start/stop/restart return error (main daemon).
 - Ambiguous target (vague wording) + stop/restart without `allow_risky` → refuse with `error_kind=ambiguous_target`, `failure_reason`, and `next_step`.
 - Manager not implemented for the action → `error_kind=unsupported_platform` or `unsupported_action`, `failure_reason`, and optional `next_step`.
-- API 401 (rustclaw) → `error_kind=permission_denied`; suggest RUSTCLAW_UI_KEY.
+- API 401 (`agent_runtime`) → `error_code=permission_denied`; suggest `APP_UI_KEY`.
 - **Permission denied**: On systemd/service, if the control command fails due to permission, the skill may retry with `sudo`. Success is returned without mentioning sudo. If sudo also fails, `error_kind=permission_denied`, `failure_reason` is a machine-readable sudo failure reason, and `next_step` suggests using a privileged account or configuring passwordless sudo.
 
 ## Structured Evidence Contract (from interface)
@@ -70,7 +70,7 @@
 - Error responses expose top-level `error_kind` and `platform` where possible; callers must not classify service failures by matching localized `failure_reason` text.
 
 ## Request/Response Examples (from interface)
-### status (all, rustclaw)
+### status (all, agent_runtime)
 
 Request:
 ```json

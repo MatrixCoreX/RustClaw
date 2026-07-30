@@ -4,8 +4,8 @@ schema_version = 2
 [package]
 name = "config_guard"
 version = "0.1.8"
-description = "Inspect RustClaw configuration for missing, inconsistent, or risky structured values."
-protocol = "rustclaw-jsonl-v1"
+description = "Inspect host runtime configuration for missing, inconsistent, or risky structured values."
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"

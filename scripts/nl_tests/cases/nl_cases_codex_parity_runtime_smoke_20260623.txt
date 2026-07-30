@@ -1,4 +1,4 @@
-# Codex-parity runtime smoke cases for RustClaw.
+# Codex-parity runtime smoke cases for Agent Runtime.
 # Created: 2026-06-23
 #
 # Purpose:
@@ -19,7 +19,7 @@
 
 codex_parity_runtime_smoke|explicit_shell_process_ports_en|covers:agent_loop,run_cmd,process_basic,observed_finalizer,verifier,provider_call_events;requires_tool_call=true;local_readonly|Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.|expect=clawd
 
-codex_parity_runtime_smoke|content_excerpt_read_lightweight_zh|covers:content_excerpt,fs_basic,doc_parse,lightweight_planner,no_shell_fallback;requires_tool_call=true;local_readonly|用合适的只读文件读取能力查看 README.md 前 20 行，只回答文件是否存在、读取到的行数，以及标题中是否出现 RustClaw；不要用 shell cat 兜底。|expect=RustClaw
+codex_parity_runtime_smoke|content_excerpt_read_lightweight_zh|covers:content_excerpt,fs_basic,doc_parse,lightweight_planner,no_shell_fallback;requires_tool_call=true;local_readonly|用合适的只读文件读取能力查看 README.md 前 20 行，只回答文件是否存在、读取到的行数，以及标题中是否出现 Agent Runtime；不要用 shell cat 兜底。|expect=Agent Runtime
 
 codex_parity_runtime_smoke|http_artifact_download_en|covers:http_basic,artifact_refs,event_stream;requires_tool_call=true;external_network|Make a GET request to https://example.com and save the response body to document/http/download/nl-codex-parity-example.body. Reply with the HTTP status and the saved output_path exactly.|expect=document/http/download/nl-codex-parity-example.body
 
@@ -35,7 +35,7 @@ codex_parity_runtime_smoke|subagent_required_child_failure_zh|covers:subagent,bo
 
 codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、deny、require_confirmation、background_wait 机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
 
-codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 RUSTCLAW_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
+codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 APP_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
 
 codex_parity_runtime_smoke|resume_context_cli_surface_zh|covers:resume,clawcli,needs_user,checkpoint;requires_tool_call=true;local_readonly|检查 clawcli 是否提供 resume 子命令，并说明 resume 请求应提交哪些结构化字段；不要实际恢复任何任务；最后必须包含机器字段 resume_task_id。|expect=resume_task_id
 

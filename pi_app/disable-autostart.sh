@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 取消 RustClaw 小屏监控的开机自启动（删除 XDG 与 LXDE-pi 两处）
+# 取消产品小屏监控的开机自启动（删除 XDG 与 LXDE-pi 两处）
 
-DESKTOP_FILE="${HOME}/.config/autostart/rustclaw-small-screen.desktop"
+DESKTOP_FILE="${HOME}/.config/autostart/agent-small-screen.desktop"
 LXDE_AUTOSTART="${HOME}/.config/lxsession/LXDE-pi/autostart"
 
 removed=0
@@ -12,9 +12,9 @@ if [[ -f "$DESKTOP_FILE" ]]; then
 fi
 
 if [[ -f "$LXDE_AUTOSTART" ]]; then
-  if grep -qE "run-small-screen-launcher\.sh|rustclaw-small-screen-launcher" "$LXDE_AUTOSTART" 2>/dev/null; then
+  if grep -qE "run-small-screen-launcher\.sh|agent-small-screen-launcher|agent-small-screen-launcher" "$LXDE_AUTOSTART" 2>/dev/null; then
     tmp=$(mktemp)
-    grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "rustclaw-small-screen-launcher" | grep -v "# RustClaw small screen" > "$tmp" || true
+    grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "agent-small-screen-launcher" | grep -v "# Agent small screen" > "$tmp" || true
     mv -f "$tmp" "$LXDE_AUTOSTART"
     echo "已从 LXDE-pi 自启动中移除: $LXDE_AUTOSTART"
     removed=1

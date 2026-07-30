@@ -3,7 +3,7 @@ locale = "en-US"
 [dict]
 "feishu.msg.identity_check_unavailable" = "Identity check temporarily unavailable, please try again later."
 "feishu.msg.bind_key_required_for_chat" = "Please send your key first to bind this account before chatting or using features."
-"feishu.msg.bind_help" = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account."
+"feishu.msg.bind_help" = "Welcome to {product_name}.\nPlease send /key <your_key> first to bind this account."
 "feishu.msg.bind_success" = "Key bound successfully. Please send your previous message again."
 "feishu.msg.bind_invalid" = "Invalid key. Please try again."
 "feishu.msg.bind_request_failed" = "Bind request failed, please try again later."

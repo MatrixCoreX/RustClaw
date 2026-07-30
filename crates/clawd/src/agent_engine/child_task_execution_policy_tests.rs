@@ -191,14 +191,14 @@ fn local_worktree_child_accepts_scoped_write_but_rejects_publish() {
     let mut state = test_state();
     install_filesystem_registry(&state);
     let worktree_root = std::env::temp_dir().join(format!(
-        "rustclaw_child_policy_worktree_{}",
+        "agent_child_policy_worktree_{}",
         uuid::Uuid::new_v4().simple()
     ));
     std::fs::create_dir_all(&worktree_root).expect("create worktree fixture");
     std::fs::write(
-        worktree_root.join(".rustclaw-isolation.json"),
+        worktree_root.join(".agent-isolation.json"),
         serde_json::json!({
-            "marker_kind": "rustclaw_execution_isolation",
+            "marker_kind": "agent_execution_isolation",
             "profile": "local_worktree"
         })
         .to_string(),

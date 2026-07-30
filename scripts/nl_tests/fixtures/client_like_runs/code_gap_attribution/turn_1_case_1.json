@@ -4,15 +4,15 @@
     "task_id": "fixture-code-gap-attribution",
     "status": "failed",
     "result_json": {
-      "text": "The selected tool ran, but RustClaw could not extract the required structured evidence.",
+      "text": "The selected tool ran, but Agent Runtime could not extract the required structured evidence.",
       "messages": [
-        "The selected tool ran, but RustClaw could not extract the required structured evidence."
+        "The selected tool ran, but Agent Runtime could not extract the required structured evidence."
       ],
       "task_journal": {
         "summary": {
           "input_text": "Read a structured field from the fixture config",
           "final_status": "failure",
-          "final_answer": "The selected tool ran, but RustClaw could not extract the required structured evidence."
+          "final_answer": "The selected tool ran, but Agent Runtime could not extract the required structured evidence."
         },
         "trace": {
           "rounds": [],

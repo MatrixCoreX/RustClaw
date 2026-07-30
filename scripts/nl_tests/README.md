@@ -566,18 +566,18 @@ Client-like continuous regression:
   The aggregate check also gates metadata coverage for built-in tools, skills, memory, multi-turn context, and structured transformation cases.
   The suite gates attribution fixture coverage for `model_error`, `schema_error`, `code_gap`, `contract_gap`, `tool_gap`, `permission_denied`, `budget_exhausted`, `prompt_budget_error`, `delivery_error`, and `provider_error`, plus the structured negative signals used by the evaluator. Keep multilingual behavior on contract ids, schema fields, action refs, evidence keys, and error codes; do not add runtime natural-language phrase matching for new languages.
 - Generate 100 deterministic contract-matrix seed cases without calling a model:
-  `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/rustclaw-contract-cases.jsonl`
+  `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/agent-runtime-contract-cases.jsonl`
   Use `--batch N` to rotate the non-mandatory cases while preserving semantic/generic, phase, policy-decision, evidence-expression, and final-answer-shape coverage.
-  Add `--history /tmp/rustclaw-contract-history.jsonl --update-history` when running repeated batches; the generator prefers case ids not already in the local history file and appends the selected ids after a successful check.
+  Add `--history /tmp/agent-runtime-contract-history.jsonl --update-history` when running repeated batches; the generator prefers case ids not already in the local history file and appends the selected ids after a successful check.
 - Generate 100 live NL replay rows from the same matrix coverage:
-  `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --nl --report > /tmp/rustclaw-contract-nl.jsonl`
-  Add `--expectations /tmp/rustclaw-contract-nl.expectations.jsonl` to write matching evaluator expectations for contract match, allowed-action phase plan refs, executed skill family, required evidence, missing-evidence status, and final answer shape.
+  `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --nl --report > /tmp/agent-runtime-contract-nl.jsonl`
+  Add `--expectations /tmp/agent-runtime-contract-nl.expectations.jsonl` to write matching evaluator expectations for contract match, allowed-action phase plan refs, executed skill family, required evidence, missing-evidence status, and final answer shape.
   Add `--multilingual-variants` to emit zh-CN, en-US, ja-JP, ko-KR, fr-FR, and mixed-language prompts for each selected contract cell while preserving the same structured `[CONTRACT_TEST_HINT]`; this is the preferred regression path for checking that multilingual wording converges to the same semantic kind, allowed action, required evidence, and final answer shape without runtime natural-language hard matching.
-  Because `[CONTRACT_TEST_HINT]` is a test-matrix machine protocol and is disabled in normal runtime, start `clawd` for these live replay rows with `RUSTCLAW_ENABLE_CONTRACT_TEST_HINT=1`.
+  Because `[CONTRACT_TEST_HINT]` is a test-matrix machine protocol and is disabled in normal runtime, start `clawd` for these live replay rows with `APP_ENABLE_CONTRACT_TEST_HINT=1`.
   Run them through the client-like path with:
-  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-contract-nl.jsonl --prompt-reply-only --quality-guard`
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/agent-runtime-contract-nl.jsonl --prompt-reply-only --quality-guard`
   Then evaluate the finished run with:
-  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations /tmp/rustclaw-contract-nl.expectations.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations /tmp/agent-runtime-contract-nl.expectations.jsonl`
 - Regenerate the safe aggregate case file:
   `python3 scripts/nl_tests/build_client_like_case_aggregate.py`
   By default this writes 2,100 executable rows, padding from the existing safe
@@ -614,13 +614,13 @@ Client-like continuous regression:
   calls, prompt truncation, provider errors, and wall time. These are release
   regression thresholds, not runtime round/tool hard stops.
 - Generate or check a lightweight offline regression baseline:
-  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/agent-runtime-client-like-baseline.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`
   Expectation rows can assert route, planner capability/tool targets, exact planned `skill.action` refs when present in trace, executed tool/skill, structured `error_kind`, execution failure attribution, stop-signal attribution, verifier issue attribution, contract policy decision, contract match, evidence coverage, verifier approval, finalizer stage/fallback/grounding, finalizer answer shape/class, final text substrings, and final answer shape without making a new LLM request.
 - Extract exact replay prompts and expectations from a finished or interrupted client-like run:
-  `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/rustclaw-replay.jsonl --expectations /tmp/rustclaw-replay.expectations.jsonl`
-  Add `--min-repro /tmp/rustclaw-replay.min-repro.jsonl` to also write a sanitized reproduction summary containing the request, route contract, planned/requested actions, observed and missing evidence, failure attribution, and final answer preview.
-  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-replay.jsonl --quality-guard --prompt-reply-only`
+  `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/agent-runtime-replay.jsonl --expectations /tmp/agent-runtime-replay.expectations.jsonl`
+  Add `--min-repro /tmp/agent-runtime-replay.min-repro.jsonl` to also write a sanitized reproduction summary containing the request, route contract, planned/requested actions, observed and missing evidence, failure attribution, and final answer preview.
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/agent-runtime-replay.jsonl --quality-guard --prompt-reply-only`
 - Focused runtime capability boundary smoke:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_smoke_20260515.txt --quality-guard`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/runtime_capability_boundary_smoke_20260515.jsonl`
@@ -720,7 +720,7 @@ check and does not require live provider generation. After running
   a zero-tool direct answer, but still rejects execution through an unrelated
   tool. This tag changes test attribution only; runtime routing never consumes
   it.
-- Case prompts may use the machine token `__RUSTCLAW_TEST_BASE_URL__` when they
+- Case prompts may use the machine token `__APP_TEST_BASE_URL__` when they
   must call the same isolated server used by the suite. The continuous runner
   materializes it from `--base-url` immediately before submission. Do not put a
   fixed local port into an isolation-sensitive HTTP case.

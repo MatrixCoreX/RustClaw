@@ -15,7 +15,7 @@ impl TempStorage {
             .unwrap_or_default()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-rss-storage-{label}-{}-{nonce}",
+            "agent-runtime-rss-storage-{label}-{}-{nonce}",
             std::process::id()
         ));
         std::fs::create_dir_all(root.join("rss_fetch")).expect("create storage root");
@@ -110,4 +110,27 @@ fn storage_requires_absolute_state_database_identity() {
         initialize_and_load(&invalid, &RssMachineState::default()).unwrap_err(),
         "storage_database_identity_invalid"
     );
+}
+
+#[test]
+fn compatible_state_from_older_schema_verifies_persisted_payload_bytes() {
+    let temp = TempStorage::new("compatible-schema");
+    let runtime = temp.runtime();
+    let db = open(&runtime).expect("open storage");
+    ensure_schema(&db).expect("create schema");
+
+    // `pending_categories` was added with `#[serde(default)]`. An older
+    // payload without that field remains valid, but decode + re-encode would
+    // add the field and therefore must not be used for integrity validation.
+    let payload = r#"{"source_states":{},"candidates":{},"deprecated":[]}"#;
+    db.execute(
+        "INSERT INTO rss_machine_state (id, payload_json, payload_sha256)
+         VALUES (?1, ?2, ?3)",
+        params![STATE_ROW_ID, payload, payload_digest(payload.as_bytes())],
+    )
+    .expect("seed compatible older payload");
+
+    let loaded = initialize_and_load(&runtime, &RssMachineState::default())
+        .expect("load compatible older payload");
+    assert_eq!(loaded.state, RssMachineState::default());
 }

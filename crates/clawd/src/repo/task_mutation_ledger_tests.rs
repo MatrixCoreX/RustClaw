@@ -17,7 +17,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw-task-mutation-ledger-{}-{}",
+            "agent-runtime-task-mutation-ledger-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));

@@ -151,7 +151,7 @@ fn playwright_install_is_fixed_to_the_browser_skill_package() {
 #[test]
 fn playwright_manifest_detection_reads_only_the_browser_skill_manifest() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-playwright-dependency-test-{}",
+        "agent-runtime-playwright-dependency-test-{}",
         uuid::Uuid::new_v4()
     ));
     let package_dir = root.join("crates/skills/browser_web/node_modules/playwright");
@@ -215,7 +215,7 @@ async fn install_endpoint_rejects_unknown_dependency_tokens() {
                 .method("POST")
                 .uri("/v1/admin/system-dependencies/install")
                 .header("content-type", "application/json")
-                .header("x-rustclaw-key", KEY)
+                .header("x-agent-key", KEY)
                 .body(Body::from(r#"{"dependency_id":"; rm -rf /"}"#))
                 .expect("install request"),
         )
@@ -252,7 +252,7 @@ async fn install_endpoint_requires_admin_role() {
                 .method("POST")
                 .uri("/v1/admin/system-dependencies/install")
                 .header("content-type", "application/json")
-                .header("x-rustclaw-key", KEY)
+                .header("x-agent-key", KEY)
                 .body(Body::from(r#"{"dependency_id":"ffmpeg"}"#))
                 .expect("install request"),
         )
@@ -282,7 +282,7 @@ async fn authenticated_snapshot_reports_bounded_machine_dependency_fields() {
         .oneshot(
             Request::builder()
                 .uri("/v1/system/dependencies")
-                .header("x-rustclaw-key", KEY)
+                .header("x-agent-key", KEY)
                 .body(Body::empty())
                 .expect("dependency snapshot request"),
         )

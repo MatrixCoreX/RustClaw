@@ -2,8 +2,8 @@
 struct SkillStoreInstallSpec {
     skill_name: String,
     manifest_path: PathBuf,
-    adapter: rustclaw_skill_sdk::BuildAdapter,
-    network_policy: rustclaw_skill_sdk::BuildNetworkPolicy,
+    adapter: skill_sdk::BuildAdapter,
+    network_policy: skill_sdk::BuildNetworkPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -98,7 +98,7 @@ struct SkillStoreMutationSlot {
     build_semaphore: Arc<Semaphore>,
     config_semaphore: Arc<Semaphore>,
     skill_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
-    controls: Mutex<HashMap<String, rustclaw_skill_sdk::InstallControl>>,
+    controls: Mutex<HashMap<String, skill_sdk::InstallControl>>,
     recovered: AtomicBool,
 }
 
@@ -152,7 +152,7 @@ fn begin_skill_store_mutation(
 
 async fn skill_store_build_permit(
     state: &AppState,
-    control: &rustclaw_skill_sdk::InstallControl,
+    control: &skill_sdk::InstallControl,
 ) -> Option<OwnedSemaphorePermit> {
     let semaphore = skill_store_mutation_slot(state).build_semaphore.clone();
     loop {
@@ -178,8 +178,8 @@ async fn skill_store_config_permit(state: &AppState) -> OwnedSemaphorePermit {
         .expect("skill store config semaphore remains open")
 }
 
-fn skill_store_operation_store(state: &AppState) -> rustclaw_skill_sdk::SkillOperationStore {
-    rustclaw_skill_sdk::SkillOperationStore::new(skill_package_root(state))
+fn skill_store_operation_store(state: &AppState) -> skill_sdk::SkillOperationStore {
+    skill_sdk::SkillOperationStore::new(skill_package_root(state))
 }
 
 fn initialize_skill_store_operations(state: &AppState) -> SkillStoreOperationResult<()> {
@@ -206,7 +206,7 @@ fn initialize_skill_store_operations(state: &AppState) -> SkillStoreOperationRes
 fn register_skill_store_control(
     state: &AppState,
     operation_id: &str,
-    control: rustclaw_skill_sdk::InstallControl,
+    control: skill_sdk::InstallControl,
 ) {
     skill_store_mutation_slot(state)
         .controls
@@ -274,7 +274,7 @@ fn precompiled_skill_package_root_for(workspace_root: &Path, target: Option<&str
 
 #[cfg(not(test))]
 fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
-    let platform = rustclaw_skill_sdk::HostPlatform::current();
+    let platform = skill_sdk::HostPlatform::current();
     precompiled_skill_package_root_for(
         &state.skill_rt.workspace_root,
         platform.target.as_deref(),
@@ -287,7 +287,7 @@ fn skill_store_package_available(
     skill_name: &str,
 ) -> bool {
     let _ = registry;
-    rustclaw_skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
+    skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
         .resolve(skill_name)
         .is_ok()
 }
@@ -296,9 +296,9 @@ fn skill_store_manifest_metadata(
     state: &AppState,
     registry: &claw_core::skill_registry::SkillsRegistry,
     skill_name: &str,
-) -> Option<rustclaw_skill_sdk::PackageManifest> {
+) -> Option<skill_sdk::PackageManifest> {
     let relative = registry.package_manifest_path(skill_name)?;
-    rustclaw_skill_sdk::PackageManifest::load(&state.skill_rt.workspace_root.join(relative)).ok()
+    skill_sdk::PackageManifest::load(&state.skill_rt.workspace_root.join(relative)).ok()
 }
 
 fn skill_store_install_spec(
@@ -341,7 +341,11 @@ fn skill_store_install_spec(
             ),
         ));
     }
-    let relative_manifest = registry.package_manifest_path(skill_name).ok_or_else(|| {
+    let relative_manifest = admission_service(state)
+        .ok()
+        .and_then(|service| service.source_manifest_path(skill_name).ok().flatten())
+        .or_else(|| registry.package_manifest_path(skill_name).map(PathBuf::from))
+        .ok_or_else(|| {
         SkillStoreOperationError::new(
             StatusCode::CONFLICT,
             SkillStoreErrorCode::ManifestMissing,
@@ -349,7 +353,7 @@ fn skill_store_install_spec(
         )
     })?;
     let manifest_path = state.skill_rt.workspace_root.join(relative_manifest);
-    let manifest = rustclaw_skill_sdk::PackageManifest::load(&manifest_path).map_err(|error| {
+    let manifest = skill_sdk::PackageManifest::load(&manifest_path).map_err(|error| {
         SkillStoreOperationError::new(
             StatusCode::CONFLICT,
             SkillStoreErrorCode::ManifestInvalid,
@@ -437,16 +441,16 @@ fn skill_config_state(state: &AppState, skill_name: &str) -> (Vec<String>, Vec<S
 async fn install_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-    control: rustclaw_skill_sdk::InstallControl,
+    control: skill_sdk::InstallControl,
     allow_network: bool,
-) -> SkillStoreOperationResult<rustclaw_skill_sdk::InstallOutcome> {
+) -> SkillStoreOperationResult<skill_sdk::InstallOutcome> {
     let manifest_path = spec.manifest_path.clone();
     let workspace_root = state.skill_rt.workspace_root.clone();
     let package_root = skill_package_root(state);
     let precompiled_root = precompiled_skill_package_root(state);
     tokio::task::spawn_blocking(move || {
         if precompiled_root.is_dir() {
-            let precompiled = rustclaw_skill_sdk::PrecompiledInstallRequest {
+            let precompiled = skill_sdk::PrecompiledInstallRequest {
                 manifest_path: manifest_path.clone(),
                 workspace_root: workspace_root.clone(),
                 package_root: package_root.clone(),
@@ -454,13 +458,13 @@ async fn install_skill_store_package(
                 target: None,
                 control: Some(control.clone()),
             };
-            match rustclaw_skill_sdk::SkillInstaller.install_precompiled(&precompiled) {
+            match skill_sdk::SkillInstaller.install_precompiled(&precompiled) {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if precompiled_source_fallback_allowed(&error.code) => {}
                 Err(error) => return Err(error),
             }
         }
-        rustclaw_skill_sdk::SkillInstaller.install(&rustclaw_skill_sdk::InstallRequest {
+        skill_sdk::SkillInstaller.install(&skill_sdk::InstallRequest {
             manifest_path,
             workspace_root,
             package_root,
@@ -501,6 +505,7 @@ fn precompiled_source_fallback_allowed(error_code: &str) -> bool {
         "precompiled_package_unavailable"
             | "precompiled_platform_mismatch"
             | "precompiled_manifest_mismatch"
+            | "precompiled_adapter_unsupported"
     )
 }
 
@@ -508,11 +513,11 @@ fn precompiled_source_fallback_allowed(error_code: &str) -> bool {
 async fn install_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
-    control: rustclaw_skill_sdk::InstallControl,
+    control: skill_sdk::InstallControl,
     _allow_network: bool,
-) -> SkillStoreOperationResult<rustclaw_skill_sdk::InstallOutcome> {
-    use rustclaw_skill_sdk::receipt::{LaunchProgramScope, ReceiptLaunch};
-    use rustclaw_skill_sdk::{
+) -> SkillStoreOperationResult<skill_sdk::InstallOutcome> {
+    use skill_sdk::receipt::{LaunchProgramScope, ReceiptLaunch};
+    use skill_sdk::{
         ArtifactReceipt, HostPlatform, InstallReceipt, InstallReceiptStore, PackageManifest,
         ProtocolSmokeReceipt, INSTALL_RECEIPT_SCHEMA_VERSION,
     };
@@ -610,7 +615,7 @@ async fn install_skill_store_package(
             error,
         )
     })?;
-    let artifact_digest = rustclaw_skill_sdk::receipt::digest_file(&program).map_err(|error| {
+    let artifact_digest = skill_sdk::receipt::digest_file(&program).map_err(|error| {
         SkillStoreOperationError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             SkillStoreErrorCode::InstallFailed,
@@ -661,7 +666,7 @@ async fn install_skill_store_package(
             )
         })?,
         protocol_smoke: ProtocolSmokeReceipt {
-            protocol: rustclaw_skill_sdk::RUSTCLAW_JSONL_PROTOCOL.to_string(),
+            protocol: skill_sdk::AGENT_JSONL_PROTOCOL.to_string(),
             passed: true,
             request_id: "skill-store-test-smoke".to_string(),
             checked_at_unix: 1,
@@ -684,7 +689,7 @@ async fn install_skill_store_package(
             error,
         )
     })?;
-    Ok(rustclaw_skill_sdk::InstallOutcome {
+    Ok(skill_sdk::InstallOutcome {
         skill_name: spec.skill_name.clone(),
         version: manifest.package.version,
         install_root: destination,
@@ -696,7 +701,7 @@ async fn install_skill_store_package(
             )
         })?,
         adapter: spec.adapter,
-        origin: rustclaw_skill_sdk::InstallOrigin::SourceBuild,
+        origin: skill_sdk::InstallOrigin::SourceBuild,
         reused: false,
         phases: vec![
             "preflight".to_string(),
@@ -710,7 +715,7 @@ fn remove_skill_store_package(
     state: &AppState,
     spec: &SkillStoreInstallSpec,
 ) -> SkillStoreOperationResult<bool> {
-    rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(state))
+    skill_sdk::InstallReceiptStore::new(skill_package_root(state))
         .remove_installed_versions(&spec.skill_name)
         .map_err(|error| {
             SkillStoreOperationError::new(

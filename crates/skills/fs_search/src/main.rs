@@ -4,7 +4,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use rustclaw_fs_discovery::{
+use fs_discovery::{
     fuzzy_name_score, BackendPreference, CaseMode, Completeness, DiscoverySelector, MatchMode,
     TargetKind,
 };
@@ -66,9 +66,9 @@ fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
         .get("__test_hard_entry_limit")
         .and_then(Value::as_u64)
         .map(|value| (value as usize).max(1))
-        .unwrap_or(rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT);
+        .unwrap_or(fs_discovery::DEFAULT_HARD_ENTRY_LIMIT);
     #[cfg(not(test))]
-    let hard_entry_limit = rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT;
+    let hard_entry_limit = fs_discovery::DEFAULT_HARD_ENTRY_LIMIT;
     let timeout_seconds = std::env::var("SKILL_TIMEOUT_SECONDS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())

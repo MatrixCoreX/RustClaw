@@ -5,7 +5,7 @@ schema_version = 2
 name = "map_merchant"
 version = "0.1.8"
 description = "Recommend nearby merchants or places from structured location and preference inputs."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -53,7 +53,7 @@ schema_version = 1
 input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_recommend", "recommend"] }, "provider" = { "type" = "string" }, "city" = { "type" = "string" }, "district" = { "type" = "string" }, "address" = { "type" = "string" }, "place" = { "type" = "string" }, "location" = { "type" = "string" }, "q" = { "type" = "string" }, "keyword" = { "type" = "string" }, "category" = { "type" = "string" }, "cuisine" = { "type" = "string" }, "price_level" = { "anyOf" = [{ "type" = "string" }, { "type" = "number" }] }, "max_distance_meters" = { "type" = "number", "minimum" = 0 }, "radius" = { "type" = "number", "minimum" = 0 }, "sort_by" = { "type" = "string" }, "top_k" = { "type" = "integer", "minimum" = 1, "maximum" = 10 }, "latitude" = { "description" = "Optional latitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", "anyOf" = [{ "type" = "number", "minimum" = -90, "maximum" = 90 }, { "type" = "null" }] }, "longitude" = { "description" = "Optional longitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", "anyOf" = [{ "type" = "number", "minimum" = -180, "maximum" = 180 }, { "type" = "null" }] } } }
 output_schema = { "type" = "object" }
 config_entry_points = [{ "kind" = "file", "reference" = "configs/map_merchant.toml", "required" = false }]
-capabilities = [{ "name" = "map.preview_merchant_recommend", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["provider", "city", "address", "place", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "sort_by", "top_k", "latitude", "longitude"], "timeout_seconds" = 20, "action" = "preview_recommend" }, { "name" = "map.merchant_recommend", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["provider", "city", "address", "place", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "sort_by", "top_k", "latitude", "longitude"], "timeout_seconds" = 20, "action" = "recommend" }]
+capabilities = [{ "name" = "map.preview_merchant_recommend", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["city|district|address|place|location|q|latitude+longitude"], "optional" = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], "timeout_seconds" = 20, "action" = "preview_recommend" }, { "name" = "map.merchant_recommend", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["city|district|address|place|location|q|latitude+longitude"], "optional" = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], "timeout_seconds" = 20, "action" = "recommend" }]
 
 [capability_request.permissions]
 llm_gateway = false

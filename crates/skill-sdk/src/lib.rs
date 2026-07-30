@@ -1,5 +1,5 @@
 //! Language-neutral package, installation, protocol, and launch contracts for
-//! RustClaw skills.
+//! Agent runtime skill development and installation contracts.
 
 pub mod adapter;
 pub mod admission;
@@ -41,7 +41,7 @@ pub use installer::{
 };
 pub use manifest::{
     ArchiveFormat, BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest, SandboxProfile,
-    LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, RUSTCLAW_JSONL_PROTOCOL, SKILL_MANIFEST_SCHEMA_VERSION,
+    AGENT_JSONL_PROTOCOL, LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, SKILL_MANIFEST_SCHEMA_VERSION,
 };
 pub use operation::{
     OperationAction, OperationFailure, OperationStage, OperationStageRecord, OperationStatus,
@@ -55,10 +55,12 @@ pub use protocol::{
 };
 pub use receipt::{
     digest_file, ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,
-    ProtocolSmokeReceipt, CURRENT_INSTALL_POINTER_SCHEMA_VERSION, INSTALL_RECEIPT_SCHEMA_VERSION,
-    LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION,
+    ProtocolSmokeReceipt, VerifiedInstall, CURRENT_INSTALL_POINTER_SCHEMA_VERSION,
+    INSTALL_RECEIPT_SCHEMA_VERSION, LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION,
 };
-pub use runtime::{SkillLaunchSpec, SkillRuntimeResolver, SKILL_LAUNCH_SCHEMA_VERSION};
+pub use runtime::{
+    SkillLaunchSpec, SkillRuntimeResolver, SkillVersionPin, SKILL_LAUNCH_SCHEMA_VERSION,
+};
 pub use safe_archive::{
     extract_safe_archive, inspect_safe_archive, read_safe_archive_member, SafeArchiveEntry,
     SafeArchiveInspection, SafeArchiveLimits,

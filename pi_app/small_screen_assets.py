@@ -1,6 +1,6 @@
 import os
 
-from small_screen_config import _pi_app_dir
+from small_screen_config import _pi_app_dir, load_product_splash_image
 
 
 def find_assets():
@@ -8,7 +8,7 @@ def find_assets():
 
 
 def find_splash_image():
-    path = os.path.join(_pi_app_dir(), "RustClaw480X320.png")
+    path = os.path.join(_pi_app_dir(), load_product_splash_image())
     return path if os.path.isfile(path) else None
 
 

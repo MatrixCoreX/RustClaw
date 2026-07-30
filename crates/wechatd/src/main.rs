@@ -63,7 +63,7 @@ const BACKOFF_DELAY_MS: u64 = 30_000;
 const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/rustclaw/wechatd/media/outbound-temp";
+const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechatd/media/outbound-temp";
 
 fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key)

@@ -9,4 +9,5 @@ component_start_init "$SCRIPT_DIR" "${1:-}" "./component_start/start-whatsapp-we
 BIN_NAME="whatsapp_webd"
 BIN_PATH="$(component_require_binary "$BIN_NAME")"
 
+bash "$COMPONENT_ROOT/scripts/whatsapp_web_bridge_deps.sh" --ensure
 component_exec_binary "$BIN_NAME" "$BIN_PATH"

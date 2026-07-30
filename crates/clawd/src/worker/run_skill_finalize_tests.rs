@@ -7,7 +7,7 @@ use claw_core::skill_registry::SkillsRegistry;
 
 fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-run-skill-finalize-registry-{}-{}",
+        "agent-runtime-run-skill-finalize-registry-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
@@ -18,6 +18,7 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     let _ = std::fs::remove_dir_all(root);
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));
@@ -33,6 +34,7 @@ fn state_with_runtime_registry() -> crate::AppState {
     let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
     let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     })));
@@ -77,7 +79,7 @@ fn claimed_run_skill_task(task_id: &str) -> crate::ClaimedTask {
         payload_json: json!({
             "skill_name": "run_cmd",
             "args": {
-                "command": "sleep 1; echo RUSTCLAW_ASYNC_TEST",
+                "command": "sleep 1; echo APP_ASYNC_TEST",
                 "async_start": true,
             }
         })
@@ -151,6 +153,12 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
             "result": {
                 "path": "/tmp/output.txt",
                 "exists": true
+            },
+            "execution_binding": {
+                "version": "1.2.3",
+                "registry_generation": 7,
+                "receipt_digest": "a".repeat(64),
+                "policy_digest": "b".repeat(64)
             }
         })),
         Some(true),
@@ -201,6 +209,11 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
         admission.get("eligible").and_then(Value::as_bool),
         Some(false)
     );
+    let execution_binding = trace
+        .pointer("/task_observations/0/execution_binding")
+        .expect("execution binding trace");
+    assert_eq!(execution_binding["version"], "1.2.3");
+    assert_eq!(execution_binding["registry_generation"], 7);
     assert_eq!(
         trace
             .get("task_observations")
@@ -266,7 +279,7 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
                 "status": "accepted",
                 "poll_after_seconds": 5,
                 "expires_at": now + 60,
-                "cancel_ref": "local_process:/tmp/rustclaw-job-1",
+                "cancel_ref": "local_process:/tmp/agent-runtime-job-1",
                 "message_key": "clawd.task.async_job_pending"
             }
         })),

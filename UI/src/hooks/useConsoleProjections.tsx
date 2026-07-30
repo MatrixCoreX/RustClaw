@@ -18,6 +18,8 @@ import type { DashboardOnboardingStep } from "../components/DashboardPage";
 import { getDashboardOverviewItems, type DashboardStepStatus } from "../lib/dashboard-home";
 import { formatBytes, formatDuration } from "../lib/display-format";
 import {
+  getChannelBindStatusCopy,
+  getChannelSetupGuidance,
   getFeishuBindStatusCopy,
   getFeishuSetupGuidance,
   getFeishuStepStatus,
@@ -31,6 +33,7 @@ import type {
   DashboardCommunicationRow,
   FeishuConfigResponse,
   HealthResponse,
+  LarkConfigResponse,
   ServiceStatusRow,
   TelegramConfigResponse,
   WechatConfigResponse,
@@ -62,6 +65,10 @@ export interface UseConsoleProjectionsParams {
   feishuConfigData: FeishuConfigResponse | null;
   feishuConfigError: string | null;
   feishuBindSession: FeishuBindSessionResponse | null;
+  larkConfigLoading: boolean;
+  larkConfigData: LarkConfigResponse | null;
+  larkConfigError: string | null;
+  larkBindSession: FeishuBindSessionResponse | null;
 }
 
 export function useConsoleProjections({
@@ -86,6 +93,10 @@ export function useConsoleProjections({
   feishuConfigData,
   feishuConfigError,
   feishuBindSession,
+  larkConfigLoading,
+  larkConfigData,
+  larkConfigError,
+  larkBindSession,
 }: UseConsoleProjectionsParams) {
   const isOnline = Boolean(health) && !error;
   const queuePressureHigh = (health?.queue_length ?? 0) >= queueWarn;
@@ -221,6 +232,7 @@ export function useConsoleProjections({
   const wechatStatusLoading = healthStatusLoading || wechatConfigLoading || (wechatConfigData == null && wechatConfigError == null);
   const telegramStatusLoading = healthStatusLoading || telegramConfigLoading || (telegramConfigData == null && telegramConfigError == null);
   const feishuStatusLoading = healthStatusLoading || feishuConfigLoading || (feishuConfigData == null && feishuConfigError == null);
+  const larkStatusLoading = healthStatusLoading || larkConfigLoading || (larkConfigData == null && larkConfigError == null);
 
   const wechatStepStatus = useMemo<DashboardStepStatus>(() => {
     if (!wechatConfigData?.enabled) return "todo";
@@ -244,7 +256,7 @@ export function useConsoleProjections({
     if (feishuConfigData?.enabled || feishuConfigData?.bind_ready || gatewayKinds.has("feishu")) {
       enabledKeys.add("feishu_bot");
     }
-    if (gatewayKinds.has("lark") || health?.larkd_healthy != null || health?.larkd_process_count != null) {
+    if (larkConfigData?.enabled || larkConfigData?.bind_ready || gatewayKinds.has("lark")) {
       enabledKeys.add("lark_bot");
     }
     if (gatewayKinds.has("whatsapp_cloud") || health?.whatsapp_cloud_healthy != null || health?.whatsapp_cloud_process_count != null) {
@@ -276,6 +288,8 @@ export function useConsoleProjections({
     health?.gateway_instance_statuses,
     health?.larkd_healthy,
     health?.larkd_process_count,
+    larkConfigData?.bind_ready,
+    larkConfigData?.enabled,
     health?.telegram_configured_bot_count,
     health?.whatsapp_cloud_healthy,
     health?.whatsapp_cloud_process_count,
@@ -313,6 +327,30 @@ export function useConsoleProjections({
     });
   }, [feishuBindSession, feishuConfigData?.bind_ready, feishuCurrentKeyBound, health?.feishud_healthy]);
   const canControlFeishuService = feishuSetupGuidance.canStartService || health?.feishud_healthy === true;
+  const larkBindStatusCopy = useMemo(
+    () => getChannelBindStatusCopy("lark", larkBindSession?.status ?? "pending"),
+    [larkBindSession?.status],
+  );
+  const larkCurrentKeyBound = larkConfigData?.current_key_bound === true;
+  const larkSetupGuidance = useMemo(
+    () => getChannelSetupGuidance("lark", {
+      bindReady: larkConfigData?.bind_ready ?? false,
+      hasUnsavedConfigChanges: false,
+      serviceHealthy: health?.larkd_healthy === true,
+      hasActiveSession: Boolean(
+        larkBindSession && !isFeishuBindTerminalStatus(larkBindSession.status),
+      ),
+      bound: larkCurrentKeyBound || larkBindSession?.status === "bound",
+    }),
+    [health?.larkd_healthy, larkBindSession, larkConfigData?.bind_ready, larkCurrentKeyBound],
+  );
+  const larkStepStatus = useMemo<DashboardStepStatus>(() => getFeishuStepStatus({
+    bindReady: larkConfigData?.bind_ready ?? false,
+    serviceHealthy: health?.larkd_healthy === true,
+    session: larkBindSession,
+    currentKeyBound: larkCurrentKeyBound,
+  }), [health?.larkd_healthy, larkBindSession, larkConfigData?.bind_ready, larkCurrentKeyBound]);
+  const canControlLarkService = larkSetupGuidance.canStartService || health?.larkd_healthy === true;
 
   const wechatStatusSummary = useMemo(() => {
     if (wechatStatusLoading) {
@@ -349,6 +387,13 @@ export function useConsoleProjections({
     }
     return lang === "zh" ? feishuSetupGuidance.zhSummary : feishuSetupGuidance.enSummary;
   }, [feishuSetupGuidance.enSummary, feishuSetupGuidance.zhSummary, feishuStatusLoading, lang, t]);
+
+  const larkStatusSummary = useMemo(() => {
+    if (larkStatusLoading) {
+      return t("正在读取 Lark 当前状态。", "Loading the current Lark status.");
+    }
+    return lang === "zh" ? larkSetupGuidance.zhSummary : larkSetupGuidance.enSummary;
+  }, [lang, larkSetupGuidance.enSummary, larkSetupGuidance.zhSummary, larkStatusLoading, t]);
 
   const testMessageStepStatus = useMemo<DashboardStepStatus>(() => {
     const hasAssistantReply = chatMessages.some((msg) => msg.role === "assistant");
@@ -431,7 +476,7 @@ export function useConsoleProjections({
         key: "llm",
         required: true,
         title: t("先设置大模型", "Set up the LLM"),
-        description: t("选择厂商、模型并保存。没有这一步，大多数功能都还不能正常工作。", "Choose a vendor and model, then save it. Most RustClaw features depend on this step."),
+        description: t("选择厂商、模型并保存。没有这一步，大多数功能都还不能正常工作。", "Choose a vendor and model, then save it. Most {product_name} features depend on this step."),
         status: llmStepStatus,
         page: "models",
         cta: t("去设置模型", "Open Models"),
@@ -449,7 +494,7 @@ export function useConsoleProjections({
         key: "wechat",
         required: false,
         title: t("连接机器人", "Connect the bot"),
-        description: t("如果你准备接入微信、Telegram 或飞书，就到通信接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat, Telegram, or Feishu, continue in Communication Setup to finish configuration, start the service, and complete sign-in verification."),
+        description: t("如果你准备接入微信、Telegram、飞书或 Lark，就到通信接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat, Telegram, Feishu, or Lark, continue in Communication Setup to finish configuration, start the service, and complete sign-in verification."),
         status: wechatStepStatus,
         page: "services",
         cta: t("去通信接入", "Open Communication Setup"),
@@ -477,6 +522,7 @@ export function useConsoleProjections({
     wechatStatusLoading,
     telegramStatusLoading,
     feishuStatusLoading,
+    larkStatusLoading,
     wechatStepStatus,
     telegramStepStatus,
     dashboardCommunicationRows,
@@ -485,9 +531,15 @@ export function useConsoleProjections({
     feishuSetupGuidance,
     feishuStepStatus,
     canControlFeishuService,
+    larkBindStatusCopy,
+    larkCurrentKeyBound,
+    larkSetupGuidance,
+    larkStepStatus,
+    canControlLarkService,
     wechatStatusSummary,
     telegramStatusSummary,
     feishuStatusSummary,
+    larkStatusSummary,
     testMessageStepStatus,
     navItems,
     onboardingSteps,

@@ -3,7 +3,7 @@ use super::{
     host_matches_no_proxy, http_observation, is_proxy_synthetic_ip, is_public_ip,
     is_sensitive_header, is_textual_content, read_limited, redirect_switches_to_get,
     resolve_output_path, resolve_output_path_with_permissions, should_forward_header,
-    should_inject_rustclaw_key_for_base, validate_target_url, FetchPolicy, HttpArtifact,
+    should_inject_runtime_key_for_base, validate_target_url, FetchPolicy, HttpArtifact,
     HttpObservationInput, RequestMethod, SKILL_NAME,
 };
 use reqwest::StatusCode;
@@ -128,8 +128,10 @@ fn http_download_observation_exposes_artifact_fields() {
 
 #[test]
 fn http_download_output_path_must_stay_inside_workspace() {
-    let workspace =
-        std::env::temp_dir().join(format!("rustclaw-http-basic-test-{}", std::process::id()));
+    let workspace = std::env::temp_dir().join(format!(
+        "agent-runtime-http-basic-test-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&workspace).expect("create temp workspace");
 
     let inside = resolve_output_path(
@@ -162,7 +164,7 @@ fn http_download_output_path_must_stay_inside_workspace() {
 #[test]
 fn admin_http_download_accepts_service_account_visible_absolute_output() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-http-admin-path-test-{}",
+        "agent-runtime-http-admin-path-test-{}",
         std::process::id()
     ));
     let workspace = root.join("workspace");
@@ -250,15 +252,15 @@ fn synthetic_dns_detection_rejects_private_peers() {
 }
 
 #[test]
-fn local_rustclaw_endpoint_requires_an_authenticated_key_context() {
+fn local_agent_endpoint_requires_an_authenticated_key_context() {
     let policy = test_policy();
     let blocked = validate_target_url("http://127.0.0.1:8787/v1/tasks", &policy, false)
         .expect_err("unauthenticated local fetch must fail");
     assert_eq!(blocked.code, "private_network_blocked");
 
     let allowed = validate_target_url("http://127.0.0.1:8787/v1/tasks", &policy, true)
-        .expect("authenticated RustClaw endpoint");
-    assert!(allowed.rustclaw_local);
+        .expect("authenticated Agent Runtime endpoint");
+    assert!(allowed.runtime_local);
 
     let other_port = validate_target_url("http://127.0.0.1:8788/", &policy, true)
         .expect_err("other local services remain blocked");
@@ -266,24 +268,24 @@ fn local_rustclaw_endpoint_requires_an_authenticated_key_context() {
 }
 
 #[test]
-fn local_rustclaw_endpoint_uses_the_configured_loopback_origin() {
-    assert!(should_inject_rustclaw_key_for_base(
+fn local_agent_endpoint_uses_the_configured_loopback_origin() {
+    assert!(should_inject_runtime_key_for_base(
         "http://127.0.0.1:49557/v1/health",
         Some("http://localhost:49557")
     ));
-    assert!(should_inject_rustclaw_key_for_base(
+    assert!(should_inject_runtime_key_for_base(
         "http://[::1]:49557/v1/health",
         Some("http://127.0.0.1:49557")
     ));
-    assert!(!should_inject_rustclaw_key_for_base(
+    assert!(!should_inject_runtime_key_for_base(
         "http://127.0.0.1:49558/v1/health",
         Some("http://127.0.0.1:49557")
     ));
-    assert!(!should_inject_rustclaw_key_for_base(
+    assert!(!should_inject_runtime_key_for_base(
         "http://127.0.0.1:49557/v1/health",
         Some("https://127.0.0.1:49557")
     ));
-    assert!(!should_inject_rustclaw_key_for_base(
+    assert!(!should_inject_runtime_key_for_base(
         "http://127.0.0.1:49557/v1/health",
         Some("http://example.com:49557")
     ));

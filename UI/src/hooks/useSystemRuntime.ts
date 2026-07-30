@@ -194,12 +194,12 @@ export function useSystemRuntime({
       const message = err instanceof ApiResponseFormatError
         ? err.kind === "html_response"
           ? t(
-              "状态接口返回了网页而不是 API 数据。请更新并重启 RustClaw；本地开发页面还应确认 API 指向 webd（默认 8788 端口）。",
-              "The status endpoint returned a web page instead of API data. Update and restart RustClaw; for local development, also confirm the API points to webd (port 8788 by default).",
+              "状态接口返回了网页而不是 API 数据。请更新并重启 {product_name}；本地开发页面还应确认 API 指向 webd（默认 8788 端口）。",
+              "The status endpoint returned a web page instead of API data. Update and restart {product_name}; for local development, also confirm the API points to webd (port 8788 by default).",
             )
           : t(
-              "状态接口返回了无法识别的数据，请更新并重启 RustClaw 后重试。",
-              "The status endpoint returned unrecognized data. Update and restart RustClaw, then retry.",
+              "状态接口返回了无法识别的数据，请更新并重启 {product_name} 后重试。",
+              "The status endpoint returned unrecognized data. Update and restart {product_name}, then retry.",
             )
         : err instanceof Error
           ? err.message
@@ -225,8 +225,8 @@ export function useSystemRuntime({
     } catch (err) {
       const message = err instanceof ApiResponseFormatError
         ? t(
-            "webd 状态接口返回了无法识别的数据，请更新并重启 RustClaw 后重试。",
-            "The webd status endpoint returned unrecognized data. Update and restart RustClaw, then retry.",
+            "webd 状态接口返回了无法识别的数据，请更新并重启 {product_name} 后重试。",
+            "The webd status endpoint returned unrecognized data. Update and restart {product_name}, then retry.",
           )
         : err instanceof Error
           ? err.message
@@ -273,8 +273,8 @@ export function useSystemRuntime({
       setWebdExposureStatus(body.data);
       setWebdExposureMessage(body.data.restart_scheduled
         ? t(
-            "访问范围已保存，RustClaw 正在重启。nginx 入口会在服务恢复后继续工作。",
-            "The access scope was saved and RustClaw is restarting. The nginx entry will continue working after the service recovers.",
+            "访问范围已保存，{product_name} 正在重启。nginx 入口会在服务恢复后继续工作。",
+            "The access scope was saved and {product_name} is restarting. The nginx entry will continue working after the service recovers.",
           )
         : t("webd 已经是所选访问范围。", "webd already uses the selected access scope."));
       if (body.data.restart_scheduled) {
@@ -292,24 +292,24 @@ export function useSystemRuntime({
     const modeConfig: Record<WorkspaceUpdateMode, { confirm: string; endpoint: string; started: string }> = {
       full: {
         confirm: t(
-          "系统会先检查本地改动：如果只有 configs 目录存在冲突，会临时保存配置、拉取后再恢复；如果源码有本地改动，会停止更新且不会覆盖文件。检查通过后会拉取并完整编译；如果已配置 nginx，还会部署最新 UI，随后重启 RustClaw。确认现在开始吗？",
-          "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls and builds everything, deploys the latest UI when nginx is already configured, and restarts RustClaw. Start now?",
+          "系统会先检查本地改动：如果只有 configs 目录存在冲突，会临时保存配置、拉取后再恢复；如果源码有本地改动，会停止更新且不会覆盖文件。检查通过后会拉取并完整编译；如果已配置 nginx，还会部署最新 UI，随后重启 {product_name}。确认现在开始吗？",
+          "The system checks local changes first. If only configs conflict, it temporarily saves them and restores them after pulling. If source files have local changes, the update stops without overwriting them. After the check passes, it pulls and builds everything, deploys the latest UI when nginx is already configured, and restarts {product_name}. Start now?",
         ),
         endpoint: "/v1/admin/workspace-update",
         started: t(
-          "完整编译已开始；完成后会把最新 UI 部署到已配置的 nginx，并重启 RustClaw。",
-          "The full build has started. When it finishes, the latest UI will be deployed to the configured nginx site and RustClaw will restart.",
+          "完整编译已开始；完成后会把最新 UI 部署到已配置的 nginx，并重启 {product_name}。",
+          "The full build has started. When it finishes, the latest UI will be deployed to the configured nginx site and {product_name} will restart.",
         ),
       },
       full_preserve_nginx: {
         confirm: t(
-          "将拉取并完整编译后端、UI、核心工具和本平台技能，但不会安装、升级、重载、复制或修改任何 nginx 内容。完成后会重启 RustClaw。确认继续吗？",
-          "Pull and fully build the backend, UI, core tools, and platform skills without installing, upgrading, reloading, copying, or modifying anything in nginx. RustClaw will restart when the build finishes. Continue?",
+          "将拉取并完整编译后端、UI、核心工具和本平台技能，但不会安装、升级、重载、复制或修改任何 nginx 内容。完成后会重启 {product_name}。确认继续吗？",
+          "Pull and fully build the backend, UI, core tools, and platform skills without installing, upgrading, reloading, copying, or modifying anything in nginx. {product_name} will restart when the build finishes. Continue?",
         ),
         endpoint: "/v1/admin/workspace-update/preserve-nginx",
         started: t(
-          "完整编译已开始；nginx 将保持不变，完成后会重启 RustClaw。",
-          "The full build has started. nginx will remain unchanged, and RustClaw will restart when the build finishes.",
+          "完整编译已开始；nginx 将保持不变，完成后会重启 {product_name}。",
+          "The full build has started. nginx will remain unchanged, and {product_name} will restart when the build finishes.",
         ),
       },
       ui_only: {
@@ -330,16 +330,16 @@ export function useSystemRuntime({
       },
       nginx_enable: {
         confirm: t(
-          "将检查 nginx：未安装时自动安装，系统仓库有新版本时自动更新；随后修复 RustClaw Web 入口、启动服务并部署当前 UI。可能需要系统管理员权限，确认继续吗？",
-          "Check nginx, install it when missing, and update it when the system repository has a newer version. Then repair the RustClaw web entry, start the service, and deploy the current UI. System administrator privileges may be required. Continue?",
+          "将检查 nginx：未安装时自动安装，系统仓库有新版本时自动更新；随后修复 {product_name} Web 入口、启动服务并部署当前 UI。可能需要系统管理员权限，确认继续吗？",
+          "Check nginx, install it when missing, and update it when the system repository has a newer version. Then repair the {product_name} web entry, start the service, and deploy the current UI. System administrator privileges may be required. Continue?",
         ),
         endpoint: "/v1/admin/workspace-update/nginx-enable",
         started: t("nginx 检查、修复和 UI 部署任务已开始。", "The nginx check, repair, and UI deployment task has started."),
       },
       nginx_disable: {
         confirm: t(
-          "关闭 nginx 会停止并禁用 nginx 服务，同时删除 RustClaw 的 nginx 站点配置和已部署 UI。云服务器或域名入口会立即无法访问，之后需要通过服务器终端或仍可直连的 webd 恢复。确认关闭吗？",
-          "Disabling nginx stops and disables the service, then removes the RustClaw nginx site and deployed UI. A cloud server or domain entry will immediately become unreachable; recovery requires server terminal access or a still-reachable direct webd connection. Disable nginx?",
+          "关闭 nginx 会停止并禁用 nginx 服务，同时删除 {product_name} 的 nginx 站点配置和已部署 UI。云服务器或域名入口会立即无法访问，之后需要通过服务器终端或仍可直连的 webd 恢复。确认关闭吗？",
+          "Disabling nginx stops and disables the service, then removes the {product_name} nginx site and deployed UI. A cloud server or domain entry will immediately become unreachable; recovery requires server terminal access or a still-reachable direct webd connection. Disable nginx?",
         ),
         endpoint: "/v1/admin/workspace-update/nginx-disable",
         started: t(
@@ -370,16 +370,16 @@ export function useSystemRuntime({
       const choice = await showChoice({
         title: t("选择完整编译方式", "Choose full build behavior"),
         message: t(
-          "两种方式都会拉取最新代码并完整编译后端、UI、核心工具和本平台技能，完成后重启 RustClaw。请选择是否同时更新 nginx 中的 UI。",
-          "Both choices pull the latest code and fully build the backend, UI, core tools, and platform skills, then restart RustClaw. Choose whether to update the UI hosted by nginx as well.",
+          "两种方式都会拉取最新代码并完整编译后端、UI、核心工具和本平台技能，完成后重启 {product_name}。请选择是否同时更新 nginx 中的 UI。",
+          "Both choices pull the latest code and fully build the backend, UI, core tools, and platform skills, then restart {product_name}. Choose whether to update the UI hosted by nginx as well.",
         ),
         choices: [
           {
             value: "deploy_nginx",
             label: t("包含 nginx：完整部署最新 UI", "Include nginx: deploy the latest UI"),
             description: t(
-              "如果本机已配置 RustClaw nginx 站点，将最新 UI 同步到该站点；未配置时不会新建 nginx。",
-              "Sync the latest UI to the existing RustClaw nginx site. This does not create nginx when no site is configured.",
+              "如果本机已配置 {product_name} nginx 站点，将最新 UI 同步到该站点；未配置时不会新建 nginx。",
+              "Sync the latest UI to the existing {product_name} nginx site. This does not create nginx when no site is configured.",
             ),
           },
           {
@@ -518,8 +518,8 @@ export function useSystemRuntime({
         await Promise.allSettled([fetchLlmConfig(), fetchMultimodalConfig(), fetchSkillsConfig(), fetchSkills()]);
         setSystemRestartMessage(
           t(
-            "RustClaw 已重启完成，当前页面已经恢复。",
-            "RustClaw restarted successfully and the page is back online.",
+            "{product_name} 已重启完成，当前页面已经恢复。",
+            "{product_name} restarted successfully and the page is back online.",
           ),
         );
       } else {
@@ -638,8 +638,8 @@ export function useSystemRuntime({
         if (status === "restarting" && workspaceUpdateSilentFailuresRef.current >= 3) {
           setWorkspaceUpdateMessage(
             t(
-              "RustClaw 可能仍在重启。你可以稍后点击“检查远端版本”确认服务是否恢复。",
-              "RustClaw may still be restarting. You can click Check remote shortly to confirm recovery.",
+              "{product_name} 可能仍在重启。你可以稍后点击“检查远端版本”确认服务是否恢复。",
+              "{product_name} may still be restarting. You can click Check remote shortly to confirm recovery.",
             ),
           );
         }

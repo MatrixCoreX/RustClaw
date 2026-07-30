@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { WorkspaceUpdateStatus } from "../types/api";
+import {PRODUCT_DISPLAY_NAME} from "./product-identity.ts";
 import {
   buildWorkspaceVersionDisplay,
   buildWorkspaceUpdateView,
@@ -141,7 +142,10 @@ test("builds nginx disable warning and completion views", () => {
     "en",
   );
   assert.equal(disabling.progressPercent, 45);
-  assert.match(disabling.progressLabel, /removing the RustClaw site/);
+  assert.match(
+    disabling.progressLabel,
+    new RegExp(`removing the ${PRODUCT_DISPLAY_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} site`),
+  );
   assert.match(disabling.notice?.detail ?? "", /may disconnect immediately/);
 
   const completed = buildWorkspaceUpdateView(
@@ -208,7 +212,7 @@ test("formats workspace update next-step keys and legacy fallback", () => {
       }),
       "zh",
     ),
-    "RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
+    `${PRODUCT_DISPLAY_NAME} 正在重启，请等待 10-20 秒后刷新页面。`,
   );
   assert.equal(
     formatWorkspaceUpdateNextStep(status({ next_step: "legacy next step" }), "en"),

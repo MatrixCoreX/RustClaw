@@ -24,16 +24,16 @@ impl TestRepository {
             .expect("clock after epoch")
             .as_nanos();
         let workspace = std::env::temp_dir().join(format!(
-            "rustclaw-git-basic-{}-{nonce}-{sequence}",
+            "agent-runtime-git-basic-{}-{nonce}-{sequence}",
             std::process::id()
         ));
         let repository = workspace.join("repository");
         std::fs::create_dir_all(&repository).expect("create test repository");
         run_git(&repository, &["init", "--quiet"]);
-        run_git(&repository, &["config", "user.name", "RustClaw Test"]);
+        run_git(&repository, &["config", "user.name", "Agent Runtime Test"]);
         run_git(
             &repository,
-            &["config", "user.email", "rustclaw-test@example.invalid"],
+            &["config", "user.email", "agent-runtime-test@example.invalid"],
         );
         Self {
             workspace,
@@ -304,8 +304,8 @@ fn show_file_at_rev_success_extra_exposes_source_and_content_fields() {
         "show_file_at_rev",
         "show",
         0,
-        "# RustClaw\n\ncontent",
-        "exit=0\n# RustClaw\n\ncontent",
+        "# Agent Runtime\n\ncontent",
+        "exit=0\n# Agent Runtime\n\ncontent",
         Some(&input_meta),
     );
 
@@ -327,7 +327,7 @@ fn show_file_at_rev_success_extra_exposes_source_and_content_fields() {
         extra
             .pointer("/field_value/content_excerpt")
             .and_then(|value| value.as_str()),
-        Some("# RustClaw")
+        Some("# Agent Runtime")
     );
     assert_eq!(
         extra
@@ -469,7 +469,7 @@ fn admin_permission_accepts_repository_visible_to_the_service_account() {
         json!({"action": "status", "repo": fixture.repository}),
         true,
     )
-    .expect("admin may inspect a repository outside the RustClaw workspace");
+    .expect("admin may inspect a repository outside the Agent Runtime workspace");
 
     assert_eq!(extra["action"], "status");
 }
@@ -507,7 +507,7 @@ fn execute_rejects_option_like_revision_tokens() {
 #[test]
 fn show_accepts_git_revision_file_object_syntax() {
     let fixture = TestRepository::new();
-    let content = "# RustClaw\n";
+    let content = "# Agent Runtime\n";
     let blob_revision = fixture.commit_file("README.md", content, "first");
     let expected_blob = git_stdout(
         &fixture.repository,

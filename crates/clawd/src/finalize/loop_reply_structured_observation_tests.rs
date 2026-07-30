@@ -212,7 +212,7 @@ fn direct_structured_observed_answer_defers_generic_content_to_synthesis() {
 #[test]
 fn broad_structured_read_drops_separator() {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw_structured_validation_{}.toml",
+        "agent_structured_validation_{}.toml",
         std::process::id()
     ));
     std::fs::write(&path, "[memory]\nconfig_path = \"configs/memory.toml\"\n")

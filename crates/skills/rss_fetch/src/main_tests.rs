@@ -761,7 +761,7 @@ fn persistence_test_path(label: &str) -> std::path::PathBuf {
         .unwrap_or_default()
         .as_nanos();
     let directory = std::env::temp_dir().join(format!(
-        "rustclaw-rss-persistence-{}-{}-{nonce}",
+        "agent-runtime-rss-persistence-{}-{}-{nonce}",
         std::process::id(),
         label
     ));

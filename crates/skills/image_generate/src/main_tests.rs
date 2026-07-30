@@ -1,5 +1,36 @@
 use super::*;
 
+fn connection_cfg(base_url: &str, api_key: &str) -> VendorConfig {
+    VendorConfig {
+        base_url: base_url.to_string(),
+        api_key: api_key.to_string(),
+        model: "multimodal-model".to_string(),
+        timeout_seconds: None,
+    }
+}
+
+#[test]
+fn independent_provider_inherits_only_missing_main_connection_fields() {
+    let shared = Some(connection_cfg("https://main.example/v1", "main-key"));
+    let mut missing_both = Some(connection_cfg("", ""));
+    inherit_provider_connection_from_llm(&mut missing_both, &shared);
+    let missing_both = missing_both.expect("provider");
+    assert_eq!(missing_both.base_url, "https://main.example/v1");
+    assert_eq!(missing_both.api_key, "main-key");
+
+    let mut missing_key = Some(connection_cfg("https://image.example/v1", ""));
+    inherit_provider_connection_from_llm(&mut missing_key, &shared);
+    let missing_key = missing_key.expect("provider");
+    assert_eq!(missing_key.base_url, "https://image.example/v1");
+    assert_eq!(missing_key.api_key, "main-key");
+
+    let mut dedicated = Some(connection_cfg("https://image.example/v1", "image-key"));
+    inherit_provider_connection_from_llm(&mut dedicated, &shared);
+    let dedicated = dedicated.expect("provider");
+    assert_eq!(dedicated.base_url, "https://image.example/v1");
+    assert_eq!(dedicated.api_key, "image-key");
+}
+
 #[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
@@ -74,7 +105,7 @@ fn extract_qwen_choice_image_url() {
 
 #[test]
 fn resolve_output_path_uses_requested_workspace_path() {
-    let workspace = PathBuf::from("/tmp/rustclaw");
+    let workspace = PathBuf::from("/tmp/agent-runtime");
     let out = resolve_output_path(
         &workspace,
         "image",
@@ -264,7 +295,7 @@ fn explicit_local_fallback_writes_image_file() {
 fn unique_temp_root(name: &str) -> PathBuf {
     let mut root = std::env::temp_dir();
     root.push(format!(
-        "rustclaw-{name}-{}",
+        "agent-runtime-{name}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")

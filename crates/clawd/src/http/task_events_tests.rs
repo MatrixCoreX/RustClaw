@@ -127,7 +127,7 @@ async fn snapshot_mode_drains_more_than_one_archive_page() {
         .expect("publish event");
     }
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static(user_key));
+    headers.insert("x-agent-key", HeaderValue::from_static(user_key));
 
     let response = stream_task_events(
         State(state),

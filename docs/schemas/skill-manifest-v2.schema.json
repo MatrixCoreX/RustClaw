@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.dev/schemas/skill-manifest-v2.schema.json",
-  "title": "RustClaw skill.toml v2",
+  "$id": "https://agent-runtime.dev/schemas/skill-manifest-v2.schema.json",
+  "title": "Agent Runtime skill.toml v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "package", "registry", "build", "run", "security", "capability_request"],
@@ -15,7 +15,7 @@
         "name": { "$ref": "#/$defs/name" },
         "version": { "type": "string", "minLength": 1 },
         "description": { "type": "string", "minLength": 1 },
-        "protocol": { "const": "rustclaw-jsonl-v1" },
+        "protocol": { "const": "agent-jsonl-v1" },
         "supported_os": { "type": "array", "minItems": 1, "items": { "enum": ["linux", "macos", "windows", "any"] } },
         "supported_arch": { "type": "array", "minItems": 1, "items": { "enum": ["x86_64", "aarch64", "armv7", "any"] } },
         "license": { "type": "string", "minLength": 1 },

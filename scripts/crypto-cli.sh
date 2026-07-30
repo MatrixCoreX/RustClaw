@@ -41,7 +41,7 @@ call_crypto() {
     local args="$1"
     local req="{\"request_id\":\"${REQ_ID}\",\"user_id\":1,\"chat_id\":1,\"skill_name\":\"crypto\",\"args\":${args},\"context\":null}"
     local resp
-    resp=$(echo "$req" | WORKSPACE_ROOT="$WORKSPACE" RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER")
+    resp=$(echo "$req" | WORKSPACE_ROOT="$WORKSPACE" APP_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER")
     local status text err
     status=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','?'))" 2>/dev/null || echo "?")
     text=$(echo "$resp"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('text',''))"   2>/dev/null || echo "")
@@ -67,7 +67,7 @@ call_crypto() {
 call_crypto_raw() {
     local args="$1"
     local req="{\"request_id\":\"${REQ_ID}\",\"user_id\":1,\"chat_id\":1,\"skill_name\":\"crypto\",\"args\":${args},\"context\":null}"
-    echo "$req" | WORKSPACE_ROOT="$WORKSPACE" RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER" | fmt_json
+    echo "$req" | WORKSPACE_ROOT="$WORKSPACE" APP_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" "$RUNNER" | fmt_json
 }
 
 # ---------- 使用说明 ----------

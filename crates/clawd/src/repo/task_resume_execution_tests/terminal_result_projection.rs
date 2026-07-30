@@ -1,3 +1,4 @@
+use super::super::TempDirGuard;
 use super::*;
 
 #[test]
@@ -218,7 +219,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
         "result_projection_state": "project_async_poll_completed",
         "final_result_json": {
             "status": "ok",
-            "output": "RUSTCLAW_ASYNC_RETRY_DONE"
+            "output": "APP_ASYNC_RETRY_DONE"
         }
     });
     assert!(
@@ -270,7 +271,7 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     let (status, error_text, result) = stored_task_status_error_result(&state, task_id);
     assert_eq!(status, "succeeded");
     assert_eq!(error_text, None);
-    assert_eq!(result["output"], "RUSTCLAW_ASYNC_RETRY_DONE");
+    assert_eq!(result["output"], "APP_ASYNC_RETRY_DONE");
     assert_eq!(result["task_lifecycle"]["state"], "succeeded");
 }
 
@@ -631,7 +632,7 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
                 "result_projection_state": "project_async_poll_completed",
                 "final_result_json": {
                     "status": "ok",
-                    "output": "RUSTCLAW_ASYNC_SMOKE"
+                    "output": "APP_ASYNC_SMOKE"
                 }
             }),
             now + 2,
@@ -652,13 +653,19 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
     assert_eq!(
         result["task_lifecycle"]["resume_executor_result_projection"]["final_result_json"]
             ["output"],
-        "RUSTCLAW_ASYNC_SMOKE"
+        "APP_ASYNC_SMOKE"
     );
 }
 
 #[test]
 fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
-    let state = state_with_tasks_table();
+    let mut state = state_with_tasks_table();
+    let workspace = TempDirGuard::new("seeded_terminal_artifact");
+    state.skill_rt.workspace_root = workspace.path.clone();
+    let source_video = workspace.path.join("downloads").join("shared-video.mp4");
+    std::fs::create_dir_all(source_video.parent().expect("video parent"))
+        .expect("create video parent");
+    std::fs::write(&source_video, b"video fixture").expect("write source video");
     let now = 9_600;
     let task_id = "ask-seeded-terminal";
     let checkpoint_id = "agent-loop:ask-seeded-terminal:round-1:step-1:confirmation";
@@ -752,7 +759,20 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
                                 "verification_command_count": 0,
                                 "verification_commands": [],
                                 "verification_status": "not_applicable"
-                            }
+                            },
+                            "capability_results": [{
+                                "status": "ok",
+                                "data": {
+                                    "extra": {
+                                        "artifacts": [{
+                                            "path": source_video,
+                                            "filename": "shared-video.mp4",
+                                            "mime_type": "video/mp4",
+                                            "size_bytes": 13
+                                        }]
+                                    }
+                                }
+                            }]
                         }
                     }
                 }
@@ -774,6 +794,29 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
     assert_eq!(
         result["task_journal"]["trace"]["coding_workflow"]["changed_files"],
         json!(["src/lib.rs", "tests/lib.rs"])
+    );
+    let artifacts = result["artifacts"]
+        .as_array()
+        .expect("terminal projection should materialize task artifacts");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["filename"], "shared-video.mp4");
+    assert_eq!(artifacts[0]["kind"], "video");
+    assert_eq!(artifacts[0]["mime_type"], "video/mp4");
+    assert!(artifacts[0]["download_url"]
+        .as_str()
+        .is_some_and(|url| url.starts_with(&format!("/v1/tasks/{task_id}/artifacts/"))));
+    assert!(artifacts[0]["preview_url"].as_str().is_some());
+    let manifest: crate::task_artifacts::TaskArtifactManifest =
+        serde_json::from_value(artifacts[0].clone()).expect("artifact manifest");
+    let delivered = crate::task_artifacts::validated_delivery_artifact_path(
+        &workspace.path,
+        task_id,
+        &manifest,
+    )
+    .expect("delivered artifact path");
+    assert_eq!(
+        std::fs::read(delivered).expect("read delivered video"),
+        b"video fixture"
     );
 }
 
@@ -848,7 +891,7 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
                 "final_result_json": {
                     "status": "ok",
                     "job_id": "local_process:poll-1",
-                    "output": "RUSTCLAW_ASYNC_SMOKE"
+                    "output": "APP_ASYNC_SMOKE"
                 }
             }),
             now + 2,
@@ -878,7 +921,7 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
     );
     assert_eq!(
         result["machine_reply"]["final_result_json"]["output"],
-        "RUSTCLAW_ASYNC_SMOKE"
+        "APP_ASYNC_SMOKE"
     );
     assert_eq!(
         result["task_journal"]["trace"]["step_results"][0]["executed_skill"],

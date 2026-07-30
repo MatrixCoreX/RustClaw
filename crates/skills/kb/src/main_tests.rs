@@ -15,7 +15,7 @@ fn runtime(root: &std::path::Path, user_key: &str) -> KbRuntime {
         workspace_root: root.to_path_buf(),
         storage_database_path: root.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
-        path_policy: rustclaw_skill_sdk::SkillPathPolicy::new(root, None)
+        path_policy: skill_sdk::SkillPathPolicy::new(root, None)
             .expect("create KB test path policy"),
     }
 }
@@ -63,7 +63,7 @@ fn ingest_args_accept_single_path_alias() {
 #[test]
 fn ingest_success_extra_includes_path_evidence_fields() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_kb_ingest_path_evidence_{}",
+        "agent_kb_ingest_path_evidence_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -113,7 +113,7 @@ fn ingest_success_extra_includes_path_evidence_fields() {
 #[test]
 fn list_namespaces_extra_includes_names_and_count_fields() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_kb_list_namespaces_fields_{}",
+        "agent_kb_list_namespaces_fields_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -156,7 +156,7 @@ fn list_namespaces_extra_includes_names_and_count_fields() {
 #[test]
 fn stats_extra_includes_document_and_chunk_count_aliases() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_kb_stats_count_aliases_{}",
+        "agent_kb_stats_count_aliases_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -208,10 +208,8 @@ fn stats_extra_includes_document_and_chunk_count_aliases() {
 
 #[test]
 fn ingest_unchanged_file_marks_idempotent_success() {
-    let root = std::env::temp_dir().join(format!(
-        "rustclaw_kb_ingest_idempotent_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("agent_kb_ingest_idempotent_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create temp kb workspace");
     fs::write(root.join("README.md"), "# Demo\n\nIndexed content.").expect("write README fixture");
@@ -330,7 +328,7 @@ fn content_digest_not_mtime_and_size_controls_incremental_identity() {
 #[test]
 fn ingest_job_resumes_from_persisted_checkpoint() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-resumable-ingest-{}",
+        "agent-runtime-kb-resumable-ingest-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -369,8 +367,10 @@ fn ingest_job_resumes_from_persisted_checkpoint() {
 
 #[test]
 fn ingest_job_cancel_is_owner_scoped() {
-    let root =
-        std::env::temp_dir().join(format!("rustclaw-kb-cancel-ingest-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-kb-cancel-ingest-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("workspace");
     fs::write(root.join("a.md"), "alpha").expect("a fixture");
@@ -396,7 +396,10 @@ fn ingest_job_cancel_is_owner_scoped() {
 
 #[test]
 fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources() {
-    let base = std::env::temp_dir().join(format!("rustclaw-kb-path-policy-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!(
+        "agent-runtime-kb-path-policy-{}",
+        std::process::id()
+    ));
     let workspace = base.join("workspace");
     let external = base.join("external.md");
     let _ = fs::remove_dir_all(&base);
@@ -418,7 +421,7 @@ fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources
         workspace_root: workspace.clone(),
         storage_database_path: workspace.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
-        path_policy: rustclaw_skill_sdk::SkillPathPolicy::new(&workspace, Some(&admin_context))
+        path_policy: skill_sdk::SkillPathPolicy::new(&workspace, Some(&admin_context))
             .expect("admin path policy"),
     };
     let targets = build_scan_targets(&admin, &[external_text]).expect("admin external source");
@@ -433,7 +436,7 @@ fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources
 #[test]
 fn document_management_actions_are_structured_and_transactional() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-document-management-{}",
+        "agent-runtime-kb-document-management-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);

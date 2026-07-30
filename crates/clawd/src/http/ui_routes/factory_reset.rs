@@ -1,4 +1,4 @@
-const FACTORY_RESET_WEBD_USERNAME: &str = "rustclaw";
+const FACTORY_RESET_WEBD_USERNAME: &str = "admin";
 const FACTORY_RESET_WEBD_PASSWORD: &str = "123456";
 
 #[derive(Debug, Default, Serialize)]

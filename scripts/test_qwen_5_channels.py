@@ -189,7 +189,7 @@ def test_tts_native(qwen: dict, audio_cfg: dict):
     body = {
         "model": model,
         "input": {
-            "text": "你好，这是一条 RustClaw 五通道连通性测试语音。",
+            "text": "你好，这是一条 agent runtime 五通道连通性测试语音。",
             "voice": audio_cfg["audio_synthesize"].get("default_voice", "Cherry"),
         },
     }
@@ -348,7 +348,7 @@ def test_image_edit_native(qwen: dict, image_cfg: dict, image_value: str):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Test 5 Qwen channels used by RustClaw.")
+    ap = argparse.ArgumentParser(description="Test 5 Qwen channels used by the agent runtime.")
     ap.add_argument("--audio", help="Local audio file for ASR test")
     ap.add_argument("--image", help="Local image file for vision/edit test")
     ap.add_argument("--image-url", help="Public image URL for vision/edit test")

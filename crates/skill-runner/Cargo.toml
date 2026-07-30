@@ -8,7 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rustclaw-skill-sdk = { path = "../skill-sdk" }
+skill-sdk = { package = "agent-skill-sdk", path = "../skill-sdk" }
 reqwest.workspace = true
 tokio = { workspace = true, features = [
     "rt-multi-thread",

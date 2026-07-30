@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
-const SKILL_RUNNER_PATH_ENV: &str = "RUSTCLAW_SKILL_RUNNER_PATH";
-
 pub(crate) fn resolve_skill_runner_path(workspace_root: &Path) -> PathBuf {
-    let explicit = std::env::var(SKILL_RUNNER_PATH_ENV).ok();
+    let explicit = claw_core::product_identity::env_string("SKILL_RUNNER_PATH").ok();
     let executable_path = std::env::current_exe().ok();
     resolve_skill_runner_path_from(
         workspace_root,

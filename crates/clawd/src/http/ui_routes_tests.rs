@@ -10,7 +10,7 @@ fn temp_workspace_root() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("rustclaw-ui-routes-{unique}"));
+    let path = std::env::temp_dir().join(format!("agent-runtime-ui-routes-{unique}"));
     std::fs::create_dir_all(&path).expect("create temp dir");
     path
 }
@@ -30,7 +30,7 @@ fn insert_ui_route_auth_key(state: &AppState) {
 fn ui_route_auth_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
-        "x-rustclaw-key",
+        "x-agent-key",
         HeaderValue::from_static(UI_ROUTE_TEST_USER_KEY),
     );
     headers
@@ -195,6 +195,37 @@ custom_keep = "yes"
     assert!(output.contains("app_id = \"cli_keep_format\""));
     assert!(output.contains("app_secret = \"secret_keep_format\""));
     assert!(output.contains("enabled = true"));
+}
+
+#[test]
+fn update_lark_config_raw_uses_international_endpoints_and_preserves_custom_lines() {
+    let raw = r#"# Lark custom header
+[lark]
+enabled = false
+app_id = ""
+app_secret = ""
+custom_keep = "yes"
+"#;
+    let output = update_lark_config_raw_preserving_format(raw, "cli_lark_test", "secret_lark_test");
+    assert!(output.contains("# Lark custom header"));
+    assert!(output.contains("custom_keep = \"yes\""));
+    assert!(output.contains("enabled = true"));
+    assert!(output.contains("app_id = \"cli_lark_test\""));
+    assert!(output.contains("app_secret = \"secret_lark_test\""));
+    assert!(output.contains("api_base_url = \"https://open.larksuite.com\""));
+    assert!(output.contains("listen = \"0.0.0.0:8790\""));
+}
+
+#[test]
+fn lark_app_entry_url_uses_larksuite_applink() {
+    assert_eq!(
+        agent_app_entry_url_for_app_id(AgentAppChannel::Lark, "cli_test").as_deref(),
+        Some("https://applink.larksuite.com/client/bot/open?appId=cli_test")
+    );
+    assert_eq!(
+        agent_app_entry_url_for_app_id(AgentAppChannel::Lark, ""),
+        None
+    );
 }
 
 #[test]
@@ -866,6 +897,7 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
     let skill = SkillListItem {
         name: "video_generate".to_string(),
         description: None,
+        description_zh: None,
         semantic_tags: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("capability".to_string()),
@@ -943,6 +975,7 @@ fn capability_items_include_disabled_machine_reason() {
     let skill = SkillListItem {
         name: "fs_basic".to_string(),
         description: None,
+        description_zh: None,
         semantic_tags: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("tool".to_string()),
@@ -998,6 +1031,7 @@ fn skill_items_expose_registry_owned_instruction_metadata() {
     let skill = SkillListItem {
         name: "weather".to_string(),
         description: Some("Query weather observations.".to_string()),
+        description_zh: Some("查询天气观测数据。".to_string()),
         semantic_tags: Some(vec!["weather.current".to_string()]),
         kind: Some("runner".to_string()),
         planner_kind: Some("skill".to_string()),
@@ -1041,6 +1075,7 @@ fn skill_items_expose_registry_owned_instruction_metadata() {
     let value = serde_json::to_value(skill).expect("serialize skill list item");
 
     assert_eq!(value["description"], "Query weather observations.");
+    assert_eq!(value["description_zh"], "查询天气观测数据。");
     assert_eq!(value["config_files"][0], "configs/weather.toml");
     assert_eq!(
         value["planner_capability_details"][0]["capability"],
@@ -1117,8 +1152,8 @@ fn workspace_update_upstream_candidate_prefers_origin_and_rejects_ambiguity() {
 async fn workspace_update_resolves_missing_upstream_from_matching_origin_branch() {
     let root = temp_workspace_root();
     run_workspace_update_test_git(&root, &["init"]);
-    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
-    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "Agent Runtime Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@agent-runtime.local"]);
     std::fs::write(root.join("README.md"), "fixture\n").expect("write fixture");
     run_workspace_update_test_git(&root, &["add", "README.md"]);
     run_workspace_update_test_git(&root, &["commit", "-m", "fixture"]);
@@ -1160,8 +1195,8 @@ async fn workspace_update_resolves_missing_upstream_from_matching_origin_branch(
 async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists() {
     let root = temp_workspace_root();
     run_workspace_update_test_git(&root, &["init"]);
-    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
-    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "Agent Runtime Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@agent-runtime.local"]);
 
     std::fs::write(root.join("tracked.txt"), "base\n").expect("write base file");
     std::fs::write(root.join("already_remote.txt"), "base\n").expect("write generated base file");
@@ -1226,8 +1261,8 @@ async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists(
 async fn workspace_update_snapshots_and_restores_only_runtime_config_conflicts() {
     let root = temp_workspace_root();
     run_workspace_update_test_git(&root, &["init"]);
-    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
-    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "Agent Runtime Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@agent-runtime.local"]);
     std::fs::create_dir_all(root.join("configs")).expect("create configs directory");
     std::fs::write(root.join("configs/config.toml"), "value = 'base'\n")
         .expect("write base config");
@@ -1273,8 +1308,8 @@ async fn workspace_update_snapshots_and_restores_only_runtime_config_conflicts()
 async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches() {
     let root = temp_workspace_root();
     run_workspace_update_test_git(&root, &["init"]);
-    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
-    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "Agent Runtime Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@agent-runtime.local"]);
 
     std::fs::write(root.join("tracked.txt"), "base\n").expect("write base file");
     run_workspace_update_test_git(&root, &["add", "tracked.txt"]);
@@ -1322,38 +1357,36 @@ async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches(
 
 #[test]
 fn workspace_update_release_selector_requires_matching_platform_asset() {
+    let artifact_id = claw_core::product_identity::product_identity().release_artifact_id();
+    let ubuntu_asset_prefix = format!("{artifact_id}-ubuntu-x86_64-");
+    let pi_asset_prefix = format!("{artifact_id}-pi-aarch64-");
     let releases = vec![
         json!({
             "tag_name": "ubuntu-x86_64-20260724-2",
             "draft": true,
-            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-2.tar.gz"}]
+            "assets": [{"name": format!("{ubuntu_asset_prefix}20260724-2.tar.gz")}]
         }),
         json!({
             "tag_name": "pi-aarch64-20260724-2",
-            "assets": [{"name": "RustClaw-pi-aarch64-20260724-2.tar.gz"}]
+            "assets": [{"name": format!("{pi_asset_prefix}20260724-2.tar.gz")}]
         }),
         json!({
             "tag_name": "ubuntu-x86_64-20260724-prerelease",
             "prerelease": true,
-            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-prerelease.tar.gz"}]
+            "assets": [{"name": format!("{ubuntu_asset_prefix}20260724-prerelease.tar.gz")}]
         }),
         json!({
             "tag_name": "ubuntu-x86_64-20260724-1",
-            "assets": [{"name": "RustClaw-ubuntu-x86_64-20260724-1.tar.gz"}]
+            "assets": [{"name": format!("{ubuntu_asset_prefix}20260724-1.tar.gz")}]
         }),
     ];
     assert_eq!(
-        select_latest_compatible_release_tag(
-            &releases,
-            "ubuntu-x86_64-",
-            "RustClaw-ubuntu-x86_64-"
-        )
-        .as_deref(),
+        select_latest_compatible_release_tag(&releases, "ubuntu-x86_64-", &ubuntu_asset_prefix)
+            .as_deref(),
         Some("ubuntu-x86_64-20260724-1")
     );
     assert_eq!(
-        select_latest_compatible_release_tag(&releases, "pi-aarch64-", "RustClaw-pi-aarch64-")
-            .as_deref(),
+        select_latest_compatible_release_tag(&releases, "pi-aarch64-", &pi_asset_prefix).as_deref(),
         Some("pi-aarch64-20260724-2")
     );
 }
@@ -1362,11 +1395,11 @@ fn workspace_update_release_selector_requires_matching_platform_asset() {
 fn workspace_update_release_platform_rejects_macos_and_unknown_architectures() {
     assert_eq!(
         release_platform_prefixes_for("linux", "x86_64"),
-        Some(("ubuntu-x86_64-", "RustClaw-ubuntu-x86_64-"))
+        Some("ubuntu-x86_64-")
     );
     assert_eq!(
         release_platform_prefixes_for("linux", "aarch64"),
-        Some(("pi-aarch64-", "RustClaw-pi-aarch64-"))
+        Some("pi-aarch64-")
     );
     assert_eq!(release_platform_prefixes_for("macos", "aarch64"), None);
     assert_eq!(release_platform_prefixes_for("linux", "riscv64"), None);
@@ -1648,13 +1681,13 @@ fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() 
     let build_script = include_str!("../../../../build-all.sh");
     assert!(build_script.contains("preserve-nginx"));
     assert!(build_script.contains("Preserving nginx as requested"));
-    assert!(build_script.contains("RUSTCLAW_PRESERVE_NGINX"));
+    assert!(build_script.contains("APP_PRESERVE_NGINX"));
 
     let disable_script = include_str!("../../../../scripts/disable-nginx-web.sh");
     assert!(disable_script.contains("brew services stop nginx"));
     assert!(disable_script.contains("systemctl disable --now nginx"));
-    assert!(disable_script.contains("# RustClaw UI"));
-    assert!(disable_script.contains("*/rustclaw|*/nginx-ui"));
+    assert!(disable_script.contains("Agent Runtime UI"));
+    assert!(disable_script.contains("*/\"$APP_DATA_NAMESPACE\"|*/nginx-ui"));
     assert!(disable_script.contains("Refusing to delete non-dedicated UI root"));
 
     let package_script = include_str!("../../../../package-release.sh");
@@ -1664,9 +1697,9 @@ fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() 
 
 #[test]
 fn workspace_update_systemd_unit_name_accepts_only_machine_tokens() {
-    assert!(is_safe_systemd_unit_name("rustclaw.service"));
-    assert!(is_safe_systemd_unit_name("rustclaw-worker@1.service"));
+    assert!(is_safe_systemd_unit_name("agent-runtime.service"));
+    assert!(is_safe_systemd_unit_name("agent-runtime-worker@1.service"));
     assert!(!is_safe_systemd_unit_name(""));
-    assert!(!is_safe_systemd_unit_name("rustclaw.service; reboot"));
-    assert!(!is_safe_systemd_unit_name("rustclaw service"));
+    assert!(!is_safe_systemd_unit_name("agent-runtime.service; reboot"));
+    assert!(!is_safe_systemd_unit_name("agent-runtime service"));
 }

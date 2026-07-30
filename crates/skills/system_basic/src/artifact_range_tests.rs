@@ -7,17 +7,17 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new(name: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-system-artifact-{name}-{}",
+            "agent-runtime-system-artifact-{name}-{}",
             uuid::Uuid::new_v4()
         ));
-        std::fs::create_dir_all(root.join(".rustclaw/artifacts/skill-output"))
+        std::fs::create_dir_all(root.join(".agent-runtime/artifacts/skill-output"))
             .expect("create artifact root");
         Self { root }
     }
 
     fn artifact(&self, name: &str) -> PathBuf {
         self.root
-            .join(".rustclaw/artifacts/skill-output")
+            .join(".agent-runtime/artifacts/skill-output")
             .join(name)
     }
 }

@@ -493,7 +493,7 @@ fn add_table(
     let sheet_path = require_sheet_path(members, sheet)?;
     let table_number = next_part_number(members, "xl/tables/table", ".xml");
     let table_path = format!("xl/tables/table{table_number}.xml");
-    let relationship_id = format!("rIdRustClawTable{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentTable{}", Uuid::new_v4().simple());
     add_part_relationship(
         members,
         &worksheet_relationships_path(&sheet_path),
@@ -548,7 +548,7 @@ fn add_chart(
     let chart_number = next_part_number(members, "xl/charts/chart", ".xml");
     let chart_path = format!("xl/charts/chart{chart_number}.xml");
     let drawing_path = ensure_sheet_drawing(members, sheet)?;
-    let relationship_id = format!("rIdRustClawChart{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentChart{}", Uuid::new_v4().simple());
     add_part_relationship(
         members,
         &relationships_path_for_part(&drawing_path),
@@ -595,7 +595,7 @@ fn add_image(
         )
     })?;
     let drawing_path = ensure_sheet_drawing(members, sheet)?;
-    let relationship_id = format!("rIdRustClawImage{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentImage{}", Uuid::new_v4().simple());
     add_part_relationship(
         members,
         &relationships_path_for_part(&drawing_path),
@@ -624,7 +624,7 @@ fn add_hyperlink(
     parse_coordinate(cell)?;
     let url = operation.string("url")?;
     let sheet_path = require_sheet_path(members, sheet)?;
-    let relationship_id = format!("rIdRustClawLink{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentLink{}", Uuid::new_v4().simple());
     add_part_relationship(
         members,
         &worksheet_relationships_path(&sheet_path),
@@ -720,8 +720,8 @@ fn create_comment_parts(
     let number = next_part_number(members, "xl/comments", ".xml");
     let comments_path = format!("xl/comments{number}.xml");
     let vml_path = format!("xl/drawings/vmlDrawing{number}.vml");
-    let comments_id = format!("rIdRustClawComments{}", Uuid::new_v4().simple());
-    let vml_id = format!("rIdRustClawVml{}", Uuid::new_v4().simple());
+    let comments_id = format!("rIdAgentComments{}", Uuid::new_v4().simple());
+    let vml_id = format!("rIdAgentVml{}", Uuid::new_v4().simple());
     let relationships_path = worksheet_relationships_path(sheet_path);
     add_part_relationship(
         members,
@@ -741,7 +741,7 @@ fn create_comment_parts(
     )?;
     members.insert(
         comments_path.clone(),
-        br#"<?xml version="1.0" encoding="UTF-8"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>RustClaw</author></authors><commentList></commentList></comments>"#.to_vec(),
+        br#"<?xml version="1.0" encoding="UTF-8"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>agent-runtime</author></authors><commentList></commentList></comments>"#.to_vec(),
     );
     members.insert(vml_path.clone(), empty_comments_vml().as_bytes().to_vec());
     ensure_content_override(
@@ -782,7 +782,7 @@ fn ensure_sheet_drawing(
     }
     let number = next_part_number(members, "xl/drawings/drawing", ".xml");
     let drawing_path = format!("xl/drawings/drawing{number}.xml");
-    let relationship_id = format!("rIdRustClawDrawing{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentDrawing{}", Uuid::new_v4().simple());
     add_part_relationship(
         members,
         &relationships_path,
@@ -896,7 +896,7 @@ fn add_sheet(
     let entries = sheet_entries(members)?;
     let number = next_sheet_part_number(members);
     let sheet_id = entries.iter().map(|entry| entry.id).max().unwrap_or(0) + 1;
-    let relationship_id = format!("rIdRustClawSheet{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentSheet{}", Uuid::new_v4().simple());
     let path = format!("xl/worksheets/sheet{number}.xml");
     let workbook = member_text(members, "xl/workbook.xml")?.to_string();
     let sheet_node = format!(

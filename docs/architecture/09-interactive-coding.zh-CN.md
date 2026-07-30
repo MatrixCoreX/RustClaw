@@ -10,7 +10,7 @@
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw 继续由单一 agent loop 负责语义决策，确定性 runtime 只负责 schema、
+Agent Runtime 继续由单一 agent loop 负责语义决策，确定性 runtime 只负责 schema、
 权限、路径边界、副作用与证据。交互式编码增加公开输出流和更安全的本地编辑
 能力。
 

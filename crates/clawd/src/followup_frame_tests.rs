@@ -289,7 +289,7 @@ fn generic_workspace_evidence_path_does_not_persist_followup_target() {
             serde_json::json!({
                 "extra": {
                     "action": "read_text_range",
-                    "resolved_path": "/home/guagua/rustclaw/plan/post_migration.md",
+                    "resolved_path": "/home/guagua/agent-runtime/plan/post_migration.md",
                     "excerpt": "workspace evidence only"
                 }
             })
@@ -305,9 +305,9 @@ fn generic_workspace_evidence_path_does_not_persist_followup_target() {
     replace_active_frame_from_ask_outcome(
         &state,
         &task,
-        "write a short RustClaw release note",
+        "write a short Agent Runtime release note",
         &route_result,
-        "RustClaw release note draft.",
+        "Agent Runtime release note draft.",
         &[],
         false,
         &journal,
@@ -334,7 +334,7 @@ fn code_workspace_journal_persists_project_dir_for_followup() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_anchor";
+    let project_dir = "/home/guagua/agent-runtime/run/nl_eval_tmp/code_workspace_anchor";
     let calc_path = format!("{project_dir}/calc_core.py");
     let test_path = format!("{project_dir}/test_calc_core.py");
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
@@ -417,7 +417,7 @@ fn readback_validated_code_workspace_persists_project_dir_for_followup() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_readback_only";
+    let project_dir = "/home/guagua/agent-runtime/run/nl_eval_tmp/code_workspace_readback_only";
     let calc_path = format!("{project_dir}/calc_core.py");
     let test_path = format!("{project_dir}/test_calc_core.py");
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
@@ -493,7 +493,7 @@ fn code_workspace_followup_wins_over_delivery_route_noise() {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_delivery_noise";
+    let project_dir = "/home/guagua/agent-runtime/run/nl_eval_tmp/code_workspace_delivery_noise";
     let calc_path = format!("{project_dir}/calc_core.py");
     let test_path = format!("{project_dir}/test_calc_core.py");
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
@@ -686,7 +686,7 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
         payload_json: "{}".to_string(),
     };
     let expected_path =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml";
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml";
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     journal
         .step_results
@@ -698,14 +698,14 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
                 serde_json::json!({
                     "request_id": "req-config-field",
                     "status": "ok",
-                    "text": "RustClaw NL Fixture",
+                    "text": "Agent Runtime NL Fixture",
                     "error_text": null,
                     "extra": {
                         "action": "read_field",
                         "path": "scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
                         "resolved_path": expected_path,
                         "field_path": "app.name",
-                        "value": "RustClaw NL Fixture"
+                        "value": "Agent Runtime NL Fixture"
                     }
                 })
                 .to_string(),
@@ -727,7 +727,7 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
         &task,
         "read structured field",
         &route_result,
-        "RustClaw NL Fixture",
+        "Agent Runtime NL Fixture",
         &[],
         false,
         &journal,
@@ -811,7 +811,7 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
+    let root = "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = IntentOutputContract {
         exact_sentence_count: None,
@@ -847,7 +847,7 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
     );
     assert_eq!(
         super::ordered_entry_target_at(&frame, 0).as_deref(),
-        Some("/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+        Some("/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
     );
 }
 
@@ -933,7 +933,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
         &FollowupFrame {
             source_request: "先列出 document 目录下前 5 个文件名".to_string(),
             op_kind: FollowupOpKind::List,
-            bound_target: Some("/home/guagua/rustclaw/document".to_string()),
+            bound_target: Some("/home/guagua/agent-runtime/document".to_string()),
             ordered_entries: vec![
                 "builtin_write_smoke.txt".to_string(),
                 "full_suite_trace_note.txt".to_string(),
@@ -954,7 +954,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
             skill: "fs_basic".to_string(),
             status: crate::executor::StepExecutionStatus::Ok,
             output_excerpt: Some(
-                r#"{"action":"inventory_dir","names":["act_plan.log","clawd.log","clawd.run.log","clawd.test.log","clawd_manual.log"],"names_only":true,"path":"logs","resolved_path":"/home/guagua/rustclaw/logs"}"#
+                r#"{"action":"inventory_dir","names":["act_plan.log","clawd.log","clawd.run.log","clawd.test.log","clawd_manual.log"],"names_only":true,"path":"logs","resolved_path":"/home/guagua/agent-runtime/logs"}"#
                     .to_string(),
             ),
             ..Default::default()
@@ -983,7 +983,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
     assert_eq!(frame.op_kind, FollowupOpKind::List);
     assert_eq!(
         frame.bound_target.as_deref(),
-        Some("/home/guagua/rustclaw/logs")
+        Some("/home/guagua/agent-runtime/logs")
     );
     assert_eq!(
         frame.ordered_entries,
@@ -997,7 +997,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
     );
     assert_eq!(
         super::ordered_entry_target_at(&frame, 1).as_deref(),
-        Some("/home/guagua/rustclaw/logs/clawd.log")
+        Some("/home/guagua/agent-runtime/logs/clawd.log")
     );
 }
 
@@ -1040,8 +1040,8 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
             "other": []
         },
         "names_only": true,
-        "path": "/home/guagua/rustclaw/logs",
-        "resolved_path": "/home/guagua/rustclaw/logs",
+        "path": "/home/guagua/agent-runtime/logs",
+        "resolved_path": "/home/guagua/agent-runtime/logs",
         "sort_by": "name"
     });
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
@@ -1067,7 +1067,7 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        locator_hint: "/home/guagua/rustclaw/logs".to_string(),
+        locator_hint: "/home/guagua/agent-runtime/logs".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
@@ -1084,7 +1084,7 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
     assert_eq!(frame.op_kind, FollowupOpKind::List);
     assert_eq!(
         frame.bound_target.as_deref(),
-        Some("/home/guagua/rustclaw/logs")
+        Some("/home/guagua/agent-runtime/logs")
     );
     assert_eq!(
         frame.ordered_entries,
@@ -1098,7 +1098,7 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
     );
     assert_eq!(
         super::ordered_entry_target_at(&frame, 1).as_deref(),
-        Some("/home/guagua/rustclaw/logs/clawd-dev.log")
+        Some("/home/guagua/agent-runtime/logs/clawd-dev.log")
     );
 }
 
@@ -1107,7 +1107,8 @@ fn ordered_entry_target_does_not_duplicate_prefixed_relative_path() {
     let frame = FollowupFrame {
         op_kind: FollowupOpKind::List,
         bound_target: Some(
-            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string(),
+            "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"
+                .to_string(),
         ),
         ordered_entries: vec![
             "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md".to_string(),
@@ -1330,7 +1331,7 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
+    let root = "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
     let prior_frame = FollowupFrame {
         source_request: "find abcd under fuzzy_top3".to_string(),
         op_kind: FollowupOpKind::Read,
@@ -1381,7 +1382,7 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
     assert_eq!(frame.bound_target.as_deref(), Some(selected.as_str()));
     assert_eq!(
         super::ordered_entry_target_at(&frame, 0).as_deref(),
-        Some("/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+        Some("/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
     );
 }
 
@@ -1490,15 +1491,15 @@ fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_sele
         &task,
         "把第二个发给我",
         &route_result,
-        "FILE:/home/guagua/rustclaw/logs/clawd.log",
-        &["FILE:/home/guagua/rustclaw/logs/clawd.log".to_string()],
+        "FILE:/home/guagua/agent-runtime/logs/clawd.log",
+        &["FILE:/home/guagua/agent-runtime/logs/clawd.log".to_string()],
         false,
         &journal,
     );
     let frame = load_active_followup_frame(&state, &task).expect("frame should load");
     assert_eq!(
         frame.bound_target.as_deref(),
-        Some("/home/guagua/rustclaw/logs/clawd.log")
+        Some("/home/guagua/agent-runtime/logs/clawd.log")
     );
     assert_eq!(frame.selected_entry_index, Some(1));
     assert_eq!(frame.ordered_entries, prior_frame.ordered_entries);
@@ -1569,7 +1570,7 @@ fn clarify_outcome_with_stale_locator_hint_still_clears_followup_frame() {
         delivery_required: false,
         locator_kind: OutputLocatorKind::Path,
         delivery_intent: crate::OutputDeliveryIntent::None,
-        locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
+        locator_hint: "/tmp/agent-runtime-workspace/old/logs/model_io.log".to_string(),
         selection: crate::OutputSelectionContract::default(),
     };
     replace_active_frame_from_ask_outcome(

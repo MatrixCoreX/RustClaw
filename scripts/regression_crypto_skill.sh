@@ -12,8 +12,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/shell_compat.sh"
 configure_platform_command_path
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
-SDK_CLI="$ROOT_DIR/target/release/rustclaw-skill"
-PACKAGE_ROOT="${RUSTCLAW_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
+SDK_CLI="$ROOT_DIR/target/release/skillctl"
+PACKAGE_ROOT="${APP_SKILL_PACKAGES_ROOT:-$ROOT_DIR/data/skill-packages}"
 
 TOTAL=0
 PASS=0
@@ -71,7 +71,7 @@ run_skill_raw() {
     }')"
 
   printf '%s\n' "$req" | \
-    RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+    APP_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
     WORKSPACE_ROOT="$ROOT_DIR" \
     "$RUNNER"
 }
@@ -188,7 +188,7 @@ main() {
     configure_cargo_build_environment
     (
       cd "$ROOT_DIR"
-      cargo build --release -p skill-runner -p rustclaw-skill-sdk
+      cargo build --release -p skill-runner -p agent-skill-sdk
       "$SDK_CLI" install-local \
         "$ROOT_DIR/optional_skills/crypto/skill.toml" \
         "$ROOT_DIR" \

@@ -14,7 +14,12 @@ pub(super) fn read_artifact_range(
 ) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let resolved = resolve_path(workspace_root, path, false)?;
-    let artifact_root = workspace_root.join(".rustclaw").join("artifacts");
+    let artifact_root = workspace_root
+        .join(
+            std::env::var("APP_WORKSPACE_STATE_DIR")
+                .unwrap_or_else(|_| ".agent-runtime".to_string()),
+        )
+        .join("artifacts");
     let canonical_artifact_root = artifact_root
         .canonicalize()
         .map_err(|err| SkillError::io("resolve_artifact_root", &artifact_root, err))?;

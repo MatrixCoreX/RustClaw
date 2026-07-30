@@ -61,7 +61,7 @@ fn run_server_list(
 fn run_tool_list(base_url: &str, key: &str, server: Option<&str>, json_output: bool) -> Result<()> {
     let url = format!("{}/admin/mcp/tools", client::base_v1(base_url));
     let client = client::make_client()?;
-    let mut request = client.get(&url).header("x-rustclaw-key", key);
+    let mut request = client.get(&url).header("x-agent-key", key);
     if let Some(server) = server {
         request = request.query(&[("server_id", server)]);
     }
@@ -99,7 +99,7 @@ fn run_probe(base_url: &str, key: &str, server: &str, json_output: bool) -> Resu
         .push("test");
     let response = client::make_client()?
         .post(url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .send()
         .context("mcp_probe_request_failed")?;
     let status = response.status();

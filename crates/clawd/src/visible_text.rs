@@ -409,7 +409,7 @@ fn redact_secret_token_references(text: &str) -> String {
     static SECRET_TOKEN_RE: OnceLock<Regex> = OnceLock::new();
     SECRET_TOKEN_RE
         .get_or_init(|| {
-            Regex::new(r"rustclaw-secret://v1/[A-Za-z0-9-]+").expect("secret_token_reference_regex")
+            Regex::new(r"agent-secret://v1/[A-Za-z0-9-]+").expect("secret_token_reference_regex")
         })
         .replace_all(text, REDACTED)
         .into_owned()

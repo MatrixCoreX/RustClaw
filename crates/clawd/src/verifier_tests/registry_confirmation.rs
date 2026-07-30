@@ -14,6 +14,7 @@ pub(super) fn workspace_registry_state() -> AppState {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     });

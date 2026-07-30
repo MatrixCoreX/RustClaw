@@ -1,5 +1,5 @@
-fn skill_store_operation_stage(phase: &str) -> rustclaw_skill_sdk::OperationStage {
-    use rustclaw_skill_sdk::OperationStage;
+fn skill_store_operation_stage(phase: &str) -> skill_sdk::OperationStage {
+    use skill_sdk::OperationStage;
     match phase {
         "preflight" | "manifest" | "toolchain" | "precompiled_verify" => {
             OperationStage::Preflight
@@ -18,11 +18,11 @@ fn skill_store_operation_stage(phase: &str) -> rustclaw_skill_sdk::OperationStag
 }
 
 fn transition_skill_store_operation(
-    store: &rustclaw_skill_sdk::SkillOperationStore,
+    store: &skill_sdk::SkillOperationStore,
     operation_id: &str,
-    status: rustclaw_skill_sdk::OperationStatus,
-    stage: rustclaw_skill_sdk::OperationStage,
-    failure: Option<rustclaw_skill_sdk::OperationFailure>,
+    status: skill_sdk::OperationStatus,
+    stage: skill_sdk::OperationStage,
+    failure: Option<skill_sdk::OperationFailure>,
     result: Option<Value>,
 ) {
     if let Err(error) = store.transition(operation_id, status, stage, failure, result) {
@@ -38,7 +38,7 @@ fn transition_skill_store_operation(
 fn skill_store_install_control(
     state: &AppState,
     operation_id: &str,
-) -> rustclaw_skill_sdk::InstallControl {
+) -> skill_sdk::InstallControl {
     let cancelled = Arc::new(AtomicBool::new(false));
     let store = skill_store_operation_store(state);
     let progress_operation_id = operation_id.to_string();
@@ -48,7 +48,7 @@ fn skill_store_install_control(
             .get(&progress_operation_id)
             .map(|operation| {
                 !operation.status.is_terminal()
-                    && (operation.status != rustclaw_skill_sdk::OperationStatus::Running
+                    && (operation.status != skill_sdk::OperationStatus::Running
                         || operation.stage != stage)
             })
             .unwrap_or(false);
@@ -56,14 +56,14 @@ fn skill_store_install_control(
             transition_skill_store_operation(
                 &store,
                 &progress_operation_id,
-                rustclaw_skill_sdk::OperationStatus::Running,
+                skill_sdk::OperationStatus::Running,
                 stage,
                 None,
                 None,
             );
         }
     });
-    let control = rustclaw_skill_sdk::InstallControl::with_progress(cancelled, progress);
+    let control = skill_sdk::InstallControl::with_progress(cancelled, progress);
     register_skill_store_control(state, operation_id, control.clone());
     control
 }
@@ -96,9 +96,9 @@ fn start_skill_store_heartbeat(
 }
 
 fn operation_cancelled(
-    store: &rustclaw_skill_sdk::SkillOperationStore,
+    store: &skill_sdk::SkillOperationStore,
     operation_id: &str,
-    control: &rustclaw_skill_sdk::InstallControl,
+    control: &skill_sdk::InstallControl,
 ) -> bool {
     control.is_cancelled()
         || store
@@ -108,7 +108,7 @@ fn operation_cancelled(
 }
 
 fn finish_skill_store_failure(
-    store: &rustclaw_skill_sdk::SkillOperationStore,
+    store: &skill_sdk::SkillOperationStore,
     operation_id: &str,
     error: SkillStoreOperationError,
     cancelled: bool,
@@ -117,8 +117,8 @@ fn finish_skill_store_failure(
         transition_skill_store_operation(
             store,
             operation_id,
-            rustclaw_skill_sdk::OperationStatus::Cancelled,
-            rustclaw_skill_sdk::OperationStage::Cancelled,
+            skill_sdk::OperationStatus::Cancelled,
+            skill_sdk::OperationStage::Cancelled,
             None,
             None,
         );
@@ -133,15 +133,15 @@ fn finish_skill_store_failure(
     transition_skill_store_operation(
         store,
         operation_id,
-        rustclaw_skill_sdk::OperationStatus::Failure,
-        rustclaw_skill_sdk::OperationStage::Failure,
-        Some(rustclaw_skill_sdk::OperationFailure {
+        skill_sdk::OperationStatus::Failure,
+        skill_sdk::OperationStage::Failure,
+        Some(skill_sdk::OperationFailure {
             error_code: error.code.as_str().to_string(),
             message_key: format!("skill_store.{}", error.code.as_str()),
             phase: error.phase,
             retryable: true,
             diagnostic: Some(
-                rustclaw_skill_sdk::redact_diagnostics(&error.diagnostic)
+                skill_sdk::redact_diagnostics(&error.diagnostic)
                     .chars()
                     .take(8 * 1024)
                     .collect(),
@@ -152,7 +152,7 @@ fn finish_skill_store_failure(
 }
 
 fn accepted_skill_store_operation(
-    operation: rustclaw_skill_sdk::SkillOperation,
+    operation: skill_sdk::SkillOperation,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     (
         StatusCode::ACCEPTED,
@@ -167,20 +167,20 @@ fn accepted_skill_store_operation(
 fn inferred_install_action(
     state: &AppState,
     skill_name: &str,
-) -> rustclaw_skill_sdk::OperationAction {
-    if rustclaw_skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
+) -> skill_sdk::OperationAction {
+    if skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
         .resolve(skill_name)
         .is_ok()
     {
-        return rustclaw_skill_sdk::OperationAction::Update;
+        return skill_sdk::OperationAction::Update;
     }
     let configured = read_skill_config_file(state)
         .map(|(_, parsed)| !collect_uninstalled_skills(&parsed, state).contains(skill_name))
         .unwrap_or(false);
     if configured {
-        rustclaw_skill_sdk::OperationAction::Repair
+        skill_sdk::OperationAction::Repair
     } else {
-        rustclaw_skill_sdk::OperationAction::Install
+        skill_sdk::OperationAction::Install
     }
 }
 
@@ -188,7 +188,7 @@ async fn start_skill_store_install(
     state: AppState,
     headers: HeaderMap,
     request: SkillStoreMutationRequest,
-    requested_action: Option<rustclaw_skill_sdk::OperationAction>,
+    requested_action: Option<skill_sdk::OperationAction>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err(response) = require_ui_identity(&state, &headers) {
         return response;
@@ -206,7 +206,7 @@ async fn start_skill_store_install(
     };
     let allow_network = request.allow_network.unwrap_or(false);
     if spec.as_ref().is_some_and(|value| {
-        value.network_policy == rustclaw_skill_sdk::BuildNetworkPolicy::ApprovalRequired
+        value.network_policy == skill_sdk::BuildNetworkPolicy::ApprovalRequired
             && !allow_network
     }) {
         return skill_store_error_response(SkillStoreOperationError::new(
@@ -252,8 +252,8 @@ async fn run_skill_store_install_operation(
     state: AppState,
     operation_id: String,
     spec: Option<SkillStoreInstallSpec>,
-    action: rustclaw_skill_sdk::OperationAction,
-    control: rustclaw_skill_sdk::InstallControl,
+    action: skill_sdk::OperationAction,
+    control: skill_sdk::InstallControl,
     allow_network: bool,
     _mutation_guard: SkillStoreMutationGuard,
 ) {
@@ -263,7 +263,7 @@ async fn run_skill_store_install_operation(
         .get(&operation_id)
         .map(|operation| operation.skill_name)
         .unwrap_or_default();
-    let receipt_store = rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(&state));
+    let receipt_store = skill_sdk::InstallReceiptStore::new(skill_package_root(&state));
     let pointer_before = receipt_store.current_pointer(&skill_name).ok();
     let result = run_skill_store_install_operation_inner(
         &state,
@@ -278,8 +278,8 @@ async fn run_skill_store_install_operation(
         Ok(data) => transition_skill_store_operation(
             &store,
             &operation_id,
-            rustclaw_skill_sdk::OperationStatus::Success,
-            rustclaw_skill_sdk::OperationStage::Success,
+            skill_sdk::OperationStatus::Success,
+            skill_sdk::OperationStage::Success,
             None,
             Some(data),
         ),
@@ -290,7 +290,11 @@ async fn run_skill_store_install_operation(
                     .map(|current| current != *before)
                     .unwrap_or(false)
             });
-            if action == rustclaw_skill_sdk::OperationAction::Update && pointer_changed {
+            if matches!(
+                action,
+                skill_sdk::OperationAction::Update | skill_sdk::OperationAction::Repair
+            ) && pointer_changed
+            {
                 let _ = receipt_store.rollback(&skill_name);
             }
             finish_skill_store_failure(
@@ -306,10 +310,10 @@ async fn run_skill_store_install_operation(
 
 async fn run_skill_store_install_operation_inner(
     state: &AppState,
-    store: &rustclaw_skill_sdk::SkillOperationStore,
+    store: &skill_sdk::SkillOperationStore,
     operation_id: &str,
     spec: Option<&SkillStoreInstallSpec>,
-    control: &rustclaw_skill_sdk::InstallControl,
+    control: &skill_sdk::InstallControl,
     allow_network: bool,
 ) -> SkillStoreOperationResult<Value> {
     if operation_cancelled(store, operation_id, control) {
@@ -322,8 +326,8 @@ async fn run_skill_store_install_operation_inner(
     transition_skill_store_operation(
         store,
         operation_id,
-        rustclaw_skill_sdk::OperationStatus::Running,
-        rustclaw_skill_sdk::OperationStage::Preflight,
+        skill_sdk::OperationStatus::Running,
+        skill_sdk::OperationStage::Preflight,
         None,
         None,
     );
@@ -356,8 +360,8 @@ async fn run_skill_store_install_operation_inner(
     transition_skill_store_operation(
         store,
         operation_id,
-        rustclaw_skill_sdk::OperationStatus::Running,
-        rustclaw_skill_sdk::OperationStage::Configure,
+        skill_sdk::OperationStatus::Running,
+        skill_sdk::OperationStage::Configure,
         None,
         None,
     );
@@ -432,7 +436,7 @@ async fn update_skill_store_item(
         state,
         headers,
         request,
-        Some(rustclaw_skill_sdk::OperationAction::Update),
+        Some(skill_sdk::OperationAction::Update),
     )
     .await
 }
@@ -446,7 +450,7 @@ async fn repair_skill_store_item(
         state,
         headers,
         request,
-        Some(rustclaw_skill_sdk::OperationAction::Repair),
+        Some(skill_sdk::OperationAction::Repair),
     )
     .await
 }
@@ -475,7 +479,7 @@ async fn remove_skill_store_item(
         Err(error) => return skill_store_error_response(error),
     };
     let operation = match skill_store_operation_store(&state)
-        .create(&skill_name, rustclaw_skill_sdk::OperationAction::Remove)
+        .create(&skill_name, skill_sdk::OperationAction::Remove)
     {
         Ok(operation) => operation,
         Err(error) => {
@@ -512,7 +516,7 @@ async fn run_skill_store_remove_operation(
     spec: Option<SkillStoreInstallSpec>,
     preserve_config: bool,
     preserve_data: bool,
-    control: rustclaw_skill_sdk::InstallControl,
+    control: skill_sdk::InstallControl,
     _mutation_guard: SkillStoreMutationGuard,
 ) {
     let store = skill_store_operation_store(&state);
@@ -541,8 +545,8 @@ async fn run_skill_store_remove_operation(
     transition_skill_store_operation(
         &store,
         &operation_id,
-        rustclaw_skill_sdk::OperationStatus::Running,
-        rustclaw_skill_sdk::OperationStage::Configure,
+        skill_sdk::OperationStatus::Running,
+        skill_sdk::OperationStage::Configure,
         None,
         None,
     );
@@ -552,8 +556,8 @@ async fn run_skill_store_remove_operation(
         transition_skill_store_operation(
             &store,
             &operation_id,
-            rustclaw_skill_sdk::OperationStatus::Running,
-            rustclaw_skill_sdk::OperationStage::Remove,
+            skill_sdk::OperationStatus::Running,
+            skill_sdk::OperationStage::Remove,
             None,
             None,
         );
@@ -605,8 +609,8 @@ async fn run_skill_store_remove_operation(
         Ok(data) => transition_skill_store_operation(
             &store,
             &operation_id,
-            rustclaw_skill_sdk::OperationStatus::Success,
-            rustclaw_skill_sdk::OperationStage::Success,
+            skill_sdk::OperationStatus::Success,
+            skill_sdk::OperationStage::Success,
             None,
             Some(data),
         ),
@@ -635,7 +639,7 @@ async fn rollback_skill_store_item(
         Err(error) => return skill_store_error_response(error),
     };
     let operation = match skill_store_operation_store(&state)
-        .create(&skill_name, rustclaw_skill_sdk::OperationAction::Rollback)
+        .create(&skill_name, skill_sdk::OperationAction::Rollback)
     {
         Ok(operation) => operation,
         Err(error) => {
@@ -654,13 +658,13 @@ async fn rollback_skill_store_item(
         transition_skill_store_operation(
             &store,
             &worker_operation_id,
-            rustclaw_skill_sdk::OperationStatus::Running,
-            rustclaw_skill_sdk::OperationStage::Rollback,
+            skill_sdk::OperationStatus::Running,
+            skill_sdk::OperationStage::Rollback,
             None,
             None,
         );
         let receipt_store =
-            rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(&worker_state));
+            skill_sdk::InstallReceiptStore::new(skill_package_root(&worker_state));
         let result = receipt_store.rollback(&skill_name).map_err(|error| {
             SkillStoreOperationError::new(
                 StatusCode::CONFLICT,
@@ -675,8 +679,8 @@ async fn rollback_skill_store_item(
                     Ok(config) => transition_skill_store_operation(
                         &store,
                         &worker_operation_id,
-                        rustclaw_skill_sdk::OperationStatus::Success,
-                        rustclaw_skill_sdk::OperationStage::Success,
+                        skill_sdk::OperationStatus::Success,
+                        skill_sdk::OperationStage::Success,
                         None,
                         Some(json!({"pointer": pointer, "config": config})),
                     ),

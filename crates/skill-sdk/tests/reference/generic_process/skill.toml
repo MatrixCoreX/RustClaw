@@ -1,0 +1,41 @@
+schema_version = 1
+
+[package]
+name = "reference_generic_process"
+version = "1.0.0"
+description = "Generic process reference conformance fixture"
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+
+[registry]
+name = "reference_generic_process"
+capability_policy_source = "registry"
+
+[build]
+adapter = "generic_process"
+source_root = "generic_process"
+network = "deny"
+
+[run]
+launcher = "process"
+entrypoint = "runtime/src/runtime/bin/reference-generic-process"
+working_directory = "."
+timeout_seconds = 10
+smoke_args = { action = "calculate", a = 1, b = 2 }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "reference_generic_process"
+
+[lifecycle]
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"

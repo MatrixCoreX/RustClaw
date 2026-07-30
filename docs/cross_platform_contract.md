@@ -1,6 +1,6 @@
 # Cross-Platform Runtime Contract
 
-RustClaw shared production code targets Linux and macOS. Platform-specific
+Agent Runtime shared production code targets Linux and macOS. Platform-specific
 capabilities remain explicit: they use a platform adapter, return a structured
 unsupported result, or are excluded with `cfg`. A missing dependency never
 authorizes a less restrictive fallback.

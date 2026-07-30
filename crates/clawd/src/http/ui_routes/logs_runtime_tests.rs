@@ -3,7 +3,7 @@ use super::{available_log_file_names, is_log_file_name, select_available_log_fil
 #[test]
 fn discovers_existing_logs_without_accepting_lock_or_unrelated_files() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-log-discovery-{}-{}",
+        "agent-runtime-log-discovery-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

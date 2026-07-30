@@ -98,7 +98,7 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
+            r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/agent-runtime.db","value":"data/agent-runtime.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
         ));
     let route_result = IntentOutputContract {
                 exact_sentence_count: None,
@@ -116,7 +116,7 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("database.sqlite_path: data/rustclaw.db\ntools.allow_sudo: true")
+        Some("database.sqlite_path: data/agent-runtime.db\ntools.allow_sudo: true")
     );
 }
 
@@ -382,7 +382,7 @@ fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() 
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/tmp/rustclaw-workspace/rustclaw.service","size_bytes":1190},"path":"/tmp/rustclaw-workspace/rustclaw.service"}],"include_missing":true}"#,
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"agent-runtime.service","resolved_path":"/tmp/agent-runtime-workspace/agent-runtime.service","size_bytes":1190},"path":"/tmp/agent-runtime-workspace/agent-runtime.service"}],"include_missing":true}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -391,7 +391,7 @@ fn ordinary_path_inspection_defers_system_basic_path_facts_to_model_synthesis() 
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -412,12 +412,12 @@ fn ordinary_path_inspection_defers_multiple_path_observations_to_model_synthesis
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"action":"find_name","count":1,"exact":true,"patterns":["rustclaw.service"],"results":["rustclaw.service"],"root":""}"#,
+        r#"{"action":"find_name","count":1,"exact":true,"patterns":["agent-runtime.service"],"results":["agent-runtime.service"],"root":""}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "fs_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"agent-runtime.service","resolved_path":"/home/guagua/agent-runtime/agent-runtime.service","size_bytes":769},"path":"/home/guagua/agent-runtime/agent-runtime.service"}],"include_missing":true}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     route_result.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -518,11 +518,11 @@ fn ordinary_path_metadata_observation_does_not_use_fixed_runtime_reply() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/rustclaw.db","resolved_path":"/tmp/repo/data/rustclaw.db","size_bytes":55226368},"path":"/tmp/repo/data/rustclaw.db"}],"include_missing":true}"#,
+            r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/agent-runtime.db","resolved_path":"/tmp/repo/data/agent-runtime.db","size_bytes":55226368},"path":"/tmp/repo/data/agent-runtime.db"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint = "data/rustclaw.db".to_string();
+    route_result.locator_hint = "data/agent-runtime.db".to_string();
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
@@ -573,7 +573,7 @@ fn run_cmd_yes_text_is_not_parsed_into_a_path_verdict() {
         crate::now_ts_u64()
     ));
     std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-    let target = temp_dir.join("rustclaw.service");
+    let target = temp_dir.join("agent-runtime.service");
     std::fs::write(&target, "ok").expect("write target");
     let expected_path = target
         .canonicalize()
@@ -592,7 +592,7 @@ fn run_cmd_yes_text_is_not_parsed_into_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -618,7 +618,7 @@ fn run_cmd_exists_text_is_not_parsed_into_a_path_verdict() {
         crate::now_ts_u64()
     ));
     std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-    let target = temp_dir.join("rustclaw.service");
+    let target = temp_dir.join("agent-runtime.service");
     std::fs::write(&target, "ok").expect("write target");
     let expected_path = target
         .canonicalize()
@@ -637,7 +637,7 @@ fn run_cmd_exists_text_is_not_parsed_into_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -663,7 +663,7 @@ fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
         crate::now_ts_u64()
     ));
     std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-    let target = temp_dir.join("rustclaw.service");
+    let target = temp_dir.join("agent-runtime.service");
     std::fs::write(&target, "ok").expect("write target");
     let resolved = target
         .canonicalize()
@@ -675,7 +675,7 @@ fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"find_name","count":1,"results":["rustclaw.service"],"root":""}"#,
+        r#"{"action":"find_name","count":1,"results":["agent-runtime.service"],"root":""}"#,
     ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -684,7 +684,7 @@ fn ordinary_find_name_path_observation_defers_to_model_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()

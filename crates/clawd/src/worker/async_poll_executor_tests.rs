@@ -6,16 +6,18 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rustclaw_{prefix}_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agent_{prefix}_{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
 
     fn root_job_dir(&self, job_id: &str) -> std::path::PathBuf {
-        let path = self.path.join(".rustclaw").join("async_jobs").join(job_id);
+        let path = self
+            .path
+            .join(".agent-runtime")
+            .join("async_jobs")
+            .join(job_id);
         std::fs::create_dir_all(&path).expect("create job dir");
         path
     }
@@ -445,7 +447,7 @@ fn single_action_agent_async_success_needs_no_provider_continuation() {
         "status": "succeeded",
         "final_result_json": {
             "status": "ok",
-            "output": "RUSTCLAW_LONG_COMMAND_COMPLETE",
+            "output": "APP_LONG_COMMAND_COMPLETE",
             "exit_code": 0
         }
     })));
@@ -464,7 +466,7 @@ fn single_action_agent_async_success_needs_no_provider_continuation() {
     assert_eq!(payload["executor_result_status"], "async_poll_completed");
     assert_eq!(
         payload["final_result_json"]["output"],
-        "RUSTCLAW_LONG_COMMAND_COMPLETE"
+        "APP_LONG_COMMAND_COMPLETE"
     );
     assert!(payload.get("continuation_result_json").is_none());
 }

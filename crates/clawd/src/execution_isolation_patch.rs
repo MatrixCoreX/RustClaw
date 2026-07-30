@@ -14,7 +14,7 @@ use super::ExecutionIsolationPlan;
 
 const MAX_CHILD_PATCH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CHILD_PATCH_FILES: usize = 512;
-const ISOLATION_MARKER_PATHSPEC: &str = ":(exclude).rustclaw-isolation.json";
+const ISOLATION_MARKER_PATHSPEC: &str = ":(exclude).agent-isolation.json";
 
 #[derive(Debug)]
 pub(crate) struct ValidatedChildPatchArtifact {

@@ -1,6 +1,6 @@
-# RustClaw
+# Agent Runtime
 
-<img src="./RustClaw.png" width="420" />
+<img src="./app-illustration.png" width="420" />
 
 这是一个简体中文入口索引页，方便快速找到当前最重要的文档。
 

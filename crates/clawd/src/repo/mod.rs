@@ -34,6 +34,7 @@ pub(crate) use auth::{
     FactoryResetDbResult, PendingChannelBindSession,
 };
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;
+#[cfg(test)]
 pub(crate) use crypto_storage::credential_context_for_user_key as crypto_credential_context_for_user_key;
 pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,

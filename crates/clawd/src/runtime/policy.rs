@@ -12,7 +12,7 @@ pub(crate) struct RateLimiter {
 }
 
 pub(crate) struct ToolsPolicy {
-    pub(crate) access_profile: String,
+    profile_allow: Vec<String>,
     pub(crate) sandbox_mode: ToolSandboxMode,
     pub(crate) sandbox_backend: ToolSandboxBackend,
     pub(crate) approval_policy: ToolApprovalPolicy,
@@ -29,6 +29,8 @@ pub(crate) struct ProviderScopedPolicy {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct SandboxRequirements<'a> {
     pub(crate) mutates: bool,
+    /// Network access already projected from the host-owned capability policy.
+    /// Package requests do not reach this layer until admission has granted them.
     pub(crate) network_access: bool,
     pub(crate) filesystem_write: bool,
     pub(crate) external_publish: bool,
@@ -91,15 +93,15 @@ impl RateLimiter {
 impl ToolsPolicy {
     pub(crate) fn from_config(cfg: &ToolsConfig) -> Result<Self, String> {
         let access_profile = cfg.access_profile.trim().to_ascii_lowercase();
-        if !matches!(
-            access_profile.as_str(),
-            "full" | "coding" | "minimal" | "messaging"
-        ) {
-            return Err(format!(
-                "{}:{}",
-                "invalid_tools_access_profile", cfg.access_profile
-            ));
-        }
+        let profile_allow = cfg
+            .profiles
+            .get(&access_profile)
+            .ok_or_else(|| format!("{}:{}", "invalid_tools_access_profile", cfg.access_profile))?;
+        let profile_allow: Vec<String> = profile_allow
+            .iter()
+            .map(|value| normalize_capability_pattern(value.trim()))
+            .filter(|value| !value.is_empty())
+            .collect();
         let allow: Vec<String> = cfg
             .allow
             .iter()
@@ -113,7 +115,7 @@ impl ToolsPolicy {
             .filter(|v| !v.is_empty())
             .collect();
 
-        for p in allow.iter().chain(deny.iter()) {
+        for p in allow.iter().chain(deny.iter()).chain(profile_allow.iter()) {
             if p != "*" && !p.starts_with("skill:") && !p.starts_with("capability:") {
                 return Err(format!(
                     "invalid tools pattern: {p}; expected '*' or prefix 'skill:'/'capability:' (legacy 'tool:' is auto-converted to 'skill:')"
@@ -158,7 +160,7 @@ impl ToolsPolicy {
         }
 
         Ok(Self {
-            access_profile,
+            profile_allow,
             sandbox_mode: cfg.sandbox_mode,
             sandbox_backend: cfg.sandbox_backend,
             approval_policy: cfg.approval_policy,
@@ -283,9 +285,10 @@ impl ToolsPolicy {
                 }
             }
             ToolSandboxMode::WorkspaceWrite => {
-                if requirements.subprocess
-                    && (requirements.external_publish || requirements.network_access)
-                {
+                // A workspace-scoped subprocess may inherit the network only when
+                // the selected registry capability explicitly carries the host
+                // network grant. Publishing remains a separate denied effect.
+                if requirements.subprocess && requirements.external_publish {
                     Some("sandbox_workspace_external_denied")
                 } else if requirements.subprocess && requirements.credential_access {
                     Some("sandbox_workspace_credential_denied")
@@ -351,53 +354,9 @@ impl ToolsPolicy {
     }
 
     fn default_allowed(&self, token: &str) -> bool {
-        let defaults = match self.access_profile.as_str() {
-            "full" => vec!["*"],
-            "coding" => vec![
-                "skill:run_cmd",
-                "skill:code_index",
-                "skill:fs_basic",
-                "skill:config_basic",
-                "skill:config_edit",
-                "skill:read_file",
-                "skill:write_file",
-                "skill:list_dir",
-                "skill:make_dir",
-                "skill:remove_file",
-                "skill:workspace_patch",
-                "skill:system_basic",
-                "skill:git_basic",
-                "skill:process_basic",
-                "skill:archive_basic",
-                "skill:fs_search",
-                "skill:health_check",
-                "skill:log_analyze",
-                "capability:service_control",
-                "skill:task_control",
-                "skill:doc_parse",
-                "skill:transform",
-                "skill:kb",
-                "capability:image.preview_generate",
-                "capability:audio.preview_synthesize",
-                "capability:video.preview_generate",
-                "capability:music.preview_generate",
-                "capability:module.preview_install",
-                "capability:schedule.preview",
-                "capability:schedule.list",
-            ],
-            "minimal" => vec![
-                "skill:run_cmd",
-                "skill:read_file",
-                "skill:write_file",
-                "skill:list_dir",
-                "skill:make_dir",
-                "skill:remove_file",
-                "skill:system_basic",
-            ],
-            "messaging" => vec!["skill:system_basic"],
-            _ => vec!["*"],
-        };
-        defaults.into_iter().any(|p| wildcard_match(p, token))
+        self.profile_allow
+            .iter()
+            .any(|pattern| wildcard_match(pattern, token))
     }
 }
 

@@ -9,7 +9,7 @@ fn runtime(root: &Path, user_key: &str) -> KbRuntime {
         workspace_root: root.to_path_buf(),
         storage_database_path: root.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
-        path_policy: rustclaw_skill_sdk::SkillPathPolicy::new(root, None)
+        path_policy: skill_sdk::SkillPathPolicy::new(root, None)
             .expect("create KB test path policy"),
     }
 }
@@ -59,8 +59,10 @@ fn snapshot(owner: &str, namespace: &str, documents: &[(&str, &str)]) -> Namespa
 
 #[test]
 fn namespace_storage_is_user_scoped_inside_one_skill_database() {
-    let root =
-        std::env::temp_dir().join(format!("rustclaw-kb-storage-users-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-kb-storage-users-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&root);
     let alpha = runtime(&root, "rk-alpha");
     let beta = runtime(&root, "rk-beta");
@@ -87,7 +89,7 @@ fn namespace_storage_is_user_scoped_inside_one_skill_database() {
 #[test]
 fn legacy_json_migrates_once_and_is_physically_removed() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-storage-migrate-{}",
+        "agent-runtime-kb-storage-migrate-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -124,7 +126,7 @@ fn legacy_json_migrates_once_and_is_physically_removed() {
 #[test]
 fn sqlite_v1_payload_migrates_to_normalized_rows_and_drops_legacy_table() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-storage-sqlite-v1-{}",
+        "agent-runtime-kb-storage-sqlite-v1-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -183,9 +185,80 @@ fn sqlite_v1_payload_migrates_to_normalized_rows_and_drops_legacy_table() {
 }
 
 #[test]
+fn sqlite_v1_migration_reuses_preimported_retrieval_identity() {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-kb-storage-preimported-retrieval-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let runtime = runtime(&root, "rk-owner");
+    initialize(&runtime).expect("initialize normalized schema");
+
+    let original = snapshot("rk-owner", "manuals", &[("guide.md", "current text")]);
+    let mut db = open(&runtime).expect("open database");
+    db.execute_batch(
+        "CREATE TABLE kb_namespaces_v1 (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at_epoch INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace)
+        );",
+    )
+    .expect("create staged v1 table");
+    db.execute(
+        "INSERT INTO kb_namespaces_v1 VALUES (?1, ?2, ?3, ?4)",
+        params![
+            original.owner_user_key,
+            original.namespace,
+            serde_json::to_string(&original).expect("serialize v1 payload"),
+            original.updated_at_epoch
+        ],
+    )
+    .expect("insert staged snapshot");
+    let tx = db.transaction().expect("begin preimport transaction");
+    insert_retrieval_row(
+        &tx,
+        &original,
+        &original.chunks[0],
+        "stale preimported text",
+        0,
+    )
+    .expect("preimport retrieval identity");
+    tx.commit().expect("commit preimport");
+    drop(db);
+
+    initialize(&runtime).expect("migrate over preimported retrieval identity");
+    initialize(&runtime).expect("repeat migration remains idempotent");
+    let db = open(&runtime).expect("reopen migrated database");
+    assert!(!table_exists(&db, "kb_namespaces_v1").expect("legacy table check"));
+    assert_eq!(
+        db.query_row(
+            "SELECT search_text FROM memory_retrieval_index
+             WHERE user_key = 'rk-owner'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("updated retrieval text"),
+        "current text"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index
+             WHERE user_key = 'rk-owner'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("one stable retrieval row"),
+        1
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn incremental_update_preserves_unaffected_retrieval_row() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-storage-incremental-{}",
+        "agent-runtime-kb-storage-incremental-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -249,7 +322,7 @@ fn incremental_update_preserves_unaffected_retrieval_row() {
 #[test]
 fn failed_incremental_write_rolls_back_documents_chunks_and_retrieval() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-storage-rollback-{}",
+        "agent-runtime-kb-storage-rollback-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -294,7 +367,7 @@ fn failed_incremental_write_rolls_back_documents_chunks_and_retrieval() {
 #[test]
 fn search_candidates_are_bounded_and_user_namespace_scoped() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-kb-storage-candidates-{}",
+        "agent-runtime-kb-storage-candidates-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);

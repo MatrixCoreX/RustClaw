@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/plan_result.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/plan_result.schema.json",
   "title": "PlanResult",
   "description": "Schema for the JSON object returned by single-plan / loop-incremental-plan / plan-repair prompts (prompts/single_plan_execution_prompt.md, prompts/loop_incremental_plan_prompt.md, prompts/plan_repair_prompt.md). Mirrors `SinglePlanEnvelope` (crates/clawd/src/agent_engine.rs) and the `AgentAction` enum (crates/clawd/src/runtime/types.rs) and is enforced by the `plan_result_schema_drift` unit test in `crates/clawd/src/agent_engine/planning.rs`.\n\n§D2 (schema-driven prompt I/O 第二份样板, after intent_normalizer): the planner returns either an envelope `{steps: [...]}` or a bare action array. Each step is an `AgentAction` discriminated by `type`. `args` is intentionally `Value` (free-form) — per-skill arg shape is governed downstream by `skills_registry.toml` rather than this schema. As of §7.4, the plan grammar also allows `{\"type\":\"synthesize_answer\"}` as a runtime-owned evidence-to-answer node so the planner no longer has to hand-write fragile `call_skill(chat, text=...)` transform prompts.",
   "type": "object",

@@ -99,7 +99,7 @@ async fn authenticated_host_summary_is_versioned_bounded_and_secret_free() {
         .oneshot(
             Request::builder()
                 .uri("/v1/system/host-summary")
-                .header("x-rustclaw-key", KEY)
+                .header("x-agent-key", KEY)
                 .body(Body::empty())
                 .expect("host summary request"),
         )

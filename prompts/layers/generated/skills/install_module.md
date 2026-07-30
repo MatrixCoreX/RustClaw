@@ -10,7 +10,7 @@
 ## Capability Summary (from interface)
 - Installs or previews language dependencies without implicit host-global writes.
 - `scope=project` updates a detected project manifest/lockfile or a project-local isolated Python dependency directory.
-- `scope=tool_cache` installs a standalone tool into RustClaw's versioned `data/tool-cache/modules` tree.
+- `scope=tool_cache` installs a standalone tool into the runtime's versioned `data/tool-cache/modules` tree.
 - Preview returns exact scope, argv, working directory, target files and the confirmation requirement without creating directories or running an installer.
 
 ## Config Entry Points (from interface)

@@ -1,7 +1,7 @@
 [messages]
-"cli.about" = "Terminal client for RustClaw tasks and coding sessions"
-"auth.key_required" = "pass -k/--key or set RUSTCLAW_ADMIN_KEY"
-"auth.workspace_not_found" = "the current directory and its parents do not contain configs/config.toml; set RUSTCLAW_WORKSPACE or run from the project root"
+"cli.about" = "Terminal client for {product_name} tasks and coding sessions"
+"auth.key_required" = "pass -k/--key or set APP_ADMIN_KEY"
+"auth.workspace_not_found" = "the current directory and its parents do not contain configs/config.toml; set APP_WORKSPACE or run from the project root"
 "auth.admin_key_not_found" = "auth_keys has no enabled admin key; start clawd first or pass -k/--key"
 "tui.prompt" = "clawcli-tui> "
 "tui.continue_prompt" = "clawcli-tui-continue> "

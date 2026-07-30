@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/schedule_intent.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/schedule_intent.schema.json",
   "title": "ScheduleIntentOutput",
   "description": "Schema for the JSON object returned by `prompts/schedule_intent_prompt.md`. Mirrors `ScheduleIntentOutput` / `ScheduleIntentSchedule` / `ScheduleIntentTask` in `crates/clawd/src/runtime/types.rs`, and is enforced by `schedule_intent_schema_drift` in `crates/clawd/src/schedule_service.rs`.\n\nThis parser turns natural-language scheduling requests into a normalized schedule envelope. `task.payload` remains intentionally free-form because per-skill argument shape is validated by the skill registry/runtime, not by the schedule parser schema.",
   "type": "object",

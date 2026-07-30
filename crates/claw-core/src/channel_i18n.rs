@@ -4,6 +4,8 @@ use std::sync::{Mutex, OnceLock};
 
 use toml::Value as TomlValue;
 
+use crate::product_identity::product_identity;
+
 static I18N_DICT_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, String>>>> = OnceLock::new();
 
 fn load_i18n_dict(i18n_path: &str) -> HashMap<String, String> {
@@ -38,20 +40,24 @@ fn collect_i18n_dict_entries(prefix: &str, value: &TomlValue, out: &mut HashMap<
 }
 
 pub fn text_from_path(i18n_path: &str, key: &str, fallback: &str) -> String {
+    let render_product_name =
+        |text: String| text.replace("{product_name}", product_identity().display_name());
     if i18n_path.trim().is_empty() {
-        return fallback.to_string();
+        return render_product_name(fallback.to_string());
     }
     let cache = I18N_DICT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = match cache.lock() {
         Ok(g) => g,
-        Err(_) => return fallback.to_string(),
+        Err(_) => return render_product_name(fallback.to_string()),
     };
     let dict = guard
         .entry(i18n_path.to_string())
         .or_insert_with(|| load_i18n_dict(i18n_path));
-    dict.get(key)
-        .cloned()
-        .unwrap_or_else(|| fallback.to_string())
+    render_product_name(
+        dict.get(key)
+            .cloned()
+            .unwrap_or_else(|| fallback.to_string()),
+    )
 }
 
 pub fn text_with_vars_from_path(
@@ -78,7 +84,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time before unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("rustclaw_channel_i18n_{name}_{unique}.toml"))
+        std::env::temp_dir().join(format!("agent_channel_i18n_{name}_{unique}.toml"))
     }
 
     #[test]

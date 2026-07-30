@@ -5,6 +5,24 @@ use std::sync::OnceLock;
 
 use super::LoopState;
 
+pub(super) fn normalize_registry_argument_aliases(
+    registry: Option<&claw_core::skill_registry::SkillsRegistry>,
+    normalized_skill: &str,
+    args: &mut Value,
+) -> bool {
+    let Some(aliases) = registry.and_then(|registry| registry.argument_aliases(normalized_skill))
+    else {
+        return false;
+    };
+    let Some(object) = args.as_object_mut() else {
+        return false;
+    };
+    aliases.iter().fold(false, |changed, (canonical, aliases)| {
+        let aliases = aliases.iter().map(String::as_str).collect::<Vec<_>>();
+        move_value_alias_and_drop_aliases(object, canonical, &aliases) || changed
+    })
+}
+
 pub(super) fn rewrite_run_cmd_with_written_aliases(
     command: &str,
     loop_state: &LoopState,
@@ -182,45 +200,12 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         return true;
     }
     match normalized_skill {
-        "audio_synthesize" => normalize_audio_synthesize_arg_aliases(args),
         "browser_web" => normalize_browser_web_arg_aliases(args),
-        "config_edit" => normalize_config_edit_arg_aliases(args),
         "fs_search" => normalize_fs_search_arg_aliases(args),
         "image_generate" => normalize_image_generate_arg_aliases(args),
-        "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
-        "make_dir" => normalize_make_dir_arg_aliases(args),
-        "music_generate" => normalize_music_generate_arg_aliases(args),
-        "run_cmd" => normalize_run_cmd_arg_aliases(args),
-        "service_control" => normalize_service_control_arg_aliases(args),
-        "video_generate" => normalize_video_generate_arg_aliases(args),
         _ => false,
     }
-}
-
-fn normalize_run_cmd_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_string_alias_if_missing(obj, "command", &["cmd", "shell_command"])
-}
-
-fn normalize_config_edit_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_value_alias_if_missing(obj, "value", &["new_value", "target_value"])
-}
-
-fn normalize_make_dir_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_value_alias_and_drop_aliases(
-        obj,
-        "parents",
-        &["create_parents", "create_parent_dirs", "mkdir_parents"],
-    )
 }
 
 fn move_string_alias_if_missing(
@@ -284,33 +269,11 @@ fn move_value_alias_and_drop_aliases(
     changed
 }
 
-fn normalize_image_edit_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_string_alias_if_missing(obj, "instruction", &["prompt", "query", "text"])
-}
-
 fn normalize_image_generate_arg_aliases(args: &mut Value) -> bool {
     let Some(obj) = args.as_object_mut() else {
         return false;
     };
-    let mut changed = false;
-    changed |= move_string_alias_if_missing(
-        obj,
-        "prompt",
-        &["subject", "description", "instruction", "text", "query"],
-    );
-    changed |= move_string_alias_if_missing(obj, "size", &["resolution", "dimensions"]);
-    changed |= move_size_from_width_height_if_missing(obj);
-    changed
-}
-
-fn normalize_audio_synthesize_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_string_alias_if_missing(obj, "text", &["input", "prompt", "content"])
+    move_size_from_width_height_if_missing(obj)
 }
 
 fn normalize_browser_web_arg_aliases(args: &mut Value) -> bool {
@@ -413,34 +376,6 @@ fn integer_value(value: &Value) -> Option<i64> {
         Value::String(value) => value.trim().parse::<i64>().ok(),
         _ => None,
     }
-}
-
-fn normalize_video_generate_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_string_alias_if_missing(
-        obj,
-        "prompt",
-        &["subject", "description", "instruction", "text", "query"],
-    )
-}
-
-fn normalize_music_generate_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    move_string_alias_if_missing(obj, "prompt", &["description", "subject", "theme", "text"])
-}
-
-fn normalize_service_control_arg_aliases(args: &mut Value) -> bool {
-    let Some(obj) = args.as_object_mut() else {
-        return false;
-    };
-    let mut changed = false;
-    changed |= move_string_alias_if_missing(obj, "target", &["unit", "name"]);
-    changed |= move_string_alias_if_missing(obj, "manager_type", &["manager"]);
-    changed
 }
 
 fn move_size_from_width_height_if_missing(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -559,11 +494,7 @@ fn normalize_kb_arg_aliases(args: &mut Value) -> bool {
     else {
         return false;
     };
-    let mut changed = move_string_alias_if_missing(
-        obj,
-        "namespace",
-        &["kb_name", "kb_namespace", "knowledge_base_name"],
-    );
+    let mut changed = false;
     if !is_ingest || kb_ingest_has_source_paths(obj) {
         return changed;
     }

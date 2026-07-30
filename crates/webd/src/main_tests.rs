@@ -37,7 +37,7 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
 
 #[tokio::test]
 async fn webd_serves_ui_assets_without_forwarding_them_to_clawd() {
-    let root = std::env::temp_dir().join(format!("rustclaw-webd-ui-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).expect("create UI fixture");
     std::fs::write(root.join("index.html"), "<html>webd-ui-marker</html>")
         .expect("write UI fixture");
@@ -196,8 +196,8 @@ async fn locked_login_returns_structured_429_with_retry_after() {
 #[test]
 fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
     let mut incoming = HeaderMap::new();
-    incoming.insert("x-rustclaw-key", HeaderValue::from_static("client-key"));
-    incoming.insert("x-rustclaw-client", HeaderValue::from_static("ui"));
+    incoming.insert("x-agent-key", HeaderValue::from_static("client-key"));
+    incoming.insert("x-agent-runtime-client", HeaderValue::from_static("ui"));
 
     let outgoing = build_outgoing_headers(
         &incoming,
@@ -209,13 +209,13 @@ fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
 
     assert_eq!(
         outgoing
-            .get("x-rustclaw-key")
+            .get("x-agent-key")
             .and_then(|value| value.to_str().ok()),
         Some("session-admin-key")
     );
     assert_eq!(
         outgoing
-            .get("x-rustclaw-client")
+            .get("x-agent-runtime-client")
             .and_then(|value| value.to_str().ok()),
         Some("ui")
     );
@@ -224,8 +224,8 @@ fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
 #[test]
 fn key_mode_forwards_client_key_and_ui_origin_without_web_session() {
     let mut incoming = HeaderMap::new();
-    incoming.insert("x-rustclaw-key", HeaderValue::from_static("admin-key"));
-    incoming.insert("x-rustclaw-client", HeaderValue::from_static("ui"));
+    incoming.insert("x-agent-key", HeaderValue::from_static("admin-key"));
+    incoming.insert("x-agent-runtime-client", HeaderValue::from_static("ui"));
 
     let outgoing = build_outgoing_headers(
         &incoming,
@@ -237,13 +237,13 @@ fn key_mode_forwards_client_key_and_ui_origin_without_web_session() {
 
     assert_eq!(
         outgoing
-            .get("x-rustclaw-key")
+            .get("x-agent-key")
             .and_then(|value| value.to_str().ok()),
         Some("admin-key")
     );
     assert_eq!(
         outgoing
-            .get("x-rustclaw-client")
+            .get("x-agent-runtime-client")
             .and_then(|value| value.to_str().ok()),
         Some("ui")
     );
@@ -332,7 +332,7 @@ fn credentialed_cors_preserves_upstream_vary_dimensions() {
         .header(header::VARY, "Accept-Encoding")
         .body(Body::empty())
         .expect("build response");
-    let origin = HeaderValue::from_static("https://rustclaw.example");
+    let origin = HeaderValue::from_static("https://agent-runtime.example");
 
     response = with_cors(response, Some(&origin));
 

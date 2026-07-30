@@ -316,7 +316,7 @@ def write_minimal_run_case(
 
 
 def run_self_test() -> int:
-    root = Path(tempfile.mkdtemp(prefix="rustclaw-provider-compare-"))
+    root = Path(tempfile.mkdtemp(prefix="agent-runtime-provider-compare-"))
     try:
         left = root / "left"
         right = root / "right"

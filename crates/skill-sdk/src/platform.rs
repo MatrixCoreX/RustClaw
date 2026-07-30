@@ -20,7 +20,7 @@ impl HostPlatform {
             arch: normalize_arch(std::env::consts::ARCH)
                 .unwrap_or(std::env::consts::ARCH)
                 .to_string(),
-            target: Some(env!("RUSTCLAW_BUILD_TARGET").to_string()),
+            target: Some(env!("APP_BUILD_TARGET").to_string()),
         }
     }
 

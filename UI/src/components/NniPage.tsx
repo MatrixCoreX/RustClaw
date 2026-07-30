@@ -586,8 +586,8 @@ export function NniPage({
           <p className="mt-4 text-sm leading-7 text-white/65">
             {nniChipMissing
               ? t(
-                  "当前设备缺少芯片，因此不会显示为已加入。你仍可以继续使用 RustClaw 的其它功能。",
-                  "This device has no chip, so it will not be marked as joined. Other RustClaw features remain available.",
+                  "当前设备缺少芯片，因此不会显示为已加入。你仍可以继续使用 {product_name} 的其它功能。",
+                  "This device has no chip, so it will not be marked as joined. Other {product_name} features remain available.",
                 )
               : nniJoined
                 ? t(

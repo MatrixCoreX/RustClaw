@@ -1,0 +1,683 @@
+from __future__ import annotations
+
+import json
+import mimetypes
+import os
+from pathlib import Path
+import subprocess
+import sys
+from typing import Any
+from urllib.parse import urlsplit
+
+
+SKILL_NAME = "media_download"
+SCHEMA_VERSION = 1
+TOOL_DIR = Path(__file__).resolve().parent / "tool"
+SUPPORTED_ACTIONS = (
+    "capabilities",
+    "download",
+    "resolve",
+    "transcribe",
+    "ocr",
+    "prepare_x",
+)
+SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
+MAX_ARTIFACTS = 32
+MAX_DIAGNOSTIC_CHARS = 4_000
+
+
+class SkillFailure(Exception):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        message_key: str,
+        retryable: bool = False,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.message_key = message_key
+        self.retryable = retryable
+        self.details = details or {}
+
+
+def _args(request: dict[str, Any]) -> dict[str, Any]:
+    args = request.get("args")
+    if not isinstance(args, dict):
+        raise SkillFailure(
+            "args must be an object",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_args",
+        )
+    return args
+
+
+def _string(
+    args: dict[str, Any],
+    name: str,
+    *,
+    required: bool = False,
+    default: str | None = None,
+    max_length: int = 20_000,
+) -> str | None:
+    value = args.get(name, default)
+    if value is None:
+        if required:
+            raise SkillFailure(
+                f"missing required argument: {name}",
+                error_code="missing_argument",
+                message_key=f"media_download.error.missing_{name}",
+            )
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise SkillFailure(
+            f"{name} must be a non-empty string",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    value = value.strip()
+    if len(value) > max_length or "\x00" in value:
+        raise SkillFailure(
+            f"{name} is too long or contains invalid characters",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
+def _bool(args: dict[str, Any], name: str, default: bool = False) -> bool:
+    value = args.get(name, default)
+    if not isinstance(value, bool):
+        raise SkillFailure(
+            f"{name} must be a boolean",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
+def _integer(
+    args: dict[str, Any],
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = args.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise SkillFailure(
+            f"{name} must be an integer between {minimum} and {maximum}",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
+def _number(
+    args: dict[str, Any],
+    name: str,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    value = args.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SkillFailure(
+            f"{name} must be a number",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    value = float(value)
+    if not minimum <= value <= maximum:
+        raise SkillFailure(
+            f"{name} must be between {minimum:g} and {maximum:g}",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
+def _choice(args: dict[str, Any], name: str, choices: tuple[str, ...], default: str) -> str:
+    value = args.get(name, default)
+    if not isinstance(value, str) or value not in choices:
+        raise SkillFailure(
+            f"{name} must be one of: {', '.join(choices)}",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
+def _artifact_output_directory(request: dict[str, Any]) -> Path:
+    context = request.get("context")
+    if not isinstance(context, dict):
+        raise SkillFailure(
+            "runtime artifact output directory is unavailable",
+            error_code="invalid_args",
+            message_key="media_download.error.artifact_directory_unavailable",
+        )
+    raw = context.get("artifact_output_directory")
+    if not isinstance(raw, str) or not raw.strip():
+        raise SkillFailure(
+            "runtime artifact output directory is unavailable",
+            error_code="invalid_args",
+            message_key="media_download.error.artifact_directory_unavailable",
+        )
+    path = Path(raw).expanduser().resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _input_path(request: dict[str, Any], raw: str) -> Path:
+    context = request.get("context")
+    workspace_root = None
+    allow_outside = False
+    if isinstance(context, dict):
+        workspace = context.get("workspace_root")
+        if isinstance(workspace, str) and workspace.strip():
+            workspace_root = Path(workspace).expanduser().resolve()
+        permissions = context.get("permissions")
+        if isinstance(permissions, dict):
+            allow_outside = permissions.get("allow_path_outside_workspace") is True
+
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and workspace_root is not None:
+        path = workspace_root / path
+    path = path.resolve()
+    if not path.exists():
+        raise SkillFailure(
+            f"input path does not exist: {path}",
+            error_code="not_found",
+            message_key="media_download.error.input_not_found",
+        )
+    if workspace_root is not None and not allow_outside:
+        try:
+            path.relative_to(workspace_root)
+        except ValueError as error:
+            raise SkillFailure(
+                f"input path is outside the allowed workspace: {path}",
+                error_code="permission_denied",
+                message_key="media_download.error.path_outside_workspace",
+            ) from error
+    return path
+
+
+def _safe_output_name(args: dict[str, Any]) -> str | None:
+    value = _string(args, "output_name", max_length=255)
+    if value is None:
+        return None
+    if Path(value).name != value or value in {".", ".."}:
+        raise SkillFailure(
+            "output_name must be a plain filename without a directory",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_output_name",
+        )
+    return value
+
+
+def _tool(script: str) -> list[str]:
+    entrypoint = TOOL_DIR / script
+    if not entrypoint.is_file():
+        raise SkillFailure(
+            f"bundled tool entrypoint is missing: {script}",
+            error_code="dependency_unavailable",
+            message_key="media_download.error.tool_missing",
+        )
+    return [sys.executable, str(entrypoint)]
+
+
+def _build_download_command(args: dict[str, Any], output_dir: Path, *, resolve_only: bool) -> list[str]:
+    share = _string(args, "share", required=True)
+    assert share is not None
+    platform = _choice(args, "platform", SUPPORTED_PLATFORMS, "auto")
+    network_timeout = _number(
+        args,
+        "network_timeout_seconds",
+        default=20.0,
+        minimum=1.0,
+        maximum=120.0,
+    )
+    profile_interval = _number(
+        args,
+        "profile_interval_seconds",
+        default=5.0,
+        minimum=0.0,
+        maximum=60.0,
+    )
+    profile_limit = args.get("profile_limit", 20)
+    if profile_limit != "all" and (
+        isinstance(profile_limit, bool)
+        or not isinstance(profile_limit, int)
+        or not 1 <= profile_limit <= 500
+    ):
+        raise SkillFailure(
+            "profile_limit must be an integer from 1 to 500, or 'all'",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_profile_limit",
+        )
+
+    command = _tool("media_downloader.py")
+    command.extend(
+        [
+            "--output-dir",
+            str(output_dir),
+            "--platform",
+            platform,
+            "--timeout",
+            f"{network_timeout:g}",
+            "--profile-limit",
+            str(profile_limit),
+            "--profile-interval",
+            f"{profile_interval:g}",
+            "--no-system-browser-cookies",
+            "--no-simplify-chinese",
+        ]
+    )
+    if not _bool(args, "browser_fallback", True):
+        command.append("--no-browser-fallback")
+
+    if resolve_only:
+        command.extend(["--print-url", "--no-ocr-images"])
+    else:
+        output_name = _safe_output_name(args)
+        if output_name:
+            command.extend(["--output-name", output_name])
+        flag_map = {
+            "save_meta": "--save-meta",
+            "show_info": "--show-info",
+            "x_compatible": "--x-compatible",
+            "overwrite": "--overwrite",
+        }
+        for name, flag in flag_map.items():
+            if _bool(args, name, False):
+                command.append(flag)
+        command.append("--no-ocr-images")
+    command.append(share)
+    return command
+
+
+def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
+    raw = _string(args, "input_path", required=True, max_length=4_096)
+    assert raw is not None
+    input_path = _input_path(request, raw)
+    engine = _choice(args, "engine", ("whisper", "funasr"), "whisper")
+    language = _string(args, "language", default="auto", max_length=32) or "auto"
+    command = _tool("video_transcriber.py")
+    command.extend(
+        [
+            "--output-dir",
+            str(output_dir),
+            "--engine",
+            engine,
+            "--language",
+            language,
+            "--no-progress",
+            "--no-simplify-chinese",
+        ]
+    )
+    flag_map = {
+        "extract_audio_only": "--extract-only",
+        "translate": "--translate",
+        "fast": "--fast",
+        "no_gpu": "--no-gpu",
+        "timestamps": "--timestamps",
+        "overwrite": "--overwrite",
+    }
+    for name, flag in flag_map.items():
+        if _bool(args, name, False):
+            command.append(flag)
+    command.append(str(input_path))
+    return command
+
+
+def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
+    raw_paths = args.get("input_paths")
+    if not isinstance(raw_paths, list) or not raw_paths or len(raw_paths) > 32:
+        raise SkillFailure(
+            "input_paths must be an array containing 1 to 32 image paths",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_input_paths",
+        )
+    paths = []
+    for raw in raw_paths:
+        if not isinstance(raw, str) or not raw.strip() or len(raw) > 4_096:
+            raise SkillFailure(
+                "each input_paths item must be a non-empty path string",
+                error_code="invalid_args",
+                message_key="media_download.error.invalid_input_paths",
+            )
+        paths.append(_input_path(request, raw.strip()))
+
+    language = _string(args, "language", default="chi_sim+eng", max_length=64) or "chi_sim+eng"
+    psm = _integer(args, "psm", default=6, minimum=0, maximum=13)
+    min_confidence = _number(
+        args,
+        "min_line_confidence",
+        default=30.0,
+        minimum=-1.0,
+        maximum=100.0,
+    )
+    command = _tool("image_ocr.py")
+    command.extend(
+        [
+            "--output-dir",
+            str(output_dir),
+            "--language",
+            language,
+            "--psm",
+            str(psm),
+            "--min-line-confidence",
+            f"{min_confidence:g}",
+        ]
+    )
+    if not _bool(args, "preprocess", True):
+        command.append("--no-preprocess")
+    if _bool(args, "overwrite", False):
+        command.append("--overwrite")
+    command.extend(str(path) for path in paths)
+    return command
+
+
+def _build_prepare_x_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
+    raw = _string(args, "input_path", required=True, max_length=4_096)
+    assert raw is not None
+    input_path = _input_path(request, raw)
+    crf = _integer(args, "crf", default=23, minimum=16, maximum=35)
+    command = _tool("x_transcoder.py")
+    command.extend(["--output-dir", str(output_dir), "--crf", str(crf)])
+    flag_map = {
+        "check_only": "--check",
+        "force": "--force",
+        "overwrite": "--overwrite",
+    }
+    for name, flag in flag_map.items():
+        if _bool(args, name, False):
+            command.append(flag)
+    command.append(str(input_path))
+    return command
+
+
+def _snapshot(directory: Path) -> dict[Path, tuple[int, int]]:
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for path in directory.rglob("*"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if path.is_file():
+            snapshot[path.resolve()] = (stat.st_size, stat.st_mtime_ns)
+    return snapshot
+
+
+def _artifact(path: Path) -> dict[str, Any]:
+    mime_type, _ = mimetypes.guess_type(path.name)
+    return {
+        "path": str(path),
+        "filename": path.name,
+        "mime_type": mime_type or "application/octet-stream",
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _diagnostics(stderr: str) -> str:
+    value = stderr.strip()
+    if len(value) <= MAX_DIAGNOSTIC_CHARS:
+        return value
+    return value[-MAX_DIAGNOSTIC_CHARS:]
+
+
+def _failure_from_process(action: str, returncode: int, stderr: str, artifacts: list[dict[str, Any]]) -> SkillFailure:
+    lowered = stderr.lower()
+    if any(marker in lowered for marker in ("was not found in path", "is required", "no module named")):
+        error_code = "dependency_unavailable"
+        message_key = "media_download.error.dependency_unavailable"
+    elif "no downloadable" in lowered or "no media" in lowered:
+        error_code = "media_not_found"
+        message_key = "media_download.error.media_not_found"
+    else:
+        error_code = "execution_failed"
+        message_key = "media_download.error.execution_failed"
+    retryable = any(marker in lowered for marker in ("timed out", "timeout", "temporarily", "connection reset"))
+    readable = _diagnostics(stderr) or f"{action} failed with exit code {returncode}"
+    return SkillFailure(
+        readable,
+        error_code=error_code,
+        message_key=message_key,
+        retryable=retryable,
+        details={"exit_code": returncode, "diagnostics": readable, "artifacts": artifacts},
+    )
+
+
+def _run_tool(action: str, command: list[str], output_dir: Path, timeout_seconds: int) -> tuple[str, str, list[dict[str, Any]]]:
+    before = _snapshot(output_dir)
+    environment = os.environ.copy()
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=TOOL_DIR,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
+        raise SkillFailure(
+            f"{action} timed out after {timeout_seconds} seconds",
+            error_code="timeout",
+            message_key="media_download.error.timeout",
+            retryable=True,
+            details={"diagnostics": _diagnostics(stderr)},
+        ) from error
+    after = _snapshot(output_dir)
+    changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
+    artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
+    if completed.returncode != 0:
+        raise _failure_from_process(action, completed.returncode, completed.stderr, artifacts)
+    return completed.stdout, completed.stderr, artifacts
+
+
+def _urls(stdout: str) -> list[str]:
+    urls: list[str] = []
+    for line in stdout.splitlines():
+        value = line.strip()
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"} and parsed.netloc and value not in urls:
+            urls.append(value)
+        if len(urls) >= 32:
+            break
+    return urls
+
+
+def _capabilities_extra() -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source_skill": SKILL_NAME,
+        "status": "ok",
+        "action": "capabilities",
+        "actions": list(SUPPORTED_ACTIONS),
+        "supported_platforms": list(SUPPORTED_PLATFORMS),
+        "public_content_only": True,
+        "system_browser_cookies": False,
+        "optional_dependencies": {
+            "youtube": ["yt-dlp"],
+            "media_processing": ["ffmpeg", "ffprobe"],
+            "ocr": ["tesseract"],
+            "browser_fallback": ["chromium_or_chrome"],
+            "transcription": ["whisper.cpp_or_funasr"],
+        },
+    }
+
+
+def _success(request_id: str, action: str, text: str, extra: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "source_skill": SKILL_NAME,
+        "status": "ok",
+        "action": action,
+    }
+    payload.update(extra)
+    return {
+        "request_id": request_id,
+        "status": "ok",
+        "text": text,
+        "error_text": None,
+        "extra": payload,
+    }
+
+
+def _error(request_id: str, failure: SkillFailure) -> dict[str, Any]:
+    extra = {
+        "schema_version": SCHEMA_VERSION,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_code": failure.error_code,
+        "message_key": failure.message_key,
+        "retryable": failure.retryable,
+    }
+    extra.update(failure.details)
+    return {
+        "request_id": request_id,
+        "status": "error",
+        "text": "",
+        "error_text": str(failure),
+        "extra": extra,
+    }
+
+
+def respond(request: dict[str, Any]) -> dict[str, Any]:
+    request_id = request.get("request_id")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise SkillFailure(
+            "request_id must be a non-empty string",
+            error_code="schema_error",
+            message_key="media_download.error.invalid_request_id",
+        )
+    args = _args(request)
+    action = _string(args, "action", required=True, max_length=64)
+    assert action is not None
+    if action not in SUPPORTED_ACTIONS:
+        raise SkillFailure(
+            f"unsupported action: {action}",
+            error_code="unsupported_action",
+            message_key="media_download.error.unsupported_action",
+        )
+    if action == "capabilities":
+        return _success(request_id, action, "Media download capabilities are available.", _capabilities_extra())
+
+    output_dir = _artifact_output_directory(request)
+    operation_timeout = _integer(
+        args,
+        "operation_timeout_seconds",
+        default=900,
+        minimum=5,
+        maximum=3_500,
+    )
+    if action == "download":
+        command = _build_download_command(args, output_dir, resolve_only=False)
+    elif action == "resolve":
+        command = _build_download_command(args, output_dir, resolve_only=True)
+    elif action == "transcribe":
+        command = _build_transcribe_command(request, args, output_dir)
+    elif action == "ocr":
+        command = _build_ocr_command(request, args, output_dir)
+    else:
+        command = _build_prepare_x_command(request, args, output_dir)
+
+    stdout, stderr, artifacts = _run_tool(action, command, output_dir, operation_timeout)
+    urls = _urls(stdout) if action == "resolve" else []
+    if action == "resolve" and not urls:
+        raise SkillFailure(
+            "media resolver completed without returning a downloadable URL",
+            error_code="media_not_found",
+            message_key="media_download.error.media_not_found",
+            details={"diagnostics": _diagnostics(stderr)},
+        )
+    count = len(urls) if action == "resolve" else len(artifacts)
+    noun = "URL" if action == "resolve" else "file"
+    deliver_to_user = action != "download" or _bool(args, "deliver_to_user", True)
+    text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
+    result_artifacts = artifacts
+    delivery = None
+    saved_files = None
+    if action == "download":
+        delivery = {
+            "intent": "artifact" if deliver_to_user else "save_only",
+            "deliver_to_user": deliver_to_user,
+        }
+        if not deliver_to_user:
+            result_artifacts = []
+            saved_files = artifacts
+            locations = ", ".join(item["path"] for item in artifacts) or str(output_dir)
+            text = f"download completed with {count} {noun}{'' if count == 1 else 's'}. Saved locally at: {locations}"
+    extra = {
+        "count": count,
+        "urls": urls,
+        "artifacts": result_artifacts,
+        "output_directory": str(output_dir),
+        "diagnostics": _diagnostics(stderr),
+    }
+    if delivery is not None:
+        extra["delivery"] = delivery
+    if saved_files is not None:
+        extra["saved_files"] = saved_files
+    return _success(
+        request_id,
+        action,
+        text,
+        extra,
+    )
+
+
+def main() -> None:
+    request_id = "invalid"
+    try:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            raise SkillFailure(
+                "request line is empty",
+                error_code="schema_error",
+                message_key="media_download.error.empty_request",
+            )
+        request = json.loads(line)
+        if not isinstance(request, dict):
+            raise SkillFailure(
+                "request must be a JSON object",
+                error_code="schema_error",
+                message_key="media_download.error.invalid_request",
+            )
+        raw_request_id = request.get("request_id")
+        if isinstance(raw_request_id, str) and raw_request_id.strip():
+            request_id = raw_request_id
+        response = respond(request)
+    except SkillFailure as failure:
+        response = _error(request_id, failure)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        response = _error(
+            request_id,
+            SkillFailure(
+                f"invalid request JSON: {error}",
+                error_code="schema_error",
+                message_key="media_download.error.invalid_json",
+            ),
+        )
+    except Exception as error:  # protocol boundary
+        response = _error(
+            request_id,
+            SkillFailure(
+                f"unexpected media download failure: {error}",
+                error_code="execution_failed",
+                message_key="media_download.error.unexpected",
+            ),
+        )
+    sys.stdout.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+if __name__ == "__main__":
+    main()

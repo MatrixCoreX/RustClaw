@@ -390,7 +390,7 @@ crates/clawd/src/fixture_replay_e2e.rs	prior_turns[{idx}].updated_at must not be
 crates/clawd/src/fixture_replay_e2e.rs	prior_turns[{idx}].user_text must not be empty	return Err(format!("prior_turns[{idx}].user_text must not be empty"));
 crates/clawd/src/fixture_replay_e2e.rs	process_ask_task returned Err: {e:?}	.map_err(|e| format!("process_ask_task returned Err: {e:?}"))?;
 crates/clawd/src/fixture_replay_e2e.rs	read fixture root {} failed: {e}	.map_err(|e| format!("read fixture root {} failed: {e}", root.display()))?;
-crates/clawd/src/fixture_replay_e2e.rs	rustclaw 有 service 文件吗	//!    触发 ask 请求 "rustclaw 有 service 文件吗"）。
+crates/clawd/src/fixture_replay_e2e.rs	agent-runtime 有 service 文件吗	//!    触发 ask 请求 "agent-runtime 有 service 文件吗"）。
 crates/clawd/src/fixture_replay_e2e.rs	seed prior_turns[{idx}] assistant memory failed: {e}	.map_err(|e| format!("seed prior_turns[{idx}] assistant memory failed: {e}"))?;
 crates/clawd/src/fixture_replay_e2e.rs	seed prior_turns[{idx}] failed: {e}	.map_err(|e| format!("seed prior_turns[{idx}] failed: {e}"))?;
 crates/clawd/src/fixture_replay_e2e.rs	seed prior_turns[{idx}] user memory failed: {e}	.map_err(|e| format!("seed prior_turns[{idx}] user memory failed: {e}"))?;
@@ -572,10 +572,10 @@ crates/clawd/src/http/ui_routes/model_provider_config.rs	config.toml has no [llm
 crates/clawd/src/http/ui_routes/model_provider_config.rs	config.toml root is not a table	.ok_or_else(|| anyhow::anyhow!("config.toml root is not a table"))?
 crates/clawd/src/http/ui_routes/model_provider_config.rs	image.toml [{}] not a table	.ok_or_else(|| anyhow::anyhow!("image.toml [{}] not a table", section))?
 crates/clawd/src/http/ui_routes/model_provider_config.rs	image.toml root not a table	.ok_or_else(|| anyhow::anyhow!("image.toml root not a table"))?;
-crates/clawd/src/http/ui_routes/model_provider_config.rs	only admin can restart RustClaw	error: Some("only admin can restart RustClaw".to_string()),
+crates/clawd/src/http/ui_routes/model_provider_config.rs	only admin can restart Agent Runtime	error: Some("only admin can restart Agent Runtime".to_string()),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	read model config failed: {err}	error: Some(format!("read model config failed: {err}")),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	read provider keys failed: {err}	error: Some(format!("read provider keys failed: {err}")),
-crates/clawd/src/http/ui_routes/model_provider_config.rs	restart triggered; start-all-bin.sh will restart RustClaw in a few seconds	"message": "restart triggered; start-all-bin.sh will restart RustClaw in a few seconds",
+crates/clawd/src/http/ui_routes/model_provider_config.rs	restart triggered; start-all-bin.sh will restart Agent Runtime in a few seconds	"message": "restart triggered; start-all-bin.sh will restart Agent Runtime in a few seconds",
 crates/clawd/src/http/ui_routes/model_provider_config.rs	saved but re-read failed: {err}	error: Some(format!("saved but re-read failed: {err}")),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	saved but re-read failed: {err}	error: Some(format!("saved but re-read failed: {err}")),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	write model config failed: {err}	error: Some(format!("write model config failed: {err}")),
@@ -609,14 +609,14 @@ crates/clawd/src/http/ui_routes/nni_remote_join.rs	signature helper returned err
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule Pi App restart: {err}	return Err(format!("failed to schedule Pi App restart: {err}"));
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule restart: {err}	return Err(format!("failed to schedule restart: {err}"));
 crates/clawd/src/http/ui_routes/service_control.rs	start-all-bin.sh not found in workspace root	return Err("start-all-bin.sh not found in workspace root".to_string());
-crates/clawd/src/http/ui_routes/skill_import_config.rs	- Avoid adding internal metadata fields yourself; RustClaw will inject its own runtime context.\n	"- Avoid adding internal metadata fields yourself; RustClaw will inject its own runtime context.\\n",
+crates/clawd/src/http/ui_routes/skill_import_config.rs	- Avoid adding internal metadata fields yourself; Agent Runtime will inject its own runtime context.\n	"- Avoid adding internal metadata fields yourself; Agent Runtime will inject its own runtime context.\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- Do not infer command-line flags, runtimes, dependencies, or action names from source files.\n	"- Do not infer command-line flags, runtimes, dependencies, or action names from source files.\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- Follow its actions, parameter names, types, defaults, and response contract exactly.\n	"- Follow its actions, parameter names, types, defaults, and response contract exactly.\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- This is an imported external skill: `{}`.\n	"- This is an imported external skill: `{}`.\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	- Treat the `INTERFACE.md` contract below as authoritative.\n	out.push_str("- Treat the `INTERFACE.md` contract below as authoritative.\\n");
 crates/clawd/src/http/ui_routes/skill_import_config.rs	<!-- AUTO-GENERATED: external skill importer -->	if raw.contains("<!-- AUTO-GENERATED: external skill importer -->") {
 crates/clawd/src/http/ui_routes/skill_import_config.rs	<!-- AUTO-GENERATED: external skill importer -->\n	out.push_str("<!-- AUTO-GENERATED: external skill importer -->\\n");
-crates/clawd/src/http/ui_routes/skill_import_config.rs	RustClaw verified external skill package.\n\n	out.push_str("RustClaw verified external skill package.\\n\\n");
+crates/clawd/src/http/ui_routes/skill_import_config.rs	Agent Runtime verified external skill package.\n\n	out.push_str("Agent Runtime verified external skill package.\\n\\n");
 crates/clawd/src/http/ui_routes/skill_import_config.rs	\n## Multilingual Reinforcement\n\n<!-- MULTILINGUAL-REINFORCEMENT: Keep language-specific nuance concise; preserve machine fields and action names exactly. -->\n	"\\n## Multilingual Reinforcement\\n\\n<!-- MULTILINGUAL-REINFORCEMENT: Keep language-specific nuance concise; preserve machine fields and action names exactly. -->\\n",
 crates/clawd/src/http/ui_routes/skill_import_config.rs	activate staged imported bundle failed: {error}	return Err(format!("activate staged imported bundle failed: {error}"));
 crates/clawd/src/http/ui_routes/skill_import_config.rs	analyze imported skill failed: {err}	error: Some(format!("analyze imported skill failed: {err}")),
@@ -641,7 +641,7 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed:
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	format!("write skills registry failed: {err}"),
 crates/clawd/src/http/ui_routes/skill_store_installation.rs	skill store config semaphore remains open	.expect("skill store config semaphore remains open")
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
-crates/clawd/src/http/ui_routes/workspace_update.rs	RUSTCLAW_SYSTEMD_UNIT contains unsupported characters	return Err("RUSTCLAW_SYSTEMD_UNIT contains unsupported characters".to_string());
+crates/clawd/src/http/ui_routes/workspace_update.rs	APP_SYSTEMD_UNIT contains unsupported characters	return Err("APP_SYSTEMD_UNIT contains unsupported characters".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stderr	.ok_or_else(|| format!("failed to capture {program} stderr"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stdout	.ok_or_else(|| format!("failed to capture {program} stdout"))?;
@@ -680,8 +680,8 @@ crates/clawd/src/main.rs	Memory item not found	Ok(None) => api_err(StatusCode::N
 crates/clawd/src/main.rs	Memory item not found	Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
 crates/clawd/src/main.rs	Memory settings update failed	"Memory settings update failed",
 crates/clawd/src/main.rs	No auth key found in database. Generated initial admin key.	warn!("No auth key found in database. Generated initial admin key.");
-crates/clawd/src/main.rs	RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address	anyhow::anyhow!("RUSTCLAW_INTERNAL_LISTEN must be a loopback socket address")
-crates/clawd/src/main.rs	RUSTCLAW_INTERNAL_LISTEN must use a loopback address	anyhow::bail!("RUSTCLAW_INTERNAL_LISTEN must use a loopback address");
+crates/clawd/src/main.rs	APP_INTERNAL_LISTEN must be a loopback socket address	anyhow::anyhow!("APP_INTERNAL_LISTEN must be a loopback socket address")
+crates/clawd/src/main.rs	APP_INTERNAL_LISTEN must use a loopback address	anyhow::bail!("APP_INTERNAL_LISTEN must use a loopback address");
 crates/clawd/src/main.rs	Rate limiter lock poisoned	"Rate limiter lock poisoned",
 crates/clawd/src/main.rs	Resolve task viewer failed: {}	error!("Resolve task viewer failed: {}", err);
 crates/clawd/src/main.rs	Task queue is full	let queue_full = "Task queue is full".to_string();
@@ -895,7 +895,7 @@ crates/clawd/src/runtime/state.rs	load minimal skills_registry.toml for test	.ex
 crates/clawd/src/runtime/state.rs	load real schedule prompts for fixture-replay test policy	.expect("load real schedule prompts for fixture-replay test policy");
 crates/clawd/src/runtime/state.rs	minimal builtin registry must satisfy integrity check, got: {:?}	"minimal builtin registry must satisfy integrity check, got: {:?}",
 crates/clawd/src/runtime/state.rs	reload_skill_views: load config failed: {}	.map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
-crates/clawd/src/runtime/state.rs	rustclaw_test_minimal_registry_{}.toml	"rustclaw_test_minimal_registry_{}.toml",
+crates/clawd/src/runtime/state.rs	agent-runtime_test_minimal_registry_{}.toml	"agent-runtime_test_minimal_registry_{}.toml",
 crates/clawd/src/runtime/state.rs	write minimal skills_registry.toml for test	std::fs::write(&path, &toml_buf).expect("write minimal skills_registry.toml for test");
 crates/clawd/src/runtime/state.rs	加一个字段动 13 个 test fixture	///   Slack / 企微）只动这一个子 struct，不再"加一个字段动 13 个 test fixture"。
 crates/clawd/src/runtime/state.rs	启动时从 config.toml 装配出来、运行期只读	/// 拆分动机：这一簇是"启动时从 config.toml 装配出来、运行期只读"的策略
@@ -905,7 +905,7 @@ crates/clawd/src/runtime/state.rs	对外通道适配器配置	/// P2.1 — 把"�
 crates/clawd/src/runtime/state.rs	建表	/// 时拿到旧/空记录而下游断言失败 —— 因此本 helper 只负责"建表"，行级
 crates/clawd/src/runtime/state.rs	录制时的同一份	///     "录制时的同一份"，hash 自洽。
 crates/clawd/src/runtime/state.rs	执行参数	/// 集合，与 SkillRuntime 的"执行参数"区分开。`maintenance` / `memory` /
-crates/clawd/src/runtime/state.rs	把 provider 装进 AppState	/// `RUSTCLAW_FIXTURE_CASE`，本 helper 只负责"把 provider 装进 AppState"。
+crates/clawd/src/runtime/state.rs	把 provider 装进 AppState	/// `APP_FIXTURE_CASE`，本 helper 只负责"把 provider 装进 AppState"。
 crates/clawd/src/runtime/state.rs	进程级别参数	/// "进程级别参数"。
 crates/clawd/src/runtime/state.rs	逻辑调用次数	/// 入口被命中的次数（与全局预算的"逻辑调用次数"语义一致）。
 crates/clawd/src/schedule_service.rs	- Note: registered but disabled — do NOT schedule run_skill for: {}	"- Note: registered but disabled — do NOT schedule run_skill for: {}",
@@ -952,7 +952,7 @@ crates/clawd/src/skill_storage/ownership.rs	KB storage pool: {error}	.map_err(|e
 crates/clawd/src/skill_storage/ownership.rs	KB storage pool: {error}	.map_err(|error| anyhow::anyhow!("KB storage pool: {error}"))?;
 crates/clawd/src/skill_storage/resolver.rs	create test skill storage root	std::fs::create_dir_all(&root).expect("create test skill storage root");
 crates/clawd/src/skill_storage/resolver.rs	invalid canonical skill storage name	anyhow::bail!("invalid canonical skill storage name");
-crates/clawd/src/skill_storage/resolver.rs	rustclaw-skill-storage-test-{}	"rustclaw-skill-storage-test-{}",
+crates/clawd/src/skill_storage/resolver.rs	skillctl-storage-test-{}	"skillctl-storage-test-{}",
 crates/clawd/src/skill_storage/resolver.rs	skill storage path has no parent	.ok_or_else(|| anyhow::anyhow!("skill storage path has no parent"))?;
 crates/clawd/src/skill_storage/resolver.rs	skill-owned storage is unsupported on this platform	anyhow::bail!("skill-owned storage is unsupported on this platform")
 crates/clawd/src/skill_storage/resolver.rs	skill_data_root contains an unsafe path component	anyhow::bail!("skill_data_root contains an unsafe path component");
@@ -1118,17 +1118,17 @@ crates/skill-runner/src/main.rs	workspace root is not a directory	return Err("wo
 crates/skill-runner/src/main.rs	workspace root unavailable: {error}	.map_err(|error| format!("workspace root unavailable: {error}"))?;
 crates/skill-runner/src/main.rs	workspace-write receipt requires WORKSPACE_ROOT	.ok_or_else(|| "workspace-write receipt requires WORKSPACE_ROOT".to_string())?;
 crates/skill-sdk/src/adapter.rs	cargo home is unknown	SkillSdkError::new("cargo_source_cache_unavailable", "cargo home is unknown")
-crates/skill-sdk/src/bin/rustclaw-skill.rs	Implement the {skill_name} capability through RustClaw.	capability_summary: format!("Implement the {skill_name} capability through RustClaw."),
-crates/skill-sdk/src/bin/rustclaw-skill.rs	JSON by default; add --human for concise text	"output": "JSON by default; add --human for concise text"
-crates/skill-sdk/src/bin/rustclaw-skill.rs	adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]	"adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	init <rust|python|node|go|prebuilt> <skill_name> <destination>	"init <rust|python|node|go|prebuilt> <skill_name> <destination>",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	package <skill.toml> <output_dir>	"package <skill.toml> <output_dir>",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	protocol-validate <request_id> <response.jsonl>	"protocol-validate <request_id> <response.jsonl>",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	receipt-verify <package_root> <skill_name>	"receipt-verify <package_root> <skill_name>",
-crates/skill-sdk/src/bin/rustclaw-skill.rs	rollback <package_root> <skill_name>	"rollback <package_root> <skill_name>"
+crates/skill-sdk/src/bin/skillctl.rs	Implement the {skill_name} capability through Agent Runtime.	capability_summary: format!("Implement the {skill_name} capability through Agent Runtime."),
+crates/skill-sdk/src/bin/skillctl.rs	JSON by default; add --human for concise text	"output": "JSON by default; add --human for concise text"
+crates/skill-sdk/src/bin/skillctl.rs	adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]	"adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]",
+crates/skill-sdk/src/bin/skillctl.rs	build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/skillctl.rs	init <rust|python|node|go|prebuilt> <skill_name> <destination>	"init <rust|python|node|go|prebuilt> <skill_name> <destination>",
+crates/skill-sdk/src/bin/skillctl.rs	install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/skillctl.rs	package <skill.toml> <output_dir>	"package <skill.toml> <output_dir>",
+crates/skill-sdk/src/bin/skillctl.rs	protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]	"protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+crates/skill-sdk/src/bin/skillctl.rs	protocol-validate <request_id> <response.jsonl>	"protocol-validate <request_id> <response.jsonl>",
+crates/skill-sdk/src/bin/skillctl.rs	receipt-verify <package_root> <skill_name>	"receipt-verify <package_root> <skill_name>",
+crates/skill-sdk/src/bin/skillctl.rs	rollback <package_root> <skill_name>	"rollback <package_root> <skill_name>"
 crates/skill-sdk/src/bounded_result.rs	artifact namespace and label must be safe path components	"artifact namespace and label must be safe path components",
 crates/skill-sdk/src/bounded_result.rs	artifact path has no parent	SkillSdkError::new("artifact_spill_path_invalid", "artifact path has no parent")
 crates/skill-sdk/src/bounded_result.rs	artifact spill root must be a real directory	"artifact spill root must be a real directory",
@@ -1165,7 +1165,7 @@ crates/skill-sdk/src/sandbox.rs	macOS sandbox-exec not found	"macOS sandbox-exec
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN OPENSSH PRIVATE KEY-----	|| upper.contains("-----BEGIN OPENSSH PRIVATE KEY-----")
 crates/skill-sdk/src/secret_scan.rs	-----BEGIN RSA PRIVATE KEY-----	|| upper.contains("-----BEGIN RSA PRIVATE KEY-----")
 crates/skill-sdk/src/templates.rs	# Add hash-pinned dependencies only.\n	"# Add hash-pinned dependencies only.\\n",
-crates/skill-sdk/src/templates.rs	# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\n	const README_TEMPLATE: &str = "# __SKILL_NAME__\\n\\n__SUMMARY__\\n\\nThis package uses `rustclaw-jsonl-v1`. Run `rustclaw-skill validate skill.toml` before installation.\\n";
+crates/skill-sdk/src/templates.rs	# __SKILL_NAME__\n\n__SUMMARY__\n\nThis package uses `agent-jsonl-v1`. Run `skillctl validate skill.toml` before installation.\n	const README_TEMPLATE: &str = "# __SKILL_NAME__\\n\\n__SUMMARY__\\n\\nThis package uses `agent-jsonl-v1`. Run `skillctl validate skill.toml` before installation.\\n";
 crates/skill-sdk/src/templates.rs	### `{action}`\n\n- Required args: none.\n- Optional args: action-specific values documented by the developer.\n	"### `{action}`\\n\\n- Required args: none.\\n- Optional args: action-specific values documented by the developer.\\n"
 crates/skill-sdk/src/templates.rs	capability_summary is empty	"capability_summary is empty",
 crates/skill-sdk/templates/rust/src/main.rs	request record is required	error_text: Some("request record is required".to_string()),
@@ -1730,7 +1730,7 @@ crates/skills/image_vision/src/providers.rs	read image failed: {err}	let bytes =
 crates/skills/image_vision/src/providers.rs	read image failed: {err}	let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
 crates/skills/image_vision/src/providers.rs	read image failed: {err}	let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
 crates/skills/image_vision/src/providers.rs	read image failed: {err}	let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
-crates/skills/image_vision/src/providers.rs	rustclaw-image-vision-{}-{}.png	"rustclaw-image-vision-{}-{}.png",
+crates/skills/image_vision/src/providers.rs	agent-runtime-image-vision-{}-{}.png	"agent-runtime-image-vision-{}-{}.png",
 crates/skills/image_vision/src/providers.rs	write temp image failed: {err}	std::fs::write(&path, data).map_err(|err| format!("write temp image failed: {err}"))?;
 crates/skills/image_vision/src/providers.rs	{error_label} request failed: {err}	.map_err(|err| format!("{error_label} request failed: {err}"))?;
 crates/skills/image_vision/src/providers.rs	{error_label} response missing text: {}	"{error_label} response missing text: {}",
@@ -1899,8 +1899,8 @@ crates/skills/office_workspace/src/package.rs	source path must be a file	return 
 crates/skills/office_workspace/src/package.rs	supported Office formats are docx, xlsx, and pptx	"supported Office formats are docx, xlsx, and pptx",
 crates/skills/office_workspace/src/package.rs	unsafe OOXML ZIP member path	"unsafe OOXML ZIP member path",
 crates/skills/office_workspace/src/package.rs	unsafe OOXML ZIP member path	"unsafe OOXML ZIP member path",
-crates/skills/office_workspace/src/package_write.rs	.{file_name}.rustclaw-backup-{}	".{file_name}.rustclaw-backup-{}",
-crates/skills/office_workspace/src/package_write.rs	.{file_name}.rustclaw-{}.tmp	let temp_path = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
+crates/skills/office_workspace/src/package_write.rs	.{file_name}.agent-runtime-backup-{}	".{file_name}.agent-runtime-backup-{}",
+crates/skills/office_workspace/src/package_write.rs	.{file_name}.agent-runtime-{}.tmp	let temp_path = parent.join(format!(".{file_name}.agent-runtime-{}.tmp", Uuid::new_v4()));
 crates/skills/office_workspace/src/package_write.rs	cannot atomically publish Office artifact: {error}	format!("cannot atomically publish Office artifact: {error}"),
 crates/skills/office_workspace/src/package_write.rs	cannot create in-place backup: {error}	format!("cannot create in-place backup: {error}"),
 crates/skills/office_workspace/src/package_write.rs	cannot create output directory: {error}	format!("cannot create output directory: {error}"),
@@ -2093,7 +2093,7 @@ crates/skills/service_control/src/main.rs	manager {} not implemented for status	
 crates/skills/service_control/src/main.rs	manager {} not implemented for verify	&format!("manager {} not implemented for verify", manager),
 crates/skills/service_control/src/main.rs	no matching service found for the given target	"no matching service found for the given target",
 crates/skills/service_control/src/main.rs	process_only manager does not support lifecycle control	"process_only manager does not support lifecycle control",
-crates/skills/service_control/src/main.rs	service {} not in RustClaw whitelist	&format!("service {} not in RustClaw whitelist", target),
+crates/skills/service_control/src/main.rs	service {} not in Agent Runtime whitelist	&format!("service {} not in Agent Runtime whitelist", target),
 crates/skills/service_control/src/main.rs	target (service name) is required for this action and must not be empty	"target (service name) is required for this action and must not be empty",
 crates/skills/service_control/src/main.rs	target contains invalid characters; use only alphanumeric, dot, dash, underscore	"target contains invalid characters; use only alphanumeric, dot, dash, underscore",
 crates/skills/service_control/src/main.rs	target required for logs	let t = effective_target.ok_or_else(|| "target required for logs".to_string())?;
@@ -2289,7 +2289,7 @@ crates/webd/src/main.rs	GET,POST,PUT,PATCH,DELETE,OPTIONS	HeaderValue::from_stat
 crates/webd/src/main.rs	[webd].upstream is empty	anyhow::bail!("[webd].upstream is empty");
 crates/webd/src/main.rs	build long-running reqwest client failed	.context("build long-running reqwest client failed")?;
 crates/webd/src/main.rs	build reqwest client failed	.context("build reqwest client failed")?;
-crates/webd/src/main.rs	content-type, x-rustclaw-key	HeaderValue::from_static("content-type, x-rustclaw-key"),
+crates/webd/src/main.rs	content-type, x-agent-key	HeaderValue::from_static("content-type, x-agent-key"),
 crates/webd/src/main.rs	request body over limit or read error: {}	error!("request body over limit or read error: {}", e);
 crates/webd/src/main.rs	webd UI static assets enabled at {}	info!("webd UI static assets enabled at {}", ui_dist_dir.display());
 crates/webd/src/main.rs	webd UI static assets missing: {}	warn!("webd UI static assets missing: {}", ui_index_path.display());

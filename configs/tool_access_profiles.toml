@@ -1,0 +1,22 @@
+# Host-owned capability grants for named access profiles. Runtime code consumes
+# this declaration and does not embed business-skill membership lists.
+
+[profiles]
+full = ["*"]
+coding = [
+  "skill:run_cmd", "skill:code_index", "skill:fs_basic", "skill:config_basic",
+  "skill:config_edit", "skill:read_file", "skill:write_file", "skill:list_dir",
+  "skill:make_dir", "skill:remove_file", "skill:workspace_patch", "skill:system_basic",
+  "skill:git_basic", "skill:process_basic", "skill:archive_basic", "skill:fs_search",
+  "skill:health_check", "skill:log_analyze", "capability:service_control",
+  "skill:task_control", "skill:doc_parse", "skill:transform", "skill:kb",
+  "capability:image.preview_generate", "capability:audio.preview_synthesize",
+  "capability:video.preview_generate", "capability:music.preview_generate",
+  "capability:module.preview_install", "capability:schedule.preview",
+  "capability:schedule.list", "capability:media_download.*",
+]
+minimal = [
+  "skill:run_cmd", "skill:read_file", "skill:write_file", "skill:list_dir",
+  "skill:make_dir", "skill:remove_file", "skill:system_basic",
+]
+messaging = ["skill:system_basic"]

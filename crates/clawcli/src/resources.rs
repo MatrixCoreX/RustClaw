@@ -35,13 +35,19 @@ fn parse_catalog(raw: &str, locale: &str) -> CliCatalog {
 }
 
 fn active_locale() -> Option<String> {
-    ["RUSTCLAW_CLI_LOCALE", "LC_ALL", "LC_MESSAGES", "LANG"]
-        .into_iter()
-        .find_map(|name| {
-            std::env::var(name)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
+    claw_core::product_identity::env_string("CLI_LOCALE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            ["LC_ALL", "LC_MESSAGES", "LANG"]
+                .into_iter()
+                .find_map(|name| {
+                    std::env::var(name)
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                })
         })
 }
 
@@ -87,6 +93,13 @@ fn list_for_locale(key: &'static str, locale: Option<&str>) -> &'static [String]
 pub(crate) fn text(key: &'static str) -> &'static str {
     let locale = active_locale();
     message_for_locale(key, locale.as_deref())
+}
+
+pub(crate) fn product_text(key: &'static str) -> String {
+    text(key).replace(
+        "{product_name}",
+        claw_core::product_identity::product_identity().display_name(),
+    )
 }
 
 pub(crate) fn optional_text(key: &str) -> Option<&'static str> {

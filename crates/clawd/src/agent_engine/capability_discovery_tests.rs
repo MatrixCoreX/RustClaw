@@ -93,6 +93,58 @@ fn group_loader_expands_only_exact_registry_groups() {
 }
 
 #[test]
+fn group_loader_expands_registry_category_tokens_without_hardcoded_aliases() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "capability-category-loader".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 1;
+    let loadable = crate::capability_map::planner_loadable_capability_group_members_for_task(
+        &state,
+        &task,
+        &loop_state.loaded_capability_skills,
+    );
+    let members = loadable
+        .get("filesystem")
+        .cloned()
+        .expect("registry filesystem category should be loadable");
+    assert!(!members.is_empty());
+
+    let mut executed = 0;
+    handle_capability_group_load(
+        &state,
+        &task,
+        &mut loop_state,
+        &json!({"op": "load_groups", "groups": ["filesystem"]}),
+        "load:filesystem",
+        1,
+        1,
+        &mut executed,
+    )
+    .expect("load registry category");
+
+    assert_eq!(executed, 1);
+    assert!(members
+        .iter()
+        .all(|skill| loop_state.loaded_capability_skills.contains(skill)));
+    let output = loop_state.last_output.as_deref().expect("loader output");
+    assert!(output.contains("\"requested_groups\":[\"filesystem\"]"));
+    assert!(output.contains("\"loaded_groups\""));
+}
+
+#[test]
 fn catalog_tool_searches_then_expands_exact_authorized_contracts() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

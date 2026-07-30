@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop nginx and remove only the RustClaw nginx site and its dedicated UI root.
+# Stop nginx and remove only the configured agent UI site and its dedicated root.
 
 set -euo pipefail
 
@@ -16,17 +16,17 @@ nginx_config_candidates() {
       brew_prefix="$(brew --prefix 2>/dev/null || true)"
     fi
     if [[ -n "$brew_prefix" ]]; then
-      printf '%s\n' "$brew_prefix/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "$brew_prefix/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
     fi
-    printf '%s\n' "/opt/homebrew/etc/nginx/servers/rustclaw-ui.conf"
-    printf '%s\n' "/usr/local/etc/nginx/servers/rustclaw-ui.conf"
+    printf '%s\n' "/opt/homebrew/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
+    printf '%s\n' "/usr/local/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
     return
   fi
-  printf '%s\n' "/etc/nginx/sites-available/rustclaw-ui.conf"
-  printf '%s\n' "/etc/nginx/conf.d/rustclaw-ui.conf"
+  printf '%s\n' "/etc/nginx/sites-available/${APP_SERVICE_NAME}-ui.conf"
+  printf '%s\n' "/etc/nginx/conf.d/${APP_SERVICE_NAME}-ui.conf"
 }
 
-rustclaw_ui_root() {
+agent_ui_root() {
   local config="$1"
   awk '
     /^[[:space:]]*root[[:space:]]+/ {
@@ -48,27 +48,27 @@ remove_path() {
   fi
 }
 
-remove_rustclaw_site() {
+remove_agent_site() {
   local config="$1"
   [[ -f "$config" ]] || return 0
-  if ! grep -Fq "# RustClaw UI" "$config"; then
+  if ! grep -Fq "Agent Runtime UI" "$config"; then
     echo "Refusing to remove unrecognized nginx config: $config" >&2
     return 1
   fi
 
   local ui_root=""
-  ui_root="$(rustclaw_ui_root "$config")"
+  ui_root="$(agent_ui_root "$config")"
   if [[ -n "$ui_root" ]]; then
     case "$ui_root" in
-      */rustclaw|*/nginx-ui)
+      */"$APP_DATA_NAMESPACE"|*/nginx-ui)
         if [[ -e "$ui_root" ]]; then
           remove_path "$ui_root"
-          echo "Removed RustClaw UI deployment: $ui_root"
+          echo "Removed $APP_DISPLAY_NAME UI deployment: $ui_root"
         fi
         ;;
       *)
         echo "Refusing to delete non-dedicated UI root: $ui_root" >&2
-        echo "Use a dedicated path ending in /rustclaw or /nginx-ui, or remove it manually." >&2
+        echo "Use a dedicated path ending in /${APP_DATA_NAMESPACE} or /nginx-ui, or remove it manually." >&2
         return 1
         ;;
     esac
@@ -79,7 +79,7 @@ remove_rustclaw_site() {
     remove_path "$site_link"
   fi
   remove_path "$config"
-  echo "Removed RustClaw nginx site: $config"
+  echo "Removed agent UI nginx site: $config"
 }
 
 stop_nginx() {
@@ -119,11 +119,11 @@ found=0
 while IFS= read -r config; do
   [[ -n "$config" && -f "$config" ]] || continue
   found=1
-  remove_rustclaw_site "$config"
+  remove_agent_site "$config"
 done < <(nginx_config_candidates)
 
 if [[ "$found" == "0" ]]; then
-  echo "No RustClaw nginx site configuration was found."
+  echo "No agent UI nginx site configuration was found."
 fi
 
 echo "nginx_disabled=ok"

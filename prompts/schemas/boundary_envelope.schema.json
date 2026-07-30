@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/boundary_envelope.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/boundary_envelope.schema.json",
   "title": "BoundaryEnvelope",
   "description": "Target machine-only boundary envelope passed from the front layer into the agent loop. It records session, locator, attachment, schedule, safety, language, and request-length facts, but it must not carry ordinary semantic routing authority, answer text, or raw user natural language.",
   "type": "object",

@@ -47,7 +47,7 @@ Credential preflight:
   deepseek -> DEEPSEEK_API_KEY
 
 Notes:
-  RUSTCLAW_PROVIDER_OVERRIDE is startup-scoped for clawd. This runner exports it
+  APP_PROVIDER_OVERRIDE is startup-scoped for clawd. This runner exports it
   for metadata and wrappers that start clawd from the same environment; it does
   not rewrite a running clawd process in place.
   Live provider quota, account, auth, and model-access failures are recorded
@@ -485,7 +485,7 @@ for provider in "${PROVIDERS[@]}"; do
 
   echo "CHINESE_PROVIDER_SMOKE_RUN provider=${provider}"
   set +e
-  RUSTCLAW_PROVIDER_OVERRIDE="$provider" \
+  APP_PROVIDER_OVERRIDE="$provider" \
   CLIENT_LIKE_TEST_ID="chinese-provider-${provider}-$(date +%Y%m%d_%H%M%S)" \
     bash "${ROOT_DIR}/scripts/nl_tests/run_client_like_continuous_suite.sh" "${runner_args[@]}" \
     | tee "$output_file"

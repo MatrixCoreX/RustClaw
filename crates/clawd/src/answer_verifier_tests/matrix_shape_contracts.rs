@@ -177,7 +177,7 @@ fn matrix_single_path_shape_requires_plain_grounded_path() {
             output_excerpt: Some(
                 json!({
                     "action": "write_text",
-                    "path": "/tmp/rustclaw/report.md"
+                    "path": "/tmp/agent-runtime/report.md"
                 })
                 .to_string(),
             ),
@@ -189,22 +189,22 @@ fn matrix_single_path_shape_requires_plain_grounded_path() {
     assert!(structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "/tmp/rustclaw/report.md"
+        "/tmp/agent-runtime/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "Path: /tmp/rustclaw/report.md"
+        "Path: /tmp/agent-runtime/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "The report is /tmp/rustclaw/report.md"
+        "The report is /tmp/agent-runtime/report.md"
     ));
     assert!(!structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "/tmp/rustclaw/missing.zip"
+        "/tmp/agent-runtime/missing.zip"
     ));
 }
 

@@ -10,7 +10,7 @@ Next: [Skill-owned storage](08-skill-owned-storage.md)
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw handles DOCX, XLSX, and PPTX as untrusted, structured artifacts. The
+Agent Runtime handles DOCX, XLSX, and PPTX as untrusted, structured artifacts. The
 planner selects a deferred Office capability from registry metadata; runtime
 code does not select a format or operation by matching user-language phrases.
 

@@ -63,7 +63,7 @@ fn derives_structural_bullet_entries_from_generic_visible_candidate_answer() {
     route.requires_content_evidence = true;
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.locator_hint =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
     let facts = derive_observed_facts_from_ask_outcome(
         "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
         &[],
@@ -228,7 +228,7 @@ fn derives_bound_target_from_scalar_path_answer_contract() {
     route.locator_kind = crate::OutputLocatorKind::Path;
     route.selection.structured_field_selector = Some("path".to_string());
     let target =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
 
     let facts = derive_observed_facts_from_ask_outcome(target, &[], &journal, &route);
 
@@ -241,7 +241,7 @@ fn ignores_plain_scalar_answer_as_bound_target_without_path_contract() {
     let mut route = dummy_route_result();
     route.response_shape = crate::OutputResponseShape::Scalar;
     let facts = derive_observed_facts_from_ask_outcome(
-        "/home/guagua/rustclaw/README.md",
+        "/home/guagua/agent-runtime/README.md",
         &[],
         &journal,
         &route,
@@ -276,7 +276,7 @@ fn generic_workspace_evidence_does_not_bind_evidence_file_path() {
     route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
     let facts = derive_observed_facts_from_ask_outcome(
-        "RustClaw release note draft.",
+        "Agent Runtime release note draft.",
         &[],
         &journal,
         &route,

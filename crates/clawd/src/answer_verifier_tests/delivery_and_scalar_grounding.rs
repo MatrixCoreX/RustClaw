@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn grounded_file_token_satisfies_file_delivery_contract_before_llm_verifier() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-answer-verifier-file-token-{}",
+        "agent-runtime-answer-verifier-file-token-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -53,7 +53,7 @@ fn grounded_file_token_satisfies_file_delivery_contract_before_llm_verifier() {
 #[test]
 fn grounded_file_token_uses_path_token_from_write_text_output() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-answer-verifier-write-text-token-{}",
+        "agent-runtime-answer-verifier-write-text-token-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -165,7 +165,7 @@ fn matrix_delivery_artifact_shape_rejects_exact_observation_summary_answer() {
 #[test]
 fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-answer-verifier-plain-delivery-path-{}",
+        "agent-runtime-answer-verifier-plain-delivery-path-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -224,7 +224,7 @@ fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
             step_id: "step_1".to_string(),
             skill: "run_cmd".to_string(),
             status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some("/home/guagua/rustclaw\n".to_string()),
+            output_excerpt: Some("/home/guagua/agent-runtime\n".to_string()),
             error_excerpt: None,
             started_at: 0,
             finished_at: 0,
@@ -233,7 +233,7 @@ fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
     assert!(structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "/home/guagua/rustclaw"
+        "/home/guagua/agent-runtime"
     ));
 }
 

@@ -257,7 +257,7 @@ fn state_patch_accepts_alias_bindings_record_object() {
             "action": "replace",
             "name": "甲文件",
             "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
-            "target_abs": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            "target_abs": "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
         }
     });
 

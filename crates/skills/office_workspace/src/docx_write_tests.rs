@@ -10,7 +10,7 @@ use crate::test_support::temp_path;
 fn creates_and_reopens_structured_docx() {
     let operations = normalize_operations(
         Some(&json!([
-            {"op":"set_properties","title":"季度报告","creator":"RustClaw"},
+            {"op":"set_properties","title":"季度报告","creator":"agent-runtime"},
             {"op":"set_header","text":"内部资料"},
             {"op":"set_footer","text":"第 1 页"},
             {"op":"add_heading","text":"Résumé","level":1},

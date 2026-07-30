@@ -76,6 +76,7 @@ pub(super) fn test_state() -> AppState {
             db: db_pool,
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -162,6 +163,7 @@ pub(super) fn enable_test_skills(state: &AppState, skills: &[&str]) {
         .skill_views_snapshot
         .write()
         .expect("write skill snapshot") = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: None,
         skills_list: Arc::new(set),
     });
@@ -169,7 +171,7 @@ pub(super) fn enable_test_skills(state: &AppState, skills: &[&str]) {
 
 pub(super) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw-skill-execution-test-{}-{}-{}.toml",
+        "skillctl-execution-test-{}-{}-{}.toml",
         std::process::id(),
         skills.join("-"),
         unique_suffix()
@@ -185,6 +187,7 @@ pub(super) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]
         .skill_views_snapshot
         .write()
         .expect("write skill snapshot") = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(set),
     });
@@ -192,7 +195,7 @@ pub(super) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]
 
 fn install_agent_guard_workspace(name: &str, raw: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-skill-exec-agent-guard-{}-{name}",
+        "skillctl-exec-agent-guard-{}-{name}",
         std::process::id()
     ));
     let config_dir = root.join("configs");
@@ -418,7 +421,7 @@ fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
         ..crate::IntentOutputContract::default()
     });
     let args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "command": "sleep 2 && echo APP_ASYNC_SMOKE",
         "async_start": true,
         "poll_after_seconds": 2,
         "expires_in_seconds": 600,
@@ -441,7 +444,7 @@ fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_
         ..crate::IntentOutputContract::default()
     });
     let args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "command": "sleep 2 && echo APP_ASYNC_SMOKE",
         "async_start": true,
         "poll_after_seconds": 2,
         "expires_in_seconds": 600
@@ -463,7 +466,7 @@ fn evidence_policy_preflight_allows_async_start_with_runtime_owned_defaults() {
         ..crate::IntentOutputContract::default()
     });
     let args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "command": "sleep 2 && echo APP_ASYNC_SMOKE",
         "async_start": true,
         "poll_after_seconds": 2
     });
@@ -634,7 +637,7 @@ fn evidence_policy_preflight_does_not_block_literal_media_run_cmd() {
 }
 
 #[test]
-fn preflight_permission_decision_marks_package_dry_run_as_low_risk_observe() {
+fn preflight_permission_decision_does_not_downgrade_non_x_dry_run() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -671,10 +674,10 @@ planner_capabilities = [
         "package_dry_run_probe",
     );
 
-    assert_eq!(permission["risk_level"], serde_json::json!("low"));
+    assert_eq!(permission["risk_level"], serde_json::json!("high"));
     assert_eq!(permission["decision"], serde_json::json!("deny"));
     assert_eq!(permission["needs_confirmation"], false);
-    assert_eq!(permission["action_effect"], serde_json::json!("observe"));
+    assert_eq!(permission["action_effect"], serde_json::json!("mutate"));
     assert_eq!(
         permission["canonical_skill"],
         serde_json::json!("package_manager")
@@ -736,7 +739,7 @@ fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     });
     let args = serde_json::json!({
         "path": "pwd_line_abs.txt",
-        "content": "/home/guagua/rustclaw\n",
+        "content": "/home/guagua/agent-runtime\n",
         "_clawd_user_named_output_path": true
     });
 
@@ -809,7 +812,7 @@ fn evidence_policy_preflight_allows_internal_synthesis_actions() {
 }
 
 #[test]
-fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
+fn evidence_policy_preflight_rejects_task_control_dry_run() {
     let state = test_state();
     let mut loop_state = LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -824,24 +827,28 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
         "dry_run": true
     });
 
-    assert!(
-        evidence_policy_action_policy_error(
-            &state,
-            &loop_state,
-            "task_control",
-            &dry_run_args,
-            "call_skill"
-        )
-        .is_none(),
-        "task_control resume dry_run should be admitted as a no-mutation preview"
-    );
-    let effect = crate::execution_recipe::classify_skill_action_effect(
+    let err = evidence_policy_action_policy_error(
         &state,
+        &loop_state,
         "task_control",
         &dry_run_args,
+        "call_skill",
+    )
+    .expect("task_control dry-run must be rejected");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("task_control dry-run rejection should be structured");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("dry_run_reserved_for_x"))
     );
-    assert!(effect.observes);
-    assert!(!effect.mutates);
+    assert!(!crate::execution_recipe::dry_run_observes_only_action(
+        "task_control",
+        &dry_run_args,
+    ));
 
     let real_args = serde_json::json!({
         "action": "resume",
@@ -973,11 +980,11 @@ fn generated_run_cmd_with_unresolved_placeholder_is_rejected() {
 fn auto_sudo_retry_builds_structured_read_range_retry_for_admin_permission_denied() {
     let mut state = test_state();
     state.policy.allow_sudo = true;
-    state.skill_rt.workspace_root = PathBuf::from("/tmp/rustclaw-auto-sudo-workspace");
+    state.skill_rt.workspace_root = PathBuf::from("/tmp/agent-runtime-auto-sudo-workspace");
     enable_test_skills(&state, &["run_cmd", "system_basic"]);
     insert_auth_key(&state, "rk-admin", "admin");
     let task = admin_task();
-    let restricted_path = "/tmp/rustclaw-auto-sudo-workspace/restricted.log";
+    let restricted_path = "/tmp/agent-runtime-auto-sudo-workspace/restricted.log";
 
     let retry = build_auto_sudo_retry_args(
         &state,
@@ -1016,11 +1023,11 @@ fn auto_sudo_retry_builds_structured_read_range_retry_for_admin_permission_denie
 fn auto_sudo_retry_uses_posix_directory_listing_for_cross_platform_hosts() {
     let mut state = test_state();
     state.policy.allow_sudo = true;
-    state.skill_rt.workspace_root = PathBuf::from("/tmp/rustclaw-auto-sudo-workspace");
+    state.skill_rt.workspace_root = PathBuf::from("/tmp/agent-runtime-auto-sudo-workspace");
     enable_test_skills(&state, &["run_cmd", "system_basic"]);
     insert_auth_key(&state, "rk-admin", "admin");
     let task = admin_task();
-    let restricted_path = "/tmp/rustclaw-auto-sudo-workspace/var-log";
+    let restricted_path = "/tmp/agent-runtime-auto-sudo-workspace/var-log";
 
     let retry = build_auto_sudo_retry_args(
         &state,
@@ -1059,7 +1066,7 @@ fn auto_sudo_retry_uses_posix_directory_listing_for_cross_platform_hosts() {
 fn auto_sudo_retry_skips_structured_reads_outside_workspace() {
     let mut state = test_state();
     state.policy.allow_sudo = true;
-    state.skill_rt.workspace_root = PathBuf::from("/home/guagua/rustclaw");
+    state.skill_rt.workspace_root = PathBuf::from("/home/guagua/agent-runtime");
     enable_test_skills(&state, &["run_cmd", "system_basic"]);
     insert_auth_key(&state, "rk-admin", "admin");
     let task = admin_task();
@@ -1241,23 +1248,24 @@ fn structured_extra_evidence_output_wraps_text_and_extra_for_journal() {
     let extra = serde_json::json!({
         "outputs": [{
             "type": "image_file",
-            "path": "/tmp/rustclaw-image.png"
+            "path": "/tmp/agent-runtime-image.png"
         }]
     });
 
-    let output = structured_extra_evidence_output("FILE:/tmp/rustclaw-image.png", Some(&extra))
-        .expect("journal evidence output");
+    let output =
+        structured_extra_evidence_output("FILE:/tmp/agent-runtime-image.png", Some(&extra))
+            .expect("journal evidence output");
     let value: serde_json::Value = serde_json::from_str(&output).expect("json output");
 
     assert_eq!(
         value.get("text").and_then(serde_json::Value::as_str),
-        Some("FILE:/tmp/rustclaw-image.png")
+        Some("FILE:/tmp/agent-runtime-image.png")
     );
     assert_eq!(
         value
             .pointer("/extra/outputs/0/path")
             .and_then(serde_json::Value::as_str),
-        Some("/tmp/rustclaw-image.png")
+        Some("/tmp/agent-runtime-image.png")
     );
 }
 
@@ -1267,7 +1275,7 @@ fn isolation_artifacts_merge_into_journal_evidence() {
         "kind": "execution_isolation_workspace",
         "profile": "local_temp_workspace",
         "creation_kind": "create_local_temp_workspace",
-        "artifact_path": "/tmp/rustclaw-isolated-task",
+        "artifact_path": "/tmp/agent-runtime-isolated-task",
         "cleanup_ref": "isolation:temp:task",
         "requires_cleanup": true
     });
@@ -1284,7 +1292,7 @@ fn isolation_artifacts_merge_into_journal_evidence() {
 
     assert_eq!(
         value.pointer("/artifacts/0/artifact_path"),
-        Some(&serde_json::json!("/tmp/rustclaw-isolated-task"))
+        Some(&serde_json::json!("/tmp/agent-runtime-isolated-task"))
     );
     assert_eq!(
         value.pointer("/artifact_refs/0/cleanup_ref"),
@@ -1315,7 +1323,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
     assert!(validate_skill_output_contract(
         &state,
         "image_edit",
-        "Edited successfully and saved: /tmp/rustclaw-image.png",
+        "Edited successfully and saved: /tmp/agent-runtime-image.png",
         None,
     )
     .is_ok());

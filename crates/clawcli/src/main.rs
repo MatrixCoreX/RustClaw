@@ -32,7 +32,7 @@ struct Cli {
     #[arg(long, default_value = DEFAULT_BASE_URL)]
     base_url: String,
 
-    /// Admin key. Defaults to RUSTCLAW_ADMIN_KEY or the first enabled admin key in auth_keys.
+    /// Admin key. Defaults to APP_ADMIN_KEY or the first enabled admin key in auth_keys.
     #[arg(short, long)]
     key: Option<String>,
 
@@ -784,11 +784,11 @@ struct EventFilterArgs {
 }
 
 fn main() -> Result<()> {
-    let mut command = Cli::command().about(resources::text("cli.about"));
+    let mut command = Cli::command().about(resources::product_text("cli.about"));
     localize_command_help(&mut command);
     let matches = command.get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    let base_url = std::env::var("RUSTCLAW_BASE_URL")
+    let base_url = claw_core::product_identity::env_string("BASE_URL")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -1511,7 +1511,7 @@ fn main() -> Result<()> {
             ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
         Command::Completions { shell } => {
-            let mut cmd = Cli::command().about(resources::text("cli.about"));
+            let mut cmd = Cli::command().about(resources::product_text("cli.about"));
             localize_command_help(&mut cmd);
             let bin_name = cmd.get_name().to_string();
             generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());

@@ -1,6 +1,6 @@
 # Task Event Archive And Replay Contract
 
-RustClaw separates live event delivery from durable replay:
+Agent Runtime separates live event delivery from durable replay:
 
 - `task_event_stream` is the bounded hot suffix used for low-latency SSE.
 - `task_event_archive` is the append-only redacted event record.

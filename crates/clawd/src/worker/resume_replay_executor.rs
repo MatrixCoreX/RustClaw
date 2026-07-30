@@ -54,7 +54,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         let continuation_actions =
             parse_checkpoint_continuation_actions(stored_action.continuation_actions)?;
         let request_envelope = json!({
-            "protocol": "rustclaw.checkpoint_action.v1",
+            "protocol": "agent.checkpoint_action.v1",
             "task_id": claimed.task_id,
             "checkpoint_id": claimed.checkpoint_id,
             "action_ref": stored_action.action_ref,
@@ -184,7 +184,7 @@ fn load_resume_steering_input(
 fn apply_resume_steering_prompt(payload: &mut Value, resume_input: &Value) {
     let original_request = super::ask_input::opaque_user_prompt(payload);
     let mut envelope = json!({
-        "protocol": "rustclaw.resume_input.v1",
+        "protocol": "agent.resume_input.v1",
         "original_request": original_request,
     });
     if let Some(object) = envelope.as_object_mut() {

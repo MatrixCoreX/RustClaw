@@ -1,8 +1,8 @@
 # Focused single-turn regressions for surface/state refactors.
 # Format: suite|name|tags|prompt|expect=<substring>
 
-chat_act|fixture_package_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只把值给我|expect=rustclaw-nl-fixture
-chat_act|fixture_config_app_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只把值给我|expect=RustClaw NL Fixture
+chat_act|fixture_package_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只把值给我|expect=agent-runtime-nl-fixture
+chat_act|fixture_config_app_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只把值给我|expect=Agent Runtime NL Fixture
 chat_act|fixture_sqlite_tables_list|cn|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名|expect=users
 chat_act|fixture_sqlite_schema_version_scalar|cn|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出数字|expect=3
 chat_act|fixture_readme_head_read|cn|读一下 scripts/nl_tests/fixtures/device_local/README.md 开头 3 行|expect=# Device Local Fixture

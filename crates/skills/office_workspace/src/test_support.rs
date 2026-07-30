@@ -7,7 +7,7 @@ use zip::ZipWriter;
 
 pub fn temp_path(extension: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "rustclaw-office-test-{}.{}",
+        "agent-office-test-{}.{}",
         Uuid::new_v4(),
         extension
     ))

@@ -1,3 +1,3 @@
-module rustclaw.local/reference-go-skill
+module agent-runtime.local/reference-go-skill
 
 go 1.22

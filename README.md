@@ -1,15 +1,13 @@
-# RustClaw
-
-<img src="./RustClaw.png" width="420" />
+# Agent Runtime
 
 Chinese version: `README.zh-CN.md`
 
-RustClaw is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
+Agent Runtime is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
 
 <!-- ai-learning-stage: foundations -->
 ## Overview
 
-RustClaw is built for daily use and administration from messaging apps or a browser instead of a terminal-first workflow.
+Agent Runtime is built for daily use and administration from messaging apps or a browser instead of a terminal-first workflow.
 
 Current repository highlights:
 
@@ -42,10 +40,31 @@ For example, “summarize this document” becomes a task. The agent inspects th
 
 Messaging channels are optional. Configure them only when the browser workflow is already working and you need access from another app.
 
+### Product identity and safe renaming
+
+`configs/product_identity.toml` is the only product-identity source. Its display name,
+release artifact ID, release repository, splash image, and terminal banner are projected
+into the Rust runtime, shell/release scripts, and UI build. Do not add brand defaults to
+business code or ordinary skills.
+
+Changing this file changes presentation and release packaging only. It does not change
+the canonical `agentctl`, `clawd`, `webd`, `skillctl`, or `clawcli` entrypoints; the
+`agent-runtime` service/data namespace; `X-Agent-Key`; API routes; permissions; task and
+conversation records; or skill storage and receipts. A rename therefore does not require
+skill source changes or data migration.
+
+Run the two-brand contract before publishing identity changes:
+
+```bash
+python3 scripts/check_product_identity_coupling.py --self-test
+python3 scripts/check_product_identity_coupling.py
+bash scripts/product_identity_tests.sh --with-ui
+```
+
 <!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path uses a Codex / Claude style agent loop. Before the first planner call, the front door materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. Every ordinary `ask` then enters the agent loop, which decides whether to answer, clarify, or execute. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; providers using the structured plan protocol express equivalent verified steps. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching.
+Agent Runtime's main natural-language path uses a Codex / Claude style agent loop. Before the first planner call, the front door materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. Every ordinary `ask` then enters the agent loop, which decides whether to answer, clarify, or execute. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; providers using the structured plan protocol express equivalent verified steps. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching.
 
 ### Request and Agent Loop Flow
 
@@ -138,7 +157,7 @@ Quick facts for direct skill tasks:
 | Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
 | Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
 
-Operationally: use `kind=ask` when the user gave a natural-language request and RustClaw should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants RustClaw to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
+Operationally: use `kind=ask` when the user gave a natural-language request and Agent Runtime should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants Agent Runtime to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
 
 - `Planner-owned front door`: materializes text/audio/attachments and builds `TurnBoundaryEnvelope` from task identity, explicit API fields, structured locator facts, and safety/budget profiles. It performs no semantic LLM call and contains no ordinary respond/clarify/execute branch.
 - `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. Native turns choose `call_capability` or structured `respond`; structured-plan turns may express equivalent tool, skill, synthesis, clarification, repair, checkpoint, or stop steps.
@@ -227,7 +246,7 @@ commands or Bash 4-only collection syntax. See
 
 ## Natural Language Contract Boundary
 
-RustClaw keeps natural-language understanding on the LLM side and deterministic execution on the runtime side. The planner may read user wording, examples, skill docs, and multilingual prompt guidance, but it must turn that understanding into structured actions before runtime code acts on it. The pre-planner front door may only expose authenticated machine facts through `TurnBoundaryEnvelope`; it cannot infer ordinary intent.
+Agent Runtime keeps natural-language understanding on the LLM side and deterministic execution on the runtime side. The planner may read user wording, examples, skill docs, and multilingual prompt guidance, but it must turn that understanding into structured actions before runtime code acts on it. The pre-planner front door may only expose authenticated machine facts through `TurnBoundaryEnvelope`; it cannot infer ordinary intent.
 
 Runtime code should consume stable contracts such as:
 
@@ -244,7 +263,7 @@ Runtime code should not add per-language phrase tables or `prompt.contains(...)`
 <!-- ai-learning-stage: context-memory -->
 ## Memory System
 
-RustClaw memory is split into short-term conversation records, structured user preferences, long-term fact cards, and retrieval indexes. The design goal is to make memory useful without letting old assistant output become a hidden instruction for a new task.
+Agent Runtime memory is split into short-term conversation records, structured user preferences, long-term fact cards, and retrieval indexes. The design goal is to make memory useful without letting old assistant output become a hidden instruction for a new task.
 
 ### Core Boundaries
 
@@ -273,7 +292,7 @@ The main persisted memory stores are:
 
 ### Write Path
 
-After an `ask` task finalizes, RustClaw can persist:
+After an `ask` task finalizes, Agent Runtime can persist:
 
 - short-term records in `memories`, scoped by `user_key`, `user_id`, `chat_id`, role, memory type, salience, and safety flag
 - user preferences in `user_preferences`, such as `response_language`, `response_style`, `response_format`, and `agent_display_name`
@@ -396,7 +415,7 @@ Important lifecycle details:
 - `clawcli goal start/status/pause/resume/edit/clear` manages structured long-task goal contracts with `objective`, `done_conditions`, `verification_commands`, constraints, checkpoint resume fields, and redacted control responses.
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
 - `clawcli tui --user-id <id> --chat-id <id>` is a terminal task console over the same task APIs; add `--once` for a single snapshot and `--task-id <task_id>` for selected task details. Selected-task snapshots include raw task data plus `selected_progress` and `selected_summary` machine fields for checkpoint/resume, goal/outcome state, LLM budget/calls, coding verification, side effects, and artifacts. Interactive key tokens are stable machine commands: `r` refresh, `w` watch, `p` pause, `c` cancel, `u` resume, `n` continue, `e` export, `1` report, `2` review, `3` subagents, `4` permission, and `q` quit.
-- `clawcli session list/show/resume/archive/delete/fork` keeps a local session navigation store for `session_id`, `task_ids`, `active_goal_id`, `workspace_root`, checkpoint, event sequence, archive status, and fork source. This store is operator metadata under `RUSTCLAW_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/rustclaw/`, or `~/.local/state/rustclaw/`; it is not used as a natural-language route source.
+- `clawcli session list/show/resume/archive/delete/fork` keeps a local session navigation store for `session_id`, `task_ids`, `active_goal_id`, `workspace_root`, checkpoint, event sequence, archive status, and fork source. This store is operator metadata under `APP_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/agent-runtime/`, or `~/.local/state/agent-runtime/`; it is not used as a natural-language route source.
 - In interactive chat, `/continue` resumes the current background/checkpoint task from persisted thread state without copying a task id, `/approve` approves the exact pending action once, `/approve-scope` approves only the backend-provided exact capability/resource scope for the current session, and `/deny` closes the pending request. `clawcli permission grants` lists server-side scope grants and `clawcli permission revoke <grant_id>` revokes one immediately. The browser Tasks page exposes the same structured choices and revocation API.
 
 ```bash
@@ -478,15 +497,15 @@ Most users should download the GitHub Release package matching their platform. B
 
 ```bash
 # Install local command entrypoints without nginx
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+bash install-agent-cmd.sh --user --no-deploy-ui
 
 # Smallest startup path
-rustclaw start -q
+agentctl start -q
 
 # Status, health, and logs
-rustclaw -status
-rustclaw -health
-rustclaw -logs clawd 200 --follow
+agentctl -status
+agentctl -health
+agentctl -logs clawd 200 --follow
 ```
 
 Operational rules:
@@ -499,21 +518,21 @@ Operational rules:
 
 ## Identity and Access
 
-RustClaw uses `user_key` as the main identity across the UI and messaging channels.
+Agent Runtime uses `user_key` as the main identity across the UI and messaging channels.
 
 - permissions are resolved by `user_key`
 - conversations are resolved by `channel + external_chat_id`
-- the browser UI sends `X-RustClaw-Key`
+- the browser UI sends `X-Agent-Key`
 - when the auth table is empty, `clawd` can bootstrap the first admin key
 
 Key management:
 
 ```bash
-rustclaw -key list
-rustclaw -key generate user
-rustclaw -key generate admin
-rustclaw -key add rk-xxxx admin
-rustclaw -key disable rk-xxxx
+agentctl -key list
+agentctl -key generate user
+agentctl -key generate admin
+agentctl -key add rk-xxxx admin
+agentctl -key disable rk-xxxx
 ```
 
 ### Telegram Transport Boundary
@@ -552,21 +571,21 @@ flowchart LR
 - `clawd` does not serve browser assets and cannot bind a non-loopback address; local channel daemons and `clawcli` may use its internal API
 - The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep the webd public port open when local use omits nginx. Closing direct webd access does not interrupt a configured native nginx deployment because nginx continues proxying over loopback.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
-- Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the RustClaw host itself.
+- Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the Agent Runtime host itself.
 - The `Learning / Maintenance` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
 - The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
 - On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
-- The dashboard system-dependency check covers RustClaw runtime requirements, source/UI build tools, and native dependencies used by built-in tools and skills. It reports detected versions and capability ownership. Administrators can start allowlisted installs through a Linux package manager or macOS Homebrew when the service already has non-interactive package-manager permission; installs run asynchronously and remain observable after a page refresh. The browser cannot submit arbitrary package names, system commands, or operating-system passwords.
+- The dashboard system-dependency check covers Agent Runtime runtime requirements, source/UI build tools, and native dependencies used by built-in tools and skills. It reports detected versions and capability ownership. Administrators can start allowlisted installs through a Linux package manager or macOS Homebrew when the service already has non-interactive package-manager permission; installs run asynchronously and remain observable after a page refresh. The browser cannot submit arbitrary package names, system commands, or operating-system passwords.
 
 `clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` uses `configs/channels/webd.toml` and can listen on either `0.0.0.0:8788` for direct device-IP access or `127.0.0.1:8788` for nginx-only/local access. The dashboard preserves the configured port when switching scope and atomically updates only the listener address. Docker publishes `8788`, not `8787`; container networking must be evaluated before changing the listener to loopback.
 
-Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
+Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 
 - `GET /v1/health`
 - `GET /v1/system/host-summary`: returns a versioned, authenticated, secret-free
   host summary for the dashboard, including OS/version, architecture, memory,
-  RustClaw data-volume storage, uptime, and machine-readable unavailable fields
+  Agent Runtime data-volume storage, uptime, and machine-readable unavailable fields
 - `GET /v1/system/dependencies`: returns Linux/macOS dependency state, installed
   versions, consuming tools/skills, and controlled-install availability
 - `POST /v1/admin/system-dependencies/install`: starts an allowlisted asynchronous
@@ -584,10 +603,10 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `GET /v1/admin/webd-exposure`: returns the configured webd listener, port, process state, and direct-access state
 - `POST /v1/admin/webd-exposure`: atomically switches webd between direct and loopback-only access, then schedules a platform-appropriate restart
 - `POST /v1/admin/workspace-update/nginx-enable`: checks, installs, or updates nginx on Linux/macOS, repairs and starts the entry, then deploys existing UI assets
-- `POST /v1/admin/workspace-update/nginx-disable`: stops and disables nginx, then removes the RustClaw site and dedicated UI deployment; cloud servers lose this web entry immediately
+- `POST /v1/admin/workspace-update/nginx-disable`: stops and disables nginx, then removes the Agent Runtime site and dedicated UI deployment; cloud servers lose this web entry immediately
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
-- `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
+- `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-Agent-Key`
 - `GET /v1/models/catalog`: returns the secret-free model/provider capability catalog used by the UI Models page and teaching-mode `model_catalog_trace`
 - `GET /v1/skills/store`: returns the registry-driven catalog for optional bundled and imported skills, including separate `installed` and `enabled` states
 - `POST /v1/skills/store/install`: installs and enables an optional catalog skill, then reloads runtime skill views
@@ -601,11 +620,11 @@ Machine-local API example (`8787` must not be exposed or port-forwarded):
 
 ```bash
 curl http://127.0.0.1:8787/v1/health \
-  -H "X-RustClaw-Key: rk-xxxx"
+  -H "X-Agent-Key: rk-xxxx"
 
 curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "Content-Type: application/json" \
-  -H "X-RustClaw-Key: rk-xxxx" \
+  -H "X-Agent-Key: rk-xxxx" \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
@@ -736,7 +755,7 @@ Focused long-tail closed-loop entries:
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
-- `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `RUSTCLAW_CLI_SMOKE_KEY` / `RUSTCLAW_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable. New CLI-only logic is also covered by `cargo test -p clawcli`.
+- `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `APP_CLI_SMOKE_KEY` / `APP_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `APP_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable. New CLI-only logic is also covered by `cargo test -p clawcli`.
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
 <!-- ai-learning-exclude:end -->
@@ -748,10 +767,10 @@ UI notes:
 - source lives in `UI/`
 - built assets live in `UI/dist`
 - `build-ui-nginx.sh` builds `UI/dist` by default; pass `--deploy` only for an explicit nginx deployment
-- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when a RustClaw nginx site already exists, which keeps local updates free of system configuration
+- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when a Agent Runtime nginx site already exists, which keeps local updates free of system configuration
 - the full `build-all.sh` flow uses that conditional deployment mode: without nginx it only refreshes `UI/dist`; with nginx already deployed it syncs the latest UI to the site's existing `root`
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
-- `install-rustclaw-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
+- `install-agent-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
 - the dashboard checks source and compatible GitHub Release versions when an admin opens it; it shows the running package version and latest platform-specific Release tag
 - packaged Release installations check and show only Release updates: they do not run Git commands or show source-build controls. An admin can explicitly choose Switch to source mode, which clones and validates the complete repository, migrates persistent runtime state, and enables Git pull/build controls only after a successful restart
 - the dashboard system-information section shows OS/version, architecture,
@@ -762,12 +781,44 @@ UI notes:
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
-- `webd` is the only browser-facing RustClaw service; nginx is an optional outer TLS/static layer, and `clawd` remains loopback-only
+- `webd` is the only browser-facing Agent Runtime service; nginx is an optional outer TLS/static layer, and `clawd` remains loopback-only
 
 <!-- ai-learning-stage: capabilities-artifacts -->
 ## Skills
 
-RustClaw currently ships a broad skill set. Representative groups:
+### Admission, hot plug, update, and removal
+
+Repository-maintained core and bundled skills come from the read-only base registry.
+Runtime imports go through one `SkillAdmissionService`; UI, CLI, and the extension manager
+do not edit tracked registry/config/prompt files. Admission validates the typed manifest,
+builds through its declared adapter, runs the JSONL or typed-HTTP protocol smoke, verifies
+an immutable package receipt, applies a host-owned policy grant, and atomically publishes a
+data-root overlay generation.
+
+```mermaid
+flowchart LR
+    A[Package + capability request] --> B[Validate + isolated adapter build]
+    B --> C[Protocol smoke + immutable receipt]
+    C --> D[Host policy grant]
+    D --> E[Atomic overlay generation]
+    E --> F[Planner catalog + resolver + verifier]
+    F --> G[Pinned version/receipt/policy execution]
+    G --> H[Structured result + evidence]
+    E --> I[Update publishes next generation]
+    I --> J[Old version lease drains]
+    J --> K[Version GC]
+    E --> L[Disable/revoke/tombstone]
+    L --> M[Block new calls]
+    M --> J
+```
+
+External packages begin disabled or awaiting approval. Enabling requires an explicit host
+grant; disabling or revoking a grant blocks new calls immediately, while an in-flight call
+finishes under its pinned generation and version lease. Uninstall first tombstones the
+skill, drains leases, and removes only skill-owned packages. Private skill data is retained
+by default, and shared Cargo/Python/Node/Go toolchains and caches are never removed.
+
+Agent Runtime currently ships a broad skill set. Representative groups:
 
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
 - files, config, and developer tools: `run_cmd`, `fs_basic`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
@@ -829,7 +880,7 @@ Skill integration entry points:
 ### Speech-To-Text Backends
 
 The default `audio_transcribe` path uses local whisper.cpp. When its binary and
-multilingual model are present, RustClaw starts the loopback model server with
+multilingual model are present, Agent Runtime starts the loopback model server with
 the rest of the runtime and stops it during normal shutdown. Qwen
 `qwen3-asr-flash` is also supported through `/chat/completions` `input_audio`;
 select it in `configs/audio.toml` when a working Qwen account is preferred.
@@ -900,8 +951,8 @@ The Pi App also carries the NNI device-signing helper used by the backend and br
 ## Developer Notes
 
 - `build-all.sh` is the most accurate repo-level build entry if you are building from source
-- Native Linux builds use the active Rust toolchain's bundled LLD; hosts with no more than 16 GiB RAM default to one Cargo job, and repeated local builds keep incremental compilation enabled. Set `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` explicitly to override those defaults, or `RUSTCLAW_DISABLE_BUNDLED_LLD=1` to diagnose linker compatibility.
-- `install-rustclaw-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
+- Native Linux builds use the active Rust toolchain's bundled LLD. ARM and memory-constrained hosts use one Cargo job; an x86 host with 12-16 GiB total memory, at least 8 GiB currently available, and at least four CPUs uses two jobs. Larger hosts keep Cargo's own default. Repeated local builds keep incremental compilation enabled. Set `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` explicitly to override these defaults, or `APP_DISABLE_BUNDLED_LLD=1` to diagnose linker compatibility.
+- `install-agent-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
 - the installer verifies Python 3.11+ with `tomllib`; on macOS it installs the current Homebrew `python` formula when missing, and runtime/build entrypoints select that interpreter without replacing the chosen Rust toolchain
 - if you only want to rebuild the local UI, use `build-ui-nginx.sh`; use `deploy-ui-nginx.sh` only for an nginx-hosted server
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you

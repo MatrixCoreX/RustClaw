@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/schemas/permanent_extension_plan.schema.json",
+  "$id": "https://agent-runtime.invalid/schemas/permanent_extension_plan.schema.json",
   "title": "Permanent Extension Plan Output",
   "description": "Schema for the JSON object returned by `extension_manager_permanent_extension_system_prompt.md` and consumed by `crates/skills/extension_manager/src/main.rs::parse_permanent_extension_plan_from_text`.",
   "type": "object",

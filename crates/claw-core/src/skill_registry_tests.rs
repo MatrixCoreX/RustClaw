@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn base_and_overlay_registry_adds_external_without_allowing_override() {
+    let root =
+        std::env::temp_dir().join(format!("agent-registry-overlay-{}", uuid::Uuid::new_v4()));
+    let overlay = root.join("registry.d");
+    std::fs::create_dir_all(&overlay).expect("create overlay");
+    let base_path = root.join("base.toml");
+    std::fs::write(
+        &base_path,
+        "[[skills]]\nname = \"base_tool\"\nkind = \"builtin\"\n",
+    )
+    .expect("write base");
+    std::fs::write(
+        overlay.join("novel_probe.toml"),
+        "[[skills]]\nname = \"novel_probe\"\nkind = \"external\"\n",
+    )
+    .expect("write overlay");
+
+    let merged = SkillsRegistry::load_from_base_and_overlay(&base_path, Some(&overlay))
+        .expect("merge registry");
+    assert!(merged.is_known("base_tool"));
+    assert!(merged.is_known("novel_probe"));
+
+    std::fs::write(
+        overlay.join("base_tool.toml"),
+        "[[skills]]\nname = \"base_tool\"\nkind = \"external\"\n",
+    )
+    .expect("write override");
+    let error = SkillsRegistry::load_from_base_and_overlay(&base_path, Some(&overlay))
+        .expect_err("bundled override must fail");
+    assert!(error.contains("cannot replace bundled skill"), "{error}");
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn package_manifest_projection_is_typed() {
     let registry = SkillsRegistry::load_from_str(
         r#"
@@ -265,11 +299,32 @@ fn config_guard_ownership_leads_the_compact_registry_description() {
         .and_then(|entry| entry.description.as_deref())
         .expect("config_basic description");
 
-    assert!(description.starts_with("config.guard_rustclaw_config owns"));
+    assert!(description.starts_with("config.guard_config owns"));
     assert!(description.contains("config.validate parses syntax only"));
     assert!(
         description.len() <= 180,
         "compact summary must remain visible"
+    );
+}
+
+#[test]
+fn every_bundled_skill_has_simplified_chinese_display_copy() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = SkillsRegistry::load_from_path(&path).expect("load bundled skill registry");
+    let missing = registry
+        .all_names()
+        .into_iter()
+        .filter(|name| {
+            registry
+                .get(name)
+                .and_then(|entry| entry.description_zh.as_deref())
+                .is_none_or(|value| value.trim().is_empty())
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "bundled skills missing description_zh: {missing:?}"
     );
 }
 
@@ -360,6 +415,52 @@ kind = "runner"
 }
 
 #[test]
+fn registry_rejects_out_of_bounds_capability_timeout() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "timeout_fixture"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "fixture.run", action = "run", timeout_seconds = 0 }
+]
+input_schema = { type = "object", properties = { action = { type = "string" } } }
+"#,
+    )
+    .expect_err("zero capability timeout must be rejected");
+
+    assert!(error.contains("1..=86400"), "{error}");
+    assert!(error.contains("fixture.run"), "{error}");
+}
+
+#[test]
+fn registry_preserves_action_scoped_capability_timeout() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "timeout_fixture"
+enabled = true
+kind = "runner"
+timeout_seconds = 30
+planner_capabilities = [
+  { name = "fixture.run", action = "run", timeout_seconds = 17 }
+]
+input_schema = { type = "object", properties = { action = { type = "string" } } }
+"#,
+    )
+    .expect("valid capability timeout registry");
+
+    let mapping = select_planner_capability_mapping(
+        registry.planner_capabilities("timeout_fixture"),
+        Some("run"),
+    )
+    .expect("action-scoped mapping");
+    assert_eq!(mapping.timeout_seconds, Some(17));
+    assert_eq!(registry.timeout_seconds("timeout_fixture"), 30);
+}
+
+#[test]
 fn capability_parses_closed_set_and_secrets_namespace() {
     // 注意：`secrets.<name>` 用 `<用途>_<vendor>_api_key` 命名，避免把
     // image / chat / vision 三套独立 LLM 配置的 key 串到一起。
@@ -370,6 +471,7 @@ fn capability_parses_closed_set_and_secrets_namespace() {
         "fs.write",
         "exec",
         "exec.sudo",
+        "llm.credential_fallback.image_generation_minimax_api_key",
         "secrets.image_generation_minimax_api_key",
         "secrets.text_openai_api_key",
     ] {
@@ -1116,7 +1218,8 @@ memory_policy = { include = ["preferences", "recent_chat_magic"] }
 #[test]
 fn integrity_report_clean_when_all_required_builtins_present() {
     let mut toml = String::new();
-    for name in REQUIRED_BUILTIN_SKILLS {
+    for descriptor in HOST_TOOL_DESCRIPTORS {
+        let name = descriptor.name;
         toml.push_str(&format!(
             "[[skills]]\nname = \"{name}\"\nenabled = true\nkind = \"builtin\"\n\n"
         ));
@@ -1307,4 +1410,33 @@ planner_capabilities = [
 
     assert!(error.contains("invalid required expression"), "{error}");
     assert!(error.contains("city||latitude+longitude"), "{error}");
+}
+
+#[test]
+fn registry_normalizes_machine_declared_argument_aliases() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "novel_probe"
+argument_aliases = { output_path = ["Output-File", "destination"] }
+"#,
+    )
+    .expect("argument alias registry");
+    assert_eq!(
+        registry.argument_aliases("novel_probe").unwrap()["output_path"],
+        vec!["output_file", "destination"]
+    );
+}
+
+#[test]
+fn registry_rejects_ambiguous_argument_aliases() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "novel_probe"
+argument_aliases = { source = ["path"], destination = ["path"] }
+"#,
+    )
+    .expect_err("duplicate aliases must fail");
+    assert!(error.contains("argument alias `path`"));
 }

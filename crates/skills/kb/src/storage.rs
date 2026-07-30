@@ -734,7 +734,7 @@ fn insert_retrieval_row(
     } else {
         index.updated_at_epoch
     };
-    tx.execute(
+    let rowid = tx.query_row(
         "INSERT INTO memory_retrieval_index (
             source_kind, source_memory_id, source_pref_key, source_ref,
             user_id, chat_id, user_key, memory_kind, role, search_text,
@@ -745,7 +745,28 @@ fn insert_retrieval_row(
             'kb_doc', NULL, NULL, ?1, 0, 0, ?2, 'knowledge_doc', NULL,
             ?3, NULL, ?4, ?5, 'local-hash-v1', 24, ?6, ?7,
             0.78, 'succeeded', 'kb', ?8, ?8
-         )",
+         )
+         ON CONFLICT(user_key, source_ref) DO UPDATE SET
+            source_kind = excluded.source_kind,
+            source_memory_id = excluded.source_memory_id,
+            source_pref_key = excluded.source_pref_key,
+            user_id = excluded.user_id,
+            chat_id = excluded.chat_id,
+            memory_kind = excluded.memory_kind,
+            role = excluded.role,
+            search_text = excluded.search_text,
+            trigger_text = excluded.trigger_text,
+            topic_tags = excluded.topic_tags,
+            vector_json = excluded.vector_json,
+            embedding_model = excluded.embedding_model,
+            embedding_dims = excluded.embedding_dims,
+            embedding_version = excluded.embedding_version,
+            metadata_json = excluded.metadata_json,
+            salience = excluded.salience,
+            success_state = excluded.success_state,
+            tool_or_skill_name = excluded.tool_or_skill_name,
+            updated_at_ts = excluded.updated_at_ts
+         RETURNING id",
         params![
             source_ref,
             index.owner_user_key,
@@ -756,9 +777,17 @@ fn insert_retrieval_row(
             metadata.to_string(),
             row_ts,
         ],
+        |row| row.get::<_, i64>(0),
     )?;
     if has_fts(tx)? {
-        let rowid = tx.last_insert_rowid();
+        // The stable source identity may already exist after importing the
+        // legacy main retrieval index. Rebuild its FTS projection whether the
+        // row was inserted or updated so staged namespace migration remains
+        // idempotent and cannot leave stale searchable text behind.
+        tx.execute(
+            "DELETE FROM memory_retrieval_index_fts WHERE rowid = ?1",
+            params![rowid],
+        )?;
         tx.execute(
             "INSERT INTO memory_retrieval_index_fts(rowid, search_text, topic_tags)
              VALUES (?1, ?2, ?3)",

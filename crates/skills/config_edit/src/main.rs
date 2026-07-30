@@ -180,7 +180,7 @@ fn execute_action(
         "validate_config" | "validate" => {
             validate_config(workspace_root, obj, allow_path_outside_workspace)
         }
-        "guard_config" | "guard_rustclaw_config" => {
+        "guard_config" => {
             guard_config(workspace_root, obj, allow_path_outside_workspace)
         }
         "read_back" => read_back(workspace_root, obj, allow_path_outside_workspace),

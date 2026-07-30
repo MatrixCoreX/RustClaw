@@ -3,13 +3,14 @@ name = "clawcli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Terminal CLI to interact with clawd (RustClaw)"
+description = "Terminal CLI to interact with the clawd agent runtime"
 
 [[bin]]
 name = "clawcli"
 path = "src/main.rs"
 
 [dependencies]
+claw-core = { path = "../claw-core" }
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }

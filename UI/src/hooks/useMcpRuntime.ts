@@ -106,8 +106,8 @@ export function useMcpRuntime({ apiFetch, t }: UseMcpRuntimeParams) {
       setMcpDraft(buildMcpConfigDraft(data));
       setMcpSaveMessage(
         t(
-          "MCP 设置已保存。重启 RustClaw 后会连接服务器。",
-          "MCP settings saved. Restart RustClaw to connect the servers.",
+          "MCP 设置已保存。重启 {product_name} 后会连接服务器。",
+          "MCP settings saved. Restart {product_name} to connect the servers.",
         ),
       );
     } catch (error) {

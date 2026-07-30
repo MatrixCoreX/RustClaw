@@ -14,7 +14,17 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+HOST_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 TEST_CONFIG="$PROJECT_ROOT/.test-config.toml"
+
+if [[ -f "$HOST_ROOT/scripts/shell_compat.sh" ]]; then
+    # Reuse the host's platform, memory, incremental-build, and linker policy.
+    # This keeps the vendored compatibility suite from becoming a hidden
+    # unbounded Cargo entrypoint.
+    # shellcheck source=../../../scripts/shell_compat.sh
+    source "$HOST_ROOT/scripts/shell_compat.sh"
+    configure_cargo_build_environment
+fi
 
 # Functions
 print_header() {

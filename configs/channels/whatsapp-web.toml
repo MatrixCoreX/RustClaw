@@ -8,7 +8,7 @@
 
 [whatsapp_web]
 # 是否启用扫码登录模式
-enabled = false
+enabled = true
 # bridge 服务监听地址（供 clawd 调用）
 bridge_listen = "127.0.0.1:8092"
 # wrapper 服务监听地址（对外包装层）

@@ -42,7 +42,7 @@ fn write_workspace_and_mounted_file(
 
 fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
     let active_path = active_runtime_config_path(state);
-    let persisted_path = std::env::var_os("RUSTCLAW_CONFIG_PERSIST_PATH")
+    let persisted_path = claw_core::product_identity::env_os("CONFIG_PERSIST_PATH")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .map(|path| {
@@ -73,39 +73,6 @@ fn write_runtime_config_to_paths(
     Ok(())
 }
 
-fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
-    let path = state
-        .skill_rt
-        .workspace_root
-        .join("configs/skills_registry.toml");
-    match std::fs::read_to_string(path) {
-        Ok(raw) => Ok(raw),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(err) => Err(err),
-    }
-}
-
-fn write_skills_registry_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    let active_path = state
-        .skill_rt
-        .workspace_root
-        .join("configs/skills_registry.toml");
-    if let Some(parent) = active_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&active_path, raw)?;
-
-    let mounted_path = state
-        .skill_rt
-        .workspace_root
-        .join("docker/config/skills_registry.toml");
-    if let Some(parent) = mounted_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&mounted_path, raw)?;
-    Ok(())
-}
-
 #[derive(Debug, Default)]
 struct ParsedSkillFrontmatter {
     name: String,
@@ -124,8 +91,6 @@ struct ImportedSkillPlan {
     supported_os: Vec<String>,
     supported_arch: Vec<String>,
     aliases: Vec<String>,
-    registry_prompt_rel_path: String,
-    prompt_body_rel_path: String,
     bundle_rel_dir: String,
     entry_file: String,
     source_url: String,
@@ -197,7 +162,7 @@ fn detect_import_plan(
 ) -> anyhow::Result<ImportedSkillPlan> {
     let frontmatter = parse_skill_frontmatter(interface_md);
     let manifest_path = bundle_dir.join("skill.toml");
-    let mut manifest = rustclaw_skill_sdk::PackageManifest::load(&manifest_path)
+    let mut manifest = skill_sdk::PackageManifest::load(&manifest_path)
         .map_err(|error| anyhow::anyhow!("manifest validation failed: {error}"))?;
     let expected_source_root = Path::new(bundle_rel_dir);
     if manifest.build.source_root == "." {
@@ -229,8 +194,6 @@ fn detect_import_plan(
     } else {
         manifest.package.description.clone()
     };
-    let registry_prompt_rel_path = format!("prompts/skills/{canonical_name}.md");
-    let prompt_body_rel_path = format!("prompts/layers/generated/skills/{canonical_name}.md");
     Ok(ImportedSkillPlan {
         canonical_name,
         display_name,
@@ -242,8 +205,6 @@ fn detect_import_plan(
         supported_os: manifest.package.supported_os,
         supported_arch: manifest.package.supported_arch,
         aliases,
-        registry_prompt_rel_path,
-        prompt_body_rel_path,
         bundle_rel_dir: bundle_rel_dir.to_string(),
         entry_file: manifest.run.entrypoint,
         source_url: manifest.package.source.unwrap_or_else(|| source.to_string()),
@@ -251,52 +212,12 @@ fn detect_import_plan(
     })
 }
 
-fn render_string_array(items: &[String]) -> String {
-    if items.is_empty() {
-        "[]".to_string()
-    } else {
-        let body = items
-            .iter()
-            .map(|item| format!("{item:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("[{body}]")
-    }
-}
-
-fn render_imported_skill_registry_block(plan: &ImportedSkillPlan) -> String {
-    let mut lines = Vec::new();
-    lines.push("[[skills]]".to_string());
-    lines.push(format!("name = {:?}", plan.canonical_name));
-    lines.push(format!("enabled = {}", plan.enabled));
-    lines.push("kind = \"external\"".to_string());
-    lines.push("install_mode = \"on_demand\"".to_string());
-    lines.push(format!(
-        "package_manifest = {:?}",
-        plan.package_manifest_rel_path
-    ));
-    lines.push(format!("aliases = {}", render_string_array(&plan.aliases)));
-    lines.push("timeout_seconds = 60".to_string());
-    lines.push(format!("prompt_file = {:?}", plan.registry_prompt_rel_path));
-    lines.push("output_kind = \"text\"".to_string());
-    lines.push(format!(
-        "supported_os = {}",
-        render_string_array(&plan.supported_os)
-    ));
-    lines.push(format!("description = {:?}", plan.description));
-    lines.push("risk_level = \"high\"".to_string());
-    lines.push("auto_invocable = false".to_string());
-    lines.push("requires_confirmation = true".to_string());
-    lines.push("side_effect = true".to_string());
-    lines.join("\n")
-}
-
 fn render_imported_skill_prompt(plan: &ImportedSkillPlan, interface_md: &str) -> String {
     let normalized_interface = interface_md.trim();
     let mut out = String::new();
     out.push_str("<!-- AUTO-GENERATED: external skill importer -->\n");
     out.push_str(&format!("# {}\n\n", plan.display_name));
-    out.push_str("RustClaw verified external skill package.\n\n");
+    out.push_str("Agent runtime verified external skill package.\n\n");
     out.push_str("## Verified Package\n");
     out.push_str(&format!(
         "- This is an imported external skill: `{}`.\n",
@@ -318,7 +239,7 @@ fn render_imported_skill_prompt(plan: &ImportedSkillPlan, interface_md: &str) ->
         "- Do not infer command-line flags, runtimes, dependencies, or action names from source files.\n",
     );
     out.push_str(
-        "- Avoid adding internal metadata fields yourself; RustClaw will inject its own runtime context.\n",
+        "- Avoid adding internal metadata fields yourself; the agent runtime will inject its own runtime context.\n",
     );
     if !normalized_interface.is_empty() {
         out.push_str("\n## Interface Contract\n\n");
@@ -331,6 +252,134 @@ fn render_imported_skill_prompt(plan: &ImportedSkillPlan, interface_md: &str) ->
     out
 }
 
+fn admission_service(
+    state: &AppState,
+) -> Result<crate::skill_admission::SkillAdmissionService, String> {
+    let config_path = active_runtime_config_path(state);
+    let config = claw_core::config::AppConfig::load(&config_path.to_string_lossy())
+        .map_err(|error| format!("load active config failed: {error}"))?;
+    crate::skill_admission::SkillAdmissionService::from_config(
+        &state.skill_rt.workspace_root,
+        &config,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn project_admission_config_state(
+    snapshot: &crate::skill_admission::OverlaySnapshot,
+    switches: &mut BTreeMap<String, bool>,
+    uninstalled: &mut BTreeSet<String>,
+) {
+    for name in &snapshot.enabled {
+        switches.insert(name.clone(), true);
+        uninstalled.remove(name);
+    }
+    for name in snapshot
+        .disabled
+        .iter()
+        .chain(snapshot.awaiting_policy.iter())
+    {
+        switches.insert(name.clone(), false);
+        uninstalled.remove(name);
+    }
+    for name in &snapshot.tombstoned {
+        switches.insert(name.clone(), false);
+        uninstalled.insert(name.clone());
+    }
+}
+
+fn imported_host_policy_grant(
+    manifest: &skill_sdk::PackageManifest,
+) -> Result<skill_sdk::HostPolicyGrant, String> {
+    use skill_sdk::{
+        ApprovalSource, GrantedCapability, HostPolicyGrant, HostRiskLevel, RequestedEffect,
+        HOST_POLICY_GRANT_SCHEMA_VERSION,
+    };
+
+    let request = manifest
+        .effective_capability_request()
+        .map_err(|error| error.to_string())?;
+    let mutating = request.capabilities.iter().any(|capability| {
+        matches!(
+            capability.effect,
+            RequestedEffect::Mutate | RequestedEffect::External
+        )
+    });
+    let high_risk = request.permissions.filesystem_write
+        || request.permissions.subprocess
+        || request.permissions.package_install
+        || request.permissions.privilege_escalation
+        || request.permissions.external_publish
+        || mutating;
+    let medium_risk = request.permissions.network
+        || request.permissions.filesystem_read
+        || request.permissions.llm_gateway
+        || !request.permissions.credential_refs.is_empty();
+    let risk_level = if high_risk {
+        HostRiskLevel::High
+    } else if medium_risk {
+        HostRiskLevel::Medium
+    } else {
+        HostRiskLevel::Low
+    };
+    let grant = HostPolicyGrant {
+        schema_version: HOST_POLICY_GRANT_SCHEMA_VERSION,
+        skill_name: manifest.package.name.clone(),
+        version: manifest.package.version.clone(),
+        semantic_contract_digest: manifest
+            .capability_request_digest()
+            .map_err(|error| error.to_string())?,
+        capabilities: request
+            .capabilities
+            .iter()
+            .map(|capability| GrantedCapability {
+                name: capability.name.clone(),
+                action: capability.action.clone(),
+            })
+            .collect(),
+        permissions: request.permissions,
+        risk_level,
+        auto_invocable: false,
+        requires_confirmation: high_risk,
+        approval_source: ApprovalSource::AdminApi,
+        approved_at_unix: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .max(1),
+    };
+    grant
+        .validate_against(manifest)
+        .map_err(|error| error.to_string())?;
+    Ok(grant)
+}
+
+fn restore_import_install_pointer(
+    state: &AppState,
+    skill_name: &str,
+    previous: Option<&skill_sdk::CurrentInstallPointer>,
+) -> Result<(), String> {
+    let store = skill_sdk::InstallReceiptStore::new(skill_package_root(state));
+    match previous {
+        Some(previous) => {
+            let current = store
+                .current_pointer(skill_name)
+                .map_err(|error| error.to_string())?;
+            if current != *previous {
+                store
+                    .rollback(skill_name)
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        }
+        None => store
+            .remove_installed_versions(skill_name)
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+    }
+}
+
+#[cfg(test)]
 fn parse_registry_block_name(block: &[&str]) -> Option<String> {
     for line in block {
         let trimmed = line.trim();
@@ -353,6 +402,7 @@ fn parse_registry_block_name(block: &[&str]) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn remove_skill_registry_block(raw: &str, skill_name: &str) -> (String, bool) {
     let mut out: Vec<String> = Vec::new();
     let lines: Vec<&str> = raw.lines().collect();
@@ -384,36 +434,6 @@ fn remove_skill_registry_block(raw: &str, skill_name: &str) -> (String, bool) {
         rendered.push('\n');
     }
     (rendered, removed)
-}
-
-fn remove_managed_prompt_file(path: &Path) -> std::io::Result<bool> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(value) => value,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(err),
-    };
-    if raw.contains("<!-- AUTO-GENERATED: external skill importer -->") {
-        std::fs::remove_file(path)?;
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-fn remove_runtime_skill_state(raw: &str, state: &AppState, skill_name: &str) -> String {
-    let parsed = toml::from_str::<toml::Value>(raw)
-        .unwrap_or_else(|_| toml::Value::Table(Default::default()));
-    let mut switches = collect_skill_switches(&parsed, state);
-    switches.remove(skill_name);
-    let mut uninstalled = collect_uninstalled_skills(&parsed, state);
-    uninstalled.remove(skill_name);
-    let rendered = render_switches_inline_table(&switches);
-    let updated = upsert_skill_switches_line(raw, &rendered);
-    upsert_section_key_line(
-        &updated,
-        "skills",
-        "uninstalled_skills",
-        &render_skill_name_array(&uninstalled),
-    )
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -457,102 +477,6 @@ fn sanitize_upload_relative_path(input: &str) -> Option<PathBuf> {
 }
 
 #[derive(Debug)]
-struct ImportedRegistrationSnapshot {
-    prompt: Option<Vec<u8>>,
-    registry: String,
-    runtime_config: String,
-    current_pointer: Option<rustclaw_skill_sdk::CurrentInstallPointer>,
-}
-
-fn read_optional_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(value) => Ok(Some(value)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn restore_optional_file(path: &Path, previous: Option<&[u8]>) -> std::io::Result<()> {
-    match previous {
-        Some(value) => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(path, value)
-        }
-        None => match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        },
-    }
-}
-
-fn rollback_imported_registration(
-    state: &AppState,
-    plan: &ImportedSkillPlan,
-    snapshot: &ImportedRegistrationSnapshot,
-) -> Vec<String> {
-    let mut failures = Vec::new();
-    let prompt_path = state
-        .skill_rt
-        .workspace_root
-        .join(&plan.prompt_body_rel_path);
-    if let Err(error) = restore_optional_file(&prompt_path, snapshot.prompt.as_deref()) {
-        failures.push(format!("prompt={error}"));
-    }
-    if let Err(error) = write_skills_registry_file(state, &snapshot.registry) {
-        failures.push(format!("registry={error}"));
-    }
-    if let Err(error) = write_runtime_config_file(state, &snapshot.runtime_config) {
-        failures.push(format!("config={error}"));
-    }
-    let receipt_store =
-        rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(state));
-    let current = receipt_store.current_pointer(&plan.canonical_name).ok();
-    match (&snapshot.current_pointer, current) {
-        (Some(previous), Some(current)) if current != *previous => {
-            if let Err(error) = receipt_store.rollback(&plan.canonical_name) {
-                failures.push(format!("receipt={error}"));
-            }
-        }
-        (None, Some(_)) => {
-            if let Err(error) = receipt_store.remove_installed_versions(&plan.canonical_name) {
-                failures.push(format!("receipt={error}"));
-            }
-        }
-        _ => {}
-    }
-    if let Err(error) = reload_skill_views(state) {
-        failures.push(format!("reload={error}"));
-    }
-    failures
-}
-
-fn imported_finalize_failure(
-    state: &AppState,
-    plan: &ImportedSkillPlan,
-    snapshot: &ImportedRegistrationSnapshot,
-    status: StatusCode,
-    message: impl std::fmt::Display,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let rollback_failures = rollback_imported_registration(state, plan, snapshot);
-    let rollback_suffix = if rollback_failures.is_empty() {
-        String::new()
-    } else {
-        format!("; rollback failures: {}", rollback_failures.join(", "))
-    };
-    (
-        status,
-        Json(ApiResponse {
-            ok: false,
-            data: None,
-            error: Some(format!("{message}{rollback_suffix}")),
-        }),
-    )
-}
-
-#[derive(Debug)]
 struct ImportedBundleActivation {
     bundle_dir: PathBuf,
     bundle_rel_dir: String,
@@ -560,7 +484,7 @@ struct ImportedBundleActivation {
 }
 
 fn imported_bundle_staging_dir(workspace_root: &Path) -> std::io::Result<PathBuf> {
-    let root = workspace_root.join("third_party/clawhub");
+    let root = workspace_root.join("data/skills/imports");
     std::fs::create_dir_all(&root)?;
     let staging = root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&staging)?;
@@ -571,14 +495,14 @@ fn activate_imported_bundle(
     workspace_root: &Path,
     staging_dir: &Path,
 ) -> Result<ImportedBundleActivation, String> {
-    let manifest = rustclaw_skill_sdk::PackageManifest::load(&staging_dir.join("skill.toml"))
+    let manifest = skill_sdk::PackageManifest::load(&staging_dir.join("skill.toml"))
         .map_err(|error| format!("validate staged skill manifest failed: {error}"))?;
     let canonical_name = manifest.package.name;
-    let bundle_rel_dir = format!("third_party/clawhub/{canonical_name}");
+    let bundle_rel_dir = format!("data/skills/imports/{canonical_name}");
     let bundle_dir = workspace_root.join(&bundle_rel_dir);
     let backup_dir = bundle_dir.exists().then(|| {
         workspace_root.join(format!(
-            "third_party/clawhub/.backup-{canonical_name}-{}",
+            "data/skills/imports/.backup-{canonical_name}-{}",
             uuid::Uuid::new_v4()
         ))
     });
@@ -641,59 +565,10 @@ async fn finalize_imported_bundle(
         }
     };
 
-    let prompt_body_path = state
-        .skill_rt
-        .workspace_root
-        .join(&plan.prompt_body_rel_path);
-    let registry_snapshot = match read_skills_registry_file(state) {
-        Ok(raw) => raw,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skills registry failed: {error}")),
-                }),
-            );
-        }
-    };
-    let runtime_config_snapshot = match read_skill_config_file(state) {
-        Ok((raw, _)) => raw,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read runtime config failed: {error}")),
-                }),
-            );
-        }
-    };
-    let prompt_snapshot = match read_optional_file(&prompt_body_path) {
-        Ok(value) => value,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read prompt snapshot failed: {error}")),
-                }),
-            );
-        }
-    };
-    let snapshot = ImportedRegistrationSnapshot {
-        prompt: prompt_snapshot,
-        registry: registry_snapshot,
-        runtime_config: runtime_config_snapshot,
-        current_pointer: rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(state))
-            .current_pointer(&plan.canonical_name)
-            .ok(),
-    };
+    let receipt_store = skill_sdk::InstallReceiptStore::new(skill_package_root(state));
+    let previous_pointer = receipt_store.current_pointer(&plan.canonical_name).ok();
 
-    let install_request = rustclaw_skill_sdk::InstallRequest {
+    let install_request = skill_sdk::InstallRequest {
         manifest_path: bundle_dir.join("skill.toml"),
         workspace_root: state.skill_rt.workspace_root.clone(),
         package_root: skill_package_root(state),
@@ -702,7 +577,7 @@ async fn finalize_imported_bundle(
         control: None,
     };
     let install_outcome = match tokio::task::spawn_blocking(move || {
-        rustclaw_skill_sdk::SkillInstaller.install(&install_request)
+        skill_sdk::SkillInstaller.install(&install_request)
     })
     .await
     {
@@ -717,7 +592,7 @@ async fn finalize_imported_bundle(
                         "skill package verification failed: code={} phase={} diagnostic={}",
                         error.code,
                         error.phase.as_deref().unwrap_or("unknown"),
-                        rustclaw_skill_sdk::redact_diagnostics(&error.detail)
+                        skill_sdk::redact_diagnostics(&error.detail)
                     )),
                 }),
             );
@@ -734,107 +609,118 @@ async fn finalize_imported_bundle(
         }
     };
 
-    if let Some(parent) = prompt_body_path.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            return imported_finalize_failure(
-                state,
-                &plan,
-                &snapshot,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("create prompt directory failed: {err}"),
-            );
-        }
-    }
-    if let Err(err) = std::fs::write(
-        &prompt_body_path,
-        render_imported_skill_prompt(&plan, interface_md),
-    ) {
-        return imported_finalize_failure(
-            state,
-            &plan,
-            &snapshot,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("write prompt file failed: {err}"),
-        );
-    }
-
-    let registry_raw = snapshot.registry.clone();
-    let (mut registry_raw, _) = remove_skill_registry_block(&registry_raw, &plan.canonical_name);
-    if !registry_raw.ends_with('\n') && !registry_raw.is_empty() {
-        registry_raw.push('\n');
-    }
-    registry_raw.push('\n');
-    registry_raw.push_str(&render_imported_skill_registry_block(&plan));
-    registry_raw.push('\n');
-    if let Err(err) = write_skills_registry_file(state, &registry_raw) {
-        return imported_finalize_failure(
-            state,
-            &plan,
-            &snapshot,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("write skills registry failed: {err}"),
-        );
-    }
-
-    let mut installation = match update_skill_store_installation(state, &plan.canonical_name, true) {
-        Ok(result) => result,
+    let verified = match receipt_store.verified_current_install(&plan.canonical_name) {
+        Ok(verified) => verified,
         Err(error) => {
-            let response = skill_store_error_response(error);
-            let message = response
-                .1
-                .0
-                .error
-                .clone()
-                .unwrap_or_else(|| "skill store configuration failed".to_string());
-            return imported_finalize_failure(
+            let _ = restore_import_install_pointer(
                 state,
-                &plan,
-                &snapshot,
-                response.0,
-                message,
+                &plan.canonical_name,
+                previous_pointer.as_ref(),
+            );
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("verify installed receipt failed: {error}")),
+                }),
             );
         }
     };
-    if !plan.enabled {
-        let (runtime_raw, parsed) = match read_skill_config_file(state) {
-            Ok(value) => value,
-            Err(error) => {
-                return imported_finalize_failure(
-                    state,
-                    &plan,
-                    &snapshot,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("read runtime config failed: {error}"),
-                );
-            }
-        };
-        let mut switches = collect_skill_switches(&parsed, state);
-        switches.insert(plan.canonical_name.clone(), false);
-        let mut uninstalled = collect_uninstalled_skills(&parsed, state);
-        uninstalled.remove(&plan.canonical_name);
-        let updated = render_skill_store_config(&runtime_raw, &switches, &uninstalled);
-        if let Err(error) = write_runtime_config_file(state, &updated) {
-            return imported_finalize_failure(
+    let grant = match imported_host_policy_grant(&verified.manifest) {
+        Ok(grant) => grant,
+        Err(error) => {
+            let _ = restore_import_install_pointer(
                 state,
-                &plan,
-                &snapshot,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("write disabled runtime config failed: {error}"),
+                &plan.canonical_name,
+                previous_pointer.as_ref(),
+            );
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("host policy grant failed: {error}")),
+                }),
             );
         }
-        match reload_skill_views(state) {
-            Ok(reload) => installation = json!({"reload": reload}),
-            Err(error) => {
-                return imported_finalize_failure(
-                    state,
-                    &plan,
-                    &snapshot,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("reload disabled imported skill failed: {error}"),
-                );
-            }
+    };
+    let service = match admission_service(state) {
+        Ok(service) => service,
+        Err(error) => {
+            let _ = restore_import_install_pointer(
+                state,
+                &plan.canonical_name,
+                previous_pointer.as_ref(),
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("initialize skill admission failed: {error}")),
+                }),
+            );
         }
-    }
+    };
+    let admission = match service.admit_external(crate::skill_admission::AdmissionMutation {
+        metadata: crate::skill_admission::ExternalSkillMetadata {
+            name: plan.canonical_name.clone(),
+            source: crate::skill_admission::SkillAdmissionSource::ExternalOverlay,
+            package_manifest_path: plan.package_manifest_rel_path.clone(),
+            description: plan.description.clone(),
+            aliases: plan.aliases.clone(),
+            group: "extensions".to_string(),
+        },
+        prompt: render_imported_skill_prompt(&plan, interface_md),
+        state: if plan.enabled {
+            skill_sdk::AdmissionState::Enabled
+        } else {
+            skill_sdk::AdmissionState::InstalledDisabled
+        },
+        grant: Some(grant.clone()),
+    }) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let rollback = restore_import_install_pointer(
+                state,
+                &plan.canonical_name,
+                previous_pointer.as_ref(),
+            )
+            .err()
+            .map(|rollback| format!("; receipt rollback failed: {rollback}"))
+            .unwrap_or_default();
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("skill admission failed: {error}{rollback}")),
+                }),
+            );
+        }
+    };
+    let reload = match reload_skill_views(state) {
+        Ok(reload) => reload,
+        Err(error) => {
+            let receipt_rollback = restore_import_install_pointer(
+                state,
+                &plan.canonical_name,
+                previous_pointer.as_ref(),
+            );
+            let generation_rollback = service.rollback_generation(admission.generation);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!(
+                        "reload admitted skill failed: {error}; receipt_rollback={receipt_rollback:?}; generation_rollback={generation_rollback:?}"
+                    )),
+                }),
+            );
+        }
+    };
 
     (
         StatusCode::OK,
@@ -853,9 +739,12 @@ async fn finalize_imported_bundle(
                 "entry_file": plan.entry_file,
                 "supported_os": plan.supported_os,
                 "supported_arch": plan.supported_arch,
-                "prompt_file": plan.registry_prompt_rel_path,
+                "prompt_file": "runtime_overlay",
                 "source": plan.source_url,
-                "reload": installation.get("reload").cloned(),
+                "registry_generation": admission.generation,
+                "registry_generation_digest": admission.generation_digest,
+                "policy_grant_digest": grant.digest(&verified.manifest).ok(),
+                "reload": reload,
                 "installed": true,
                 "enabled": plan.enabled
             })),

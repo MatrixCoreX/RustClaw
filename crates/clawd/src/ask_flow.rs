@@ -109,9 +109,9 @@ pub(crate) async fn transcribe_attached_audio_for_ask(
     let mut prompt = template.replace("__TRANSCRIPT__", transcript);
     let typed_prompt = typed_prompt.trim();
     if !typed_prompt.is_empty() {
-        prompt.push_str("\n\n[RUSTCLAW_TYPED_TEXT]\n");
+        prompt.push_str("\n\n[AGENT_TYPED_TEXT]\n");
         prompt.push_str(typed_prompt);
-        prompt.push_str("\n[/RUSTCLAW_TYPED_TEXT]");
+        prompt.push_str("\n[/AGENT_TYPED_TEXT]");
     }
     Ok(Some(AttachedAudioMaterialization {
         planner_text: prompt,
@@ -166,13 +166,13 @@ fn audio_failure_planner_text(
         "required_decision": "respond_from_structured_failure",
     });
     let mut prompt = format!(
-        "[RUSTCLAW_AUDIO_TRANSCRIPTION_RESULT]\n{payload}\n[/RUSTCLAW_AUDIO_TRANSCRIPTION_RESULT]"
+        "[AGENT_AUDIO_TRANSCRIPTION_RESULT]\n{payload}\n[/AGENT_AUDIO_TRANSCRIPTION_RESULT]"
     );
     let typed_prompt = typed_prompt.trim();
     if !typed_prompt.is_empty() {
-        prompt.push_str("\n\n[RUSTCLAW_TYPED_TEXT]\n");
+        prompt.push_str("\n\n[AGENT_TYPED_TEXT]\n");
         prompt.push_str(typed_prompt);
-        prompt.push_str("\n[/RUSTCLAW_TYPED_TEXT]");
+        prompt.push_str("\n[/AGENT_TYPED_TEXT]");
     }
     prompt
 }

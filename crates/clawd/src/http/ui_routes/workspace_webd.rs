@@ -216,7 +216,7 @@ fn parse_webd_listen_address(listen: &str) -> Result<std::net::SocketAddr, &'sta
 }
 
 fn webd_channel_config_path(workspace_root: &Path) -> PathBuf {
-    let directory = std::env::var_os("RUSTCLAW_CHANNEL_CONFIG_DIR")
+    let directory = claw_core::product_identity::env_os("CHANNEL_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root.join("configs/channels"));
     let directory = if directory.is_absolute() {
@@ -260,7 +260,7 @@ fn schedule_webd_listener_restart(workspace_root: &Path) -> Result<(), String> {
         .map(|pid| format!("kill -TERM {pid} >/dev/null 2>&1 || true; "))
         .collect::<String>();
     let workspace = shell_escape_arg(workspace_root.to_string_lossy().as_ref());
-    let profile = std::env::var("RUSTCLAW_START_PROFILE")
+    let profile = claw_core::product_identity::env_string("START_PROFILE")
         .ok()
         .filter(|value| value == "release")
         .unwrap_or_else(|| "release".to_string());
@@ -268,7 +268,7 @@ fn schedule_webd_listener_restart(workspace_root: &Path) -> Result<(), String> {
         "sleep 2; cd {workspace} && mkdir -p logs .pids; \
          {stop_commands}\
          sleep 1; rm -f .pids/webd.pid; \
-         RUSTCLAW_SKIP_BANNER=1 nohup bash ./component_start/start-webd.sh {} >> logs/webd.log 2>&1 & \
+         APP_SKIP_BANNER=1 nohup bash ./component_start/start-webd.sh {} >> logs/webd.log 2>&1 & \
          echo $! > .pids/webd.pid",
         shell_escape_arg(&profile)
     );

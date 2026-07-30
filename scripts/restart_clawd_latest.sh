@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/home/guagua/rustclaw"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$HOME/runtime_env_filled.sh}"
-CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
+CONFIG_PATH="${APP_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 PID_FILE="${ROOT_DIR}/.pids/clawd.pid"
-LOG_FILE="${RUSTCLAW_CLAWD_LOG_FILE:-${ROOT_DIR}/logs/clawd.run.log}"
+LOG_FILE="${APP_CLAWD_LOG_FILE:-${ROOT_DIR}/logs/clawd.run.log}"
 
 cd "${ROOT_DIR}"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/version_info.sh"
-print_rustclaw_version "${ROOT_DIR}"
+print_app_version "${ROOT_DIR}"
 mkdir -p "$(dirname "${PID_FILE}")"
 mkdir -p "$(dirname "${LOG_FILE}")"
 
@@ -25,23 +25,48 @@ if [[ ! -x "${CLAWD_BIN}" ]]; then
   exit 1
 fi
 
-LISTEN_ADDR="${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
+LISTEN_ADDR="${APP_INTERNAL_LISTEN:-127.0.0.1:8787}"
 PORT="${LISTEN_ADDR##*:}"
 
-pkill -f 'target/release/clawd|cargo run -p clawd' || true
+clawd_pids() {
+  pgrep -f "^${CLAWD_BIN}([[:space:]]|$)" 2>/dev/null || true
+}
+
+port_is_listening() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -lnt | awk '{print $4}' | grep -Eq "[:.]${PORT}$"
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+while IFS= read -r existing_pid; do
+  [[ -n "${existing_pid}" ]] && kill "${existing_pid}"
+done < <(clawd_pids)
 
 for _ in $(seq 1 50); do
-  if ! ss -lnt | awk '{print $4}' | grep -Eq "[:.]${PORT}\$"; then
+  if ! port_is_listening; then
     break
   fi
   sleep 0.2
 done
 
-setsid "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
+if port_is_listening; then
+  echo "port ${PORT} is still in use after stopping ${CLAWD_BIN}" >&2
+  exit 1
+fi
+
+if command -v setsid >/dev/null 2>&1; then
+  setsid "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
+else
+  nohup "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
+fi
 
 sleep 2
 
-if ! pgrep -n -f "^${CLAWD_BIN}\$|${CLAWD_BIN}" > "${PID_FILE}"; then
+if ! pgrep -n -f "^${CLAWD_BIN}([[:space:]]|$)" > "${PID_FILE}"; then
   echo "failed to restart clawd" >&2
   echo "--- ${LOG_FILE} ---" >&2
   tail -n 80 "${LOG_FILE}" >&2 || true
@@ -50,6 +75,10 @@ fi
 
 cat "${PID_FILE}"
 echo '---'
-pgrep -af "^${CLAWD_BIN}\$|${CLAWD_BIN}"
+pgrep -af "^${CLAWD_BIN}([[:space:]]|$)"
 echo '---'
-ss -lntp | rg "${PORT}|clawd"
+if command -v ss >/dev/null 2>&1; then
+  ss -lntp | rg "${PORT}|clawd"
+else
+  lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN
+fi

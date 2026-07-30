@@ -150,6 +150,7 @@ fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -268,7 +269,7 @@ fn sync_output_payload_preserves_content_evidence_for_file_delivery_contract() {
         ..IntentOutputContract::default()
     };
     let token = "FILE:/tmp/report.toml";
-    let content = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"";
+    let content = "[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\"";
     let mut text = token.to_string();
     let mut messages = vec![token.to_string(), content.to_string()];
 
@@ -391,17 +392,20 @@ fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
         response_shape: OutputResponseShape::Scalar,
         ..IntentOutputContract::default()
     };
-    let mut text = "rustclaw-nl-fixture".to_string();
+    let mut text = "agent-runtime-nl-fixture".to_string();
     let summary = format!(
-        "{}\n1. 调用技能 `system_basic`\n   输出：\n```text\nrustclaw-nl-fixture\n```",
+        "{}\n1. 调用技能 `system_basic`\n   输出：\n```text\nagent-runtime-nl-fixture\n```",
         crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
     );
     let mut messages = vec![summary.clone(), text.clone()];
 
     sync_output_payload(&contract, &mut text, &mut messages);
 
-    assert_eq!(text, "rustclaw-nl-fixture");
-    assert_eq!(messages, vec![summary, "rustclaw-nl-fixture".to_string()]);
+    assert_eq!(text, "agent-runtime-nl-fixture");
+    assert_eq!(
+        messages,
+        vec![summary, "agent-runtime-nl-fixture".to_string()]
+    );
 }
 
 #[test]
@@ -1248,7 +1252,7 @@ fn rule3_precise_missing_filename_reports_not_found_after_complete_scan() {
     }
 
     let resolved = resolve_file_delivery_target(
-        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        "把 definitely_missing_named_file_agent_001.txt 发给我",
         system_root.path(),
         project_root.path(),
     );
@@ -1265,11 +1269,11 @@ fn rule3_precise_missing_filename_reports_not_found_after_complete_scan() {
 fn rule3_filename_only_long_missing_name_does_not_match_short_substrings() {
     let system_root = TempDirGuard::new("rule3_system_missing_long_name");
     let project_root = TempDirGuard::new("rule3_project_missing_long_name");
-    write_text_file(&project_root.path().join("rustclaw.service"));
+    write_text_file(&project_root.path().join("agent-runtime.service"));
     write_text_file(&project_root.path().join("README_file.txt"));
 
     let resolved = resolve_file_delivery_target(
-        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        "把 definitely_missing_named_file_agent_001.txt 发给我",
         system_root.path(),
         project_root.path(),
     );
@@ -1285,11 +1289,11 @@ fn rule3_filename_only_long_missing_name_does_not_match_short_substrings() {
 #[test]
 fn rule3_filename_only_missing_name_does_not_fallback_to_real_system_root_scan() {
     let project_root = TempDirGuard::new("rule3_project_missing_real_system_root");
-    write_text_file(&project_root.path().join("rustclaw.service"));
+    write_text_file(&project_root.path().join("agent-runtime.service"));
     write_text_file(&project_root.path().join("README_file.txt"));
 
     let resolved = resolve_file_delivery_target(
-        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        "把 definitely_missing_named_file_agent_001.txt 发给我",
         std::path::Path::new("/"),
         project_root.path(),
     );

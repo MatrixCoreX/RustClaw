@@ -96,7 +96,7 @@ export function AuthKeysPage({
           <div>
             <h3 className="text-base font-semibold">{t("账号绑定与 Key 管理", "Account binding and key management")}</h3>
             <p className="mt-2 text-sm text-white/65">
-              {t("微信、Telegram 和飞书的快捷接入已经移到通信接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat, Telegram, and Feishu setup moved to Communication Setup. This page now keeps account bindings plus access key generation and management.")}
+              {t("微信、Telegram、飞书和 Lark 的快捷接入已经移到通信接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat, Telegram, Feishu, and Lark setup moved to Communication Setup. This page now keeps account bindings plus access key generation and management.")}
             </p>
           </div>
         </div>
@@ -304,7 +304,7 @@ export function AuthKeysPage({
                                     value={webdLoginUsernameDraft}
                                     onChange={(event) => onWebdLoginUsernameDraftChange(event.target.value)}
                                     className="theme-input"
-                                    placeholder={t("例如 rustclaw_admin", "For example rustclaw_admin")}
+                                    placeholder={t("例如 admin", "For example admin")}
                                   />
                                 </label>
                                 <label className="space-y-2">

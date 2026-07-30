@@ -1,4 +1,4 @@
-//! HTTP 反向代理：对外监听，转发至本机 `clawd`；可选 `/webd/login` 会话并注入 `X-RustClaw-Key`。
+//! HTTP 反向代理：对外监听，转发至本机 `clawd`；可选 `/webd/login` 会话并注入规范认证头。
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -17,6 +17,7 @@ use axum::routing::{any, get, get_service, post};
 use axum::Json;
 use axum::Router;
 use claw_core::config::AppConfig;
+use claw_core::product_identity::AUTH_KEY_HEADER;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -194,7 +195,7 @@ fn build_webd_router(state: AppState, ui_dist_dir: PathBuf) -> Router {
 }
 
 fn resolve_ui_dist_dir() -> PathBuf {
-    std::env::var("RUSTCLAW_UI_DIST")
+    claw_core::product_identity::env_string("UI_DIST")
         .ok()
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
@@ -487,10 +488,14 @@ async fn webd_options(headers: HeaderMap) -> impl IntoResponse {
         res.headers_mut()
             .insert(header::ACCESS_CONTROL_ALLOW_HEADERS, req_headers);
     } else {
-        res.headers_mut().insert(
-            header::ACCESS_CONTROL_ALLOW_HEADERS,
-            HeaderValue::from_static("content-type, x-rustclaw-key"),
-        );
+        let allowed = std::iter::once("content-type")
+            .chain(std::iter::once(AUTH_KEY_HEADER))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if let Ok(value) = HeaderValue::from_str(&allowed) {
+            res.headers_mut()
+                .insert(header::ACCESS_CONTROL_ALLOW_HEADERS, value);
+        }
     }
     res.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
@@ -813,7 +818,7 @@ fn build_outgoing_headers(
         if hop_by_hop_request(k.as_str()) {
             continue;
         }
-        if session_user_key.is_some() && k.as_str().eq_ignore_ascii_case("x-rustclaw-key") {
+        if session_user_key.is_some() && k.as_str().eq_ignore_ascii_case(AUTH_KEY_HEADER) {
             continue;
         }
         if k.as_str().eq_ignore_ascii_case("x-forwarded-for") && forward_x {
@@ -833,7 +838,7 @@ fn build_outgoing_headers(
 
     if let Some(key) = session_user_key {
         if let Ok(v) = HeaderValue::from_str(key) {
-            if let Ok(name) = HeaderName::from_bytes(b"x-rustclaw-key") {
+            if let Ok(name) = HeaderName::from_bytes(AUTH_KEY_HEADER.as_bytes()) {
                 out.insert(name, v);
             }
         }

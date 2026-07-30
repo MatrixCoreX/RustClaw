@@ -14,7 +14,7 @@ use crate::{SkillSdkError, SkillSdkResult};
 
 pub const LEGACY_SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 2;
-pub const RUSTCLAW_JSONL_PROTOCOL: &str = "rustclaw-jsonl-v1";
+pub const AGENT_JSONL_PROTOCOL: &str = "agent-jsonl-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -396,7 +396,7 @@ impl PackageManifest {
                 "description and license are required",
             ));
         }
-        if self.package.protocol != RUSTCLAW_JSONL_PROTOCOL {
+        if self.package.protocol != AGENT_JSONL_PROTOCOL {
             return Err(SkillSdkError::new(
                 "manifest_protocol_unsupported",
                 format!("protocol={}", self.package.protocol),

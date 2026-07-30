@@ -48,16 +48,16 @@ fn capture_submit_headers(options: TaskSubmissionOptions) -> String {
 #[test]
 fn task_submission_headers_keep_yolo_explicit() {
     let safe = capture_submit_headers(TaskSubmissionOptions::default()).to_ascii_lowercase();
-    assert!(safe.contains("x-rustclaw-client: clawcli"));
-    assert!(!safe.contains("x-rustclaw-execution-mode:"));
+    assert!(safe.contains("x-agent-client: clawcli"));
+    assert!(!safe.contains("x-agent-execution-mode:"));
 
     let yolo = capture_submit_headers(TaskSubmissionOptions {
         yolo: true,
         permission_mode: None,
     })
     .to_ascii_lowercase();
-    assert!(yolo.contains("x-rustclaw-client: clawcli"));
-    assert!(yolo.contains("x-rustclaw-execution-mode: yolo"));
+    assert!(yolo.contains("x-agent-client: clawcli"));
+    assert!(yolo.contains("x-agent-execution-mode: yolo"));
 
     for mode in [
         crate::chat_session::PermissionMode::Safe,
@@ -68,7 +68,7 @@ fn task_submission_headers_keep_yolo_explicit() {
             permission_mode: Some(mode),
         })
         .to_ascii_lowercase();
-        assert!(captured.contains(&format!("x-rustclaw-execution-mode: {}", mode.as_token())));
+        assert!(captured.contains(&format!("x-agent-execution-mode: {}", mode.as_token())));
     }
 }
 

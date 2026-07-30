@@ -16,10 +16,10 @@ edition = "2024"
 EOF
 printf '2.0.1\n' > "$TMP_ROOT/release/VERSION"
 
-[[ "$(rustclaw_version_from_root "$TMP_ROOT/source")" == "1.2.3" ]]
-[[ "$(rustclaw_version_from_root "$TMP_ROOT/release")" == "2.0.1" ]]
-[[ "$(RUSTCLAW_VERSION=3.4.5 rustclaw_version_from_root "$TMP_ROOT/release")" == "3.4.5" ]]
-[[ "$(RUSTCLAW_VERSION='invalid value' rustclaw_version_from_root "$TMP_ROOT/unknown")" == "unknown" ]]
-[[ "$(rustclaw_version_from_root "$TMP_ROOT/unknown")" == "unknown" ]]
+[[ "$(app_version_from_root "$TMP_ROOT/source")" == "1.2.3" ]]
+[[ "$(app_version_from_root "$TMP_ROOT/release")" == "2.0.1" ]]
+[[ "$(APP_VERSION=3.4.5 app_version_from_root "$TMP_ROOT/release")" == "3.4.5" ]]
+[[ "$(APP_VERSION='invalid value' app_version_from_root "$TMP_ROOT/unknown")" == "unknown" ]]
+[[ "$(app_version_from_root "$TMP_ROOT/unknown")" == "unknown" ]]
 
 echo "VERSION_INFO_TESTS ok"

@@ -58,7 +58,7 @@ fn fetch_task_llm_trace(base_url: &str, key: &str, task_id: &str) -> Result<Valu
     let url = task_llm_trace_url(base_url, task_id)?;
     let resp = client::make_client()?
         .get(url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .send()
         .context("llm_trace_request_failed")?;
     let status = resp.status();

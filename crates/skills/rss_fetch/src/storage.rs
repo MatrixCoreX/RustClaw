@@ -181,18 +181,22 @@ fn load_state_from_connection(db: &Connection) -> Result<Option<RssMachineState>
     let Some((payload, persisted_digest)) = row else {
         return Ok(None);
     };
-    let state = serde_json::from_str::<RssMachineState>(&payload)
-        .map_err(|_| "storage_state_decode_failed".to_string())?;
-    if state_digest(&state)? != persisted_digest {
+    // Verify the bytes that were actually persisted. Re-serializing the
+    // decoded state is not an integrity check: a newer binary may populate a
+    // newly added `#[serde(default)]` field and produce different JSON even
+    // though the stored payload is intact and remains schema-compatible.
+    if payload_digest(payload.as_bytes()) != persisted_digest {
         return Err("storage_state_digest_mismatch".to_string());
     }
+    let state = serde_json::from_str::<RssMachineState>(&payload)
+        .map_err(|_| "storage_state_decode_failed".to_string())?;
     Ok(Some(state))
 }
 
 fn write_state_to_connection(db: &Connection, state: &RssMachineState) -> Result<(), String> {
     let payload =
         serde_json::to_string(state).map_err(|_| "storage_state_encode_failed".to_string())?;
-    let digest = state_digest(state)?;
+    let digest = payload_digest(payload.as_bytes());
     db.execute(
         "INSERT INTO rss_machine_state (id, payload_json, payload_sha256)
          VALUES (?1, ?2, ?3)
@@ -221,7 +225,11 @@ fn verify_state_in_connection(db: &Connection, expected: &RssMachineState) -> Re
 fn state_digest(state: &RssMachineState) -> Result<String, String> {
     let payload =
         serde_json::to_vec(state).map_err(|_| "storage_state_encode_failed".to_string())?;
-    Ok(format!("{:x}", Sha256::digest(payload)))
+    Ok(payload_digest(&payload))
+}
+
+fn payload_digest(payload: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(payload))
 }
 
 fn integrity_check(db: &Connection) -> Result<(), String> {

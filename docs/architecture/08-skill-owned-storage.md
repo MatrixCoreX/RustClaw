@@ -30,7 +30,7 @@ flowchart TD
     I -->|crypto| E
     I -->|kb| F
     I -->|rss_fetch| N
-    J[rustclaw.db<br/>tasks, auth, schedules, runtime memory] --> K[Agent runtime]
+    J[agent-runtime.db<br/>tasks, auth, schedules, runtime memory] --> K[Agent runtime]
     F --> L[KB recall adapter]
     L --> K
     E --> M[Credential repository]

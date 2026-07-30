@@ -159,8 +159,8 @@ fn memory_fact_card_rejects_plain_locator_alias_mapping() {
     let fact = MemoryFactUpsert::from_long_term_summary(
         "project_facts",
         "config_alias",
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
-        "那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+        "那个配置文件 maps to /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
         0.95,
         "long_term_summary:301",
         &source_ids,

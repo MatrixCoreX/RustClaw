@@ -24,7 +24,7 @@ fn summarize_structured_treats_root_token_as_document_root() {
 
 fn temp_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "rustclaw-{label}-{}-{}",
+        "agent-runtime-{label}-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

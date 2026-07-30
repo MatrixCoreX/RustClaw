@@ -36,7 +36,7 @@ telegram_text = telegram_cfg_path.read_text(encoding="utf-8") if telegram_cfg_pa
 telegram_cfg = tomllib.loads(telegram_text) if telegram_text else {}
 changed = False
 telegram_changed = False
-force = str(os.environ.get("RUSTCLAW_SETUP_FORCE", "1")).strip().lower() not in ("0", "false", "no")
+force = str(os.environ.get("APP_SETUP_FORCE", "1")).strip().lower() not in ("0", "false", "no")
 
 try:
     tty_in = open("/dev/tty", "r", encoding="utf-8", errors="ignore")
@@ -287,24 +287,7 @@ if [[ -n "${SKILLS_LIST:-}" ]]; then
 fi
 
 if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
-  echo "Checking WhatsApp Web bridge dependencies..." # zh: 检查 WhatsApp Web bridge 依赖...
-  if ! command -v node >/dev/null 2>&1; then
-    echo "node not found. Please install Node.js 18+." # zh: 未找到 node，请先安装 Node.js 18+
-    exit 1
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "npm not found. Please install npm." # zh: 未找到 npm，请先安装 npm
-    exit 1
-  fi
-  BRIDGE_DIR="$SCRIPT_DIR/services/wa-web-bridge"
-  if [[ ! -f "$BRIDGE_DIR/package.json" ]]; then
-    echo "wa-web-bridge package.json not found: $BRIDGE_DIR/package.json" # zh: 未找到 wa-web-bridge 的 package.json
-    exit 1
-  fi
-  if [[ ! -d "$BRIDGE_DIR/node_modules" ]]; then
-    echo "Installing wa-web-bridge npm dependencies..." # zh: 安装 wa-web-bridge npm 依赖...
-    npm --prefix "$BRIDGE_DIR" install
-  fi
+  bash "$SCRIPT_DIR/scripts/whatsapp_web_bridge_deps.sh" --ensure
 fi
 
 echo "Done." # zh: 完成。

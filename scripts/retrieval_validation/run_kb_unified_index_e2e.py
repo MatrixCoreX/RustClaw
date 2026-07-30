@@ -111,7 +111,7 @@ def write_fixture_docs(workspace: Path, namespace: str) -> list[Path]:
             f"""
             # Deployment Guide
 
-            RustClaw deployment steps for validation.
+Agent runtime deployment steps for validation.
 
             1. Run `cargo check -p clawd`.
             2. Start services after config validation.

@@ -1,20 +1,20 @@
-name: rustclaw
+name: agent-system
 
 services:
-  rustclaw:
+  agent-system:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: rustclaw
+    container_name: agent-system
     environment:
       RUST_LOG: warn
-      RUSTCLAW_PROFILE: release
+      APP_PROFILE: release
     ports:
       - "8788:8788"
     restart: unless-stopped
     volumes:
-      - rustclaw-data:/app/data
-      - rustclaw-logs:/app/logs
+      - agent-system-data:/app/data
+      - agent-system-logs:/app/logs
       - ./audio:/app/audio
       - ./document:/app/document
       - ./image:/app/image
@@ -23,7 +23,7 @@ services:
       - ./third_party:/app/third_party
 
 volumes:
-  rustclaw-data:
-    name: rustclaw_rustclaw-data
-  rustclaw-logs:
-    name: rustclaw_rustclaw-logs
+  agent-system-data:
+    name: agent-system-data
+  agent-system-logs:
+    name: agent-system-logs

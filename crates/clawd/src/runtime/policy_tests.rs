@@ -33,6 +33,7 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
         assert!(!policy.is_allowed(denied, None), "{denied}");
     }
     assert!(policy.is_allowed("capability:module.preview_install", None));
+    assert!(policy.is_allowed("capability:media_download.capabilities", None));
     assert!(policy.is_any_allowed(
         &["skill:install_module", "capability:module.preview_install"],
         None
@@ -114,6 +115,25 @@ fn full_profile_remains_an_explicit_operator_opt_in() {
     let policy = ToolsPolicy::from_config(&config).expect("full tools policy");
     assert!(policy.is_allowed("skill:x", None));
     assert!(policy.is_allowed("skill:service_control", None));
+}
+
+#[test]
+fn access_profile_membership_comes_from_host_configuration() {
+    let mut config = ToolsConfig::default();
+    config.access_profile = "reviewer".to_string();
+    config.profiles.insert(
+        "reviewer".to_string(),
+        vec!["capability:filesystem.read_file".to_string()],
+    );
+    let policy = ToolsPolicy::from_config(&config).expect("custom profile");
+    assert!(policy.is_allowed("capability:filesystem.read_file", None));
+    assert!(!policy.is_allowed("skill:run_cmd", None));
+
+    config.access_profile = "missing".to_string();
+    assert!(ToolsPolicy::from_config(&config)
+        .err()
+        .expect("unknown profile must fail")
+        .contains("invalid_tools_access_profile"));
 }
 
 #[test]
@@ -228,7 +248,7 @@ fn sandbox_mode_and_approval_policy_are_independent() {
 }
 
 #[test]
-fn workspace_sandbox_separates_brokered_network_from_subprocess_access() {
+fn workspace_sandbox_allows_host_granted_network_but_blocks_external_effects() {
     let policy = ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy");
     assert_eq!(
         policy.sandbox_denial(SandboxRequirements {
@@ -243,7 +263,25 @@ fn workspace_sandbox_separates_brokered_network_from_subprocess_access() {
             subprocess: true,
             ..SandboxRequirements::default()
         }),
+        None
+    );
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            network_access: true,
+            external_publish: true,
+            subprocess: true,
+            ..SandboxRequirements::default()
+        }),
         Some("sandbox_workspace_external_denied")
+    );
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            network_access: true,
+            credential_access: true,
+            subprocess: true,
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_workspace_credential_denied")
     );
     assert_eq!(
         policy.sandbox_denial(SandboxRequirements {

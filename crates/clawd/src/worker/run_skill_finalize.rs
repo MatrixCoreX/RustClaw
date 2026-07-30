@@ -259,6 +259,7 @@ fn record_run_skill_task_observation(
     notify: Option<bool>,
     external_skill_admission: Option<&Value>,
 ) {
+    let execution_binding = extra.and_then(|value| value.get("execution_binding"));
     let mut payload = json!({
         "source": "run_skill",
         "legacy_source": "direct_run_skill",
@@ -324,6 +325,7 @@ fn record_run_skill_task_observation(
             "capability_contract": capability_contract,
             "capability_ref": capability_contract.get("capability_ref").cloned(),
             "external_skill_admission": external_skill_admission,
+            "execution_binding": execution_binding,
             "observed_evidence": observed_evidence,
         }));
     }

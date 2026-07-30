@@ -147,10 +147,10 @@ pub(super) async fn execute_command_handler(
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env(
-            "RUSTCLAW_HOOK_SCHEMA_VERSION",
+            "AGENT_HOOK_SCHEMA_VERSION",
             super::HOOK_EVENT_SCHEMA_VERSION.to_string(),
         )
-        .env("RUSTCLAW_HOOK_ID", &handler.common.id)
+        .env("AGENT_HOOK_ID", &handler.common.id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

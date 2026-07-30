@@ -102,7 +102,7 @@ fn temp_support_workspace(name: &str) -> std::path::PathBuf {
         .expect("system clock")
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-support-{name}-{}-{stamp}",
+        "agent-runtime-support-{name}-{}-{stamp}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp support workspace");
@@ -117,6 +117,7 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     let _ = std::fs::remove_dir_all(root);
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));
@@ -705,7 +706,7 @@ fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
             "explicit_locator_hints": [
                 {"kind": "path", "hint": "docs/README.md"}
             ],
-            "resolved_workspace_child": "/tmp/rustclaw/docs/README.md",
+            "resolved_workspace_child": "/tmp/agent-runtime/docs/README.md",
             "has_multiple_local_paths": false
         }
     });
@@ -726,12 +727,12 @@ fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
         .get("current_request_locator_evidence")
         .expect("locator evidence");
     assert!(evidence.contains("docs/README.md"));
-    assert!(evidence.contains("/tmp/rustclaw/docs/README.md"));
+    assert!(evidence.contains("/tmp/agent-runtime/docs/README.md"));
     assert_eq!(
         loop_state
             .output_vars
             .get("current_request_resolved_workspace_child_targets"),
-        Some(&"[\"/tmp/rustclaw/docs/README.md\"]".to_string())
+        Some(&"[\"/tmp/agent-runtime/docs/README.md\"]".to_string())
     );
 }
 
@@ -747,7 +748,7 @@ fn seed_loop_state_ignores_missing_referent_when_current_request_locator_is_conc
             "explicit_locator_hints": [
                 {"kind": "filename", "hint": "README.md"}
             ],
-            "resolved_workspace_root": "/tmp/rustclaw"
+            "resolved_workspace_root": "/tmp/agent-runtime"
         },
         "missing_referent": {
             "owner_layer": "agent_loop_boundary",
@@ -786,7 +787,7 @@ fn seed_loop_state_extracts_active_plan_file_targets_boundary_observation() {
         "active_plan_files": [{
             "source": "workspace_plan_directory",
             "logical_path": "plan/active.md",
-            "workspace_path": "/tmp/rustclaw/plan/active.md",
+            "workspace_path": "/tmp/agent-runtime/plan/active.md",
             "bytes": 128
         }]
     });
@@ -804,7 +805,7 @@ fn seed_loop_state_extracts_active_plan_file_targets_boundary_observation() {
 
     assert_eq!(
         loop_state.output_vars.get("active_plan_file_targets"),
-        Some(&"[\"/tmp/rustclaw/plan/active.md\"]".to_string())
+        Some(&"[\"/tmp/agent-runtime/plan/active.md\"]".to_string())
     );
 }
 
@@ -815,9 +816,9 @@ fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() 
         "schema_version": 1,
         "default_main_config_contract": {
             "source": "boundary_contract",
-            "contract": "rustclaw_main_config",
+            "contract": "host_main_config",
             "logical_path": "configs/config.toml",
-            "workspace_path": "/tmp/rustclaw/configs/config.toml",
+            "workspace_path": "/tmp/agent-runtime/configs/config.toml",
             "exists": true
         }
     });
@@ -837,7 +838,7 @@ fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() 
         .output_vars
         .get("default_main_config_contract_evidence")
         .expect("default config evidence");
-    assert!(evidence.contains("rustclaw_main_config"));
+    assert!(evidence.contains("host_main_config"));
     assert_eq!(
         loop_state
             .output_vars
@@ -848,7 +849,7 @@ fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() 
         loop_state
             .output_vars
             .get("default_main_config_contract_workspace_path"),
-        Some(&"/tmp/rustclaw/configs/config.toml".to_string())
+        Some(&"/tmp/agent-runtime/configs/config.toml".to_string())
     );
 }
 
@@ -1064,7 +1065,7 @@ fn seed_loop_state_ignores_missing_referent_when_auto_locator_boundary_ready() {
         },
         "auto_locator": {
             "resolved_direct": true,
-            "path": "/workspace/rustclaw.service",
+            "path": "/workspace/agent-runtime.service",
             "fuzzy_candidates": []
         },
         "missing_referent": {

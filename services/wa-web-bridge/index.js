@@ -15,27 +15,49 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const log = pino({ level: process.env.WA_WEB_LOG_LEVEL || "info" });
+const bridgeStartedAtMs = Date.now();
 
 function loadConfig() {
-  const workspaceRoot = process.cwd();
-  const cfgPath = path.join(workspaceRoot, "configs", "config.toml");
+  const workspaceRoot = path.resolve(process.env.APP_WORKSPACE_ROOT || path.join(__dirname, "..", ".."));
+  const cfgPath = path.resolve(process.env.APP_CONFIG_PATH || path.join(workspaceRoot, "configs", "config.toml"));
   const raw = fs.readFileSync(cfgPath, "utf8");
   const baseCfg = TOML.parse(raw);
-  const waSplitPath = path.join(workspaceRoot, "configs", "channels", "whatsapp.toml");
+  const channelConfigDir = path.resolve(
+    process.env.APP_CHANNEL_CONFIG_DIR || path.join(workspaceRoot, "configs", "channels")
+  );
+  const waSplitPath = path.join(channelConfigDir, "whatsapp-cloud.toml");
   let splitCfg = {};
   if (fs.existsSync(waSplitPath)) {
     splitCfg = TOML.parse(fs.readFileSync(waSplitPath, "utf8"));
   }
-  const waWebSplitPath = path.join(workspaceRoot, "configs", "channels", "whatsapp-web.toml");
+  const waWebSplitPath = path.join(channelConfigDir, "whatsapp-web.toml");
   let waWebCfg = {};
   if (fs.existsSync(waWebSplitPath)) {
     waWebCfg = TOML.parse(fs.readFileSync(waWebSplitPath, "utf8"));
   }
-  const cfg = { ...baseCfg, ...splitCfg, ...waWebCfg };
-  const serverListen = String(cfg?.server?.listen || "127.0.0.1:8088");
-  const clawdBaseUrl = `http://${serverListen}`;
+  const webdSplitPath = path.join(channelConfigDir, "webd.toml");
+  let webdCfg = {};
+  if (fs.existsSync(webdSplitPath)) {
+    webdCfg = TOML.parse(fs.readFileSync(webdSplitPath, "utf8"));
+  }
+  const cfg = { ...baseCfg, ...webdCfg, ...splitCfg, ...waWebCfg };
+  const clawdBaseUrl = normalizeInternalApiBaseUrl(
+    process.env.APP_INTERNAL_API_BASE_URL || cfg?.webd?.upstream
+  );
   const ww = cfg?.whatsapp_web || {};
   const waCloud = cfg?.whatsapp || {};
+  const language = String(ww.language || "en-US").trim() || "en-US";
+  const configuredI18nPath = String(ww.i18n_path || "").trim();
+  const languageI18nPath = path.join(workspaceRoot, "configs", "i18n", `whatsapp-webd.${language}.toml`);
+  const i18nPath = configuredI18nPath
+    ? path.resolve(workspaceRoot, configuredI18nPath)
+    : languageI18nPath;
+  let i18n = {};
+  if (fs.existsSync(languageI18nPath)) {
+    i18n = TOML.parse(fs.readFileSync(languageI18nPath, "utf8"))?.dict || {};
+  } else if (fs.existsSync(i18nPath)) {
+    i18n = TOML.parse(fs.readFileSync(i18nPath, "utf8"))?.dict || {};
+  }
 
   return {
     workspaceRoot,
@@ -46,15 +68,54 @@ function loadConfig() {
     quickResultWaitSeconds: Number(ww.quick_result_wait_seconds || 3),
     allowlist: new Set((ww.allowlist || []).map((v) => String(v).trim()).filter(Boolean)),
     admins: new Set((ww.admins || []).map((v) => String(v).trim()).filter(Boolean)),
+    i18n,
     imageInboxDir: path.join(workspaceRoot, String(waCloud.image_inbox_dir || "image/upload")),
     audioInboxDir: path.join(workspaceRoot, String(waCloud.audio_inbox_dir || "audio/upload")),
   };
+}
+
+function parseListenAddress(raw, defaultPort) {
+  const value = String(raw || "").trim();
+  const ipv6 = value.match(/^\[([^\]]+)\](?::([0-9]+))?$/);
+  if (ipv6) {
+    return { host: ipv6[1], port: Number(ipv6[2] || defaultPort) };
+  }
+  const separator = value.lastIndexOf(":");
+  if (separator > 0) {
+    return { host: value.slice(0, separator), port: Number(value.slice(separator + 1) || defaultPort) };
+  }
+  return { host: value || "127.0.0.1", port: Number(defaultPort) };
+}
+
+function normalizeInternalApiBaseUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) throw new Error("internal API base URL is missing");
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("internal API base URL must use http or https");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("internal API base URL must not contain credentials");
+  }
+  if ((parsed.pathname && parsed.pathname !== "/") || parsed.search || parsed.hash) {
+    throw new Error("internal API base URL must not contain a path, query, or fragment");
+  }
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host || "").trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
 }
 
 const cfg = loadConfig();
 let sock = null;
 const inboundDedup = new Map();
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;
+const outboundMessageIds = new Map();
+const pendingOutboundMessages = new Map();
+const OUTBOUND_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+const PENDING_OUTBOUND_WINDOW_MS = 30 * 1000;
 const waLoginState = {
   connected: false,
   qrRaw: null,
@@ -62,6 +123,15 @@ const waLoginState = {
   lastUpdateTs: Date.now(),
   lastError: null,
 };
+const expectingKeyReply = new Set();
+
+function tr(key, fallback, vars = {}) {
+  let text = String(cfg.i18n?.[key] || fallback);
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.split(`{${name}}`).join(String(value));
+  }
+  return text;
+}
 
 function cleanupDedup(now = Date.now()) {
   for (const [k, ts] of inboundDedup.entries()) {
@@ -110,6 +180,130 @@ function normalizeJid(jid) {
   return String(jid).trim();
 }
 
+function canonicalUserJid(jid) {
+  return normalizeJid(jid).replace(/^([^:@]+):\d+@/, "$1@");
+}
+
+function isSameAccountJid(remoteJid, ownId, ownLid) {
+  const remote = canonicalUserJid(remoteJid);
+  if (!remote) return false;
+  return [ownId, ownLid]
+    .map(canonicalUserJid)
+    .filter(Boolean)
+    .some((candidate) => candidate === remote);
+}
+
+function messageTimestampSeconds(msg) {
+  const value = msg?.messageTimestamp;
+  if (typeof value === "number") return Number.isFinite(value) ? Math.floor(value) : null;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+  }
+  if (value && typeof value.toNumber === "function") {
+    const parsed = value.toNumber();
+    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+  }
+  return null;
+}
+
+function shouldProcessUpsertMessage(msg, type, ownId, ownLid, startedAtMs, nowMs = Date.now()) {
+  if (type === "notify") return true;
+  if (type !== "append" || !msg?.key?.fromMe) return false;
+  if (!isSameAccountJid(msg.key.remoteJid, ownId, ownLid)) return false;
+  const timestampSeconds = messageTimestampSeconds(msg);
+  if (timestampSeconds === null) return false;
+  const earliestSeconds = Math.floor(startedAtMs / 1000) - 10;
+  const latestSeconds = Math.floor(nowMs / 1000) + 300;
+  return timestampSeconds >= earliestSeconds && timestampSeconds <= latestSeconds;
+}
+
+function outboundContentKey(jid, content) {
+  const target = canonicalUserJid(jid);
+  if (typeof content?.text === "string") return `${target}:text:${content.text}`;
+  if (content?.image) return `${target}:image`;
+  if (content?.audio) return `${target}:audio`;
+  if (content?.document) return `${target}:document`;
+  return "";
+}
+
+function inboundContentKey(msg) {
+  const target = canonicalUserJid(msg?.key?.remoteJid);
+  const message = msg?.message || {};
+  const text = extractTextContent(message);
+  if (text) return `${target}:text:${text}`;
+  if (message.imageMessage) return `${target}:image`;
+  if (message.audioMessage) return `${target}:audio`;
+  if (message.documentMessage) return `${target}:document`;
+  return "";
+}
+
+function cleanupOutboundTracking(now = Date.now()) {
+  for (const [id, ts] of outboundMessageIds.entries()) {
+    if (now - ts > OUTBOUND_DEDUP_WINDOW_MS) outboundMessageIds.delete(id);
+  }
+  for (const [key, timestamps] of pendingOutboundMessages.entries()) {
+    const fresh = timestamps.filter((ts) => now - ts <= PENDING_OUTBOUND_WINDOW_MS);
+    if (fresh.length > 0) pendingOutboundMessages.set(key, fresh);
+    else pendingOutboundMessages.delete(key);
+  }
+}
+
+function rememberPendingOutbound(key, now = Date.now()) {
+  if (!key) return;
+  cleanupOutboundTracking(now);
+  const timestamps = pendingOutboundMessages.get(key) || [];
+  timestamps.push(now);
+  pendingOutboundMessages.set(key, timestamps);
+}
+
+function consumePendingOutbound(key, now = Date.now()) {
+  if (!key) return false;
+  cleanupOutboundTracking(now);
+  const timestamps = pendingOutboundMessages.get(key);
+  if (!timestamps?.length) return false;
+  timestamps.shift();
+  if (timestamps.length === 0) pendingOutboundMessages.delete(key);
+  return true;
+}
+
+function isBridgeOutboundMessage(msg) {
+  const now = Date.now();
+  cleanupOutboundTracking(now);
+  const id = String(msg?.key?.id || "").trim();
+  if (id && outboundMessageIds.has(id)) {
+    outboundMessageIds.delete(id);
+    consumePendingOutbound(inboundContentKey(msg), now);
+    return true;
+  }
+  return consumePendingOutbound(inboundContentKey(msg), now);
+}
+
+function isSelfChatMessage(msg) {
+  if (!msg?.key?.fromMe || !sock?.user?.id) return false;
+  return isSameAccountJid(msg.key.remoteJid, sock.user.id, sock.user.lid);
+}
+
+async function sendWaMessage(jid, content) {
+  if (!sock) throw new Error("wa socket not ready");
+  const pendingKey = outboundContentKey(jid, content);
+  rememberPendingOutbound(pendingKey);
+  try {
+    const sent = await sock.sendMessage(jid, content);
+    const id = String(sent?.key?.id || "").trim();
+    if (id) outboundMessageIds.set(id, Date.now());
+    return sent;
+  } catch (error) {
+    consumePendingOutbound(pendingKey);
+    throw error;
+  }
+}
+
+function isGroupJid(jid) {
+  return normalizeJid(jid).endsWith("@g.us");
+}
+
 function extractTextContent(message) {
   if (!message) return "";
   return (
@@ -119,6 +313,53 @@ function extractTextContent(message) {
     message.videoMessage?.caption ||
     ""
   ).trim();
+}
+
+function extractBindKeyCandidate(text, expectReply) {
+  const trimmed = String(text || "").trim();
+  if (trimmed.toLowerCase().startsWith("/key")) {
+    const candidate = trimmed.slice(4).trim();
+    return candidate || null;
+  }
+  if (expectReply && trimmed && !trimmed.startsWith("/")) return trimmed;
+  return null;
+}
+
+async function resolveIdentity(externalUserId, externalChatId) {
+  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/resolve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      channel: "whatsapp",
+      external_user_id: externalUserId,
+      external_chat_id: externalChatId,
+    }),
+  });
+  const body = await resp.json();
+  if (!resp.ok || !body.ok) {
+    throw new Error(`resolve channel identity failed: ${body.error || resp.status}`);
+  }
+  return body.data?.identity || null;
+}
+
+async function bindIdentity(externalUserId, externalChatId, userKey) {
+  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/bind`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      channel: "whatsapp",
+      external_user_id: externalUserId,
+      external_chat_id: externalChatId,
+      user_key: String(userKey || "").trim(),
+    }),
+  });
+  const body = await resp.json();
+  if (resp.status === 401) return null;
+  if (!resp.ok) {
+    throw new Error(`bind channel identity failed: ${body.error || resp.status}`);
+  }
+  if (!body.ok || !body.data?.user_key) return null;
+  return body.data;
 }
 
 function buildRelPath(absPath) {
@@ -137,23 +378,31 @@ function resetWaLoginState() {
   waLoginState.lastError = null;
 }
 
-async function submitTask(jid, kind, payload) {
-  const userId = stableUserId(jid);
-  const body = {
+function buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, identity) {
+  const userId = Number(identity?.user_id || stableUserId(externalUserId));
+  const userKey = String(identity?.user_key || "").trim();
+  if (!userKey) throw new Error("bound user key is required");
+  return {
     user_id: userId,
     chat_id: userId,
+    user_key: userKey,
     channel: "whatsapp",
-    external_user_id: jid,
-    external_chat_id: jid,
+    external_user_id: externalUserId,
+    external_chat_id: externalChatId,
     kind,
     payload: {
       adapter: "whatsapp_web",
       ...(payload || {}),
     },
   };
+}
+
+async function submitTask(externalUserId, externalChatId, kind, payload, identity) {
+  const body = buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, identity);
+  const userKey = body.user_key;
   const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-agent-key": userKey },
     body: JSON.stringify(body),
   });
   const text = await resp.text();
@@ -167,8 +416,10 @@ async function submitTask(jid, kind, payload) {
   return String(parsed.data.task_id);
 }
 
-async function queryTask(taskId) {
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks/${taskId}`);
+async function queryTask(taskId, identity) {
+  const userKey = String(identity?.user_key || "").trim();
+  const headers = userKey ? { "x-agent-key": userKey } : {};
+  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks/${taskId}`, { headers });
   const text = await resp.text();
   if (!resp.ok) {
     throw new Error(`query task http ${resp.status}: ${text}`);
@@ -192,11 +443,11 @@ function taskSuccessMessages(task) {
   return [String(task.result_json?.text || "done")];
 }
 
-async function pollTaskResult(taskId, waitSeconds) {
+async function pollTaskResult(taskId, waitSeconds, identity) {
   const pollMs = 500;
   const rounds = Math.max(1, Math.floor((waitSeconds * 1000) / pollMs));
   for (let i = 0; i < rounds; i += 1) {
-    const task = await queryTask(taskId);
+    const task = await queryTask(taskId, identity);
     if (task.status === "queued" || task.status === "running") {
       await new Promise((r) => setTimeout(r, pollMs));
       continue;
@@ -242,33 +493,40 @@ async function sendAnswer(jid, answer) {
   const voicePaths = extractTokenPaths(answer, "VOICE_FILE:");
 
   if (text) {
-    await sock.sendMessage(jid, { text });
+    await sendWaMessage(jid, { text });
   }
   for (const p of imagePaths) {
-    await sock.sendMessage(jid, { image: { url: p } });
+    await sendWaMessage(jid, { image: { url: p } });
   }
   for (const p of filePaths) {
-    await sock.sendMessage(jid, {
+    await sendWaMessage(jid, {
       document: { url: p },
       fileName: path.basename(p),
     });
   }
   for (const p of voicePaths) {
-    await sock.sendMessage(jid, {
+    await sendWaMessage(jid, {
       audio: { url: p },
       ptt: true,
       mimetype: "audio/ogg; codecs=opus",
     });
   }
   if (!text && imagePaths.length === 0 && filePaths.length === 0 && voicePaths.length === 0) {
-    await sock.sendMessage(jid, { text: answer });
+    await sendWaMessage(jid, { text: answer });
   }
 }
 
-async function runTaskFlow(jid, kind, payload, quickWait = cfg.quickResultWaitSeconds) {
-  const taskId = await submitTask(jid, kind, payload);
+async function runTaskFlow(
+  jid,
+  externalUserId,
+  kind,
+  payload,
+  identity,
+  quickWait = cfg.quickResultWaitSeconds
+) {
+  const taskId = await submitTask(externalUserId, jid, kind, payload, identity);
   try {
-    const out = await pollTaskResult(taskId, quickWait);
+    const out = await pollTaskResult(taskId, quickWait, identity);
     for (const answer of out) {
       await sendAnswer(jid, answer);
     }
@@ -276,17 +534,25 @@ async function runTaskFlow(jid, kind, payload, quickWait = cfg.quickResultWaitSe
     if (String(err.message || err) === "task_result_wait_timeout") {
       setTimeout(async () => {
         try {
-          const finalOut = await pollTaskResult(taskId, 600);
+          const finalOut = await pollTaskResult(taskId, 600, identity);
           for (const answer of finalOut) {
             await sendAnswer(jid, answer);
           }
         } catch (e) {
-          await sock.sendMessage(jid, { text: `处理失败: ${String(e.message || e)}` });
+          await sendWaMessage(jid, {
+            text: tr("whatsapp_web.msg.process_failed", "Processing failed: {error}", {
+              error: String(e.message || e),
+            }),
+          });
         }
       }, 200);
       return;
     }
-    await sock.sendMessage(jid, { text: `处理失败: ${String(err.message || err)}` });
+    await sendWaMessage(jid, {
+      text: tr("whatsapp_web.msg.process_failed", "Processing failed: {error}", {
+        error: String(err.message || err),
+      }),
+    });
   }
 }
 
@@ -335,58 +601,117 @@ async function saveInboundMedia(message, jid, userId) {
   return { mediaType, absPath, relPath: buildRelPath(absPath) };
 }
 
-async function handleInboundMessage(msg) {
-  if (!msg?.key || msg.key.fromMe) return;
+async function handleInboundMessage(msg, upsertType = "notify") {
+  if (!msg?.key) return;
+  if (
+    !shouldProcessUpsertMessage(
+      msg,
+      upsertType,
+      sock?.user?.id,
+      sock?.user?.lid,
+      bridgeStartedAtMs
+    )
+  ) return;
+  if (msg.key.fromMe && isBridgeOutboundMessage(msg)) return;
+  if (msg.key.fromMe && !isSelfChatMessage(msg)) return;
   if (!shouldProcessInbound(msg)) {
     log.info({ id: msg?.key?.id, jid: msg?.key?.remoteJid }, "skip duplicated inbound message");
     return;
   }
   const jid = normalizeJid(msg.key.remoteJid);
   if (!jid) return;
-  if (!isAllowed(jid)) {
-    await sock.sendMessage(jid, { text: "Unauthorized user" });
+  const externalUserId = normalizeJid(msg.key.participant || jid);
+  const bindingScope = `${externalUserId}\u0000${jid}`;
+  if (!isAllowed(externalUserId) && !isAllowed(jid)) {
+    await sendWaMessage(jid, {
+      text: tr("whatsapp_web.msg.access_denied", "This account is not allowed to use this channel."),
+    });
     return;
   }
 
   const text = extractTextContent(msg.message);
+  let identity = await resolveIdentity(externalUserId, jid);
+  if (!identity && isGroupJid(jid)) {
+    identity = await resolveIdentity(externalUserId, externalUserId);
+  }
+  if (!identity) {
+    if (isGroupJid(jid)) {
+      await sendWaMessage(jid, {
+        text: tr(
+          "whatsapp_web.msg.bind_private",
+          "For security, bind your key in a private chat with this account before using it in a group."
+        ),
+      });
+      return;
+    }
+    const candidate = extractBindKeyCandidate(text, expectingKeyReply.has(bindingScope));
+    if (candidate) {
+      identity = await bindIdentity(externalUserId, jid, candidate);
+      if (identity) {
+        expectingKeyReply.delete(bindingScope);
+        await sendWaMessage(jid, {
+          text: tr(
+            "whatsapp_web.msg.bind_success",
+            "Key bound successfully. Please send your previous message again."
+          ),
+        });
+      } else {
+        expectingKeyReply.add(bindingScope);
+        await sendWaMessage(jid, {
+          text: tr("whatsapp_web.msg.bind_invalid", "Invalid key. Please try again."),
+        });
+      }
+      return;
+    }
+    expectingKeyReply.add(bindingScope);
+    await sendWaMessage(jid, {
+      text: tr(
+        "whatsapp_web.msg.bind_help",
+        "Please send /key <your_key> first to bind this account before chatting or using features."
+      ),
+    });
+    return;
+  }
+  expectingKeyReply.delete(bindingScope);
+
   if (text.startsWith("/run")) {
     const rest = text.slice(4).trim();
     const firstSpace = rest.indexOf(" ");
     const skill = (firstSpace >= 0 ? rest.slice(0, firstSpace) : rest).trim();
     const args = (firstSpace >= 0 ? rest.slice(firstSpace + 1) : "").trim();
     if (!skill) {
-      await sock.sendMessage(jid, { text: "Usage: /run <skill_name> <args>" });
+      await sendWaMessage(jid, { text: "Usage: /run <skill_name> <args>" });
       return;
     }
-    await runTaskFlow(jid, "run_skill", { skill_name: skill, args });
+    await runTaskFlow(jid, externalUserId, "run_skill", { skill_name: skill, args }, identity);
     return;
   }
 
-  const userId = stableUserId(jid);
+  const userId = Number(identity.user_id || stableUserId(externalUserId));
   const media = await saveInboundMedia(msg.message, jid, userId);
   if (media?.mediaType === "image") {
-    await runTaskFlow(jid, "run_skill", {
+    await runTaskFlow(jid, externalUserId, "run_skill", {
       skill_name: "image_vision",
       args: {
         action: "describe",
         images: [{ path: media.relPath }],
         detail_level: "normal",
       },
-    });
+    }, identity);
     return;
   }
   if (media?.mediaType === "audio") {
-    await runTaskFlow(jid, "run_skill", {
+    await runTaskFlow(jid, externalUserId, "run_skill", {
       skill_name: "audio_transcribe",
       args: {
         audio: { path: media.relPath },
       },
-    }, 120);
+    }, identity, 120);
     return;
   }
 
   if (text) {
-    await runTaskFlow(jid, "ask", { text });
+    await runTaskFlow(jid, externalUserId, "ask", { text }, identity);
   }
 }
 
@@ -449,10 +774,26 @@ async function connectWhatsApp() {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify" || !Array.isArray(messages)) return;
+    if (!Array.isArray(messages)) return;
+    const ownMessages = messages.filter((message) => message?.key?.fromMe);
+    if (ownMessages.length > 0) {
+      const acceptedSelfMessages = ownMessages.filter((message) =>
+        shouldProcessUpsertMessage(
+          message,
+          type,
+          sock?.user?.id,
+          sock?.user?.lid,
+          bridgeStartedAtMs
+        )
+      ).length;
+      log.info(
+        { type, own_message_count: ownMessages.length, accepted_self_message_count: acceptedSelfMessages },
+        "wa-web own message upsert"
+      );
+    }
     for (const m of messages) {
       try {
-        await handleInboundMessage(m);
+        await handleInboundMessage(m, type);
       } catch (err) {
         log.error({ err: String(err?.stack || err) }, "handle inbound failed");
       }
@@ -489,7 +830,7 @@ function startHttpServer() {
       if (!sock) {
         return res.status(503).json({ ok: false, error: "wa socket not ready" });
       }
-      await sock.sendMessage(to, { text });
+      await sendWaMessage(to, { text });
       return res.json({ ok: true });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err.message || err) });
@@ -527,10 +868,12 @@ function startHttpServer() {
     }
   });
 
-  const [host, portRaw] = cfg.bridgeListen.split(":");
-  const port = Number(portRaw || 8092);
-  app.listen(port, host || "127.0.0.1", () => {
-    log.info(`wa-web bridge listening on ${host || "127.0.0.1"}:${port}`);
+  const { host, port } = parseListenAddress(cfg.bridgeListen, 8092);
+  if (!isLoopbackHost(host)) {
+    throw new Error("WhatsApp Web bridge_listen must use a loopback host");
+  }
+  app.listen(port, host, () => {
+    log.info(`wa-web bridge listening on ${host}:${port}`);
   });
 }
 
@@ -543,7 +886,28 @@ async function main() {
   await connectWhatsApp();
 }
 
-main().catch((err) => {
-  log.error({ err: String(err?.stack || err) }, "wa-web bridge fatal");
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    log.error({ err: String(err?.stack || err) }, "wa-web bridge fatal");
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  bindIdentity,
+  buildSubmitTaskBody,
+  canonicalUserJid,
+  extractBindKeyCandidate,
+  extractTextContent,
+  isGroupJid,
+  isLoopbackHost,
+  isSameAccountJid,
+  messageTimestampSeconds,
+  normalizeInternalApiBaseUrl,
+  parseListenAddress,
+  queryTask,
+  resolveIdentity,
+  stableUserId,
+  submitTask,
+  shouldProcessUpsertMessage,
+};

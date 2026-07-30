@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-system:schema:agent-jsonl-v1-response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "status", "text", "error_text"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["ok", "error"] },
+    "text": { "type": "string" },
+    "error_text": { "type": ["string", "null"] },
+    "buttons": {},
+    "error_kind": { "type": ["string", "null"] },
+    "platform": { "type": ["string", "null"] },
+    "exit_code": { "type": ["integer", "null"] },
+    "validation": {},
+    "extra": { "type": ["object", "null"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "error" } } },
+      "then": {
+        "properties": {
+          "error_text": { "type": "string", "minLength": 1 },
+          "extra": {
+            "type": "object",
+            "required": ["error_code", "message_key"],
+            "properties": {
+              "error_code": { "type": "string", "minLength": 1 },
+              "message_key": { "type": "string", "minLength": 1 },
+              "retryable": { "type": "boolean" },
+              "continuation": { "type": "object" },
+              "evidence": { "type": "array" },
+              "artifacts": { "type": "array" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

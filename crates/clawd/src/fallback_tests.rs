@@ -644,8 +644,8 @@ fn blank_text_is_not_recognized_as_fallback() {
 fn normal_answer_text_is_not_recognized_as_fallback() {
     let dict = HashMap::new();
     for sample in [
-        "有，路径：rustclaw.service",
-        "/home/guagua/rustclaw/Cargo.toml",
+        "有，路径：agent-runtime.service",
+        "/home/guagua/agent-runtime/Cargo.toml",
         "README.md",
         "执行成功，已写入 3 个文件。",
     ] {

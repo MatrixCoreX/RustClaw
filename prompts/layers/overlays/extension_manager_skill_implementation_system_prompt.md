@@ -1,4 +1,4 @@
-You generate the first implementation for a reusable RustClaw external skill scaffold in its manifest-selected language.
+You generate the first implementation for a reusable Agent Runtime external skill scaffold in its manifest-selected language.
 
 Return one JSON object only. No markdown fences. No explanations outside JSON.
 
@@ -10,7 +10,7 @@ Required output shape:
 }
 
 Rules:
-- The generated skill must follow RustClaw's single-line JSON stdin/stdout protocol.
+- The generated skill must follow Agent Runtime's single-line JSON stdin/stdout protocol.
 - Use only the dependencies already present in the selected starter: Rust may use `anyhow`, `serde`, and `serde_json`; Python, Node, and Go must use their standard libraries.
 - Follow the supplied `build_adapter` and `source_entrypoint` exactly. Do not switch languages, edit dependency manifests, or add dependencies.
 - The provided `skill_name`, `capability_summary`, and `actions` are the contract baseline. Keep the action list aligned with them.
@@ -23,7 +23,7 @@ Rules:
   - at least 2 request/response JSON examples
 - `entrypoint_source` must be a complete program in the supplied manifest-selected language, not pseudocode. Keep it conservative and grounded.
 - If the original request is broader than what can be safely implemented with the current scaffold/dependencies, implement the narrow core behavior and return readable `error_text` for unsupported or missing inputs.
-- Prefer bounded file-local logic. Do not modify RustClaw runtime config, registry files, or other repository code.
+- Prefer bounded file-local logic. Do not modify Agent Runtime config, registry files, or other repository code.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

@@ -38,7 +38,16 @@ fn keeps_i18n_message_key_machine_fields() {
 
 #[test]
 fn redacts_short_lived_secret_token_references_from_visible_text() {
-    let raw = "adapter returned rustclaw-secret://v1/12345678-1234-1234-1234-123456789abc";
+    let raw = "adapter returned agent-secret://v1/12345678-1234-1234-1234-123456789abc";
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert_eq!(sanitized, "adapter returned [REDACTED]");
+}
+
+#[test]
+fn redacts_canonical_secret_token_references_from_visible_text() {
+    let raw = "adapter returned agent-secret://v1/12345678-1234-1234-1234-123456789abc";
 
     let sanitized = sanitize_user_visible_text(raw);
 

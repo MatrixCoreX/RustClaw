@@ -1,6 +1,6 @@
 # 代码索引合同
 
-`code_index` 是 planner 面向代码仓库智能检索的边界。它在 `.rustclaw/index/repository-v1.json` 维护增量机器索引，并返回结构化定义、引用、测试、变更影响和有界源码区间。
+`code_index` 是 planner 面向代码仓库智能检索的边界。它在 `.agent-runtime/index/repository-v1.json` 维护增量机器索引，并返回结构化定义、引用、测试、变更影响和有界源码区间。
 
 ## 所有权
 

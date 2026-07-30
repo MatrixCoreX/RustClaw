@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+SHELL_COMPAT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SHELL_COMPAT_DIR/product_identity.sh"
+
 resolve_path_python() {
   local target="$1"
   python3 - "$target" <<'PY'
@@ -82,8 +86,8 @@ configure_macos_deployment_target() {
     # An explicit standard variable is authoritative. The Rust toolchain used
     # by that build must provide compatible standard libraries.
     target="$MACOSX_DEPLOYMENT_TARGET"
-  elif [[ -n "${RUSTCLAW_MACOS_DEPLOYMENT_TARGET:-}" ]]; then
-    target="$RUSTCLAW_MACOS_DEPLOYMENT_TARGET"
+  elif [[ -n "${APP_MACOS_DEPLOYMENT_TARGET:-}" ]]; then
+    target="$APP_MACOS_DEPLOYMENT_TARGET"
   else
     if [[ -z "$host_version" ]]; then
       host_version="$(sw_vers -productVersion 2>/dev/null || true)"
@@ -140,7 +144,7 @@ configure_platform_command_path() {
 resolve_python3_with_tomllib() {
   local candidate resolved seen=""
   for candidate in \
-    "${RUSTCLAW_PYTHON_BIN:-}" \
+    "${APP_PYTHON_BIN:-}" \
     "$(command -v python3 2>/dev/null || true)" \
     /usr/local/bin/python3 \
     /opt/homebrew/bin/python3 \
@@ -159,17 +163,17 @@ resolve_python3_with_tomllib() {
       return 0
     fi
   done
-  echo "Python 3.11+ with stdlib tomllib is required; install it or set RUSTCLAW_PYTHON_BIN." >&2
+  echo "Python 3.11+ with stdlib tomllib is required; install it or set APP_PYTHON_BIN." >&2
   return 1
 }
 
 configure_python3_with_tomllib() {
-  RUSTCLAW_PYTHON_BIN="$(resolve_python3_with_tomllib)" || return 1
-  export RUSTCLAW_PYTHON_BIN
+  APP_PYTHON_BIN="$(resolve_python3_with_tomllib)" || return 1
+  export APP_PYTHON_BIN
   # Keep the caller's PATH ordering intact so selecting a Homebrew Python on
   # macOS cannot silently replace an explicitly selected rustup Cargo.
   python3() {
-    command "$RUSTCLAW_PYTHON_BIN" "$@"
+    command "$APP_PYTHON_BIN" "$@"
   }
 }
 
@@ -372,25 +376,103 @@ cargo_host_memory_kb() {
   esac
 }
 
-cargo_jobs_for_small_host() {
-  local host_os host_arch mem_kb
+cargo_host_available_memory_kb() {
+  local host_os bytes page_size
   host_os="$(detect_host_os 2>/dev/null || printf '%s' "unknown")"
-  host_arch="$(detect_host_arch 2>/dev/null || printf '%s' "unknown")"
-  mem_kb="$(cargo_host_memory_kb 2>/dev/null || printf '%s' "0")"
-  case "$mem_kb" in
-    ''|*[!0-9]*) mem_kb=0 ;;
+  case "$host_os" in
+    linux)
+      awk '/MemAvailable:/ {print $2; exit}' /proc/meminfo 2>/dev/null
+      ;;
+    macos)
+      page_size="$(sysctl -n hw.pagesize 2>/dev/null || printf '%s' "4096")"
+      vm_stat 2>/dev/null | awk -v page_size="$page_size" '
+        /Pages free:|Pages inactive:|Pages speculative:/ {
+          value = $NF
+          gsub(/\./, "", value)
+          pages += value
+        }
+        END { printf "%.0f\n", pages * page_size / 1024 }
+      '
+      ;;
+    *)
+      printf '%s\n' "0"
+      return 1
+      ;;
+  esac
+}
+
+cargo_host_cpu_count() {
+  local count
+  count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || printf '%s' "0")"
+  case "$count" in
+    ''|*[!0-9]*) printf '%s\n' "0" ;;
+    *) printf '%s\n' "$count" ;;
+  esac
+}
+
+launch_detached_process() {
+  local log_file="$1"
+  shift
+  if [[ "$#" -eq 0 ]]; then
+    echo "launch_detached_process requires a command" >&2
+    return 2
+  fi
+  mkdir -p "$(dirname "$log_file")"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$log_file" 2>&1 </dev/null &
+  else
+    nohup python3 -c \
+      'import os, sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' \
+      "$@" >"$log_file" 2>&1 </dev/null &
+  fi
+  DETACHED_PROCESS_PID=$!
+  export DETACHED_PROCESS_PID
+}
+
+cargo_jobs_for_host_capacity() {
+  local host_arch="${1:-unknown}"
+  local total_kb="${2:-0}"
+  local available_kb="${3:-0}"
+  local cpu_count="${4:-0}"
+  case "$total_kb:$available_kb:$cpu_count" in
+    *[!0-9:]*) return 1 ;;
   esac
 
-  # Large RustClaw links can exceed 3 GiB RSS. Follow the repository's
-  # low-memory contract on both Linux and macOS rather than allowing Cargo to
-  # fan out across every CPU on machines with 16 GiB or less.
-  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" \
-    || ( "$mem_kb" -gt 0 && "$mem_kb" -le 16777216 ) ]]; then
+  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" ]]; then
     printf '%s\n' "1"
     return 0
   fi
-
+  if [[ "$total_kb" -gt 0 && "$total_kb" -le 16777216 ]]; then
+    if [[ "$total_kb" -ge 14680064 && "$available_kb" -ge 10485760 \
+      && "$cpu_count" -ge 8 ]]; then
+      printf '%s\n' "4"
+    elif [[ "$total_kb" -ge 12582912 && "$available_kb" -ge 8388608 \
+      && "$cpu_count" -ge 4 ]]; then
+      printf '%s\n' "2"
+    else
+      printf '%s\n' "1"
+    fi
+    return 0
+  fi
   return 1
+}
+
+cargo_jobs_for_small_host() {
+  local host_arch mem_kb available_kb cpu_count
+  host_arch="$(detect_host_arch 2>/dev/null || printf '%s' "unknown")"
+  mem_kb="$(cargo_host_memory_kb 2>/dev/null || printf '%s' "0")"
+  available_kb="$(cargo_host_available_memory_kb 2>/dev/null || printf '%s' "0")"
+  cpu_count="$(cargo_host_cpu_count 2>/dev/null || printf '%s' "0")"
+  case "$mem_kb" in
+    ''|*[!0-9]*) mem_kb=0 ;;
+  esac
+  case "$available_kb" in
+    ''|*[!0-9]*) available_kb=0 ;;
+  esac
+  case "$cpu_count" in
+    ''|*[!0-9]*) cpu_count=0 ;;
+  esac
+  cargo_jobs_for_host_capacity "$host_arch" "$mem_kb" "$available_kb" "$cpu_count"
 }
 
 configure_cargo_build_jobs_for_small_host() {
@@ -405,7 +487,7 @@ configure_cargo_build_jobs_for_small_host() {
   fi
 
   export CARGO_BUILD_JOBS="$jobs"
-  echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS on this <=16 GiB/ARM host to avoid concurrent high-memory Rust links."
+  echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS after CPU and available-memory capacity detection."
 }
 
 cargo_uses_sccache_wrapper() {

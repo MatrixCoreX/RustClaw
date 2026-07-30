@@ -218,7 +218,7 @@ FORBIDDEN_SNIPPETS: dict[Path, dict[str, str]] = {
         "stderr_absolute_link": "[stderr]($stderr_log)",
     },
     SKILLS_UPGRADE_SUITE: {
-        "wrapper_smoke_absolute_tmp": "/tmp/rustclaw_wrapper_smoke.log",
+        "wrapper_smoke_absolute_tmp": "/tmp/agent-runtime_wrapper_smoke.log",
         "wrapper_smoke_absolute_report_message": 'pass "wrapper smoke completed successfully (report: $WRAPPER_SMOKE_REPORT)"',
         "wrapper_smoke_absolute_fail_message": 'fail "wrapper smoke reported failures (report: $WRAPPER_SMOKE_REPORT)"',
         "wrapper_report_absolute": 'echo "- Wrapper smoke report: \\`$WRAPPER_SMOKE_REPORT\\`"',

@@ -236,7 +236,7 @@ fn fs_basic_read_artifact_range_rewrites_to_system_basic() {
         "fs_basic",
         json!({
             "action": "read_artifact_range",
-            "file_path": ".rustclaw/artifacts/skill-output/task/result.txt",
+            "file_path": ".agent-runtime/artifacts/skill-output/task/result.txt",
             "cursor": 65536,
             "max_bytes": 32768,
         }),
@@ -248,7 +248,7 @@ fn fs_basic_read_artifact_range_rewrites_to_system_basic() {
     assert_eq!(rewrite.runtime_args["action"], "read_artifact_range");
     assert_eq!(
         rewrite.runtime_args["path"],
-        ".rustclaw/artifacts/skill-output/task/result.txt"
+        ".agent-runtime/artifacts/skill-output/task/result.txt"
     );
     assert_eq!(rewrite.runtime_args["cursor"], 65536);
     assert_eq!(rewrite.runtime_args["max_bytes"], 32768);
@@ -260,7 +260,7 @@ fn system_basic_read_artifact_range_canonicalizes_to_fs_basic() {
         "system_basic",
         json!({
             "action": "read_artifact_range",
-            "path": ".rustclaw/artifacts/tool-output/task/stdout.log",
+            "path": ".agent-runtime/artifacts/tool-output/task/stdout.log",
         }),
     )
     .expect("canonical call");
@@ -997,7 +997,7 @@ fn fs_basic_find_entries_without_criterion_degrades_to_directory_listing() {
 fn fs_basic_find_entries_wildcard_only_degrades_to_directory_listing() {
     let args = json!({
         "action": "find_entries",
-        "root": "/home/guagua/rustclaw/plan",
+        "root": "/home/guagua/agent-runtime/plan",
         "pattern": "*",
         "target_kind": "file",
         "max_results": 50
@@ -1013,7 +1013,7 @@ fn fs_basic_find_entries_wildcard_only_degrades_to_directory_listing() {
     );
     assert_eq!(
         rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
-        Some("/home/guagua/rustclaw/plan")
+        Some("/home/guagua/agent-runtime/plan")
     );
     assert_eq!(
         rewrite
@@ -1057,7 +1057,7 @@ fn fs_basic_find_entries_mixed_patterns_keep_literal_selectors() {
 #[test]
 fn fs_basic_find_entries_existing_directory_pattern_degrades_to_listing() {
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-fs-basic-pattern-dir-{}",
+        "agent-runtime-fs-basic-pattern-dir-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp directory");
@@ -1221,7 +1221,7 @@ fn config_basic_missing_action_with_field_path_defaults_to_read_field() {
 
 #[test]
 fn config_basic_guard_rewrites_to_config_edit_guard() {
-    let args = json!({"action":"guard_rustclaw_config"});
+    let args = json!({"action":"guard_config"});
     let rewrite = rewrite_virtual_tool_call("config_basic", args)
         .unwrap()
         .expect("rewrite");
@@ -1258,7 +1258,7 @@ fn config_basic_semantic_guard_profile_rewrites_to_config_guard() {
     let args = json!({
         "action":"validate",
         "path":"configs/config.toml",
-        "validation_profile":"rustclaw_semantic_guard"
+        "validation_profile":"host_semantic_guard"
     });
     let rewrite = rewrite_virtual_tool_call("config_basic", args)
         .unwrap()

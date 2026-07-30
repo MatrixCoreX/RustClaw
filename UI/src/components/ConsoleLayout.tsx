@@ -3,12 +3,16 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun } from "lucide-react";
 
 import type { AuthIdentityResponse, ConsolePage } from "../types/api";
+import {
+  appStorageKey,
+  PRODUCT_DISPLAY_NAME,
+} from "../lib/product-identity";
 
 type UiLanguage = "zh" | "en";
 type AuthMode = "key" | "webd" | null;
 type Translate = (zh: string, en: string) => string;
 
-const NAV_COLLAPSED_STORAGE_KEY = "rustclaw.monitor.navCollapsed";
+const NAV_COLLAPSED_STORAGE_KEY = appStorageKey("monitor.navCollapsed");
 
 export function shouldCollapseNavigationForTarget(target: EventTarget | null): boolean {
   const candidate = target as HTMLElement | null;
@@ -100,8 +104,8 @@ export function ConsoleLayout({
               onClick={() => onCurrentPageChange("dashboard")}
               className="theme-brand-link inline-flex items-center gap-2 truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
             >
-              <img className="rustclaw-logo rustclaw-logo-header" src="/rustclaw-logo.svg" alt="" />
-              <span>RustClaw</span>
+              <img className="app-logo app-logo-header" src="/app-logo.svg" alt="" />
+              <span>{PRODUCT_DISPLAY_NAME}</span>
             </button>
           </div>
 

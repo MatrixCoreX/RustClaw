@@ -1,4 +1,4 @@
-# RustClaw client-like typical NL coverage.
+# Agent Runtime client-like typical NL coverage.
 # Purpose: compressed gate for the 2026-06-05 agent-generalization convergence phase.
 # Keep this file small enough for routine MiniMax runs while covering representative behavior.
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -19,7 +19,7 @@ chat_act|typical_compare_cargo_sizes_zh|typical,act,compare,summary,zh,client_li
 chat_act|typical_process_top_cpu_zh|typical,act,process,summary,zh,client_like|看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
 chat_act|typical_telegramd_status_en|typical,act,service,summary,en,client_like|check whether telegramd is running right now and briefly explain the status
 chat_act|typical_health_check_en|typical,act,health,summary,en,client_like|run a basic health check here and summarize only the most important findings
-single|typical_http_local_health_zh|typical,act,http,summary,zh,client_like|请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
+single|typical_http_local_health_zh|typical,act,http,summary,zh,client_like|请求一下 __APP_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 single|typical_ports_brief_zh|typical,act,network,ports,summary,zh,client_like|看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下
 single|typical_log_analyze_zh|typical,act,logs,summary,zh,client_like|快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
 single|typical_git_status_zh|typical,act,git,summary,zh,client_like|看看这个仓库现在有没有未提交改动，用一句话告诉我
@@ -34,10 +34,10 @@ chat_act|typical_sqlite_schema_version_zh|typical,act,database,scalar,zh,client_
 chat_act|typical_archive_list_zh|typical,act,archive,zh,client_like|查看 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里面有哪些文件，只列文件名
 compound|typical_fixture_list_then_read_zh|typical,act,listing,file,summary,zh,client_like|先列出 scripts/nl_tests/fixtures/device_local/docs 目录里的文件名，再读取 release_checklist.md 开头，最后用一句中文说它更像操作清单还是普通说明
 compound|typical_count_then_compare_zh|typical,act,listing,compare,summary,zh,client_like|先数 scripts/nl_tests/fixtures/device_local/docs 直接子项数量，再数 scripts/nl_tests/fixtures/device_local/logs 直接子项数量，最后一句中文说哪个更多
-failure|typical_missing_file_delivery_zh|typical,failure,delivery,missing_file_graceful,zh,client_like|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+failure|typical_missing_file_delivery_zh|typical,failure,delivery,missing_file_graceful,zh,client_like|把 definitely_missing_named_file_agent-runtime_001.txt 发给我
 continuous|typical_clarify_send_file_turn1|typical,clarify,delivery,turn_chain,zh,client_like|把文件发给我
 continuous|typical_clarify_send_file_turn2|typical,clarify,delivery,turn_chain,zh,client_like|README.md
-continuous|typical_context_file_chain_turn1|typical,state,file,turn_chain,zh,client_like|先记一下，后面我说“那个文件”就是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+continuous|typical_context_file_chain_turn1|typical,state,file,turn_chain,zh,client_like|先记一下，后面我说“那个文件”就是 /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md
 continuous|typical_context_file_chain_turn2|typical,state,file,turn_chain,zh,client_like|把那个文件开头读 10 行
 continuous|typical_context_file_chain_turn3|typical,state,file,summary,turn_chain,zh,client_like|把它再用一句人话总结
 continuous|typical_memory_marker_turn1|typical,memory,state,turn_chain,zh,client_like|本轮连续测试里，请记住编号 RC-TYPICAL-CN-0605-A。只用一句中文确认。

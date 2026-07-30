@@ -436,7 +436,7 @@ pub async fn send_weixin_image_from_file(
     let mut msg_obj = json!({
         "from_user_id": "",
         "to_user_id": to_user_id,
-        "client_id": format!("rustclaw-img-{ts}"),
+        "client_id": format!("agent-img-{ts}"),
         "message_type": MSG_TYPE_BOT,
         "message_state": MSG_STATE_FINISH,
         "item_list": [{
@@ -498,7 +498,7 @@ pub async fn send_weixin_video_from_file(
     let mut msg_obj = json!({
         "from_user_id": "",
         "to_user_id": to_user_id,
-        "client_id": format!("rustclaw-vid-{ts}"),
+        "client_id": format!("agent-vid-{ts}"),
         "message_type": MSG_TYPE_BOT,
         "message_state": MSG_STATE_FINISH,
         "item_list": [{
@@ -561,7 +561,7 @@ pub async fn send_weixin_file_from_file(
     let mut msg_obj = json!({
         "from_user_id": "",
         "to_user_id": to_user_id,
-        "client_id": format!("rustclaw-file-{ts}"),
+        "client_id": format!("agent-file-{ts}"),
         "message_type": MSG_TYPE_BOT,
         "message_state": MSG_STATE_FINISH,
         "item_list": [{

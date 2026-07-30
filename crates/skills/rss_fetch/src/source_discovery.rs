@@ -539,7 +539,7 @@ pub(super) fn fetch_public_feed_xml(raw_url: &str, timeout_seconds: u64) -> Resu
         ensure_public_resolution(&current)?;
         let mut response = client
             .get(current.clone())
-            .header("User-Agent", "RustClaw-RSS-Fetch/1.1")
+            .header("User-Agent", "Agent-System-RSS-Fetch/1.1")
             .send()
             .map_err(|error| format!("http_request_failed:{error}"))?;
         if response.status().is_redirection() {

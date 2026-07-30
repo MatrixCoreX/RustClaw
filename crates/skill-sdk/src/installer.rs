@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::adapter::{prepare_package, source_digest, AdapterContext, PreparedPackage};
-use crate::manifest::{BuildAdapter, BuildNetworkPolicy, PackageManifest, RUSTCLAW_JSONL_PROTOCOL};
+use crate::manifest::{BuildAdapter, BuildNetworkPolicy, PackageManifest, AGENT_JSONL_PROTOCOL};
 use crate::process::run_command_controlled;
 use crate::protocol::{validate_response_line, ProtocolRequest};
 use crate::receipt::{
@@ -718,7 +718,7 @@ fn protocol_smoke(
             );
         }
         return Ok(ProtocolSmokeReceipt {
-            protocol: RUSTCLAW_JSONL_PROTOCOL.to_string(),
+            protocol: AGENT_JSONL_PROTOCOL.to_string(),
             passed: true,
             request_id,
             checked_at_unix: now_unix()?,
@@ -797,7 +797,7 @@ fn protocol_smoke(
     }
     validate_response_line(&output.stdout, &request_id)?;
     Ok(ProtocolSmokeReceipt {
-        protocol: RUSTCLAW_JSONL_PROTOCOL.to_string(),
+        protocol: AGENT_JSONL_PROTOCOL.to_string(),
         passed: true,
         request_id,
         checked_at_unix: now_unix()?,

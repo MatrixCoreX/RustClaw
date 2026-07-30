@@ -1,5 +1,5 @@
 {
-  "name": "rustclaw",
+  "name": "agent-system-workspace",
   "private": true,
   "dependencies": {
     "@xdevplatform/xurl": "^1.0.3"

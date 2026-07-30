@@ -60,7 +60,7 @@ ensure_binary() {
 }
 
 prepare_workspace() {
-  TEMP_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-restart-continuity-XXXXXX")"
+TEMP_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/agent-runtime-restart-continuity-XXXXXX")"
   cp "$ROOT_DIR/Cargo.toml" "$TEMP_WORKSPACE/Cargo.toml"
   [[ ! -f "$ROOT_DIR/Cargo.lock" ]] || cp "$ROOT_DIR/Cargo.lock" "$TEMP_WORKSPACE/Cargo.lock"
   cp -R "$ROOT_DIR/configs" "$TEMP_WORKSPACE/configs"
@@ -94,7 +94,7 @@ path.write_text(text, encoding="utf-8")
 PY
 
   ADMIN_KEY="$(
-    RUSTCLAW_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
+    APP_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
       bash "$ROOT_DIR/scripts/auth-key.sh" generate admin | awk '{print $1; exit}'
   )"
   [[ -n "$ADMIN_KEY" ]] || {
@@ -107,7 +107,7 @@ start_clawd() {
   local log_path="$1"
   (
     cd "$TEMP_WORKSPACE"
-    RUSTCLAW_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
+    APP_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
       WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
   ) >"$log_path" 2>&1 &
   CLAWD_PID=$!
@@ -125,7 +125,7 @@ stop_clawd() {
 wait_for_health() {
   local waited=0
   while (( waited <= WAIT_SECONDS )); do
-    if curl -fsS -H "X-RustClaw-Key: ${ADMIN_KEY}" "${BASE_URL}/v1/health" >/dev/null 2>&1; then
+    if curl -fsS -H "X-Agent-Key: ${ADMIN_KEY}" "${BASE_URL}/v1/health" >/dev/null 2>&1; then
       return 0
     fi
     if [[ -n "$CLAWD_PID" ]] && ! kill -0 "$CLAWD_PID" >/dev/null 2>&1; then
@@ -153,7 +153,7 @@ expires_seconds = int(sys.argv[3])
 command = (
     "printf 'mutation-once\\n' >> document/restart-continuity-counter.txt; "
     f"sleep {sleep_seconds}; "
-    "printf 'RUSTCLAW_RESTART_LONG_COMMAND_DONE\\n'"
+    "printf 'APP_RESTART_LONG_COMMAND_DONE\\n'"
 )
 path.write_text(json.dumps({
     "user_id": 2_147_300_001,
@@ -173,7 +173,7 @@ path.write_text(json.dumps({
 PY
   curl -fsS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
-    -H "X-RustClaw-Key: ${ADMIN_KEY}" \
+    -H "X-Agent-Key: ${ADMIN_KEY}" \
     --data-binary "@${request_path}" >"$response_path"
   TASK_ID="$(
     python3 - "$response_path" <<'PY'
@@ -195,7 +195,7 @@ PY
 
 query_task() {
   local output_path="$1"
-  curl -fsS -H "X-RustClaw-Key: ${ADMIN_KEY}" \
+  curl -fsS -H "X-Agent-Key: ${ADMIN_KEY}" \
     "${BASE_URL}/v1/tasks/${TASK_ID}" >"$output_path"
 }
 
@@ -262,7 +262,7 @@ Path(sys.argv[1]).write_text(json.dumps({
 PY
   curl -fsS -X POST "${BASE_URL}/v1/tasks/resume-by-task-id" \
     -H "Content-Type: application/json" \
-    -H "X-RustClaw-Key: ${ADMIN_KEY}" \
+    -H "X-Agent-Key: ${ADMIN_KEY}" \
     --data-binary "@${request_path}" >"$response_path"
   python3 - "$response_path" <<'PY'
 from pathlib import Path
@@ -358,7 +358,7 @@ after_lifecycle = after_result.get("task_lifecycle") or {}
 
 assert after_data.get("status") == "succeeded", after_data.get("status")
 assert before_checkpoint.get("checkpoint_id"), "missing pre-restart checkpoint"
-assert "RUSTCLAW_RESTART_LONG_COMMAND_DONE" in json.dumps(after_result), "missing command output"
+assert "APP_RESTART_LONG_COMMAND_DONE" in json.dumps(after_result), "missing command output"
 assert after_lifecycle.get("state") == "succeeded", after_lifecycle
 lines = counter_path.read_text(encoding="utf-8").splitlines()
 assert lines == ["mutation-once"], lines

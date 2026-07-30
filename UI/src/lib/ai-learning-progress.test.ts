@@ -40,7 +40,7 @@ test("round-trips language-specific learning progress", () => {
 
 test("drops corrupt, unknown, and removed progress values", () => {
   const storage = new MemoryStorage();
-  storage.setItem("rustclaw.ai-learning.progress.v1.zh", JSON.stringify({
+  storage.setItem("agent-runtime.ai-learning.progress.v1.zh", JSON.stringify({
     audience: "unknown",
     visitedPageIds: ["kept", "removed", 1],
     lastPageByAudience: { beginner: "removed", developer: "kept" },
@@ -52,6 +52,6 @@ test("drops corrupt, unknown, and removed progress values", () => {
     lastPageByAudience: { developer: "kept" },
   });
 
-  storage.setItem("rustclaw.ai-learning.progress.v1.zh", "not-json");
+  storage.setItem("agent-runtime.ai-learning.progress.v1.zh", "not-json");
   assert.deepEqual(loadLearningProgress(storage, "zh", new Set()), emptyLearningProgress());
 });

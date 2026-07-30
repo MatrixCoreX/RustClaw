@@ -15,6 +15,7 @@ import {
   traceEventMeta,
 } from "./task-result.ts";
 import type { TaskQueryResponse } from "../types/api.ts";
+import {PRODUCT_DISPLAY_NAME} from "./product-identity.ts";
 
 test("appends progressive model events into the live task trace", () => {
   const first = appendLiveTaskEvent(null, "task-live", {
@@ -900,7 +901,7 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.equal(buildTaskTraceEventView(events[13], "en").title, "Task progress");
   assert.equal(
     buildTaskTraceEventView(events[13], "en").detail,
-    "Progress is saved and RustClaw will continue safely.",
+    `Progress is saved and ${PRODUCT_DISPLAY_NAME} will continue safely.`,
   );
   assert.equal(buildTaskTraceEventView(events[13], "en").tone, "attention");
 });

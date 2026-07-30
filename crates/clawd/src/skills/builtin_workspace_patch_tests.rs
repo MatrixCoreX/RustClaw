@@ -10,7 +10,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-workspace-patch-{}",
+            "agent-runtime-workspace-patch-{}",
             uuid::Uuid::new_v4().simple()
         ));
         fs::create_dir_all(&root).expect("create workspace");
@@ -129,12 +129,12 @@ fn patch_rejects_parent_traversal_and_internal_state_paths() {
     let workspace = TestWorkspace::new();
     for patch in [
         "diff --git a/../escape.txt b/../escape.txt\nnew file mode 100644\n--- /dev/null\n+++ b/../escape.txt\n@@ -0,0 +1 @@\n+bad\n",
-        "diff --git a/.rustclaw/state b/.rustclaw/state\nnew file mode 100644\n--- /dev/null\n+++ b/.rustclaw/state\n@@ -0,0 +1 @@\n+bad\n",
+        "diff --git a/.agent-runtime/state b/.agent-runtime/state\nnew file mode 100644\n--- /dev/null\n+++ b/.agent-runtime/state\n@@ -0,0 +1 @@\n+bad\n",
     ] {
         let result = workspace.run(json!({"action":"apply_patch", "patch":patch}));
         assert!(result.is_err());
     }
-    assert!(!workspace.root.join(".rustclaw/state").exists());
+    assert!(!workspace.root.join(".agent-runtime/state").exists());
 }
 
 #[test]
@@ -193,11 +193,11 @@ fn checkpoint_state_symlink_is_rejected() {
 
     let workspace = TestWorkspace::new();
     let external = std::env::temp_dir().join(format!(
-        "rustclaw-workspace-patch-external-{}",
+        "agent-runtime-workspace-patch-external-{}",
         uuid::Uuid::new_v4().simple()
     ));
     fs::create_dir_all(&external).unwrap();
-    symlink(&external, workspace.root.join(".rustclaw")).unwrap();
+    symlink(&external, workspace.root.join(".agent-runtime")).unwrap();
     let patch = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+new\n";
     let result = workspace.run(json!({"action":"apply_patch", "patch":patch}));
     assert!(result.unwrap_err().contains("checkpoint_symlink_denied"));

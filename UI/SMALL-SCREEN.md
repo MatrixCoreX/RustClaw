@@ -24,7 +24,7 @@
    - **本机访问**（推荐）：`http://127.0.0.1:8787/small-screen.html`
 3. 或在本机用脚本全屏打开小屏页：
    ```bash
-   cd /path/to/RustClaw/pi_app && ./open-small-screen.sh
+   cd /path/to/agent-runtime/pi_app && ./open-small-screen.sh
    ```
 
 ## 文件位置

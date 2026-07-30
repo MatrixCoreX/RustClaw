@@ -821,7 +821,7 @@ async fn query_task_status(
     let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
     let mut req = state.client.get(&url);
     if let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) {
-        req = req.header("X-RustClaw-Key", user_key);
+        req = req.header("X-Agent-Key", user_key);
     }
     let resp = req.send().await.context("query task status failed")?;
     if !resp.status().is_success() {

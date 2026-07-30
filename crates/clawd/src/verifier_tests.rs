@@ -215,6 +215,26 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "media_download"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "file"
+risk_level = "high"
+auto_invocable = true
+requires_confirmation = true
+side_effect = true
+confirmation_exempt_when = [
+  { action = "resolve" },
+  { action = "download" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["resolve", "download"] }, share = { type = "string" } } }
+planner_capabilities = [
+  { name = "media_download.resolve", action = "resolve", effect = "observe", required = ["share"], risk_level = "low", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "media_download.download", action = "download", effect = "mutate", required = ["share"], risk_level = "medium", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+]
+
+[[skills]]
 name = "primary_reader"
 enabled = true
 kind = "runner"
@@ -279,6 +299,7 @@ pub(super) fn test_state() -> AppState {
             "image_generate",
             "image_edit",
             "weather",
+            "media_download",
             "primary_reader",
             "fallback_reader",
             "photo_organize",
@@ -296,6 +317,7 @@ pub(super) fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: Some(registry),
                 skills_list,
             }))),
@@ -475,7 +497,7 @@ fn redacted_workspace_child_boundary_blocks_path_content_read_plan() {
                 step_id: "s1".to_string(),
                 action_type: "call_tool".to_string(),
                 skill: "fs_basic".to_string(),
-                args: json!({ "action": "read_text_range", "path": "/etc/rustclaw-verifier-outside/README.md" }),
+                args: json!({ "action": "read_text_range", "path": "/etc/agent-runtime-verifier-outside/README.md" }),
                 depends_on: Vec::new(),
                 why: String::new(),
             }]),
@@ -570,7 +592,7 @@ fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan(
         step_id: "s1".to_string(),
         action_type: "call_tool".to_string(),
         skill: "fs_basic".to_string(),
-        args: json!({ "action": "read_text_range", "path": "/etc/rustclaw-verifier-outside/README.md" }),
+        args: json!({ "action": "read_text_range", "path": "/etc/agent-runtime-verifier-outside/README.md" }),
         depends_on: Vec::new(),
         why: String::new(),
     }]);
@@ -789,13 +811,13 @@ fn observe_mode_allows_prior_output_template_in_later_args() {
             request_text: Some(
                 "查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。",
             ),
-            context_bundle_summary: Some("auto_locator_path=/home/guagua/rustclaw/logs"),
+            context_bundle_summary: Some("auto_locator_path=/home/guagua/agent-runtime/logs"),
             plan_result: &plan_result(vec![
                 PlanStep {
                     step_id: "step_1".to_string(),
                     action_type: "call_skill".to_string(),
                     skill: "list_dir".to_string(),
-                    args: json!({ "path": "/home/guagua/rustclaw/logs" }),
+                    args: json!({ "path": "/home/guagua/agent-runtime/logs" }),
                     depends_on: Vec::new(),
                     why: String::new(),
                 },
@@ -804,7 +826,7 @@ fn observe_mode_allows_prior_output_template_in_later_args() {
                     action_type: "call_skill".to_string(),
                     skill: "write_file".to_string(),
                     args: json!({
-                        "path": "/home/guagua/rustclaw/logs_inventory.txt",
+                        "path": "/home/guagua/agent-runtime/logs_inventory.txt",
                         "content": "{{last_output}}"
                     }),
                     depends_on: vec!["step_1".to_string()],
@@ -1043,7 +1065,7 @@ fn external_fs_basic_mutation_requires_registry_confirmation() {
                 skill: "fs_basic".to_string(),
                 args: json!({
                     "action": "write_text",
-                    "path": "/etc/rustclaw-verifier-outside.txt",
+                    "path": "/etc/agent-runtime-verifier-outside.txt",
                     "content": "outside"
                 }),
                 depends_on: Vec::new(),
@@ -1119,7 +1141,7 @@ fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection(
                 skill: "write_file".to_string(),
                 args: json!({
                     "path": "pwd_line_abs.txt",
-                    "content": "/home/guagua/rustclaw\n",
+                    "content": "/home/guagua/agent-runtime\n",
                     "_clawd_user_named_output_path": true
                 }),
                 depends_on: Vec::new(),
@@ -1381,6 +1403,7 @@ fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() 
         .get_skills_registry()
         .expect("test registry should be installed");
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(
             ["read_file", "run_cmd", "list_dir"]
@@ -1841,14 +1864,14 @@ fn safe_make_dir_missing_path_defaults_under_workspace_without_confirmation() {
         .and_then(|value| value.as_str())
         .unwrap_or_default();
     assert!(path.starts_with(state.skill_rt.workspace_root.to_string_lossy().as_ref()));
-    assert!(path.contains("rustclaw-created-dir-taskveri"));
+    assert!(path.contains("agent-created-dir-taskveri"));
 }
 
 #[test]
 fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() {
     let state = test_state();
     let task = test_task();
-    let filename = format!("rustclaw-autonomy-{}.txt", uuid::Uuid::new_v4());
+    let filename = format!("agent-runtime-autonomy-{}.txt", uuid::Uuid::new_v4());
     let result = verify_plan(
         &state,
         &task,
@@ -1888,75 +1911,8 @@ fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() 
     assert!(path.ends_with(".txt"));
 }
 
-#[test]
-fn dangerous_remove_file_missing_path_blocks_without_default_target() {
-    let state = test_state();
-    let task = test_task();
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            output_contract: Some(&route_result()),
-            request_text: Some("delete it"),
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![PlanStep {
-                step_id: "s1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "remove_file".to_string(),
-                args: json!({}),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
-        },
-        VerifyMode::Enforce,
-    );
-
-    assert!(!result.approved);
-    assert!(!result
-        .issues
-        .iter()
-        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
-    assert!(result
-        .issues
-        .iter()
-        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
-}
-
-#[test]
-fn dangerous_fs_basic_remove_path_missing_path_blocks_without_default_target() {
-    let state = test_state();
-    let task = test_task();
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            output_contract: Some(&route_result()),
-            request_text: Some("remove that path"),
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![PlanStep {
-                step_id: "s1".to_string(),
-                action_type: "call_tool".to_string(),
-                skill: "fs_basic".to_string(),
-                args: json!({ "action": "remove_path" }),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
-        },
-        VerifyMode::Enforce,
-    );
-
-    assert!(!result.approved);
-    assert!(!result
-        .issues
-        .iter()
-        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
-    assert!(result
-        .issues
-        .iter()
-        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
-}
+#[path = "verifier_tests/dangerous_defaults.rs"]
+mod dangerous_defaults;
 
 #[path = "verifier_tests/code_change_validation.rs"]
 mod code_change_validation;

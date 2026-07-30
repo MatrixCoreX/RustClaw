@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUSTCLAW_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "${RUSTCLAW_SCRIPTS_DIR}/shell_compat.sh"
+source "${APP_SCRIPTS_DIR}/shell_compat.sh"
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID="${USER_ID:-1985996990}"
 CHAT_ID="${CHAT_ID:-1985996990}"
-USER_KEY="${USER_KEY:-${RUSTCLAW_USER_KEY:-}}"
+USER_KEY="${USER_KEY:-${APP_USER_KEY:-}}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-600}"
 EXTRA_GRACE_SECONDS="${EXTRA_GRACE_SECONDS:-180}"
@@ -21,7 +21,7 @@ curl_auth_args() {
   local key
   key="$(normalized_user_key)"
   if [[ -n "$key" ]]; then
-    printf '%s\n' "-H" "X-RustClaw-Key: ${key}"
+    printf '%s\n' "-H" "X-Agent-Key: ${key}"
   fi
 }
 
@@ -277,7 +277,7 @@ query_task_to_file() {
 
 extract_task_triplet() {
   local raw_file
-  raw_file="$(mktemp /tmp/rustclaw-task-triplet.XXXXXX)"
+	raw_file="$(mktemp /tmp/agent-runtime-task-triplet.XXXXXX)"
   cat > "$raw_file"
   python3 - "$raw_file" <<'PY'
 import json

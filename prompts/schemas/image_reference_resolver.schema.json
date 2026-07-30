@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/schemas/image_reference_resolver.schema.json",
+  "$id": "https://agent-runtime.invalid/schemas/image_reference_resolver.schema.json",
   "title": "Image Reference Resolver Output",
   "description": "Schema for the JSON object returned by `prompts/image_reference_resolver_prompt.md`. Used by `crates/skills/image_edit/src/main.rs::parse_llm_selected_index` to resolve one candidate image from recent context.",
   "type": "object",

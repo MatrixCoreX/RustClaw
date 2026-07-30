@@ -4,14 +4,14 @@
     "task_id": "fixture-observed-finalizer-scalar",
     "status": "succeeded",
     "result_json": {
-      "text": "/home/guagua/rustclaw",
+      "text": "/home/guagua/agent-runtime",
       "messages": [
-        "/home/guagua/rustclaw"
+        "/home/guagua/agent-runtime"
       ],
       "task_journal": {
         "summary": {
           "input_text": "只输出当前工作目录的绝对路径，不要解释",
-          "final_answer": "/home/guagua/rustclaw",
+          "final_answer": "/home/guagua/agent-runtime",
           "final_status": "success",
           "route_result": {
             "first_layer_decision": "planner_execute",
@@ -61,7 +61,7 @@
               "requested_capability": "run_cmd",
               "executed_skill": "run_cmd",
               "status": "ok",
-              "output_excerpt": "/home/guagua/rustclaw"
+              "output_excerpt": "/home/guagua/agent-runtime"
             }
           ]
         }

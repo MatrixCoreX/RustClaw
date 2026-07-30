@@ -1,6 +1,6 @@
 # 跨平台运行时合同
 
-RustClaw 共享生产代码以 Linux 和 macOS 为目标。平台专属能力必须显式处理：使用平台 adapter、返回结构化 unsupported 结果，或通过 `cfg` 排除。依赖缺失绝不允许降级到限制更少的后备实现。
+Agent Runtime 共享生产代码以 Linux 和 macOS 为目标。平台专属能力必须显式处理：使用平台 adapter、返回结构化 unsupported 结果，或通过 `cfg` 排除。依赖缺失绝不允许降级到限制更少的后备实现。
 
 ## 进程沙箱
 

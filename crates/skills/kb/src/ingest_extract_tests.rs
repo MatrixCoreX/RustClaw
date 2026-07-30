@@ -2,14 +2,14 @@ use super::*;
 
 #[test]
 fn extracts_structured_text_without_lossy_binary_fallback() {
-    let json =
-        extract_document(br#"{"name":"RustClaw","enabled":true}"#, "json").expect("extract JSON");
+    let json = extract_document(br#"{"name":"Agent Runtime","enabled":true}"#, "json")
+        .expect("extract JSON");
     match json {
         ExtractOutcome::Text {
             text,
             parser_version,
         } => {
-            assert!(text.contains("RustClaw"));
+            assert!(text.contains("Agent Runtime"));
             assert_eq!(parser_version, "json-structured-v1");
         }
         ExtractOutcome::Skip { .. } => panic!("JSON should be extracted"),

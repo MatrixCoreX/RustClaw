@@ -1,6 +1,6 @@
 # Prompt Layers
 
-This directory defines RustClaw's layered prompt sources.
+This directory defines Agent Runtime's layered prompt sources.
 
 The shared runtime prompt-layer parser/helper lives in `crates/claw-core/src/prompt_layers.rs`. `clawd`, `telegramd`, and any skill process that adopts this helper will render prompts according to the layering rules defined here.
 

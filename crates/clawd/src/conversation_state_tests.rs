@@ -195,9 +195,9 @@ fn standalone_side_answer_preserves_existing_primary_task() {
         attachment_processing_required: false,
     };
     let prior_state = ConversationState {
-        last_primary_task_prompt: Some("Write a short release note for RustClaw.".to_string()),
+        last_primary_task_prompt: Some("Write a short release note for Agent Runtime.".to_string()),
         last_primary_task_output: Some(
-            "- Update RustClaw to the latest version.\n- Keep Python 3.11.\n- Try the new features."
+            "- Update Agent Runtime to the latest version.\n- Keep Python 3.11.\n- Try the new features."
                 .to_string(),
         ),
         ..ConversationState::default()
@@ -223,12 +223,12 @@ fn standalone_side_answer_preserves_existing_primary_task() {
 
     assert_eq!(
         prompt.as_deref(),
-        Some("Write a short release note for RustClaw.")
+        Some("Write a short release note for Agent Runtime.")
     );
     assert_eq!(
         output.as_deref(),
         Some(
-            "- Update RustClaw to the latest version.\n- Keep Python 3.11.\n- Try the new features."
+            "- Update Agent Runtime to the latest version.\n- Keep Python 3.11.\n- Try the new features."
         )
     );
 }
@@ -249,8 +249,10 @@ fn direct_standalone_side_answer_preserves_existing_primary_task() {
         attachment_processing_required: false,
     };
     let prior_state = ConversationState {
-        last_primary_task_prompt: Some("Write a short release note for RustClaw.".to_string()),
-        last_primary_task_output: Some("RustClaw shipped a focused runtime update.".to_string()),
+        last_primary_task_prompt: Some("Write a short release note for Agent Runtime.".to_string()),
+        last_primary_task_output: Some(
+            "Agent Runtime shipped a focused runtime update.".to_string(),
+        ),
         ..ConversationState::default()
     };
     let resolved =
@@ -274,11 +276,11 @@ fn direct_standalone_side_answer_preserves_existing_primary_task() {
 
     assert_eq!(
         prompt.as_deref(),
-        Some("Write a short release note for RustClaw.")
+        Some("Write a short release note for Agent Runtime.")
     );
     assert_eq!(
         output.as_deref(),
-        Some("RustClaw shipped a focused runtime update.")
+        Some("Agent Runtime shipped a focused runtime update.")
     );
 }
 
@@ -296,8 +298,10 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
         attachment_processing_required: false,
     };
     let prior_state = ConversationState {
-        last_primary_task_prompt: Some("Write a short release note for RustClaw".to_string()),
-        last_primary_task_output: Some("RustClaw is easier for non-technical users.".to_string()),
+        last_primary_task_prompt: Some("Write a short release note for Agent Runtime".to_string()),
+        last_primary_task_output: Some(
+            "Agent Runtime is easier for non-technical users.".to_string(),
+        ),
         ..ConversationState::default()
     };
 
@@ -313,7 +317,7 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
         &route_result,
         Some(&turn_analysis),
         "Write one deployment note that mentions Python 3.10",
-        "RustClaw deployment should use Python 3.10.",
+        "Agent Runtime deployment should use Python 3.10.",
         &[],
     );
 
@@ -323,7 +327,7 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
     );
     assert_eq!(
         output.as_deref(),
-        Some("RustClaw deployment should use Python 3.10.")
+        Some("Agent Runtime deployment should use Python 3.10.")
     );
 }
 
@@ -488,7 +492,7 @@ fn active_task_non_success_preserves_prior_primary_output() {
         attachment_processing_required: false,
     };
     let prior_state = ConversationState {
-        last_primary_task_prompt: Some("Write a short release note for RustClaw".to_string()),
+        last_primary_task_prompt: Some("Write a short release note for Agent Runtime".to_string()),
         last_primary_task_output: Some(
             "1. Manage settings easily\n2. Track work clearly\n3. Communicate naturally"
                 .to_string(),
@@ -663,23 +667,26 @@ fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
         Some(&prior_state),
         &route_result,
         Some(&turn_analysis),
-        "Write a short release note for RustClaw.",
-        "Write a short release note for RustClaw.",
+        "Write a short release note for Agent Runtime.",
+        "Write a short release note for Agent Runtime.",
     );
     let output = next_last_primary_task_output(
         Some(&prior_state),
         &route_result,
         Some(&turn_analysis),
-        "Write a short release note for RustClaw.",
-        "RustClaw 0.1.7 is now available.",
+        "Write a short release note for Agent Runtime.",
+        "Agent Runtime 0.1.7 is now available.",
         &[],
     );
 
     assert_eq!(
         prompt.as_deref(),
-        Some("Write a short release note for RustClaw.")
+        Some("Write a short release note for Agent Runtime.")
     );
-    assert_eq!(output.as_deref(), Some("RustClaw 0.1.7 is now available."));
+    assert_eq!(
+        output.as_deref(),
+        Some("Agent Runtime 0.1.7 is now available.")
+    );
 }
 
 #[test]
@@ -692,25 +699,25 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task() {
         None,
         &route_result,
         None,
-        "Write a short release note for RustClaw",
-        "Write a short release note for RustClaw",
+        "Write a short release note for Agent Runtime",
+        "Write a short release note for Agent Runtime",
     );
     let output = next_last_primary_task_output(
         None,
         &route_result,
         None,
-        "Write a short release note for RustClaw",
-        "RustClaw 0.1.7 is easier to update and operate.",
+        "Write a short release note for Agent Runtime",
+        "Agent Runtime 0.1.7 is easier to update and operate.",
         &[],
     );
 
     assert_eq!(
         prompt.as_deref(),
-        Some("Write a short release note for RustClaw")
+        Some("Write a short release note for Agent Runtime")
     );
     assert_eq!(
         output.as_deref(),
-        Some("RustClaw 0.1.7 is easier to update and operate.")
+        Some("Agent Runtime 0.1.7 is easier to update and operate.")
     );
 }
 
@@ -1030,7 +1037,7 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
             active_observed_facts_task_id: Some("old-observed".to_string()),
         },
     );
-    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_alias_patch";
+    let project_dir = "/home/guagua/agent-runtime/run/nl_eval_tmp/code_workspace_alias_patch";
     let calc_path = format!("{project_dir}/calc_core.py");
     let test_path = format!("{project_dir}/test_calc_core.py");
     let mut route = output_contract_for_test();
@@ -1396,7 +1403,7 @@ fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,
-        "先记一下，后面我说“那个文件”就是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md",
+        "先记一下，后面我说“那个文件”就是 /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md",
         &route,
         "",
     );
@@ -1404,7 +1411,7 @@ fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
     assert!(merged.iter().any(|binding| {
         binding.alias == "那个文件"
             && binding.target
-                == "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md"
+                == "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md"
     }));
 }
 

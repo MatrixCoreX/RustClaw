@@ -12,14 +12,17 @@ fn command_permission_preview_uses_verifier_policy_tokens() {
     let state = test_state();
     let preview = super::preview_command_permission_decision(
         &state,
-        "sudo rm -rf /tmp/rustclaw-never-run",
+        "sudo rm -rf /tmp/agent-runtime-never-run",
         None,
         false,
     );
 
     assert_eq!(preview["status_code"], "permission_preflight_complete");
     assert_eq!(preview["action"], "preview_command_permission");
-    assert_eq!(preview["command"], "sudo rm -rf /tmp/rustclaw-never-run");
+    assert_eq!(
+        preview["command"],
+        "sudo rm -rf /tmp/agent-runtime-never-run"
+    );
     assert_eq!(preview["dry_run"], true);
     assert_eq!(preview["preview_only"], true);
     assert_eq!(preview["decision"], "deny");
@@ -282,6 +285,97 @@ fn workspace_sandbox_blocks_package_install_contract() {
             .pointer("/steps/0/sandbox_denial_reason")
             .and_then(serde_json::Value::as_str),
         Some("sandbox_workspace_privilege_denied")
+    );
+}
+
+#[test]
+fn workspace_sandbox_allows_admitted_media_network_resolution() {
+    let state = state_with_tool_policy(ToolSandboxMode::WorkspaceWrite, ToolApprovalPolicy::OnRisk);
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "media_download".to_string(),
+                args: json!({
+                    "action": "resolve",
+                    "share": "https://example.invalid/public-video"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::SandboxPolicyDenied)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/sandbox/network_access"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn workspace_sandbox_allows_admitted_media_download_without_confirmation() {
+    let state = state_with_tool_policy(ToolSandboxMode::WorkspaceWrite, ToolApprovalPolicy::OnRisk);
+    let share = "复制这条消息，打开小红书看看 https://xhslink.com/a/AbCdEf 更多内容";
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: Some(share),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "media_download".to_string(),
+                args: json!({"action": "download", "share": share}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/sandbox/network_access"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
     );
 }
 

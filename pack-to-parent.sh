@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# 将当前 RustClaw 目录整体打包到上一级目录，生成 RustClaw.tar.gz（或带日期的 RustCLaw-YYYYMMDD.tar.gz）
+# 将当前项目目录整体打包到上一级目录，归档名由产品身份配置决定。
 # 用法：在仓库根目录执行 ./pack-to-parent.sh [--with-date]
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_NAME="$(basename "$SCRIPT_DIR")"
 PARENT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/product_identity.sh"
 
 use_date=0
 for arg in "$@"; do
@@ -21,9 +23,9 @@ for arg in "$@"; do
 done
 
 if [[ "$use_date" == "1" ]]; then
-  ARCHIVE="${PARENT}/${ROOT_NAME}-$(date +%Y%m%d).tar.gz"
+  ARCHIVE="${PARENT}/${APP_RELEASE_ARTIFACT_ID}-$(date +%Y%m%d).tar.gz"
 else
-  ARCHIVE="${PARENT}/${ROOT_NAME}.tar.gz"
+  ARCHIVE="${PARENT}/${APP_RELEASE_ARTIFACT_ID}.tar.gz"
 fi
 
 echo "Packing $SCRIPT_DIR -> $ARCHIVE (excluding .git and target/)"

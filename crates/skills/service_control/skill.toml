@@ -4,8 +4,8 @@ schema_version = 2
 [package]
 name = "service_control"
 version = "0.1.8"
-description = "Check, verify, diagnose, and control RustClaw, systemd/service, Homebrew services, and launchd services with structured status evidence."
-protocol = "rustclaw-jsonl-v1"
+description = "Check, verify, diagnose, and control the agent runtime, systemd/service, Homebrew services, and launchd services with structured status evidence."
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/service-control-skill"
 working_directory = "."
 timeout_seconds = 30
-environment_allowlist = ["CLAWD_BASE_URL", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUSTCLAW_UI_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_UI_KEY", "CLAWD_BASE_URL", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
@@ -50,7 +50,7 @@ update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, "service" = { "type" = "string" }, "target" = { "type" = "string" }, "manager_type" = { "type" = "string", "enum" = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "rustclaw", "unknown"] }, "lines" = { "type" = "integer", "minimum" = 1, "maximum" = 500 } } }
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, "service" = { "type" = "string" }, "target" = { "type" = "string" }, "manager_type" = { "type" = "string", "enum" = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "agent_runtime", "unknown"] }, "lines" = { "type" = "integer", "minimum" = 1, "maximum" = 500 } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
 capabilities = [{ "name" = "service_control", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service_control.status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service.status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "status" }, { "name" = "service.verify", "effect" = "validate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "verify" }, { "name" = "service.logs", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type", "lines"], "timeout_seconds" = 30, "action" = "logs" }, { "name" = "service.start", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "start" }, { "name" = "service_control.start", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "start" }, { "name" = "service.stop", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "service_control.stop", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "stop" }, { "name" = "service.restart", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "restart" }, { "name" = "service_control.restart", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["target"], "optional" = ["service", "manager_type"], "timeout_seconds" = 30, "action" = "restart" }]

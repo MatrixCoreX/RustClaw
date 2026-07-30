@@ -9,7 +9,7 @@ use crate::{
 
 fn fixture_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "rustclaw-fs-discovery-{name}-{}",
+        "agent-runtime-fs-discovery-{name}-{}",
         std::process::id()
     ))
 }

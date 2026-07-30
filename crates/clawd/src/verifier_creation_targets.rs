@@ -34,7 +34,7 @@ fn default_make_dir_path(state: &AppState, task: &ClaimedTask) -> String {
     state
         .skill_rt
         .workspace_root
-        .join(format!("rustclaw-created-dir-{}", stable_task_suffix(task)))
+        .join(format!("agent-created-dir-{}", stable_task_suffix(task)))
         .to_string_lossy()
         .to_string()
 }

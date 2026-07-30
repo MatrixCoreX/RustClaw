@@ -8,6 +8,9 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
+#[path = "skill_registry_overlay.rs"]
+mod overlay;
+
 /// 技能类型：builtin（clawd 内执行）/ runner（skill-runner 子进程）/ 预留 external
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -148,6 +151,11 @@ pub struct PlannerCapabilityMapping {
     pub idempotent: Option<bool>,
     #[serde(default)]
     pub execution_mode: Option<CapabilityExecutionMode>,
+    /// Host-approved timeout override for this exact capability/action. The
+    /// value is bounded during registry admission and takes precedence over
+    /// the skill-level timeout.
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub async_adapter_kind: Option<String>,
     #[serde(default)]
@@ -402,6 +410,8 @@ impl PlannerCapabilityKind {
 ///
 /// **词汇表**（任何不在表内的字符串都会让 registry 加载报错，避免 typo）：
 /// - `llm`：调用 LLM 网关（受 clawd LLM gateway 管控：fallback / 限流 / 审计）。
+/// - `llm.credential_fallback.<name>`：允许缺少具名 `secrets.<name>` 时复用当前
+///   主 LLM 连接中同 vendor 的凭据；必须同时声明 `llm` 与对应 `secrets.<name>`。
 /// - `net`：除 LLM 网关外的对外网络（HTTP/HTTPS/raw socket）。
 /// - `fs.read`：读取技能 bundle 目录之外的文件。
 /// - `fs.write`：在技能 bundle 目录之外创建/修改文件。
@@ -427,6 +437,7 @@ impl PlannerCapabilityKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     Llm,
+    LlmCredentialFallback(String),
     Net,
     FsRead,
     FsWrite,
@@ -455,20 +466,12 @@ impl Capability {
             "exec" => Ok(Self::Exec),
             "exec.sudo" => Ok(Self::ExecSudo),
             other => {
+                if let Some(name) = other.strip_prefix("llm.credential_fallback.") {
+                    validate_named_capability(name, token, "llm credential fallback")?;
+                    return Ok(Self::LlmCredentialFallback(name.to_string()));
+                }
                 if let Some(name) = other.strip_prefix("secrets.") {
-                    if name.is_empty() || name.len() > 64 {
-                        return Err(format!(
-                            "secrets capability name length must be 1..=64: `{token}`"
-                        ));
-                    }
-                    if !name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    {
-                        return Err(format!(
-                            "secrets capability name must match [a-z0-9_]: `{token}`"
-                        ));
-                    }
+                    validate_named_capability(name, token, "secrets capability")?;
                     // §P4.1 ↔ image/text 配置独立性：拦截"裸 vendor 名"反模式。
                     // image_generation / image_edit / image_vision / [llm] 是
                     // 4 套互相独立的 LLM provider 配置（同一 vendor 在不同用途
@@ -500,7 +503,7 @@ impl Capability {
                     Ok(Self::Secrets(name.to_string()))
                 } else {
                     Err(format!(
-                        "unknown capability `{token}` (allowed: llm, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)"
+                        "unknown capability `{token}` (allowed: llm, llm.credential_fallback.<name>, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)"
                     ))
                 }
             }
@@ -511,6 +514,9 @@ impl Capability {
     pub fn as_token(&self) -> String {
         match self {
             Self::Llm => "llm".to_string(),
+            Self::LlmCredentialFallback(name) => {
+                format!("llm.credential_fallback.{name}")
+            }
             Self::Net => "net".to_string(),
             Self::FsRead => "fs.read".to_string(),
             Self::FsWrite => "fs.write".to_string(),
@@ -519,6 +525,19 @@ impl Capability {
             Self::Secrets(name) => format!("secrets.{name}"),
         }
     }
+}
+
+fn validate_named_capability(name: &str, token: &str, label: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(format!("{label} name length must be 1..=64: `{token}`"));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(format!("{label} name must match [a-z0-9_]: `{token}`"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -538,6 +557,7 @@ pub struct SkillManifest {
     pub runtime_action: Option<String>,
     pub runtime_default_args: Option<JsonValue>,
     pub runtime_rewrite_arg_keys: Vec<String>,
+    pub argument_aliases: BTreeMap<String, Vec<String>>,
     pub risk_level: Option<SkillRiskLevel>,
     pub auto_invocable: Option<bool>,
     pub requires_confirmation: Option<bool>,
@@ -601,6 +621,10 @@ pub struct SkillRegistryEntry {
     pub output_kind: OutputKind,
     #[serde(default)]
     pub description: Option<String>,
+    /// Operator-facing Simplified Chinese copy. This is display metadata only;
+    /// the canonical planner description remains `description`.
+    #[serde(default)]
+    pub description_zh: Option<String>,
     /// Planner-facing semantic tags, for example `sqlite_table_listing`,
     /// `archive_unpack`, or `service_status`. These are descriptive routing
     /// hints, not permissions.
@@ -629,6 +653,10 @@ pub struct SkillRegistryEntry {
     pub runtime_default_args: Option<TomlValue>,
     #[serde(default)]
     pub runtime_rewrite_arg_keys: Vec<String>,
+    /// Machine-declared compatibility aliases keyed by canonical argument.
+    /// Runtime applies these generically; aliases never depend on user language.
+    #[serde(default)]
+    pub argument_aliases: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub risk_level: Option<SkillRiskLevel>,
     #[serde(default)]
@@ -808,6 +836,29 @@ fn normalize_schema_tokens(values: &[String]) -> Vec<String> {
     out
 }
 
+fn normalize_argument_aliases(
+    values: &BTreeMap<String, Vec<String>>,
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let mut normalized = BTreeMap::new();
+    let mut claimed_aliases = std::collections::BTreeSet::new();
+    for (canonical, aliases) in values {
+        let canonical = normalize_schema_token(canonical);
+        if canonical.is_empty() {
+            return Err("argument alias canonical field is empty".to_string());
+        }
+        let aliases = normalize_schema_tokens(aliases);
+        for alias in &aliases {
+            if alias == &canonical || !claimed_aliases.insert(alias.clone()) {
+                return Err(format!(
+                    "argument alias `{alias}` is duplicated or equals `{canonical}`"
+                ));
+            }
+        }
+        normalized.insert(canonical, aliases);
+    }
+    Ok(normalized)
+}
+
 fn normalize_action_tokens(values: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for value in values {
@@ -852,6 +903,7 @@ fn normalize_planner_capabilities(
             dedup_fields: normalize_schema_tokens(&mapping.dedup_fields),
             idempotent: mapping.idempotent,
             execution_mode: mapping.execution_mode,
+            timeout_seconds: mapping.timeout_seconds,
             async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
                 .map(|value| normalize_schema_token(&value)),
             isolation_profile: mapping
@@ -922,6 +974,7 @@ fn planner_capability_policy_equivalent(
         && alias.dedup_fields == target.dedup_fields
         && alias.idempotent == target.idempotent
         && alias.execution_mode == target.execution_mode
+        && alias.timeout_seconds == target.timeout_seconds
         && alias.async_adapter_kind == target.async_adapter_kind
         && alias.isolation_profile == target.isolation_profile
         && alias.network_access == target.network_access
@@ -1036,6 +1089,17 @@ fn validate_planner_capability_schemas(
 ) -> Result<(), String> {
     let input_schema = entry.input_schema.as_ref().and_then(toml_value_to_json);
     for mapping in &entry.planner_capabilities {
+        if mapping
+            .timeout_seconds
+            .is_some_and(|timeout| !(1..=86_400).contains(&timeout))
+        {
+            return Err(format!(
+                "planner capability timeout must be within 1..=86400 seconds for skill `{}` capability `{}` in {}",
+                entry.name,
+                mapping.name,
+                path.display()
+            ));
+        }
         planner_capability_argument_schema(input_schema.as_ref(), mapping)
             .map_err(|error| format!("{error} for skill `{}` in {}", entry.name, path.display()))?;
     }
@@ -1341,6 +1405,16 @@ impl SkillsRegistry {
         Self::load_from_str_with_source(&content, path)
     }
 
+    /// Load the immutable bundled registry plus one host-managed overlay
+    /// fragment per external skill. Overlay fragments may add external/runner
+    /// entries, but cannot replace a bundled name, alias, or builtin.
+    pub fn load_from_base_and_overlay(
+        base_path: &Path,
+        overlay_dir: Option<&Path>,
+    ) -> Result<Self, String> {
+        overlay::load(base_path, overlay_dir)
+    }
+
     /// Load a registry from TOML text for bundled config, tests, or embedded config.
     pub fn load_from_str(content: &str) -> Result<Self, String> {
         Self::load_from_str_with_source(content, Path::new("<inline>"))
@@ -1378,6 +1452,13 @@ impl SkillsRegistry {
                 .map(|value| normalize_planner_capability_name(&value));
             entry.runtime_rewrite_arg_keys =
                 normalize_schema_tokens(&entry.runtime_rewrite_arg_keys);
+            entry.argument_aliases =
+                normalize_argument_aliases(&entry.argument_aliases).map_err(|error| {
+                    format!(
+                        "invalid argument aliases for skill `{canonical}` in {}: {error}",
+                        path.display()
+                    )
+                })?;
             entry.confirmation_exempt_when =
                 normalize_confirmation_exempt_when(&entry.confirmation_exempt_when);
             entry.package_manifest = normalize_package_manifest_path(
@@ -1512,6 +1593,19 @@ impl SkillsRegistry {
         names
     }
 
+    /// Registry-owned Skill Store membership. No caller should maintain a
+    /// second list of on-demand package names.
+    pub fn on_demand_names(&self) -> Vec<String> {
+        let mut names = self
+            .by_name
+            .iter()
+            .filter(|(_, entry)| entry.install_mode.as_deref() == Some("on_demand"))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        names
+    }
+
     pub fn is_fixed_on(&self, canonical_name: &str) -> bool {
         self.get(canonical_name).is_some_and(|entry| entry.fixed_on)
     }
@@ -1590,6 +1684,10 @@ impl SkillsRegistry {
         self.get(canonical_name)?.package_manifest.as_deref()
     }
 
+    pub fn argument_aliases(&self, canonical_name: &str) -> Option<&BTreeMap<String, Vec<String>>> {
+        Some(&self.get(canonical_name)?.argument_aliases)
+    }
+
     pub fn manifest(&self, canonical_name: &str) -> Option<SkillManifest> {
         let entry = self.get(canonical_name)?;
         let timeout_seconds = (entry.timeout_seconds > 0).then_some(entry.timeout_seconds);
@@ -1612,6 +1710,7 @@ impl SkillsRegistry {
                 .as_ref()
                 .and_then(toml_value_to_json),
             runtime_rewrite_arg_keys: entry.runtime_rewrite_arg_keys.clone(),
+            argument_aliases: entry.argument_aliases.clone(),
             risk_level: entry.risk_level,
             auto_invocable: entry.auto_invocable,
             requires_confirmation: entry.requires_confirmation,
@@ -1836,6 +1935,18 @@ impl SkillsRegistry {
                 }
             }
 
+            for capability in caps {
+                let Capability::LlmCredentialFallback(secret_name) = capability else {
+                    continue;
+                };
+                if !has(&Capability::Llm) || !has(&Capability::Secrets(secret_name.clone())) {
+                    violations.push(format!(
+                        "skill `{name}` declares `{}` without matching `llm` and `secrets.{secret_name}`",
+                        capability.as_token()
+                    ));
+                }
+            }
+
             let has_write_or_exec =
                 has(&Capability::FsWrite) || has(&Capability::Exec) || has(&Capability::ExecSudo);
             if has_write_or_exec && entry.side_effect == Some(false) {
@@ -1854,72 +1965,11 @@ fn to_canonical_key(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
-pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
-    "run_cmd",
-    "code_index",
-    "fs_basic",
-    "config_basic",
-    "read_file",
-    "write_file",
-    "list_dir",
-    "make_dir",
-    "remove_file",
-    "schedule",
-];
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct RegistryIntegrityReport {
-    pub missing: Vec<String>,
-    pub wrong_kind: Vec<String>,
-}
-
-impl RegistryIntegrityReport {
-    pub fn is_clean(&self) -> bool {
-        self.missing.is_empty() && self.wrong_kind.is_empty()
-    }
-
-    pub fn into_human_message(self) -> Option<String> {
-        if self.is_clean() {
-            return None;
-        }
-        let mut parts: Vec<String> = Vec::new();
-        if !self.missing.is_empty() {
-            parts.push(format!("missing builtins: {}", self.missing.join(", ")));
-        }
-        if !self.wrong_kind.is_empty() {
-            parts.push(format!(
-                "builtins with wrong kind (expected kind=builtin): {}",
-                self.wrong_kind.join(", ")
-            ));
-        }
-        Some(parts.join("; "))
-    }
-}
-
-impl SkillsRegistry {
-    /// Validate required built-in registry entries and their kinds.
-    ///
-    /// 这是 §P4.1 alias 收敛子项的"启动期 + CI 双保险"基础：
-    /// - clawd 启动时调一次，发现漂移直接 bail；
-    /// - `tests/config_templates.rs` 在 CI 跑同一套校验，避免 dev 漏跑。
-    pub fn integrity_report(&self) -> RegistryIntegrityReport {
-        let mut missing: Vec<String> = Vec::new();
-        let mut wrong_kind: Vec<String> = Vec::new();
-        for name in REQUIRED_BUILTIN_SKILLS {
-            match self.get(name) {
-                None => missing.push((*name).to_string()),
-                Some(entry) if entry.kind != SkillKind::Builtin => {
-                    wrong_kind.push((*name).to_string());
-                }
-                Some(_) => {}
-            }
-        }
-        RegistryIntegrityReport {
-            missing,
-            wrong_kind,
-        }
-    }
-}
+#[path = "skill_registry_host_tools.rs"]
+mod skill_registry_host_tools;
+pub use skill_registry_host_tools::{
+    HostToolDescriptor, RegistryIntegrityReport, HOST_TOOL_DESCRIPTORS,
+};
 
 #[cfg(test)]
 #[path = "skill_registry_tests.rs"]

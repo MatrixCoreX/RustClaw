@@ -4,12 +4,12 @@
 set -euo pipefail
 
 PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="${HOME}/.config/rustclaw-small-screen"
+STATE_DIR="${APP_CONFIG_HOME:-${HOME}/.config/agent-small-screen}"
 STATE_FILE="${STATE_DIR}/active-pi-app-dir"
 BIN_DIR="${HOME}/.local/bin"
-WRAPPER="${BIN_DIR}/rustclaw-small-screen-launcher"
+WRAPPER="${BIN_DIR}/agent-small-screen-launcher"
 ICON_DIR="${HOME}/.local/share/icons"
-ICON_LINK="${ICON_DIR}/rustclaw-small-screen.png"
+ICON_LINK="${ICON_DIR}/agent-small-screen.png"
 
 mkdir -p "$STATE_DIR" "$BIN_DIR" "$ICON_DIR"
 printf '%s\n' "$PI_APP_DIR" > "$STATE_FILE"
@@ -18,15 +18,15 @@ cat > "$WRAPPER" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_FILE="${HOME}/.config/rustclaw-small-screen/active-pi-app-dir"
+STATE_FILE="${APP_CONFIG_HOME:-${HOME}/.config/agent-small-screen}/active-pi-app-dir"
 if [[ ! -f "$STATE_FILE" ]]; then
-  echo "未找到 RustClaw 小屏目录配置: $STATE_FILE" >&2
+  echo "未找到 Agent 小屏目录配置: $STATE_FILE" >&2
   exit 1
 fi
 
 PI_APP_DIR="$(tr -d '\r' < "$STATE_FILE" | head -n 1)"
 if [[ -z "${PI_APP_DIR}" ]]; then
-  echo "RustClaw 小屏目录配置为空: $STATE_FILE" >&2
+  echo "Agent 小屏目录配置为空: $STATE_FILE" >&2
   exit 1
 fi
 

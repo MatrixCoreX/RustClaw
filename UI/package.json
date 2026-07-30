@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js --port=3000 --host=0.0.0.0",
     "build": "node ./node_modules/vite/bin/vite.js build",
+    "test": "node --import tsx --import ./test/product-identity-setup.ts --test src/lib/*.test.ts src/lib/*.test.tsx src/hooks/*.test.ts",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
     "clean": "rm -rf dist",
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit"

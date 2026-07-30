@@ -1,4 +1,4 @@
-# RustClaw Skill Development Rules / RustClaw 技能开发规则
+# Agent Runtime Skill Development Rules / Agent Runtime 技能开发规则
 
 本文件给所有参与本仓库的 agent 使用。目标是统一技能接入、宿主准入、授权、热更新和卸载流程；编译/协议通过只证明产物可被准入，不等同于已经获得运行权限或自动启用。
 This file is for all agents working in this repository. The goal is to standardize skill integration, host admission, authorization, hot reload, and removal. A successful build/protocol smoke proves only that an artifact is admissible; it does not grant runtime permissions or enable the skill automatically.
@@ -9,7 +9,7 @@ This file is for all agents working in this repository. The goal is to standardi
 - 主要用户是“不懂技术的普通小白”。
   The primary user is a non-technical beginner.
 - 他们希望通过可视化界面完成部署后的日常使用、状态查看、渠道接入和基础排障，而不是阅读日志、编辑配置文件或依赖命令行。
-  They want to operate RustClaw through a visual console for daily use, status checks, channel setup, and basic troubleshooting instead of reading logs, editing config files, or using the command line.
+  They want to operate Agent Runtime through a visual console for daily use, status checks, channel setup, and basic troubleshooting instead of reading logs, editing config files, or using the command line.
 - UI 应优先降低理解门槛，让用户先建立“我看得懂、我敢点、我不会弄坏”的信心。
   The UI should reduce cognitive load first and build the feeling of “I understand this, I can click this, and I probably will not break it.”
 
@@ -20,6 +20,19 @@ This file is for all agents working in this repository. The goal is to standardi
   The product voice should feel steady, direct, and friendly without showing off technical complexity or creating intimidation.
 - 即使底层是 agent runtime / multi-channel / task orchestration，前端表达也应尽量像“清晰的控制面板”，而不是“工程师调试工具”。
   Even though the backend is an agent runtime with multi-channel orchestration, the frontend should feel like a clear control console rather than an engineer-only debugging tool.
+
+### Product Identity and Rename Safety / 产品身份与可改名性
+
+- 生产代码和测试代码不得把任何具体品牌名当作程序身份写死在 UI 文案、API header、环境变量、服务/组件/可执行文件名、数据目录、持久化 key、变量、函数、模块或脚本文件名中。品牌值只允许出现在 product identity TOML；代码只读取 `ProductIdentity` 的展示/发行字段，运行时合同始终使用中性规范名。
+  Production and test code must not hardcode any concrete brand as program identity in UI copy, API headers, environment variables, service/component/executable names, data paths, persisted keys, variables, functions, modules, or script filenames. Brand values may appear only in product-identity TOML files; code reads display/release fields from `ProductIdentity`, while runtime contracts always use neutral canonical names.
+- 当前测试环境采用直接中性切换，不保留旧品牌 header、环境变量、命令、协议、数据路径或 launcher 兼容分支。改名只能改变展示和发行品牌，不得改变认证、API、数据库、会话、任务、权限、技能、工具、服务组件、数据目录或浏览器持久化键。
+  This test environment uses a direct neutral cutover and keeps no legacy brand header, environment, command, protocol, data-path, or launcher compatibility branches. Renaming may change display and release branding only; it must not change authentication, APIs, databases, conversations, tasks, permissions, skills, tools, service components, data directories, or browser persistence keys.
+- 修改命名、安装、部署、认证、内部 API 或持久化代码时，必须运行产品名耦合 inventory/ratchet；不得增加未经批准的产品名 literal。产品改名不得要求修改普通业务技能源码。
+  Changes to naming, installation, deployment, authentication, internal APIs, or persistence must run the product-name coupling inventory/ratchet and must not add unapproved product-name literals. Renaming the product must not require changes to ordinary skill source code.
+- 产品身份的唯一配置入口是 `configs/product_identity.toml`；Rust runtime、shell、安装/发布脚本和 UI 构建必须读取同一 schema。新增品牌字段或品牌表现时先扩展该配置和跨品牌测试，不得在业务代码增加第二套默认值。每次相关修改运行 `python3 scripts/check_product_identity_coupling.py --self-test && python3 scripts/check_product_identity_coupling.py` 以及 `bash scripts/product_identity_tests.sh --with-ui`。
+  `configs/product_identity.toml` is the sole product-identity configuration entry point; the Rust runtime, shell, install/release scripts, and UI build must consume the same schema. Extend that configuration and its cross-brand tests before adding any brand surface, and never add a second business-code default. Run the product-identity coupling self-test/inventory and the two-brand UI test after related changes.
+- 品牌值只能出现在 product identity TOML 配置（包括同 schema 测试 fixture）中；`APP_PRODUCT_IDENTITY_CONFIG` 只选择配置文件。生产代码、测试代码、环境变量和 `VITE_APP_*` 不得定义或覆盖显示名、app id、服务名、数据命名空间或横幅；它们只能投影所选配置。配置缺失、schema 不支持或必填字段非法时必须明确失败，不能回退到代码内第二套品牌。
+  Brand values may appear only in product-identity TOML configuration files, including same-schema test fixtures; `APP_PRODUCT_IDENTITY_CONFIG` selects the file only. Production/test code, environment variables, and `VITE_APP_*` must not define or override the display name, app id, service name, data namespace, or banner; they may only project the selected configuration. Missing configuration, unsupported schema, or invalid required fields must fail explicitly instead of falling back to a second code-defined brand.
 
 ### Aesthetic Direction
 - 采用双主题。
@@ -40,8 +53,8 @@ This file is for all agents working in this repository. The goal is to standardi
   Organize around user tasks, not implementation details: structure pages around “I want to log in,” “I want to bind a channel,” and “I want to check service health,” not backend module names.
 - 渐进披露复杂度：默认只展示最必要的信息，把日志、原始 JSON、底层细节放在第二层。
   Use progressive disclosure: show only the most necessary information by default, with logs, raw JSON, and low-level details in secondary layers.
-- 任何新增 UI 改动都要自查：一个从未接触过 RustClaw 的普通用户，第一次打开时能否理解这个页面在做什么、能做什么、下一步该做什么。
-  Every new UI change should be checked against this question: can a first-time, non-technical RustClaw user understand what this page does, what it is for, and what to do next?
+- 任何新增 UI 改动都要自查：一个从未接触过 Agent Runtime 的普通用户，第一次打开时能否理解这个页面在做什么、能做什么、下一步该做什么。
+  Every new UI change should be checked against this question: can a first-time, non-technical Agent Runtime user understand what this page does, what it is for, and what to do next?
 
 ## 1) Communication Flow / 通讯链路（技能、路由、主程序）
 
@@ -216,8 +229,8 @@ The runtime source of truth is the merge of the read-only base registry/prompts 
 PR 合并前至少满足：
 Before merge, at least the following must pass:
 
-1. 运行 `rustclaw-skill validate`、对应 adapter 的 build/protocol smoke；仓库 core/bundled Cargo 再运行相应 workspace check，external Cargo 只检查其 standalone workspace，不得为了检查 external 重新编译或修改 `clawd`。
-   Run `rustclaw-skill validate` plus the selected adapter's build/protocol smoke. Repository core/bundled Cargo skills also run the relevant workspace check; external Cargo is checked only in its standalone workspace and must not modify or rebuild `clawd` for admission.
+1. 运行中性规范入口 `skillctl validate`、对应 adapter 的 build/protocol smoke；不得新增品牌 launcher。仓库 core/bundled Cargo 再运行相应 workspace check，external Cargo 只检查其 standalone workspace，不得为了检查 external 重新编译或修改 `clawd`。
+   Run the neutral canonical entry point `skillctl validate` plus the selected adapter's build/protocol smoke; do not add brand launchers. Repository core/bundled Cargo skills also run the relevant workspace check; external Cargo is checked only in its standalone workspace and must not modify or rebuild `clawd` for admission.
 2. 若改了 UI：在 `UI/` 下执行 `npm run lint && npm run build`
    If UI changed: run `npm run lint && npm run build` under `UI/`
 3. 能通过 `run_skill` 路径打通（最少一次 happy path）

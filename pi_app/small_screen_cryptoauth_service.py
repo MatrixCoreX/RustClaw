@@ -38,7 +38,7 @@ def _cryptoauthlib_root():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = _existing_dirs(
         [
-            os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_ROOT"),
+            os.environ.get("APP_CRYPTOAUTHLIB_ROOT"),
             os.path.join(_pi_app_dir(), "vendor", "cryptoauthlib"),
             os.path.join(script_dir, "vendor", "cryptoauthlib"),
             os.path.join(script_dir, "..", "..", "cryptoauthlib"),
@@ -54,7 +54,7 @@ def _cryptoauthlib_lib_dirs(root_dir):
         return []
     return _existing_dirs(
         [
-            os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_LIB_DIR"),
+            os.environ.get("APP_CRYPTOAUTHLIB_LIB_DIR"),
             os.path.join(root_dir, "build-pyfix"),
             os.path.join(root_dir, "build-pyfix", "lib"),
             os.path.join(root_dir, "build", "lib"),
@@ -76,7 +76,7 @@ def _cryptoauthlib_pythonpath_entries(root_dir):
 def _cryptoauthlib_python_candidates(root_dir):
     candidates = _existing_files(
         [
-            os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_PYTHON"),
+            os.environ.get("APP_CRYPTOAUTHLIB_PYTHON"),
             os.path.join(root_dir, "python", ".venv", "bin", "python") if root_dir else None,
             os.path.join(root_dir, "python", "venv", "bin", "python") if root_dir else None,
         ]
@@ -105,7 +105,7 @@ def _run_signature_helper(args):
     if not python_exec:
         return None, "cryptoauthlib python not found"
     env = os.environ.copy()
-    env["RUSTCLAW_CRYPTOAUTHLIB_ROOT"] = root_dir
+    env["APP_CRYPTOAUTHLIB_ROOT"] = root_dir
     lib_dirs = _cryptoauthlib_lib_dirs(root_dir)
     if lib_dirs:
         env["LD_LIBRARY_PATH"] = ":".join(lib_dirs + [env.get("LD_LIBRARY_PATH", "")]).rstrip(":")

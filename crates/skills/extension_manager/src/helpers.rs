@@ -4,11 +4,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustclaw_skill_sdk::{
-    InstallOutcome, InstallReceiptStore, InstallRequest, PackageManifest, SkillInstaller,
-    SkillRuntimeResolver,
-};
 use serde_json::{json, Map, Value};
+use skill_sdk::{InstallRequest, PackageManifest, SkillInstaller};
 
 use super::{
     CommandRunRecord, ExternalSkillEnableReport, ExternalSkillImplementation,
@@ -53,7 +50,7 @@ pub(crate) fn write_external_skill_implementation(
     let interface_path = skill_dir.join("INTERFACE.md");
     let source_path = skill_dir.join(source_entrypoint);
 
-    ensure_sdk_scaffold_file(&readme_path, "rustclaw-skill validate")?;
+    ensure_sdk_scaffold_file(&readme_path, "skillctl validate")?;
     ensure_sdk_scaffold_file(&interface_path, "## Error Contract")?;
     ensure_sdk_scaffold_file(&source_path, scaffold_marker)?;
 
@@ -79,7 +76,7 @@ pub(crate) fn write_external_skill_implementation(
 pub(crate) fn implementation_source_target(
     manifest: &PackageManifest,
 ) -> Result<(&'static str, &'static str), String> {
-    use rustclaw_skill_sdk::BuildAdapter;
+    use skill_sdk::BuildAdapter;
     match manifest.build.adapter {
         BuildAdapter::Cargo => Ok(("src/main.rs", "fn respond(request: Request)")),
         BuildAdapter::Python => Ok(("src/main.py", "def respond(request: dict)")),
@@ -181,137 +178,113 @@ pub(crate) fn validate_external_skill(
     validation_result
 }
 
-pub(crate) fn register_external_skill(
+pub(crate) async fn register_external_skill(
     repo_root: &Path,
     skill_name: &str,
 ) -> Result<ExternalSkillRegistrationReport, String> {
-    let registry_path = repo_root.join("configs/skills_registry.toml");
-    let config_path = repo_root.join("configs/config.toml");
-    let manifest_relative = format!("external_skills/{skill_name}/skill.toml");
-    PackageManifest::load(&repo_root.join(&manifest_relative))
-        .map_err(|error| format!("external skill manifest invalid: {error}"))?;
-    SkillRuntimeResolver::new(external_package_root(repo_root))
-        .resolve(skill_name)
-        .map_err(|error| format!("external skill verified install missing: {error}"))?;
-    let registry_raw = fs::read_to_string(&registry_path)
-        .map_err(|err| format!("read skills_registry.toml failed: {err}"))?;
-    let (registry_updated, registry_entry_added) =
-        add_registry_entry_text(&registry_raw, skill_name, &manifest_relative);
-
-    let config_raw = fs::read_to_string(&config_path)
-        .map_err(|err| format!("read config.toml failed: {err}"))?;
-    let mut switches = collect_skill_switches_from_text(&config_raw);
-    let (config_updated, switch_recorded_enabled) = match switches.get(skill_name).copied() {
-        Some(true) => (config_raw.clone(), false),
-        _ => {
-            switches.insert(skill_name.to_string(), true);
-            let rendered = render_switches_inline_table(&switches);
-            (upsert_skill_switches_line(&config_raw, &rendered), true)
-        }
-    };
-
-    if registry_entry_added {
-        if let Err(err) = fs::write(&registry_path, &registry_updated) {
-            return Err(format!("write skills_registry.toml failed: {err}"));
-        }
-    }
-
-    if switch_recorded_enabled {
-        if let Err(err) = fs::write(&config_path, &config_updated) {
-            if registry_entry_added {
-                let _ = fs::write(&registry_path, &registry_raw);
-            }
-            return Err(format!(
-                "write config.toml failed: {err}; rolled back prior registry metadata changes"
-            ));
-        }
-    }
-
-    Ok(ExternalSkillRegistrationReport {
-        registry_entry_added,
-        switch_recorded_enabled,
-        package_manifest: manifest_relative,
-        matrix_admission_eligible: false,
-    })
+    admit_external_skill(repo_root, skill_name).await
 }
 
-pub(crate) fn external_package_root(repo_root: &Path) -> PathBuf {
-    repo_root.join("data/skill-packages")
-}
-
-pub(crate) fn install_external_skill(
-    repo_root: &Path,
-    skill_name: &str,
-) -> Result<InstallOutcome, String> {
-    SkillInstaller
-        .install(&InstallRequest {
-            manifest_path: repo_root
-                .join("external_skills")
-                .join(skill_name)
-                .join("skill.toml"),
-            workspace_root: repo_root.to_path_buf(),
-            package_root: external_package_root(repo_root),
-            target: None,
-            allow_network: false,
-            control: None,
-        })
-        .map_err(|error| {
-            format!(
-                "external skill install failed: phase={:?} code={} detail={}",
-                error.phase, error.code, error.detail
-            )
-        })
-}
-
-pub(crate) fn enable_external_skill(
+pub(crate) async fn enable_external_skill(
     repo_root: &Path,
     skill_name: &str,
 ) -> Result<ExternalSkillEnableReport, String> {
-    let config_path = repo_root.join("configs/config.toml");
-    let config_raw = fs::read_to_string(&config_path)
-        .map_err(|err| format!("read config.toml failed: {err}"))?;
-    let mut switches = collect_skill_switches_from_text(&config_raw);
-    let (config_updated, switch_enabled) = match switches.get(skill_name).copied() {
-        Some(true) => (config_raw.clone(), false),
-        _ => {
-            switches.insert(skill_name.to_string(), true);
-            let rendered = render_switches_inline_table(&switches);
-            (upsert_skill_switches_line(&config_raw, &rendered), true)
-        }
-    };
+    let admission = admit_external_skill(repo_root, skill_name).await?;
+    Ok(ExternalSkillEnableReport { admission })
+}
 
-    let had_verified_install = SkillRuntimeResolver::new(external_package_root(repo_root))
-        .resolve(skill_name)
-        .is_ok();
-    let install = install_external_skill(repo_root, skill_name)?;
-
-    if switch_enabled {
-        if let Err(err) = fs::write(&config_path, &config_updated) {
-            restore_external_install(repo_root, skill_name, had_verified_install);
-            return Err(format!(
-                "write config.toml failed: {err}; rolled back installed package and left the skill disabled"
-            ));
-        }
+async fn admit_external_skill(
+    repo_root: &Path,
+    skill_name: &str,
+) -> Result<ExternalSkillRegistrationReport, String> {
+    let source = repo_root.join("external_skills").join(skill_name);
+    let manifest = PackageManifest::load(&source.join("skill.toml"))
+        .map_err(|error| format!("external skill manifest invalid: {error}"))?;
+    if manifest.package.name != skill_name || manifest.registry.name != skill_name {
+        return Err(format!(
+            "external skill identity mismatch: directory={skill_name} package={} registry={}",
+            manifest.package.name, manifest.registry.name
+        ));
     }
-
-    Ok(ExternalSkillEnableReport {
-        switch_enabled,
-        install_ok: true,
-        adapter: install.adapter.as_token().to_string(),
-        installed_version: install.version,
-        receipt_digest: install.receipt_digest,
-        install_root: path_string(&install.install_root),
-        reload_required: true,
+    let url = env::var("AGENT_INTERNAL_ADMISSION_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "internal skill admission URL is unavailable".to_string())?;
+    let token = env::var("AGENT_INTERNAL_ADMISSION_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "internal skill admission token is unavailable".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            extension_manager_admission_timeout_seconds(),
+        ))
+        .build()
+        .map_err(|error| format!("build skill admission client failed: {error}"))?;
+    let response = client
+        .post(url)
+        .header("x-agent-internal-skill-token", token)
+        .json(&json!({
+            "source": source.to_string_lossy(),
+            "enabled": true,
+            "allow_network": false,
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("skill admission request failed: {error}"))?;
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("parse skill admission response failed: {error}"))?;
+    if !status.is_success() || payload.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(format!(
+            "skill admission rejected: status={status} error={}",
+            payload
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ));
+    }
+    let data = payload
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "skill admission response is missing data".to_string())?;
+    Ok(ExternalSkillRegistrationReport {
+        registry_generation: data
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "skill admission response is missing registry_generation".to_string())?,
+        registry_generation_digest: data
+            .get("registry_generation_digest")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        build_adapter: data
+            .get("build_adapter")
+            .and_then(Value::as_str)
+            .unwrap_or(manifest.build.adapter.as_token())
+            .to_string(),
+        installed_version: data
+            .get("package_version")
+            .and_then(Value::as_str)
+            .unwrap_or(&manifest.package.version)
+            .to_string(),
+        receipt_digest: data
+            .get("receipt_digest")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        enabled: data.get("enabled").and_then(Value::as_bool) == Some(true),
     })
 }
 
-fn restore_external_install(repo_root: &Path, skill_name: &str, had_verified_install: bool) {
-    let store = InstallReceiptStore::new(external_package_root(repo_root));
-    if had_verified_install {
-        let _ = store.rollback(skill_name);
-    } else {
-        let _ = store.remove_installed_versions(skill_name);
-    }
+fn extension_manager_admission_timeout_seconds() -> u64 {
+    env::var("EXTENSION_MANAGER_ADMISSION_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(900)
 }
 
 pub(crate) fn prepare_validation_staging_dir(skill_name: &str) -> Result<PathBuf, String> {
@@ -406,164 +379,6 @@ pub(crate) fn best_process_output(output: &ProcessCapture) -> String {
     }
 }
 
-pub(crate) fn conservative_registry_entry_text(skill_name: &str, package_manifest: &str) -> String {
-    format!(
-        r#"
-[[skills]]
-name = "{skill_name}"
-enabled = false
-kind = "external"
-planner_kind = "skill"
-install_mode = "on_demand"
-package_manifest = "{package_manifest}"
-aliases = []
-description = "External skill {skill_name}; see its INTERFACE.md for the capability contract."
-semantic_tags = []
-preferred_over_run_cmd = false
-validation_actions = []
-timeout_seconds = 30
-prompt_file = "prompts/skills/{skill_name}.md"
-output_kind = "text"
-risk_level = "high"
-auto_invocable = false
-requires_confirmation = true
-side_effect = true
-retryable = false
-matrix_admission = {{ eligible = false, declared_actions = [], evidence_sources = [], required_extra_fields = [], extractor_kind = "structured_json", admission_version = "external-v1" }}
-"#
-    )
-}
-
-pub(crate) fn add_registry_entry_text(
-    raw: &str,
-    skill_name: &str,
-    package_manifest: &str,
-) -> (String, bool) {
-    if raw.contains(&format!("name = \"{skill_name}\"")) {
-        return (raw.to_string(), false);
-    }
-    let mut updated = raw.trim_end().to_string();
-    updated.push_str(&conservative_registry_entry_text(
-        skill_name,
-        package_manifest,
-    ));
-    updated.push('\n');
-    (updated, true)
-}
-
-pub(crate) fn collect_skill_switches_from_text(
-    raw: &str,
-) -> std::collections::BTreeMap<String, bool> {
-    let mut in_skills = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[skills]" {
-            in_skills = true;
-            continue;
-        }
-        if in_skills && trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed != "[skills]"
-        {
-            break;
-        }
-        if in_skills
-            && trimmed.starts_with("skill_switches")
-            && trimmed.contains('{')
-            && trimmed.contains('}')
-        {
-            let body = trimmed
-                .split_once('{')
-                .and_then(|(_, rest)| rest.rsplit_once('}').map(|(inner, _)| inner))
-                .unwrap_or("");
-            let mut out = std::collections::BTreeMap::new();
-            for pair in body.split(',') {
-                let pair = pair.trim();
-                if pair.is_empty() {
-                    continue;
-                }
-                let Some((key, value)) = pair.split_once('=') else {
-                    continue;
-                };
-                let key = key.trim().to_string();
-                match value.trim() {
-                    "true" => {
-                        out.insert(key, true);
-                    }
-                    "false" => {
-                        out.insert(key, false);
-                    }
-                    _ => {}
-                }
-            }
-            return out;
-        }
-    }
-    std::collections::BTreeMap::new()
-}
-
-pub(crate) fn render_switches_inline_table(
-    switches: &std::collections::BTreeMap<String, bool>,
-) -> String {
-    if switches.is_empty() {
-        return "skill_switches = {}".to_string();
-    }
-    let pairs = switches
-        .iter()
-        .map(|(k, v)| format!("{k} = {v}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("skill_switches = {{ {pairs} }}")
-}
-
-pub(crate) fn upsert_skill_switches_line(raw: &str, rendered_line: &str) -> String {
-    let mut lines: Vec<String> = raw.lines().map(|s| s.to_string()).collect();
-    let mut in_skills = false;
-    let mut inserted_or_replaced = false;
-    let mut skills_section_seen = false;
-    let mut insert_index_in_skills: Option<usize> = None;
-    let mut skills_section_end: Option<usize> = None;
-
-    for idx in 0..lines.len() {
-        let trimmed = lines[idx].trim();
-        if trimmed == "[skills]" {
-            in_skills = true;
-            skills_section_seen = true;
-            insert_index_in_skills = Some(idx + 1);
-            continue;
-        }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed != "[skills]" {
-            if in_skills {
-                skills_section_end = Some(idx);
-                break;
-            }
-            continue;
-        }
-        if in_skills && trimmed.starts_with("skill_switches") && trimmed.contains('=') {
-            lines[idx] = rendered_line.to_string();
-            inserted_or_replaced = true;
-            break;
-        }
-        if in_skills && insert_index_in_skills.is_none() && !trimmed.is_empty() {
-            insert_index_in_skills = Some(idx);
-        }
-        if in_skills && trimmed.starts_with("skills_list") && insert_index_in_skills.is_none() {
-            insert_index_in_skills = Some(idx);
-        }
-    }
-
-    if !inserted_or_replaced && skills_section_seen {
-        let idx = insert_index_in_skills
-            .or(skills_section_end)
-            .unwrap_or(lines.len());
-        lines.insert(idx, rendered_line.to_string());
-    }
-
-    let mut out = lines.join("\n");
-    if raw.ends_with('\n') {
-        out.push('\n');
-    }
-    out
-}
-
 pub(crate) fn install_plan_packages(plan: &TemporaryFixPlan) -> Result<Vec<Value>, String> {
     let mut installed = Vec::new();
     for package in &plan.packages {
@@ -637,7 +452,7 @@ pub(crate) fn scaffold_external_skill(
         .or_else(|| obj.get("build_adapter"))
         .and_then(Value::as_str)
         .unwrap_or("rust");
-    let implementation_language = rustclaw_skill_sdk::ImplementationLanguage::parse(language_token)
+    let implementation_language = skill_sdk::ImplementationLanguage::parse(language_token)
         .map_err(|error| error.to_string())?;
     let skill_dir = repo_root.join("external_skills").join(&skill_name);
     if skill_dir.exists() {
@@ -647,7 +462,7 @@ pub(crate) fn scaffold_external_skill(
         ));
     }
 
-    let scaffold = rustclaw_skill_sdk::scaffold_skill(&rustclaw_skill_sdk::ScaffoldRequest {
+    let scaffold = skill_sdk::scaffold_skill(&skill_sdk::ScaffoldRequest {
         destination: skill_dir.clone(),
         skill_name: skill_name.clone(),
         capability_summary,

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 
+COMPONENT_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$COMPONENT_COMMON_DIR/../scripts/product_identity.sh"
+
 component_start_init() {
   local root_dir="$1"
   local requested_profile="$2"
   local entrypoint="$3"
 
   COMPONENT_ROOT="$(cd "$root_dir" && pwd)"
-  COMPONENT_PROFILE="${requested_profile:-${RUSTCLAW_START_PROFILE:-release}}"
+  COMPONENT_PROFILE="${requested_profile:-${APP_START_PROFILE:-release}}"
   COMPONENT_ENTRYPOINT="$entrypoint"
 
   case "$COMPONENT_PROFILE" in
@@ -22,7 +26,7 @@ component_start_init() {
   source "$COMPONENT_ROOT/scripts/shell_compat.sh"
   # shellcheck source=/dev/null
   source "$COMPONENT_ROOT/scripts/version_info.sh"
-  print_rustclaw_version "$COMPONENT_ROOT"
+  print_app_version "$COMPONENT_ROOT"
 
   if [[ -f "$HOME/.cargo/env" ]]; then
     # shellcheck source=/dev/null
@@ -30,29 +34,29 @@ component_start_init() {
   fi
 
   local runtime_env_script
-  runtime_env_script="${RUSTCLAW_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
+  runtime_env_script="${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
   if [[ -f "$runtime_env_script" ]]; then
     # shellcheck source=/dev/null
     source "$runtime_env_script"
   fi
   configure_platform_command_path
 
-  COMPONENT_CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-$COMPONENT_ROOT/configs/config.toml}"
+  COMPONENT_CONFIG_PATH="${APP_CONFIG_PATH:-$COMPONENT_ROOT/configs/config.toml}"
   case "$COMPONENT_CONFIG_PATH" in
     /*) ;;
     *) COMPONENT_CONFIG_PATH="$COMPONENT_ROOT/$COMPONENT_CONFIG_PATH" ;;
   esac
-  export RUSTCLAW_CONFIG_PATH="$COMPONENT_CONFIG_PATH"
+  export APP_CONFIG_PATH="$COMPONENT_CONFIG_PATH"
 
-  COMPONENT_CHANNEL_CONFIG_DIR="${RUSTCLAW_CHANNEL_CONFIG_DIR:-$COMPONENT_ROOT/configs/channels}"
+  COMPONENT_CHANNEL_CONFIG_DIR="${APP_CHANNEL_CONFIG_DIR:-$COMPONENT_ROOT/configs/channels}"
   case "$COMPONENT_CHANNEL_CONFIG_DIR" in
     /*) ;;
     *) COMPONENT_CHANNEL_CONFIG_DIR="$COMPONENT_ROOT/$COMPONENT_CHANNEL_CONFIG_DIR" ;;
   esac
-  export RUSTCLAW_CHANNEL_CONFIG_DIR="$COMPONENT_CHANNEL_CONFIG_DIR"
+  export APP_CHANNEL_CONFIG_DIR="$COMPONENT_CHANNEL_CONFIG_DIR"
 
-  if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-    export RUSTCLAW_LOG_COLOR=1
+  if [[ -t 1 && -z "${APP_LOG_COLOR:-}" ]]; then
+    export APP_LOG_COLOR=1
   fi
 
   COMPONENT_PID_DIR="$COMPONENT_ROOT/.pids"
@@ -242,6 +246,26 @@ component_write_pid_file() {
   local temporary="${pid_file}.tmp.$$"
   printf '%s\n' "$pid" > "$temporary"
   mv -f "$temporary" "$pid_file"
+}
+
+component_launch_detached() {
+  local log_path="$1"
+  shift
+  if [[ "$#" -eq 0 ]]; then
+    echo "component_launch_detached requires a command." >&2
+    return 2
+  fi
+
+  # A new session keeps deployed daemons alive when a non-interactive caller
+  # exits or its process group is cleaned up. macOS does not ship `setsid`, so
+  # keep the conventional nohup fallback there.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$log_path" 2>&1 </dev/null &
+  else
+    nohup "$@" >"$log_path" 2>&1 </dev/null &
+  fi
+  COMPONENT_LAUNCHED_PID=$!
+  disown "$COMPONENT_LAUNCHED_PID" 2>/dev/null || true
 }
 
 component_exec_binary() {

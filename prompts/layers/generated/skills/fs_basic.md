@@ -57,7 +57,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `read_text_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_text_range` | `n` / `start_line` / `end_line` | no | integer | action default | Bounded line controls. |
 | `read_text_range` | `field_selector` | no | string | - | Use machine token `title` when the requested scalar is the document/markdown heading; runtime returns `field_value` when observed. |
-| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned file below `.rustclaw/artifacts`; regular workspace files are rejected. |
+| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned file below `.agent-runtime/artifacts`; regular workspace files are rejected. |
 | `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset returned by an artifact range handle or prior `page.next_cursor`. |
 | `read_artifact_range` | `max_bytes` | no | integer | `65536` | Bounded page size, clamped to `256..1048576`; binary pages return base64. |
 | `find_entries` | `root` | no | string(path) | workspace | Focused recursive search root; no implicit depth cap. |
@@ -100,7 +100,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Known explicit path content: use `read_text_range` or a known-file `grep_text`; do not launch a repository-wide path search first.
 - Symbol definitions, references, tests, and impact: prefer `code_index`. Use `grep_text` only as literal/regex fallback when parser coverage is unavailable or incomplete, and do not describe it as semantic resolution.
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
-- When the authenticated admin execution context reports unrestricted system scope, an explicit absolute `root` (including `/`) may search everything visible to the RustClaw service account. Never claim or request this scope for a non-admin task.
+- When the authenticated admin execution context reports unrestricted system scope, an explicit absolute `root` (including `/`) may search everything visible to the Agent Runtime service account. Never claim or request this scope for a non-admin task.
 - Start at the narrowest known root with an exact basename/kind when possible. If results are broad, narrow root/filter; if completeness is partial, continue or refine from machine evidence rather than claiming absence.
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
 - Directory inventory: use `list_dir`, not `grep_text`.

@@ -37,9 +37,7 @@ pub(crate) async fn list_conversation_history(
     headers: HeaderMap,
     Query(query): Query<ConversationHistoryQuery>,
 ) -> (StatusCode, Json<ApiResponse<ConversationHistoryPage>>) {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
@@ -83,9 +81,7 @@ pub(crate) async fn get_conversation_body_range(
     axum::extract::Path((task_id, field)): axum::extract::Path<(String, String)>,
     Query(query): Query<ConversationBodyQuery>,
 ) -> (StatusCode, Json<ApiResponse<ConversationBodyPage>>) {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
@@ -148,9 +144,7 @@ pub(crate) async fn update_conversation_title(
     axum::extract::Path(conversation_id): axum::extract::Path<String>,
     Json(request): Json<ConversationTitleRequest>,
 ) -> (StatusCode, Json<ApiResponse<ConversationTitleUpdate>>) {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
@@ -200,9 +194,7 @@ pub(crate) async fn archive_conversation(
     headers: HeaderMap,
     axum::extract::Path(conversation_id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<ApiResponse<ConversationArchiveUpdate>>) {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {

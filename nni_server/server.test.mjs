@@ -55,7 +55,7 @@ async function freePort() {
 }
 
 async function startServer({ publicKeyWhitelist = "", initialState = null } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), "rustclaw-nni-server-test-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "agent-runtime-nni-server-test-"));
   const statePath = path.join(dir, "state.json");
   if (initialState) {
     await writeFile(statePath, `${JSON.stringify(initialState, null, 2)}\n`, "utf8");

@@ -11,7 +11,7 @@ struct TempDir {
 impl TempDir {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_child_control_{}",
+            "agent_child_control_{}",
             uuid::Uuid::new_v4().simple()
         ));
         std::fs::create_dir_all(&path).expect("create temp directory");

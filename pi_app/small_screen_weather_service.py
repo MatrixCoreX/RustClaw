@@ -372,7 +372,7 @@ def _fetch_today_weather_wttr(lang="CN", city=""):
         base_url += urllib.parse.quote(city)
     payload = _fetch_json(
         base_url + "?" + query,
-        headers={"User-Agent": "RustClawSmallScreen/1.0", "Accept": "application/json"},
+        headers={"User-Agent": "agent-small-screen/1.0", "Accept": "application/json"},
     )
     current = ((payload or {}).get("current_condition") or [{}])[0]
     today = ((payload or {}).get("weather") or [{}])[0]

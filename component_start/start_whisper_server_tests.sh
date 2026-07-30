@@ -16,7 +16,7 @@ local_server_enabled = true
 EOF
 
 ready="$({
-  RUSTCLAW_AUDIO_CONFIG_PATH="$TMP_ROOT/local.toml" \
+  APP_AUDIO_CONFIG_PATH="$TMP_ROOT/local.toml" \
   WHISPER_SERVER_BIN="$TRUE_BIN" \
   WHISPER_MODEL_PATH="$TRUE_BIN" \
     "$SCRIPT" --check
@@ -31,14 +31,14 @@ local_server_enabled = true
 EOF
 
 skipped="$({
-  RUSTCLAW_AUDIO_CONFIG_PATH="$TMP_ROOT/remote.toml" \
+  APP_AUDIO_CONFIG_PATH="$TMP_ROOT/remote.toml" \
   WHISPER_SERVER_BIN="$FALSE_BIN" \
   WHISPER_MODEL_PATH=/definitely/missing \
     "$SCRIPT" --check
 })"
 [[ "$skipped" == *"not selected"* ]]
 
-if RUSTCLAW_AUDIO_CONFIG_PATH="$TMP_ROOT/local.toml" \
+if APP_AUDIO_CONFIG_PATH="$TMP_ROOT/local.toml" \
   WHISPER_SERVER_BIN="$TRUE_BIN" \
   WHISPER_MODEL_PATH=/definitely/missing \
   "$SCRIPT" --check >/dev/null 2>&1; then

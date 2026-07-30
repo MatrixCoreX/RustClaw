@@ -126,7 +126,7 @@ if [[ -z "$GIT_STATUS" ]]; then
 fi
 
 cat > "$PROMPT_FILE" <<EOF
-You are fixing a bug in the RustClaw repository.
+You are fixing a bug in the agent-runtime repository.
 
 Workspace: ${ROOT_DIR}
 Primary signal: log excerpt for the last ${TASKS} task(s) from ${LOG_FILE}

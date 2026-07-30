@@ -7,7 +7,7 @@
 
 - Installs or previews language dependencies without implicit host-global writes.
 - `scope=project` updates a detected project manifest/lockfile or a project-local isolated Python dependency directory.
-- `scope=tool_cache` installs a standalone tool into RustClaw's versioned `data/tool-cache/modules` tree.
+- `scope=tool_cache` installs a standalone tool into the runtime's versioned `data/tool-cache/modules` tree.
 - Preview returns exact scope, argv, working directory, target files and the confirmation requirement without creating directories or running an installer.
 
 ## Actions
@@ -30,7 +30,7 @@
 ## Scope And Platform Contract
 
 - Project Node installs use local `npm install --save`; Rust uses `cargo add`; Go uses `go get`.
-- Python uses `uv add` or `poetry add` when the corresponding lockfile exists, otherwise an isolated project `.rustclaw/dependencies/python` target.
+- Python uses `uv add` or `poetry add` when the corresponding lockfile exists, otherwise an isolated project `.agent-runtime/dependencies/python` target.
 - Tool-cache Python uses `pip --target`, Node uses `npm --prefix`, Rust uses `cargo install --root`, and Go uses a cache-specific `GOBIN`.
 - Ordinary module installation never emits Python `--user`, npm `-g`, or an unscoped Cargo/Go install. Native OS packages belong to `package_manager`.
 

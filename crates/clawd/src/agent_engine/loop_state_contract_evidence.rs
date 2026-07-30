@@ -244,7 +244,7 @@ fn default_main_config_contract_evidence_from_boundary_observation_blocks(
             .get("logical_path")
             .and_then(Value::as_str)
             .map(str::trim);
-        if contract_name == Some("rustclaw_main_config")
+        if contract_name == Some("host_main_config")
             && logical_path.is_some_and(|path| !path.is_empty())
         {
             out.push(Value::Object(contract.clone()));

@@ -1,6 +1,6 @@
 # Task Lifecycle Lease Model
 
-RustClaw uses two machine-readable lease layers for durable task execution:
+Agent Runtime uses two machine-readable lease layers for durable task execution:
 
 - task-row worker leases in SQLite, used to claim and heartbeat queued/running work;
 - checkpoint resume-executor leases in `result_json`, used to resume paused/background work without replaying completed side effects.
@@ -168,7 +168,7 @@ finalization.
 
 ## Decision
 
-Explicit task lease columns are now part of the current SQLite schema. RustClaw does not need a separate distributed worker table yet, but task claiming must use the existing row-level lease fields plus checkpoint resume leases. The current model supports:
+Explicit task lease columns are now part of the current SQLite schema. Agent Runtime does not need a separate distributed worker table yet, but task claiming must use the existing row-level lease fields plus checkpoint resume leases. The current model supports:
 
 - foreground submit-and-return flows,
 - task query lifecycle projection,
@@ -178,7 +178,7 @@ Explicit task lease columns are now part of the current SQLite schema. RustClaw 
 - direct task-id cancellation.
 - manual checkpoint pause/resume through structured task-control APIs.
 
-Future multi-host execution should build on the existing task-row lease columns. Add a dedicated worker registry only when RustClaw needs host health, queue partitioning, or cross-process lease ownership beyond `lease_owner` and `lease_expires_at`.
+Future multi-host execution should build on the existing task-row lease columns. Add a dedicated worker registry only when Agent Runtime needs host health, queue partitioning, or cross-process lease ownership beyond `lease_owner` and `lease_expires_at`.
 
 ## Required Checks
 

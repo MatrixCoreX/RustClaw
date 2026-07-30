@@ -1,17 +1,33 @@
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use claw_core::config::{ToolApprovalPolicy, ToolSandboxMode};
 use claw_core::types::AuthIdentity;
 use serde_json::{json, Value};
 
 use crate::{AppState, ClaimedTask};
 
-pub(crate) const CLIENT_ORIGIN_HEADER: &str = "x-rustclaw-client";
-pub(crate) const EXECUTION_MODE_HEADER: &str = "x-rustclaw-execution-mode";
-pub(crate) const POLICY_PAYLOAD_FIELD: &str = "_rustclaw_execution_policy";
+pub(crate) const CLIENT_ORIGIN_HEADER: &str = claw_core::product_identity::CLIENT_ORIGIN_HEADER;
+pub(crate) const EXECUTION_MODE_HEADER: &str = "x-agent-execution-mode";
+pub(crate) const POLICY_PAYLOAD_FIELD: &str = "_agent_execution_policy";
 const CLAWCLI_ORIGIN: &str = "clawcli";
 const SAFE_MODE: &str = "safe";
 const ASK_MODE: &str = "ask";
 const YOLO_MODE: &str = "yolo";
+
+pub(crate) fn client_origin_from_headers(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(CLIENT_ORIGIN_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
+pub(crate) fn execution_mode_from_headers(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(EXECUTION_MODE_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
+pub(crate) fn policy_payload(payload: &Value) -> Option<&Value> {
+    payload.get(POLICY_PAYLOAD_FIELD)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskExecutionMode {
@@ -195,7 +211,7 @@ pub(crate) fn effective_policy_for_task(
         Ok(payload) => payload,
         Err(_) => return configured(),
     };
-    let Some(policy) = payload.get(POLICY_PAYLOAD_FIELD) else {
+    let Some(policy) = policy_payload(&payload) else {
         return configured();
     };
     match policy.get("mode").and_then(Value::as_str) {
@@ -249,7 +265,7 @@ pub(crate) fn execution_policy_authorization_error(
     task: &ClaimedTask,
 ) -> Option<&'static str> {
     let payload = serde_json::from_str::<Value>(&task.payload_json).ok()?;
-    let policy = payload.get(POLICY_PAYLOAD_FIELD)?;
+    let policy = policy_payload(&payload)?;
     if matches!(
         policy.get("mode").and_then(Value::as_str),
         Some(SAFE_MODE | ASK_MODE)
@@ -311,8 +327,7 @@ pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> 
 }
 
 pub(crate) fn stamped_execution_mode(payload: &Value) -> &'static str {
-    match payload
-        .get(POLICY_PAYLOAD_FIELD)
+    match policy_payload(payload)
         .and_then(|policy| policy.get("mode"))
         .and_then(Value::as_str)
     {

@@ -2,7 +2,7 @@ locale = "zh-CN"
 
 [dict]
 "whatsapp_cloud.msg.bind_key_required_for_chat" = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。"
-"whatsapp_cloud.msg.bind_help" = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。"
+"whatsapp_cloud.msg.bind_help" = "欢迎使用 {product_name}。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。"
 "whatsapp_cloud.msg.bind_success" = "Key 绑定成功，请重新发送刚才的消息。"
 "whatsapp_cloud.msg.bind_invalid" = "Key 无效，请重新输入。"
 "whatsapp_cloud.msg.run_usage" = "用法：/run <skill_name> <args>"

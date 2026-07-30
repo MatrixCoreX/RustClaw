@@ -142,7 +142,7 @@ fn teaching_trace_layers() -> Value {
                 "calls.entry.usage",
             ],
         },
-        "rustclaw_decisions": {
+        "agent_decisions": {
             "classification": "parsed_machine_decisions",
             "fields": [
                 "calls.flow",

@@ -574,11 +574,12 @@ fn inspect_local_async_jobs(workspace_root: &Path, now_ts: u64) -> LocalAsyncJob
     const ORPHAN_GRACE_SECONDS: u64 = 300;
     const MAX_SCANNED_JOBS: usize = 10_000;
     let mut health = LocalAsyncJobHealth::default();
-    let root = workspace_root.join(".rustclaw").join("async_jobs");
-    let Ok(entries) = fs::read_dir(root) else {
-        return health;
-    };
-    for entry in entries.flatten().take(MAX_SCANNED_JOBS) {
+    let entries = claw_core::workspace_state::known_workspace_state_roots(workspace_root)
+        .into_iter()
+        .filter_map(|root| fs::read_dir(root.join("async_jobs")).ok())
+        .flat_map(|entries| entries.flatten())
+        .take(MAX_SCANNED_JOBS);
+    for entry in entries {
         let path = entry.path();
         if !path.is_dir() {
             continue;

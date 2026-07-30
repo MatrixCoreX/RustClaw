@@ -13,7 +13,7 @@ fn configured_server(server_id: &str) -> McpServerUpdate {
         transport: "stdio".to_string(),
         command: Some("/bin/echo".to_string()),
         args: vec!["fixture".to_string()],
-        env_refs: BTreeMap::from([("CHILD_TOKEN".to_string(), "RUSTCLAW_MCP_TOKEN".to_string())]),
+        env_refs: BTreeMap::from([("CHILD_TOKEN".to_string(), "APP_MCP_TOKEN".to_string())]),
         allowed_tools: vec!["lookup".to_string()],
         ..McpServerUpdate::default()
     }
@@ -44,7 +44,7 @@ fn config_update_preserves_unmanaged_fields_and_redacts_static_environment() {
         serde_json::to_string(&config_view(&parsed.mcp, false)).expect("serialize config view");
     assert!(!view.contains("must-not-reach-api"));
     assert!(!view.contains("PRIVATE_LITERAL"));
-    assert!(view.contains("RUSTCLAW_MCP_TOKEN"));
+    assert!(view.contains("APP_MCP_TOKEN"));
     assert!(view.contains("\"has_static_env\":true"));
     assert!(view.contains("\"has_advanced_policy\":true"));
 }
@@ -83,7 +83,7 @@ fn config_update_rejects_literal_secret_reference_and_duplicate_server_ids() {
 #[test]
 fn config_writer_preserves_distinct_workspace_and_mounted_content() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-mcp-config-write-{}",
+        "agent-runtime-mcp-config-write-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");

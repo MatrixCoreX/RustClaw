@@ -1,4 +1,5 @@
 import type { NniDeviceActionResponse, NniDevicePayload, NniDeviceStatusResponse } from "../types/api";
+import { productCopy } from "./product-identity";
 
 export type UiLanguage = "zh" | "en";
 
@@ -17,7 +18,7 @@ export interface NniRuntimeTile {
 export type NniSimulationControlMode = "enable" | "disable" | null;
 
 function copy(lang: UiLanguage, zh: string, en: string): string {
-  return lang === "zh" ? zh : en;
+  return productCopy(lang === "zh" ? zh : en);
 }
 
 export function shortenHex(value?: string | null, head = 16, tail = 16): string {
@@ -101,8 +102,8 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_status.helper_missing.next_step":
       return copy(
         lang,
-        "如果本设备需要 NNI 设备签名，请确认 pi_app/signature.py 已随 RustClaw 一起部署。",
-        "If this device needs NNI device signing, confirm pi_app/signature.py was deployed with RustClaw.",
+        "如果本设备需要 NNI 设备签名，请确认 pi_app/signature.py 已随 {product_name} 一起部署。",
+        "If this device needs NNI device signing, confirm pi_app/signature.py was deployed with {product_name}.",
       );
     case "nni.device_status.ready":
       return copy(lang, "已检测到芯片，NNI 设备签名可用。", "A chip was detected, and NNI device signing is available.");
@@ -117,8 +118,8 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_status.signature_chip_missing":
       return copy(
         lang,
-        "未检测到 MatrixAI 芯片。此设备仍可使用 RustClaw 的其他功能。",
-        "No MatrixAI chip was detected. This device can still use other RustClaw features.",
+        "未检测到 MatrixAI 芯片。此设备仍可使用 {product_name} 的其他功能。",
+        "No MatrixAI chip was detected. This device can still use other {product_name} features.",
       );
     case "nni.device_status.signature_chip_missing.next_step":
       return copy(
@@ -135,8 +136,8 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
     case "nni.device_action.simulation_failed":
       return copy(
         lang,
-        "无法启动模拟芯片。请确认 RustClaw 的 data 目录可写，然后重试。",
-        "The simulated chip could not start. Confirm that RustClaw can write to its data directory, then try again.",
+        "无法启动模拟芯片。请确认 {product_name} 的 data 目录可写，然后重试。",
+        "The simulated chip could not start. Confirm that {product_name} can write to its data directory, then try again.",
       );
     case "nni.device_action.simulation_not_needed":
       return copy(lang, "已检测到真实芯片，无需启用模拟。", "A real chip was detected, so simulation is not needed.");

@@ -48,7 +48,7 @@ def _existing_files(paths):
 def _cryptoauthlib_root():
     candidates = _existing_dirs(
         [
-            os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_ROOT"),
+            os.environ.get("APP_CRYPTOAUTHLIB_ROOT"),
             os.path.join(_SCRIPT_DIR, "vendor", "cryptoauthlib"),
             os.path.join(_SCRIPT_DIR, "..", "..", "cryptoauthlib"),
             "/home/pi/cryptoauthlib",
@@ -89,7 +89,7 @@ def _bootstrap_runtime_env(root_dir):
 def _maybe_reexec_with_runtime_env(root_dir):
     if __name__ != "__main__" or not root_dir:
         return
-    if os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_BOOTSTRAPPED") == "1":
+    if os.environ.get("APP_CRYPTOAUTHLIB_BOOTSTRAPPED") == "1":
         return
     lib_dirs = _cryptoauthlib_lib_dirs(root_dir)
     if not lib_dirs:
@@ -97,7 +97,7 @@ def _maybe_reexec_with_runtime_env(root_dir):
     env = os.environ.copy()
     current = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = ":".join(lib_dirs + ([current] if current else []))
-    env["RUSTCLAW_CRYPTOAUTHLIB_BOOTSTRAPPED"] = "1"
+    env["APP_CRYPTOAUTHLIB_BOOTSTRAPPED"] = "1"
     os.execvpe(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]], env)
 
 
@@ -140,7 +140,7 @@ def _library_candidates(root_dir):
         return []
     return _existing_files(
         [
-            os.environ.get("RUSTCLAW_CRYPTOAUTHLIB_LIB_PATH"),
+            os.environ.get("APP_CRYPTOAUTHLIB_LIB_PATH"),
             os.path.join(root_dir, "python", "cryptoauthlib", "libcryptoauth.so"),
             os.path.join(root_dir, "build-pyfix", "libcryptoauth.so"),
             os.path.join(root_dir, "build-pyfix", "lib", "libcryptoauth.so"),
@@ -188,19 +188,19 @@ def build_config():
     lib_path = _load_library()
     cfg = ATCAIfaceCfg()
     cfg.iface_type = int(ATCAIfaceType.ATCA_I2C_IFACE)
-    cfg.devtype = _int_env("RUSTCLAW_CRYPTOAUTHLIB_DEVTYPE", int(ATCADeviceType.ATECC608))
-    cfg.atcai2c.bus = _int_env("RUSTCLAW_CRYPTOAUTHLIB_I2C_BUS", 0)
-    cfg.atcai2c.baud = _int_env("RUSTCLAW_CRYPTOAUTHLIB_I2C_BAUD", 100000)
+    cfg.devtype = _int_env("APP_CRYPTOAUTHLIB_DEVTYPE", int(ATCADeviceType.ATECC608))
+    cfg.atcai2c.bus = _int_env("APP_CRYPTOAUTHLIB_I2C_BUS", 0)
+    cfg.atcai2c.baud = _int_env("APP_CRYPTOAUTHLIB_I2C_BAUD", 100000)
     # Linux HAL 会右移 1 位后再发给内核，因此这里沿用 8-bit 地址。
-    cfg.atcai2c.address = _int_env("RUSTCLAW_CRYPTOAUTHLIB_I2C_ADDRESS", 0x6A)
-    cfg.wake_delay = _int_env("RUSTCLAW_CRYPTOAUTHLIB_WAKE_DELAY", 1500)
-    cfg.rx_retries = _int_env("RUSTCLAW_CRYPTOAUTHLIB_RX_RETRIES", 20)
+    cfg.atcai2c.address = _int_env("APP_CRYPTOAUTHLIB_I2C_ADDRESS", 0x6A)
+    cfg.wake_delay = _int_env("APP_CRYPTOAUTHLIB_WAKE_DELAY", 1500)
+    cfg.rx_retries = _int_env("APP_CRYPTOAUTHLIB_RX_RETRIES", 20)
     cfg.cfg_data = None
     return cfg, lib_path
 
 
 def _slot():
-    return _int_env("RUSTCLAW_CRYPTOAUTHLIB_SLOT", 0)
+    return _int_env("APP_CRYPTOAUTHLIB_SLOT", 0)
 
 
 def _config_meta(cfg, lib_path):

@@ -1,6 +1,6 @@
 # 任务事件归档与回放合同
 
-RustClaw 把实时事件交付与持久回放分开：
+Agent Runtime 把实时事件交付与持久回放分开：
 
 - `task_event_stream`：用于低延迟 SSE 的有界热后缀。
 - `task_event_archive`：只追加的脱敏事件记录。

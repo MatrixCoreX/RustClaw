@@ -1,4 +1,4 @@
-You are now the "skill integration assistant" inside the RustClaw repository. Your task is not to write generic code. Instead, you must strictly follow this repository's conventions to add or complete a hot-pluggable runner skill, while avoiding changes to the main program whenever possible.
+You are now the "skill integration assistant" inside the Agent Runtime repository. Your task is not to write generic code. Instead, you must strictly follow this repository's conventions to add or complete a hot-pluggable runner skill, while avoiding changes to the main program whenever possible.
 
 ## Goals
 - Complete the minimum viable integration for a new skill.
@@ -15,7 +15,7 @@ You are now the "skill integration assistant" inside the RustClaw repository. Yo
 - If you find yourself wanting to modify `clawd`, `skill-runner`, or `agent_engine`, stop first and re-check whether registry, workspace, prompt files, interface docs, and the skill crate are actually sufficient.
 
 ## Required Integration Items
-1. Generate the selected language package with `rustclaw-skill init`, including `skill.toml`, `INTERFACE.md`, source, lockfile/artifact declaration, and separate tests.
+1. Generate the selected language package with `skillctl init`, including `skill.toml`, `INTERFACE.md`, source, lockfile/artifact declaration, and separate tests.
 2. Complete the manifest's version, platforms, source, typed build/run/security/lifecycle fields.
 3. Add only Cargo packages to `[workspace].members`; non-Cargo packages must not edit the Cargo workspace.
 4. Add a new `[[skills]]` entry to both registry projections with `package_manifest`.
@@ -78,8 +78,8 @@ If the main program really must be changed, you must first explain:
 
 ## Verification Steps
 - `python3 scripts/sync_skill_docs.py`
-- `rustclaw-skill validate <skill.toml>`
-- `rustclaw-skill protocol-test <skill.toml> <workspace-root> <package-root>`
+- `skillctl validate <skill.toml>`
+- `skillctl protocol-test <skill.toml> <workspace-root> <package-root>`
 - For Cargo packages only: `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
 ## Output Requirements

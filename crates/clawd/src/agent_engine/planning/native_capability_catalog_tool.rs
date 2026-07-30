@@ -6,7 +6,7 @@ pub(super) fn native_capability_loader_tool_definition(
 ) -> ModelToolDefinition {
     ModelToolDefinition {
         name: super::super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
-        description: "runtime_capability_catalog_v4; effect=observe; operations=search|expand|load_groups; authorization=canonical_registry; next_action=replan".to_string(),
+        description: "runtime_capability_catalog_v4; effect=observe; operations=search|expand|load_groups; group_tokens=exact_registry_skill_or_registry_category; authorization=canonical_registry; next_action=replan".to_string(),
         input_schema: json!({
             "type": "object",
             "oneOf": [

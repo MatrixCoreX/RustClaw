@@ -188,7 +188,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryOverview((prev) => (prev ? { ...prev, long_term_enabled: data.long_term_enabled } : prev));
       setMemoryMessage(
         data.restart_required
-          ? t("记忆设置已保存。重启 RustClaw 后生效。", "Memory setting saved. Restart RustClaw for it to take effect.")
+          ? t("记忆设置已保存。重启 {product_name} 后生效。", "Memory setting saved. Restart {product_name} for it to take effect.")
           : t("记忆设置没有变化。", "Memory setting is unchanged."),
       );
     } catch (err) {

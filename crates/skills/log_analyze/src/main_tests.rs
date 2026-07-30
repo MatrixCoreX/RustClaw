@@ -1,6 +1,6 @@
 use super::{
     analyze_log_file, candidate_priority, error_extra, execute, log_level_from_line,
-    sanitize_match_line, select_log_candidate, SKILL_NAME,
+    resolve_input_path, sanitize_match_line, select_log_candidate, SKILL_NAME,
 };
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,20 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["error_code"], "execution_failed");
     assert_eq!(extra["message_key"], "skill.log_analyze.execution_failed");
     assert_eq!(extra["retryable"], false);
+}
+
+#[test]
+fn relative_log_paths_resolve_from_workspace_root() {
+    let root = Path::new("/workspace");
+
+    assert_eq!(
+        resolve_input_path(root, PathBuf::from("logs/app.log")),
+        PathBuf::from("/workspace/logs/app.log")
+    );
+    assert_eq!(
+        resolve_input_path(root, PathBuf::from("/var/log/app.log")),
+        PathBuf::from("/var/log/app.log")
+    );
 }
 
 #[test]
@@ -90,8 +104,10 @@ fn detects_standard_log_levels_as_structured_notable_lines() {
 
 #[test]
 fn default_analysis_keeps_warn_latency_visible() {
-    let dir =
-        std::env::temp_dir().join(format!("rustclaw-log-analyze-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "agent-runtime-log-analyze-test-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("app.log");
     std::fs::write(
@@ -131,7 +147,7 @@ fn default_analysis_keeps_warn_latency_visible() {
 #[test]
 fn analysis_keeps_recovery_lines_visible_even_when_info_level() {
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-log-analyze-recovery-test-{}",
+        "agent-runtime-log-analyze-recovery-test-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
@@ -163,7 +179,7 @@ fn analysis_keeps_recovery_lines_visible_even_when_info_level() {
 #[test]
 fn execute_returns_structured_extra_alongside_legacy_text_json() {
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-log-analyze-extra-test-{}",
+        "agent-runtime-log-analyze-extra-test-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
@@ -205,7 +221,7 @@ fn execute_returns_structured_extra_alongside_legacy_text_json() {
 #[test]
 fn execute_returns_tail_lines_when_requested() {
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-log-analyze-tail-test-{}",
+        "agent-runtime-log-analyze-tail-test-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
@@ -249,7 +265,7 @@ fn execute_returns_tail_lines_when_requested() {
 #[test]
 fn bounded_match_pages_continue_to_older_lines_and_reject_changed_logs() {
     let dir = std::env::temp_dir().join(format!(
-        "rustclaw-log-analyze-page-test-{}",
+        "agent-runtime-log-analyze-page-test-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");

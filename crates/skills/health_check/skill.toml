@@ -4,8 +4,8 @@ schema_version = 2
 [package]
 name = "health_check"
 version = "0.1.8"
-description = "Run baseline host and RustClaw runtime health diagnostics with runtime-owned overall_status, clawd_visible, and db_available probes; prefer this before narrower inspection."
-protocol = "rustclaw-jsonl-v1"
+description = "Run baseline host and agent runtime health diagnostics with runtime-owned overall_status, clawd_visible, and db_available probes; prefer this before narrower inspection."
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"

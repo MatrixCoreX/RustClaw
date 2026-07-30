@@ -16,10 +16,8 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rustclaw_{prefix}_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agent_{prefix}_{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }

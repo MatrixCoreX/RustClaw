@@ -15,7 +15,7 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
                 step_id: "s1".to_string(),
                 action_type: "call_skill".to_string(),
                 skill: "run_cmd".to_string(),
-                args: json!({ "command": "rm -rf /tmp/rustclaw-verifier-test" }),
+                args: json!({ "command": "rm -rf /tmp/agent-runtime-verifier-test" }),
                 depends_on: Vec::new(),
                 why: String::new(),
             }]),
@@ -145,7 +145,7 @@ fn destructive_run_cmd_uses_authenticated_yolo_policy() {
                 step_id: "s1".to_string(),
                 action_type: "call_skill".to_string(),
                 skill: "run_cmd".to_string(),
-                args: json!({ "command": "rm -rf /tmp/rustclaw-verifier-test" }),
+                args: json!({ "command": "rm -rf /tmp/agent-runtime-verifier-test" }),
                 depends_on: Vec::new(),
                 why: String::new(),
             }]),
@@ -675,7 +675,7 @@ fn high_risk_external_generation_requires_confirmation_without_dry_run() {
 }
 
 #[test]
-fn high_risk_external_generation_dry_run_skips_confirmation() {
+fn non_x_dry_run_does_not_skip_confirmation() {
     let state = test_state();
     let task = test_task();
     let result = verify_plan(
@@ -703,8 +703,8 @@ fn high_risk_external_generation_dry_run_skips_confirmation() {
     );
 
     assert!(result.approved, "issues: {:?}", result.issues);
-    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
-    assert!(!result
+    assert!(result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(result
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
@@ -713,14 +713,14 @@ fn high_risk_external_generation_dry_run_skips_confirmation() {
             .permission_decision
             .pointer("/steps/0/risk_level")
             .and_then(serde_json::Value::as_str),
-        Some("low")
+        Some("high")
     );
     assert_eq!(
         result
             .permission_decision
             .pointer("/steps/0/decision")
             .and_then(serde_json::Value::as_str),
-        Some("allow")
+        Some("require_confirmation")
     );
 }
 

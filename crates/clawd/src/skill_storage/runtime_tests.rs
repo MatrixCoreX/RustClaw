@@ -3,8 +3,16 @@ use super::*;
 #[test]
 fn runtime_keeps_crypto_and_kb_in_separate_pools() {
     let runtime = SkillStorageRuntime::test_default();
-    let crypto = runtime.crypto_pool().get().expect("crypto db");
-    let kb = runtime.kb_pool().get().expect("kb db");
+    let crypto = runtime
+        .pool_for("crypto")
+        .expect("crypto owner")
+        .get()
+        .expect("crypto db");
+    let kb = runtime
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("kb db");
     let crypto_has_credentials: i64 = crypto
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='exchange_api_credentials'",
@@ -27,7 +35,8 @@ fn runtime_keeps_crypto_and_kb_in_separate_pools() {
 fn clearing_one_skill_never_removes_another_skills_rows() {
     let runtime = SkillStorageRuntime::test_default();
     runtime
-        .crypto_pool()
+        .pool_for("crypto")
+        .expect("crypto owner")
         .get()
         .expect("crypto db")
         .execute(
@@ -38,7 +47,8 @@ fn clearing_one_skill_never_removes_another_skills_rows() {
         )
         .expect("seed crypto");
     runtime
-        .kb_pool()
+        .pool_for("kb")
+        .expect("KB owner")
         .get()
         .expect("KB db")
         .execute(

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-$ROOT_DIR/configs/config.toml}"
+CONFIG_PATH="${APP_CONFIG_PATH:-$ROOT_DIR/configs/config.toml}"
 
 usage() {
   cat <<'EOF'
@@ -21,7 +21,7 @@ Usage:
   webd-set 的密码来源（优先级）：环境变量 WEBD_PASSWORD → 非终端 stdin 一行 → 终端下交互输入。
 
   webd-set 通过 clawd 管理接口完成（由服务端哈希密码）：
-    - 使用 RUSTCLAW_ADMIN_KEY；若未设置，则从库里取第一个 enabled 的 admin user_key。
+    - 使用 APP_ADMIN_KEY；若未设置，则从库里取第一个 enabled 的 admin user_key。
     - BASE_URL 默认 http://127.0.0.1:8787（clawd 需已启动）。
 
 This script is the local-only key management entrypoint.
@@ -55,10 +55,12 @@ cmd = sys.argv[3]
 args = sys.argv[4:]
 
 cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
-db_rel = cfg.get("database", {}).get("sqlite_path", "data/rustclaw.db")
+db_rel = cfg.get("database", {}).get("sqlite_path")
+if not isinstance(db_rel, str) or not db_rel.strip():
+    raise SystemExit("database.sqlite_path must be configured")
 db_path = (root / db_rel).resolve()
 db_path.parent.mkdir(parents=True, exist_ok=True)
-pi_settings_path = root / "pi_app" / ".rustclaw_small_screen_config.json"
+pi_settings_path = root / "pi_app" / ".agent_small_screen_config.json"
 pi_key = ""
 try:
     pi_settings = json.loads(pi_settings_path.read_text(encoding="utf-8"))
@@ -138,7 +140,7 @@ def webd_set_via_http(
         method="POST",
         headers={
             "Content-Type": "application/json",
-            "X-RustClaw-Key": admin_key,
+            "X-Agent-Key": admin_key,
         },
     )
     try:
@@ -249,7 +251,7 @@ elif cmd == "webd-set":
     if not row_target:
         raise SystemExit(f"user_key not found or disabled in auth_keys: {user_key}")
 
-    admin_key = (os.environ.get("RUSTCLAW_ADMIN_KEY") or "").strip()
+    admin_key = (os.environ.get("APP_ADMIN_KEY") or "").strip()
     if not admin_key:
         row_adm = conn.execute(
             "SELECT user_key FROM auth_keys WHERE role = 'admin' AND enabled = 1 ORDER BY created_at ASC LIMIT 1"
@@ -259,13 +261,13 @@ elif cmd == "webd-set":
 
     if not admin_key:
         raise SystemExit(
-            "no enabled admin key found. Set RUSTCLAW_ADMIN_KEY or create/enable an admin key first."
+            "no enabled admin key found. Set APP_ADMIN_KEY or create/enable an admin key first."
         )
 
     base_url = (os.environ.get("BASE_URL") or "http://127.0.0.1:8787").strip()
-    if not os.environ.get("RUSTCLAW_ADMIN_KEY"):
+    if not os.environ.get("APP_ADMIN_KEY"):
         print(
-            "note: using first enabled admin user_key from DB for HTTP (set RUSTCLAW_ADMIN_KEY to override)",
+            "note: using first enabled admin user_key from DB for HTTP (set APP_ADMIN_KEY to override)",
             file=sys.stderr,
         )
     webd_set_via_http(base_url, admin_key, user_key, username, pw)

@@ -8,8 +8,8 @@
 //!   * 通过 `[[llm_providers]] type = "fixture_replay"` 走 [`crate::providers::client::PROVIDER_IMPLS`]
 //!     正常分发，不需要修改 `LlmProvider` trait 或 `AppState` 结构。
 //!   * 由两个进程级 env 控制：
-//!       - `RUSTCLAW_FIXTURE_LLM_ROOT`：fixture 根目录（绝对路径）。
-//!       - `RUSTCLAW_FIXTURE_CASE`：当前 case 名（root 下的子目录名）。
+//!       - `APP_FIXTURE_LLM_ROOT`：fixture 根目录（绝对路径）。
+//!       - `APP_FIXTURE_CASE`：当前 case 名（root 下的子目录名）。
 //!     测试 harness 在调用 `process_ask_task` 前 set，跑完 unset。
 //!   * Fixture 文件位于 `<root>/<case>/calls.jsonl`，每行一条 [`RecordedCall`]
 //!     JSON：`prompt_hash` 是 prompt 字符串的 [FNV-1a 64-bit] hex（16 字符），
@@ -40,17 +40,17 @@ use crate::LlmProviderRuntime;
 pub(crate) const FIXTURE_REPLAY_PROVIDER_TYPE: &str = "fixture_replay";
 
 /// 测试 harness 通过这个 env 指定 fixture 根目录（必须是绝对路径）。
-pub(crate) const FIXTURE_LLM_ROOT_ENV: &str = "RUSTCLAW_FIXTURE_LLM_ROOT";
+pub(crate) const FIXTURE_LLM_ROOT_ENV: &str = "APP_FIXTURE_LLM_ROOT";
 
 /// 测试 harness 通过这个 env 指定当前 case 名（root 下的子目录）。
-pub(crate) const FIXTURE_LLM_CASE_ENV: &str = "RUSTCLAW_FIXTURE_CASE";
+pub(crate) const FIXTURE_LLM_CASE_ENV: &str = "APP_FIXTURE_CASE";
 /// 诊断开关：命中 / miss 时把当前 prompt hash 与前缀打印到 stderr。
-pub(crate) const FIXTURE_LLM_DEBUG_ENV: &str = "RUSTCLAW_FIXTURE_DEBUG";
+pub(crate) const FIXTURE_LLM_DEBUG_ENV: &str = "APP_FIXTURE_DEBUG";
 /// 测试专用兼容开关：hash miss 时按 calls.jsonl 录制顺序回放。
 ///
 /// 默认关闭，保证普通 fixture 测试仍然 fail-loud。E2E replay 可显式开启它，
 /// 用来承受 prompt 文案轻微演进，而不把宽松回放扩散到生产或普通单测。
-pub(crate) const FIXTURE_LLM_SEQUENCE_FALLBACK_ENV: &str = "RUSTCLAW_FIXTURE_SEQUENCE_FALLBACK";
+pub(crate) const FIXTURE_LLM_SEQUENCE_FALLBACK_ENV: &str = "APP_FIXTURE_SEQUENCE_FALLBACK";
 
 /// Fixture 文件名（位于 `<root>/<case>/<file>`）。
 pub(crate) const FIXTURE_CALLS_FILENAME: &str = "calls.jsonl";
@@ -291,7 +291,7 @@ pub(crate) fn regen_fixture_from_log(
     if overwrote_existing && !force {
         return Err(format!(
             "regen_fixture_from_log: {} already exists; pass force=true (env \
-             RUSTCLAW_REGEN_FIXTURE_FORCE=1) to overwrite",
+             APP_REGEN_FIXTURE_FORCE=1) to overwrite",
             dest.display()
         ));
     }
@@ -629,7 +629,7 @@ impl LlmProvider for FixtureReplayProvider {
                     Err(ProviderError::non_retryable(
                         format!(
                             "fixture_replay miss case={case} prompt_hash={prompt_hash} \
-                             prompt_chars={chars} (regen: RUSTCLAW_REGEN_FIXTURE={case} bash scripts/regen_fixture.sh)",
+                             prompt_chars={chars} (regen: APP_REGEN_FIXTURE={case} bash scripts/regen_fixture.sh)",
                             chars = prompt.chars().count(),
                         ),
                         json!({

@@ -854,22 +854,19 @@ fn save_session_store_to_path(path: &Path, store: &SessionStore) -> Result<()> {
 }
 
 fn session_store_path() -> PathBuf {
-    if let Some(path) = env::var_os("RUSTCLAW_CLAWCLI_SESSION_STORE") {
+    const SESSION_NAMESPACE: &str = "agent-runtime";
+    if let Some(path) = claw_core::product_identity::env_os("CLAWCLI_SESSION_STORE") {
         return PathBuf::from(path);
     }
     if let Some(path) = env::var_os("XDG_STATE_HOME") {
-        return PathBuf::from(path)
-            .join("rustclaw")
-            .join("clawcli_sessions.json");
+        let root = PathBuf::from(path);
+        return root.join(SESSION_NAMESPACE).join("clawcli_sessions.json");
     }
     if let Some(path) = env::var_os("HOME") {
-        return PathBuf::from(path)
-            .join(".local")
-            .join("state")
-            .join("rustclaw")
-            .join("clawcli_sessions.json");
+        let root = PathBuf::from(path).join(".local").join("state");
+        return root.join(SESSION_NAMESPACE).join("clawcli_sessions.json");
     }
-    PathBuf::from(".rustclaw_clawcli_sessions.json")
+    PathBuf::from(".agent_clawcli_sessions.json")
 }
 
 fn active_tasks(base_url: &str, key: &str, user_id: i64, chat_id: i64) -> Result<Value> {
@@ -881,7 +878,7 @@ fn active_tasks(base_url: &str, key: &str, user_id: i64, chat_id: i64) -> Result
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()

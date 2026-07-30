@@ -24,7 +24,7 @@ fn error_extra_merges_machine_contract_and_details() {
 #[test]
 fn list_missing_archive_returns_structured_not_found() {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw_missing_archive_{}_{}.zip",
+        "agent_missing_archive_{}_{}.zip",
         std::process::id(),
         "unit"
     ));
@@ -110,7 +110,7 @@ fn archive_member_rejects_traversal() {
 #[test]
 fn read_archive_member_returns_member_content() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_archive_read_{}_{}",
+        "agent_archive_read_{}_{}",
         std::process::id(),
         "unit"
     ));
@@ -174,7 +174,7 @@ fn execute_read_projects_member_path_and_content_excerpt() {
 #[test]
 fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_archive_envelope_{}_{}",
+        "agent_archive_envelope_{}_{}",
         std::process::id(),
         "unit"
     ));

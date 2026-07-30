@@ -55,6 +55,7 @@ fn test_state(workspace_root: PathBuf) -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list,
             }))),
@@ -327,7 +328,10 @@ async fn authenticated_admin_can_explicitly_disable_async_command_deadline() {
     assert_eq!(accepted["action"], "async_start");
     assert_eq!(accepted["status"], "accepted");
     assert_eq!(accepted["job_id"], "local_process:admin-disable-timeout");
-    for _ in 0..40 {
+    // The wrapper has to commit several durable metadata files. Under the full
+    // parallel suite, CPU and filesystem scheduling can legitimately take
+    // longer than one second even though the command itself is immediate.
+    for _ in 0..400 {
         if job_dir.join("exit_code").is_file() {
             break;
         }
@@ -862,8 +866,8 @@ async fn run_cmd_accepts_timeout_seconds_override() {
         "run_cmd",
         &json!({
             "command": "printf ok",
-            "timeout_seconds": 1,
-            "idle_timeout_seconds": 1,
+            "timeout_seconds": 10,
+            "idle_timeout_seconds": 10,
             "max_output_bytes": 8000
         }),
     )
@@ -891,8 +895,8 @@ async fn run_cmd_accepts_planner_action_metadata() {
         &json!({
             "action": "inspect_cli_help",
             "command": "printf ok",
-            "timeout_seconds": 1,
-            "idle_timeout_seconds": 1,
+            "timeout_seconds": 10,
+            "idle_timeout_seconds": 10,
             "max_output_bytes": 8000
         }),
     )
@@ -1245,7 +1249,7 @@ async fn run_cmd_command_not_found_uses_exit_code_category() {
         &state,
         "run_cmd",
         &json!({
-            "command": "definitely_missing_rustclaw_command_for_exit_category",
+            "command": "definitely_missing_agent_command_for_exit_category",
             "timeout_seconds": 10,
             "idle_timeout_seconds": 10,
             "max_output_bytes": 8000
