@@ -169,7 +169,9 @@ fn service_is_running(service: &str) -> bool {
 }
 
 async fn wait_for_service_running(service: &str) -> bool {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let wait_seconds = if service == "whatsapp_webd" { 120 } else { 10 };
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(wait_seconds);
     loop {
         if service_is_running(service) {
             return true;
@@ -224,6 +226,29 @@ fn validate_service_start_readiness(
             {
                 return Err(ServiceControlFailure::new(
                     "feishu_webhook_credentials_missing",
+                ));
+            }
+            Ok(())
+        }
+        "larkd" => {
+            let config = load_lark_config_response(state, None).map_err(|err| {
+                ServiceControlFailure::with_data(
+                    "lark_config_read_failed",
+                    json!({"detail": err.to_string()}),
+                )
+            })?;
+            if !config.enabled {
+                return Err(ServiceControlFailure::new("service_disabled"));
+            }
+            if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
+                return Err(ServiceControlFailure::new("lark_credentials_missing"));
+            }
+            if config.mode.eq_ignore_ascii_case("webhook")
+                && !config.verification_token_configured
+                && !config.encrypt_key_configured
+            {
+                return Err(ServiceControlFailure::new(
+                    "lark_webhook_credentials_missing",
                 ));
             }
             Ok(())
@@ -286,7 +311,7 @@ async fn control_service(
                     }),
                 );
             }
-            let profile = std::env::var("RUSTCLAW_START_PROFILE")
+            let profile = claw_core::product_identity::env_string("START_PROFILE")
                 .ok()
                 .filter(|v| matches!(v.as_str(), "debug" | "release"))
                 .unwrap_or_else(|| runtime_profile_default().to_string());
@@ -501,7 +526,7 @@ async fn control_service(
                 let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let profile = std::env::var("RUSTCLAW_START_PROFILE")
+            let profile = claw_core::product_identity::env_string("START_PROFILE")
                 .ok()
                 .filter(|v| matches!(v.as_str(), "debug" | "release"))
                 .unwrap_or_else(|| runtime_profile_default().to_string());
@@ -572,7 +597,7 @@ async fn restart_system(
     if !identity.role.eq_ignore_ascii_case("admin") {
         return service_control_error_response(
             StatusCode::FORBIDDEN,
-            "rustclaw",
+            "agent_runtime",
             "restart",
             ServiceControlFailure::new("admin_role_required"),
         );
@@ -588,7 +613,7 @@ async fn restart_system(
         if let Err(err) = cmd.spawn() {
             return service_control_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "rustclaw",
+                "agent_runtime",
                 "restart",
                 ServiceControlFailure::with_data(
                     "system_restart_schedule_failed",
@@ -626,7 +651,7 @@ async fn restart_system(
         ),
         Err(err) => service_control_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "rustclaw",
+            "agent_runtime",
             "restart",
             ServiceControlFailure::with_data(
                 "system_restart_schedule_failed",
@@ -793,7 +818,7 @@ fn schedule_binary_restart_with_start_all(state: &AppState) -> Result<(), String
 
     let workspace = state.skill_rt.workspace_root.to_string_lossy();
     let script = format!(
-        "sleep 2; cd {} && mkdir -p logs .pids && RUSTCLAW_SKIP_BANNER=1 bash ./start-all-bin.sh release > logs/restart-system.log 2>&1",
+        "sleep 2; cd {} && mkdir -p logs .pids && APP_SKIP_BANNER=1 bash ./start-all-bin.sh release > logs/restart-system.log 2>&1",
         shell_escape_arg(workspace.as_ref())
     );
     let mut cmd = StdCommand::new("nohup");

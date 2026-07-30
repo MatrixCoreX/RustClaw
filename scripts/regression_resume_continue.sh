@@ -12,7 +12,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-}"
 USER_ID="${USER_ID:-}"
 CHAT_ID="${CHAT_ID:-}"
-USER_KEY="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+USER_KEY="${APP_USER_KEY:-${USER_KEY:-}}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
 
@@ -88,7 +88,7 @@ PY
 fi
 
 if [[ -z "$BASE_URL" ]]; then
-  BASE_URL="http://${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
+  BASE_URL="http://${APP_INTERNAL_LISTEN:-127.0.0.1:8787}"
 fi
 BASE_URL="${BASE_URL%/}"
 
@@ -107,7 +107,7 @@ submit_ask() {
     } + (if ($user_key | length) > 0 then { user_key: $user_key } else {} end)' \
   | curl -sS -X POST "${BASE_URL}/v1/tasks" \
       -H "Content-Type: application/json" \
-      -H "X-RustClaw-Key: ${USER_KEY}" \
+      -H "X-Agent-Key: ${USER_KEY}" \
       -d @-
 }
 
@@ -116,7 +116,7 @@ poll_terminal() {
   local waited=0
   while [[ "$waited" -le "$WAIT_SECONDS" ]]; do
     local row status
-    row="$(curl -sS -H "X-RustClaw-Key: ${USER_KEY}" "${BASE_URL}/v1/tasks/${task_id}")"
+    row="$(curl -sS -H "X-Agent-Key: ${USER_KEY}" "${BASE_URL}/v1/tasks/${task_id}")"
     status="$(echo "$row" | jq -r '.data.status // ""')"
     case "$status" in
       succeeded|failed|timeout|canceled)

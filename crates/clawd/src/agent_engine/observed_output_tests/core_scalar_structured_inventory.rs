@@ -1025,14 +1025,14 @@ fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"entries":[],"files_only":true,"include_hidden":false,"names_by_kind":{"dirs":[],"files":["act_plan.log","clawd-codex-current.log","clawd-codex-style-live.log","clawd-dev-live.log","clawd-dev.log"],"other":[]},"path":"logs","resolved_path":"/home/guagua/rustclaw/logs","size_summary":{"largest_file":{"kind":"file","name":"model_io.log.2026-07-09","path":"logs/model_io.log.2026-07-09","size_bytes":532246887},"matched_file_count":49,"smallest_file":{"kind":"file","name":"nl_delayed_minimax_retry_20260616_121155.log","path":"logs/nl_delayed_minimax_retry_20260616_121155.log","size_bytes":60},"total_file_size_bytes":2290871096},"sort_by":"name"}}"#,
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"entries":[],"files_only":true,"include_hidden":false,"names_by_kind":{"dirs":[],"files":["act_plan.log","clawd-codex-current.log","clawd-codex-style-live.log","clawd-dev-live.log","clawd-dev.log"],"other":[]},"path":"logs","resolved_path":"/home/guagua/agent-runtime/logs","size_summary":{"largest_file":{"kind":"file","name":"model_io.log.2026-07-09","path":"logs/model_io.log.2026-07-09","size_bytes":532246887},"matched_file_count":49,"smallest_file":{"kind":"file","name":"nl_delayed_minimax_retry_20260616_121155.log","path":"logs/nl_delayed_minimax_retry_20260616_121155.log","size_bytes":60},"total_file_size_bytes":2290871096},"sort_by":"name"}}"#,
     ));
 
     let entries = observed_output_entries(&loop_state);
     let joined = entries.join("\n");
 
     assert!(
-        joined.contains("inventory_dir path=/home/guagua/rustclaw/logs sort_by=name total=5 files=5 dirs=0 hidden=0"),
+        joined.contains("inventory_dir path=/home/guagua/agent-runtime/logs sort_by=name total=5 files=5 dirs=0 hidden=0"),
         "entries: {joined}"
     );
     assert!(
@@ -1232,11 +1232,11 @@ fn direct_scalar_ignores_shell_locale_warning_noise() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "run_cmd",
-            "/tmp/rustclaw-workspace\n\nbash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory\n",
+            "/tmp/agent-runtime-workspace\n\nbash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory\n",
         ));
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
-        Some("/tmp/rustclaw-workspace")
+        Some("/tmp/agent-runtime-workspace")
     );
 }
 
@@ -1246,11 +1246,11 @@ fn direct_scalar_reads_extract_field_value_from_structured_output() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
+            r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"agent-runtime","value":"agent-runtime","value_type":"string"}"#,
         ));
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
-        Some("rustclaw")
+        Some("agent-runtime")
     );
 }
 

@@ -76,6 +76,7 @@ struct LlmConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     api_key: String,
@@ -1333,6 +1334,21 @@ fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
     }
 }
 
+fn inherit_provider_connection_from_llm(
+    target: &mut Option<VendorConfig>,
+    source: &Option<VendorConfig>,
+) {
+    let (Some(target), Some(source)) = (target.as_mut(), source.as_ref()) else {
+        return;
+    };
+    if target.base_url.trim().is_empty() && !source.base_url.trim().is_empty() {
+        target.base_url = source.base_url.clone();
+    }
+    if target.api_key.trim().is_empty() && !source.api_key.trim().is_empty() {
+        target.api_key = source.api_key.clone();
+    }
+}
+
 fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
@@ -1370,6 +1386,28 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
         &mut cfg.image_generation.providers.minimax,
         "IMAGE_GENERATION_MINIMAX_API_KEY",
     );
+    inherit_provider_connection_from_llm(
+        &mut cfg.image_generation.providers.openai,
+        &cfg.llm.openai,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.image_generation.providers.google,
+        &cfg.llm.google,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.image_generation.providers.anthropic,
+        &cfg.llm.anthropic,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.image_generation.providers.grok, &cfg.llm.grok);
+    inherit_provider_connection_from_llm(
+        &mut cfg.image_generation.providers.deepseek,
+        &cfg.llm.deepseek,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.image_generation.providers.qwen, &cfg.llm.qwen);
+    inherit_provider_connection_from_llm(
+        &mut cfg.image_generation.providers.minimax,
+        &cfg.llm.minimax,
+    );
     if let Some(enabled) = env_bool("IMAGE_GENERATION_LOCAL_FALLBACK") {
         cfg.image_generation.local_fallback_enabled = enabled;
     }
@@ -1383,7 +1421,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_allows_external_paths() -> bool {
-    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+    std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn vendor_order(

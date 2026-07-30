@@ -3,7 +3,7 @@ locale = "zh-CN"
 [dict]
 "feishu.msg.identity_check_unavailable" = "身份校验暂时不可用，请稍后重试。"
 "feishu.msg.bind_key_required_for_chat" = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。"
-"feishu.msg.bind_help" = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。"
+"feishu.msg.bind_help" = "欢迎使用 {product_name}。\n请先发送 /key <your_key> 完成绑定。"
 "feishu.msg.bind_success" = "绑定成功，请重新发送你的问题。"
 "feishu.msg.bind_invalid" = "key 无效或绑定失败，请发送有效 key 完成绑定。"
 "feishu.msg.bind_request_failed" = "绑定请求失败，请稍后重试。"

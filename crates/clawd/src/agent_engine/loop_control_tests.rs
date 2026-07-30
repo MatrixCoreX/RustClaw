@@ -55,6 +55,7 @@ fn state_with_workspace_registry() -> crate::AppState {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });

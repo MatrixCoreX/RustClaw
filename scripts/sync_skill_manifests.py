@@ -92,10 +92,10 @@ def runtime_environment_allowlist(skill: CargoSkill, entry: dict[str, object]) -
         names.update(
             {
                 "CLAWD_BASE_URL",
-                "RUSTCLAW_INTERNAL_LLM_URL",
-                "RUSTCLAW_INTERNAL_LLM_TOKEN",
-                "RUSTCLAW_SELECTED_LLM_VENDOR",
-                "RUSTCLAW_SELECTED_LLM_PROVIDER_TYPE",
+                "AGENT_INTERNAL_LLM_URL",
+                "AGENT_INTERNAL_LLM_TOKEN",
+                "APP_SELECTED_LLM_VENDOR",
+                "APP_SELECTED_LLM_PROVIDER_TYPE",
                 "OPENAI_BASE_URL",
                 "OPENAI_MODEL",
                 "OPENAI_API_KEY",
@@ -228,7 +228,7 @@ def capability_request_projection(
 
 def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -> str:
     supported_os = entry.get("supported_os") or ["linux", "macos"]
-    description = str(entry.get("description") or f"RustClaw {skill.name} skill")
+    description = str(entry.get("description") or f"Host capability package: {skill.name}")
     timeout = int(entry.get("timeout_seconds") or 30)
     storage = entry.get("storage") if isinstance(entry.get("storage"), dict) else None
     storage_kind = str(storage.get("kind")) if storage else "none"
@@ -245,7 +245,7 @@ schema_version = 2
 name = {json.dumps(skill.name)}
 version = {json.dumps(version)}
 description = {json.dumps(description)}
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = {json.dumps(supported_os)}
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -325,7 +325,15 @@ def sync_manifests(skills: dict[str, CargoSkill], entries: list[dict[str, object
         name = str(entry.get("name") or "")
         skill = skills.get(name)
         if skill is None:
-            raise ValueError(f"runner skill has no Cargo source: {name}")
+            relative = entry.get("package_manifest")
+            if not isinstance(relative, str) or not relative:
+                raise ValueError(f"runner skill has no package manifest: {name}")
+            manifest_path = ROOT / relative
+            manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+            adapter = manifest.get("build", {}).get("adapter")
+            if adapter == "cargo":
+                raise ValueError(f"Cargo runner skill has no Cargo source: {name}")
+            continue
         path = skill.source_dir / "skill.toml"
         expected = render_manifest(skill, entry, str(version))
         current = path.read_text(encoding="utf-8") if path.is_file() else None

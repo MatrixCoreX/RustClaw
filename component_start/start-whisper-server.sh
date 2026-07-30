@@ -24,7 +24,7 @@ done
 
 component_start_init "$ROOT_DIR" "$PROFILE" "./component_start/start-whisper-server.sh"
 
-AUDIO_CONFIG_PATH="${RUSTCLAW_AUDIO_CONFIG_PATH:-$ROOT_DIR/configs/audio.toml}"
+AUDIO_CONFIG_PATH="${APP_AUDIO_CONFIG_PATH:-$ROOT_DIR/configs/audio.toml}"
 if [[ ! -f "$AUDIO_CONFIG_PATH" ]]; then
   echo "Audio config not found: $AUDIO_CONFIG_PATH" >&2
   exit 1
@@ -94,7 +94,7 @@ PY
 IFS=$'\x1f' read -r DEFAULT_VENDOR DEFAULT_MODEL CONFIG_ENABLED CONFIG_SERVER_BIN \
   CONFIG_MODEL_PATH CONFIG_HOST CONFIG_PORT CONFIG_THREADS <<<"$CONFIG_VALUES"
 
-ENABLED="${RUSTCLAW_LOCAL_WHISPER_ENABLED:-auto}"
+ENABLED="${APP_LOCAL_WHISPER_ENABLED:-auto}"
 case "$ENABLED" in
   auto)
     if [[ "$CONFIG_ENABLED" != "true" || "$DEFAULT_VENDOR" != "custom" || "$DEFAULT_MODEL" != "local-whisper" ]]; then
@@ -108,7 +108,7 @@ case "$ENABLED" in
     exit 0
     ;;
   *)
-    echo "RUSTCLAW_LOCAL_WHISPER_ENABLED must be auto, true, or false." >&2
+    echo "APP_LOCAL_WHISPER_ENABLED must be auto, true, or false." >&2
     exit 2
     ;;
 esac
@@ -156,7 +156,7 @@ fi
 LOG_DIR="$ROOT_DIR/logs"
 TMP_DIR="$ROOT_DIR/data/tmp/whisper"
 mkdir -p "$LOG_DIR" "$TMP_DIR"
-nohup "$SERVER_BIN" \
+component_launch_detached "$LOG_DIR/whisper-server.log" "$SERVER_BIN" \
   -m "$MODEL_PATH" \
   --host "$HOST" \
   --port "$PORT" \
@@ -165,9 +165,8 @@ nohup "$SERVER_BIN" \
   --inference-path /audio/transcriptions \
   --convert \
   --tmp-dir "$TMP_DIR" \
-  --language auto \
-  >"$LOG_DIR/whisper-server.log" 2>&1 &
-PID=$!
+  --language auto
+PID="$COMPONENT_LAUNCHED_PID"
 component_write_pid_file "whisper-server" "$PID"
 
 READY_WAIT="${WHISPER_SERVER_READY_WAIT_SECONDS:-5}"

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/long_term_summary.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/long_term_summary.schema.json",
   "title": "LongTermRefreshLlmOut",
   "description": "Schema for the JSON object returned by `prompts/long_term_summary_prompt.md`. Mirrors `LongTermRefreshLlmOut` and `KnowledgeCandidateLlmOut` in `crates/clawd/src/memory/service.rs`, and is enforced by `long_term_summary_schema_drift` in the same file.\n\nThis prompt produces a durable summary plus up to a few conservative structured memory fact candidates. Runtime may still fall back to treating the whole output as plain summary text when the model does not return valid JSON, so the schema primarily guards the structured path rather than making summary refresh brittle.",
   "type": "object",

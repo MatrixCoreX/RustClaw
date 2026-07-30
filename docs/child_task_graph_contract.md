@@ -1,6 +1,6 @@
 # Durable Child Task Graph Contract
 
-RustClaw persists planner-authorized subagent work as a task graph. The graph is
+Agent Runtime persists planner-authorized subagent work as a task graph. The graph is
 an execution contract, not a semantic router: the model proposes roles,
 objectives, dependencies, and structured scope, while the runtime validates and
 enforces trusted role policy, permissions, ownership, readiness, and lifecycle.

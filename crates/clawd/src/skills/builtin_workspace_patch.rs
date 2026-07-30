@@ -723,11 +723,11 @@ pub(super) fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
 }
 
 fn checkpoint_root(root: &Path) -> PathBuf {
-    root.join(".rustclaw").join("checkpoints")
+    claw_core::workspace_state::workspace_state_root(root).join("checkpoints")
 }
 
 pub(super) fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
-    let state_dir = root.join(".rustclaw");
+    let state_dir = claw_core::workspace_state::workspace_state_root(root);
     reject_symlink_if_present(&state_dir)?;
     fs::create_dir_all(&state_dir).map_err(|err| {
         patch_io_error(
@@ -860,7 +860,11 @@ fn lexical_workspace_path(root: &Path, path: &str) -> Result<PathBuf, String> {
     for component in Path::new(path).components() {
         match component {
             Component::Normal(value) => {
-                if value == ".git" || value == ".rustclaw" {
+                if value == ".git"
+                    || value
+                        .to_str()
+                        .is_some_and(claw_core::workspace_state::is_known_workspace_state_dir_name)
+                {
                     return Err(invalid_path_error(path));
                 }
                 relative.push(value);

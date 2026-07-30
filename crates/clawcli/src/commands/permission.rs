@@ -103,7 +103,7 @@ pub(crate) fn run_permission_revoke(
     );
     let response = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .json(&json!({"grant_id": grant_id}))
         .send()
         .context("approval_scope_grant_revoke_request_failed")?;
@@ -135,7 +135,7 @@ pub(super) fn permission_report_json(task: &task::TaskStatusView) -> Value {
     let mut signals = PermissionSignals::default();
     collect_permission_signals(&task.raw_data, &mut signals, 0);
     json!({
-        "report_kind": "rustclaw_permission_report",
+        "report_kind": "agent_permission_report",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),
@@ -217,7 +217,7 @@ fn capability_permission_report_json(
         }
     }
     json!({
-        "report_kind": "rustclaw_capability_permission_report",
+        "report_kind": "agent_capability_permission_report",
         "skill_filter": skill_filter,
         "capability_filter": capability_filter,
         "item_count": items.len(),

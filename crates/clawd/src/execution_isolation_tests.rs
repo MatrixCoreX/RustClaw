@@ -7,7 +7,7 @@ struct TempRoot {
 impl TempRoot {
     fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_execution_isolation_{name}_{}_{}",
+            "agent_execution_isolation_{name}_{}_{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -265,8 +265,8 @@ fn isolation_profile_from_token_accepts_only_machine_tokens() {
 fn init_git_repo(path: &Path) {
     for args in [
         vec!["init", "--quiet"],
-        vec!["config", "user.email", "rustclaw-test@example.invalid"],
-        vec!["config", "user.name", "RustClaw Test"],
+        vec!["config", "user.email", "agent-runtime-test@example.invalid"],
+        vec!["config", "user.name", "Agent Runtime Test"],
     ] {
         let status = std::process::Command::new("git")
             .arg("-C")

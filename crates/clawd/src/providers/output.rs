@@ -403,7 +403,7 @@ fn cleanup_model_io_log_archives(file_path: &Path, keep_days: u64) -> anyhow::Re
 
 pub(crate) fn log_color_enabled() -> bool {
     let is_tty = std::io::stdout().is_terminal() || std::io::stderr().is_terminal();
-    if let Ok(v) = std::env::var("RUSTCLAW_LOG_COLOR") {
+    if let Ok(v) = claw_core::product_identity::env_string("LOG_COLOR") {
         let s = v.trim().to_ascii_lowercase();
         if matches!(s.as_str(), "0" | "false" | "no" | "off") {
             return false;

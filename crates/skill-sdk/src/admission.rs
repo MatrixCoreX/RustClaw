@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -7,6 +9,7 @@ use crate::capability_request::RuntimePermissionRequest;
 use crate::manifest::{validate_safe_name, validate_sha256, PackageManifest};
 use crate::platform::HostPlatform;
 use crate::receipt::InstallReceipt;
+use crate::runtime::SkillRuntimeResolver;
 use crate::{SkillSdkError, SkillSdkResult};
 
 pub const HOST_POLICY_GRANT_SCHEMA_VERSION: u32 = 1;
@@ -59,6 +62,7 @@ pub struct HostPolicyGrant {
     pub risk_level: HostRiskLevel,
     #[serde(default)]
     pub auto_invocable: bool,
+    pub requires_confirmation: bool,
     pub approval_source: ApprovalSource,
     pub approved_at_unix: u64,
 }
@@ -226,6 +230,26 @@ impl AdmissionReceipt {
     pub fn digest(&self) -> SkillSdkResult<String> {
         self.validate()?;
         Ok(hex::encode(Sha256::digest(serde_json::to_vec(self)?)))
+    }
+
+    pub fn verify_installed(&self, package_root: &Path) -> SkillSdkResult<()> {
+        self.validate()?;
+        let resolved = SkillRuntimeResolver::new(package_root).resolve_pinned(
+            &self.skill_name,
+            &self.version,
+            &self.manifest_digest,
+            &self.install_receipt_digest,
+        )?;
+        let receipt: InstallReceipt = serde_json::from_slice(&fs::read(
+            resolved.install_root.join("install-receipt.json"),
+        )?)?;
+        if receipt.artifact_set_digest()? != self.artifact_set_digest {
+            return Err(SkillSdkError::new(
+                "admission_install_artifact_set_mismatch",
+                format!("skill={}", self.skill_name),
+            ));
+        }
+        Ok(())
     }
 
     pub fn from_install(

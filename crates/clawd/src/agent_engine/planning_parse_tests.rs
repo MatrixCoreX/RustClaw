@@ -21,6 +21,7 @@ fn state_with_workspace_registry() -> crate::AppState {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });
@@ -103,7 +104,7 @@ async fn invalid_optional_output_contract_does_not_discard_valid_steps() {
         {
           "type": "call_capability",
           "capability": "system.preview_command_permission",
-          "args": {"command": "sudo rm -rf /tmp/rustclaw-never-run"}
+          "args": {"command": "sudo rm -rf /tmp/agent-runtime-never-run"}
         },
         {"type": "synthesize_answer", "evidence_refs": ["last_output"]}
       ]

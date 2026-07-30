@@ -181,23 +181,23 @@ python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --count "${CASE_COUNT}" \
   --check \
   --report \
-  > /tmp/rustclaw-contract-matrix-cases.jsonl
+  > /tmp/agent-runtime-contract-matrix-cases.jsonl
 
 echo "Generating external skill admission contract cases"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --external-admission-cases \
   --check \
   --report \
-  > /tmp/rustclaw-external-admission-cases.jsonl
+  > /tmp/agent-runtime-external-admission-cases.jsonl
 
 echo "Generating deterministic contract matrix live NL rows"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --count "${CASE_COUNT}" \
   --check \
   --nl \
-  --expectations /tmp/rustclaw-contract-matrix-nl.expectations.jsonl \
+  --expectations /tmp/agent-runtime-contract-matrix-nl.expectations.jsonl \
   --report \
-  > /tmp/rustclaw-contract-matrix-nl.jsonl
+  > /tmp/agent-runtime-contract-matrix-nl.jsonl
 
 echo "Generating multilingual contract matrix live NL rows"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
@@ -205,9 +205,9 @@ python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --check \
   --nl \
   --multilingual-variants \
-  --expectations /tmp/rustclaw-contract-matrix-nl-multilingual.expectations.jsonl \
+  --expectations /tmp/agent-runtime-contract-matrix-nl-multilingual.expectations.jsonl \
   --report \
-  > /tmp/rustclaw-contract-matrix-nl-multilingual.jsonl
+  > /tmp/agent-runtime-contract-matrix-nl-multilingual.jsonl
 
 fixtures=(
   observed_finalizer_scalar
@@ -314,14 +314,14 @@ PY
 echo "Extracting minimal replay reproduction fixture"
 python3 "${ROOT_DIR}/scripts/nl_tests/extract_client_like_replay.py" \
   "${ROOT_DIR}/scripts/nl_tests/fixtures/client_like_runs/contract_rejection_attribution" \
-  --case-jsonl /tmp/rustclaw-contract-replay.jsonl \
-  --expectations /tmp/rustclaw-contract-replay.expectations.jsonl \
-  --min-repro /tmp/rustclaw-contract-replay.min-repro.jsonl
+  --case-jsonl /tmp/agent-runtime-contract-replay.jsonl \
+  --expectations /tmp/agent-runtime-contract-replay.expectations.jsonl \
+  --min-repro /tmp/agent-runtime-contract-replay.min-repro.jsonl
 python3 - <<'PY'
 import json
 from pathlib import Path
 
-path = Path("/tmp/rustclaw-contract-replay.min-repro.jsonl")
+path = Path("/tmp/agent-runtime-contract-replay.min-repro.jsonl")
 rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 assert len(rows) == 1, f"expected one min-repro row, got {len(rows)}"
 row = rows[0]

@@ -5,7 +5,7 @@ schema_version = 2
 name = "http_basic"
 version = "0.1.8"
 description = "Raw HTTP/API request tool for status checks, response previews, validation, and downloads; use browser_web for browser-rendered page titles, readable page text, page summaries, screenshots, or extraction artifacts."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/http-basic-skill"
 working_directory = "."
 timeout_seconds = 30
-environment_allowlist = ["CLAWD_BASE_URL", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "CLAWD_BASE_URL", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]

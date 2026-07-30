@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-system:schema:agent-jsonl-v1-request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "args", "user_id", "chat_id"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "args": { "type": "object" },
+    "context": { "type": ["object", "null"] },
+    "user_id": { "type": "integer" },
+    "chat_id": { "type": "integer" },
+    "user_key": { "type": "string" }
+  }
+}

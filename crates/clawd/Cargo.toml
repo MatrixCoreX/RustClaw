@@ -10,8 +10,8 @@ anyhow.workspace = true
 axum = { workspace = true, features = ["multipart"] }
 base64.workspace = true
 claw-core = { path = "../claw-core" }
-rustclaw-fs-discovery = { path = "../fs-discovery" }
-rustclaw-skill-sdk = { path = "../skill-sdk" }
+fs-discovery = { path = "../fs-discovery" }
+skill-sdk = { package = "agent-skill-sdk", path = "../skill-sdk" }
 wechat-ilink = { path = "../wechat-ilink" }
 reqwest.workspace = true
 reqwest-mcp.workspace = true

@@ -22,6 +22,7 @@ fn state_with_workspace_registry_excluding(disabled: &[&str]) -> crate::AppState
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });
@@ -30,7 +31,7 @@ fn state_with_workspace_registry_excluding(disabled: &[&str]) -> crate::AppState
 
 fn state_with_registry_toml(toml: &str) -> crate::AppState {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw-capability-resolver-{}-{}.toml",
+        "agent-runtime-capability-resolver-{}-{}.toml",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -51,10 +52,66 @@ fn state_with_registry_toml(toml: &str) -> crate::AppState {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });
     state
+}
+
+#[test]
+fn media_download_routes_raw_share_text_to_autonomous_download() {
+    let state = state_with_workspace_registry();
+    let share = "复制这条消息，打开快手看看 https://v.kuaishou.com/AbCdEf 更多内容";
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "media_download.download",
+        json!({"share": share}),
+    );
+    let Some(AgentAction::CallSkill { skill, args }) = action else {
+        panic!("expected media download skill action");
+    };
+
+    assert_eq!(skill, "media_download");
+    assert_eq!(args["action"], "download");
+    assert_eq!(args["share"], share);
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+
+    let manifest = state
+        .skill_manifest("media_download")
+        .expect("media download manifest");
+    assert_eq!(manifest.auto_invocable, Some(true));
+    assert_eq!(manifest.requires_confirmation, Some(true));
+    assert!(!state.skill_invocation_requires_confirmation_policy(
+        "media_download",
+        Some(&json!({"action": "download", "share": share})),
+    ));
+    assert!(state.skill_invocation_requires_confirmation_policy(
+        "media_download",
+        Some(&json!({"action": "transcribe", "input_path": "input.mp4"})),
+    ));
+
+    let download = state
+        .get_skills_registry()
+        .expect("skills registry")
+        .planner_capabilities("media_download")
+        .iter()
+        .find(|mapping| mapping.name == "media_download.download")
+        .cloned()
+        .expect("download capability");
+    assert_eq!(
+        download.effect.map(|effect| effect.as_token()),
+        Some("mutate")
+    );
+    assert_eq!(download.risk_level, Some(SkillRiskLevel::Medium));
+    assert_eq!(download.external_publish, Some(false));
+    assert!(download
+        .optional
+        .iter()
+        .any(|name| name == "deliver_to_user"));
 }
 
 #[test]
@@ -328,16 +385,16 @@ fn config_guard_resolves_to_dedicated_machine_action() {
     let state = state_with_workspace_registry();
     let (action, _record) = resolve_capability_action_with_record_for_state(
         &state,
-        "config.guard_rustclaw_config",
+        "config.guard_config",
         json!({"path": "configs/config.toml"}),
     );
     let Some(AgentAction::CallTool { tool, args }) = action else {
         panic!("expected config guard tool action");
     };
-    assert_eq!(tool, "config_basic");
+    assert_eq!(tool, "config_edit");
     assert_eq!(
         args.get("action").and_then(Value::as_str),
-        Some("guard_rustclaw_config")
+        Some("guard_config")
     );
     assert_eq!(
         args.get("path").and_then(Value::as_str),
@@ -450,12 +507,12 @@ fn docker_capabilities_resolve_through_registry_contracts() {
         (
             "docker.read_logs",
             "logs",
-            json!({"container": "rustclaw-test", "tail": 20}),
+            json!({"container": "agent-runtime-test", "tail": 20}),
         ),
         (
             "docker.restart_container",
             "restart",
-            json!({"container": "rustclaw-test"}),
+            json!({"container": "agent-runtime-test"}),
         ),
     ] {
         let (action, _record) =
@@ -1476,7 +1533,7 @@ fn registry_resolves_terminal_layer_representative_capabilities() {
         ("git.status", json!({}), "tool:git_basic"),
         (
             "web.search_results",
-            json!({"query": "rustclaw"}),
+            json!({"query": "agent-runtime"}),
             "tool:web_search_extract",
         ),
         (
@@ -1684,12 +1741,12 @@ fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback()
         ),
         (
             "filesystem.create_dir",
-            json!({"path": "/tmp/rustclaw-test"}),
+            json!({"path": "/tmp/agent-runtime-test"}),
             "tool:fs_basic",
         ),
         (
             "filesystem.delete_path",
-            json!({"path": "/tmp/rustclaw-test"}),
+            json!({"path": "/tmp/agent-runtime-test"}),
             "tool:fs_basic",
         ),
         (

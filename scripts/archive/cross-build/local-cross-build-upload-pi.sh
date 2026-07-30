@@ -9,7 +9,7 @@
 # - 本脚本在本机编译，兼容 macOS 和 Ubuntu。
 # - 编译产物来自 target/aarch64-unknown-linux-gnu/release/，上传时会放到远端 target/release/。
 # - `all` 模式默认会先同步技能文档、构建 UI/dist，再交叉编译整个 workspace 并上传。
-# - `dir` 模式会把指定目录完整同步到远端，并额外附带 RustClaw 运行/测试常用依赖文件。
+# - `dir` 模式会把指定目录完整同步到远端，并额外附带 agent runtime 运行/测试常用依赖文件。
 # - `dir` 模式可结合环境变量:
 #     BUILD_CMD='cargo build -p clawd --release --target aarch64-unknown-linux-gnu'
 #     BINARIES='clawd telegramd'
@@ -57,7 +57,7 @@ RSYNC_PROGRESS_OPTS=()
 
 LOCAL_TARGET_RELEASE_DIR="${SCRIPT_DIR}/target/${TARGET}/${BUILD_PROFILE}"
 STAGE_ROOT=""
-RUSTCLAW_CARGO_METADATA_FILE=""
+APP_CARGO_METADATA_FILE=""
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 
@@ -96,7 +96,7 @@ log_phase() {
 
 cleanup_temp_artifacts() {
 	[[ -n "${STAGE_ROOT}" && -d "${STAGE_ROOT}" ]] && rm -rf "${STAGE_ROOT}"
-	[[ -n "${RUSTCLAW_CARGO_METADATA_FILE}" && -f "${RUSTCLAW_CARGO_METADATA_FILE}" ]] && rm -f "${RUSTCLAW_CARGO_METADATA_FILE}"
+	[[ -n "${APP_CARGO_METADATA_FILE}" && -f "${APP_CARGO_METADATA_FILE}" ]] && rm -f "${APP_CARGO_METADATA_FILE}"
 }
 
 trap cleanup_temp_artifacts EXIT
@@ -215,7 +215,7 @@ parse_args() {
 
 	[[ -n "${MODE}" ]] || MODE="all"
 	if [[ -z "${REMOTE_DIR}" ]]; then
-		REMOTE_DIR="/home/${REMOTE_USER}/rustclaw"
+		REMOTE_DIR="/home/${REMOTE_USER}/${APP_RELEASE_ARTIFACT_ID}"
 	fi
 }
 
@@ -413,13 +413,13 @@ setup_cross_env() {
 }
 
 load_cargo_metadata() {
-	if [[ -n "${RUSTCLAW_CARGO_METADATA_FILE}" && -f "${RUSTCLAW_CARGO_METADATA_FILE}" ]]; then
+	if [[ -n "${APP_CARGO_METADATA_FILE}" && -f "${APP_CARGO_METADATA_FILE}" ]]; then
 		return 0
 	fi
 	mkdir -p "${SCRIPT_DIR}/target"
-	RUSTCLAW_CARGO_METADATA_FILE="$(mktemp "${SCRIPT_DIR}/target/local-cross-build-cargo-metadata.XXXXXX")"
-	log "generating cargo metadata cache: ${RUSTCLAW_CARGO_METADATA_FILE}"
-	cargo metadata --format-version 1 > "${RUSTCLAW_CARGO_METADATA_FILE}"
+	APP_CARGO_METADATA_FILE="$(mktemp "${SCRIPT_DIR}/target/local-cross-build-cargo-metadata.XXXXXX")"
+	log "generating cargo metadata cache: ${APP_CARGO_METADATA_FILE}"
+	cargo metadata --format-version 1 > "${APP_CARGO_METADATA_FILE}"
 }
 
 workspace_bins_raw() {
@@ -429,17 +429,17 @@ workspace_bins_raw() {
 		python3 "${SCRIPT_DIR}/scripts/skill_store_packages.py" \
 			--scope build-excludes --target "${TARGET}" --format packages
 	)"
-	RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" \
-		RUSTCLAW_BUILD_EXCLUDED_PACKAGES="${build_excluded_packages}" python3 - <<'PY'
+	APP_CARGO_METADATA_FILE="${APP_CARGO_METADATA_FILE}" \
+		APP_BUILD_EXCLUDED_PACKAGES="${build_excluded_packages}" python3 - <<'PY'
 import json
 import os
 
-with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+with open(os.environ["APP_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 build_excluded_packages = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
+    for value in os.environ.get("APP_BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = set()
@@ -463,13 +463,13 @@ PY
 package_bins_raw() {
 	local package_name="$1"
 	load_cargo_metadata
-	PACKAGE_NAME="$package_name" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
+	PACKAGE_NAME="$package_name" APP_CARGO_METADATA_FILE="${APP_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
 
 package_name = os.environ["PACKAGE_NAME"]
-with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+with open(os.environ["APP_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 
@@ -496,7 +496,7 @@ PY
 package_workspace_dirs_raw() {
 	local package_name="$1"
 	load_cargo_metadata
-	PACKAGE_NAME="$package_name" REPO_ROOT="${SCRIPT_DIR}" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
+	PACKAGE_NAME="$package_name" REPO_ROOT="${SCRIPT_DIR}" APP_CARGO_METADATA_FILE="${APP_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
@@ -504,7 +504,7 @@ from pathlib import Path
 
 package_name = os.environ["PACKAGE_NAME"]
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
-with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+with open(os.environ["APP_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 
 workspace_members = set(data.get("workspace_members", []))
@@ -555,7 +555,7 @@ PY
 package_name_for_dir() {
 	local repo_rel_dir="$1"
 	load_cargo_metadata
-	DIR_REL="$repo_rel_dir" REPO_ROOT="${SCRIPT_DIR}" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
+	DIR_REL="$repo_rel_dir" REPO_ROOT="${SCRIPT_DIR}" APP_CARGO_METADATA_FILE="${APP_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
@@ -563,7 +563,7 @@ from pathlib import Path
 
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
 target_dir = (repo_root / os.environ["DIR_REL"]).resolve()
-with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+with open(os.environ["APP_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
     data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 
@@ -597,7 +597,7 @@ copy_repo_rel_into_stage() {
 		return 0
 	fi
 
-	dest_parent="${STAGE_ROOT}/RustClaw/$(dirname "${repo_rel}")"
+	dest_parent="${STAGE_ROOT}/${APP_RELEASE_ARTIFACT_ID}/$(dirname "${repo_rel}")"
 	mkdir -p "${dest_parent}"
 	log "adding to staging: ${repo_rel}"
 	rsync -a "${src}" "${dest_parent}/"
@@ -652,18 +652,18 @@ copy_binaries_into_stage() {
 		return 0
 	fi
 
-	mkdir -p "${STAGE_ROOT}/RustClaw/target/release"
+	mkdir -p "${STAGE_ROOT}/${APP_RELEASE_ARTIFACT_ID}/target/release"
 	for bin in "${binaries[@]}"; do
 		[[ -n "${bin}" ]] || continue
 		[[ -x "${LOCAL_TARGET_RELEASE_DIR}/${bin}" ]] || die "missing cross-build artifact: ${LOCAL_TARGET_RELEASE_DIR}/${bin}"
 		log "adding binary: ${bin}"
-		rsync -a "${LOCAL_TARGET_RELEASE_DIR}/${bin}" "${STAGE_ROOT}/RustClaw/target/release/${bin}"
+		rsync -a "${LOCAL_TARGET_RELEASE_DIR}/${bin}" "${STAGE_ROOT}/${APP_RELEASE_ARTIFACT_ID}/target/release/${bin}"
 	done
 }
 
 prepare_stage_root() {
 	STAGE_ROOT="$(mktemp -d)"
-	mkdir -p "${STAGE_ROOT}/RustClaw"
+	mkdir -p "${STAGE_ROOT}/${APP_RELEASE_ARTIFACT_ID}"
 	log "creating staging directory: ${STAGE_ROOT}"
 }
 
@@ -681,14 +681,14 @@ copy_runtime_base_paths() {
 		"services/wa-web-bridge"
 		"README.md"
 		"USAGE.md"
-		"rustclaw"
+		"agentctl"
 		"build-all.sh"
 		"deploy-pi-nginx.sh"
-		"install-rustclaw-cmd.sh"
+		"install-agent-cmd.sh"
 		"start-all.sh"
 		"start-all-bin.sh"
 		"component_start"
-		"stop-rustclaw.sh"
+		"stop-agent.sh"
 	)
 	local path
 
@@ -728,7 +728,7 @@ sync_stage_to_remote() {
 	rsync -az -e "${RSYNC_SSH}" \
 		"${RSYNC_PROGRESS_OPTS[@]}" \
 		"${rsync_delete_opt[@]}" \
-		"${STAGE_ROOT}/RustClaw/" \
+		"${STAGE_ROOT}/${APP_RELEASE_ARTIFACT_ID}/" \
 		"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
 	log_phase "6/6 Remote verification"

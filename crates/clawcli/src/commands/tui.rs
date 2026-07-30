@@ -161,7 +161,7 @@ pub(crate) fn run_tui(
 
 pub(super) fn tui_snapshot_json(active: &Value, selected: Option<&task::TaskStatusView>) -> Value {
     json!({
-        "snapshot_kind": "rustclaw_cli_tui",
+        "snapshot_kind": "agent_cli_tui",
         "active": active,
         "selected_task": selected.map(|task| task.raw_data.clone()).unwrap_or(Value::Null),
         "selected_progress": selected.map(watch_progress_json).unwrap_or(Value::Null),
@@ -171,7 +171,7 @@ pub(super) fn tui_snapshot_json(active: &Value, selected: Option<&task::TaskStat
 
 pub(super) fn tui_export_json(active: &Value, selected: Option<&task::TaskStatusView>) -> Value {
     json!({
-        "export_kind": "rustclaw_cli_tui_export",
+        "export_kind": "agent_cli_tui_export",
         "snapshot": tui_snapshot_json(active, selected),
         "selected_task_id": selected.map(|task| task.task_id.clone()).unwrap_or_default(),
     })
@@ -450,7 +450,7 @@ fn active_tasks(base_url: &str, key: &str, user_id: i64, chat_id: i64) -> Result
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()

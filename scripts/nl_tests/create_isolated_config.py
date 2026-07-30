@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a test-only RustClaw config with isolated databases."""
+"""Create a test-only Agent Runtime config with isolated databases."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ skill_data_root = "data/skills"
 [prompts]
 config_path = "configs/config.toml"
 """
-    with tempfile.TemporaryDirectory(prefix="rustclaw-isolated-config-") as raw:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-isolated-config-") as raw:
         root = Path(raw)
         output = root / "config.toml"
         output.write_text(

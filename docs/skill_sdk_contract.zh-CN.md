@@ -1,6 +1,6 @@
-# RustClaw 多语言技能 SDK 合同
+# Agent Runtime 多语言技能 SDK 合同
 
-新的 RustClaw 技能包使用版本为 2 的 `skill.toml`。v1 只作为集中式只读兼容
+新的 Agent Runtime 技能包使用版本为 2 的 `skill.toml`。v1 只作为集中式只读兼容
 输入，新源码安装在激活前会规范化成 v2。manifest 除包、构建和运行信息外，
 还声明类型化 capability/permission request，包括输入/输出 schema、effect、
 execution mode、artifact、evidence、timeout、配置入口和运行资源申请。request
@@ -10,7 +10,7 @@ execution mode、artifact、evidence、timeout、配置入口和运行资源申�
 `http_json` 适配器。清单只有类型化字段，不允许写任意 Shell 命令。构建
 网络默认关闭，依赖必须位于技能自己的安装根目录；缺少沙箱时必须失败关闭。
 
-所有本地技能进程使用 `rustclaw-jsonl-v1`：stdin 一条 JSON 请求，stdout
+所有本地技能进程使用 `agent-jsonl-v1`：stdin 一条 JSON 请求，stdout
 严格一条 JSON 响应，诊断信息写 stderr。响应必须回显 `request_id`；错误必须
 同时提供可读 `error_text`、稳定的 `extra.error_code` 和
 `extra.message_key`。单条记录最多 1 MiB。
@@ -25,7 +25,7 @@ grant 摘要和 registry generation 绑定。回执只能保存凭据引用，�
 再生成 `SkillLaunchSpec`。planner 参数不能覆盖程序、入口、工作目录、环境、
 沙箱或回执身份。
 
-机器 schema 位于 `docs/schemas/`。`rustclaw-skill` 命令以单个 JSON 结果提供
+机器 schema 位于 `docs/schemas/`。`skillctl` 命令以单个 JSON 结果提供
 CI 友好的清单、协议和回执检查。
 
 ## 包目录与唯一权威
@@ -54,11 +54,11 @@ Cargo workspace；external Cargo 始终保持 standalone workspace。
 先构建一次 SDK CLI，再显式选择语言：
 
 ```bash
-CARGO_BUILD_JOBS=1 cargo build -p rustclaw-skill-sdk --bin rustclaw-skill
-target/debug/rustclaw-skill init python demo_skill external_skills/demo_skill --human
-target/debug/rustclaw-skill validate external_skills/demo_skill/skill.toml --human
-target/debug/rustclaw-skill build external_skills/demo_skill/skill.toml . data/skill-packages --human
-target/debug/rustclaw-skill receipt-verify data/skill-packages demo_skill --human
+CARGO_BUILD_JOBS=1 cargo build -p agent-skill-sdk --bin skillctl
+target/debug/skillctl init python demo_skill external_skills/demo_skill --human
+target/debug/skillctl validate external_skills/demo_skill/skill.toml --human
+target/debug/skillctl build external_skills/demo_skill/skill.toml . data/skill-packages --human
+target/debug/skillctl receipt-verify data/skill-packages demo_skill --human
 ```
 
 `build`、`protocol-test` 与 `install-local` 都走同一条验证安装链路。只有
@@ -125,5 +125,5 @@ GOOS/GOARCH 且关闭 CGO；Cargo 与 prebuilt 遵循各自 target/artifact 声�
 prebuilt 夹具，验证同一套计算、结构化错误、产物、waiting、needs-user、超时、
 非法/多条/超大 stdout 以及仅写 stderr 的诊断行为。测试还会对每个可用 adapter
 执行原子更新、已验证回滚、失败更新保留、构建网络拒绝和源码目录无污染检查。
-Ubuntu 与 macOS CI 设置 `RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS=1`，因此五种
+Ubuntu 与 macOS CI 设置 `APP_REQUIRE_REFERENCE_ADAPTERS=1`，因此五种
 adapter 和必需沙箱必须全部实际执行，不能因缺少工具链而静默跳过。

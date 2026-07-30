@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# 安装 PyInstaller 等打包依赖，并将 rustclaw_small_screen.py 打成可分发目录/单文件。
+# 安装 PyInstaller 等打包依赖，并将 agent_small_screen.py 打成可分发目录/单文件。
 # 在 pi_app 目录下执行：./package-small-screen.sh
-# 产物：dist/rustclaw-small-screen/（默认 onedir）或 dist/rustclaw-small-screen（--onefile）
+# 产物：dist/agent-small-screen/（默认 onedir）或 dist/agent-small-screen（--onefile）
 
 set -euo pipefail
 
 PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PI_APP_DIR"
+# shellcheck source=/dev/null
+source "$PI_APP_DIR/../scripts/product_identity.sh"
 
 ONEFILE=0
 for arg in "$@"; do
@@ -33,8 +35,8 @@ echo "安装/升级打包依赖 (requirements-packaging.txt) ..."
 pip install -q --upgrade pip
 pip install -q -r "${PI_APP_DIR}/requirements-packaging.txt"
 
-NAME="rustclaw-small-screen"
-ENTRY="rustclaw_small_screen.py"
+NAME="agent-small-screen"
+ENTRY="agent_small_screen.py"
 
 # Linux / macOS 用 ':'；Windows 为 ';'（本脚本面向 Unix）
 if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == CYGWIN_NT* ]] || [[ "$(uname -s)" == MSYS_NT* ]]; then
@@ -57,7 +59,7 @@ add_data_tree "small_screen_markets.toml" "."
 add_data_tree "signature.py" "."
 add_data_tree "signature_simulator.py" "."
 add_data_tree "signature_simulator_x509.py" "."
-add_data_tree "RustClaw480X320.png" "."
+add_data_tree "$APP_SMALL_SCREEN_SPLASH_IMAGE" "."
 add_data_tree "longxia.png" "."
 add_data_tree "image" "image"
 

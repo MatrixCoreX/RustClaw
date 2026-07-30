@@ -68,15 +68,16 @@ fn ps_filter_matches_command_case_insensitively() {
 
 #[test]
 fn pgrep_row_parser_preserves_full_command() {
-    let row =
-        parse_pgrep_row("33030 /Users/xuhao/rustclaw/target/release/clawd --config local.toml")
-            .expect("pgrep row");
+    let row = parse_pgrep_row(
+        "33030 /Users/xuhao/agent-runtime/target/release/clawd --config local.toml",
+    )
+    .expect("pgrep row");
 
     assert_eq!(row.pid, 33030);
     assert_eq!(row.ppid, 0);
     assert_eq!(
         row.comm,
-        "/Users/xuhao/rustclaw/target/release/clawd --config local.toml"
+        "/Users/xuhao/agent-runtime/target/release/clawd --config local.toml"
     );
 }
 

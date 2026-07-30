@@ -147,9 +147,7 @@ pub(crate) fn delivery_artifact_path(
     artifact_id: &str,
     filename: &str,
 ) -> PathBuf {
-    workspace_root
-        .join(".rustclaw")
-        .join("artifacts")
+    claw_core::workspace_state::workspace_artifacts_root(workspace_root)
         .join("delivery")
         .join(machine_path_component(task_id, "task"))
         .join(machine_path_component(artifact_id, "artifact"))
@@ -162,47 +160,51 @@ pub(crate) fn validated_delivery_artifact_path(
     manifest: &TaskArtifactManifest,
 ) -> Option<PathBuf> {
     let workspace = workspace_root.canonicalize().ok()?;
-    let task_root = workspace
-        .join(".rustclaw")
-        .join("artifacts")
-        .join("delivery")
-        .join(machine_path_component(task_id, "task"));
-    let candidate = delivery_artifact_path(&workspace, task_id, &manifest.id, &manifest.filename);
-    let canonical = candidate.canonicalize().ok()?;
-    let canonical_task_root = task_root.canonicalize().ok()?;
-    (canonical.starts_with(canonical_task_root) && canonical.is_file()).then_some(canonical)
+    claw_core::workspace_state::known_workspace_state_roots(&workspace)
+        .into_iter()
+        .find_map(|state_root| {
+            let task_root = state_root
+                .join("artifacts")
+                .join("delivery")
+                .join(machine_path_component(task_id, "task"));
+            let candidate = task_root
+                .join(machine_path_component(&manifest.id, "artifact"))
+                .join(safe_filename(&manifest.filename));
+            let canonical = candidate.canonicalize().ok()?;
+            let canonical_task_root = task_root.canonicalize().ok()?;
+            (canonical.starts_with(canonical_task_root) && canonical.is_file()).then_some(canonical)
+        })
 }
 
 pub(crate) fn cleanup_orphaned_delivery_artifacts(
     workspace_root: &Path,
     db: &Connection,
 ) -> anyhow::Result<usize> {
-    let root = workspace_root
-        .join(".rustclaw")
-        .join("artifacts")
-        .join("delivery");
-    let entries = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(error.into()),
-    };
     let mut removed = 0;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(task_id) = entry.file_name().to_str().and_then(machine_id) else {
-            continue;
+    for state_root in claw_core::workspace_state::known_workspace_state_roots(workspace_root) {
+        let root = state_root.join("artifacts").join("delivery");
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
         };
-        let exists = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id = ?1)",
-            [task_id],
-            |row| row.get::<_, i64>(0),
-        )? != 0;
-        if !exists {
-            fs::remove_dir_all(path)?;
-            removed += 1;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(task_id) = entry.file_name().to_str().and_then(machine_id) else {
+                continue;
+            };
+            let exists = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id = ?1)",
+                [task_id],
+                |row| row.get::<_, i64>(0),
+            )? != 0;
+            if !exists {
+                fs::remove_dir_all(path)?;
+                removed += 1;
+            }
         }
     }
     Ok(removed)
@@ -421,7 +423,7 @@ fn valid_manifest(manifest: &TaskArtifactManifest) -> bool {
 }
 
 fn max_artifact_bytes() -> u64 {
-    std::env::var("RUSTCLAW_MAX_DELIVERY_ARTIFACT_BYTES")
+    claw_core::product_identity::env_string("MAX_DELIVERY_ARTIFACT_BYTES")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_MAX_ARTIFACT_BYTES)

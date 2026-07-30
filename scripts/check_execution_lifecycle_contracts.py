@@ -61,6 +61,12 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "scripts/nl_tests/build_builtin_tool_skill_subset.py": (
         '"selected_non_x_dry_run_count"',
     ),
+    "scripts/skill_calls/_run_skill.sh": (
+        "expected_skill_version",
+        "expected_manifest_digest",
+        "expected_receipt_digest",
+        "expected_registry_generation: 0",
+    ),
 }
 
 FORBIDDEN_FRAGMENTS: dict[str, tuple[str, ...]] = {

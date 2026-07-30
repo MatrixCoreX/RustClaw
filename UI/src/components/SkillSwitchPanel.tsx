@@ -167,7 +167,7 @@ export function SkillSwitchPanel({
             </button>
           </span>
           <span className="mt-0.5 block break-words text-[11px] leading-4 text-white/50">
-            {skillDescription(lang, skillItem?.description)}
+            {skillDescription(lang, skillItem?.description, skillItem?.description_zh)}
           </span>
           {statusMeta.length > 0 ? (
             <span className="mt-1 block text-[10px] leading-4 text-white/35">{statusMeta.join(" · ")}</span>

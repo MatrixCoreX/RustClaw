@@ -20,9 +20,9 @@ function location(href: string): BrowserLocation {
 }
 
 test("domain deployments use the current origin without backend ports", () => {
-  const deployed = location("https://rustclaw.example.com/login");
-  assert.equal(defaultBrowserApiBaseUrl(deployed), "https://rustclaw.example.com");
-  assert.equal(defaultWebdBaseUrl(deployed), "https://rustclaw.example.com");
+  const deployed = location("https://agent-runtime.example.com/login");
+  assert.equal(defaultBrowserApiBaseUrl(deployed), "https://agent-runtime.example.com");
+  assert.equal(defaultWebdBaseUrl(deployed), "https://agent-runtime.example.com");
 });
 
 test("legacy clawd UI addresses resolve all browser traffic through webd", () => {
@@ -56,19 +56,19 @@ test("standard HTTP ports do not gain explicit backend ports", () => {
 });
 
 test("legacy generated domain ports migrate to the current reverse-proxy origin", () => {
-  const deployed = location("https://rustclaw.example.com/");
+  const deployed = location("https://agent-runtime.example.com/");
   assert.equal(
-    preferredBrowserApiBaseUrl("https://rustclaw.example.com:8787", deployed),
-    "https://rustclaw.example.com",
+    preferredBrowserApiBaseUrl("https://agent-runtime.example.com:8787", deployed),
+    "https://agent-runtime.example.com",
   );
   assert.equal(
-    preferredWebdBaseUrl("https://rustclaw.example.com:8788", deployed),
-    "https://rustclaw.example.com",
+    preferredWebdBaseUrl("https://agent-runtime.example.com:8788", deployed),
+    "https://agent-runtime.example.com",
   );
 });
 
 test("manually configured service addresses are preserved", () => {
-  const deployed = location("https://rustclaw.example.com/");
+  const deployed = location("https://agent-runtime.example.com/");
   assert.equal(
     preferredWebdBaseUrl("https://gateway.example.net", deployed),
     "https://gateway.example.net",

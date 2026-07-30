@@ -7,10 +7,10 @@ use crate::{SkillSdkError, SkillSdkResult};
 
 /// Set by the trusted runtime when the skill runner and all of its descendants
 /// already execute inside the capability-scoped process sandbox.
-pub const PARENT_SANDBOX_BACKEND_ENV: &str = "RUSTCLAW_PARENT_SANDBOX_BACKEND";
+pub const PARENT_SANDBOX_BACKEND_ENV: &str = "APP_PARENT_SANDBOX_BACKEND";
 /// Set only by the trusted runtime so a read-only installed skill can write to
 /// its declared private storage without gaining write access to the workspace.
-pub const SKILL_STORAGE_WRITABLE_DIRECTORY_ENV: &str = "RUSTCLAW_SKILL_STORAGE_WRITABLE_DIRECTORY";
+pub const SKILL_STORAGE_WRITABLE_DIRECTORY_ENV: &str = "APP_SKILL_STORAGE_WRITABLE_DIRECTORY";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

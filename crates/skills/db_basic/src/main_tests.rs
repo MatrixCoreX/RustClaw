@@ -22,7 +22,7 @@ fn error_extra_merges_machine_contract_and_details() {
 
 fn temp_db_path(name: &str) -> String {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw-db-basic-{name}-{}.sqlite",
+        "agent-runtime-db-basic-{name}-{}.sqlite",
         std::process::id()
     ));
     let _ = std::fs::remove_file(&path);
@@ -133,7 +133,7 @@ fn readonly_action_does_not_create_a_missing_database() {
 #[test]
 fn readonly_action_rejects_a_directory_path() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-db-basic-directory-{}",
+        "agent-runtime-db-basic-directory-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create directory fixture");

@@ -20,7 +20,7 @@ fn answer_verifier_prompt_request_preserves_original_language_over_resolved_inte
         external_chat_id: None,
         kind: "ask".to_string(),
         payload_json: serde_json::json!({
-            "text": "用合适的只读文件读取能力查看 README.md 前 20 行，只回答文件是否存在、读取到的行数，以及标题中是否出现 RustClaw；不要用 shell cat 兜底。"
+            "text": "用合适的只读文件读取能力查看 README.md 前 20 行，只回答文件是否存在、读取到的行数，以及标题中是否出现 Agent Runtime；不要用 shell cat 兜底。"
         })
         .to_string(),
     };
@@ -392,7 +392,7 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("/home/guagua/rustclaw\n".to_string()),
+        output: Some("/home/guagua/agent-runtime\n".to_string()),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -405,10 +405,10 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
             "error_text": "Command failed with exit code 127",
             "platform": "linux",
             "extra": {
-                "command": "definitely_missing_command_rustclaw_english_67890",
+                "command": "definitely_missing_command_agent_english_67890",
                 "exit_code": 127,
                 "exit_category": "command_not_found",
-                "stderr": "bash: line 1: definitely_missing_command_rustclaw_english_67890: command not found\n",
+                "stderr": "bash: line 1: definitely_missing_command_agent_english_67890: command not found\n",
                 "output_truncated": false
             }
         })
@@ -430,7 +430,7 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
     assert!(block.contains(r#""command_output""#), "block: {block}");
     assert!(block.contains(r#""field": "exit_code""#), "block: {block}");
     assert!(
-        !block.contains("definitely_missing_command_rustclaw_english_67890"),
+        !block.contains("definitely_missing_command_agent_english_67890"),
         "block: {block}"
     );
 }

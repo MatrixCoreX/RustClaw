@@ -1,16 +1,16 @@
 [package]
-name = "rustclaw-skill-sdk"
+name = "agent-skill-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "rustclaw_skill_sdk"
+name = "skill_sdk"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rustclaw-skill"
-path = "src/bin/rustclaw-skill.rs"
+name = "skillctl"
+path = "src/bin/skillctl.rs"
 
 [dependencies]
 hex.workspace = true

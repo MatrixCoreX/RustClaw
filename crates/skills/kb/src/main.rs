@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
-use rustclaw_skill_sdk::SkillPathPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use skill_sdk::SkillPathPolicy;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;

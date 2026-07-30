@@ -64,7 +64,7 @@ fn map_pending_channel_bind_session(
     })
 }
 
-const DEFAULT_WEBD_USERNAME: &str = "rustclaw";
+const DEFAULT_WEBD_USERNAME: &str = "admin";
 const DEFAULT_WEBD_PASSWORD: &str = "123456";
 
 pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {

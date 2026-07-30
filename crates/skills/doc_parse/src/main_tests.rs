@@ -19,7 +19,7 @@ impl TempOfficeFile {
             .expect("system time")
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_doc_parse_{}_{}.docx",
+            "agent_doc_parse_{}_{}.docx",
             std::process::id(),
             nonce
         ));
@@ -73,14 +73,14 @@ fn parse_doc_extra_exposes_path_and_content_excerpt() {
         }
     });
     let payload = ParsePayload {
-        text: "RustClaw is a local agent runtime.".to_string(),
+        text: "Agent Runtime is a local agent runtime.".to_string(),
         tables: vec![],
         sections: vec![],
         metadata: Some(Metadata {
-            title: "RustClaw".to_string(),
+            title: "Agent Runtime".to_string(),
             pages: 1,
             doc_type: "md".to_string(),
-            path: "/home/guagua/rustclaw/README.md".to_string(),
+            path: "/home/guagua/agent-runtime/README.md".to_string(),
             encoding: "utf-8-or-lossy".to_string(),
             truncated: false,
             truncation_notice: None,
@@ -101,7 +101,7 @@ fn parse_doc_extra_exposes_path_and_content_excerpt() {
 
     assert_eq!(
         extra.get("path").and_then(|value| value.as_str()),
-        Some("/home/guagua/rustclaw/README.md")
+        Some("/home/guagua/agent-runtime/README.md")
     );
     assert_eq!(
         extra.get("requested_path").and_then(|value| value.as_str()),
@@ -111,7 +111,7 @@ fn parse_doc_extra_exposes_path_and_content_excerpt() {
         extra
             .get("content_excerpt")
             .and_then(|value| value.as_str()),
-        Some("RustClaw is a local agent runtime.")
+        Some("Agent Runtime is a local agent runtime.")
     );
     assert_eq!(
         extra
@@ -159,7 +159,7 @@ fn bounded_content_excerpt_limits_long_text_without_suffix() {
 #[test]
 fn document_text_pages_continue_without_losing_the_canonical_range() {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw-doc-parse-page-{}-{}.txt",
+        "agent-runtime-doc-parse-page-{}-{}.txt",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

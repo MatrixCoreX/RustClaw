@@ -5,13 +5,13 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
     let task = claimed_task("task-contractual-last-respond");
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
-    loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
+    loop_state.last_user_visible_respond = Some("/home/guagua/agent-runtime".to_string());
     loop_state.last_publishable_synthesis_output =
         Some("命令执行已完成，但综合答案时出错。".to_string());
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     let mut route = scalar_route_result();
     route.selection.structured_field_selector = Some("path".to_string());
@@ -25,14 +25,14 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
 
     assert_eq!(
         loop_state.delivery_messages,
-        vec!["/home/guagua/rustclaw".to_string()]
+        vec!["/home/guagua/agent-runtime".to_string()]
     );
 }
 
 #[test]
 fn backfill_delivery_accepts_exact_multiline_exact_observation_respond() {
     let task = claimed_task("task-contractual-multiline-raw-command");
-    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let observed = "/home/guagua/agent-runtime\nguagua\nThinkPad-X1\n";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(observed.trim().to_string());
@@ -97,7 +97,7 @@ fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection()
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "audio_synthesize",
-        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -125,7 +125,7 @@ fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution()
 
 {
   "args": {
-    "command": "sleep 2 && echo RUSTCLAW_ASYNC_100",
+    "command": "sleep 2 && echo APP_ASYNC_100",
     "async_start": true,
     "poll_after_seconds": 5
   },
@@ -223,13 +223,13 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
     let task = claimed_task("task-single-line-observed-respond");
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
-    loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
+    loop_state.last_user_visible_respond = Some("/home/guagua/agent-runtime".to_string());
     loop_state.last_publishable_synthesis_output =
         Some("执行成功了，但合成最终答案的环节遇到问题。".to_string());
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
@@ -253,13 +253,16 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
     .await
     .expect("finalize should succeed");
 
-    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert_eq!(reply.text, "/home/guagua/agent-runtime");
     assert!(!reply.should_fail_task);
     assert_eq!(
         reply.messages.last().map(String::as_str),
-        Some("/home/guagua/rustclaw")
+        Some("/home/guagua/agent-runtime")
     );
-    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert_eq!(
+        reply.messages,
+        vec!["/home/guagua/agent-runtime".to_string()]
+    );
     assert!(reply
         .messages
         .iter()
@@ -270,7 +273,7 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
 async fn finalize_loop_reply_keeps_exact_multiline_exact_observation_observed_respond() {
     let state = test_state();
     let task = claimed_task("task-multiline-raw-command-observed-respond");
-    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let observed = "/home/guagua/agent-runtime\nguagua\nThinkPad-X1\n";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(observed.trim().to_string());
@@ -312,7 +315,7 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("rustclaw.service".to_string()),
+        output: Some("agent-runtime.service".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -321,13 +324,13 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
         step_id: "step_2".to_string(),
         skill: "synthesize_answer".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("有，路径：/tmp/rustclaw.service".to_string()),
+        output: Some("有，路径：/tmp/agent-runtime.service".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
     });
     loop_state.last_publishable_synthesis_output =
-        Some("有，路径：/tmp/rustclaw.service".to_string());
+        Some("有，路径：/tmp/agent-runtime.service".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(scalar_route_result()),
         ..Default::default()
@@ -336,15 +339,15 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "检查 rustclaw.service 是否存在并给出路径",
+        "检查 agent-runtime.service 是否存在并给出路径",
         loop_state,
         Some(&agent_run_context),
     )
     .await
     .expect("finalize should succeed");
 
-    assert_eq!(reply.text, "有，路径：/tmp/rustclaw.service");
-    assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
+    assert_eq!(reply.text, "有，路径：/tmp/agent-runtime.service");
+    assert_eq!(reply.messages, vec!["有，路径：/tmp/agent-runtime.service"]);
     assert!(!reply.should_fail_task);
     assert!(!reply.is_llm_reply);
 }
@@ -455,7 +458,7 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
 async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delivery() {
     let state = test_state();
     let task = claimed_task("task-content-excerpt-title-delivery");
-    let synthesis = "文件存在；读取到 20 行；标题中出现 RustClaw。";
+    let synthesis = "文件存在；读取到 20 行；标题中出现 Agent Runtime。";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push("README.md".to_string());
@@ -464,7 +467,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "doc_parse",
-        r##"{"extra":{"action":"parse_doc","content_excerpt":"# RustClaw\n\nRustClaw runtime.","path":"README.md","metadata":{"title":"README.md"}},"text":"README.md"}"##,
+        r##"{"extra":{"action":"parse_doc","content_excerpt":"# Agent Runtime\n\nAgent Runtime runtime.","path":"README.md","metadata":{"title":"README.md"}},"text":"README.md"}"##,
     ));
     loop_state
         .executed_step_results
@@ -490,7 +493,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "读取 README.md 前 20 行并回答标题是否包含 RustClaw",
+        "读取 README.md 前 20 行并回答标题是否包含 Agent Runtime",
         loop_state,
         Some(&ctx),
     )
@@ -507,7 +510,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
     let state = test_state();
     let task = claimed_task("task-content-excerpt-respond-title-delivery");
     let synthesis =
-        "1. 文件是否存在：是。\n2. 读取到的行数：20 行。\n3. 标题中是否出现 RustClaw：是。";
+        "1. 文件是否存在：是。\n2. 读取到的行数：20 行。\n3. 标题中是否出现 Agent Runtime：是。";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.delivery_messages.push("README.md".to_string());
@@ -515,7 +518,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r##"{"extra":{"action":"read_range","end_line":20,"excerpt":"1|# RustClaw\n2|\n3|body","path":"/home/guagua/rustclaw/README.md","resolved_path":"/home/guagua/rustclaw/README.md","start_line":1,"total_lines":806},"text":"{\"action\":\"read_range\"}"}"##,
+        r##"{"extra":{"action":"read_range","end_line":20,"excerpt":"1|# Agent Runtime\n2|\n3|body","path":"/home/guagua/agent-runtime/README.md","resolved_path":"/home/guagua/agent-runtime/README.md","start_line":1,"total_lines":806},"text":"{\"action\":\"read_range\"}"}"##,
     ));
     loop_state
         .executed_step_results
@@ -532,7 +535,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "读取 README.md 前 20 行并回答标题是否包含 RustClaw",
+        "读取 README.md 前 20 行并回答标题是否包含 Agent Runtime",
         loop_state,
         Some(&ctx),
     )
@@ -558,12 +561,12 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "db_basic",
-        r#"{"extra":{"action":"list_tables","db_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","field_value":{"table_count":3,"tables":["orders","service_logs","users"]},"result":{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]},"table_count":3,"tables":["orders","service_logs","users"]},"text":"{\"columns\":[\"name\"],\"rows\":[{\"name\":\"orders\"},{\"name\":\"service_logs\"},{\"name\":\"users\"}]}"}"#,
+        r#"{"extra":{"action":"list_tables","db_path":"/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","field_value":{"table_count":3,"tables":["orders","service_logs","users"]},"result":{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]},"table_count":3,"tables":["orders","service_logs","users"]},"text":"{\"columns\":[\"name\"],\"rows\":[{\"name\":\"orders\"},{\"name\":\"service_logs\"},{\"name\":\"users\"}]}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "db_basic",
-        r#"{"extra":{"action":"sqlite_query","db_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","result":{"columns":["id","user_id","amount","status"],"rows":[{"amount":19.9,"id":1,"status":"paid","user_id":1},{"amount":42.5,"id":2,"status":"pending","user_id":2}]},"sql":"SELECT * FROM orders LIMIT 5;"},"text":"{\"columns\":[\"id\",\"user_id\",\"amount\",\"status\"],\"rows\":[{\"amount\":19.9,\"id\":1,\"status\":\"paid\",\"user_id\":1},{\"amount\":42.5,\"id\":2,\"status\":\"pending\",\"user_id\":2}]}"}"#,
+        r#"{"extra":{"action":"sqlite_query","db_path":"/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","result":{"columns":["id","user_id","amount","status"],"rows":[{"amount":19.9,"id":1,"status":"paid","user_id":1},{"amount":42.5,"id":2,"status":"pending","user_id":2}]},"sql":"SELECT * FROM orders LIMIT 5;"},"text":"{\"columns\":[\"id\",\"user_id\",\"amount\",\"status\"],\"rows\":[{\"amount\":19.9,\"id\":1,\"status\":\"paid\",\"user_id\":1},{\"amount\":42.5,\"id\":2,\"status\":\"pending\",\"user_id\":2}]}"}"#,
     ));
     loop_state
         .executed_step_results
@@ -577,7 +580,7 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
     route.delivery_required = false;
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
             .to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -690,11 +693,11 @@ async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
             "requested_n": 20,
             "path": "README.md",
         },
-        "text": "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on clawd.",
+        "text": "# Agent Runtime\n\nAgent Runtime is a local Rust agent runtime centered on clawd.",
     })
     .to_string();
     let synthesis =
-        "RustClaw is a local Rust agent runtime. It is centered on clawd. It supports channel and skill execution.";
+        "Agent Runtime is a local Rust agent runtime. It is centered on clawd. It supports channel and skill execution.";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -865,7 +868,7 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
     let raw_git = "exit=0\nabc123 fix deployment docs\n";
     loop_state.last_user_visible_respond = Some(raw_git.to_string());
     loop_state.last_publishable_synthesis_output =
-        Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string());
+        Some("Agent Runtime 的部署可按项目文档和安装脚本完成。".to_string());
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "git_basic".to_string(),
@@ -879,7 +882,7 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
         step_id: "step_2".to_string(),
         skill: "synthesize_answer".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string()),
+        output: Some("Agent Runtime 的部署可按项目文档和安装脚本完成。".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -894,17 +897,20 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "帮我写一段 RustClaw 部署说明",
+        "帮我写一段 Agent Runtime 部署说明",
         loop_state,
         Some(&agent_run_context),
     )
     .await
     .expect("finalize should succeed");
 
-    assert_eq!(reply.text, "RustClaw 的部署可按项目文档和安装脚本完成。");
+    assert_eq!(
+        reply.text,
+        "Agent Runtime 的部署可按项目文档和安装脚本完成。"
+    );
     assert_eq!(
         reply.messages.last().map(String::as_str),
-        Some("RustClaw 的部署可按项目文档和安装脚本完成。")
+        Some("Agent Runtime 的部署可按项目文档和安装脚本完成。")
     );
     assert!(reply
         .messages
@@ -931,12 +937,12 @@ async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
         step_id: "step_2".to_string(),
         skill: "read_file".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("# RustClaw\n\nRustClaw is a local Rust agent runtime.".to_string()),
+        output: Some("# Agent Runtime\n\nAgent Runtime is a local Rust agent runtime.".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
     });
-    let article = "RustClaw 是一个本地优先的 Rust 智能体运行时，围绕 clawd、技能调度和多渠道入口组织，可用于通过聊天或浏览器完成项目管理与自动化任务。".to_string();
+    let article = "Agent Runtime 是一个本地优先的 Rust 智能体运行时，围绕 clawd、技能调度和多渠道入口组织，可用于通过聊天或浏览器完成项目管理与自动化任务。".to_string();
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_3".to_string(),
         skill: "synthesize_answer".to_string(),
@@ -963,7 +969,7 @@ async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "帮我写一篇关于 RustClaw 的长文",
+        "帮我写一篇关于 Agent Runtime 的长文",
         loop_state,
         Some(&agent_run_context),
     )
@@ -993,12 +999,12 @@ async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
         .push("{{synthesized}}".to_string());
     loop_state.last_user_visible_respond = Some("{{synthesized}}".to_string());
     loop_state.last_publishable_synthesis_output =
-        Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string());
+        Some("Agent Runtime 可以按 README 中的安装脚本路径完成部署。".to_string());
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "read_file".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("# RustClaw\n\nUse install-rustclaw-cmd.sh".to_string()),
+        output: Some("# Agent Runtime\n\nUse install-agent-cmd.sh".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -1007,7 +1013,7 @@ async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
         step_id: "step_2".to_string(),
         skill: "synthesize_answer".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string()),
+        output: Some("Agent Runtime 可以按 README 中的安装脚本路径完成部署。".to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
@@ -1022,7 +1028,7 @@ async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "帮我写一段 RustClaw 部署说明",
+        "帮我写一段 Agent Runtime 部署说明",
         loop_state,
         Some(&agent_run_context),
     )
@@ -1031,11 +1037,11 @@ async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
 
     assert_eq!(
         reply.text,
-        "RustClaw 可以按 README 中的安装脚本路径完成部署。"
+        "Agent Runtime 可以按 README 中的安装脚本路径完成部署。"
     );
     assert_eq!(
         reply.messages.last().map(String::as_str),
-        Some("RustClaw 可以按 README 中的安装脚本路径完成部署。")
+        Some("Agent Runtime 可以按 README 中的安装脚本路径完成部署。")
     );
     assert!(!reply.text.contains("{{"));
 }

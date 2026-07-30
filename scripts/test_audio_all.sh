@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "== [1/2] audio_synthesize =="
 bash "$ROOT_DIR/scripts/skill_calls/call_audio_synthesize.sh" \
-  --args '{"text":"你好，这是 RustClaw 音频联调。","voice":"Cherry"}'
+  --args '{"text":"你好，这是 agent runtime 音频联调。","voice":"Cherry"}'
 
 echo
 echo "== [2/2] audio_transcribe (fun-asr, url input) =="

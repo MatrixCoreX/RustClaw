@@ -350,7 +350,7 @@ mod task_debug_trace_tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("rustclaw-debug-trace-{unique}"));
+        let path = std::env::temp_dir().join(format!("agent-debug-trace-{unique}"));
         std::fs::create_dir_all(&path).expect("create temp workspace");
         path
     }

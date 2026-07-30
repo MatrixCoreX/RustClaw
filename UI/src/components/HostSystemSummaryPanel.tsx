@@ -80,7 +80,7 @@ function hostErrorLabel(t: Translate, code: string): string {
     case "permission_denied":
       return t("当前账号无权查看系统信息。", "This account cannot view system information.");
     case "disconnected":
-      return t("暂时无法连接 RustClaw。", "RustClaw is temporarily unreachable.");
+      return t("暂时无法连接 {product_name}。", "{product_name} is temporarily unreachable.");
     default:
       return t("系统信息暂不可用。", "System information is temporarily unavailable.");
   }

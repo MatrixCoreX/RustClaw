@@ -973,14 +973,14 @@ fn answer_verifier_retry_summary_skips_clarify_final_status() {
 
 #[test]
 fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
-    let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
+    let answer = "Agent Runtime combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.push_step_result(&ok_step(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","excerpt":"RustClaw runtime overview","path":"README.md"},"text":"RustClaw runtime overview"}"#,
+        r#"{"extra":{"action":"read_range","excerpt":"Agent Runtime runtime overview","path":"README.md"},"text":"Agent Runtime runtime overview"}"#,
     ));
     journal.push_step_result(&ok_step("step_2", "synthesize_answer", answer));
     journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
@@ -1049,7 +1049,7 @@ fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
 
 #[test]
 fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
-    let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
+    let answer = "Agent Runtime combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
@@ -1082,8 +1082,9 @@ fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
 
 #[test]
 fn terminal_model_answer_replaces_direct_observation_before_verifier() {
-    let raw_readme = "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on `clawd`.";
-    let answer = "RustClaw 是以 `clawd` 为核心的本地 Rust 智能体运行时。它整合多渠道聊天、任务执行、工具和技能路由等能力。它面向通过聊天应用或浏览器完成日常使用和管理。";
+    let raw_readme =
+        "# Agent Runtime\n\nAgent Runtime is a local Rust agent runtime centered on `clawd`.";
+    let answer = "Agent Runtime 是以 `clawd` 为核心的本地 Rust 智能体运行时。它整合多渠道聊天、任务执行、工具和技能路由等能力。它面向通过聊天应用或浏览器完成日常使用和管理。";
     let mut route = route_result(OutputResponseShape::Strict);
     route.exact_sentence_count = Some(3);
     route.locator_kind = OutputLocatorKind::None;
@@ -1125,7 +1126,7 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
         crate::task_journal::TaskJournal::for_task("task-service-status-terminal", "ask", "status");
     let service_output = json!({
         "extra": {
-            "manager_type": "rustclaw",
+            "manager_type": "agent_runtime",
             "post_state": "telegramd=running",
             "pre_state": "telegramd=running",
             "service_name": "telegramd",
@@ -1146,7 +1147,7 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
         used_evidence_ids_count: 1,
         ..Default::default()
     });
-    let observed_projection = "target=telegramd service_name=telegramd post_state=telegramd=running pre_state=telegramd=running status=ok verified=true manager_type=rustclaw source=service_control";
+    let observed_projection = "target=telegramd service_name=telegramd post_state=telegramd=running pre_state=telegramd=running status=ok verified=true manager_type=agent-runtime source=service_control";
     let mut reply = AskReply::non_llm(observed_projection.to_string())
         .with_messages(vec![observed_projection.to_string()])
         .with_task_journal(journal);
@@ -1249,7 +1250,7 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
 #[test]
 fn file_token_delivery_suppresses_list_count_verifier_retry_when_grounded() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-loop-control-file-token-{}",
+        "agent-runtime-loop-control-file-token-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -1315,7 +1316,7 @@ fn file_token_delivery_suppresses_list_count_verifier_retry_when_grounded() {
 #[test]
 fn file_token_delivery_does_not_suppress_when_token_is_not_grounded() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-loop-control-file-token-ungrounded-{}",
+        "agent-runtime-loop-control-file-token-ungrounded-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");

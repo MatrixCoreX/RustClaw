@@ -144,7 +144,7 @@ test("uses an identity-scoped local cache key without credentials", () => {
   assert.equal(conversationHistoryStorageKey(""), "");
   assert.equal(
     conversationHistoryStorageKey("webd:42:7"),
-    "rustclaw.ui.chatThreads.v2.webd:42:7",
+    "agent-runtime.ui.chatThreads.v2.webd:42:7",
   );
 });
 

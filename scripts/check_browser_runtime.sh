@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKILL_DIR="$ROOT_DIR/crates/skills/browser_web"
-SERVICE_NAME="${1:-rustclaw.service}"
+SERVICE_NAME="${1:-agent-runtime-core.service}"
 if [[ "$(uname -s)" == "Darwin" ]]; then
   export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 else

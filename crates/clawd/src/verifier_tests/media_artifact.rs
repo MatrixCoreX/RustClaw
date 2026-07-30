@@ -22,7 +22,7 @@ fn exact_scalar_path_does_not_repair_media_artifact_output_with_text_write() {
                     action_type: "call_skill".to_string(),
                     skill: "audio_synthesize".to_string(),
                     args: json!({
-                        "text": "RustClaw skill test passed",
+                        "text": "Agent Runtime skill test passed",
                         "output_path": "document/skill_audio_smoke.mp3"
                     }),
                     depends_on: Vec::new(),
@@ -51,7 +51,7 @@ fn exact_scalar_path_does_not_repair_media_artifact_output_with_text_write() {
 }
 
 #[test]
-fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
+fn media_preview_does_not_exceed_medium_risk_ceiling() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_contract(false);
@@ -69,10 +69,9 @@ fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
                 action_type: "call_skill".to_string(),
                 skill: "image_generate".to_string(),
                 args: json!({
-                    "action": "generate",
+                    "action": "preview_generate",
                     "prompt": "status card",
-                    "output_path": "document/media_dry_run/image_status_card.png",
-                    "dry_run": true
+                    "output_path": "document/media_preview/image_status_card.png"
                 }),
                 depends_on: Vec::new(),
                 why: String::new(),

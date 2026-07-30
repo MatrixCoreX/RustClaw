@@ -142,6 +142,7 @@ fn test_state_with_registry_excluding(disabled: &[&str]) -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: Some(Arc::new(registry)),
                 skills_list: Arc::new(enabled),
             }))),
@@ -384,7 +385,7 @@ fn confirm_arg_is_kept_when_skill_schema_declares_it() {
 #[test]
 fn invalid_file_delivery_token_detects_embedded_runtime_observation() {
     let candidate = r#"FILE:/tmp/docs/{"action":"inventory_dir","counts":{"files":2},"names":["a.txt","b.txt"]}"#;
-    let compound_delivery = "FILE:/tmp/docs/a.txt\n\n[app]\nname = \"RustClaw NL Fixture\"";
+    let compound_delivery = "FILE:/tmp/docs/a.txt\n\n[app]\nname = \"Agent Runtime NL Fixture\"";
 
     assert!(unresolved_file_token_delivery_artifact(candidate));
     assert!(unresolved_file_token_delivery_artifact(
@@ -1182,7 +1183,7 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"path_batch_facts","facts":[{"path":".","resolved_path":"/home/guagua/rustclaw","exists":true}]}"#,
+        r#"{"action":"path_batch_facts","facts":[{"path":".","resolved_path":"/home/guagua/agent-runtime","exists":true}]}"#,
     ));
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
@@ -1205,7 +1206,7 @@ fn synthesize_direct_fallback_uses_scalar_path_observation() {
     let answer = synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx))
         .expect("scalar path fallback");
 
-    assert_eq!(answer, "/home/guagua/rustclaw");
+    assert_eq!(answer, "/home/guagua/agent-runtime");
 }
 
 #[test]
@@ -1355,9 +1356,11 @@ fn generic_content_synthesis_defers_multiline_excerpt_to_model() {
 fn unclassified_strict_evidence_contract_defers_direct_fallback_to_synthesis() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new();
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/agent-runtime\n",
+    ));
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Strict,

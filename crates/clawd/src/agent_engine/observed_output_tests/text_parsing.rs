@@ -45,10 +45,10 @@ fn observed_answer_parser_strips_bare_json_language_prefix() {
 
 #[test]
 fn observed_answer_parser_unwraps_nested_finalizer_envelope() {
-    let raw = "json\n{\"answer\":\"# RustClaw\\n正文\",\"qualified\":true,\"needs_clarify\":false,\"is_meta_instruction\":false,\"publishable\":true,\"confidence\":0.85,\"reason\":\"grounded\"}";
+    let raw = "json\n{\"answer\":\"# Agent Runtime\\n正文\",\"qualified\":true,\"needs_clarify\":false,\"is_meta_instruction\":false,\"publishable\":true,\"confidence\":0.85,\"reason\":\"grounded\"}";
     assert_eq!(
         extract_answer_from_finalizer_envelope_text(raw).as_deref(),
-        Some("# RustClaw\n正文")
+        Some("# Agent Runtime\n正文")
     );
 }
 

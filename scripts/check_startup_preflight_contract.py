@@ -38,7 +38,12 @@ def build_fixture(root: Path) -> Path:
 
     write(
         root / "scripts/version_info.sh",
-        "print_rustclaw_version() { :; }\n",
+        "print_app_version() { :; }\n",
+        executable=True,
+    )
+    write(
+        root / "scripts/product_identity.sh",
+        (ROOT / "scripts/product_identity.sh").read_text(encoding="utf-8"),
         executable=True,
     )
     write(
@@ -52,11 +57,15 @@ def build_fixture(root: Path) -> Path:
         executable=True,
     )
     write(
-        root / "stop-rustclaw.sh",
+        root / "stop-agent.sh",
         '#!/usr/bin/env bash\nprintf "stopped\\n" > "$PWD/stop-called"\n',
         executable=True,
     )
     write(root / "configs/config.toml", "")
+    write(
+        root / "configs/product_identity.toml",
+        (ROOT / "configs/product_identity.toml").read_text(encoding="utf-8"),
+    )
     write(root / "configs/channels/webd.toml", "[webd]\nenabled = false\n")
     write(
         root / "configs/channels/telegram.toml",
@@ -76,7 +85,7 @@ def build_fixture(root: Path) -> Path:
         executable=True,
     )
     write(
-        root / "target/release/rustclaw-skill",
+        root / "target/release/skillctl",
         "#!/usr/bin/env bash\nprintf '{\"ok\":true}\\n'\n",
         executable=True,
     )
@@ -84,12 +93,12 @@ def build_fixture(root: Path) -> Path:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="rustclaw-startup-preflight-") as raw:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-startup-preflight-") as raw:
         root = Path(raw)
         script = build_fixture(root)
         env = os.environ.copy()
         env["HOME"] = str(root / "home")
-        env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
         result = subprocess.run(
             ["bash", str(script), "release"],
             cwd=root,
@@ -109,14 +118,14 @@ def main() -> int:
         required = (
             "telegramd",
             "Startup preflight failed",
-            "existing RustClaw processes were left unchanged",
+            "existing agent processes were left unchanged",
         )
         missing = [token for token in required if token not in result.stdout]
         if missing:
             print(f"STARTUP_PREFLIGHT_CONTRACT failed: missing_output={missing}")
             return 1
 
-    with tempfile.TemporaryDirectory(prefix="rustclaw-whatsapp-preflight-") as raw:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-whatsapp-preflight-") as raw:
         root = Path(raw)
         script = build_fixture(root)
         write(
@@ -129,7 +138,7 @@ def main() -> int:
         )
         env = os.environ.copy()
         env["HOME"] = str(root / "home")
-        env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
         result = subprocess.run(
             ["bash", str(script), "release"],
             cwd=root,
@@ -153,7 +162,7 @@ def main() -> int:
             )
             return 1
 
-    with tempfile.TemporaryDirectory(prefix="rustclaw-process-identity-") as raw:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-process-identity-") as raw:
         root = Path(raw)
         script = build_fixture(root)
         write(
@@ -179,7 +188,7 @@ def main() -> int:
         try:
             env = os.environ.copy()
             env["HOME"] = str(root / "home")
-            env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+            env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
             result = subprocess.run(
                 ["bash", str(script), "release"],
                 cwd=root,
@@ -218,7 +227,7 @@ def main() -> int:
                 decoy.kill()
 
     if Path("/proc/self/exe").is_symlink():
-        with tempfile.TemporaryDirectory(prefix="rustclaw-relative-process-") as raw:
+        with tempfile.TemporaryDirectory(prefix="agent-runtime-relative-process-") as raw:
             root = Path(raw)
             script = build_fixture(root)
             write(
@@ -239,7 +248,7 @@ def main() -> int:
                 pid_path.write_text(f"{relative_clawd.pid}\n", encoding="utf-8")
                 env = os.environ.copy()
                 env["HOME"] = str(root / "home")
-                env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+                env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
                 result = subprocess.run(
                     ["bash", str(script), "release"],
                     cwd=root,
@@ -263,7 +272,7 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     relative_clawd.kill()
 
-    with tempfile.TemporaryDirectory(prefix="rustclaw-channel-isolation-") as raw:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-channel-isolation-") as raw:
         root = Path(raw)
         script = build_fixture(root)
         write(root / "configs/channels/webd.toml", "[webd]\nenabled = true\n")
@@ -284,7 +293,7 @@ def main() -> int:
         )
         env = os.environ.copy()
         env["HOME"] = str(root / "home")
-        env["RUSTCLAW_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
         result = subprocess.run(
             ["bash", str(script), "release"],
             cwd=root,

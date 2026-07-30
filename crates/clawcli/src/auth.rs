@@ -1,10 +1,9 @@
 use std::path::{Path, PathBuf};
 
 const CONFIG_REL: &str = "configs/config.toml";
-const DEFAULT_SQLITE_PATH: &str = "data/rustclaw.db";
 
 fn find_workspace_root() -> Option<PathBuf> {
-    if let Ok(s) = std::env::var("RUSTCLAW_WORKSPACE") {
+    if let Ok(s) = claw_core::product_identity::env_string("WORKSPACE") {
         let p = Path::new(s.trim());
         if !p.as_os_str().is_empty() && p.join(CONFIG_REL).exists() {
             return Some(p.to_path_buf());
@@ -29,7 +28,7 @@ fn sqlite_path_from_config() -> Option<PathBuf> {
     let value: toml::Value = toml::from_str(&raw).ok()?;
     let path_str = value.get("database")?.get("sqlite_path")?.as_str()?.trim();
     if path_str.is_empty() {
-        return Some(root.join(DEFAULT_SQLITE_PATH));
+        return None;
     }
     let p = Path::new(path_str);
     if p.is_absolute() {
@@ -40,8 +39,7 @@ fn sqlite_path_from_config() -> Option<PathBuf> {
 }
 
 fn admin_key_from_db() -> Option<String> {
-    let db_path = sqlite_path_from_config()
-        .or_else(|| find_workspace_root().map(|root| root.join(DEFAULT_SQLITE_PATH)))?;
+    let db_path = sqlite_path_from_config()?;
     let db = rusqlite::Connection::open(&db_path).ok()?;
     let mut stmt = db
         .prepare("SELECT user_key FROM auth_keys WHERE role = 'admin' AND enabled = 1 LIMIT 1")
@@ -56,7 +54,7 @@ fn admin_key_from_db() -> Option<String> {
 }
 
 pub(crate) fn default_admin_key() -> Option<String> {
-    if let Ok(s) = std::env::var("RUSTCLAW_ADMIN_KEY") {
+    if let Ok(s) = claw_core::product_identity::env_string("ADMIN_KEY") {
         let t = s.trim();
         if !t.is_empty() {
             return Some(t.to_string());

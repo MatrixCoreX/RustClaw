@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use office_workspace::read_docx_for_legacy_parser;
 use regex::Regex;
-use rustclaw_skill_sdk::{BoundedResult, ContinuationDescriptor};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use skill_sdk::{BoundedResult, ContinuationDescriptor};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};

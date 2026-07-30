@@ -352,7 +352,7 @@ fn generic_path_content_allows_git_status_observation() {
             ..IntentOutputContract::default()
         }),
         "git_basic",
-        &serde_json::json!({"action": "status", "path": "/home/guagua/rustclaw"}),
+        &serde_json::json!({"action": "status", "path": "/home/guagua/agent-runtime"}),
     )
     .expect("action policy");
 

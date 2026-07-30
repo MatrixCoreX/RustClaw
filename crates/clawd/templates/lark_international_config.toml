@@ -1,0 +1,22 @@
+# Lark (international) application bot channel configuration
+# Lark uses open.larksuite.com. Feishu China uses the separate feishu.toml configuration.
+
+[lark]
+enabled = false
+mode = "long_connection"
+listen = "0.0.0.0:8790"
+clawd_base_url = "http://127.0.0.1:8787"
+api_base_url = "https://open.larksuite.com"
+language = "en-US"
+i18n_path = "configs/i18n/larkd.en-US.toml"
+image_inbox_dir = "data/larkd/image"
+video_inbox_dir = "data/larkd/video"
+audio_inbox_dir = "data/larkd/audio"
+file_inbox_dir = "data/larkd/file"
+app_id = ""
+app_secret = ""
+verification_token = ""
+encrypt_key = ""
+request_timeout_seconds = 30
+task_delivery_timeout_seconds = 600
+text_chunk_chars = 4000

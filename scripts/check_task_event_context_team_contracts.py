@@ -197,7 +197,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "remove_child_patch_artifact",
     ),
     "crates/clawd/src/bootstrap/skill_runner.rs": (
-        "RUSTCLAW_SKILL_RUNNER_PATH",
+        "SKILL_RUNNER_PATH",
         "resolve_skill_runner_path",
         "current_exe",
         'parent.join("skill-runner")',
@@ -311,7 +311,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/worker/resume_replay_executor.rs": (
         "load_resume_steering_input",
         "apply_resume_steering_prompt",
-        '"rustclaw.resume_input.v1"',
+        '"agent.resume_input.v1"',
         '"original_request"',
         '"user_message"',
         '"new_constraints"',

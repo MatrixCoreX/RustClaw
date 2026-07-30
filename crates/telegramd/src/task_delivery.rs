@@ -431,7 +431,7 @@ pub(super) fn write_subtask_body_to_temp_file(header: &str, body: &str) -> anyho
         .unwrap_or_default()
         .as_millis();
     let sanitized = sanitize_filename_fragment(header);
-    let path = std::env::temp_dir().join(format!("rustclaw-{sanitized}-{millis}.txt"));
+    let path = std::env::temp_dir().join(format!("agent-{sanitized}-{millis}.txt"));
     fs::write(&path, body)
         .with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
     Ok(path.to_string_lossy().to_string())

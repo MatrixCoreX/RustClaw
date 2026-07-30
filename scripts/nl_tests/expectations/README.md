@@ -74,7 +74,7 @@ Use the evaluator to generate a starting baseline from a known-good run:
 ```bash
 python3 scripts/nl_tests/evaluate_client_like_run.py \
   scripts/nl_suite_logs/client_like_continuous/<run_id> \
-  --write-baseline /tmp/rustclaw-client-like-baseline.jsonl
+  --write-baseline /tmp/agent-runtime-client-like-baseline.jsonl
 ```
 
 Then copy only stable, meaningful assertions into a source-controlled

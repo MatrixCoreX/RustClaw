@@ -129,8 +129,10 @@ async fn duplicate_namespaces_fail_closed_before_connecting() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn duplicate_tool_failure_cleans_up_stdio_process() {
-    let pid_file =
-        std::env::temp_dir().join(format!("rustclaw-mcp-fixture-pid-{}", uuid::Uuid::new_v4()));
+    let pid_file = std::env::temp_dir().join(format!(
+        "agent-runtime-mcp-fixture-pid-{}",
+        uuid::Uuid::new_v4()
+    ));
     let mut config = fixture_config();
     let fixture = config.servers.get_mut("fixture").expect("fixture config");
     fixture
@@ -215,9 +217,9 @@ async fn conflicting_http_auth_is_blocked_without_background_retry() {
     fixture.transport = claw_core::config::McpTransportConfig::StreamableHttp;
     fixture.command = None;
     fixture.url = Some("http://127.0.0.1:1/mcp".to_string());
-    fixture.auth_token_env = Some("RUSTCLAW_MCP_BEARER".to_string());
-    fixture.oauth_client_id_env = Some("RUSTCLAW_MCP_CLIENT_ID".to_string());
-    fixture.oauth_client_secret_env = Some("RUSTCLAW_MCP_CLIENT_SECRET".to_string());
+    fixture.auth_token_env = Some("APP_MCP_BEARER".to_string());
+    fixture.oauth_client_id_env = Some("APP_MCP_CLIENT_ID".to_string());
+    fixture.oauth_client_secret_env = Some("APP_MCP_CLIENT_SECRET".to_string());
     let runtime = McpRuntime::new(config);
     runtime.start().await;
     let lifecycle = runtime.lifecycle_snapshots();
@@ -258,8 +260,10 @@ fn configuration_validation_rejects_invalid_secret_reference_names() {
 
 #[tokio::test]
 async fn health_tick_reconnects_closed_transport_without_replaying_a_tool() {
-    let marker =
-        std::env::temp_dir().join(format!("rustclaw-mcp-reconnect-{}", uuid::Uuid::new_v4()));
+    let marker = std::env::temp_dir().join(format!(
+        "agent-runtime-mcp-reconnect-{}",
+        uuid::Uuid::new_v4()
+    ));
     let mut config = fixture_config();
     config
         .servers
@@ -519,7 +523,7 @@ async fn streamable_http_fixture(Json(message): Json<serde_json::Value>) -> Resp
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("2025-11-25"),
             "capabilities": {"tools": {"listChanged": false}},
-            "serverInfo": {"name": "rustclaw-http-fixture", "version": "1"},
+            "serverInfo": {"name": "agent-runtime-http-fixture", "version": "1"},
         }),
         "tools/list" => json!({
             "tools": [
@@ -704,8 +708,8 @@ async fn oauth_client_credentials_discovers_refreshes_and_redacts_tokens() {
         .simple()
         .to_string()
         .to_ascii_uppercase();
-    let client_id_env = format!("RUSTCLAW_MCP_OAUTH_CLIENT_ID_{suffix}");
-    let client_secret_env = format!("RUSTCLAW_MCP_OAUTH_CLIENT_SECRET_{suffix}");
+    let client_id_env = format!("APP_MCP_OAUTH_CLIENT_ID_{suffix}");
+    let client_secret_env = format!("APP_MCP_OAUTH_CLIENT_SECRET_{suffix}");
     std::env::set_var(&client_id_env, "fixture-client");
     std::env::set_var(&client_secret_env, "fixture-secret");
 

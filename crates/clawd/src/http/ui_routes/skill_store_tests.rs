@@ -7,7 +7,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use super::{
-    activate_imported_bundle, begin_skill_store_mutation, build_ui_router,
+    activate_imported_bundle, admission_service, begin_skill_store_mutation, build_ui_router,
     finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
     precompiled_skill_package_root_for, precompiled_source_fallback_allowed,
     remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
@@ -23,6 +23,7 @@ fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
         "precompiled_package_unavailable",
         "precompiled_platform_mismatch",
         "precompiled_manifest_mismatch",
+        "precompiled_adapter_unsupported",
     ] {
         assert!(precompiled_source_fallback_allowed(code), "code={code}");
     }
@@ -38,7 +39,7 @@ fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
 #[test]
 fn source_checkout_uses_target_scoped_precompiled_skill_store() {
     let workspace = std::env::temp_dir().join(format!(
-        "rustclaw-precompiled-root-{}",
+        "agent-runtime-precompiled-root-{}",
         uuid::Uuid::new_v4()
     ));
     let target_root = workspace.join("target/prebuilt-skill-packages/test-target");
@@ -54,7 +55,7 @@ fn source_checkout_uses_target_scoped_precompiled_skill_store() {
 #[test]
 fn packaged_precompiled_skill_store_takes_priority() {
     let workspace = std::env::temp_dir().join(format!(
-        "rustclaw-precompiled-root-{}",
+        "agent-runtime-precompiled-root-{}",
         uuid::Uuid::new_v4()
     ));
     let packaged = workspace.join("prebuilt/skill-packages");
@@ -71,7 +72,7 @@ fn packaged_precompiled_skill_store_takes_priority() {
 
 fn isolated_skill_store_state() -> (AppState, PathBuf) {
     let workspace =
-        std::env::temp_dir().join(format!("rustclaw-skill-store-api-{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("skillctl-store-api-{}", uuid::Uuid::new_v4()));
     let configs = workspace.join("configs");
     std::fs::create_dir_all(&configs).expect("create isolated config directory");
 
@@ -194,7 +195,7 @@ async fn call_skill_store_api_raw(
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
-        .header("x-rustclaw-key", STORE_TEST_KEY);
+        .header("x-agent-key", STORE_TEST_KEY);
     let request_body = if let Some(body) = body {
         builder = builder.header("content-type", "application/json");
         Body::from(body.to_string())
@@ -253,12 +254,40 @@ async fn set_managed_skill_enabled(router: axum::Router, skill_name: &str, enabl
         Some(serde_json::json!({"skill_switches": switches})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "update config for {skill_name}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "update config for {skill_name}: {updated}"
+    );
     updated
 }
 
 async fn register_external_skill_fixture(state: &AppState, workspace: &Path, skill_name: &str) {
     let bundle_dir = workspace.join("third_party").join(skill_name);
+    let interface_md = write_external_skill_fixture(&bundle_dir, skill_name);
+    let (status, response) = super::finalize_imported_bundle(
+        state,
+        &bundle_dir,
+        &format!("third_party/{skill_name}"),
+        "local-test",
+        true,
+        false,
+        &interface_md,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.0.ok);
+    assert_eq!(
+        response
+            .0
+            .data
+            .as_ref()
+            .and_then(|data| data["skill_name"].as_str()),
+        Some(skill_name)
+    );
+}
+
+fn write_external_skill_fixture(bundle_dir: &Path, skill_name: &str) -> String {
     std::fs::create_dir_all(&bundle_dir).expect("create external skill bundle");
     let interface_md = format!(
         "---\nname: {skill_name}\ndescription: External fixture\n---\n# External fixture\n"
@@ -270,7 +299,7 @@ async fn register_external_skill_fixture(state: &AppState, workspace: &Path, ski
         "#!/bin/sh\nIFS= read -r line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '{\"request_id\":\"%s\",\"status\":\"ok\",\"text\":\"fixture ok\",\"error_text\":null}\\n' \"$request_id\"\n",
     )
     .expect("write external skill runner");
-    let platform = rustclaw_skill_sdk::HostPlatform::current();
+    let platform = skill_sdk::HostPlatform::current();
     std::fs::write(
         bundle_dir.join("skill.toml"),
         format!(
@@ -279,7 +308,7 @@ async fn register_external_skill_fixture(state: &AppState, workspace: &Path, ski
 name = "{skill_name}"
 version = "1.0.0"
 description = "External fixture"
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["{os}"]
 supported_arch = ["{arch}"]
 license = "MIT"
@@ -306,26 +335,7 @@ inherit_credentials = false
         ),
     )
     .expect("write external skill manifest");
-    let (status, response) = super::finalize_imported_bundle(
-        state,
-        &bundle_dir,
-        &format!("third_party/{skill_name}"),
-        "local-test",
-        true,
-        false,
-        &interface_md,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(response.0.ok);
-    assert_eq!(
-        response
-            .0
-            .data
-            .as_ref()
-            .and_then(|data| data["skill_name"].as_str()),
-        Some(skill_name)
-    );
+    interface_md
 }
 
 #[test]
@@ -421,8 +431,10 @@ fn imported_skill_aliases_remain_language_neutral_machine_tokens() {
 
 #[test]
 fn failed_import_bundle_activation_restores_the_previous_package_directory() {
-    let workspace =
-        std::env::temp_dir().join(format!("rustclaw-import-atomic-{}", uuid::Uuid::new_v4()));
+    let workspace = std::env::temp_dir().join(format!(
+        "agent-runtime-import-atomic-{}",
+        uuid::Uuid::new_v4()
+    ));
     let existing = workspace.join("third_party/clawhub/weather");
     std::fs::create_dir_all(&existing).expect("existing package");
     std::fs::write(existing.join("old-version.txt"), "keep me").expect("old sentinel");
@@ -555,6 +567,80 @@ async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
 }
 
 #[tokio::test]
+async fn internal_extension_admission_uses_the_same_overlay_without_source_writes() {
+    let (state, workspace) = isolated_skill_store_state();
+    let skill_name = "runtime_probe";
+    let source = workspace.join("external_skills").join(skill_name);
+    write_external_skill_fixture(&source, skill_name);
+    let config_path = workspace.join("configs/config.toml");
+    let registry_path = workspace.join("configs/skills_registry.toml");
+    let config_before = std::fs::read(&config_path).expect("config baseline");
+    let registry_before = std::fs::read(&registry_path).expect("registry baseline");
+    let token = claw_core::secrets::issue_secret_token_value(
+        &claw_core::secrets::SecretValue::new(
+            serde_json::json!({
+                "task_id": "internal-admission-test",
+                "user_id": 1,
+                "chat_id": 1,
+                "user_key": STORE_TEST_KEY,
+                "channel": "ui",
+                "external_user_id": null,
+                "external_chat_id": null,
+                "kind": "run_skill",
+                "payload_json": "{}",
+                "skill_name": "extension_manager"
+            })
+            .to_string(),
+        ),
+        std::time::Duration::from_secs(60),
+    )
+    .expect("issue internal admission token");
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/internal/skills/admit")
+        .header("content-type", "application/json")
+        .header("x-agent-internal-skill-token", token)
+        .body(Body::from(
+            serde_json::json!({
+                "source": source,
+                "enabled": true,
+                "allow_network": false
+            })
+            .to_string(),
+        ))
+        .expect("internal admission request");
+    let response = router
+        .oneshot(request)
+        .await
+        .expect("internal admission call");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("internal admission response"),
+    )
+    .expect("parse internal admission response");
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["data"]["skill_name"], skill_name);
+    assert!(payload["data"]["registry_generation"]
+        .as_u64()
+        .is_some_and(|generation| generation > 0));
+    assert!(state.get_skills_list().contains(skill_name));
+    assert_eq!(
+        std::fs::read(config_path).expect("config after"),
+        config_before
+    );
+    assert_eq!(
+        std::fs::read(registry_path).expect("registry after"),
+        registry_before
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     let (state, workspace) = isolated_skill_store_state();
     let router = axum::Router::new()
@@ -567,7 +653,16 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(store_item(&initial, "weather")["installed"], false);
     assert_eq!(store_item(&initial, "weather")["catalog_section"], "other");
     assert_eq!(
+        store_item(&initial, "weather")["description_zh"],
+        "通过 Open-Meteo 查询指定城市、地点或坐标的当前天气与逐日预报。"
+    );
+    assert_eq!(
         store_item(&initial, "weather")["source_kind"],
+        "bundled_optional"
+    );
+    assert_eq!(store_item(&initial, "media_download")["installed"], false);
+    assert_eq!(
+        store_item(&initial, "media_download")["source_kind"],
         "bundled_optional"
     );
     assert_eq!(
@@ -585,6 +680,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
             "crypto",
             "invest_copy",
             "map_merchant",
+            "media_download",
             "photo_organize",
             "stock",
             "weather",
@@ -745,7 +841,7 @@ async fn skill_store_install_returns_a_durable_operation_and_records_every_stage
 async fn skill_store_recovers_interrupted_operations_from_disk() {
     let (state, workspace) = isolated_skill_store_state();
     let interrupted = skill_store_operation_store(&state)
-        .create("weather", rustclaw_skill_sdk::OperationAction::Install)
+        .create("weather", skill_sdk::OperationAction::Install)
         .expect("persist interrupted operation");
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
@@ -845,7 +941,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
     inventory.sort_unstable();
     assert!(!inventory.is_empty(), "on-demand inventory");
 
-    if let Ok(requested) = std::env::var("RUSTCLAW_SKILL_STORE_TEST_SKILL") {
+    if let Ok(requested) = claw_core::product_identity::env_string("SKILL_STORE_TEST_SKILL") {
         let requested = requested.trim();
         assert!(
             inventory.iter().any(|name| name == requested),
@@ -904,10 +1000,6 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
             .iter()
             .map(|value| value.as_str().expect("config path").to_string())
             .collect::<Vec<_>>();
-        assert!(
-            !config_files.is_empty(),
-            "config path missing for {skill_name}"
-        );
         let config_sentinel = format!("owner = \"{skill_name}\"\n");
         for relative in &config_files {
             let path = workspace.join(relative);
@@ -951,11 +1043,9 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
 
         for candidate in registry_names.iter() {
             assert_eq!(
-                rustclaw_skill_sdk::SkillRuntimeResolver::new(
-                    workspace.join("data/skill-packages")
-                )
-                .resolve(candidate)
-                .is_ok(),
+                skill_sdk::SkillRuntimeResolver::new(workspace.join("data/skill-packages"))
+                    .resolve(candidate)
+                    .is_ok(),
                 candidate == &skill_name,
                 "only the selected package may resolve while installing {skill_name}"
             );
@@ -963,8 +1053,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
 
         let disabled = set_managed_skill_enabled(router.clone(), &skill_name, false).await;
         assert_eq!(disabled["data"]["skill_switches"][&skill_name], false);
-        assert_eq!(disabled["data"]["restart_required"], true);
-        reload_skill_views(&state).expect("apply disabled skill state after restart");
+        assert_eq!(disabled["data"]["restart_required"], false);
         assert!(!state.get_skills_list().contains(&skill_name));
         assert_eq!(
             std::fs::read(&pointer).expect("read disabled package pointer"),
@@ -973,8 +1062,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
         );
         let enabled = set_managed_skill_enabled(router.clone(), &skill_name, true).await;
         assert_eq!(enabled["data"]["skill_switches"][&skill_name], true);
-        assert_eq!(enabled["data"]["restart_required"], true);
-        reload_skill_views(&state).expect("apply enabled skill state after restart");
+        assert_eq!(enabled["data"]["restart_required"], false);
         assert!(state.get_skills_list().contains(&skill_name));
         assert_eq!(
             std::fs::read(&pointer).expect("read re-enabled package pointer"),
@@ -1079,7 +1167,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
 }
 
 #[tokio::test]
-async fn skill_store_mutates_the_active_runtime_config_path() {
+async fn skill_store_uses_runtime_generation_without_mutating_configs() {
     let (mut state, workspace) = isolated_skill_store_state();
     let default_config = workspace.join("configs/config.toml");
     let active_config = workspace.join("profiles/active.toml");
@@ -1087,12 +1175,13 @@ async fn skill_store_mutates_the_active_runtime_config_path() {
         .expect("create active config directory");
     std::fs::copy(&default_config, &active_config).expect("copy active runtime config");
     let default_before = std::fs::read_to_string(&default_config).expect("read default config");
+    let active_before = std::fs::read_to_string(&active_config).expect("read active config");
     state.reload_ctx.config_path_for_reload = active_config.to_string_lossy().into_owned();
     reload_skill_views(&state).expect("reload active runtime config");
 
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
-        .with_state(state);
+        .with_state(state.clone());
     let (status, installed) = call_skill_store_api(
         router,
         Method::POST,
@@ -1103,21 +1192,23 @@ async fn skill_store_mutates_the_active_runtime_config_path() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(installed["data"]["enabled"], true);
-    let active = std::fs::read_to_string(active_config).expect("read active config");
-    let parsed = toml::from_str::<toml::Value>(&active).expect("parse active config");
     assert_eq!(
-        parsed["skills"]["skill_switches"]["weather"].as_bool(),
-        Some(true)
+        std::fs::read_to_string(&active_config).expect("reread active config"),
+        active_before
     );
-    assert!(!parsed["skills"]["uninstalled_skills"]
-        .as_array()
-        .expect("active uninstalled skills")
-        .iter()
-        .any(|name| name.as_str() == Some("weather")));
     assert_eq!(
         std::fs::read_to_string(default_config).expect("reread default config"),
         default_before
     );
+    let admission = admission_service(&state)
+        .expect("admission service")
+        .snapshot()
+        .expect("admission snapshot");
+    assert_eq!(
+        admission.state("weather"),
+        Some(skill_sdk::AdmissionState::Enabled)
+    );
+    assert!(admission.generation > 0);
     let _ = std::fs::remove_dir_all(workspace);
 }
 
@@ -1297,7 +1388,7 @@ async fn skill_store_catalog_publishes_and_clears_active_operation() {
     assert_eq!(status, StatusCode::OK);
     assert!(initial["data"]["active_operation"].is_null());
     let operation = skill_store_operation_store(&state)
-        .create("weather", rustclaw_skill_sdk::OperationAction::Install)
+        .create("weather", skill_sdk::OperationAction::Install)
         .expect("begin visible skill-store operation");
 
     let (status, active) =
@@ -1312,8 +1403,8 @@ async fn skill_store_catalog_publishes_and_clears_active_operation() {
     transition_skill_store_operation(
         &skill_store_operation_store(&state),
         &operation.operation_id,
-        rustclaw_skill_sdk::OperationStatus::Success,
-        rustclaw_skill_sdk::OperationStage::Success,
+        skill_sdk::OperationStatus::Success,
+        skill_sdk::OperationStage::Success,
         None,
         Some(serde_json::json!({"done": true})),
     );

@@ -41,16 +41,17 @@ if command -v xset >/dev/null 2>&1; then
 fi
 
 # 若小屏进程已在运行，直接退出，避免重复启动
-if pgrep -f "rustclaw_small_screen\.py" >/dev/null 2>&1; then
+if pgrep -f "agent_small_screen\.py" >/dev/null 2>&1; then
   exit 0
 fi
 
 PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PI_APP_DIR" || exit 1
 
-LOG="$HOME/.rustclaw-small-screen.log"
-if ! /usr/bin/env python3 "${PI_APP_DIR}/rustclaw_small_screen.py" >>"$LOG" 2>&1; then
-  echo "RustClaw 小屏启动失败，详见: $LOG" >>"$LOG"
-  notify-send "RustClaw 小屏" "启动失败，请查看 $LOG" 2>/dev/null || true
+LOG="${APP_DATA_HOME:-$HOME/.agent-system}/small-screen.log"
+mkdir -p "$(dirname "$LOG")"
+if ! /usr/bin/env python3 "${PI_APP_DIR}/agent_small_screen.py" >>"$LOG" 2>&1; then
+  echo "Agent 小屏启动失败，详见: $LOG" >>"$LOG"
+  notify-send "Agent 小屏" "启动失败，请查看 $LOG" 2>/dev/null || true
   exit 1
 fi

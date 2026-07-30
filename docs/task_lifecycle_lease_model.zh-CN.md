@@ -1,6 +1,6 @@
 # 任务生命周期 Lease 模型
 
-RustClaw 使用两层机器可读 lease 支持持久任务执行：
+Agent Runtime 使用两层机器可读 lease 支持持久任务执行：
 
 - SQLite 任务行 worker lease，用于认领 queued/running 工作并发送 heartbeat；
 - `result_json` 中的 checkpoint resume-executor lease，用于恢复 paused/background 工作且不重放已完成副作用。

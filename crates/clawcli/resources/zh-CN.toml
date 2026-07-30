@@ -1,7 +1,7 @@
 [messages]
-"cli.about" = "用于 RustClaw 任务和连续编程会话的终端客户端"
-"auth.key_required" = "请通过 -k/--key 或 RUSTCLAW_ADMIN_KEY 提供管理密钥"
-"auth.workspace_not_found" = "当前目录及其上级目录中没有 configs/config.toml；请设置 RUSTCLAW_WORKSPACE 或在项目根目录运行"
+"cli.about" = "用于 {product_name} 任务和连续编程会话的终端客户端"
+"auth.key_required" = "请通过 -k/--key 或 APP_ADMIN_KEY 提供管理密钥"
+"auth.workspace_not_found" = "当前目录及其上级目录中没有 configs/config.toml；请设置 APP_WORKSPACE 或在项目根目录运行"
 "auth.admin_key_not_found" = "auth_keys 中没有启用的管理密钥；请先启动 clawd，或通过 -k/--key 提供密钥"
 "tui.prompt" = "clawcli-控制台> "
 "tui.continue_prompt" = "clawcli-继续任务> "

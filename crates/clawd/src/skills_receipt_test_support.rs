@@ -28,7 +28,7 @@ print(json.dumps({
         "{:x}",
         Sha256::digest(fs::read(&executable).expect("read receipt fixture"))
     );
-    let platform = rustclaw_skill_sdk::HostPlatform::current();
+    let platform = skill_sdk::HostPlatform::current();
     let source_relative = format!("receipt-fixtures/{skill_name}");
     let manifest = format!(
         r#"schema_version = 1
@@ -37,7 +37,7 @@ print(json.dumps({
 name = "{skill_name}"
 version = "1.0.0"
 description = "Verified clawd test fixture"
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["{os}"]
 supported_arch = ["{arch}"]
 license = "MIT"
@@ -81,8 +81,8 @@ migration_owner = "{skill_name}"
     );
     let manifest_path = source_root.join("skill.toml");
     fs::write(&manifest_path, manifest).expect("write receipt fixture manifest");
-    rustclaw_skill_sdk::SkillInstaller
-        .install(&rustclaw_skill_sdk::InstallRequest {
+    skill_sdk::SkillInstaller
+        .install(&skill_sdk::InstallRequest {
             manifest_path,
             workspace_root: workspace_root.to_path_buf(),
             package_root: workspace_root.join("data/skill-packages"),

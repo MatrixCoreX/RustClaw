@@ -793,7 +793,7 @@ fn handle_text_message_to_clawd(
             if let Some(ref key) = user_key_poll {
                 let k = key.trim();
                 if !k.is_empty() {
-                    req = req.header("X-RustClaw-Key", k);
+                    req = req.header("X-Agent-Key", k);
                 }
             }
             let resp = match req.send().await {

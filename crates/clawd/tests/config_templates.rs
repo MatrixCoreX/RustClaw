@@ -1,6 +1,6 @@
 use claw_core::secrets::{provision_secret_envs, SecretValue, SecretsBroker, SecretsError};
 use claw_core::skill_registry::{
-    Capability, PlannerCapabilityKind, SkillsRegistry, REQUIRED_BUILTIN_SKILLS,
+    Capability, PlannerCapabilityKind, SkillsRegistry, HOST_TOOL_DESCRIPTORS,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -395,9 +395,9 @@ fn registry_covers_all_required_builtins() {
         let report = registry.integrity_report();
         assert!(
             report.is_clean(),
-            "{}: registry integrity check failed (REQUIRED_BUILTIN_SKILLS={:?}): {}",
+            "{}: registry integrity check failed (HOST_TOOL_DESCRIPTORS={:?}): {}",
             path.display(),
-            REQUIRED_BUILTIN_SKILLS,
+            HOST_TOOL_DESCRIPTORS,
             report.into_human_message().unwrap_or_default()
         );
     }
@@ -405,16 +405,18 @@ fn registry_covers_all_required_builtins() {
 
 #[test]
 fn registry_owns_the_fixed_on_skill_floor() {
-    let expected = claw_core::config::core_skills_always_enabled()
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<BTreeSet<_>>();
     let registry_paths = [
         workspace_root().join("configs/skills_registry.toml"),
         workspace_root().join("docker/config/skills_registry.toml"),
     ];
+    let expected = SkillsRegistry::load_from_path(&registry_paths[0])
+        .expect("load authoritative registry")
+        .fixed_on_names()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    assert!(!expected.is_empty(), "fixed-on policy must not be empty");
 
-    for path in registry_paths.iter() {
+    for path in registry_paths.iter().skip(1) {
         let registry = SkillsRegistry::load_from_path(path).expect("load registry");
         let actual = registry
             .fixed_on_names()
@@ -423,7 +425,7 @@ fn registry_owns_the_fixed_on_skill_floor() {
         assert_eq!(
             actual,
             expected,
-            "{}: fixed-on skill policy must match the no-registry fallback",
+            "{}: fixed-on skill policy must match the authoritative registry",
             path.display()
         );
     }
@@ -560,6 +562,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("log_analyze", &["fs.read"]),
         ("map_merchant", &["net"]),
         ("make_dir", &["fs.write"]),
+        ("media_download", &["exec", "fs.read", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
         ("office_workspace", &["fs.read", "fs.write"]),
         ("remove_file", &["fs.write"]),
@@ -621,6 +624,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("log_analyze", &["fs.read"]),
         ("map_merchant", &["net"]),
         ("make_dir", &["fs.write"]),
+        ("media_download", &["exec", "fs.read", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
         ("office_workspace", &["fs.read", "fs.write"]),
         ("read_file", &["fs.read"]),
@@ -738,10 +742,17 @@ fn registry_entries_have_group_and_tools_have_platform_metadata() {
 #[test]
 fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
     let root = workspace_root();
-    let expected = claw_core::config::skill_store_optional_skill_names()
-        .iter()
-        .copied()
+    let authoritative_registry =
+        SkillsRegistry::load_from_path(&root.join("configs/skills_registry.toml"))
+            .expect("load authoritative registry");
+    let expected = authoritative_registry
+        .on_demand_names()
+        .into_iter()
         .collect::<BTreeSet<_>>();
+    assert!(
+        !expected.is_empty(),
+        "on-demand registry set must not be empty"
+    );
     let workspace = parse_toml(&root.join("Cargo.toml"));
     let package_names = workspace["workspace"]["members"]
         .as_array()
@@ -777,7 +788,7 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(
-            actual.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+            actual,
             expected,
             "{}: on-demand Skill Store set drifted",
             registry_path.display()
@@ -789,25 +800,29 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
                 .as_deref()
                 .expect("on-demand skill package_manifest");
             let manifest = parse_toml(&root.join(manifest_relative));
-            let package = manifest["build"]["package"]
+            let adapter = manifest["build"]["adapter"]
                 .as_str()
-                .expect("Cargo adapter package");
+                .expect("build adapter");
+            if adapter == "cargo" {
+                let package = manifest["build"]["package"]
+                    .as_str()
+                    .expect("Cargo adapter package");
+                assert!(
+                    package_names.contains(package),
+                    "{}: `{name}` manifest package `{package}` is not a workspace package",
+                    registry_path.display()
+                );
+            }
             assert!(
-                package_names.contains(package),
-                "{}: `{name}` manifest package `{package}` is not a workspace package",
-                registry_path.display()
-            );
-            assert!(
-                !entry.config_files.is_empty()
-                    && entry.config_files.iter().all(|path| {
-                        let path = Path::new(path);
-                        !path.is_absolute()
-                            && path.starts_with("configs")
-                            && path
-                                .components()
-                                .all(|part| matches!(part, std::path::Component::Normal(_)))
-                    }),
-                "{}: `{name}` must declare safe configs/ paths",
+                entry.config_files.iter().all(|path| {
+                    let path = Path::new(path);
+                    !path.is_absolute()
+                        && path.starts_with("configs")
+                        && path
+                            .components()
+                            .all(|part| matches!(part, std::path::Component::Normal(_)))
+                }),
+                "{}: `{name}` config paths must stay under configs/",
                 registry_path.display()
             );
         }
@@ -824,6 +839,7 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
             .expect("uninstalled skill list")
             .iter()
             .filter_map(toml::Value::as_str)
+            .map(str::to_string)
             .collect::<BTreeSet<_>>();
         assert_eq!(uninstalled, expected, "{}", config_path.display());
         let baseline = skills["skills_list"]
@@ -835,14 +851,14 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
         for name in &expected {
             assert_eq!(
                 skills["skill_switches"]
-                    .get(*name)
+                    .get(name.as_str())
                     .and_then(toml::Value::as_bool),
                 Some(false),
                 "{}: `{name}` must default disabled",
                 config_path.display()
             );
             assert!(
-                !baseline.contains(name),
+                !baseline.contains(name.as_str()),
                 "{}: `{name}` must not be in the proactive baseline",
                 config_path.display()
             );

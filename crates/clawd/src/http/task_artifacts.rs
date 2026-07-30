@@ -187,9 +187,7 @@ fn visible_task(
     }) else {
         return Err(api_error(StatusCode::NOT_FOUND, "task_not_found"));
     };
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok());
+    let provided_key = crate::auth_key_from_headers(headers);
     match check_task_view_access(state, task_user_key.as_deref(), &channel, provided_key) {
         Ok(()) => Ok(task),
         Err(TaskViewerAccessError::AuthLookup(error)) => {

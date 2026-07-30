@@ -123,7 +123,7 @@ fn parse_os_specific_runtime_values() {
 #[test]
 fn execute_reports_standalone_nni_server_log_separately() {
     let log_dir = std::env::temp_dir().join(format!(
-        "rustclaw-health-check-log-test-{}",
+        "agent-runtime-health-check-log-test-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&log_dir);

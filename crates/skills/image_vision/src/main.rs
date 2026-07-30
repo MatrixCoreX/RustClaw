@@ -69,6 +69,7 @@ struct LlmConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     api_key: String,
@@ -639,7 +640,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_allows_external_paths() -> bool {
-    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+    std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn vendor_order(
@@ -703,13 +704,16 @@ fn vendor_name(v: VendorKind) -> &'static str {
     }
 }
 
-fn provider_config_with_shared_key(
+fn provider_config_with_shared_connection(
     provider: Option<&VendorConfig>,
     shared: Option<&VendorConfig>,
 ) -> Option<VendorConfig> {
     match (provider, shared) {
         (Some(provider), Some(shared)) => {
             let mut merged = provider.clone();
+            if merged.base_url.trim().is_empty() && !shared.base_url.trim().is_empty() {
+                merged.base_url = shared.base_url.clone();
+            }
             if check_api_key("", &merged.api_key).is_err()
                 && check_api_key("", &shared.api_key).is_ok()
             {
@@ -730,42 +734,45 @@ fn resolve_vendor_config(
     let section = &cfg.image_vision.providers;
     match vendor {
         VendorKind::OpenAI => {
-            provider_config_with_shared_key(section.openai.as_ref(), cfg.llm.openai.as_ref())
+            provider_config_with_shared_connection(section.openai.as_ref(), cfg.llm.openai.as_ref())
                 .map(|v| ("openai", v))
                 .ok_or_else(|| "openai config missing".to_string())
         }
         VendorKind::Google => {
-            provider_config_with_shared_key(section.google.as_ref(), cfg.llm.google.as_ref())
+            provider_config_with_shared_connection(section.google.as_ref(), cfg.llm.google.as_ref())
                 .map(|v| ("google", v))
                 .ok_or_else(|| "google config missing".to_string())
         }
-        VendorKind::Anthropic => {
-            provider_config_with_shared_key(section.anthropic.as_ref(), cfg.llm.anthropic.as_ref())
-                .map(|v| ("anthropic", v))
-                .ok_or_else(|| "anthropic config missing".to_string())
-        }
+        VendorKind::Anthropic => provider_config_with_shared_connection(
+            section.anthropic.as_ref(),
+            cfg.llm.anthropic.as_ref(),
+        )
+        .map(|v| ("anthropic", v))
+        .ok_or_else(|| "anthropic config missing".to_string()),
         VendorKind::Grok => {
-            provider_config_with_shared_key(section.grok.as_ref(), cfg.llm.grok.as_ref())
+            provider_config_with_shared_connection(section.grok.as_ref(), cfg.llm.grok.as_ref())
                 .map(|v| ("grok", v))
                 .ok_or_else(|| "grok config missing".to_string())
         }
-        VendorKind::DeepSeek => {
-            provider_config_with_shared_key(section.deepseek.as_ref(), cfg.llm.deepseek.as_ref())
-                .map(|v| ("deepseek", v))
-                .ok_or_else(|| "deepseek config missing".to_string())
-        }
+        VendorKind::DeepSeek => provider_config_with_shared_connection(
+            section.deepseek.as_ref(),
+            cfg.llm.deepseek.as_ref(),
+        )
+        .map(|v| ("deepseek", v))
+        .ok_or_else(|| "deepseek config missing".to_string()),
         VendorKind::Qwen => {
-            provider_config_with_shared_key(section.qwen.as_ref(), cfg.llm.qwen.as_ref())
+            provider_config_with_shared_connection(section.qwen.as_ref(), cfg.llm.qwen.as_ref())
                 .map(|v| ("qwen", v))
                 .ok_or_else(|| "qwen config missing".to_string())
         }
-        VendorKind::MiniMax => {
-            provider_config_with_shared_key(section.minimax.as_ref(), cfg.llm.minimax.as_ref())
-                .map(|v| ("minimax", v))
-                .ok_or_else(|| "minimax config missing".to_string())
-        }
+        VendorKind::MiniMax => provider_config_with_shared_connection(
+            section.minimax.as_ref(),
+            cfg.llm.minimax.as_ref(),
+        )
+        .map(|v| ("minimax", v))
+        .ok_or_else(|| "minimax config missing".to_string()),
         VendorKind::Mimo => {
-            provider_config_with_shared_key(section.mimo.as_ref(), cfg.llm.mimo.as_ref())
+            provider_config_with_shared_connection(section.mimo.as_ref(), cfg.llm.mimo.as_ref())
                 .map(|v| ("mimo", v))
                 .ok_or_else(|| "mimo config missing".to_string())
         }

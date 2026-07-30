@@ -25,8 +25,8 @@ fn delivery_locator_literal_accepts_hint_and_path_shapes() {
 #[test]
 fn delivery_locator_literal_rejects_user_facing_sentences() {
     assert!(!looks_like_delivery_locator_literal(
-        "未找到该文件。文件 `definitely_missing_named_file_rustclaw_001.txt` 在工作区中不存在。",
-        "definitely_missing_named_file_rustclaw_001.txt"
+        "未找到该文件。文件 `definitely_missing_named_file_agent_001.txt` 在工作区中不存在。",
+        "definitely_missing_named_file_agent_001.txt"
     ));
     assert!(!looks_like_delivery_locator_literal(
         "LOCATOR_CLARIFY_PROMPT",
@@ -78,19 +78,20 @@ fn non_file_contract_strips_spurious_leading_file_label_from_prose() {
         ..Default::default()
     };
     let mut text =
-        "FILE: RustClaw-介绍.md\n# RustClaw\nRustClaw 是一个本地智能体运行时。".to_string();
+        "FILE: Agent Runtime-介绍.md\n# Agent Runtime\nAgent Runtime 是一个本地智能体运行时。"
+            .to_string();
     let mut messages = vec![text.clone()];
 
     enforce_output_contract(
         &state,
-        "帮我写一篇关于 RustClaw 的长文",
+        "帮我写一篇关于 Agent Runtime 的长文",
         &contract,
         &mut text,
         &mut messages,
     );
 
     assert!(!text.starts_with("FILE:"));
-    assert!(text.starts_with("# RustClaw"));
+    assert!(text.starts_with("# Agent Runtime"));
     assert_eq!(messages, vec![text]);
 }
 
@@ -140,16 +141,16 @@ fn scalar_contract_does_not_extract_delimited_path_from_context_sentence() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
-        locator_hint: "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string(),
+        locator_hint: "./NO_SUCH_APP_TEST_987654.txt".to_string(),
         ..Default::default()
     };
-    let expected = "未找到 `./NO_SUCH_RUSTCLAW_TEST_987654.txt`，请确认路径后再继续。";
+    let expected = "未找到 `./NO_SUCH_APP_TEST_987654.txt`，请确认路径后再继续。";
     let mut text = expected.to_string();
     let mut messages = Vec::new();
 
     enforce_output_contract(
         &state,
-        "读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行",
+        "读取 ./NO_SUCH_APP_TEST_987654.txt 的第一行",
         &contract,
         &mut text,
         &mut messages,
@@ -167,7 +168,7 @@ fn scalar_contract_preserves_natural_language_summary_with_single_ascii_token() 
         response_shape: OutputResponseShape::Scalar,
         ..Default::default()
     };
-    let expected = "该测试验证 RustClaw 在连续会话下能否稳定保持上下文、记忆和状态。";
+    let expected = "该测试验证 Agent Runtime 在连续会话下能否稳定保持上下文、记忆和状态。";
     let mut text = expected.to_string();
     let mut messages = Vec::new();
 

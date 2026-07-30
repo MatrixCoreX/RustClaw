@@ -5,11 +5,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT}/scripts/shell_compat.sh"
 CLAWCLI_BIN="${CLAWCLI_BIN:-$ROOT/target/debug/clawcli}"
-BASE_URL="${RUSTCLAW_BASE_URL:-http://127.0.0.1:8787}"
-KEY="${RUSTCLAW_CLI_SMOKE_KEY:-${RUSTCLAW_ADMIN_KEY:-}}"
-SMOKE_TEXT="${RUSTCLAW_CLI_SMOKE_TEXT:-hello}"
-WATCH_TIMEOUT_SECONDS="${RUSTCLAW_CLI_SMOKE_WATCH_TIMEOUT_SECONDS:-120}"
-REQUIRE_CAPABILITIES="${RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES:-0}"
+BASE_URL="${APP_BASE_URL:-http://127.0.0.1:8787}"
+KEY="${APP_CLI_SMOKE_KEY:-${APP_ADMIN_KEY:-}}"
+SMOKE_TEXT="${APP_CLI_SMOKE_TEXT:-hello}"
+WATCH_TIMEOUT_SECONDS="${APP_CLI_SMOKE_WATCH_TIMEOUT_SECONDS:-120}"
+REQUIRE_CAPABILITIES="${APP_CLI_SMOKE_REQUIRE_CAPABILITIES:-0}"
 
 if [[ ! -x "$CLAWCLI_BIN" ]]; then
   echo "clawcli binary not found or not executable: $CLAWCLI_BIN" >&2
@@ -88,43 +88,43 @@ run_cli replay export "$task_id" --output "$replay_file" --json >/dev/null
 run_cli replay run "$replay_file" --coverage >/dev/null
 rm -f "$replay_file"
 
-if [[ -n "${RUSTCLAW_CLI_SMOKE_USER_ID:-}" && -n "${RUSTCLAW_CLI_SMOKE_CHAT_ID:-}" ]]; then
+if [[ -n "${APP_CLI_SMOKE_USER_ID:-}" && -n "${APP_CLI_SMOKE_CHAT_ID:-}" ]]; then
   echo "SMOKE active"
   run_cli active \
-    --user-id "$RUSTCLAW_CLI_SMOKE_USER_ID" \
-    --chat-id "$RUSTCLAW_CLI_SMOKE_CHAT_ID" \
+    --user-id "$APP_CLI_SMOKE_USER_ID" \
+    --chat-id "$APP_CLI_SMOKE_CHAT_ID" \
     --json >/dev/null
   echo "SMOKE tui"
   run_cli tui \
-    --user-id "$RUSTCLAW_CLI_SMOKE_USER_ID" \
-    --chat-id "$RUSTCLAW_CLI_SMOKE_CHAT_ID" \
+    --user-id "$APP_CLI_SMOKE_USER_ID" \
+    --chat-id "$APP_CLI_SMOKE_CHAT_ID" \
     --task-id "$task_id" \
     --once \
     --json >/dev/null
 fi
 
-if [[ -n "${RUSTCLAW_CLI_SMOKE_CANCEL_TASK_ID:-}" ]]; then
+if [[ -n "${APP_CLI_SMOKE_CANCEL_TASK_ID:-}" ]]; then
   echo "SMOKE cancel-task"
-  run_cli cancel-task "$RUSTCLAW_CLI_SMOKE_CANCEL_TASK_ID" >/dev/null
+  run_cli cancel-task "$APP_CLI_SMOKE_CANCEL_TASK_ID" >/dev/null
 fi
 
-if [[ -n "${RUSTCLAW_CLI_SMOKE_RESUME_TASK_ID:-}" ]]; then
+if [[ -n "${APP_CLI_SMOKE_RESUME_TASK_ID:-}" ]]; then
   echo "SMOKE resume-task"
-  run_cli resume-task "$RUSTCLAW_CLI_SMOKE_RESUME_TASK_ID" >/dev/null
+  run_cli resume-task "$APP_CLI_SMOKE_RESUME_TASK_ID" >/dev/null
 fi
 
-if [[ -n "${RUSTCLAW_CLI_SMOKE_PAUSE_TASK_ID:-}" ]]; then
+if [[ -n "${APP_CLI_SMOKE_PAUSE_TASK_ID:-}" ]]; then
   echo "SMOKE pause-task"
   run_cli pause-task \
-    "$RUSTCLAW_CLI_SMOKE_PAUSE_TASK_ID" \
-    --pause-seconds "${RUSTCLAW_CLI_SMOKE_PAUSE_SECONDS:-3600}" >/dev/null
+    "$APP_CLI_SMOKE_PAUSE_TASK_ID" \
+    --pause-seconds "${APP_CLI_SMOKE_PAUSE_SECONDS:-3600}" >/dev/null
 fi
 
-if [[ -n "${RUSTCLAW_CLI_SMOKE_RUN_SKILL:-}" ]]; then
+if [[ -n "${APP_CLI_SMOKE_RUN_SKILL:-}" ]]; then
   echo "SMOKE run-skill"
   run_cli run-skill \
-    "$RUSTCLAW_CLI_SMOKE_RUN_SKILL" \
-    --args-json "${RUSTCLAW_CLI_SMOKE_RUN_SKILL_ARGS_JSON:-{}}" \
+    "$APP_CLI_SMOKE_RUN_SKILL" \
+    --args-json "${APP_CLI_SMOKE_RUN_SKILL_ARGS_JSON:-{}}" \
     --wait \
     --json >/dev/null
 fi

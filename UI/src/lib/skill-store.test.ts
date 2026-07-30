@@ -21,11 +21,15 @@ const item = (name: string, installed: boolean, group: string): SkillStoreItem =
   skill: { name },
 });
 
-test("filters store items by machine name and registry group", () => {
-  const items = [item("weather", true, "information"), item("photo_organize", false, "media")];
+test("filters store items by machine name, localized description, and registry group", () => {
+  const items = [
+    { ...item("weather", true, "information"), description_zh: "查询天气预报" },
+    item("photo_organize", false, "media"),
+  ];
 
   assert.deepEqual(filterSkillStoreItems(items, "PHOTO").map((entry) => entry.name), ["photo_organize"]);
   assert.deepEqual(filterSkillStoreItems(items, "information").map((entry) => entry.name), ["weather"]);
+  assert.deepEqual(filterSkillStoreItems(items, "天气").map((entry) => entry.name), ["weather"]);
   assert.equal(filterSkillStoreItems(items, "missing").length, 0);
 });
 

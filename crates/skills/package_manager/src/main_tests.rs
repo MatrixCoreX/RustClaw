@@ -23,7 +23,7 @@ struct TempDir {
 impl TempDir {
     fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw-package-manager-{name}-{}",
+            "agent-runtime-package-manager-{name}-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&path);

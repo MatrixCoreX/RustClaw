@@ -10,8 +10,10 @@ struct TempWorkspace(PathBuf);
 
 impl TempWorkspace {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("rustclaw-task-artifacts-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "agent-runtime-task-artifacts-{}",
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -114,7 +116,7 @@ fn cleanup_removes_only_delivery_directories_without_tasks() {
         .unwrap();
     db.execute("INSERT INTO tasks (task_id) VALUES ('task-live')", [])
         .unwrap();
-    let root = workspace.path().join(".rustclaw/artifacts/delivery");
+    let root = workspace.path().join(".agent-runtime/artifacts/delivery");
     fs::create_dir_all(root.join("task-live")).unwrap();
     fs::create_dir_all(root.join("task-gone")).unwrap();
 

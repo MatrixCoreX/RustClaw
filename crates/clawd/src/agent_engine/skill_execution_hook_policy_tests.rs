@@ -198,7 +198,7 @@ fn post_tool_hook_records_safe_run_cmd_machine_args() {
         "run_cmd",
         &json!({
             "command": "python3 test_calc_core.py",
-            "cwd": "/tmp/rustclaw_live_resume",
+            "cwd": "/tmp/agent-runtime_live_resume",
             "timeout_seconds": 30,
             "api_key": "should-not-be-recorded"
         }),

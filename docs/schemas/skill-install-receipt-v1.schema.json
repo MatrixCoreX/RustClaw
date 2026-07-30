@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.dev/schemas/skill-install-receipt-v1.schema.json",
+  "$id": "https://agent-runtime.dev/schemas/skill-install-receipt-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "skill_name", "version", "manifest_digest", "source_digest", "lockfile_digests", "adapter", "adapter_version", "platform", "artifacts", "launch", "sandbox_profile", "runtime_network", "protocol_smoke", "installed_at_unix"],
@@ -82,7 +82,7 @@
       "additionalProperties": false,
       "required": ["protocol", "passed", "request_id", "checked_at_unix"],
       "properties": {
-        "protocol": { "const": "rustclaw-jsonl-v1" },
+        "protocol": { "const": "agent-jsonl-v1" },
         "passed": { "const": true },
         "request_id": { "type": "string", "minLength": 1 },
         "checked_at_unix": { "type": "integer", "minimum": 0 }

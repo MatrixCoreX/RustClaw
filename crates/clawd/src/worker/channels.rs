@@ -159,3 +159,37 @@ pub(crate) async fn send_task_channel_message(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn whatsapp_delivery_keeps_web_and_cloud_adapters_distinct() {
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.channels.whatsapp_web_enabled = true;
+        state.channels.whatsapp_cloud_enabled = true;
+
+        assert_eq!(
+            resolve_whatsapp_delivery_route(&state, &json!({"adapter": "whatsapp_web"})),
+            crate::WhatsappDeliveryRoute::WebBridge
+        );
+        assert_eq!(
+            resolve_whatsapp_delivery_route(&state, &json!({"adapter": "whatsapp_cloud"})),
+            crate::WhatsappDeliveryRoute::Cloud
+        );
+    }
+
+    #[test]
+    fn whatsapp_delivery_falls_back_to_the_only_enabled_adapter() {
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.channels.whatsapp_web_enabled = true;
+        state.channels.whatsapp_cloud_enabled = false;
+
+        assert_eq!(
+            resolve_whatsapp_delivery_route(&state, &json!({})),
+            crate::WhatsappDeliveryRoute::WebBridge
+        );
+    }
+}

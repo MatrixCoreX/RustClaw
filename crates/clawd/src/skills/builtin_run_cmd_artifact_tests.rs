@@ -8,8 +8,10 @@ struct TempDir {
 
 impl TempDir {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("rustclaw-output-artifact-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "agent-runtime-output-artifact-{}",
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
@@ -80,5 +82,9 @@ fn small_output_stays_inline_without_artifact_files() {
 
     assert!(writer.finish().expect("finish").is_none());
     assert_eq!(stdout, b"small");
-    assert!(!temp.path.join(ARTIFACT_ROOT).exists());
+    assert!(
+        !claw_core::workspace_state::workspace_state_root(&temp.path)
+            .join(ARTIFACT_DIR)
+            .exists()
+    );
 }

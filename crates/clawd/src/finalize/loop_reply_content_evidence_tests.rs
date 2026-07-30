@@ -478,13 +478,13 @@ async fn missing_read_target_reply_prefers_original_user_language() {
     let state = test_state();
     let mut task = claimed_task("task-missing-read-target-language");
     task.payload_json = serde_json::json!({
-        "text": "读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行"
+        "text": "读取 ./NO_SUCH_APP_TEST_987654.txt 的第一行"
     })
     .to_string();
     let mut route = free_route_result();
     route.response_shape = OutputResponseShape::Strict;
     route.requires_content_evidence = true;
-    route.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
+    route.locator_hint = "./NO_SUCH_APP_TEST_987654.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -501,11 +501,11 @@ async fn missing_read_target_reply_prefers_original_user_language() {
             serde_json::json!({
                 "skill": "system_basic",
                 "error_code": "not_found",
-                "error_text": "path was not found: ./NO_SUCH_RUSTCLAW_TEST_987654.txt",
+                "error_text": "path was not found: ./NO_SUCH_APP_TEST_987654.txt",
                 "platform": "linux",
                 "extra": {
                     "operation": "metadata",
-                    "path": "./NO_SUCH_RUSTCLAW_TEST_987654.txt"
+                    "path": "./NO_SUCH_APP_TEST_987654.txt"
                 }
             })
         )),
@@ -516,7 +516,7 @@ async fn missing_read_target_reply_prefers_original_user_language() {
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "Read the first line of the file ./NO_SUCH_RUSTCLAW_TEST_987654.txt.",
+        "Read the first line of the file ./NO_SUCH_APP_TEST_987654.txt.",
         loop_state,
         Some(&agent_run_context),
     )
@@ -524,7 +524,7 @@ async fn missing_read_target_reply_prefers_original_user_language() {
     .expect("finalize should return a missing-target answer");
 
     assert!(
-        reply.text.contains("./NO_SUCH_RUSTCLAW_TEST_987654.txt"),
+        reply.text.contains("./NO_SUCH_APP_TEST_987654.txt"),
         "text: {}",
         reply.text
     );
@@ -536,14 +536,14 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
     let state = test_state();
     let mut task = claimed_task("task-missing-read-target-scalar");
     task.payload_json = serde_json::json!({
-        "text": "读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行"
+        "text": "读取 ./NO_SUCH_APP_TEST_987654.txt 的第一行"
     })
     .to_string();
     let mut route = scalar_route_result();
     route.response_shape = OutputResponseShape::Scalar;
     route.requires_content_evidence = true;
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
+    route.locator_hint = "./NO_SUCH_APP_TEST_987654.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         ..Default::default()
@@ -560,11 +560,11 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
             serde_json::json!({
                 "skill": "system_basic",
                 "error_code": "not_found",
-                "error_text": "path was not found: ./NO_SUCH_RUSTCLAW_TEST_987654.txt",
+                "error_text": "path was not found: ./NO_SUCH_APP_TEST_987654.txt",
                 "platform": "linux",
                 "extra": {
                     "operation": "metadata",
-                    "path": "./NO_SUCH_RUSTCLAW_TEST_987654.txt"
+                    "path": "./NO_SUCH_APP_TEST_987654.txt"
                 }
             })
         )),
@@ -575,7 +575,7 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
     let reply = finalize_loop_reply(
         &state,
         &task,
-        "Read the first line of the file ./NO_SUCH_RUSTCLAW_TEST_987654.txt.",
+        "Read the first line of the file ./NO_SUCH_APP_TEST_987654.txt.",
         loop_state,
         Some(&agent_run_context),
     )
@@ -583,12 +583,12 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
     .expect("finalize should return a missing-target answer");
 
     assert!(
-        reply.text.contains("./NO_SUCH_RUSTCLAW_TEST_987654.txt"),
+        reply.text.contains("./NO_SUCH_APP_TEST_987654.txt"),
         "text: {}",
         reply.text
     );
     assert!(
-        reply.text != "./NO_SUCH_RUSTCLAW_TEST_987654.txt",
+        reply.text != "./NO_SUCH_APP_TEST_987654.txt",
         "missing target answer must not be reshaped into path-only scalar"
     );
     assert_eq!(reply.messages.len(), 1);

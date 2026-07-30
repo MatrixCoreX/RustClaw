@@ -501,6 +501,50 @@ fn skill_context_parses_schedule_metadata() {
 }
 
 #[test]
+fn private_credentials_are_loaded_from_skill_owned_storage() {
+    let database_path = std::env::temp_dir().join(format!(
+        "agent-crypto-skill-storage-{}-{}.db",
+        std::process::id(),
+        now_ts_ms()
+    ));
+    let db = rusqlite::Connection::open(&database_path).expect("open test storage");
+    db.execute_batch(
+        "CREATE TABLE exchange_api_credentials (
+            user_key TEXT NOT NULL,
+            exchange TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            api_secret TEXT NOT NULL,
+            passphrase TEXT,
+            enabled INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_key, exchange)
+         );",
+    )
+    .expect("create credential table");
+    db.execute(
+        "INSERT INTO exchange_api_credentials
+            (user_key, exchange, api_key, api_secret, passphrase, enabled, updated_at)
+         VALUES (?1, 'binance', 'key', 'secret', NULL, 1, 'now')",
+        ["rk-user"],
+    )
+    .expect("insert credential");
+    drop(db);
+
+    let context = SkillContext {
+        user_key: Some("rk-user".to_string()),
+        skill_storage: Some(SkillStorageContext {
+            database_path: database_path.display().to_string(),
+        }),
+        ..Default::default()
+    };
+    let configured = apply_context_credentials(&RootConfig::default(), &context);
+    assert!(configured.binance.enabled);
+    assert_eq!(configured.binance.api_key, "key");
+    assert_eq!(configured.binance.api_secret, "secret");
+    std::fs::remove_file(database_path).expect("remove test storage");
+}
+
+#[test]
 fn schedule_invocation_extra_prefers_context_over_args() {
     let ctx = SkillContext {
         schedule_job_id: Some("from_ctx".to_string()),

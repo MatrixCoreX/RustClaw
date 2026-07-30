@@ -11,7 +11,7 @@ struct TempRepo {
 impl TempRepo {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_child_scope_{}_{}",
+            "agent_child_scope_{}_{}",
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
@@ -163,8 +163,8 @@ fn unsupported_child_profile_fails_closed() {
 fn init_git_repo(path: &Path) {
     for args in [
         vec!["init", "--quiet"],
-        vec!["config", "user.email", "rustclaw-test@example.invalid"],
-        vec!["config", "user.name", "RustClaw Test"],
+        vec!["config", "user.email", "agent-runtime-test@example.invalid"],
+        vec!["config", "user.name", "Agent Runtime Test"],
     ] {
         let status = std::process::Command::new("git")
             .arg("-C")

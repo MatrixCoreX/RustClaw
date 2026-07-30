@@ -53,4 +53,4 @@ flowchart TD
     L --> M[Journal 投影<br/>context_budget + context_compaction + memory_trace]
 ```
 
-任务成功结果持久化后，RustClaw 会保存符合策略的短期轮次记录，并异步启动偏好/事实提取。长期偏好和事实的变更使用结构化 memory-intent schema；用户可以查看、设为过期或删除这些记录。
+任务成功结果持久化后，Agent Runtime 会保存符合策略的短期轮次记录，并异步启动偏好/事实提取。长期偏好和事实的变更使用结构化 memory-intent schema；用户可以查看、设为过期或删除这些记录。

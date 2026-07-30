@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# 将 RustClaw 小屏监控设为当前用户登录后自动启动
+# 将产品小屏监控设为当前用户登录后自动启动
 # 在 pi_app 目录下执行。
 # 同时写入 XDG autostart 与 LXDE-pi autostart，兼容树莓派桌面。
 # 取消自启动：运行本目录下 disable-autostart.sh
 
 set -e
 PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="$(cd "$PI_APP_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "$APP_ROOT/scripts/product_identity.sh"
 REGISTER="${PI_APP_DIR}/register-launcher.sh"
-WRAPPER="${HOME}/.local/bin/rustclaw-small-screen-launcher"
+WRAPPER="${HOME}/.local/bin/agent-small-screen-launcher"
 AUTOSTART_DIR="${HOME}/.config/autostart"
-DESKTOP_FILE="${AUTOSTART_DIR}/rustclaw-small-screen.desktop"
+DESKTOP_FILE="${AUTOSTART_DIR}/agent-small-screen.desktop"
 LXDE_AUTOSTART="${HOME}/.config/lxsession/LXDE-pi/autostart"
 
 "$REGISTER"
@@ -17,8 +20,8 @@ mkdir -p "$AUTOSTART_DIR"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Type=Application
-Name=RustClaw Small Screen
-Comment=RustClaw 小屏监控开机自启动
+Name=${APP_DISPLAY_NAME} Small Screen
+Comment=Agent 小屏监控开机自启动
 Exec=${WRAPPER}
 Path=${HOME}
 TryExec=${WRAPPER}
@@ -31,10 +34,10 @@ chmod +x "$WRAPPER"
 
 # 树莓派常用 LXDE：自启动由 lxsession 读 ~/.config/lxsession/LXDE-pi/autostart
 mkdir -p "$(dirname "$LXDE_AUTOSTART")"
-MARKER="# RustClaw small screen"
+MARKER="# Agent small screen"
 tmp="$(mktemp)"
 if [[ -f "$LXDE_AUTOSTART" ]]; then
-  grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "rustclaw-small-screen-launcher" | grep -v "# RustClaw small screen" > "$tmp" || true
+  grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "agent-small-screen-launcher" | grep -v "# Agent small screen" > "$tmp" || true
 else
   : > "$tmp"
 fi

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-$ROOT_DIR/configs/config.toml}"
-CRYPTO_CONFIG_PATH="${RUSTCLAW_CRYPTO_CONFIG_PATH:-$ROOT_DIR/configs/crypto.toml}"
+CONFIG_PATH="${APP_CONFIG_PATH:-$ROOT_DIR/configs/config.toml}"
+CRYPTO_CONFIG_PATH="${APP_CRYPTO_CONFIG_PATH:-$ROOT_DIR/configs/crypto.toml}"
 
 usage() {
   cat <<'EOF'
@@ -19,7 +19,7 @@ Options:
 Notes:
   - This script imports Binance / OKX credentials from configs/crypto.toml
     into the crypto-owned SQLite database under database.skill_data_root.
-  - The main RustClaw database is opened read-only for auth-key selection and
+  - The main agent-runtime database is opened read-only for auth-key selection and
     never receives crypto-owned tables or secrets.
   - It does NOT delete configs/crypto.toml, because that file still contains
     non-secret crypto behavior settings.
@@ -83,7 +83,7 @@ if not crypto_config_path.exists():
 
 cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
 database_cfg = cfg.get("database", {})
-main_db_configured = Path(database_cfg.get("sqlite_path", "data/rustclaw.db"))
+main_db_configured = Path(database_cfg.get("sqlite_path", "data/agent-runtime.db"))
 main_db_path = (
     main_db_configured
     if main_db_configured.is_absolute()
@@ -227,14 +227,14 @@ def collect_credentials(cfg_obj: dict):
 
 
 if not main_db_path.exists():
-    raise SystemExit(f"RustClaw database not found: {main_db_path}")
+    raise SystemExit(f"agent-runtime database not found: {main_db_path}")
 
 auth_conn = sqlite3.connect(f"file:{main_db_path}?mode=ro", uri=True)
 auth_table = auth_conn.execute(
     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='auth_keys'"
 ).fetchone()[0]
 if auth_table != 1:
-    raise SystemExit("RustClaw auth schema is not initialized; start clawd before importing")
+    raise SystemExit("agent-runtime auth schema is not initialized; start clawd before importing")
 target_user_key = pick_target_user_key(auth_conn, user_key, role)
 auth_conn.close()
 

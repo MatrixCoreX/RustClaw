@@ -191,7 +191,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",
-        "RustClaw is a local Rust agent runtime centered on clawd.",
+        "Agent Runtime is a local Rust agent runtime centered on clawd.",
     ));
     loop_state.executed_step_results.push(ok_step(
             "step_2",
@@ -210,7 +210,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "RustClaw".to_string(),
+            locator_hint: "Agent Runtime".to_string(),
             selection: crate::OutputSelectionContract::default(),
         };
     let agent_run_context = AgentRunContext {

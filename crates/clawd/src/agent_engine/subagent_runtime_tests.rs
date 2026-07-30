@@ -9,7 +9,7 @@ struct TempDirGuard {
 impl TempDirGuard {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw-subagent-runtime-{label}-{}",
+            "agent-runtime-subagent-runtime-{label}-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&path);
@@ -782,8 +782,7 @@ fn subagent_model_child_parser_rejects_unstructured_completion() {
 
 #[test]
 fn subagent_child_loop_wraps_satisfied_custom_result_contract() {
-    let raw =
-        r##"{"first_line_text":"# RustClaw","names_rustclaw":true,"evidence_ref":"README.md"}"##;
+    let raw = r##"{"first_line_text":"# Agent Runtime","names_agent-runtime":true,"evidence_ref":"README.md"}"##;
     let parsed = parse_child_loop_result_for_test(
         raw,
         "reviewer",
@@ -791,26 +790,26 @@ fn subagent_child_loop_wraps_satisfied_custom_result_contract() {
         &json!({
             "output_format": "machine_json",
             "require_evidence": true,
-            "required_keys": ["first_line_text", "names_rustclaw", "evidence_ref"]
+            "required_keys": ["first_line_text", "names_agent-runtime", "evidence_ref"]
         }),
     );
 
     assert_eq!(parsed["status"], "completed");
     assert_eq!(parsed["role"], "reviewer");
-    assert_eq!(parsed["result"]["first_line_text"], "# RustClaw");
-    assert_eq!(parsed["result"]["names_rustclaw"], true);
+    assert_eq!(parsed["result"]["first_line_text"], "# Agent Runtime");
+    assert_eq!(parsed["result"]["names_agent-runtime"], true);
     assert_eq!(parsed["evidence_refs"], json!(["README.md"]));
 }
 
 #[test]
 fn subagent_child_loop_rejects_missing_custom_result_key() {
-    let raw = r##"{"first_line_text":"# RustClaw","evidence_ref":"README.md"}"##;
+    let raw = r##"{"first_line_text":"# Agent Runtime","evidence_ref":"README.md"}"##;
     let parsed = parse_child_loop_result_for_test(
         raw,
         "reviewer",
         &json!(["README.md"]),
         &json!({
-            "required_keys": ["first_line_text", "names_rustclaw", "evidence_ref"]
+            "required_keys": ["first_line_text", "names_agent-runtime", "evidence_ref"]
         }),
     );
 

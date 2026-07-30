@@ -177,22 +177,17 @@ def check_run_cmd_async_contract(skills_by_name: dict[str, dict[str, Any]]) -> l
     return findings
 
 
-def check_media_dry_run_contract(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
+def check_dry_run_restricted_to_x(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
     findings: list[str] = []
-    for skill_name, action in MEDIA_SKILLS.items():
-        skill = skills_by_name.get(skill_name)
-        if not skill:
-            findings.append(f"{skill_name}: missing registry skill entry")
-            continue
-        props = input_properties(skill)
-        if "dry_run" not in props:
-            findings.append(f"{skill_name}: input_schema missing dry_run")
-        cap = capability_by_action(skill, action)
-        if not cap:
-            findings.append(f"{skill_name}: missing planner capability action={action}")
-            continue
-        if "dry_run" not in optional_tokens(cap):
-            findings.append(f"{skill_name}.{action}: optional missing dry_run")
+    for skill_name, skill in skills_by_name.items():
+        serialized = repr(skill)
+        if skill_name != "x" and "dry_run" in serialized:
+            findings.append(f"{skill_name}: dry_run is reserved for x")
+    x_skill = skills_by_name.get("x")
+    if not x_skill:
+        findings.append("x: missing registry skill entry")
+    elif "dry_run" not in input_properties(x_skill):
+        findings.append("x: input_schema missing dry_run")
     return findings
 
 
@@ -253,7 +248,7 @@ def check_video_poll_contract(skills_by_name: dict[str, dict[str, Any]]) -> list
         findings.append("video_generate: missing generate capability")
     else:
         optional = optional_tokens(generate)
-        for field in ["wait_for_completion", "max_poll_seconds", "dry_run"]:
+        for field in ["wait_for_completion", "max_poll_seconds"]:
             if field not in optional:
                 findings.append(f"video_generate.generate: optional missing {field}")
     if not poll:
@@ -262,7 +257,7 @@ def check_video_poll_contract(skills_by_name: dict[str, dict[str, Any]]) -> list
         if "task_id" not in required_tokens(poll):
             findings.append("video_generate.poll: required missing task_id")
         optional = optional_tokens(poll)
-        for field in ["job_id", "poll_after_seconds", "expires_at", "dry_run"]:
+        for field in ["job_id", "poll_after_seconds", "expires_at"]:
             if field not in optional:
                 findings.append(f"video_generate.poll: optional missing {field}")
         if poll.get("idempotent") is not True:
@@ -288,7 +283,6 @@ def check_pollable_media_contracts(skills_by_name: dict[str, dict[str, Any]]) ->
             "expires_at",
             "mock_status",
             "mock_file_id",
-            "dry_run",
         ]:
             if field not in props:
                 findings.append(f"{skill_name}: input_schema missing {field}")
@@ -301,8 +295,6 @@ def check_pollable_media_contracts(skills_by_name: dict[str, dict[str, Any]]) ->
                 findings.append(f"{skill_name}.{start_action}: execution_mode must be async")
             if start.get("async_adapter_kind") != "media_job_poll":
                 findings.append(f"{skill_name}.{start_action}: async_adapter_kind must be media_job_poll")
-            if "dry_run" not in optional_tokens(start):
-                findings.append(f"{skill_name}.{start_action}: optional missing dry_run")
 
         poll = capability_by_name(skill, f"{prefix}.poll")
         if not poll:
@@ -311,7 +303,7 @@ def check_pollable_media_contracts(skills_by_name: dict[str, dict[str, Any]]) ->
             if "task_id" not in required_tokens(poll):
                 findings.append(f"{skill_name}.{prefix}.poll: required missing task_id")
             optional = optional_tokens(poll)
-            for field in ["job_id", "poll_after_seconds", "poll_after_ms", "expires_at", "dry_run"]:
+            for field in ["job_id", "poll_after_seconds", "poll_after_ms", "expires_at"]:
                 if field not in optional:
                     findings.append(f"{skill_name}.{prefix}.poll: optional missing {field}")
             if poll.get("execution_mode") != "async_required":
@@ -328,7 +320,7 @@ def check_pollable_media_contracts(skills_by_name: dict[str, dict[str, Any]]) ->
             if "task_id" not in required_tokens(cancel):
                 findings.append(f"{skill_name}.{prefix}.cancel: required missing task_id")
             optional = optional_tokens(cancel)
-            for field in ["job_id", "cancel_token", "cancel_ref", "dry_run"]:
+            for field in ["job_id", "cancel_token", "cancel_ref"]:
                 if field not in optional:
                     findings.append(f"{skill_name}.{prefix}.cancel: optional missing {field}")
             if cancel.get("execution_mode") != "async_required":
@@ -353,7 +345,7 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
         check_timeouts(skills)
         + check_capability_execution_modes(skills)
         + check_run_cmd_async_contract(skills_by_name)
-        + check_media_dry_run_contract(skills_by_name)
+        + check_dry_run_restricted_to_x(skills_by_name)
         + check_media_preview_contract(skills_by_name)
         + check_video_poll_contract(skills_by_name)
         + check_pollable_media_contracts(skills_by_name)
@@ -403,13 +395,18 @@ def run_self_test() -> int:
             }
         ],
     }
-    bad_media = {"image_generate": bad_media_skill}
-    dry_run_findings = check_media_dry_run_contract(bad_media)
+    bad_media = {
+        "image_generate": {
+            **bad_media_skill,
+            "input_schema": {"properties": {"dry_run": {"type": "boolean"}}},
+        },
+        "x": {"input_schema": {"properties": {"dry_run": {"type": "boolean"}}}},
+    }
+    dry_run_findings = check_dry_run_restricted_to_x(bad_media)
     preview_findings = check_media_preview_contract(bad_media)
     pollable_findings = check_pollable_media_contracts(bad_media)
     expected_tokens = {
-        "input_schema missing dry_run",
-        "optional missing dry_run",
+        "dry_run is reserved for x",
         "missing image.preview_generate capability",
         "execution_mode must be async",
         "missing image.poll capability",

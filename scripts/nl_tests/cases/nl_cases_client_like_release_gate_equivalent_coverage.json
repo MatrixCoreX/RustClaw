@@ -189,7 +189,7 @@
     "capability:code.list_tests": 1,
     "capability:code.search_symbols": 1,
     "capability:coding_workflow.preview_repair": 1,
-    "capability:config.guard_rustclaw_config": 1,
+    "capability:config.guard_config": 1,
     "capability:crypto.preview_quote": 1,
     "capability:database.user_version": 1,
     "capability:filesystem.find_entries": 1,

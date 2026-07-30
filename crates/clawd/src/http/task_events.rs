@@ -52,9 +52,7 @@ pub(crate) async fn stream_task_events(
     }) else {
         return api_error(StatusCode::NOT_FOUND, "task_not_found");
     };
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok());
+    let provided_key = crate::auth_key_from_headers(&headers);
     if let Err(error) =
         check_task_view_access(&state, task_user_key.as_deref(), &channel, provided_key)
     {
@@ -159,9 +157,7 @@ pub(crate) async fn get_task_event_artifact(
     }) else {
         return api_error(StatusCode::NOT_FOUND, "task_not_found");
     };
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok());
+    let provided_key = crate::auth_key_from_headers(&headers);
     if let Err(error) =
         check_task_view_access(&state, task_user_key.as_deref(), &channel, provided_key)
     {

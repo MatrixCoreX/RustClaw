@@ -212,7 +212,7 @@ pub(super) fn goal_edit_patch_json(
 pub(super) fn goal_status_summary_json(task: &task::TaskStatusView) -> Value {
     let goal = task.raw_data.get("goal").cloned().unwrap_or(Value::Null);
     json!({
-        "report_kind": "rustclaw_goal_status",
+        "report_kind": "agent_goal_status",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),

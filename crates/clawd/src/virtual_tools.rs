@@ -482,8 +482,7 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
         }
         "validate" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
-            if obj.get("validation_profile").and_then(Value::as_str)
-                == Some("rustclaw_semantic_guard")
+            if obj.get("validation_profile").and_then(Value::as_str) == Some("host_semantic_guard")
             {
                 obj.remove("validation_profile");
                 obj.insert(
@@ -498,7 +497,7 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
             );
             Ok(rewrite_to("system_basic", obj))
         }
-        "guard_rustclaw_config" => {
+        "guard_config" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
             obj.entry("path".to_string())
                 .or_insert_with(|| Value::String("configs/config.toml".to_string()));
@@ -720,11 +719,11 @@ fn normalize_config_basic_args(args: &mut Value) -> bool {
             ("extract_fields", "read_fields"),
             ("structured_keys", "list_keys"),
             ("keys", "list_keys"),
-            ("scan", "guard_rustclaw_config"),
-            ("check", "guard_rustclaw_config"),
+            ("scan", "guard_config"),
+            ("check", "guard_config"),
         ],
     );
-    if action_name(obj).as_deref() == Some("guard_rustclaw_config") {
+    if action_name(obj).as_deref() == Some("guard_config") {
         obj.entry("path".to_string())
             .or_insert_with(|| Value::String("configs/config.toml".to_string()));
         changed = true;

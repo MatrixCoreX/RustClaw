@@ -26,7 +26,7 @@ jobs:
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
-      RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS: "1"
+      APP_REQUIRE_REFERENCE_ADAPTERS: "1"
 
     steps:
       - name: Checkout
@@ -40,6 +40,7 @@ jobs:
           INPUT_PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
           set -euo pipefail
+          source scripts/product_identity.sh
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_TAG}" ]]; then
             release_tag="${INPUT_TAG}"
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -59,10 +60,10 @@ jobs:
 
           case "${release_tag}" in
             ubuntu-x86_64-*)
-              package_name="RustClaw-${release_tag}.tar.gz"
+              package_name="${APP_RELEASE_ARTIFACT_ID}-${release_tag}.tar.gz"
               ;;
             *)
-              package_name="RustClaw-ubuntu-x86_64-${release_tag}.tar.gz"
+              package_name="${APP_RELEASE_ARTIFACT_ID}-ubuntu-x86_64-${release_tag}.tar.gz"
               ;;
           esac
           {
@@ -128,7 +129,7 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --self-test
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
-          cargo test -p rustclaw-skill-sdk
+          cargo test -p agent-skill-sdk
           cargo test -p skill-runner
 
       - name: Build Rust workspace
@@ -148,18 +149,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist-release
-          RUSTCLAW_RELEASE_BIN_DIR="$PWD/target/release" \
-            RUSTCLAW_PACKAGE_TARGET="x86_64-unknown-linux-gnu" \
-            RUSTCLAW_BUNDLE_DIR="$PWD/dist-release" \
-            RUSTCLAW_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
-            RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY=1 \
+          APP_RELEASE_BIN_DIR="$PWD/target/release" \
+            APP_PACKAGE_TARGET="x86_64-unknown-linux-gnu" \
+            APP_BUNDLE_DIR="$PWD/dist-release" \
+            APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
+            APP_SKIP_LOCAL_PACKAGE_COPY=1 \
             ./package-release.sh
           (cd dist-release && sha256sum "${{ steps.meta.outputs.package_name }}" > "${{ steps.meta.outputs.package_name }}.sha256")
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rustclaw-ubuntu-x86_64
+          name: agent-runtime-ubuntu-x86_64
           path: |
             dist-release/${{ steps.meta.outputs.package_name }}
             dist-release/${{ steps.meta.outputs.package_name }}.sha256
@@ -170,7 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf '%s\n' "RustClaw Ubuntu x86_64 runtime package."
+          printf '%s\n' "Agent runtime Ubuntu x86_64 package."
             printf '\n'
             printf 'Target: %s\n' "${RUST_TARGET}"
             printf 'Commit: %s\n' "${GITHUB_SHA}"
@@ -201,7 +202,7 @@ jobs:
             gh release create "${RELEASE_TAG}" \
               "dist-release/${PACKAGE_NAME}" \
               "dist-release/${PACKAGE_NAME}.sha256" \
-              --title "RustClaw Ubuntu x86_64 ${RELEASE_TAG}" \
+            --title "Agent runtime Ubuntu x86_64 ${RELEASE_TAG}" \
               --notes-file release-notes.md \
               "${release_flags[@]}"
           fi

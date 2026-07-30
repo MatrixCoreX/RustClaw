@@ -61,7 +61,7 @@ pub(super) fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         Err(error) => return Err(error),
     };
     let temporary = parent.join(format!(
-        ".rustclaw-write-{}.tmp",
+        ".agent-write-{}.tmp",
         uuid::Uuid::new_v4().simple()
     ));
     let result = (|| {
@@ -615,7 +615,12 @@ fn safe_target_from_relative(root: &Path, relative: &str) -> Result<PathBuf, Str
     let mut target = root.to_path_buf();
     for component in path.components() {
         match component {
-            std::path::Component::Normal(value) if value != ".git" && value != ".rustclaw" => {
+            std::path::Component::Normal(value)
+                if value != ".git"
+                    && !claw_core::workspace_state::is_known_workspace_state_dir_name(
+                        &value.to_string_lossy(),
+                    ) =>
+            {
                 target.push(value);
                 match fs::symlink_metadata(&target) {
                     Ok(metadata) if metadata.file_type().is_symlink() => {

@@ -10,11 +10,13 @@ use claw_core::skill_registry::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
 use super::policy::{RateLimiter, ToolsPolicy};
 pub(crate) use super::provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};
 use super::types::{CommandIntentRuntime, ScheduleRuntime};
+use crate::skill_admission::{AdmissionExecutionBinding, OverlaySnapshot, SkillAdmissionService};
 
 pub(crate) struct SkillViews {
     pub(crate) registry: Option<Arc<SkillsRegistry>>,
@@ -73,9 +75,20 @@ struct TaskLlmMetricsCheckpoint {
     call_sequence: Vec<LlmCallSequenceEntry>,
 }
 
+#[derive(Default)]
 pub(crate) struct SkillViewsSnapshot {
     pub(crate) registry: Option<Arc<SkillsRegistry>>,
     pub(crate) skills_list: Arc<HashSet<String>>,
+    pub(crate) binding: SkillViewsBinding,
+}
+
+#[derive(Default)]
+pub(crate) struct SkillViewsBinding {
+    pub(crate) registry_generation: u64,
+    pub(crate) registry_generation_digest: Option<String>,
+    pub(crate) base_registry_digest: Option<String>,
+    pub(crate) overlay_generation_digest: Option<String>,
+    pub(crate) admission_bindings: Arc<BTreeMap<String, AdmissionExecutionBinding>>,
 }
 
 /// P2.1 — 把"对外通道适配器配置"从 [`AppState`] 主体中剥出来，放进独立子 struct。
@@ -103,14 +116,11 @@ pub(crate) struct ChannelConfig {
 
 /// P2.1 — 把"配置 / 注册表 reload 时需要查的元信息"从 [`AppState`] 主体中剥出来。
 ///
-/// 这一组字段除了 `config_path_for_reload` 在 `reload_skill_views` 用到，其他字段
-/// 只保留为 reload 兼容快照，避免重新解析配置失败时丢失上一轮运行态上下文。
+/// Reload always reparses the authoritative config and registry instead of
+/// retaining a second membership snapshot in memory.
 #[derive(Clone, Default)]
 pub(crate) struct ReloadContext {
     pub(crate) config_path_for_reload: String,
-    pub(crate) _registry_path_for_reload: Option<String>,
-    pub(crate) _skill_switches_for_reload: Arc<HashMap<String, bool>>,
-    pub(crate) _initial_skills_list_for_reload: Vec<String>,
 }
 
 /// P2.1 Stage 2 — `CoreServices` 簇：所有模块都需要的核心运行时句柄
@@ -152,6 +162,7 @@ impl CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             http_client: Client::new(),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -169,8 +180,8 @@ impl CoreServices {
     /// runtime + 塞进 Vec + 改 active_provider_type"三连。
     ///
     /// **必须配合** [`crate::fixture_replay_e2e::FixtureEnvGuard`] 才能让 provider
-    /// 真的命中 fixture：guard 负责 set `RUSTCLAW_FIXTURE_LLM_ROOT` /
-    /// `RUSTCLAW_FIXTURE_CASE`，本 helper 只负责"把 provider 装进 AppState"。
+    /// 真的命中 fixture：guard 负责 set `APP_FIXTURE_LLM_ROOT` /
+    /// `APP_FIXTURE_CASE`，本 helper 只负责"把 provider 装进 AppState"。
     #[cfg(test)]
     pub(crate) fn test_default_with_fixture_provider() -> Self {
         let mut base = Self::test_default();
@@ -473,27 +484,54 @@ impl TaskProviderBlocker {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn build_skill_views(
     workspace_root: &Path,
     registry_path: Option<&str>,
     skill_switches: &HashMap<String, bool>,
-    initial_skills_list: &[String],
     uninstalled_skills: &[String],
 ) -> Result<SkillViews, String> {
-    let registry: Option<Arc<SkillsRegistry>> = if let Some(p) = registry_path {
-        let path = if Path::new(p).is_absolute() {
-            PathBuf::from(p)
-        } else {
-            workspace_root.join(p)
-        };
-        match SkillsRegistry::load_from_path(&path) {
-            Ok(reg) => Some(Arc::new(reg)),
-            Err(e) => return Err(format!("registry load failed: {}: {}", path.display(), e)),
-        }
-    } else {
-        None
+    build_skill_views_with_overlay(
+        workspace_root,
+        registry_path,
+        skill_switches,
+        uninstalled_skills,
+        None,
+    )
+}
+
+pub(crate) fn build_skill_views_with_overlay(
+    workspace_root: &Path,
+    registry_path: Option<&str>,
+    skill_switches: &HashMap<String, bool>,
+    uninstalled_skills: &[String],
+    overlay: Option<&OverlaySnapshot>,
+) -> Result<SkillViews, String> {
+    let Some(registry_path) = registry_path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return Err(
+            "skill_registry_not_configured; repair=set_skills.registry_path_to_a_valid_base_registry"
+                .to_string(),
+        );
     };
-    let fixed_on_skills = fixed_on_skill_names(registry.as_deref())
+    let path = if Path::new(registry_path).is_absolute() {
+        PathBuf::from(registry_path)
+    } else {
+        workspace_root.join(registry_path)
+    };
+    let registry = SkillsRegistry::load_from_base_and_overlay(
+        &path,
+        overlay.and_then(|snapshot| snapshot.registry_dir.as_deref()),
+    )
+    .map(Arc::new)
+    .map_err(|error| format!("registry load failed: {}: {error}", path.display()))?;
+    if registry.all_names().is_empty() {
+        return Err(format!(
+            "skill_registry_empty; path={}; repair=restore_a_non_empty_base_registry",
+            path.display()
+        ));
+    }
+    let fixed_on_skills = registry
+        .fixed_on_names()
         .into_iter()
         .collect::<HashSet<_>>();
 
@@ -502,24 +540,17 @@ pub(crate) fn build_skill_views(
         .filter(|(_, &on)| !on)
         .map(|(skill, _)| {
             registry
-                .as_ref()
-                .and_then(|r| r.resolve_canonical(skill).map(String::from))
+                .resolve_canonical(skill)
+                .map(String::from)
                 .unwrap_or_else(|| crate::canonical_skill_name(skill).to_string())
         })
         .collect();
 
-    let mut enabled: HashSet<String> = if let Some(ref reg) = registry {
-        reg.enabled_names().into_iter().collect()
-    } else {
-        initial_skills_list
-            .iter()
-            .map(|s| crate::canonical_skill_name(s).to_string())
-            .collect()
-    };
+    let mut enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
     for (skill, is_enabled) in skill_switches {
         let canonical = registry
-            .as_ref()
-            .and_then(|r| r.resolve_canonical(skill).map(String::from))
+            .resolve_canonical(skill)
+            .map(String::from)
             .unwrap_or_else(|| crate::canonical_skill_name(skill).to_string());
         if *is_enabled {
             enabled.insert(canonical);
@@ -534,43 +565,36 @@ pub(crate) fn build_skill_views(
     }
     for skill in uninstalled_skills {
         let canonical = registry
-            .as_ref()
-            .and_then(|registry| registry.resolve_canonical(skill).map(String::from))
+            .resolve_canonical(skill)
+            .map(String::from)
             .unwrap_or_else(|| crate::canonical_skill_name(skill).to_string());
         if !fixed_on_skills.contains(&canonical) {
             enabled.remove(&canonical);
         }
     }
+    if let Some(overlay) = overlay {
+        enabled.extend(overlay.enabled.iter().cloned());
+        for skill in overlay
+            .disabled
+            .iter()
+            .chain(overlay.awaiting_policy.iter())
+            .chain(overlay.tombstoned.iter())
+        {
+            enabled.remove(skill);
+        }
+    }
     let mut planner_visible: Vec<String> = enabled
         .iter()
-        .filter(|skill| {
-            registry
-                .as_ref()
-                .map(|reg| reg.is_planner_visible(skill))
-                .unwrap_or(true)
-        })
+        .filter(|skill| registry.is_planner_visible(skill))
         .cloned()
         .collect();
     planner_visible.sort_unstable();
 
     Ok(SkillViews {
-        registry,
+        registry: Some(registry),
         execution_skills: enabled,
         planner_visible,
     })
-}
-
-fn fixed_on_skill_names(registry: Option<&SkillsRegistry>) -> Vec<String> {
-    let registry_names = registry
-        .map(SkillsRegistry::fixed_on_names)
-        .unwrap_or_default();
-    if !registry_names.is_empty() {
-        return registry_names;
-    }
-    claw_core::config::core_skills_always_enabled()
-        .iter()
-        .map(|skill| crate::canonical_skill_name(skill).to_string())
-        .collect()
 }
 
 pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsResult, String> {
@@ -582,12 +606,13 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         .map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
     let registry_path = config.skills.registry_path.as_deref();
     let path_display = registry_path.unwrap_or("(none)");
-    let views = build_skill_views(
+    let overlay = load_skill_admission_snapshot(&state.skill_rt.workspace_root, &config)?;
+    let views = build_skill_views_with_overlay(
         &state.skill_rt.workspace_root,
         registry_path,
         &config.skills.skill_switches,
-        &config.skills.skills_list,
         &config.skills.uninstalled_skills,
+        Some(&overlay),
     )?;
     let registry_entries = views
         .registry
@@ -597,10 +622,7 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
     let execution_count = views.execution_skills.len();
     let planner_count = views.planner_visible.len();
 
-    let snapshot = SkillViewsSnapshot {
-        registry: views.registry,
-        skills_list: Arc::new(views.execution_skills),
-    };
+    let snapshot = assemble_skill_views_snapshot(views, &overlay);
     *state.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
 
     tracing::info!(
@@ -615,6 +637,47 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         execution_skills_count: execution_count,
         planner_visible_count: planner_count,
     })
+}
+
+pub(crate) fn assemble_skill_views_snapshot(
+    views: SkillViews,
+    overlay: &OverlaySnapshot,
+) -> SkillViewsSnapshot {
+    let registry_generation_digest = overlay.base_registry_digest.as_ref().map(|base_digest| {
+        let mut digest = Sha256::new();
+        digest.update(b"agent-registry-generation-v1\0");
+        digest.update(base_digest.as_bytes());
+        digest.update(b"\0");
+        digest.update(overlay.generation.to_le_bytes());
+        digest.update(b"\0");
+        if let Some(overlay_digest) = overlay.generation_digest.as_deref() {
+            digest.update(overlay_digest.as_bytes());
+        }
+        format!("{:x}", digest.finalize())
+    });
+    SkillViewsSnapshot {
+        registry: views.registry,
+        skills_list: Arc::new(views.execution_skills),
+        binding: SkillViewsBinding {
+            registry_generation: overlay.generation,
+            registry_generation_digest,
+            base_registry_digest: overlay.base_registry_digest.clone(),
+            overlay_generation_digest: overlay.generation_digest.clone(),
+            admission_bindings: Arc::new(overlay.execution_bindings.clone()),
+        },
+    }
+}
+
+pub(crate) fn load_skill_admission_snapshot(
+    workspace_root: &Path,
+    config: &AppConfig,
+) -> Result<OverlaySnapshot, String> {
+    if config.skills.registry_path.is_none() {
+        return Ok(OverlaySnapshot::default());
+    }
+    SkillAdmissionService::from_config(workspace_root, config)
+        .and_then(|service| service.snapshot())
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -639,7 +702,8 @@ pub(crate) struct AppState {
     /// future_adapters）。详见 [`ChannelConfig`] 头部 doc。
     pub(crate) channels: ChannelConfig,
     /// P2.1 — reload 元信息子 struct（config 路径、registry 路径、skill_switches、
-    /// 初始 skills_list）。详见 [`ReloadContext`] 头部 doc。
+    /// Registry membership is always rebuilt from the configured base plus the
+    /// active admission overlay. See [`ReloadContext`] for reload ownership.
     pub(crate) reload_ctx: ReloadContext,
     /// Phase 3.3 Stage 3.2 — per-task 当前 ask_state 注册表。
     /// 由 [`crate::log_ask_transition`] 同步更新；finalize 子层可通过
@@ -647,8 +711,6 @@ pub(crate) struct AppState {
     /// 终态（Completed/Failed）的 entry 会被立即清理，避免长跑泄漏。
     pub(crate) ask_states: AskStateRegistry,
 }
-
-const DEFAULT_AGENT_RUNTIME_IDENTITY: &str = "RustClaw";
 
 /// Phase 3.3 Stage 3.2 — per-task ask_state 注册表。
 ///
@@ -761,10 +823,10 @@ impl AppState {
     ///
     /// 用途：`process_ask_task` e2e harness 启动期会跑
     /// [`SkillsRegistry::integrity_report`]，缺任何一条
-    /// [`claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS`] builtin 就 bail。
+    /// [`claw_core::skill_registry::HOST_TOOL_DESCRIPTORS`] builtin 就 bail。
     /// 真生产 registry（`configs/skills_registry.toml`）有 30+ 条，其中 20+ 条
     /// 是 runner / external，要求 prompt 文件 / runner 二进制都在 —— 对
-    /// fixture-replay 测试是不必要的依赖。这里只装 [`REQUIRED_BUILTIN_SKILLS`]
+    /// fixture-replay 测试是不必要的依赖。这里只装 [`HOST_TOOL_DESCRIPTORS`]
     /// 全集，最小、`integrity-clean` 且独立于 workspace 文件系统。
     ///
     /// 概念辨析：`normalize / delivery_classifier / nl2cmd` 等是 **prompt label**
@@ -778,15 +840,16 @@ impl AppState {
     /// `enabled_names()` 集合写入 `core.skill_views_snapshot`。
     #[cfg(test)]
     pub(crate) fn with_minimal_builtin_registry(self) -> Self {
-        use claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS;
+        use claw_core::skill_registry::HOST_TOOL_DESCRIPTORS;
         let mut toml_buf = String::new();
-        for name in REQUIRED_BUILTIN_SKILLS {
+        for descriptor in HOST_TOOL_DESCRIPTORS {
+            let name = descriptor.name;
             toml_buf.push_str(&format!(
                 "[[skills]]\nname = \"{name}\"\nenabled = true\nkind = \"builtin\"\n\n",
             ));
         }
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_test_minimal_registry_{}.toml",
+            "agent_test_minimal_registry_{}.toml",
             uuid::Uuid::new_v4()
         ));
         std::fs::write(&path, &toml_buf).expect("write minimal skills_registry.toml for test");
@@ -801,6 +864,7 @@ impl AppState {
         );
         let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
         let snapshot = SkillViewsSnapshot {
+            binding: Default::default(),
             registry: Some(Arc::new(registry)),
             skills_list: Arc::new(enabled),
         };
@@ -864,19 +928,16 @@ impl AppState {
             &self.skill_rt.workspace_root,
             config.skills.registry_path.as_deref(),
             &config.skills.skill_switches,
-            &config.skills.skills_list,
             &config.skills.uninstalled_skills,
         )
         .expect("build real skill views for fixture-replay test");
         let snapshot = SkillViewsSnapshot {
+            binding: Default::default(),
             registry: views.registry,
             skills_list: Arc::new(views.execution_skills),
         };
         *self.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
         self.reload_ctx.config_path_for_reload = config_path_str;
-        self.reload_ctx._registry_path_for_reload = config.skills.registry_path.clone();
-        self.reload_ctx._skill_switches_for_reload = Arc::new(config.skills.skill_switches.clone());
-        self.reload_ctx._initial_skills_list_for_reload = config.skills.skills_list.clone();
         self
     }
 
@@ -1416,13 +1477,20 @@ impl AppState {
         self.snapshot().registry.clone()
     }
 
+    pub(crate) fn get_skill_views_snapshot(&self) -> Arc<SkillViewsSnapshot> {
+        self.snapshot()
+    }
+
     pub(crate) fn get_skills_list(&self) -> Arc<HashSet<String>> {
         self.snapshot().skills_list.clone()
     }
 
     pub(crate) fn fixed_on_skill_names(&self) -> Vec<String> {
         let registry = self.get_skills_registry();
-        fixed_on_skill_names(registry.as_deref())
+        registry
+            .as_deref()
+            .map(SkillsRegistry::fixed_on_names)
+            .unwrap_or_default()
     }
 
     pub(crate) fn skill_is_fixed_on(&self, name: &str) -> bool {
@@ -1497,7 +1565,7 @@ impl AppState {
     }
 
     pub(crate) fn agent_runtime_identity_label(&self) -> &'static str {
-        DEFAULT_AGENT_RUNTIME_IDENTITY
+        claw_core::product_identity::product_identity().display_name()
     }
 
     pub(crate) fn task_allows_skill(&self, task: &ClaimedTask, canonical_skill: &str) -> bool {
@@ -1528,10 +1596,8 @@ impl AppState {
 
     pub(crate) fn is_builtin_skill(&self, name: &str) -> bool {
         let canonical = self.resolve_canonical_skill_name(name);
-        if let Some(ref r) = self.get_skills_registry() {
-            return r.is_builtin(&canonical);
-        }
-        crate::is_builtin_skill_name(&canonical)
+        self.get_skills_registry()
+            .is_some_and(|registry| registry.is_builtin(&canonical))
     }
 
     pub(crate) fn skill_registry_prompt_rel_path(&self, canonical_name: &str) -> Option<String> {
@@ -1546,11 +1612,7 @@ impl AppState {
                 return entry.kind;
             }
         }
-        if crate::is_builtin_skill_name(canonical_name) {
-            SkillKind::Builtin
-        } else {
-            SkillKind::Runner
-        }
+        SkillKind::Runner
     }
 
     pub(crate) fn skill_manifest(&self, canonical_name: &str) -> Option<SkillManifest> {

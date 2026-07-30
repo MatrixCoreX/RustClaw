@@ -28,7 +28,7 @@ fn generic_path_content_allows_runtime_equivalent_config_guard() {
     .expect("generic path content profile should classify config guard");
 
     assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
+    assert_eq!(policy.action_key, "config_edit.guard_config");
     assert_eq!(policy.contract_match, "generic_path_content");
 }
 

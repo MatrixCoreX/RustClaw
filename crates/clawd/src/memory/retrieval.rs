@@ -148,7 +148,7 @@ pub(crate) fn retrieve_indexed_memories(
     let kb = state
         .core
         .skill_storage
-        .kb_pool()
+        .pool_for("kb")?
         .get()
         .map_err(|error| anyhow!("kb_skill_storage_pool:{error}"))?;
     candidates.extend(fetch_kb_recent_candidates(

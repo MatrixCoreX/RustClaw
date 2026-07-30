@@ -378,8 +378,8 @@ fn submit_task_with_kind_payload(
     });
     let request = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
-        .header("x-rustclaw-client", "clawcli")
+        .header("x-agent-key", key)
+        .header("x-agent-client", "clawcli")
         .header("content-type", "application/json")
         .json(&body);
     let requested_mode = if options.yolo {
@@ -388,7 +388,7 @@ fn submit_task_with_kind_payload(
         options.permission_mode.map(PermissionMode::as_token)
     };
     let request = match requested_mode {
-        Some(mode) => request.header("x-rustclaw-execution-mode", mode),
+        Some(mode) => request.header("x-agent-execution-mode", mode),
         None => request,
     };
     let resp = request.send().context("submit task failed")?;
@@ -409,7 +409,7 @@ pub(crate) fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Resul
     let url = format!("{}/tasks/{}", client::base_v1(base_url), task_id);
     let resp = client::make_client()?
         .get(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .send()
         .context("get task failed")?;
     let status_code = resp.status();
@@ -492,7 +492,7 @@ pub(crate) fn cancel_task_by_id(
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()
@@ -606,7 +606,7 @@ fn task_control_by_id(
     let url = format!("{}{}", client::base_v1(base_url), path);
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()

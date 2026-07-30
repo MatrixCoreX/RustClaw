@@ -1,4 +1,4 @@
-# 用途/Purpose: webd — 对外 HTTP 反向代理到本机 clawd；可选 `/webd/login` 会话并注入 `X-RustClaw-Key`。
+# 用途/Purpose: webd — 对外 HTTP 反向代理到本机 clawd；可选 `/webd/login` 会话并注入 `X-Agent-Key`。
 # clawd 固定只监听 127.0.0.1:8787；webd 是对外 HTTP 入口。
 # 风险/Risk: `[webd].listen` 勿与 clawd、本目录其他渠道守护进程监听冲突。
 #

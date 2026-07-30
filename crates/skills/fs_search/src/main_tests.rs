@@ -14,7 +14,10 @@ fn error_extra_exposes_machine_contract() {
 }
 
 fn unique_temp_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("rustclaw-fs-search-{name}-{}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "agent-runtime-fs-search-{name}-{}",
+        std::process::id()
+    ))
 }
 
 #[test]
@@ -1227,9 +1230,10 @@ fn find_name_supports_prefix_and_suffix_modes() {
 #[test]
 fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
     let root = unique_temp_dir("fuzzy-ranking");
-    std::fs::create_dir_all(root.join("rustclaw-cache")).expect("create fuzzy directory");
-    std::fs::write(root.join("rustclaw.toml"), "fixture\n").expect("write close match");
-    std::fs::write(root.join("rustclaw-backup.toml"), "fixture\n").expect("write broader match");
+    std::fs::create_dir_all(root.join("agent-runtime-cache")).expect("create fuzzy directory");
+    std::fs::write(root.join("agent-runtime.toml"), "fixture\n").expect("write close match");
+    std::fs::write(root.join("agent-runtime-backup.toml"), "fixture\n")
+        .expect("write broader match");
     std::fs::write(root.join("unrelated.toml"), "fixture\n").expect("write unrelated");
 
     let files = execute(json!({
@@ -1246,7 +1250,7 @@ fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
     assert_eq!(files["sort_by"], "relevance");
     assert_eq!(
         files["results"][0].as_str(),
-        Some(root.join("rustclaw.toml").to_string_lossy().as_ref())
+        Some(root.join("agent-runtime.toml").to_string_lossy().as_ref())
     );
     assert!(files["results"]
         .as_array()
@@ -1267,7 +1271,7 @@ fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
     assert_eq!(directories["count"], 1);
     assert!(directories["results"][0]
         .as_str()
-        .is_some_and(|path| path.ends_with("rustclaw-cache")));
+        .is_some_and(|path| path.ends_with("agent-runtime-cache")));
 
     let _ = std::fs::remove_dir_all(root);
 }

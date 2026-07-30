@@ -23,6 +23,11 @@ import {
 import { conversationHistoryScope } from "./lib/chat-history";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import {
+  appStorageKey,
+  AUTH_KEY_HEADER,
+  productCopy,
+} from "./lib/product-identity";
+import {
   formatDateTimeHuman as formatDateTimeHumanValue,
   formatUnixDateTime as formatUnixDateTimeValue,
 } from "./lib/date-format";
@@ -60,7 +65,7 @@ import {
   preferredWebdBaseUrl,
 } from "./lib/service-origins";
 import { useWechatRuntime } from "./hooks/useWechatRuntime";
-import { useFeishuBindRuntime } from "./hooks/useFeishuBindRuntime";
+import { useChannelBindRuntime, useFeishuBindRuntime } from "./hooks/useFeishuBindRuntime";
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useTaskRuntime } from "./hooks/useTaskRuntime";
 import { useSystemRuntime } from "./hooks/useSystemRuntime";
@@ -83,16 +88,16 @@ const AiLearningPage = lazy(() =>
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
 const STORAGE_KEYS = {
-  baseUrl: "rustclaw.monitor.baseUrl",
-  webdBaseUrl: "rustclaw.monitor.webdBaseUrl",
-  userKey: "rustclaw.monitor.userKey",
-  authMode: "rustclaw.monitor.authMode",
-  polling: "rustclaw.monitor.pollingSeconds",
-  queueWarn: "rustclaw.monitor.queueWarn",
-  ageWarn: "rustclaw.monitor.ageWarnSeconds",
-  lang: "rustclaw.monitor.lang",
-  currentPage: "rustclaw.monitor.currentPage",
-  themeMode: "rustclaw.monitor.themeMode",
+  baseUrl: appStorageKey("monitor.baseUrl"),
+  webdBaseUrl: appStorageKey("monitor.webdBaseUrl"),
+  userKey: appStorageKey("monitor.userKey"),
+  authMode: appStorageKey("monitor.authMode"),
+  polling: appStorageKey("monitor.pollingSeconds"),
+  queueWarn: appStorageKey("monitor.queueWarn"),
+  ageWarn: appStorageKey("monitor.ageWarnSeconds"),
+  lang: appStorageKey("monitor.lang"),
+  currentPage: appStorageKey("monitor.currentPage"),
+  themeMode: appStorageKey("monitor.themeMode"),
 } as const;
 
 /** 根据当前页面地址推断浏览器网关地址；获取不到主机名时使用本机 webd。 */
@@ -169,7 +174,7 @@ export default function App() {
   const logContainerRef = useRef<HTMLPreElement | null>(null);
 
   const t = useCallback(
-    (zh: string, en: string) => (lang === "zh" ? zh : en),
+    (zh: string, en: string) => productCopy(lang === "zh" ? zh : en),
     [lang],
   );
   const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
@@ -185,7 +190,7 @@ export default function App() {
     return formatUnixDateTimeValue(ts, dateLocale);
   };
 
-  const authHeaders = authMode !== "webd" && uiKey ? { "X-RustClaw-Key": uiKey } : {};
+  const authHeaders = authMode !== "webd" && uiKey ? { [AUTH_KEY_HEADER]: uiKey } : {};
   const normalizeFetchError = (err: unknown, targetUrl: string) => {
     const fallback = t("未知错误", "Unknown error");
     if (!(err instanceof Error)) return fallback;
@@ -409,7 +414,7 @@ export default function App() {
       setInteractionChatId(null);
       setInteractionRole("-");
       setLoginTab("webd");
-      setWebdUsername(result.webd_username || "rustclaw");
+      setWebdUsername(result.webd_username || "admin");
       setWebdPassword("");
       clearAuthKeysList();
     },
@@ -551,6 +556,9 @@ export default function App() {
     feishuConfigLoading,
     feishuConfigError,
     feishuConfigData,
+    larkConfigLoading,
+    larkConfigError,
+    larkConfigData,
     telegramConfigLoading,
     telegramConfigError,
     telegramConfigData,
@@ -561,6 +569,7 @@ export default function App() {
     hasUnsavedTelegramConfigChanges,
     fetchWechatConfig,
     fetchFeishuConfig,
+    fetchLarkConfig,
     fetchTelegramConfig,
     setTelegramPrimaryBotDraftField,
     saveTelegramConfig,
@@ -1048,12 +1057,33 @@ export default function App() {
     },
   });
   const {
+    bindLoading: larkBindLoading,
+    bindError: larkBindError,
+    bindSession: larkBindSession,
+    bindQrDataUrl: larkBindQrDataUrl,
+    resetLoading: larkResetLoading,
+    beginBind: beginLarkBind,
+    resetSetup: resetLarkSetup,
+  } = useChannelBindRuntime({
+    apiFetch,
+    t,
+    uiAuthReady,
+    platform: "lark",
+    onConfigRefresh: async () => {
+      await fetchLarkConfig();
+    },
+    onHealthRefresh: async () => {
+      await fetchHealth();
+    },
+  });
+  const {
     isOnline,
     queuePressureHigh,
     runningTooOld,
     wechatStatusLoading,
     telegramStatusLoading,
     feishuStatusLoading,
+    larkStatusLoading,
     wechatStepStatus,
     telegramStepStatus,
     dashboardCommunicationRows,
@@ -1062,9 +1092,15 @@ export default function App() {
     feishuSetupGuidance,
     feishuStepStatus,
     canControlFeishuService,
+    larkBindStatusCopy,
+    larkCurrentKeyBound,
+    larkSetupGuidance,
+    larkStepStatus,
+    canControlLarkService,
     wechatStatusSummary,
     telegramStatusSummary,
     feishuStatusSummary,
+    larkStatusSummary,
     navItems,
     onboardingSteps,
     dashboardOverviewItems,
@@ -1090,6 +1126,10 @@ export default function App() {
     feishuConfigData,
     feishuConfigError,
     feishuBindSession,
+    larkConfigLoading,
+    larkConfigData,
+    larkConfigError,
+    larkBindSession,
   });
 
   const fetchLocalInteractionContext = async () => {
@@ -1303,6 +1343,7 @@ export default function App() {
     void fetchSkillsConfig();
     void fetchWechatConfig();
     void fetchFeishuConfig();
+    void fetchLarkConfig();
     void fetchTelegramConfig();
     void fetchLlmConfig();
     void fetchModelCatalog();
@@ -1317,6 +1358,7 @@ export default function App() {
       void fetchAuthKeys();
       void fetchWechatConfig();
       void fetchFeishuConfig();
+      void fetchLarkConfig();
       void fetchTelegramConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
@@ -1654,6 +1696,13 @@ export default function App() {
               wechatLoginError={wechatLoginError}
               wechatConfigEnabled={wechatConfigData?.enabled === true}
               wechatServiceHealthy={health?.wechatd_healthy === true}
+              whatsappWebQrRequested={waLoginDialogOpen}
+              whatsappWebLoginLoading={waLoginLoading}
+              whatsappWebLoginStatus={waLoginStatus}
+              whatsappWebBridgeReachable={waWebBridgeReachable}
+              whatsappWebLoginError={waLoginError}
+              whatsappWebLogoutLoading={waLogoutLoading}
+              whatsappWebServiceHealthy={health?.whatsapp_web_healthy === true}
               telegramStatusLoading={telegramStatusLoading}
               telegramStepStatus={telegramStepStatus}
               telegramStatusSummary={telegramStatusSummary}
@@ -1665,27 +1714,53 @@ export default function App() {
               telegramConfigLoading={telegramConfigLoading}
               hasUnsavedTelegramConfigChanges={hasUnsavedTelegramConfigChanges}
               telegramServiceHealthy={health?.telegramd_healthy === true}
-              feishuStatusLoading={feishuStatusLoading}
-              feishuStepStatus={feishuStepStatus}
-              feishuStatusSummary={feishuStatusSummary}
-              feishuConfigError={feishuConfigError}
-              feishuSetupGuidance={feishuSetupGuidance}
-              feishuCurrentKeyBound={feishuCurrentKeyBound}
-              feishuBindQrDataUrl={feishuBindQrDataUrl}
-              feishuBindStatusCopy={feishuBindStatusCopy}
-              feishuBindSession={feishuBindSession}
-              feishuBindError={feishuBindError}
-              feishuBindLoading={feishuBindLoading}
-              feishuResetLoading={feishuResetLoading}
+              feishuSetup={{
+                statusLoading: feishuStatusLoading,
+                stepStatus: feishuStepStatus,
+                statusSummary: feishuStatusSummary,
+                configError: feishuConfigError,
+                setupGuidance: feishuSetupGuidance,
+                currentKeyBound: feishuCurrentKeyBound,
+                bindQrDataUrl: feishuBindQrDataUrl,
+                bindStatusCopy: feishuBindStatusCopy,
+                bindSession: feishuBindSession,
+                bindError: feishuBindError,
+                bindLoading: feishuBindLoading,
+                resetLoading: feishuResetLoading,
+                serviceHealthy: health?.feishud_healthy === true,
+                canControlService: canControlFeishuService,
+                onBeginBind: beginFeishuBind,
+                onResetSetup: resetFeishuSetup,
+              }}
+              larkSetup={{
+                statusLoading: larkStatusLoading,
+                stepStatus: larkStepStatus,
+                statusSummary: larkStatusSummary,
+                configError: larkConfigError,
+                setupGuidance: larkSetupGuidance,
+                currentKeyBound: larkCurrentKeyBound,
+                bindQrDataUrl: larkBindQrDataUrl,
+                bindStatusCopy: larkBindStatusCopy,
+                bindSession: larkBindSession,
+                bindError: larkBindError,
+                bindLoading: larkBindLoading,
+                resetLoading: larkResetLoading,
+                serviceHealthy: health?.larkd_healthy === true,
+                canControlService: canControlLarkService,
+                onBeginBind: beginLarkBind,
+                onResetSetup: resetLarkSetup,
+              }}
               isAdminIdentity={isAdminIdentity}
-              feishuServiceHealthy={health?.feishud_healthy === true}
-              canControlFeishuService={canControlFeishuService}
               onControlService={controlService}
               onStartWechatQrLogin={startWechatQrLogin}
+              onShowWhatsappWebQr={() => {
+                setWaLoginDialogOpen(true);
+                return fetchWhatsappWebLoginStatus();
+              }}
+              onRefreshWhatsappWebLogin={fetchWhatsappWebLoginStatus}
+              onLogoutWhatsappWeb={logoutWhatsappWeb}
               onTelegramBotTokenChange={(value) => setTelegramPrimaryBotDraftField("bot_token", value)}
               onSaveTelegramConfig={saveTelegramConfig}
-              onBeginFeishuBind={beginFeishuBind}
-              onResetFeishuSetup={resetFeishuSetup}
             />
           ) : null}
 

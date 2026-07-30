@@ -12,7 +12,7 @@ default_locale = "zh-CN"
 # SQLite busy 超时（毫秒） / SQLite busy timeout in milliseconds.
 busy_timeout_ms = 2000
 # SQLite 文件路径 / SQLite file path.
-sqlite_path = "data/rustclaw.db"
+sqlite_path = "data/agent-runtime.db"
 # Skill-owned databases survive image/binary updates under this mounted data
 # root and remain separate from runtime task/auth state.
 skill_data_root = "data/skills"
@@ -331,8 +331,8 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
-uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "photo_organize", "stock", "weather", "x"]
+skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, media_download = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
+uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "media_download", "photo_organize", "stock", "weather", "x"]
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):

@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
 
-RUSTCLAW_MODEL_SELECT=0 component_start_init "$ROOT_DIR" release "test-entry"
+APP_MODEL_SELECT=0 component_start_init "$ROOT_DIR" release "test-entry"
 [[ "$COMPONENT_ROOT" == "$ROOT_DIR" ]]
 [[ "$COMPONENT_PROFILE" == "release" ]]
 [[ "$COMPONENT_CONFIG_PATH" == "$ROOT_DIR/configs/config.toml" ]]
@@ -40,9 +40,14 @@ if component_pid_is_running "component-common-test"; then
 fi
 [[ ! -e "$stale_pid" ]]
 
+detached_log="$(mktemp)"
+component_launch_detached "$detached_log" sleep 30
+detached_pid="$COMPONENT_LAUNCHED_PID"
+component_process_is_running "$detached_pid"
+
 sleep 30 &
 unrelated_pid=$!
-trap 'kill "$unrelated_pid" >/dev/null 2>&1 || true; rm -f "$COMPONENT_PID_DIR/component-common-test.pid"' EXIT
+trap 'kill "$unrelated_pid" "$detached_pid" >/dev/null 2>&1 || true; rm -f "$detached_log" "$COMPONENT_PID_DIR/component-common-test.pid"' EXIT
 printf '%s\n' "$unrelated_pid" > "$stale_pid"
 if component_pid_is_running \
   "component-common-test" \

@@ -110,7 +110,7 @@
 | `read_range` | `max_line_chars` | no | integer | `800` | Per-line character preview cap, clamped to `80..4000`. |
 | `read_range` | `raw` | no | bool | `false` | Disable the safety compaction applied to recognized internal model-I/O log records. |
 | `read_range` | `field_selector` | no | string | - | Use machine token `title` to project the first markdown/document heading into `field_value`. Prefer the virtual `fs_basic.read_text_range` contract for new plans. |
-| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned regular file below `<workspace>/.rustclaw/artifacts`; paths outside that root are rejected. Prefer planner capability `artifact.read_range`. |
+| `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned regular file below `<workspace>/.agent-runtime/artifacts`; paths outside that root are rejected. Prefer planner capability `artifact.read_range`. |
 | `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset for the requested page. |
 | `read_artifact_range` | `max_bytes` | no | integer | `65536` | Page size clamped to `256..1048576`; UTF-8 pages stop at a character boundary and binary pages return base64. |
 | `compare_paths` | `left_path` | yes | string(path) | - | First path to compare. |

@@ -411,7 +411,7 @@ fn runtime_equivalent_virtual_action_ref(
         normalize_action_token(normalized_skill).as_str(),
         action.as_str(),
     ) {
-        ("config_edit", "guard_config") => ActionRef::parse("config_basic.guard_rustclaw_config"),
+        ("config_edit", "guard_config") => ActionRef::parse("config_edit.guard_config"),
         _ => None,
     }
 }

@@ -265,8 +265,10 @@ fn reserved_network_ranges_are_not_public() {
 
 #[test]
 fn workspace_paths_reject_traversal_and_symlink_escape() {
-    let workspace =
-        std::env::temp_dir().join(format!("rustclaw-browser-web-test-{}", std::process::id()));
+    let workspace = std::env::temp_dir().join(format!(
+        "agent-runtime-browser-web-test-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&workspace).expect("workspace");
 
@@ -293,7 +295,7 @@ fn workspace_paths_reject_traversal_and_symlink_escape() {
 #[test]
 fn admin_browser_paths_accept_service_account_visible_locations() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-browser-web-admin-test-{}",
+        "agent-runtime-browser-web-admin-test-{}",
         std::process::id()
     ));
     let workspace = root.join("workspace");

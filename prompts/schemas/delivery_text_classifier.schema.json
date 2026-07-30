@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/delivery_text_classifier.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/delivery_text_classifier.schema.json",
   "title": "DeliveryTextClassifierOut",
   "description": "Schema for the JSON object returned by `prompts/delivery_text_classifier_prompt.md`. Mirrors `DeliveryTextClassifierOut` in `crates/clawd/src/semantic_judge.rs` and is enforced by `delivery_text_classifier_schema_drift` in the same file.\n\nThis classifier judges a candidate final-facing text on two axes at once: whether it is still a meta/process fragment, and whether it is publishable as meaningful user-facing content. All six fields are expected on every successful JSON reply; runtime clamps confidence into [0,1] after schema validation.",
   "type": "object",

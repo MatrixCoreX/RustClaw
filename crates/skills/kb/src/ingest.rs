@@ -6,10 +6,10 @@ use super::{
     storage, storage_path_for, tokenize, Chunk, DocMeta, KbRuntime, NamespaceIndex,
 };
 use anyhow::{anyhow, Context, Result};
-use rustclaw_skill_sdk::ExpectedPathKind;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use skill_sdk::ExpectedPathKind;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;

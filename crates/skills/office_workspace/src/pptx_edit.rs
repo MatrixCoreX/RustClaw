@@ -79,7 +79,7 @@ fn add_slide(
 ) -> OfficeResult<String> {
     let number = next_part_number(members, "ppt/slides/slide", ".xml");
     let path = format!("ppt/slides/slide{number}.xml");
-    let relationship_id = format!("rIdRustClawSlide{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentSlide{}", Uuid::new_v4().simple());
     let entries = slide_entries(members)?;
     let presentation = member_text(members, "ppt/presentation.xml")?.to_string();
     let slide_numeric_id = max_slide_numeric_id(&presentation).max(255) + 1;
@@ -123,7 +123,7 @@ fn add_slide(
             add_relationship(
                 members,
                 &slide_relationships_path(&path),
-                &format!("rIdRustClawLayout{}", Uuid::new_v4().simple()),
+                &format!("rIdAgentLayout{}", Uuid::new_v4().simple()),
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout",
                 &relative_slide_target(&layout),
                 false,
@@ -363,7 +363,7 @@ fn add_link(
     operation: &NormalizedOperation,
 ) -> OfficeResult<()> {
     let entry = require_slide(members, operation.string("slide_id")?)?;
-    let relationship_id = format!("rIdRustClawLink{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentLink{}", Uuid::new_v4().simple());
     add_relationship(
         members,
         &slide_relationships_path(&entry.path),
@@ -397,7 +397,7 @@ fn add_image(
     })?;
     let number = next_part_number(members, "ppt/media/image", "");
     let member = format!("ppt/media/image{number}.{extension}");
-    let relationship_id = format!("rIdRustClawImage{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentImage{}", Uuid::new_v4().simple());
     add_relationship(
         members,
         &slide_relationships_path(&entry.path),
@@ -488,7 +488,7 @@ fn add_chart(
     }
     let number = next_part_number(members, "ppt/charts/chart", ".xml");
     let chart_path = format!("ppt/charts/chart{number}.xml");
-    let relationship_id = format!("rIdRustClawChart{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentChart{}", Uuid::new_v4().simple());
     add_relationship(
         members,
         &slide_relationships_path(&entry.path),
@@ -543,7 +543,7 @@ fn add_notes_to_slide(
     }
     let number = next_part_number(members, "ppt/notesSlides/notesSlide", ".xml");
     let path = format!("ppt/notesSlides/notesSlide{number}.xml");
-    let relationship_id = format!("rIdRustClawNotes{}", Uuid::new_v4().simple());
+    let relationship_id = format!("rIdAgentNotes{}", Uuid::new_v4().simple());
     add_relationship(
         members,
         &slide_relationships_path(&entry.path),

@@ -72,6 +72,7 @@ fn test_state_with_registry(toml: &str, skills: &[&str]) -> AppState {
     let _ = std::fs::remove_file(path);
     let mut state = AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(
             skills

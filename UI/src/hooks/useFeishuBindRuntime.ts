@@ -3,9 +3,10 @@ import QRCode from "qrcode";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
-  fetchFeishuBindSession,
+  fetchChannelBindSession,
   isFeishuBindTerminalStatus,
-  startFeishuBindSession,
+  startChannelBindSession,
+  type AgentAppChannel,
   type FeishuBindSessionResponse,
 } from "../lib/feishu-bind";
 import type { ApiResponse } from "../types/api";
@@ -21,41 +22,47 @@ export interface UseFeishuBindRuntimeParams {
   onHealthRefresh: () => Promise<void>;
 }
 
-export function useFeishuBindRuntime({
+export interface UseChannelBindRuntimeParams extends UseFeishuBindRuntimeParams {
+  platform: AgentAppChannel;
+}
+
+export function useChannelBindRuntime({
   apiFetch,
   t,
   uiAuthReady,
   onConfigRefresh,
   onHealthRefresh,
-}: UseFeishuBindRuntimeParams) {
+  platform,
+}: UseChannelBindRuntimeParams) {
   const { confirm: showConfirm } = useUiDialog();
-  const [feishuBindLoading, setFeishuBindLoading] = useState(false);
-  const [feishuBindError, setFeishuBindError] = useState<string | null>(null);
-  const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
-  const [feishuBindQrDataUrl, setFeishuBindQrDataUrl] = useState<string | null>(null);
-  const [feishuResetLoading, setFeishuResetLoading] = useState(false);
+  const [bindLoading, setBindLoading] = useState(false);
+  const [bindError, setBindError] = useState<string | null>(null);
+  const [bindSession, setBindSession] = useState<FeishuBindSessionResponse | null>(null);
+  const [bindQrDataUrl, setBindQrDataUrl] = useState<string | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
+  const channelLabel = platform === "lark" ? "Lark" : t("飞书", "Feishu");
 
-  const beginFeishuBind = async () => {
-    setFeishuBindLoading(true);
-    setFeishuBindError(null);
+  const beginBind = async () => {
+    setBindLoading(true);
+    setBindError(null);
     try {
-      const session = await startFeishuBindSession(apiFetch);
-      setFeishuBindSession(session);
+      const session = await startChannelBindSession(apiFetch, platform);
+      setBindSession(session);
     } catch (err) {
-      setFeishuBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
     } finally {
-      setFeishuBindLoading(false);
+      setBindLoading(false);
     }
   };
 
-  const refreshFeishuBindSession = async (sessionId: number, silent = false) => {
+  const refreshBindSession = async (sessionId: number, silent = false) => {
     if (!silent) {
-      setFeishuBindLoading(true);
-      setFeishuBindError(null);
+      setBindLoading(true);
+      setBindError(null);
     }
     try {
-      const session = await fetchFeishuBindSession(apiFetch, sessionId);
-      setFeishuBindSession(session);
+      const session = await fetchChannelBindSession(apiFetch, platform, sessionId);
+      setBindSession(session);
       if (session.status === "bound") {
         await onConfigRefresh();
         await onHealthRefresh();
@@ -64,51 +71,51 @@ export function useFeishuBindRuntime({
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       if (!silent) {
-        setFeishuBindError(message);
+        setBindError(message);
       }
       return null;
     } finally {
       if (!silent) {
-        setFeishuBindLoading(false);
+        setBindLoading(false);
       }
     }
   };
 
-  const resetFeishuSetup = async () => {
+  const resetSetup = async () => {
     const confirmed = await showConfirm({
-      title: t("重置飞书接入", "Reset Feishu setup"),
+      title: t(`重置${channelLabel}接入`, `Reset ${channelLabel} setup`),
       message: t(
-        "确认重置飞书接入吗？这会清空飞书配置里的关键凭据，并删除当前 Key 的飞书绑定状态与待绑定会话。",
-        "Reset Feishu setup? This clears the Feishu credentials and removes the current key's Feishu bindings and pending setup sessions.",
+        `确认重置${channelLabel}接入吗？这会清空关键凭据，并删除当前 Key 的绑定状态与待绑定会话。`,
+        `Reset ${channelLabel} setup? This clears its credentials and removes the current key's bindings and pending setup sessions.`,
       ),
       confirmLabel: t("重置", "Reset"),
       tone: "danger",
     });
     if (!confirmed) return;
-    setFeishuResetLoading(true);
-    setFeishuBindError(null);
+    setResetLoading(true);
+    setBindError(null);
     try {
-      const res = await apiFetch(`/v1/admin/feishu/reset`, { method: "POST" });
+      const res = await apiFetch(`/v1/admin/${platform}/reset`, { method: "POST" });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `feishu reset failed (${res.status})`);
+        throw new Error(body.error || `${platform} reset failed (${res.status})`);
       }
-      setFeishuBindSession(null);
-      setFeishuBindQrDataUrl(null);
+      setBindSession(null);
+      setBindQrDataUrl(null);
       await onConfigRefresh();
       await onHealthRefresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setFeishuBindError(message);
+      setBindError(message);
     } finally {
-      setFeishuResetLoading(false);
+      setResetLoading(false);
     }
   };
 
   useEffect(() => {
-    const entryUrl = feishuBindSession?.entry_url?.trim() ?? "";
+    const entryUrl = bindSession?.entry_url?.trim() ?? "";
     if (!entryUrl) {
-      setFeishuBindQrDataUrl(null);
+      setBindQrDataUrl(null);
       return;
     }
     let cancelled = false;
@@ -122,39 +129,64 @@ export function useFeishuBindRuntime({
     })
       .then((url) => {
         if (!cancelled) {
-          setFeishuBindQrDataUrl(url);
+          setBindQrDataUrl(url);
         }
       })
       .catch((err) => {
         if (!cancelled) {
-          setFeishuBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
-          setFeishuBindQrDataUrl(null);
+          setBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+          setBindQrDataUrl(null);
         }
       });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feishuBindSession?.entry_url]);
+  }, [bindSession?.entry_url]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
-    if (!feishuBindSession) return;
-    if (isFeishuBindTerminalStatus(feishuBindSession.status)) return;
-    const timer = window.setInterval(() => {
-      void refreshFeishuBindSession(feishuBindSession.session_id, true);
-    }, 1800);
-    return () => window.clearInterval(timer);
+    if (!bindSession) return;
+    if (isFeishuBindTerminalStatus(bindSession.status)) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const scheduleNextPoll = (session: FeishuBindSessionResponse) => {
+      const intervalSeconds = Math.max(1, session.poll_interval_seconds ?? 5);
+      timer = window.setTimeout(async () => {
+        const refreshed = await refreshBindSession(session.session_id, true);
+        if (!cancelled && refreshed && !isFeishuBindTerminalStatus(refreshed.status)) {
+          scheduleNextPoll(refreshed);
+        }
+      }, intervalSeconds * 1000);
+    };
+    scheduleNextPoll(bindSession);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uiAuthReady, feishuBindSession?.session_id, feishuBindSession?.status]);
+  }, [uiAuthReady, bindSession?.session_id, bindSession?.status]);
 
   return {
-    feishuBindLoading,
-    feishuBindError,
-    feishuBindSession,
-    feishuBindQrDataUrl,
-    feishuResetLoading,
-    beginFeishuBind,
-    resetFeishuSetup,
+    bindLoading,
+    bindError,
+    bindSession,
+    bindQrDataUrl,
+    resetLoading,
+    beginBind,
+    resetSetup,
+  };
+}
+
+export function useFeishuBindRuntime(params: UseFeishuBindRuntimeParams) {
+  const runtime = useChannelBindRuntime({ ...params, platform: "feishu" });
+  return {
+    feishuBindLoading: runtime.bindLoading,
+    feishuBindError: runtime.bindError,
+    feishuBindSession: runtime.bindSession,
+    feishuBindQrDataUrl: runtime.bindQrDataUrl,
+    feishuResetLoading: runtime.resetLoading,
+    beginFeishuBind: runtime.beginBind,
+    resetFeishuSetup: runtime.resetSetup,
   };
 }

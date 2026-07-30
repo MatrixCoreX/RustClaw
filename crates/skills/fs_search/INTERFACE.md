@@ -77,7 +77,7 @@
 - Matrix admission uses machine `extra`, never natural-language `text` parsing.
 - Common evidence: `action` (status), `root`/`workspace_root` (path), `count`/`returned_count`/`known_match_count`/`total_count_is_complete` (count), `results`/`matches` (results/entries/path), and `page`/`completeness`/`continuation`/`snapshot_sha256` (status/provenance).
 - Action-specific fields include `exts`, `patterns`, `globs`, `match_mode`, `case_mode`, `target_kind`, image metadata, and grep line/byte/context provenance.
-- The trusted runner context may grant `permissions.allow_path_outside_workspace=true`; only then may an explicit absolute `root` search the full host scope visible to the RustClaw service account. A caller-provided argument cannot grant this permission.
+- The trusted runner context may grant `permissions.allow_path_outside_workspace=true`; only then may an explicit absolute `root` search the full host scope visible to the agent-runtime service account. A caller-provided argument cannot grant this permission.
 - `scan.backend`, backend version/fallback/elapsed fields, `cache_reused`, `cache_status`, and `observation_bytes` provide diagnostic provenance. They are executor evidence, not planner-selected backend controls.
 - Content matches include exact `start_byte`/`end_byte`, `matched_text`, encoding/binary evidence, and a file-identity-bound `range_handle` for a later bounded read.
 - Sensitive fields: `matches[].text` may include user data. Provider-facing traces should prefer short excerpts, hashes, line numbers, and paths unless the user requested matched content.

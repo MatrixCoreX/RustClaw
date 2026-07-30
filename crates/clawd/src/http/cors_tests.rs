@@ -18,7 +18,7 @@ async fn task_submit_preflight_accepts_ui_client_header() {
                 .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
                 .header(
                     header::ACCESS_CONTROL_REQUEST_HEADERS,
-                    "content-type,x-rustclaw-client,x-rustclaw-key",
+                    "content-type,x-agent-client,x-agent-key",
                 )
                 .body(Body::empty())
                 .expect("build CORS preflight request"),
@@ -32,7 +32,7 @@ async fn task_submit_preflight_accepts_ui_client_header() {
         .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
         .and_then(|value| value.to_str().ok())
         .expect("access-control-allow-headers");
-    for expected in ["content-type", "x-rustclaw-client", "x-rustclaw-key"] {
+    for expected in ["content-type", "x-agent-client", "x-agent-key"] {
         assert!(
             allowed.split(',').any(|value| value.trim() == expected),
             "missing {expected} in {allowed}"

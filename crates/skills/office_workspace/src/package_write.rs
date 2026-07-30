@@ -84,7 +84,7 @@ pub fn publish_package(
         SystemTime::now(),
         abandoned_temp_max_age(),
     );
-    let temp_path = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
+    let temp_path = parent.join(format!(".{file_name}.agent-{}.tmp", Uuid::new_v4()));
     let result = write_and_validate(members, &temp_path, format);
     let package = match result {
         Ok(package) => package,
@@ -97,7 +97,7 @@ pub fn publish_package(
     let backup_path = if let Some(source) = in_place_source {
         let hash = source_hash.unwrap_or("unknown");
         let backup = parent.join(format!(
-            ".{file_name}.rustclaw-backup-{}",
+            ".{file_name}.agent-backup-{}",
             &hash[..hash.len().min(16)]
         ));
         fs::copy(source, &backup).map_err(|error| {
@@ -155,7 +155,7 @@ fn cleanup_abandoned_temp_packages(
     now: SystemTime,
     max_age: Duration,
 ) -> TempCleanupEvidence {
-    let prefix = format!(".{file_name}.rustclaw-");
+    let prefix = format!(".{file_name}.agent-");
     let mut evidence = TempCleanupEvidence {
         removed: 0,
         errors: Vec::new(),

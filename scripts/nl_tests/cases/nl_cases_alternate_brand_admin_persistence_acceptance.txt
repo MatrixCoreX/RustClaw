@@ -1,0 +1,11 @@
+# Focused live acceptance for alternate-brand deployment, admin host scope,
+# durable conversation context, fuzzy filesystem discovery, and long commands.
+# Every executable case is real; no preview or dry-run is permitted.
+
+alternate_brand_admin|alternate_brand_ui_asset_zh|auth:admin,requires_tool_call=true,local_readonly|这是一次已授权的本机验收。使用 system.run_command 真实执行 `curl -fsS http://127.0.0.1/`，从返回 HTML 找到 index JavaScript 路径，再真实读取该 JavaScript；只根据观测证据返回 contains_rustpanda、contains_legacy_brand 和 asset_path。不要预演。|expect=contains:contains_rustpanda;confirm:确认执行
+alternate_brand_admin|runtime_health_neutral_en|auth:admin,requires_tool_call=true,local_readonly|Check the currently running agent service health without restart. Return only status, checked_targets, and next_action_needed.|expect=status
+alternate_brand_admin|admin_read_host_os_zh|auth:admin,requires_tool_call=true,local_readonly|以 admin 身份读取工作区外的 `/etc/os-release`，只返回 resolved_path、NAME 和 VERSION_ID；不要复制文件，不要改用工作区内文件。|expect=/etc/os-release
+alternate_brand_admin|admin_fuzzy_search_system_zh|auth:admin,requires_tool_call=true,local_readonly|以 admin 身份在整个 `/etc/nginx` 范围模糊查找名称接近 `agent runtime ui` 的文件或目录，最多返回 5 个真实匹配；只返回 query、search_root、match_count 和 paths。不要把查询限制到当前项目目录。|expect=agent-runtime-ui.conf
+alternate_brand_admin|conversation_marker_set_zh|group:alternate_brand_persistence,auth:admin|请记住本次刷新持久化验收标记 `PANDA-PERSIST-0730`，只用一句中文确认。
+alternate_brand_admin|conversation_marker_recall_zh|group:alternate_brand_persistence,auth:admin|刚才让你记住的刷新持久化验收标记是什么？只回答标记。|expect=PANDA-PERSIST-0730
+alternate_brand_admin|quiet_long_command_real_en|auth:admin,requires_tool_call=true,local_side_effect,resumable_job|This is an authorized real long-command test. Start the exact command `sleep 12 && printf APP_QUIET_NL_COMPLETE` with system.run_command, async_start=true, idle_timeout_seconds=3, poll_after_seconds=1, and expires_in_seconds=45. Poll the same real job until terminal. Do not preview, do not use dry-run, and do not start it twice. Return the real job/checkpoint identity, terminal state, exit_code, and stdout.|expect=contains:APP_QUIET_NL_COMPLETE;confirm:确认执行

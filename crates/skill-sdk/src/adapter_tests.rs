@@ -47,7 +47,7 @@ fn prebuilt_selection_requires_an_exact_normalized_platform() {
 #[test]
 fn missing_and_unsafe_toolchain_names_are_structured_preflight_errors() {
     assert_eq!(
-        find_program("definitely-not-a-rustclaw-toolchain-7f34")
+        find_program("definitely-not-a-agent-runtime-toolchain-7f34")
             .expect_err("missing toolchain")
             .code,
         "toolchain_missing"
@@ -58,4 +58,53 @@ fn missing_and_unsafe_toolchain_names_are_structured_preflight_errors() {
             .code,
         "toolchain_name_invalid"
     );
+}
+
+#[test]
+fn http_json_adapter_prepares_a_pinned_https_launch_without_local_toolchains() {
+    let source = crate::tests::manifest_source()
+        .replace("adapter = \"cargo\"", "adapter = \"http_json\"")
+        .replace("package = \"sample-weather-skill\"\n", "")
+        .replace("binary = \"sample-weather-skill\"\n", "")
+        .replace("lockfile = \"Cargo.lock\"\n", "")
+        .replace("network = \"deny\"", "network = \"approval_required\"")
+        .replace(
+            "network = \"approval_required\"\n\n[run]",
+            "network = \"approval_required\"\noptions = { endpoint = \"https://api.example.invalid/v1/skill\" }\n\n[run]",
+        )
+        .replace("launcher = \"native\"", "launcher = \"http_json\"")
+        .replace(
+            "entrypoint = \"runtime/bin/sample-weather-skill\"",
+            "entrypoint = \"runtime/http-json-adapter\"",
+        )
+        .replace("runtime_network = false", "runtime_network = true");
+    let manifest = PackageManifest::from_toml_str(&source).expect("valid HTTP manifest");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    let staging = temp.path().join("staging");
+    let cache = temp.path().join("cache");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let platform = HostPlatform::current();
+
+    let prepared = prepare_package(&AdapterContext {
+        manifest: &manifest,
+        workspace_root: &workspace,
+        manifest_dir: &workspace,
+        staging_root: &staging,
+        cache_root: &cache,
+        platform: &platform,
+        target: None,
+        allow_network: true,
+        control: None,
+    })
+    .expect("prepare HTTP adapter");
+
+    assert_eq!(prepared.adapter_version, "http-json-v1");
+    assert_eq!(prepared.launch.launcher, LauncherKind::HttpJson);
+    assert_eq!(
+        prepared.launch.remote_endpoint.as_deref(),
+        Some("https://api.example.invalid/v1/skill")
+    );
+    assert_eq!(prepared.artifacts.len(), 1);
+    assert!(staging.join("runtime/http-json-adapter").is_file());
 }

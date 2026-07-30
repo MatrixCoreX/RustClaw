@@ -282,10 +282,14 @@ export interface TaskLlmDebugResponse {
       classification?: string | null;
       fields?: string[] | null;
     } | null;
-    rustclaw_decisions?: {
+    agent_decisions?: {
       classification?: string | null;
       fields?: string[] | null;
     } | null;
+    [compatibilityField: string]: {
+      classification?: string | null;
+      fields?: string[] | null;
+    } | null | undefined;
   } | null;
   call_count?: number | null;
   flow_summary?: TaskLlmDebugFlowSummary | null;
@@ -409,6 +413,7 @@ export interface ResolveChannelBindingResponse {
 export interface SkillListItem {
   name: string;
   description?: string | null;
+  description_zh?: string | null;
   semantic_tags?: string[] | null;
   kind?: string | null;
   planner_kind?: string | null;
@@ -499,6 +504,7 @@ export interface SkillsConfigResponse {
 export interface SkillStoreItem {
   name: string;
   description?: string | null;
+  description_zh?: string | null;
   group?: string | null;
   catalog_section?: string | null;
   kind: string;
@@ -1010,6 +1016,8 @@ export interface FeishuConfigResponse {
   current_key_bound: boolean;
   restart_required: boolean;
 }
+
+export type LarkConfigResponse = FeishuConfigResponse;
 
 export interface AgentConfigItem {
   id: string;

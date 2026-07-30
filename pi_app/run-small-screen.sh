@@ -18,4 +18,4 @@ if command -v xset >/dev/null 2>&1; then
   xset s noblank >/dev/null 2>&1 || true
 fi
 
-exec /usr/bin/env python3 "${PI_APP_DIR}/rustclaw_small_screen.py"
+exec /usr/bin/env python3 "${PI_APP_DIR}/agent_small_screen.py"

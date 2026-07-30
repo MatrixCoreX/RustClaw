@@ -12,7 +12,7 @@ struct ScopedTempDir(std::path::PathBuf);
 impl ScopedTempDir {
     fn new(label: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "rustclaw_fixture_replay_{}_{}",
+            "agent_fixture_replay_{}_{}",
             label,
             uuid::Uuid::new_v4()
         ));
@@ -109,7 +109,7 @@ async fn replay_fails_loud_on_miss_with_regen_hint() {
     assert!(!err.retryable, "miss must be non-retryable to fail loud");
     assert!(err.message.contains("fixture_replay miss"));
     assert!(err.message.contains("prompt_hash="));
-    assert!(err.message.contains("RUSTCLAW_REGEN_FIXTURE=case_miss"));
+    assert!(err.message.contains("APP_REGEN_FIXTURE=case_miss"));
 
     std::env::remove_var(FIXTURE_LLM_ROOT_ENV);
     std::env::remove_var(FIXTURE_LLM_CASE_ENV);
@@ -185,7 +185,7 @@ async fn replay_fails_loud_when_env_not_set() {
         .call(runtime, "x".to_string(), ChatRequestHints::default())
         .await
         .expect_err("env missing");
-    assert!(err.message.contains("RUSTCLAW_FIXTURE_LLM_ROOT"));
+    assert!(err.message.contains("APP_FIXTURE_LLM_ROOT"));
 }
 
 // ---------- §7.5 Step 2.b: convert_model_io_log_to_fixture ----------
@@ -363,7 +363,7 @@ fn regen_refuses_overwrite_without_force() {
         .expect_err("must refuse overwrite without force");
     assert!(err.contains("already exists"), "err = {err}");
     assert!(
-        err.contains("RUSTCLAW_REGEN_FIXTURE_FORCE"),
+        err.contains("APP_REGEN_FIXTURE_FORCE"),
         "err must hint at the force env: {err}"
     );
 }

@@ -123,11 +123,11 @@ pub(crate) fn prompt_with_ui_attachment_context(prompt: &str, payload: &Value) -
         return prompt.to_string();
     }
     let mut lines = Vec::new();
-    lines.push("[RUSTCLAW_ATTACHMENT_CONTEXT]".to_string());
+    lines.push("[AGENT_ATTACHMENT_CONTEXT]".to_string());
     for (kind, path) in paths {
         lines.push(format!("{kind}_path={path}"));
     }
-    lines.push("[/RUSTCLAW_ATTACHMENT_CONTEXT]".to_string());
+    lines.push("[/AGENT_ATTACHMENT_CONTEXT]".to_string());
     let context = lines.join("\n");
     if prompt.trim().is_empty() {
         context

@@ -195,6 +195,39 @@ fn resolve_vendor_config_inherits_shared_key_for_empty_provider_override() {
 }
 
 #[test]
+fn resolve_vendor_config_inherits_shared_api_for_empty_provider_override() {
+    let mut cfg = RootConfig::default();
+    cfg.llm.minimax = Some(vendor_cfg(
+        "https://shared.example/v1",
+        "shared-minimax-key",
+        "shared-model",
+    ));
+    cfg.image_vision.providers.minimax = Some(vendor_cfg("", "vision-minimax-key", "vision-model"));
+
+    let (_, resolved) = resolve_vendor_config(&cfg, VendorKind::MiniMax).expect("minimax config");
+
+    assert_eq!(resolved.base_url, "https://shared.example/v1");
+    assert_eq!(resolved.api_key, "vision-minimax-key");
+    assert_eq!(resolved.model, "vision-model");
+}
+
+#[test]
+fn resolve_vendor_config_uses_main_connection_when_override_is_absent() {
+    let mut cfg = RootConfig::default();
+    cfg.llm.minimax = Some(vendor_cfg(
+        "https://shared.example/v1",
+        "shared-minimax-key",
+        "shared-model",
+    ));
+
+    let (_, resolved) = resolve_vendor_config(&cfg, VendorKind::MiniMax).expect("minimax config");
+
+    assert_eq!(resolved.base_url, "https://shared.example/v1");
+    assert_eq!(resolved.api_key, "shared-minimax-key");
+    assert_eq!(resolved.model, "shared-model");
+}
+
+#[test]
 fn resolve_vendor_config_keeps_dedicated_provider_key() {
     let mut cfg = RootConfig::default();
     cfg.llm.minimax = Some(vendor_cfg(

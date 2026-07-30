@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Rustup ships an LLD matching rustc. Reusing it avoids a separate system lld
-# dependency and substantially reduces memory/time for RustClaw's large test
+# dependency and substantially reduces memory/time for the runtime's large test
 # and runtime links. A caller can opt out when diagnosing toolchain issues.
-if [[ "${RUSTCLAW_DISABLE_BUNDLED_LLD:-0}" != "1" ]] \
+if [[ "${APP_DISABLE_BUNDLED_LLD:-0}" != "1" ]] \
   && command -v rustc >/dev/null 2>&1 \
   && command -v clang >/dev/null 2>&1; then
   rust_host="$(rustc -vV | awk '/^host:/ {print $2; exit}')"

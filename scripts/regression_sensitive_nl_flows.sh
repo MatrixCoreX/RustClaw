@@ -252,14 +252,14 @@ ensure_binaries() {
       cargo build -p clawd
       cargo build --release \
         -p skill-runner \
-        -p rustclaw-skill-sdk \
+        -p agent-skill-sdk \
         -p config-guard-skill \
         -p extension-manager-skill
       python3 scripts/project_skill_receipts.py \
         --package-root "$ROOT_DIR/data/skill-packages" \
         --skill config_guard \
         --skill extension_manager
-      "$ROOT_DIR/target/release/rustclaw-skill" install-local \
+      "$ROOT_DIR/target/release/skillctl" install-local \
         "$ROOT_DIR/optional_skills/crypto/skill.toml" \
         "$ROOT_DIR" \
         "$ROOT_DIR/data/skill-packages"
@@ -277,13 +277,13 @@ ensure_binaries() {
     echo "skill-runner release binary missing: $ROOT_DIR/target/release/skill-runner" >&2
     exit 2
   }
-  [[ -x "$ROOT_DIR/target/release/rustclaw-skill" ]] || {
-    echo "skill SDK CLI missing: $ROOT_DIR/target/release/rustclaw-skill" >&2
+  [[ -x "$ROOT_DIR/target/release/skillctl" ]] || {
+    echo "skill SDK CLI missing: $ROOT_DIR/target/release/skillctl" >&2
     exit 2
   }
   local skill_name
   for skill_name in config_guard crypto extension_manager; do
-    "$ROOT_DIR/target/release/rustclaw-skill" receipt-verify \
+    "$ROOT_DIR/target/release/skillctl" receipt-verify \
       "$ROOT_DIR/data/skill-packages" "$skill_name" >/dev/null || {
       echo "verified install receipt missing for skill: $skill_name" >&2
       exit 2
@@ -294,7 +294,7 @@ ensure_binaries() {
 wait_for_health() {
   local waited=0
   while [[ "$waited" -le "$WAIT_SECONDS" ]]; do
-    if curl -sS -H "X-RustClaw-Key: ${ADMIN_USER_KEY}" "${BASE_URL}/v1/health" >/dev/null 2>&1; then
+    if curl -sS -H "X-Agent-Key: ${ADMIN_USER_KEY}" "${BASE_URL}/v1/health" >/dev/null 2>&1; then
       return 0
     fi
     if [[ -n "$CLAWD_PID" ]] && ! kill -0 "$CLAWD_PID" >/dev/null 2>&1; then
@@ -579,7 +579,7 @@ BASE_ID_SEED="$(make_base_seed)"
 if [[ -n "$WORKSPACE_ROOT_OVERRIDE" ]]; then
   TEMP_WORKSPACE="$WORKSPACE_ROOT_OVERRIDE"
 else
-  TEMP_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-sensitive-nl-XXXXXX")"
+TEMP_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/agent-runtime-sensitive-nl-XXXXXX")"
 fi
 
 prepare_temp_workspace "$TEMP_WORKSPACE"
@@ -592,11 +592,11 @@ BASE_URL="http://127.0.0.1:${PORT}"
 export BASE_URL
 
 ADMIN_USER_KEY="$(
-  RUSTCLAW_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
+  APP_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
     bash "$ROOT_DIR/scripts/auth-key.sh" generate admin | awk '{print $1; exit}'
 )"
 REGULAR_USER_KEY="$(
-  RUSTCLAW_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
+  APP_CONFIG_PATH="$TEMP_WORKSPACE/configs/config.toml" \
     bash "$ROOT_DIR/scripts/auth-key.sh" generate user | awk '{print $1; exit}'
 )"
 
@@ -606,7 +606,7 @@ REGULAR_USER_KEY="$(
     # shellcheck source=/dev/null
     source "$RUNTIME_ENV_FILE"
   fi
-  RUSTCLAW_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
+  APP_INTERNAL_LISTEN="127.0.0.1:${PORT}" \
     WORKSPACE_ROOT="$TEMP_WORKSPACE" "$CLAWD_BIN"
 ) >"$LOG_DIR/clawd.log" 2>&1 &
 CLAWD_PID=$!

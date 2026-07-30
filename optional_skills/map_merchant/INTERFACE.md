@@ -80,5 +80,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"map-3","status":"error","text":"","extra":{"schema_version":1,"source_skill":"map_merchant","status":"error","error_kind":"execution_failed","message_key":"skill.map_merchant.execution_failed","retryable":false},"error_text":"code=provider_api_key_missing provider=google config=configs/map_merchant.toml"}
+{"request_id":"map-3","status":"error","text":"","extra":{"schema_version":1,"source_skill":"map_merchant","status":"error","error_code":"provider_api_key_missing","message_key":"skill.map_merchant.provider_api_key_missing","retryable":false},"error_text":"code=provider_api_key_missing provider=google config=configs/map_merchant.toml"}
 ```

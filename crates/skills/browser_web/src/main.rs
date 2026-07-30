@@ -820,7 +820,7 @@ fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
         })
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+        || std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, SkillFailure> {

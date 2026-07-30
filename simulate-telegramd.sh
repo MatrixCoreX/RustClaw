@@ -106,7 +106,7 @@ if ! [[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || [[ "$WAIT_SECONDS" -le 0 ]]; then
 fi
 
 if [[ -z "$BASE_URL" ]]; then
-  BASE_URL="http://${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
+  BASE_URL="http://${APP_INTERNAL_LISTEN:-127.0.0.1:8787}"
 fi
 
 if [[ "$KIND" == "ask" ]]; then

@@ -6,9 +6,6 @@ mod defaults;
 mod runtime;
 
 use defaults::*;
-pub use defaults::{
-    base_skill_names, core_skills_always_enabled, skill_store_optional_skill_names,
-};
 
 pub const CLAWD_INTERNAL_LISTEN: &str = "127.0.0.1:8787";
 pub const CLAWD_INTERNAL_BASE_URL: &str = "http://127.0.0.1:8787";
@@ -850,7 +847,7 @@ pub struct DatabaseConfig {
     pub pool_max_size: u32,
     /// Phase 2.2 Stage 2: 把 audit_logs 拆到独立 SQLite 文件 +
     /// 独立连接池，让任务流水线（tasks/scheduled_jobs/...）的 writer 锁
-    /// 不再被 audit append 抢占。默认 `data/rustclaw_audit.db`，
+    /// 不再被 audit append 抢占。默认 `data/agent-runtime-audit.db`，
     /// 启动时若主库存在 audit_logs 行会一次性迁移过去。
     #[serde(default = "default_audit_sqlite_path")]
     pub audit_sqlite_path: String,
@@ -869,7 +866,7 @@ fn default_skill_data_root() -> String {
 }
 
 fn default_audit_sqlite_path() -> String {
-    "data/rustclaw_audit.db".to_string()
+    "data/agent-runtime-audit.db".to_string()
 }
 
 fn default_audit_pool_max_size() -> u32 {
@@ -1145,9 +1142,13 @@ pub struct SkillsConfig {
     /// 已从活动运行时移除、但仍可从 Skill Store 重新安装的技能。
     #[serde(default = "default_uninstalled_skills")]
     pub uninstalled_skills: Vec<String>,
-    /// 技能注册表文件路径（相对 workspace 或绝对）。设则启用 registry 驱动发现/启用/别名/超时。
-    #[serde(default)]
+    /// 技能注册表文件路径（相对 workspace 或绝对）。生产启动要求该文件存在且有效。
+    #[serde(default = "default_skill_registry_path")]
     pub registry_path: Option<String>,
+}
+
+fn default_skill_registry_path() -> Option<String> {
+    Some("configs/skills_registry.toml".to_string())
 }
 
 impl Default for SkillsConfig {
@@ -1158,7 +1159,7 @@ impl Default for SkillsConfig {
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
             uninstalled_skills: default_uninstalled_skills(),
-            registry_path: None,
+            registry_path: default_skill_registry_path(),
         }
     }
 }
@@ -1448,6 +1449,8 @@ pub struct ToolsConfig {
     pub allow: Vec<String>,
     #[serde(default)]
     pub deny: Vec<String>,
+    #[serde(default = "default_tool_access_profiles")]
+    pub profiles: HashMap<String, Vec<String>>,
     #[serde(default = "default_tool_cmd_timeout_seconds")]
     pub cmd_timeout_seconds: u64,
     #[serde(default = "default_tool_cmd_idle_timeout_seconds")]
@@ -1479,6 +1482,7 @@ impl Default for ToolsConfig {
             approval_policy: ToolApprovalPolicy::default(),
             allow: Vec::new(),
             deny: Vec::new(),
+            profiles: default_tool_access_profiles(),
             cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),
             cmd_idle_timeout_seconds: default_tool_cmd_idle_timeout_seconds(),
             cmd_async_timeout_seconds: default_tool_cmd_async_timeout_seconds(),

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.dev/schemas/skill-host-policy-grant-v1.schema.json",
-  "title": "RustClaw host-owned skill policy grant v1",
+  "$id": "https://agent-runtime.dev/schemas/skill-host-policy-grant-v1.schema.json",
+  "title": "Agent Runtime host-owned skill policy grant v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "skill_name", "version", "semantic_contract_digest", "capabilities", "permissions", "risk_level", "auto_invocable", "approval_source", "approved_at_unix"],
+  "required": ["schema_version", "skill_name", "version", "semantic_contract_digest", "capabilities", "permissions", "risk_level", "auto_invocable", "requires_confirmation", "approval_source", "approved_at_unix"],
   "properties": {
     "schema_version": { "const": 1 },
     "skill_name": { "$ref": "#/$defs/name" },
@@ -14,6 +14,7 @@
     "permissions": { "$ref": "skill-manifest-v2.schema.json#/$defs/permissions" },
     "risk_level": { "enum": ["low", "medium", "high"] },
     "auto_invocable": { "type": "boolean" },
+    "requires_confirmation": { "type": "boolean" },
     "approval_source": { "enum": ["release_baseline", "operator", "admin_api", "policy_automation", "migration"] },
     "approved_at_unix": { "type": "integer", "minimum": 1 }
   },

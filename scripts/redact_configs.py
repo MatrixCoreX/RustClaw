@@ -212,7 +212,7 @@ def redact_file(
 
 def write_mapping(path: Path, entries: list[MappingEntry], dry_run: bool) -> None:
     header = [
-        "# RustClaw config secret mapping",
+            "# Agent runtime config secret mapping",
         "# Keep this file private. Anyone with this file can restore secrets.",
         "# Format: one JSON object per line",
         "",

@@ -10,23 +10,13 @@ configure_platform_command_path
 configure_python3_with_tomllib
 component_start_init "$SCRIPT_DIR" release "./component_start/start-wa-web-bridge.sh"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "node not found. Please install Node.js 18+." # zh: 未找到 node，请先安装 Node.js 18+
-  exit 1
-fi
-
-if ! command -v npm >/dev/null 2>&1; then
-  echo "npm not found. Please install npm." # zh: 未找到 npm，请先安装 npm
-  exit 1
-fi
-
 enabled="$(
 python3 - <<'PY'
 import os
 import tomllib
 from pathlib import Path
-cfg = tomllib.loads(Path(os.environ["RUSTCLAW_CONFIG_PATH"]).read_text(encoding="utf-8"))
-channel_dir = Path(os.environ["RUSTCLAW_CHANNEL_CONFIG_DIR"])
+cfg = tomllib.loads(Path(os.environ["APP_CONFIG_PATH"]).read_text(encoding="utf-8"))
+channel_dir = Path(os.environ["APP_CHANNEL_CONFIG_DIR"])
 for name in ("whatsapp.toml", "whatsapp-web.toml"):
     extra = channel_dir / name
     if extra.exists():
@@ -51,14 +41,7 @@ if component_pid_is_running "wa-web-bridge" "$BRIDGE_DIR/index.js"; then
   exit 0
 fi
 
-if [[ ! -d "$BRIDGE_DIR/node_modules" ]]; then
-  echo "Installing wa-web-bridge dependencies..." # zh: 正在安装 wa-web-bridge 依赖...
-  if [[ -f "$BRIDGE_DIR/package-lock.json" ]]; then
-    npm --prefix "$BRIDGE_DIR" ci --omit=dev
-  else
-    npm --prefix "$BRIDGE_DIR" install --omit=dev
-  fi
-fi
+bash "$SCRIPT_DIR/scripts/whatsapp_web_bridge_deps.sh" --ensure
 
 component_write_pid_file "wa-web-bridge" "$$"
 exec node "$BRIDGE_DIR/index.js"

@@ -30,6 +30,7 @@ fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -116,8 +117,8 @@ fn stable_fact_rendering_skips_cross_turn_deictic_locator_mapping() {
                 r#"{"deictic_reference":{"target":"unresolved_prior_object"},"locator":"/tmp/device/app.log","reason":"stale cross-turn alias"}"#,
             ),
             item("项目别名：'那个服务' 代指 'clawd'"),
-            item("那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
-            item("那个配置文件 refers to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
+            item("那个配置文件 maps to /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
+            item("那个配置文件 refers to /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
             item("默认用中文回复\nReason: durable preference"),
         ],
         ..Default::default()
@@ -139,7 +140,7 @@ fn stable_fact_rendering_skips_internal_client_like_run_ids_from_project_facts()
         relevant_facts: vec![
             RetrievedMemoryItem {
                 role: None,
-                text: "测试编号 client-like-continuous-20260520_031810 用于 RustClaw 客户端连续会话测试场".to_string(),
+                text: "测试编号 client-like-continuous-20260520_031810 用于 Agent Runtime 客户端连续会话测试场".to_string(),
                 score: 0.91,
                 source_label: Some("project_facts".to_string()),
             },
@@ -157,7 +158,7 @@ fn stable_fact_rendering_skips_internal_client_like_run_ids_from_project_facts()
             },
             RetrievedMemoryItem {
                 role: None,
-                text: "RustClaw workspace package version is 0.1.7".to_string(),
+                text: "Agent Runtime workspace package version is 0.1.7".to_string(),
                 score: 0.89,
                 source_label: Some("project_facts".to_string()),
             },
@@ -171,7 +172,7 @@ fn stable_fact_rendering_skips_internal_client_like_run_ids_from_project_facts()
     assert!(!block.contains("[project_facts] 当前连续测试标记为 RC-CONT-CN-0428-A"));
     assert!(block
         .contains("[user_profile] 用户保存的测试编号是 client-like-continuous-20260520_031810"));
-    assert!(block.contains("[project_facts] RustClaw workspace package version is 0.1.7"));
+    assert!(block.contains("[project_facts] Agent Runtime workspace package version is 0.1.7"));
 }
 
 #[test]
@@ -518,7 +519,8 @@ fn kb_docs_are_scoped_by_user_key() {
         let db = state
             .core
             .skill_storage
-            .kb_pool()
+            .pool_for("kb")
+            .expect("KB owner")
             .get()
             .expect("KB db lock");
         db.execute(

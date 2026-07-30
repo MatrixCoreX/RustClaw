@@ -18,14 +18,14 @@ fn workspace_root_joins_relative_search_results_as_absolute_path_evidence() {
         &json!({
             "action": "find_name",
             "root": "",
-            "workspace_root": "/workspace/rustclaw",
+            "workspace_root": "/workspace/agent-runtime",
             "results": ["AGENTS.md", "patches/open-lark/AGENTS.md"]
         }),
         &mut paths,
     );
 
-    assert!(paths.contains("/workspace/rustclaw/AGENTS.md"));
-    assert!(paths.contains("/workspace/rustclaw/patches/open-lark/AGENTS.md"));
+    assert!(paths.contains("/workspace/agent-runtime/AGENTS.md"));
+    assert!(paths.contains("/workspace/agent-runtime/patches/open-lark/AGENTS.md"));
 }
 
 fn route_with_mode() -> crate::answer_verifier::AnswerContract {
@@ -405,7 +405,7 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.selection.structured_field_selector = Some("path".to_string());
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "definitely_missing_dir_rustclaw_xyz/".to_string();
+    route.output_contract.locator_hint = "definitely_missing_dir_agent_xyz/".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-not-found", "ask", "list");
     journal.record_output_contract(&route.output_contract);
@@ -421,7 +421,7 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
             Some("linux"),
             Some(json!({
                 "operation": "list_dir",
-                "path": "definitely_missing_dir_rustclaw_xyz/"
+                "path": "definitely_missing_dir_agent_xyz/"
             })),
         )),
         started_at: 1,
@@ -448,7 +448,7 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
+    route.output_contract.locator_hint = "/tmp/agent-runtime-missing.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-local-gap-not-found-answer",
         "ask",
@@ -460,7 +460,7 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
         skill: "fs_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Error,
         output: None,
-        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/rustclaw-missing.md".to_string()),
+        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/agent-runtime-missing.md".to_string()),
         started_at: 1,
         finished_at: 2,
     });
@@ -468,7 +468,7 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
     assert!(structural_satisfaction_can_skip_verifier(
         &route,
         &journal,
-        "/tmp/rustclaw-missing.md"
+        "/tmp/agent-runtime-missing.md"
     ));
 }
 
@@ -478,7 +478,7 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md | README.md".to_string();
+    route.output_contract.locator_hint = "/tmp/agent-runtime-missing.md | README.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-local-gap-stat-missing-answer",
         "ask",
@@ -497,7 +497,7 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
                     {
                         "exists": false,
                         "kind": "missing",
-                        "path": "/tmp/rustclaw-missing.md"
+                        "path": "/tmp/agent-runtime-missing.md"
                     }
                 ],
                 "include_missing": true
@@ -512,7 +512,7 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
     assert!(structural_satisfaction_can_skip_verifier(
         &route,
         &journal,
-        "exists=false path=/tmp/rustclaw-missing.md kind=missing"
+        "exists=false path=/tmp/agent-runtime-missing.md kind=missing"
     ));
 }
 
@@ -522,7 +522,7 @@ fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
+    route.output_contract.locator_hint = "/tmp/agent-runtime-missing.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-local-gap-not-found-answer-no-path",
         "ask",
@@ -534,7 +534,7 @@ fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
         skill: "fs_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Error,
         output: None,
-        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/rustclaw-missing.md".to_string()),
+        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/agent-runtime-missing.md".to_string()),
         started_at: 1,
         finished_at: 2,
     });
@@ -621,8 +621,8 @@ fn should_verify_answer_skips_grounded_generic_machine_projection() {
             "provider=minimax\n",
             "model=speech-2.8-turbo\n",
             "model_kind=dry_run\n",
-            "output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3\n",
-            "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3\",\"type\":\"audio_file\"}]",
+            "output_path=/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3\n",
+            "planned_outputs=[{\"path\":\"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3\",\"type\":\"audio_file\"}]",
         )
     ));
     assert!(!should_verify_answer(

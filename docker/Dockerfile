@@ -73,13 +73,13 @@ COPY services/ /app/services/
 COPY scripts/ /app/scripts/
 COPY component_start/ /app/component_start/
 COPY start-all-bin.sh /app/start-all-bin.sh
-COPY stop-rustclaw.sh /app/stop-rustclaw.sh
+COPY stop-agent.sh /app/stop-agent.sh
 COPY docker/docker-entrypoint.sh /app/docker/docker-entrypoint.sh
 
 RUN chmod +x \
     /app/start-all-bin.sh \
     /app/component_start/*.sh \
-    /app/stop-rustclaw.sh \
+    /app/stop-agent.sh \
     /app/docker/docker-entrypoint.sh \
     /app/scripts/auth-key.sh \
  && find /app/target/release -maxdepth 1 -type f -exec chmod +x '{}' + \

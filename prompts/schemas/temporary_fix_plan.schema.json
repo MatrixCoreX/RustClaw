@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/schemas/temporary_fix_plan.schema.json",
+  "$id": "https://agent-runtime.invalid/schemas/temporary_fix_plan.schema.json",
   "title": "Temporary Fix Plan Output",
   "description": "Schema for the JSON object returned by `extension_manager_temporary_fix_system_prompt.md` and consumed by `crates/skills/extension_manager/src/main.rs::parse_temporary_fix_plan_from_text`.",
   "type": "object",

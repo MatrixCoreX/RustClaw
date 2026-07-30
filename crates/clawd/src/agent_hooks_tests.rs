@@ -18,7 +18,7 @@ struct TempHookRoot {
 impl TempHookRoot {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw-hook-runtime-{}",
+            "agent-runtime-hook-runtime-{}",
             uuid::Uuid::new_v4().simple()
         ));
         std::fs::create_dir_all(path.join("hooks")).expect("create hook root");

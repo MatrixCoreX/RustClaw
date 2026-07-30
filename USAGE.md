@@ -1,6 +1,6 @@
-# RustClaw 使用手册
+# Agent Runtime 使用手册
 
-本文档是 RustClaw 安装、配置、启动、更新和排障的唯一操作手册。
+本文档是 Agent Runtime 安装、配置、启动、更新和排障的唯一操作手册。
 
 - 项目定位、Agent Loop 和能力架构：见 `README.zh-CN.md`
 - 英文项目总览：见 `README.md`
@@ -11,8 +11,8 @@
 
 | 场景 | 推荐方式 | 是否需要 nginx | 服务管理 |
 | --- | --- | --- | --- |
-| 本地 Linux/macOS | Release 包或源码，直接运行 | 否 | `rustclaw` 命令 |
-| 树莓派 | Pi aarch64 Release 包 | 否；公网访问时可选 | `rustclaw` 或 systemd |
+| 本地 Linux/macOS | Release 包或源码，直接运行 | 否 | `agentctl` 命令 |
+| 树莓派 | Pi aarch64 Release 包 | 否；公网访问时可选 | `agentctl` 或 systemd |
 | 云服务器 | Ubuntu x86_64 Release 包 | 公网域名推荐 | systemd |
 | 开发环境 | Git 源码 | 否 | 前台命令 |
 
@@ -54,28 +54,31 @@ bash scripts/build_toolchain_manager.sh update
 无交互 sudo 权限才会启用自动安装；否则页面只显示缺失状态和手动配置提示。安装在
 后台运行，刷新页面不会丢失进行中状态。
 
-构建脚本会按 CPU 和可用内存调整并发；树莓派等低内存设备不应手工提高 Cargo
-或 Node.js 并发。
+构建脚本会按 CPU 和当前可用内存调整并发：ARM/低内存主机使用一个 Cargo job；
+内存余量充足的 12-16 GiB x86 主机使用两个；更大主机保留 Cargo 默认并发。
+树莓派等低内存设备不应手工提高 Cargo 或 Node.js 并发。
 
-`install-rustclaw-cmd.sh` 会校验这项 Python 运行时依赖；macOS 缺失时通过
-Homebrew 安装当前 `python` 公式，并让 RustClaw 精确使用它，不受系统自带旧版
+`install-agent-cmd.sh` 会校验这项 Python 运行时依赖；macOS 缺失时通过
+Homebrew 安装当前 `python` 公式，并让 Agent Runtime 精确使用它，不受系统自带旧版
 `/usr/bin/python3` 的 PATH 顺序影响。
 
-## 3. 获取 RustClaw
+## 3. 获取 Agent Runtime
 
 ### 3.1 使用 Release 包
 
 下载与平台匹配的最新包：
 
-- Ubuntu/通用 Linux x86_64：`RustClaw-ubuntu-x86_64-*.tar.gz`
-- 树莓派 64 位：`RustClaw-pi-aarch64-*.tar.gz`
+- Ubuntu/通用 Linux x86_64：`<artifact-id>-ubuntu-x86_64-*.tar.gz`
+- 树莓派 64 位：`<artifact-id>-pi-aarch64-*.tar.gz`
+
+`<artifact-id>` 与发布仓库由发行方在 `configs/product_identity.toml` 中定义。
 
 同时下载 `.sha256` 文件并校验：
 
 ```bash
-sha256sum -c RustClaw-*.tar.gz.sha256
-tar -xzf RustClaw-*.tar.gz
-cd RustClaw
+sha256sum -c <archive>.sha256
+tar -xzf <archive>
+cd <extracted-directory>
 ```
 
 Release 包包含预编译二进制和 UI 静态资源，不需要在目标机器重新编译。
@@ -83,8 +86,8 @@ Release 包包含预编译二进制和 UI 静态资源，不需要在目标机�
 ### 3.2 使用 Git 源码
 
 ```bash
-git clone https://github.com/MatrixCoreX/RustClaw.git
-cd RustClaw
+git clone <repository-url>
+cd <source-directory>
 ```
 
 更新现有工作区：
@@ -113,7 +116,7 @@ export MINIMAX_API_KEY="..."
 启动前加载：
 
 ```bash
-export RUSTCLAW_RUNTIME_ENV_SCRIPT=/absolute/path/runtime_env_filled.sh
+export APP_RUNTIME_ENV_SCRIPT=/absolute/path/runtime_env_filled.sh
 ```
 
 不要把真实密钥、登录密码、Token 或设备私钥提交到 Git。
@@ -130,29 +133,26 @@ export RUSTCLAW_RUNTIME_ENV_SCRIPT=/absolute/path/runtime_env_filled.sh
 本地用户安装，不配置 nginx：
 
 ```bash
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+bash install-agent-cmd.sh --user --no-deploy-ui
 ```
 
 从源码构建后安装：
 
 ```bash
-bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
+bash install-agent-cmd.sh --build --user --no-deploy-ui
 ```
 
 检查结果：
 
 ```bash
-command -v rustclaw
-rustclaw -h
-rustclaw -status
+command -v agentctl
+agentctl -h
+agentctl -status
 command -v clawcli
 ```
 
-卸载命令入口不会删除配置和数据：
-
-```bash
-bash uninstall-rustclaw-cmd.sh --user
-```
+删除安装器创建的 `agentctl` / `clawcli` 链接不会删除工作区、配置或数据；systemd
+部署应先按第 8 节卸载 unit。当前不提供会删除工作区或数据的一键卸载脚本。
 
 ## 6. 从源码构建
 
@@ -186,36 +186,36 @@ CARGO_BUILD_JOBS=1 cargo check --workspace
 最简快速启动：
 
 ```bash
-rustclaw start -q
+agentctl start -q
 ```
 
 带 UI 启动：
 
 ```bash
-rustclaw -start release all --with-ui
+agentctl -start release all --with-ui
 ```
 
 指定模型：
 
 ```bash
-rustclaw -start --vendor minimax --model MODEL_NAME --profile release --channels all
+agentctl -start --vendor minimax --model MODEL_NAME --profile release --channels all
 ```
 
 常用运维：
 
 ```bash
-rustclaw -status
-rustclaw -health
-rustclaw -logs clawd 200 --follow
-rustclaw -restart release all --quick --skip-setup
-rustclaw -stop
+agentctl -status
+agentctl -health
+agentctl -logs clawd 200 --follow
+agentctl -restart release all --quick --skip-setup
+agentctl -stop
 ```
 
 不安装命令入口时也可直接运行：
 
 ```bash
 ./start-all-bin.sh release
-./stop-rustclaw.sh
+./stop-agent.sh
 ```
 
 ### 7.1 在终端中连续使用 Agent
@@ -257,7 +257,7 @@ JSONL 模式的 stdout 每行都是独立、带版本的 JSON 对象，不包含
 
 ## 8. Linux systemd 服务
 
-仓库不保存写死用户或安装路径的 `rustclaw.service`。Linux/systemd 主机应使用
+仓库不保存写死用户或安装路径的 `agent-runtime.service`。Linux/systemd 主机应使用
 安装器按当前环境生成 unit：
 
 ```bash
@@ -271,7 +271,7 @@ bash scripts/install-systemd-service.sh \
   --workspace "$PWD" \
   --user "$(id -un)" \
   --runtime-env /absolute/path/runtime_env_filled.sh \
-  --output /tmp/rustclaw.service
+  --output /tmp/agent-runtime.service
 ```
 
 安装、启用并启动：
@@ -288,9 +288,9 @@ bash scripts/install-systemd-service.sh \
 查看状态和日志：
 
 ```bash
-sudo systemctl status rustclaw.service
-sudo journalctl -u rustclaw.service -n 200
-sudo journalctl -u rustclaw.service -f
+sudo systemctl status agent-runtime.service
+sudo journalctl -u agent-runtime.service -n 200
+sudo journalctl -u agent-runtime.service -f
 ```
 
 卸载：
@@ -332,31 +332,31 @@ npm run build
 云服务器使用域名和 TLS 时，可显式部署静态 UI 到 nginx：
 
 ```bash
-bash install-rustclaw-cmd.sh \
-  --deploy-ui-nginx /var/www/html/rustclaw
+bash install-agent-cmd.sh \
+  --deploy-ui-nginx /var/www/html/agent-runtime
 ```
 
 脚本会保留已有 TLS 站点配置，不会用默认 HTTP 模板覆盖已管理的证书配置。
-nginx 只负责静态资源以及 `/v1/`、`/webd/` 反向代理；RustClaw 进程仍由
+nginx 只负责静态资源以及 `/v1/`、`/webd/` 反向代理；Agent Runtime 进程仍由
 systemd 或直接启动方式管理。
 
 首页的“Nginx Web 入口配置”提供两个管理动作：
 
 - “启用/修复 nginx”会在 Linux/macOS 上检查并按需安装或更新 nginx，修复站点、
   启动服务并部署当前 `UI/dist`。
-- “关闭 nginx”会停止并禁用服务，删除 RustClaw 站点和专用 UI 部署，但不卸载
+- “关闭 nginx”会停止并禁用服务，删除 Agent Runtime 站点和专用 UI 部署，但不卸载
   nginx。云服务器通过该入口访问时会立即断开，执行前必须确认仍有服务器终端或直连
   `webd` 的恢复通道。
 
 ## 10. 身份与 Key
 
 ```bash
-rustclaw -key list
-rustclaw -key generate user
-rustclaw -key generate admin
-rustclaw -key add rk-xxxx admin
-rustclaw -key disable rk-xxxx
-rustclaw -key enable rk-xxxx
+agentctl -key list
+agentctl -key generate user
+agentctl -key generate admin
+agentctl -key add rk-xxxx admin
+agentctl -key disable rk-xxxx
+agentctl -key enable rk-xxxx
 ```
 
 - `user`：普通对话和允许的技能调用
@@ -370,7 +370,7 @@ rustclaw -key enable rk-xxxx
 仅在树莓派上安装桌面入口与登录自启：
 
 ```bash
-bash install-rustclaw-cmd.sh --user --pi-app
+bash install-agent-cmd.sh --user --pi-app
 ```
 
 手工运行：
@@ -380,7 +380,7 @@ cd pi_app
 ./run-small-screen.sh
 ```
 
-没有 MatrixAI 签名硬件时，RustClaw 主功能仍可使用，但 NNI 设备签名和网络原生
+没有 MatrixAI 签名硬件时，Agent Runtime 主功能仍可使用，但 NNI 设备签名和网络原生
 智能参与能力不可用。
 
 ## 12. 更新
@@ -425,8 +425,8 @@ Release 更新卡片中选择“切换到源码模式”。该操作会先把完
 更新后检查：
 
 ```bash
-rustclaw -status
-rustclaw -health
+agentctl -status
+agentctl -health
 ```
 
 ## 13. 开发与测试
@@ -463,9 +463,9 @@ NL 测试必须使用隔离数据库/端口，打印每个 case 及编号后的�
 
 按以下顺序检查：
 
-1. `rustclaw -status`
-2. `rustclaw -health`
-3. `rustclaw -logs clawd 200`
+1. `agentctl -status`
+2. `agentctl -health`
+3. `agentctl -logs clawd 200`
 4. 对应 `configs/channels/*.toml`
 5. provider API key、额度和网络
 6. 端口占用、磁盘和内存

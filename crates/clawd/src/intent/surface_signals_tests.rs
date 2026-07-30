@@ -11,7 +11,7 @@ fn structural_locator_only_accepts_machine_locator_shapes() {
         "scripts/nl_tests/fixtures/test_contract.sqlite"
     ));
     assert!(prompt_is_structural_locator_only(
-        "/home/guagua/rustclaw/Cargo.toml"
+        "/home/guagua/agent-runtime/Cargo.toml"
     ));
     assert!(prompt_is_structural_locator_only("Cargo.toml"));
     assert!(prompt_is_structural_locator_only("README.md"));
@@ -135,7 +135,7 @@ fn deictic_reference_comes_from_structured_state_patch_only() {
 #[test]
 fn extracts_dotted_field_selector_from_mixed_prompt() {
     let out = extract_dotted_field_selector(
-        "读取 /home/guagua/rustclaw/configs/config.toml 里的 tools.allow_sudo，只输出值",
+        "读取 /home/guagua/agent-runtime/configs/config.toml 里的 tools.allow_sudo，只输出值",
     )
     .expect("should find dotted field selector");
     assert_eq!(out, "tools.allow_sudo");

@@ -115,7 +115,7 @@ REQUIRED_FILE_TOKENS = {
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
     ),
-    "install-rustclaw-cmd.sh": (
+    "install-agent-cmd.sh": (
         "ensure_python_runtime()",
         "brew install python",
         "configure_python3_with_tomllib",

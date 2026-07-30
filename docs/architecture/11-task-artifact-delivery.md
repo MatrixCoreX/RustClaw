@@ -9,7 +9,7 @@ Previous: [Web entry and core isolation](10-web-entry-security.md) |
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw turns successful task output files into authenticated, durable task
+Agent Runtime turns successful task output files into authenticated, durable task
 artifacts. The browser receives a machine-readable manifest and renders the
 right preview or download control without interpreting assistant prose.
 
@@ -40,7 +40,7 @@ flowchart LR
 
 When a task succeeds, `clawd` collects structured local output references,
 verifies that every source remains inside the workspace, copies accepted files
-into `.rustclaw/artifacts/delivery/<task_id>/<artifact_id>/`, and adds an
+into `.agent-runtime/artifacts/delivery/<task_id>/<artifact_id>/`, and adds an
 `artifacts` array to the stored task result. Each manifest entry contains a
 stable identifier, filename, media kind, MIME type, byte size, SHA-256 digest,
 and same-origin download and preview paths.

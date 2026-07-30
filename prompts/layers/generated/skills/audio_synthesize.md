@@ -76,7 +76,7 @@ Provider notes:
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{"text":"Hello from RustClaw","format":"mp3","output_path":"tmp/hello.mp3"}}
+{"request_id":"demo-1","args":{"text":"Hello from the agent runtime","format":"mp3","output_path":"tmp/hello.mp3"}}
 ```
 Response:
 ```json
@@ -86,7 +86,7 @@ Response:
 ### Example 2
 Request:
 ```json
-{"request_id":"demo-2","args":{"text":"Hello from RustClaw","format":"mp3","output_path":"tmp/hello.mp3","dry_run":true}}
+{"request_id":"demo-2","args":{"text":"Hello from the agent runtime","format":"mp3","output_path":"tmp/hello.mp3","dry_run":true}}
 ```
 Response:
 ```json

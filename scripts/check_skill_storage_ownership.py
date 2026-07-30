@@ -32,9 +32,11 @@ CONFIG_PATHS = (
 )
 ALLOWED_EXCHANGE_TABLE_OWNERS = {
     Path("crates/clawd/src/repo/crypto_storage.rs"),
+    Path("crates/clawd/src/skill_storage/data_owners.rs"),
     Path("crates/clawd/src/skill_storage/mod.rs"),
     Path("crates/clawd/src/skill_storage/migration.rs"),
     Path("crates/clawd/src/skill_storage/schema.rs"),
+    Path("optional_skills/crypto/src/main.rs"),
     Path("scripts/import-crypto-credentials.sh"),
 }
 SKILL_SOURCE_ROOTS = (
@@ -153,7 +155,7 @@ def check_runtime_boundaries(root: Path, findings: list[str]) -> None:
             ):
                 continue
             text = path.read_text(encoding="utf-8")
-            for marker in ("database.sqlite_path", "data/rustclaw.db", "claw_core::AppConfig"):
+            for marker in ("database.sqlite_path", "data/agent-runtime.db", "claw_core::AppConfig"):
                 if marker in text:
                     findings.append(
                         f"skill_reads_runtime_main_storage:{relative.as_posix()}:{marker}"
@@ -244,13 +246,13 @@ def run_self_test() -> int:
 
         kb_main = root / "crates/skills/kb/src/main.rs"
         kb_main.write_text(
-            'fn main() { let _ = ("data/rustclaw.db", skill_storage); }\n',
+            'fn main() { let _ = ("data/agent-runtime.db", skill_storage); }\n',
             encoding="utf-8",
         )
         findings = evaluate(root)
         expected = (
             "skill_reads_runtime_main_storage:"
-            "crates/skills/kb/src/main.rs:data/rustclaw.db"
+            "crates/skills/kb/src/main.rs:data/agent-runtime.db"
         )
         if expected not in findings:
             print(f"SELF_TEST_FAIL direct_main_db findings={findings}")

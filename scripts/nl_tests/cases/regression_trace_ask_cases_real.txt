@@ -5,8 +5,8 @@ chat_act_compare_sizes|先执行 df -h，再用大白话告诉我哪个挂载点
 chat_act_explicit_dependency_poem|先执行 pwd，然后根据这个路径写一句打工人风格短诗
 chat_act_three_step_story|先执行 whoami，再执行 pwd，然后把这两个结果串成一句自嘲签名
 multi_act_mixed_tone|先执行 uname -a，再执行 date，然后用一句江湖口吻播报结果
-mid_fail_then_summary_new|先执行 pwd，再执行 definitely_missing_command_rustclaw_67890，然后总结刚才成功和失败各是什么
-mid_fail_then_continue_target|先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_67890，再执行 echo AFTER_BREAK_67890
+mid_fail_then_summary_new|先执行 pwd，再执行 definitely_missing_command_agent-runtime_67890，然后总结刚才成功和失败各是什么
+mid_fail_then_continue_target|先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_agent-runtime_67890，再执行 echo AFTER_BREAK_67890
 chat_act_dir_digest|先查看当前目录，再挑 5 个你觉得最像项目核心的条目简单说明
 followup_continue_new|继续
 followup_ask_failure_reason|刚才失败的是哪一步，后面还剩什么
@@ -16,15 +16,15 @@ en_act_precise_file_count|Count how many regular files are directly under the cu
 en_chat_act_compare_sizes|Run df -h first, then explain in plain English which mount point looks the most worrying.
 en_chat_act_dependency_poem|Run pwd first, then write one short worker-style line based on that path.
 en_chat_act_three_step_story|Run whoami, then run pwd, and turn those two results into one self-mocking signature line.
-en_mid_fail_then_summary|Run pwd, then run definitely_missing_command_rustclaw_english_67890, then summarize what succeeded and what failed.
+en_mid_fail_then_summary|Run pwd, then run definitely_missing_command_agent-runtime_english_67890, then summarize what succeeded and what failed.
 en_followup_continue|continue
 en_followup_failure_reason|Which step failed just now, and what work is still remaining?
 en_chat_act_write_line_reply_only|Run pwd first, then write one short worker-style line based on that path in the reply only. Do not save any file.
 en_chat_act_save_line_to_file|Run pwd first, save one short worker-style line based on that path to `worker_line_explicit.txt`, then tell me the saved path.
-followup_explain_failure_then_resume|先执行 echo BREAK_A，再执行 definitely_missing_command_rustclaw_follow_24680，然后说一下哪一步失败、还剩什么，先不要继续
-en_followup_explain_failure_then_resume|Run `echo BREAK_B`, then run `definitely_missing_command_rustclaw_follow_24681`, then explain which step failed and what still remains. Do not continue yet.
-followup_resume_with_change|先执行 echo BEFORE_CHANGE，再执行 definitely_missing_command_rustclaw_change_24682，再执行 echo AFTER_CHANGE_OLD；失败后如果我说继续，就把最后一步改成 echo AFTER_CHANGE_NEW
-en_followup_resume_with_change|Run `echo BEFORE_CHANGE_EN`, then `definitely_missing_command_rustclaw_change_24683`, then `echo AFTER_CHANGE_OLD_EN`; if I later say continue with a change, replace the last step with `echo AFTER_CHANGE_NEW_EN`.
+followup_explain_failure_then_resume|先执行 echo BREAK_A，再执行 definitely_missing_command_agent-runtime_follow_24680，然后说一下哪一步失败、还剩什么，先不要继续
+en_followup_explain_failure_then_resume|Run `echo BREAK_B`, then run `definitely_missing_command_agent-runtime_follow_24681`, then explain which step failed and what still remains. Do not continue yet.
+followup_resume_with_change|先执行 echo BEFORE_CHANGE，再执行 definitely_missing_command_agent-runtime_change_24682，再执行 echo AFTER_CHANGE_OLD；失败后如果我说继续，就把最后一步改成 echo AFTER_CHANGE_NEW
+en_followup_resume_with_change|Run `echo BEFORE_CHANGE_EN`, then `definitely_missing_command_agent-runtime_change_24683`, then `echo AFTER_CHANGE_OLD_EN`; if I later say continue with a change, replace the last step with `echo AFTER_CHANGE_NEW_EN`.
 followup_discuss_then_continue_cn|刚才先别继续，只告诉我剩余步骤的原话
 en_followup_discuss_then_continue|Don't resume yet. Just tell me the exact remaining step text.
 en_followup_pick_up_from_there|Pick up from where it stopped.
@@ -69,9 +69,9 @@ en_df_synonym_1|Run df -h and tell me, in simple words, which mount point looks 
 en_df_synonym_2|Please check df -h first, then point out the filesystem that deserves the most concern.
 en_restart_synonym_1|Don't continue from the breakpoint. Rerun the failed task from scratch.
 en_restart_synonym_2|Forget the partial progress and restart that interrupted task from the top.
-bind_guard_fail_cn|先执行 echo BIND_GUARD_BEFORE_CN，再执行 definitely_missing_command_rustclaw_bind_guard_cn_24684，再执行 echo BIND_GUARD_AFTER_CN
+bind_guard_fail_cn|先执行 echo BIND_GUARD_BEFORE_CN，再执行 definitely_missing_command_agent-runtime_bind_guard_cn_24684，再执行 echo BIND_GUARD_AFTER_CN
 bind_guard_new_request_cn|别讨论刚才那个失败任务，直接执行 pwd
-bind_guard_fail_en|Run `echo BIND_GUARD_BEFORE_EN`, then `definitely_missing_command_rustclaw_bind_guard_en_24685`, then `echo BIND_GUARD_AFTER_EN`.
+bind_guard_fail_en|Run `echo BIND_GUARD_BEFORE_EN`, then `definitely_missing_command_agent-runtime_bind_guard_en_24685`, then `echo BIND_GUARD_AFTER_EN`.
 bind_guard_new_request_en|Ignore the previous failed task and just run pwd now.
 cn_absolute_saved_path_only|执行 pwd，把一句短句写入 `pwd_line_cn_abs.txt`，只回复该文件的绝对路径
 en_absolute_saved_path_only|Run pwd, write one short line based on it into `pwd_line_abs.txt`, and reply with the absolute saved file path only.
@@ -86,5 +86,5 @@ en_send_named_file_license_casefold|Send me license.zh-cn.md
 cn_generate_hello_sh_and_send|帮我写个打印helloworld的sh脚本，保存，并且发给我
 cn_generate_hello_sh_and_send_typo|帮我写个答应helloworld的sh脚本，保存，并且发给我
 en_generate_hello_sh_and_send|Write a shell script that prints hello world, save it, and send me the file.
-cn_send_named_file_missing|把 definitely_missing_named_file_rustclaw_24686.md 发给我
-en_send_named_file_missing|Send me definitely_missing_named_file_rustclaw_24687.md
+cn_send_named_file_missing|把 definitely_missing_named_file_agent-runtime_24686.md 发给我
+en_send_named_file_missing|Send me definitely_missing_named_file_agent-runtime_24687.md

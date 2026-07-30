@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/shell_compat.sh"
-SOURCE_DIR="${1:-${RUSTCLAW_RELEASE_SOURCE:-$ROOT_DIR/target/release}}"
-DEST_DIR="${RUSTCLAW_RELEASE_BIN_DIR:-$ROOT_DIR/release-bin}"
+SOURCE_DIR="${1:-${APP_RELEASE_SOURCE:-$ROOT_DIR/target/release}}"
+DEST_DIR="${APP_RELEASE_BIN_DIR:-$ROOT_DIR/release-bin}"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
@@ -23,14 +23,14 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
 fi
 
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
-export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
+export APP_WORKSPACE_METADATA="$WORKSPACE_METADATA"
 
 array_from_command_lines REQUIRED_BINS \
   python3 - <<'PY'
 import json
 import os
 
-raw = os.environ.get("RUSTCLAW_WORKSPACE_METADATA", "").strip()
+raw = os.environ.get("APP_WORKSPACE_METADATA", "").strip()
 if not raw:
     raise SystemExit(1)
 

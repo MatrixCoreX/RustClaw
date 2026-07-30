@@ -31,8 +31,7 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let path =
-            std::env::temp_dir().join(format!("rustclaw_{prefix}_{}", Uuid::new_v4().simple()));
+        let path = std::env::temp_dir().join(format!("agent_{prefix}_{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
@@ -286,7 +285,7 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
     let initial = json!({
         "schema_version": 1,
         "source": "local_process_async_job",
-        "output": "RUSTCLAW_ASYNC_SMOKE\n",
+        "output": "APP_ASYNC_SMOKE\n",
         "task_lifecycle": {
             "schema_version": 1,
             "state": "succeeded",
@@ -294,7 +293,7 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
             "terminal_executor_result_status": "async_poll_completed",
             "resume_executor_result_projection": {
                 "final_result_json": {
-                    "output": "RUSTCLAW_ASYNC_SMOKE\n"
+                    "output": "APP_ASYNC_SMOKE\n"
                 }
             }
         }
@@ -875,7 +874,7 @@ fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
     );
     assert!(!workspace
         .path
-        .join(".rustclaw/artifacts/delivery/lease-success")
+        .join(".agent-runtime/artifacts/delivery/lease-success")
         .exists());
     assert_worker_lease_lost(
         update_task_failure(&stale_worker, "lease-failure", 1, "worker_runtime_error")

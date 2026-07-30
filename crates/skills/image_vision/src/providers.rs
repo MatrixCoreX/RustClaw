@@ -297,7 +297,7 @@ pub(super) fn image_source_for_minimax_mcp(
         ImageSource::Path(p) => Ok((p.to_string_lossy().to_string(), None)),
         ImageSource::Base64(s) => {
             let path = std::env::temp_dir().join(format!(
-                "rustclaw-image-vision-{}-{}.png",
+                "agent-image-vision-{}-{}.png",
                 std::process::id(),
                 monotonic_millis()
             ));

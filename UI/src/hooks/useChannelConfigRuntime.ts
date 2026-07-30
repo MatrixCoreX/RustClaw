@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type {
   ApiResponse,
   FeishuConfigResponse,
+  LarkConfigResponse,
   TelegramBotConfigItem,
   TelegramConfigResponse,
   WechatConfigResponse,
@@ -37,6 +38,9 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
   const [feishuConfigLoading, setFeishuConfigLoading] = useState(false);
   const [feishuConfigError, setFeishuConfigError] = useState<string | null>(null);
   const [feishuConfigData, setFeishuConfigData] = useState<FeishuConfigResponse | null>(null);
+  const [larkConfigLoading, setLarkConfigLoading] = useState(false);
+  const [larkConfigError, setLarkConfigError] = useState<string | null>(null);
+  const [larkConfigData, setLarkConfigData] = useState<LarkConfigResponse | null>(null);
   const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
   const [telegramConfigError, setTelegramConfigError] = useState<string | null>(null);
   const [telegramConfigData, setTelegramConfigData] = useState<TelegramConfigResponse | null>(null);
@@ -77,6 +81,24 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       setFeishuConfigError(message);
     } finally {
       setFeishuConfigLoading(false);
+    }
+  };
+
+  const fetchLarkConfig = async () => {
+    setLarkConfigLoading(true);
+    setLarkConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/lark/config`);
+      const body = (await res.json()) as ApiResponse<LarkConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Lark config fetch failed (${res.status})`);
+      }
+      setLarkConfigData(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setLarkConfigError(message);
+    } finally {
+      setLarkConfigLoading(false);
     }
   };
 
@@ -178,6 +200,9 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
     feishuConfigLoading,
     feishuConfigError,
     feishuConfigData,
+    larkConfigLoading,
+    larkConfigError,
+    larkConfigData,
     telegramConfigLoading,
     telegramConfigError,
     telegramConfigData,
@@ -188,6 +213,7 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
     hasUnsavedTelegramConfigChanges,
     fetchWechatConfig,
     fetchFeishuConfig,
+    fetchLarkConfig,
     fetchTelegramConfig,
     setTelegramPrimaryBotDraftField,
     saveTelegramConfig,

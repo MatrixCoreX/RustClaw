@@ -128,7 +128,7 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for Agent Runtime NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
     ));
     let route = crate::IntentOutputContract {
         exact_sentence_count: None,
@@ -148,7 +148,7 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
     assert_eq!(
         synthesize_bounded_read_range_direct_answer(&loop_state, Some(&ctx)).as_deref(),
         Some(
-            "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests."
+            "# Device Local Fixture\n\nThis directory contains stable local files for Agent Runtime NL regression tests."
         )
     );
 }

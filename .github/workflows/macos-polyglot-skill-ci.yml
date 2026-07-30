@@ -51,7 +51,7 @@ jobs:
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_TERM_COLOR: always
-      RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS: "1"
+      APP_REQUIRE_REFERENCE_ADAPTERS: "1"
 
     steps:
       - name: Checkout
@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test -p rustclaw-skill-sdk
+          cargo test -p agent-skill-sdk
           cargo test -p skill-runner
 
       - name: Check shared runtime integration
@@ -113,6 +113,6 @@ jobs:
       - name: Upload native Skill Store packages
         uses: actions/upload-artifact@v4
         with:
-          name: rustclaw-skill-store-macos-${{ runner.arch }}
+          name: skillctl-store-macos-${{ runner.arch }}
           path: target/prebuilt-skill-packages/*
           if-no-files-found: error

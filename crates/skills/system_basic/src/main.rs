@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{SecondsFormat, Utc};
-use rustclaw_fs_discovery::{
+use fs_discovery::{
     discover, fuzzy_name_score, CaseMode, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest,
     DiscoverySelector, MatchMode, TargetKind,
 };
@@ -1419,7 +1419,7 @@ fn find_path(
     let mut ranked_entries = report.entries.iter().collect::<Vec<_>>();
     if match_mode == "fuzzy" {
         ranked_entries.sort_by(|left, right| {
-            let score = |entry: &&rustclaw_fs_discovery::DiscoveryEntry| {
+            let score = |entry: &&fs_discovery::DiscoveryEntry| {
                 entry
                     .path
                     .file_name()

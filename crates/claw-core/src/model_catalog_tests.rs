@@ -35,7 +35,7 @@ fn temp_workspace_root() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("rustclaw-model-catalog-{unique}"));
+    let root = std::env::temp_dir().join(format!("agent-runtime-model-catalog-{unique}"));
     std::fs::create_dir_all(root.join("configs")).expect("create configs");
     root
 }
@@ -257,7 +257,7 @@ fn catalog_ignores_missing_env_file_path() {
     unsafe {
         std::env::set_var(
             "CHINESE_PROVIDER_ENV_FILE",
-            "/tmp/rustclaw-definitely-missing-env-file.sh",
+            "/tmp/agent-runtime-definitely-missing-env-file.sh",
         );
     }
 

@@ -5,7 +5,7 @@ schema_version = 2
 name = "browser_web"
 version = "0.1.8"
 description = "Open exact public URLs through a policy-guarded headless browser and return bounded untrusted page evidence, canonical metadata, citations, screenshots, and structured partial/failure results."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/browser-web-skill"
 working_directory = "."
 timeout_seconds = 45
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]

@@ -87,7 +87,7 @@ with config_path.open("rb") as f:
     data = tomllib.load(f)
 db_path = (((data.get("database") or {}).get("sqlite_path")) or "").strip()
 if not db_path:
-    print((root / "data" / "rustclaw.db").resolve())
+    print((root / "data" / "agent-runtime.db").resolve())
 else:
     p = Path(db_path)
     print((p if p.is_absolute() else (root / p)).resolve())

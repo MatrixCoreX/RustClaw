@@ -4,15 +4,15 @@
     "task_id": "fixture-permission-denied-attribution",
     "status": "failed",
     "result_json": {
-      "text": "RustClaw needs permission before running this action.",
+      "text": "Agent Runtime needs permission before running this action.",
       "messages": [
-        "RustClaw needs permission before running this action."
+        "Agent Runtime needs permission before running this action."
       ],
       "task_journal": {
         "summary": {
           "input_text": "Run a high-risk command without approval",
           "final_status": "failure",
-          "final_answer": "RustClaw needs permission before running this action."
+          "final_answer": "Agent Runtime needs permission before running this action."
         },
         "trace": {
           "rounds": [],

@@ -80,7 +80,7 @@ fn render(renderer: &Renderer, object: &Map<String, Value>) -> OfficeResult<Valu
             json!({"directory": parent.display().to_string()}),
         )
     })?;
-    let temp_dir = parent.join(format!(".rustclaw-render-{}", Uuid::new_v4()));
+    let temp_dir = parent.join(format!(".agent-render-{}", Uuid::new_v4()));
     fs::create_dir_all(&temp_dir).map_err(|error| {
         OfficeError::new(
             "render_failed",

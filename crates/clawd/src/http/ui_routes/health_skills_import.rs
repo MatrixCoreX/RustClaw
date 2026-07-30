@@ -1,3 +1,38 @@
+async fn whatsapp_web_bridge_healthy(state: &AppState) -> Option<bool> {
+    if !state.channels.whatsapp_web_enabled {
+        return None;
+    }
+    let base = state
+        .channels
+        .whatsapp_web_bridge_base_url
+        .trim()
+        .trim_end_matches('/');
+    if base.is_empty() {
+        return Some(false);
+    }
+    let response = state
+        .core
+        .http_client
+        .get(format!("{base}/health"))
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await;
+    let Ok(response) = response else {
+        return Some(false);
+    };
+    if !response.status().is_success() {
+        return Some(false);
+    }
+    Some(
+        response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|body| body.get("ok").and_then(serde_json::Value::as_bool))
+            .unwrap_or(false),
+    )
+}
+
 async fn health(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -94,6 +129,7 @@ async fn health(
     let whatsapp_web_gateway_healthy = gateway_instance_statuses_by_scope
         .get("whatsapp_web:primary")
         .map(|s| s.healthy);
+    let whatsapp_web_bridge_healthy = whatsapp_web_bridge_healthy(&state).await;
     let feishu_gateway_healthy = gateway_instance_statuses_by_scope
         .get("feishu:primary")
         .map(|s| s.healthy);
@@ -130,10 +166,18 @@ async fn health(
         _ if whatsapp_web_gateway_healthy == Some(true) => None,
         _ => wa_webd_memory_rss_bytes_raw,
     };
-    let wa_webd_healthy = match wa_webd_process_count_raw {
+    let whatsapp_web_process_healthy = match wa_webd_process_count_raw {
         Some(count) if count > 0 => Some(true),
         _ => whatsapp_web_gateway_healthy
             .or_else(|| wa_webd_process_count_raw.map(|count| count > 0)),
+    };
+    let wa_webd_healthy = if state.channels.whatsapp_web_enabled {
+        Some(
+            whatsapp_web_process_healthy.unwrap_or(false)
+                && whatsapp_web_bridge_healthy.unwrap_or(false),
+        )
+    } else {
+        whatsapp_web_process_healthy
     };
 
     let feishud_process_count = match feishud_process_count_raw {
@@ -446,6 +490,12 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     SkillListItem {
         name: skill_name.to_string(),
         description,
+        description_zh: registry_entry
+            .as_ref()
+            .and_then(|entry| entry.description_zh.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
         semantic_tags: registry_entry
             .as_ref()
             .map(|entry| entry.semantic_tags.clone())
@@ -793,10 +843,80 @@ async fn import_external_skill(
     headers: HeaderMap,
     Json(req): Json<ImportSkillRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("skill_admission_admin_required".to_string()),
+            }),
+        );
     }
-    let source = req.source.trim();
+    import_external_skill_from_source(
+        &state,
+        req.source.trim(),
+        req.enabled.unwrap_or(true),
+        req.allow_network.unwrap_or(false),
+    )
+    .await
+}
+
+async fn internal_skill_admit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<InternalSkillAdmissionRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let token_ctx = match redeem_internal_skill_token(&headers) {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    let authorized_capability = state.get_skills_registry().is_some_and(|registry| {
+        registry
+            .planner_capabilities(&token_ctx.skill_name)
+            .iter()
+            .any(|capability| capability.name == "extension.register_skill")
+    });
+    if !authorized_capability {
+        return api_error_value(
+            StatusCode::FORBIDDEN,
+            "internal token skill lacks extension.register_skill",
+        );
+    }
+    let is_admin = token_ctx
+        .user_key
+        .as_deref()
+        .and_then(|key| resolve_auth_identity_by_key(&state, key).ok().flatten())
+        .is_some_and(|identity| identity.role.eq_ignore_ascii_case("admin"));
+    if !is_admin {
+        return api_error_value(StatusCode::FORBIDDEN, "skill_admission_admin_required");
+    }
+    let source = Path::new(req.source.trim());
+    let external_root = state.skill_rt.workspace_root.join("external_skills");
+    let source_allowed = std::fs::canonicalize(source)
+        .ok()
+        .zip(std::fs::canonicalize(&external_root).ok())
+        .is_some_and(|(source, root)| source.starts_with(root));
+    if !source_allowed {
+        return api_error_value(
+            StatusCode::FORBIDDEN,
+            "internal skill admission source must stay under external_skills",
+        );
+    }
+    import_external_skill_from_source(&state, req.source.trim(), req.enabled, req.allow_network)
+        .await
+}
+
+async fn import_external_skill_from_source(
+    state: &AppState,
+    source: &str,
+    enabled: bool,
+    allow_network: bool,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
     if source.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -807,9 +927,6 @@ async fn import_external_skill(
             }),
         );
     }
-    let enabled = req.enabled.unwrap_or(true);
-    let allow_network = req.allow_network.unwrap_or(false);
-
     let staging_dir = match imported_bundle_staging_dir(&state.skill_rt.workspace_root) {
         Ok(path) => path,
         Err(error) => {
@@ -853,7 +970,7 @@ async fn import_external_skill(
         }
     };
     let response = finalize_imported_bundle(
-        &state,
+        state,
         &activation.bundle_dir,
         &activation.bundle_rel_dir,
         source,
@@ -873,8 +990,19 @@ async fn import_external_skill_upload(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("skill_admission_admin_required".to_string()),
+            }),
+        );
     }
 
     let mut bundle_name = String::new();
@@ -1150,6 +1278,23 @@ struct FeishuConfigResponse {
     restart_required: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct LarkConfigResponse {
+    config_path: String,
+    enabled: bool,
+    mode: String,
+    listen: String,
+    clawd_base_url: String,
+    api_base_url: String,
+    app_id: String,
+    app_secret: String,
+    verification_token_configured: bool,
+    encrypt_key_configured: bool,
+    bind_ready: bool,
+    current_key_bound: bool,
+    restart_required: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct UpdateWechatConfigRequest {
     enabled: bool,
@@ -1165,6 +1310,14 @@ struct UpdateWechatConfigRequest {
 
 #[derive(Debug, Deserialize)]
 struct UpdateFeishuConfigRequest {
+    #[serde(default)]
+    app_id: String,
+    #[serde(default)]
+    app_secret: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateLarkConfigRequest {
     #[serde(default)]
     app_id: String,
     #[serde(default)]

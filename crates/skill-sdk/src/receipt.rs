@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -96,6 +97,13 @@ pub struct CurrentInstallPointer {
     pub version: String,
     pub install_dir: String,
     pub receipt_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedInstall {
+    pub install_dir: PathBuf,
+    pub manifest: PackageManifest,
+    pub receipt: InstallReceipt,
 }
 
 impl InstallReceipt {
@@ -281,6 +289,39 @@ pub struct InstallReceiptStore {
     root: PathBuf,
 }
 
+#[derive(Debug)]
+pub struct SkillVersionLease {
+    file: File,
+    store: InstallReceiptStore,
+    skill_name: String,
+    install_dir: String,
+}
+
+impl SkillVersionLease {
+    pub fn install_dir(&self) -> &str {
+        &self.install_dir
+    }
+}
+
+impl Drop for SkillVersionLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+        let skill_root = match self.store.skill_root(&self.skill_name) {
+            Ok(root) => root,
+            Err(_) => return,
+        };
+        if skill_root.join("gc-requested").is_file() {
+            let _ = self
+                .store
+                .garbage_collect_installed_versions(&self.skill_name);
+        } else {
+            let _ = self
+                .store
+                .garbage_collect_superseded_versions(&self.skill_name);
+        }
+    }
+}
+
 impl InstallReceiptStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -364,9 +405,19 @@ impl InstallReceiptStore {
             })?;
         let current_path = skill_root.join("current.json");
         let previous_path = skill_root.join("previous.json");
+        let obsolete_pointer = if previous_path.is_file() {
+            let pointer: CurrentInstallPointer =
+                serde_json::from_slice(&fs::read(&previous_path)?)?;
+            validate_pointer(&pointer)?;
+            Some(pointer)
+        } else {
+            None
+        };
         if current_path.is_file() {
             let current = fs::read(&current_path)?;
             atomic_write(&previous_path, &current)?;
+            let pointer: CurrentInstallPointer = serde_json::from_slice(&current)?;
+            validate_pointer(&pointer)?;
         }
         let pointer = CurrentInstallPointer {
             schema_version: CURRENT_INSTALL_POINTER_SCHEMA_VERSION,
@@ -374,7 +425,18 @@ impl InstallReceiptStore {
             install_dir: install_dir_name.to_string(),
             receipt_digest: receipt.digest()?,
         };
-        atomic_write_json(&current_path, &pointer)
+        if obsolete_pointer
+            .as_ref()
+            .is_some_and(|obsolete| obsolete.install_dir != pointer.install_dir)
+        {
+            self.request_version_gc(
+                &receipt.skill_name,
+                &obsolete_pointer.as_ref().unwrap().install_dir,
+            )?;
+        }
+        atomic_write_json(&current_path, &pointer)?;
+        let _ = self.garbage_collect_superseded_versions(&receipt.skill_name);
+        Ok(())
     }
 
     pub fn current_pointer(&self, skill_name: &str) -> SkillSdkResult<CurrentInstallPointer> {
@@ -382,6 +444,11 @@ impl InstallReceiptStore {
         let pointer: CurrentInstallPointer = serde_json::from_slice(&fs::read(&path)?)?;
         validate_pointer(&pointer)?;
         Ok(pointer)
+    }
+
+    pub fn verified_current_install(&self, skill_name: &str) -> SkillSdkResult<VerifiedInstall> {
+        let pointer = self.current_pointer(skill_name)?;
+        self.verify_pointer_install(skill_name, &pointer)
     }
 
     pub fn rollback(&self, skill_name: &str) -> SkillSdkResult<CurrentInstallPointer> {
@@ -397,11 +464,61 @@ impl InstallReceiptStore {
         Ok(previous)
     }
 
+    pub fn acquire_version_lease(
+        &self,
+        skill_name: &str,
+        install_root: &Path,
+    ) -> SkillSdkResult<SkillVersionLease> {
+        let versions_root = self.skill_root(skill_name)?.join("versions");
+        let canonical_versions = fs::canonicalize(&versions_root)?;
+        let canonical_install = fs::canonicalize(install_root)?;
+        if !canonical_install.starts_with(&canonical_versions)
+            || canonical_install.parent() != Some(canonical_versions.as_path())
+        {
+            return Err(SkillSdkError::new(
+                "skill_lease_install_root_invalid",
+                canonical_install.display().to_string(),
+            ));
+        }
+        let install_dir = canonical_install
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                SkillSdkError::new(
+                    "skill_lease_install_dir_invalid",
+                    canonical_install.display().to_string(),
+                )
+            })?
+            .to_string();
+        let leases_root = self.skill_root(skill_name)?.join("leases");
+        fs::create_dir_all(&leases_root)?;
+        let path = leases_root.join(format!("{install_dir}.lock"));
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        FileExt::lock_shared(&file)?;
+        if !canonical_install.is_dir() {
+            let _ = FileExt::unlock(&file);
+            return Err(SkillSdkError::new(
+                "skill_lease_install_removed",
+                canonical_install.display().to_string(),
+            ));
+        }
+        Ok(SkillVersionLease {
+            file,
+            store: self.clone(),
+            skill_name: skill_name.to_string(),
+            install_dir,
+        })
+    }
+
     fn verify_pointer_install(
         &self,
         skill_name: &str,
         pointer: &CurrentInstallPointer,
-    ) -> SkillSdkResult<()> {
+    ) -> SkillSdkResult<VerifiedInstall> {
         let versions_root = self.skill_root(skill_name)?.join("versions");
         let canonical_versions = fs::canonicalize(&versions_root)?;
         let install_root = fs::canonicalize(versions_root.join(&pointer.install_dir))?;
@@ -436,7 +553,11 @@ impl InstallReceiptStore {
                 ));
             }
         }
-        Ok(())
+        Ok(VerifiedInstall {
+            install_dir: install_root,
+            manifest,
+            receipt,
+        })
     }
 
     pub fn remove_installed_versions(&self, skill_name: &str) -> SkillSdkResult<bool> {
@@ -444,8 +565,103 @@ impl InstallReceiptStore {
         if !skill_root.exists() {
             return Ok(false);
         }
-        fs::remove_dir_all(&skill_root)?;
+        fs::write(skill_root.join("gc-requested"), b"pending\n")?;
+        self.garbage_collect_installed_versions(skill_name)
+    }
+
+    fn garbage_collect_installed_versions(&self, skill_name: &str) -> SkillSdkResult<bool> {
+        let skill_root = self.skill_root(skill_name)?;
+        if !skill_root.exists() {
+            return Ok(false);
+        }
+        let versions_root = skill_root.join("versions");
+        let leases_root = skill_root.join("leases");
+        let mut retained = false;
+        if versions_root.is_dir() {
+            for entry in fs::read_dir(&versions_root)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let install_dir = entry.file_name().to_string_lossy().to_string();
+                fs::create_dir_all(&leases_root)?;
+                let lease_path = leases_root.join(format!("{install_dir}.lock"));
+                let lease = OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .open(&lease_path)?;
+                match FileExt::try_lock_exclusive(&lease) {
+                    Ok(()) => {
+                        fs::remove_dir_all(entry.path())?;
+                        let _ = FileExt::unlock(&lease);
+                        drop(lease);
+                        let _ = fs::remove_file(lease_path);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        retained = true;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        if retained {
+            return Ok(false);
+        }
+        fs::remove_dir_all(skill_root)?;
         Ok(true)
+    }
+
+    fn request_version_gc(&self, skill_name: &str, install_dir: &str) -> SkillSdkResult<()> {
+        let pending_root = self.skill_root(skill_name)?.join("gc-versions");
+        fs::create_dir_all(&pending_root)?;
+        atomic_write(&pending_root.join(install_dir), b"pending\n")
+    }
+
+    fn garbage_collect_superseded_versions(&self, skill_name: &str) -> SkillSdkResult<()> {
+        let skill_root = self.skill_root(skill_name)?;
+        let pending_root = skill_root.join("gc-versions");
+        if !pending_root.is_dir() {
+            return Ok(());
+        }
+        let current = self.current_pointer(skill_name).ok();
+        let versions_root = skill_root.join("versions");
+        let leases_root = skill_root.join("leases");
+        for entry in fs::read_dir(&pending_root)? {
+            let entry = entry?;
+            let install_dir = entry.file_name().to_string_lossy().to_string();
+            if current
+                .as_ref()
+                .is_some_and(|pointer| pointer.install_dir == install_dir)
+            {
+                continue;
+            }
+            fs::create_dir_all(&leases_root)?;
+            let lease_path = leases_root.join(format!("{install_dir}.lock"));
+            let lease = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&lease_path)?;
+            match FileExt::try_lock_exclusive(&lease) {
+                Ok(()) => {
+                    let version_root = versions_root.join(&install_dir);
+                    if version_root.is_dir() {
+                        fs::remove_dir_all(version_root)?;
+                    }
+                    let _ = FileExt::unlock(&lease);
+                    drop(lease);
+                    let _ = fs::remove_file(lease_path);
+                    fs::remove_file(entry.path())?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if fs::read_dir(&pending_root)?.next().is_none() {
+            fs::remove_dir(&pending_root)?;
+        }
+        Ok(())
     }
 }
 

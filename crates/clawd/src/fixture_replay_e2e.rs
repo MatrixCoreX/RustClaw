@@ -20,7 +20,7 @@
 //!
 //! 1. **真录一次**：在本地配好真 LLM key，把 `[routing] debug_log_prompt = true`
 //!    打开，跑一次目标 case（例如通过 telegram / `scripts/nl_tests/run_manual_test.sh`
-//!    触发 ask 请求 "rustclaw 有 service 文件吗"）。
+//!    触发 ask 请求 "agent runtime 有 service 文件吗"）。
 //! 2. **抓日志**：定位到 workspace 下的 `logs/model_io.log`，把对应任务的所有
 //!    verbose 行 grep 出来（按 `task_id` 过滤），存成临时文件
 //!    `/tmp/<case>.model_io.log`。

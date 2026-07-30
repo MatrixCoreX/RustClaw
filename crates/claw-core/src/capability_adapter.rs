@@ -83,7 +83,10 @@ pub fn skill_uses_external_api(entry: &SkillRegistryEntry) -> bool {
     entry.resolved_capabilities.iter().any(|capability| {
         matches!(
             capability,
-            Capability::Llm | Capability::Net | Capability::Secrets(_)
+            Capability::Llm
+                | Capability::LlmCredentialFallback(_)
+                | Capability::Net
+                | Capability::Secrets(_)
         )
     })
 }

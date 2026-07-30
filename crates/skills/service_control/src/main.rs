@@ -1,6 +1,6 @@
 //! service_control skill: unified, safe, structured service lifecycle control.
 //! Supports: status, start, stop, restart, reload, logs, verify, diagnose.
-//! Managers: rustclaw (HTTP), systemd, service, brew services, launchd.
+//! Managers: agent_runtime (HTTP), systemd, service, brew services, launchd.
 
 use std::io::{self, BufRead, Write};
 use std::process::Command;
@@ -22,7 +22,7 @@ use platform::{
 
 // ---------- Constants ----------
 
-const RUSTCLAW_SERVICES: &[&str] = &[
+const AGENT_SERVICES: &[&str] = &[
     "clawd",
     "telegramd",
     "whatsappd",
@@ -52,10 +52,9 @@ const MANAGER_TYPES: &[&str] = &[
     "docker_container",
     "supervisor",
     "process_only",
-    "rustclaw",
+    "agent_runtime",
     "unknown",
 ];
-
 const TAIL_LINES_DEFAULT: usize = 100;
 const TAIL_LINES_MAX: usize = 500;
 const VERIFY_WAIT_SECONDS: u64 = 2;
@@ -259,8 +258,8 @@ fn detect_manager_for_target(target: &str) -> Option<&'static str> {
 fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String {
     let t = effective_target.or_else(|| input.target.as_deref());
     if let Some(t) = t {
-        if RUSTCLAW_SERVICES.contains(&t) {
-            return "rustclaw".to_string();
+        if AGENT_SERVICES.contains(&t) {
+            return "agent_runtime".to_string();
         }
     }
     if let Some(ref mt) = input.manager_type {
@@ -276,7 +275,7 @@ fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String
             .to_string();
     }
     if input.action == "status" {
-        return "rustclaw".to_string();
+        return "agent_runtime".to_string();
     }
     "unknown".to_string()
 }
@@ -453,7 +452,7 @@ fn execute(
                     .to_string();
             return Ok(out);
         }
-        if input.manager_type.as_deref() != Some("rustclaw") && !RUSTCLAW_SERVICES.contains(&t) {
+        if input.manager_type.as_deref() != Some("agent_runtime") && !AGENT_SERVICES.contains(&t) {
             if !is_safe_target(t) {
                 let mut out = OutputContract::default();
                 out.service_name = t.to_string();
@@ -466,14 +465,14 @@ fn execute(
         }
     }
 
-    // Service discovery (non-rustclaw): normalize alias -> 0 candidates fail, >1 ambiguous, 1 proceed. Skip discovery when manager_type is explicit (caller trusts the name).
+    // Service discovery (non-runtime): normalize alias -> 0 candidates fail, >1 ambiguous, 1 proceed. Skip discovery when manager_type is explicit (caller trusts the name).
     let mut suggestion_used = false;
     let mut suggestion_target = String::new();
     // When read-only action auto-picks a candidate from a multi-match,
     // record the full candidate list so we can emit it as evidence below.
     let mut auto_picked_from_candidates: Option<Vec<String>> = None;
     let effective_target_opt: Option<String> = if let Some(t) = target_opt {
-        if RUSTCLAW_SERVICES.contains(&t.as_ref()) {
+        if AGENT_SERVICES.contains(&t.as_ref()) {
             Some(t.to_string())
         } else if input.manager_type.is_some() {
             Some(normalize_target_alias(t))
@@ -693,7 +692,7 @@ fn execute(
     Ok(out)
 }
 
-// ---------- RustClaw (HTTP) ----------
+// ---------- Agent runtime (HTTP) ----------
 
 fn clawd_base_url() -> String {
     std::env::var("CLAWD_BASE_URL")
@@ -704,13 +703,14 @@ fn clawd_base_url() -> String {
 }
 
 fn ui_key() -> Option<String> {
-    std::env::var("RUSTCLAW_UI_KEY")
+    std::env::var("APP_UI_KEY")
+        .or_else(|_| std::env::var("APP_UI_KEY"))
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
-fn rustclaw_health(
+fn agent_runtime_health(
     client: &reqwest::blocking::Client,
     req_user_key: Option<&str>,
 ) -> Result<Value, String> {
@@ -718,7 +718,7 @@ fn rustclaw_health(
     let mut req = client.get(format!("{base}/v1/health"));
     let fallback_ui_key = ui_key();
     if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
-        req = req.header("x-rustclaw-key", k);
+        req = req.header("x-agent-key", k);
     }
     let resp = req
         .send()
@@ -733,7 +733,7 @@ fn rustclaw_health(
     Ok(data.get("data").cloned().unwrap_or(data))
 }
 
-fn rustclaw_service_state(data: &Value, service: &str) -> (bool, Option<usize>, Option<u64>) {
+fn agent_runtime_service_state(data: &Value, service: &str) -> (bool, Option<usize>, Option<u64>) {
     match service {
         "clawd" => {
             let rss = data.get("memory_rss_bytes").and_then(|v| v.as_u64());
@@ -792,10 +792,13 @@ fn rustclaw_service_state(data: &Value, service: &str) -> (bool, Option<usize>, 
     }
 }
 
-fn rustclaw_process_fallback_state(target: Option<&str>, reason: &str) -> (String, Vec<String>) {
+fn agent_runtime_process_fallback_state(
+    target: Option<&str>,
+    reason: &str,
+) -> (String, Vec<String>) {
     let services: Vec<&str> = target
         .map(|t| vec![t])
-        .unwrap_or_else(|| RUSTCLAW_SERVICES.to_vec());
+        .unwrap_or_else(|| AGENT_SERVICES.to_vec());
     let mut parts = Vec::new();
     let mut evidence = Vec::new();
     evidence.push(format!(
@@ -822,7 +825,7 @@ fn run_status_inner(
 ) -> (String, Vec<String>) {
     let mut evidence = Vec::new();
     match manager {
-        "rustclaw" => {
+        "agent_runtime" => {
             let client = match reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .build()
@@ -833,19 +836,20 @@ fn run_status_inner(
                     return ("unknown".to_string(), evidence);
                 }
             };
-            let data = match rustclaw_health(&client, req_user_key) {
+            let data = match agent_runtime_health(&client, req_user_key) {
                 Ok(d) => d,
                 Err(e) => {
-                    let (state, fallback_evidence) = rustclaw_process_fallback_state(target, &e);
+                    let (state, fallback_evidence) =
+                        agent_runtime_process_fallback_state(target, &e);
                     return (state, fallback_evidence);
                 }
             };
             let services: Vec<&str> = target
                 .map(|t| vec![t])
-                .unwrap_or_else(|| RUSTCLAW_SERVICES.to_vec());
+                .unwrap_or_else(|| AGENT_SERVICES.to_vec());
             let mut parts = Vec::new();
             for s in &services {
-                let (running, count, rss) = rustclaw_service_state(&data, s);
+                let (running, count, rss) = agent_runtime_service_state(&data, s);
                 let state = if running { "running" } else { "stopped" };
                 parts.push(format!("{}={}", s, state));
                 evidence.push(format!(
@@ -974,7 +978,7 @@ fn run_verify_inner(
 ) -> (String, Vec<String>) {
     let mut evidence = Vec::new();
     match manager {
-        "rustclaw" => {
+        "agent_runtime" => {
             let client = match reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -982,7 +986,7 @@ fn run_verify_inner(
                 Ok(c) => c,
                 Err(_) => return ("unknown".to_string(), evidence),
             };
-            let data = match rustclaw_health(&client, req_user_key) {
+            let data = match agent_runtime_health(&client, req_user_key) {
                 Ok(d) => d,
                 Err(e) => {
                     let count = process_count_for_target(target);
@@ -995,7 +999,7 @@ fn run_verify_inner(
                     return (state.to_string(), evidence);
                 }
             };
-            let (running, _, _) = rustclaw_service_state(&data, target);
+            let (running, _, _) = agent_runtime_service_state(&data, target);
             let state = if running { "running" } else { "stopped" };
             evidence.push(format!("health check: {}", state));
             (state.to_string(), evidence)
@@ -1084,18 +1088,18 @@ fn run_control_inner(
     req_user_key: Option<&str>,
     out: &mut OutputContract,
 ) -> Result<(), ()> {
-    let effective_action = if action == "reload" && manager == "rustclaw" {
+    let effective_action = if action == "reload" && manager == "agent_runtime" {
         "restart"
     } else {
         action
     };
 
     match manager {
-        "rustclaw" => {
-            if !RUSTCLAW_SERVICES.contains(&target) {
+        "agent_runtime" => {
+            if !AGENT_SERVICES.contains(&target) {
                 out.fail_kind(
                     "not_found",
-                    &format!("service {} not in RustClaw whitelist", target),
+                    &format!("service {} not in the agent-runtime allowlist", target),
                 );
                 return Err(());
             }
@@ -1117,7 +1121,7 @@ fn run_control_inner(
             let mut req = client.post(&url);
             let fallback_ui_key = ui_key();
             if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
-                req = req.header("x-rustclaw-key", k);
+                req = req.header("x-agent-key", k);
             }
             let resp = req.send().map_err(|e| {
                 out.fail_kind("dependency_error", &format!("request failed: {e}"));

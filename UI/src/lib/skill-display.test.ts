@@ -73,7 +73,11 @@ test("normalizes and applies skill search text", () => {
 
 test("formats skill descriptions and risk labels", () => {
   assert.equal(skillDescription("en", "Generate images from prompts."), "Generate images from prompts.");
-  assert.equal(skillDescription("zh", " 根据描述生成图片。 "), "根据描述生成图片。");
+  assert.equal(
+    skillDescription("zh", "Generate images from prompts.", " 根据描述生成图片。 "),
+    "根据描述生成图片。",
+  );
+  assert.equal(skillDescription("zh", "English-only fallback."), "English-only fallback.");
   assert.equal(skillDescription("en"), "No description is available for this skill.");
   assert.equal(skillDescription("zh"), "该技能暂无说明。");
   assert.equal(skillRiskLabel("high", "en"), "High risk");
@@ -84,6 +88,7 @@ test("generates localized instructional examples from capability metadata", () =
   const skill = {
     name: "config_edit",
     description: "Update structured configuration.",
+    description_zh: "更新结构化配置。",
     planner_capability_details: [
       {
         capability: "config.validate",
@@ -107,6 +112,7 @@ test("generates localized instructional examples from capability metadata", () =
   assert.match(en[1], /ask for confirmation/);
   assert.ok(zh.every((example) => example.trim().length > 0));
   assert.ok(en.every((example) => example.trim().length > 0));
+  assert.ok(zh.some((example) => example.includes("更新结构化配置")));
 });
 
 test("uses metadata-based generic examples for external skills", () => {

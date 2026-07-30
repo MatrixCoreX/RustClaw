@@ -497,6 +497,66 @@ fn load_feishu_config_response(
     })
 }
 
+fn load_lark_config_response(
+    state: &AppState,
+    current_user_key: Option<&str>,
+) -> anyhow::Result<LarkConfigResponse> {
+    let value = read_lark_config_value(state)?;
+    let lark = value
+        .get("lark")
+        .and_then(|value| value.as_table())
+        .cloned()
+        .unwrap_or_default();
+    let string_value = |key: &str| {
+        lark.get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let app_id = string_value("app_id");
+    let app_secret = string_value("app_secret");
+    let current_key_bound = match current_user_key {
+        Some(user_key) => has_channel_binding_for_user_key(state, "lark", user_key)?,
+        None => false,
+    };
+    Ok(LarkConfigResponse {
+        config_path: "configs/channels/lark.toml".to_string(),
+        enabled: lark
+            .get("enabled")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(!app_id.is_empty() && !app_secret.is_empty()),
+        mode: lark
+            .get("mode")
+            .and_then(|value| value.as_str())
+            .unwrap_or("long_connection")
+            .trim()
+            .to_string(),
+        listen: lark
+            .get("listen")
+            .and_then(|value| value.as_str())
+            .unwrap_or("0.0.0.0:8790")
+            .to_string(),
+        clawd_base_url: lark
+            .get("clawd_base_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("http://127.0.0.1:8787")
+            .to_string(),
+        api_base_url: lark
+            .get("api_base_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("https://open.larksuite.com")
+            .to_string(),
+        app_id: app_id.clone(),
+        app_secret: app_secret.clone(),
+        verification_token_configured: !string_value("verification_token").is_empty(),
+        encrypt_key_configured: !string_value("encrypt_key").is_empty(),
+        bind_ready: !app_id.is_empty() && !app_secret.is_empty(),
+        current_key_bound,
+        restart_required: true,
+    })
+}
+
 async fn get_wechat_config(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -563,6 +623,43 @@ async fn get_feishu_config(
                 ok: false,
                 data: None,
                 error: Some(format!("read feishu config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn get_lark_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<LarkConfigResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    match load_lark_config_response(&state, Some(&identity.user_key)) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("read lark config failed: {err}")),
             }),
         ),
     }
@@ -859,6 +956,162 @@ async fn reset_feishu_config_handler(
                 ok: false,
                 data: None,
                 error: Some(format!("reload feishu config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn update_lark_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateLarkConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<LarkConfigResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    let raw = match read_lark_config_raw(&state) {
+        Ok(raw) => raw,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read lark config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let output = update_lark_config_raw_preserving_format(
+        &raw,
+        req.app_id.trim(),
+        req.app_secret.trim(),
+    );
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.skill_rt.workspace_root,
+        "configs/channels/lark.toml",
+        &output,
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write lark config failed: {err}")),
+            }),
+        );
+    }
+    match load_lark_config_response(&state, Some(&identity.user_key)) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reload lark config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn reset_lark_config_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<LarkConfigResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can reset lark config".to_string()),
+            }),
+        );
+    }
+    let raw = match read_lark_config_raw(&state) {
+        Ok(raw) => raw,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read lark config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let output = reset_lark_config_raw_preserving_format(&raw);
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.skill_rt.workspace_root,
+        "configs/channels/lark.toml",
+        &output,
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write lark config failed: {err}")),
+            }),
+        );
+    }
+    if let Err(err) = reset_channel_binding_state_for_user_key(&state, "lark", &identity.user_key)
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reset lark bindings failed: {err}")),
+            }),
+        );
+    }
+    match load_lark_config_response(&state, Some(&identity.user_key)) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reload lark config failed: {err}")),
             }),
         ),
     }
@@ -1166,6 +1419,8 @@ struct PlannerCapabilityDisplayItem {
 struct SkillListItem {
     name: String,
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description_zh: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     semantic_tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -4,7 +4,7 @@ fn direct_scalar_prefers_unique_exact_fs_search_match_path() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
-            r#"{"action":"find_name","pattern":"README.md","count":5,"results":["RUSTCLAW_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
+            r#"{"action":"find_name","pattern":"README.md","count":5,"results":["APP_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
         ));
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
@@ -17,7 +17,7 @@ fn direct_scalar_uses_locator_hint_when_fs_search_output_omits_pattern() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
-            r#"{"action":"find_name","count":5,"results":["RUSTCLAW_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
+            r#"{"action":"find_name","count":5,"results":["APP_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
         ));
     assert_eq!(
         extract_direct_scalar_from_generic_output_with_locator_hint(
@@ -76,7 +76,7 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+    route.locator_hint = "/home/guagua/agent-runtime/plan".to_string();
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
@@ -99,7 +99,7 @@ fn fs_search_file_paths_contract_uses_planner_output_contract() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+    route.locator_hint = "/home/guagua/agent-runtime/plan".to_string();
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
@@ -122,7 +122,7 @@ fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() 
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.locator_hint = "/home/guagua/rustclaw".to_string();
+    route.locator_hint = "/home/guagua/agent-runtime".to_string();
     let agent_run_context = AgentRunContext {
         output_contract: Some(route.clone()),
         ..AgentRunContext::default()
@@ -149,7 +149,7 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"action":"find_name","count":6,"results":["README.md","README.zh-CN.md","README_cn.md","RUSTCLAW_SERVICE_README.md","UI/README.md","Cargo.toml"],"root":""}"#,
+        r#"{"action":"find_name","count":6,"results":["README.md","README.zh-CN.md","README_cn.md","APP_SERVICE_README.md","UI/README.md","Cargo.toml"],"root":""}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("path".to_string());
@@ -392,7 +392,7 @@ fn fs_search_find_ext_unclassified_contract_keeps_observed_file_paths() {
     };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+        auto_locator_path: Some("/home/guagua/agent-runtime".to_string()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -417,7 +417,7 @@ fn virtual_fs_basic_find_ext_unclassified_contract_keeps_observed_file_paths() {
     };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+        auto_locator_path: Some("/home/guagua/agent-runtime".to_string()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -432,17 +432,17 @@ fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","excerpt":"1|{\"kind\":\"telegram\",\"name\":\"primary\",\"scope\":\"telegram:primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json","resolved_path":"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"kind\\\":\\\"telegram\\\",\\\"name\\\":\\\"primary\\\",\\\"scope\\\":\\\"telegram:primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json\"}"}"#,
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\"kind\":\"telegram\",\"name\":\"primary\",\"scope\":\"telegram:primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/agent-runtime/run/gateway-instance-status/telegram__primary.json","resolved_path":"/home/guagua/agent-runtime/run/gateway-instance-status/telegram__primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"kind\\\":\\\"telegram\\\",\\\"name\\\":\\\"primary\\\",\\\"scope\\\":\\\"telegram:primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/agent-runtime/run/gateway-instance-status/telegram__primary.json\",\"resolved_path\":\"/home/guagua/agent-runtime/run/gateway-instance-status/telegram__primary.json\"}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","excerpt":"1|{\"name\":\"primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/rustclaw/run/telegram-bot-status/primary.json","resolved_path":"/home/guagua/rustclaw/run/telegram-bot-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"name\\\":\\\"primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/rustclaw/run/telegram-bot-status/primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/telegram-bot-status/primary.json\"}"}"#,
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\"name\":\"primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/agent-runtime/run/telegram-bot-status/primary.json","resolved_path":"/home/guagua/agent-runtime/run/telegram-bot-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"name\\\":\\\"primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/agent-runtime/run/telegram-bot-status/primary.json\",\"resolved_path\":\"/home/guagua/agent-runtime/run/telegram-bot-status/primary.json\"}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_3",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","excerpt":"1|{\n2|  \"healthy\": true,\n3|  \"status\": \"login_required\",\n4|  \"last_error\": null,\n5|  \"account_label\": \"primary\"\n6|}","path":"/home/guagua/rustclaw/run/wechatd-status/primary.json","resolved_path":"/home/guagua/rustclaw/run/wechatd-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\n2|  \\\"healthy\\\": true,\\n3|  \\\"status\\\": \\\"login_required\\\",\\n4|  \\\"last_error\\\": null,\\n5|  \\\"account_label\\\": \\\"primary\\\"\\n6|}\",\"path\":\"/home/guagua/rustclaw/run/wechatd-status/primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/wechatd-status/primary.json\"}"}"#,
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\n2|  \"healthy\": true,\n3|  \"status\": \"login_required\",\n4|  \"last_error\": null,\n5|  \"account_label\": \"primary\"\n6|}","path":"/home/guagua/agent-runtime/run/wechatd-status/primary.json","resolved_path":"/home/guagua/agent-runtime/run/wechatd-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\n2|  \\\"healthy\\\": true,\\n3|  \\\"status\\\": \\\"login_required\\\",\\n4|  \\\"last_error\\\": null,\\n5|  \\\"account_label\\\": \\\"primary\\\"\\n6|}\",\"path\":\"/home/guagua/agent-runtime/run/wechatd-status/primary.json\",\"resolved_path\":\"/home/guagua/agent-runtime/run/wechatd-status/primary.json\"}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_4",
@@ -452,7 +452,7 @@ fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
     let route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/home/guagua/rustclaw/run".to_string()),
+        auto_locator_path: Some("/home/guagua/agent-runtime/run".to_string()),
         ..AgentRunContext::default()
     };
 
@@ -497,7 +497,7 @@ fn fs_search_direct_answer_does_not_confirm_ambiguous_matches_when_direct_list_d
 #[test]
 fn fs_search_direct_answer_prefers_exact_match_before_confirmation() {
     let value = serde_json::from_str::<serde_json::Value>(
-            r#"{"action":"find_name","pattern":"README.md","count":5,"results":["RUSTCLAW_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
+            r#"{"action":"find_name","pattern":"README.md","count":5,"results":["APP_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
         )
         .expect("json");
     let answer = super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
@@ -638,13 +638,13 @@ fn observed_entries_use_read_range_excerpt_body_instead_of_raw_json() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"read_range","path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|Hello"}"#,
+        r#"{"action":"read_range","path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|\n3|Hello"}"#,
     ));
     let entries = observed_output_entries(&loop_state);
     assert_eq!(entries.len(), 1);
     assert!(entries[0].contains("read_range path=/tmp/README.md"));
-    assert!(entries[0].contains("# RustClaw"));
-    assert!(entries[0].contains("# RustClaw\n\nHello"));
+    assert!(entries[0].contains("# Agent Runtime"));
+    assert!(entries[0].contains("# Agent Runtime\n\nHello"));
     assert!(entries[0].contains("Hello"));
     assert!(!entries[0].contains(r#""action":"read_range""#));
 }
@@ -773,16 +773,16 @@ fn path_inspection_defers_non_bilingual_answer_to_model_synthesis() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
-            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/agent-runtime-missing-ja.txt"}],"include_missing":true}"#,
         ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
     route_result.requires_content_evidence = false;
     route_result.locator_kind = OutputLocatorKind::Path;
-    route_result.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route_result.locator_hint = "/tmp/agent-runtime-missing-ja.txt".to_string();
     route_result.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = AgentRunContext {
             original_user_request: Some(
-                "/tmp/rustclaw-missing-ja.txt が存在するか確認してください。存在しない場合は日本語で短く答えてください。"
+                "/tmp/agent-runtime-missing-ja.txt が存在するか確認してください。存在しない場合は日本語で短く答えてください。"
                     .to_string(),
             ),
             output_contract: Some(route_result.clone()),
@@ -913,7 +913,7 @@ fn chat_wrapped_free_content_contract_requires_model_synthesis() {
 #[test]
 fn single_file_delivery_uses_path_batch_fact_as_file_token() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-observed-file-delivery-{}",
+        "agent-runtime-observed-file-delivery-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -967,7 +967,7 @@ fn single_file_delivery_uses_path_batch_fact_as_file_token() {
 #[test]
 fn single_file_delivery_ignores_prior_read_range_rejections_after_path_fact() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-observed-file-delivery-after-reject-{}",
+        "agent-runtime-observed-file-delivery-after-reject-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -1101,14 +1101,14 @@ fn direct_observation_passthrough_detector_matches_raw_output() {
     let mut loop_state = LoopState::new();
     loop_state
         .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
+        .push(ok_step("step_1", "run_cmd", "/home/guagua/agent-runtime\n"));
 
     assert!(answer_is_direct_observation_passthrough(
-        "/home/guagua/rustclaw",
+        "/home/guagua/agent-runtime",
         &loop_state
     ));
     assert!(!answer_is_direct_observation_passthrough(
-        "Working directory: /home/guagua/rustclaw",
+        "Working directory: /home/guagua/agent-runtime",
         &loop_state
     ));
 }

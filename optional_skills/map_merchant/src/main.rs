@@ -1344,9 +1344,9 @@ fn build_amap_navigation_links(name: &str, raw_location: &str) -> Option<Value> 
     let (lon, lat) = parse_lon_lat(raw_location)?;
     let encoded_name = urlencoding::encode(name.trim());
     Some(json!({
-        "walk": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=walk&policy=0&src=rustclaw&callnative=1"),
-        "car": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=car&policy=0&src=rustclaw&callnative=1"),
-        "ride": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=ride&policy=0&src=rustclaw&callnative=1"),
+        "walk": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=walk&policy=0&src=agent-runtime&callnative=1"),
+        "car": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=car&policy=0&src=agent-runtime&callnative=1"),
+        "ride": format!("https://uri.amap.com/navigation?to={lon:.6},{lat:.6},{encoded_name}&mode=ride&policy=0&src=agent-runtime&callnative=1"),
     }))
 }
 

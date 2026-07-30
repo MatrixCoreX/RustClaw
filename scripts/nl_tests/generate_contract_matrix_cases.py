@@ -80,9 +80,9 @@ FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
 }
 
 LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
-    "ja_jp": "次の RustClaw task を実行して、結果は簡潔に日本語で答えてください: {prompt}",
-    "ko_kr": "다음 RustClaw task를 수행하고 결과를 간결한 한국어로 답하세요: {prompt}",
-    "fr_fr": "Exécute cette tâche RustClaw et réponds brièvement en français : {prompt}",
+    "ja_jp": "次の Agent Runtime task を実行して、結果は簡潔に日本語で答えてください: {prompt}",
+    "ko_kr": "다음 Agent Runtime task를 수행하고 결과를 간결한 한국어로 답하세요: {prompt}",
+    "fr_fr": "Exécute cette tâche Agent Runtime et réponds brièvement en français : {prompt}",
     "mixed": "请按这个 English task 执行，并保持结果简短：{prompt}",
 }
 
@@ -325,11 +325,11 @@ def base_prompt_and_source_for_case(
         return wrapper.format(prompt=en_prompt), f"wrapper_{variant}_en_us"
     if variant == "en_us":
         return (
-            f"Run the RustClaw structured task {contract_id}. "
+            f"Run the Agent Runtime structured task {contract_id}. "
             "Observe evidence first, then return a concise result in the required shape."
         ), "fallback_en_us"
     return (
-        f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
+        f"按 Agent Runtime 结构化任务 {contract_id} 做一次只读检查，"
         "需要先观察证据，再按要求给出简短结果。"
     ), "fallback_zh_cn"
 

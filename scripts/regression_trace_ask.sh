@@ -332,7 +332,7 @@ final_like_env_block = "不支持命令执行" in text or "无法执行" in text
 duplicate_final = bool(progress) and text.strip() and progress[-1].strip() == text.strip()
 creative_mixed = bool(re.search(r"(笑话|故事|评书|段子|poem|joke|story)", prompt, re.I))
 multi_step_prompt = bool(re.search(r"(先|然后|再执行|接着|并且)", prompt))
-missing_cmd_case = "definitely_missing_command_rustclaw_12345" in prompt
+missing_cmd_case = "definitely_missing_command_agent_12345" in prompt
 after_fail_marker = "AFTER_FAIL_TRACE" in prompt
 trace_multi_marker = "TRACE_MULTI_OK" in prompt
 progress_join = "\n".join(progress + messages + ([text] if text else []))
@@ -343,7 +343,7 @@ same_turn_failure_explain_like = failure_followup_like and bool(re.search(r"(先
 listing_based_digest_like = bool(re.search(r"(目录|directory listing|项目核心|core project)", prompt, re.I))
 hidden_files_like = bool(re.search(r"(隐藏文件|点开头|dotfiles?|hidden files?|hidden entries?)", prompt, re.I))
 named_file_delivery_like = bool(re.search(r"(发给我|发我|发过来|send me|send\b|deliver\b).*(?:`?)([A-Za-z0-9_.-]+\.[A-Za-z0-9_.-]+)(?:`?)", prompt, re.I))
-named_missing_file_like = "definitely_missing_named_file_rustclaw_" in prompt
+named_missing_file_like = "definitely_missing_named_file_agent_" in prompt
 create_and_deliver_file_like = bool(
     re.search(r"(写个|写一个|生成|create|write)\b.*(\.sh|shell script|脚本)", prompt, re.I)
     and re.search(r"(保存|存成|写入文件|save|create file)", prompt, re.I)
@@ -423,7 +423,7 @@ if trace_multi_marker and "TRACE_MULTI_OK" not in progress_join:
     issues.append("多步成功标记 TRACE_MULTI_OK 未出现在输出中，需确认顺序执行是否完整。")
 if missing_cmd_case and after_fail_marker and "AFTER_FAIL_TRACE" in progress_join:
     issues.append("失败后的后续步骤似乎仍然执行了 AFTER_FAIL_TRACE，需确认失败后是否正确中断。")
-if missing_cmd_case and creative_mixed and re.search(r"(pwd|/home|RustClaw)", progress_join):
+if missing_cmd_case and creative_mixed and re.search(r"(pwd|/home)", progress_join):
     issues.append("失败混合 chat case 里出现前序执行内容，需人工检查 chat 是否被 act 输出污染。")
 if prompt.strip() == "继续" and not route_clarify and not route_act:
     issues.append("“继续” 未落到 AskClarify/Act，需检查 follow-up 路由。")

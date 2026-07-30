@@ -112,7 +112,7 @@ function dependencyErrorLabel(t: Translate, code: string | null): string {
     case "permission_denied":
       return t("当前账号无权检查系统依赖。", "This account cannot inspect system dependencies.");
     case "disconnected":
-      return t("暂时无法连接 RustClaw。", "RustClaw is temporarily unreachable.");
+      return t("暂时无法连接 {product_name}。", "{product_name} is temporarily unreachable.");
     case "package_manager_unavailable":
       return t("未检测到受支持的系统包管理器，请手动安装依赖。", "No supported system package manager was detected. Install the dependency manually.");
     case "dependency_install_unsupported":
@@ -167,7 +167,7 @@ function DependencyRow({
       title: t("安装系统依赖", "Install system dependency"),
       message: t(
         `将使用 ${dependency.package_manager ?? "系统包管理器"} 安装“${localizedToken(t, dependency.id, DEPENDENCY_NAMES)}”。安装可能需要几分钟，期间可以离开本页面。`,
-        `RustClaw will use ${dependency.package_manager ?? "the system package manager"} to install “${localizedToken(t, dependency.id, DEPENDENCY_NAMES)}”. This may take several minutes, and you may leave this page while it runs.`,
+        `{product_name} will use ${dependency.package_manager ?? "the system package manager"} to install “${localizedToken(t, dependency.id, DEPENDENCY_NAMES)}”. This may take several minutes, and you may leave this page while it runs.`,
       ),
       confirmLabel: t("开始安装", "Install"),
     });
@@ -277,7 +277,7 @@ export function SystemDependenciesPanel({
                     `已检测 ${snapshot.summary.total} 项，${snapshot.summary.installed} 项可用；系统必需缺失 ${snapshot.summary.missing_required} 项，可选能力缺失 ${snapshot.summary.missing_optional} 项。`,
                     `${snapshot.summary.total} checked and ${snapshot.summary.installed} available; ${snapshot.summary.missing_required} required and ${snapshot.summary.missing_optional} optional dependencies are missing.`,
                   )
-                : t("检查 RustClaw、内置工具和技能所需的本机依赖。", "Check local dependencies used by RustClaw, built-in tools, and skills.")}
+                : t("检查 {product_name}、内置工具和技能所需的本机依赖。", "Check local dependencies used by {product_name}, built-in tools, and skills.")}
             </p>
           </div>
         </div>

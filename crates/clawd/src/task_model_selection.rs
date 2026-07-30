@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
 const REQUEST_FIELD: &str = "model_selection";
-const STAMP_FIELD: &str = "_rustclaw_model_selection";
+const STAMP_FIELD: &str = "_agent_model_selection";
 const MAX_SELECTION_TOKEN_BYTES: usize = 128;
 
 #[derive(Clone)]

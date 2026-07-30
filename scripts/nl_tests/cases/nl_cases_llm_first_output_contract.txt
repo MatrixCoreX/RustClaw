@@ -14,5 +14,5 @@ continuous|task_append_split_sentence_cn_turn1|legacy_shape,turn_chain,allow_cla
 continuous|task_append_split_sentence_cn_turn2|legacy_shape,turn_chain,allow_clarify|面向老板
 continuous|task_append_split_sentence_cn_turn3|legacy_shape,turn_chain|不要太技术，控制在 80 字内，只输出正文
 task_correct_version_cn|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
-task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成短帖串|只输出前三条，每条一行
+task_replace_goal_cn|帮我写一篇关于 Agent Runtime 的长文|算了，别写长文了，改成短帖串|只输出前三条，每条一行
 task_scope_update_cn|帮我做一个测试计划|先只看登录模块|只输出三个测试点

@@ -2,13 +2,13 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use rustclaw_skill_sdk::{
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use skill_sdk::{
     extract_safe_archive, inspect_safe_archive, read_safe_archive_member, ArtifactSpill,
     BoundedResult, ContinuationDescriptor, ExpectedPathKind, SafeArchiveInspection,
     SafeArchiveLimits, SkillPathPolicy, MAX_PROTOCOL_LINE_BYTES,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 
 const SKILL_NAME: &str = "archive_basic";
 
@@ -345,7 +345,7 @@ fn execute_with_root_and_context(
     }
 }
 
-fn path_policy_error(error: rustclaw_skill_sdk::SkillSdkError) -> SkillError {
+fn path_policy_error(error: skill_sdk::SkillSdkError) -> SkillError {
     let kind = match error.code.as_str() {
         "path_outside_workspace" => "path_outside_workspace",
         "path_traversal_forbidden" => "path_traversal_forbidden",
@@ -488,7 +488,7 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<SafeArchiveInspection, 
     let limits =
         SafeArchiveLimits::adaptive_for(archive, &canonical_parent).map_err(archive_sdk_error)?;
     let temporary = tempfile::Builder::new()
-        .prefix(".rustclaw-archive-")
+        .prefix(".agent-archive-")
         .tempdir_in(&canonical_parent)
         .map_err(|error| SkillError::command_failed(format!("tempdir failed: {error}")))?;
     let staging = temporary.path().join("payload");
@@ -498,7 +498,7 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<SafeArchiveInspection, 
     Ok(inspection)
 }
 
-fn archive_sdk_error(error: rustclaw_skill_sdk::SkillSdkError) -> SkillError {
+fn archive_sdk_error(error: skill_sdk::SkillSdkError) -> SkillError {
     let kind = match error.code.as_str() {
         "archive_format_unsupported" => "unsupported_format",
         "archive_path_unsafe" => "archive_path_unsafe",

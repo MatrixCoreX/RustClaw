@@ -10,7 +10,7 @@ Next: [Web entry and core isolation](10-web-entry-security.md)
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw keeps semantic decisions in one agent loop while deterministic runtime
+Agent Runtime keeps semantic decisions in one agent loop while deterministic runtime
 layers enforce schemas, permissions, confinement, side effects, and evidence.
 Interactive coding adds a public presentation stream and safer local edit
 surface.

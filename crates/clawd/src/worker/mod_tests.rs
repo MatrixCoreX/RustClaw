@@ -14,10 +14,8 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rustclaw_{prefix}_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agent_{prefix}_{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
@@ -771,7 +769,7 @@ async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
     checkpoint["pending_action"] = json!({
         "final_result_json": {
             "status": "ok",
-            "output": "RUSTCLAW_RESTART_TERMINAL_DONE"
+            "output": "APP_RESTART_TERMINAL_DONE"
         }
     });
     checkpoint["completed_side_effect_refs"] = json!(["write_file:tmp/report.txt"]);
@@ -809,7 +807,7 @@ async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
         .expect("runtime recovery terminal projection after restart");
     let (status, result) = task_status_result_json(&restarted_state, "runtime-terminal-restart");
     assert_eq!(status, "succeeded");
-    assert_eq!(result["output"], "RUSTCLAW_RESTART_TERMINAL_DONE");
+    assert_eq!(result["output"], "APP_RESTART_TERMINAL_DONE");
     assert_eq!(result["task_lifecycle"]["state"], "succeeded");
     assert_eq!(
         result["task_lifecycle"]["checkpoint_id"],
@@ -828,7 +826,7 @@ async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
     let (second_status, second_result) =
         task_status_result_json(&second_restarted_state, "runtime-terminal-restart");
     assert_eq!(second_status, "succeeded");
-    assert_eq!(second_result["output"], "RUSTCLAW_RESTART_TERMINAL_DONE");
+    assert_eq!(second_result["output"], "APP_RESTART_TERMINAL_DONE");
     assert_eq!(
         second_result["task_lifecycle"]["terminal_executor_result_status"],
         "finalize_completed"
@@ -840,7 +838,7 @@ async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
     let state = state_with_runtime_tasks_table();
     let job_dir = TempDirGuard::new("runtime_poll_checkpoint_terminal");
     std::fs::write(job_dir.path.join("exit_code"), "0\n").expect("write exit code");
-    std::fs::write(job_dir.path.join("stdout"), "RUSTCLAW_POLL_DONE\n").expect("write stdout");
+    std::fs::write(job_dir.path.join("stdout"), "APP_POLL_DONE\n").expect("write stdout");
     std::fs::write(job_dir.path.join("stderr"), "").expect("write stderr");
     let now = crate::now_ts_u64() as i64;
     let mut checkpoint = valid_checkpoint_json("ckpt-runtime-poll", "poll_async_job");
@@ -899,7 +897,7 @@ async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
         result["task_lifecycle"]["terminal_executor_result_status"],
         "async_poll_completed"
     );
-    assert_eq!(result["output"], "RUSTCLAW_POLL_DONE\n", "result={result}");
+    assert_eq!(result["output"], "APP_POLL_DONE\n", "result={result}");
     assert_eq!(result["exit_code"], 0, "result={result}");
 }
 

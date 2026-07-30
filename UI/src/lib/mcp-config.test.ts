@@ -25,7 +25,7 @@ function configFixture(): McpConfigResponse {
         transport: "stdio",
         command: "/usr/bin/fixture",
         args: ["--stdio"],
-        env_refs: { CHILD_TOKEN: "RUSTCLAW_MCP_TOKEN" },
+        env_refs: { CHILD_TOKEN: "APP_MCP_TOKEN" },
         oauth_scopes: [],
         allowed_tools: ["lookup"],
         has_static_env: true,
@@ -39,7 +39,7 @@ test("builds an MCP draft and saves only secret reference names", () => {
   const config = configFixture();
   const draft = buildMcpConfigDraft(config);
   const payload = buildMcpConfigUpdatePayload(draft);
-  assert.equal(payload.servers[0].env_refs.CHILD_TOKEN, "RUSTCLAW_MCP_TOKEN");
+  assert.equal(payload.servers[0].env_refs.CHILD_TOKEN, "APP_MCP_TOKEN");
   assert.equal(JSON.stringify(payload).includes("secret_value"), false);
   assert.equal(hasUnsavedMcpChanges(config, draft), false);
 });

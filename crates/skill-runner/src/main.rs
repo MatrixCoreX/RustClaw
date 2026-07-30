@@ -14,13 +14,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rustclaw_skill_sdk::{
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use skill_sdk::{
     prepare_sandboxed_command, validate_response_line, LauncherKind, ProtocolResponse,
     ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec, SkillRuntimeResolver,
     PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
@@ -31,8 +31,31 @@ struct SkillRequest {
     chat_id: i64,
     user_key: Option<String>,
     skill_name: String,
+    expected_skill_version: String,
+    expected_manifest_digest: String,
+    expected_receipt_digest: String,
+    expected_registry_generation: u64,
+    expected_registry_generation_digest: Option<String>,
+    expected_base_registry_digest: Option<String>,
+    expected_overlay_generation_digest: Option<String>,
+    expected_policy_digest: Option<String>,
+    expected_admission_receipt_digest: Option<String>,
     args: Value,
     context: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ExecutionBinding {
+    skill_name: String,
+    version: String,
+    manifest_digest: String,
+    receipt_digest: String,
+    registry_generation: u64,
+    registry_generation_digest: Option<String>,
+    base_registry_digest: Option<String>,
+    overlay_generation_digest: Option<String>,
+    policy_digest: Option<String>,
+    admission_receipt_digest: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,13 +176,29 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn execute_skill(req: SkillRequest) -> SkillResponse {
-    let timeout_secs: u64 = std::env::var("SKILL_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(30);
+    let configured_timeout_limit = match configured_timeout_limit_from_env() {
+        Ok(limit) => limit,
+        Err(detail) => {
+            return SkillResponse {
+                request_id: req.request_id,
+                status: "error".to_string(),
+                text: String::new(),
+                buttons: None,
+                error_code: Some("runner_timeout_config_invalid".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
+                exit_code: None,
+                validation: None,
+                extra: Some(serde_json::json!({
+                    "error_code": "runner_timeout_config_invalid",
+                    "message_key": "skill_runner.timeout_config_invalid",
+                    "retryable": false,
+                })),
+                error_text: Some(detail),
+            };
+        }
+    };
 
-    let child_launch = match resolve_child_launch(&req.skill_name) {
+    let mut child_launch = match resolve_child_launch(&req) {
         Ok(launch) => launch,
         Err(err) => {
             return SkillResponse {
@@ -181,6 +220,31 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
         }
     };
 
+    let Some(binding) = child_launch.execution_binding.as_mut() else {
+        return SkillResponse {
+            request_id: req.request_id,
+            status: "error".to_string(),
+            text: String::new(),
+            buttons: None,
+            error_code: Some("runner_execution_binding_missing".to_string()),
+            platform: Some(std::env::consts::OS.to_string()),
+            exit_code: None,
+            validation: None,
+            extra: Some(serde_json::json!({
+                "error_code": "runner_execution_binding_missing",
+                "message_key": "skill_runner.execution_binding_missing",
+                "retryable": false,
+            })),
+            error_text: Some("installed launch did not produce an execution binding".to_string()),
+        };
+    };
+    binding.registry_generation = req.expected_registry_generation;
+    binding.registry_generation_digest = req.expected_registry_generation_digest.clone();
+    binding.base_registry_digest = req.expected_base_registry_digest.clone();
+    binding.overlay_generation_digest = req.expected_overlay_generation_digest.clone();
+    binding.policy_digest = req.expected_policy_digest.clone();
+    binding.admission_receipt_digest = req.expected_admission_receipt_digest.clone();
+
     let child_req = serde_json::json!({
         "request_id": req.request_id,
         "args": req.args,
@@ -190,13 +254,16 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
         "user_key": req.user_key,
     });
 
-    let timeout = Duration::from_secs(timeout_secs.min(child_launch.timeout_seconds));
+    let timeout_seconds =
+        effective_timeout_seconds(child_launch.timeout_seconds, configured_timeout_limit);
+    child_launch.timeout_seconds = timeout_seconds;
+    let timeout = Duration::from_secs(timeout_seconds);
     let execution = if child_launch.launcher == LauncherKind::HttpJson {
         run_http_json_skill(&child_launch, &child_req, timeout).await
     } else {
         run_child_skill(&child_launch, &child_req.to_string(), timeout).await
     };
-    match execution {
+    let response = match execution {
         Ok(out) => {
             let parsed = parse_child_response(&out, &req.request_id, child_launch.strict_protocol);
             match parsed {
@@ -253,7 +320,59 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
             })),
             error_text: Some(err.detail),
         },
+    };
+    attach_execution_binding(response, child_launch.execution_binding.as_ref())
+}
+
+fn attach_execution_binding(
+    mut response: SkillResponse,
+    binding: Option<&ExecutionBinding>,
+) -> SkillResponse {
+    let Some(binding) = binding else {
+        return response;
+    };
+    let mut extra = match response.extra.take() {
+        Some(Value::Object(extra)) => extra,
+        Some(child_extra) => serde_json::Map::from_iter([("child_extra".to_string(), child_extra)]),
+        None => serde_json::Map::new(),
+    };
+    extra.insert(
+        "execution_binding".to_string(),
+        serde_json::to_value(binding).expect("execution binding is serializable"),
+    );
+    response.extra = Some(Value::Object(extra));
+    response
+}
+
+fn configured_timeout_limit_from_env() -> Result<Option<u64>, String> {
+    match std::env::var("SKILL_TIMEOUT_SECONDS") {
+        Ok(raw) => parse_configured_timeout_limit(Some(&raw)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err("SKILL_TIMEOUT_SECONDS must be valid UTF-8".to_string())
+        }
     }
+}
+
+fn parse_configured_timeout_limit(raw: Option<&str>) -> Result<Option<u64>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value = raw.parse::<u64>().map_err(|_| {
+        "SKILL_TIMEOUT_SECONDS must be a positive integer no greater than 86400".to_string()
+    })?;
+    if !(1..=86_400).contains(&value) {
+        return Err(
+            "SKILL_TIMEOUT_SECONDS must be a positive integer no greater than 86400".to_string(),
+        );
+    }
+    Ok(Some(value))
+}
+
+fn effective_timeout_seconds(manifest_timeout_seconds: u64, configured_limit: Option<u64>) -> u64 {
+    configured_limit
+        .map(|limit| limit.min(manifest_timeout_seconds))
+        .unwrap_or(manifest_timeout_seconds)
 }
 
 #[derive(Debug, Clone)]
@@ -270,17 +389,19 @@ struct ChildLaunch {
     timeout_seconds: u64,
     installed: bool,
     sandbox_profile: SandboxProfile,
+    execution_binding: Option<ExecutionBinding>,
 }
 
-const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 4] = [
+const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 5] = [
     // Credentials arrive as short-lived references.  The child must see the
     // broker-owned token directory in order to redeem an allowed credential
     // environment variable; package manifests should not need to declare
     // this runtime implementation detail themselves.
-    "RUSTCLAW_SECRET_TOKEN_DIR",
-    "RUSTCLAW_UNRESTRICTED_ADMIN",
-    "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE",
-    "RUSTCLAW_ALLOW_SUDO",
+    "APP_SECRET_TOKEN_DIR",
+    "APP_UNRESTRICTED_ADMIN",
+    "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
+    "APP_ALLOW_SUDO",
+    "APP_WORKSPACE_STATE_DIR",
 ];
 
 impl ChildLaunch {
@@ -299,10 +420,23 @@ impl ChildLaunch {
             timeout_seconds: 86_400,
             installed: false,
             sandbox_profile: SandboxProfile::Required,
+            execution_binding: None,
         }
     }
 
     fn installed(spec: SkillLaunchSpec) -> Self {
+        let execution_binding = ExecutionBinding {
+            skill_name: spec.skill_name.clone(),
+            version: spec.version.clone(),
+            manifest_digest: spec.manifest_digest.clone(),
+            receipt_digest: spec.receipt_digest.clone(),
+            registry_generation: 0,
+            registry_generation_digest: None,
+            base_registry_digest: None,
+            overlay_generation_digest: None,
+            policy_digest: None,
+            admission_receipt_digest: None,
+        };
         Self {
             program: spec.program,
             args: spec.args,
@@ -316,16 +450,22 @@ impl ChildLaunch {
             timeout_seconds: spec.timeout_seconds,
             installed: true,
             sandbox_profile: spec.sandbox_profile,
+            execution_binding: Some(execution_binding),
         }
     }
 }
 
-fn resolve_child_launch(skill_name: &str) -> Result<ChildLaunch, String> {
-    let package_root = std::env::var_os("RUSTCLAW_SKILL_PACKAGES_ROOT")
+fn resolve_child_launch(request: &SkillRequest) -> Result<ChildLaunch, String> {
+    let package_root = std::env::var_os("APP_SKILL_PACKAGES_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/skill-packages"));
     SkillRuntimeResolver::new(&package_root)
-        .resolve(skill_name)
+        .resolve_pinned(
+            &request.skill_name,
+            &request.expected_skill_version,
+            &request.expected_manifest_digest,
+            &request.expected_receipt_digest,
+        )
         .map(ChildLaunch::installed)
         .map_err(|error| {
             format!(
@@ -529,6 +669,9 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
             command.env(key, value);
         }
     }
+    // The runner owns the final deadline. Propagate the effective value after
+    // inherited environment handling so the child cannot observe a looser cap.
+    command.env("SKILL_TIMEOUT_SECONDS", launch.timeout_seconds.to_string());
     command.args(&launch.args);
     Ok(command)
 }
@@ -587,16 +730,16 @@ async fn read_bounded_output(
 ) -> Result<Vec<u8>, ExecutionFailure> {
     let mut output = Vec::new();
     reader
-        .take((rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES + 1) as u64)
+        .take((skill_sdk::MAX_PROTOCOL_LINE_BYTES + 1) as u64)
         .read_to_end(&mut output)
         .await
         .map_err(|error| ExecutionFailure::new("child_output_read_failed", error.to_string()))?;
-    if output.len() > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES {
+    if output.len() > skill_sdk::MAX_PROTOCOL_LINE_BYTES {
         let mut failure = ExecutionFailure::new(
             "child_output_truncated",
             format!(
                 "child output exceeds {} bytes",
-                rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES
+                skill_sdk::MAX_PROTOCOL_LINE_BYTES
             ),
         );
         failure.truncated = true;
@@ -655,7 +798,7 @@ async fn run_http_json_skill(
     }
     if response
         .content_length()
-        .is_some_and(|size| size > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES as u64)
+        .is_some_and(|size| size > skill_sdk::MAX_PROTOCOL_LINE_BYTES as u64)
     {
         let mut failure =
             ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
@@ -666,7 +809,7 @@ async fn run_http_json_skill(
     while let Some(chunk) = response.chunk().await.map_err(|error| {
         ExecutionFailure::new("http_response_read_failed", error.to_string()).retryable(true)
     })? {
-        if output.len().saturating_add(chunk.len()) > rustclaw_skill_sdk::MAX_PROTOCOL_LINE_BYTES {
+        if output.len().saturating_add(chunk.len()) > skill_sdk::MAX_PROTOCOL_LINE_BYTES {
             let mut failure =
                 ExecutionFailure::new("http_response_truncated", "http_json response is oversized");
             failure.truncated = true;
@@ -678,7 +821,7 @@ async fn run_http_json_skill(
 }
 
 fn unrestricted_admin_authority() -> bool {
-    environment_flag_value_is_enabled(std::env::var("RUSTCLAW_UNRESTRICTED_ADMIN").ok().as_deref())
+    environment_flag_value_is_enabled(std::env::var("APP_UNRESTRICTED_ADMIN").ok().as_deref())
 }
 
 fn environment_flag_value_is_enabled(value: Option<&str>) -> bool {

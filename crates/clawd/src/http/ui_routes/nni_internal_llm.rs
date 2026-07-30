@@ -28,7 +28,7 @@ fn nni_signature_helper_path(state: &AppState) -> PathBuf {
 }
 
 fn nni_signature_helper_python() -> String {
-    std::env::var("RUSTCLAW_CRYPTOAUTHLIB_PYTHON")
+    claw_core::product_identity::env_string("CRYPTOAUTHLIB_PYTHON")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -117,7 +117,7 @@ async fn run_nni_signature_helper(
         .current_dir(&state.skill_rt.workspace_root)
         .env("PYTHONUNBUFFERED", "1")
         .env(
-            "RUSTCLAW_SIGNATURE_SIMULATOR_STATE",
+            "APP_SIGNATURE_SIMULATOR_STATE",
             nni_signature_simulator_state_path(state),
         )
         .stdin(StdProcessStdio::null())
@@ -649,7 +649,7 @@ async fn nni_device_action(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct InternalLlmTokenContext {
+struct InternalSkillTokenContext {
     task_id: String,
     user_id: i64,
     chat_id: i64,
@@ -660,6 +660,32 @@ struct InternalLlmTokenContext {
     kind: String,
     payload_json: String,
     skill_name: String,
+}
+
+fn redeem_internal_skill_token(
+    headers: &HeaderMap,
+) -> Result<InternalSkillTokenContext, (StatusCode, Json<ApiResponse<Value>>)> {
+    let token = headers
+        .get(claw_core::product_identity::INTERNAL_SKILL_TOKEN_HEADER)
+        .or_else(|| headers.get(claw_core::product_identity::INTERNAL_LLM_TOKEN_HEADER))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| api_error_value(StatusCode::UNAUTHORIZED, "missing internal skill token"))?;
+    let payload = claw_core::secrets::redeem_secret_token_reference(token)
+        .map_err(|error| {
+            api_error_value(
+                StatusCode::UNAUTHORIZED,
+                format!("internal skill token rejected: {error}"),
+            )
+        })?
+        .ok_or_else(|| api_error_value(StatusCode::UNAUTHORIZED, "invalid internal skill token"))?;
+    serde_json::from_str(&payload).map_err(|error| {
+        api_error_value(
+            StatusCode::UNAUTHORIZED,
+            format!("internal skill token payload invalid: {error}"),
+        )
+    })
 }
 
 fn api_error_value(
@@ -681,35 +707,9 @@ async fn internal_llm_text(
     headers: HeaderMap,
     Json(req): Json<InternalLlmTextRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let token = headers
-        .get("x-rustclaw-internal-llm-token")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let Some(token) = token else {
-        return api_error_value(StatusCode::UNAUTHORIZED, "missing internal llm token");
-    };
-
-    let token_payload = match claw_core::secrets::redeem_secret_token_reference(token) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return api_error_value(StatusCode::UNAUTHORIZED, "invalid internal llm token");
-        }
-        Err(err) => {
-            return api_error_value(
-                StatusCode::UNAUTHORIZED,
-                format!("internal llm token rejected: {err}"),
-            );
-        }
-    };
-    let token_ctx: InternalLlmTokenContext = match serde_json::from_str(&token_payload) {
+    let token_ctx = match redeem_internal_skill_token(&headers) {
         Ok(value) => value,
-        Err(err) => {
-            return api_error_value(
-                StatusCode::UNAUTHORIZED,
-                format!("internal llm token payload invalid: {err}"),
-            );
-        }
+        Err(response) => return response,
     };
 
     let requested_skill = req.skill_name.trim();

@@ -168,7 +168,7 @@ fn env_broker_label_is_stable() {
 
 fn fresh_token_store_dir(suffix: &str) -> PathBuf {
     env::temp_dir().join(format!(
-        "rustclaw-secret-token-test-{}-{}",
+        "agent-secret-token-test-{}-{}",
         std::process::id(),
         suffix
     ))

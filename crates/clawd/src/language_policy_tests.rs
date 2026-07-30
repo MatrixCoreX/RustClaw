@@ -14,11 +14,11 @@ fn request_language_hint_prefers_current_turn_text_shape() {
     );
     assert_eq!(request_language_hint("用 English 解释 README"), "mixed");
     assert_eq!(
-        request_language_hint("读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行"),
+        request_language_hint("读取 ./NO_SUCH_APP_TEST_987654.txt 的第一行"),
         "zh-CN"
     );
     assert_eq!(
-        request_language_hint("读取 /home/guagua/rustclaw/configs/config.toml 的第一行"),
+        request_language_hint("读取 /home/guagua/agent-runtime/configs/config.toml 的第一行"),
         "zh-CN"
     );
     assert_eq!(
@@ -44,7 +44,7 @@ fn request_language_hint_prefers_current_turn_text_shape() {
         "und-Latn"
     );
     assert_eq!(
-        request_language_hint("/home/guagua/rustclaw/configs/config.toml"),
+        request_language_hint("/home/guagua/agent-runtime/configs/config.toml"),
         "config_default"
     );
     assert_eq!(
@@ -57,7 +57,7 @@ fn request_language_hint_prefers_current_turn_text_shape() {
 #[test]
 fn language_neutral_artifacts_do_not_force_english() {
     assert!(text_is_language_neutral_artifact_only(
-        "/home/guagua/rustclaw/configs/config.toml"
+        "/home/guagua/agent-runtime/configs/config.toml"
     ));
     assert!(text_is_language_neutral_artifact_only(
         "configs/app_config.toml"
@@ -71,7 +71,7 @@ fn language_neutral_artifacts_do_not_force_english() {
     assert!(!text_is_language_neutral_artifact_only("12345"));
     assert_eq!(
         first_clear_request_language_hint([
-            "/home/guagua/rustclaw/configs/app_config.toml",
+            "/home/guagua/agent-runtime/configs/app_config.toml",
             "把那个文件发给我，不要贴内容",
         ])
         .as_deref(),
@@ -98,11 +98,11 @@ fn generated_text_language_conflict_allows_embedded_names() {
         "zh-CN"
     ));
     assert!(text_language_conflicts_with_hint(
-        "# Service Notes\n\nRustClaw test fixture service notes.",
+        "# Service Notes\n\nAgent Runtime test fixture service notes.",
         "ko"
     ));
     assert!(text_language_conflicts_with_hint(
-        "# Service Notes\n\nRustClaw test fixture service notes.",
+        "# Service Notes\n\nAgent Runtime test fixture service notes.",
         "ja"
     ));
     assert!(!text_language_conflicts_with_hint(

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# 读取当前 RustClaw SQLite 数据库的结构与内容摘要（依赖系统安装 sqlite3 命令行）
+# 读取当前 agent runtime SQLite 数据库的结构与内容摘要（依赖系统安装 sqlite3 命令行）
 # 若无 sqlite3，请使用: python scripts/db_schema_and_content.py [路径]
 # 用法: scripts/db_schema_and_content.sh [数据库文件路径]
-# 未指定路径时从 configs/config.toml 的 database.sqlite_path 读取，缺省为 data/rustclaw.db（相对仓库根）
+# 未指定路径时从 configs/config.toml 的 database.sqlite_path 读取，缺省为 data/agent-runtime.db（相对仓库根）
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$ROOT/configs/config.toml"
-DEFAULT_DB="$ROOT/data/rustclaw.db"
+DEFAULT_DB="$ROOT/data/agent-runtime.db"
 
 # 解析数据库路径
 get_db_path() {

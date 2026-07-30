@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/answer_verifier.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/answer_verifier.schema.json",
   "title": "AnswerVerifierOut",
   "description": "Schema for the JSON object returned by prompts/answer_verifier_prompt.md. Mirrors AnswerVerifierOut in crates/clawd/src/answer_verifier.rs.",
   "type": "object",

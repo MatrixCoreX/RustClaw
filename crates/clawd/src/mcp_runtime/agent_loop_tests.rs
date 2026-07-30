@@ -38,8 +38,10 @@ struct TempFixtureRoot {
 
 impl TempFixtureRoot {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("rustclaw-mcp-agent-loop-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "agent-runtime-mcp-agent-loop-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&path).expect("create fixture root");
         Self { path }
     }

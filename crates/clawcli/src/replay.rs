@@ -16,7 +16,7 @@ use replay_fingerprint::{
 };
 
 const REPLAY_SCHEMA_VERSION: u64 = 1;
-const REPLAY_BUNDLE_KIND: &str = "rustclaw_task_replay";
+const REPLAY_BUNDLE_KIND: &str = "agent_task_replay";
 
 pub(crate) fn run_export(
     base_url: &str,
@@ -238,7 +238,7 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
         permission_changed,
     });
     json!({
-        "bundle_kind": "rustclaw_task_replay_diff",
+        "bundle_kind": "agent_task_replay_diff",
         "schema_version": REPLAY_SCHEMA_VERSION,
         "replay_mode": "recorded_only",
         "live_provider": false,
@@ -700,7 +700,7 @@ fn value_looks_secret_like(value: &str) -> bool {
     lower.starts_with("sk-")
         || lower.starts_with("tp-")
         || lower.starts_with("bearer-")
-        || lower.starts_with("rustclaw_")
+        || lower.starts_with("agent_")
         || lower.contains("_secret_")
         || lower.contains("_token_")
 }

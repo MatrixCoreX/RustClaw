@@ -75,7 +75,7 @@ for line in sys.stdin:
             {
                 "protocolVersion": protocol_version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "rustclaw-fixture", "version": "1"},
+                "serverInfo": {"name": "agent-runtime-fixture", "version": "1"},
             },
         )
     elif method == "tools/list":

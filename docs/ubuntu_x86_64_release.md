@@ -1,6 +1,6 @@
 # Ubuntu x86_64 Release Package
 
-RustClaw can publish a prebuilt Ubuntu x86_64 runtime package through GitHub
+Agent Runtime can publish a prebuilt Ubuntu x86_64 runtime package through GitHub
 Actions. This package is for regular 64-bit Ubuntu servers and PCs.
 
 ## Build And Publish
@@ -20,8 +20,8 @@ The workflow builds:
 
 - Rust workspace binaries for `x86_64-unknown-linux-gnu`
 - `UI/dist`
-- a runtime archive named `RustClaw-ubuntu-x86_64-<tag>.tar.gz`
-  (`RustClaw-<tag>.tar.gz` when the tag already starts with `ubuntu-x86_64-`)
+- a runtime archive named `Agent Runtime-ubuntu-x86_64-<tag>.tar.gz`
+  (`Agent Runtime-<tag>.tar.gz` when the tag already starts with `ubuntu-x86_64-`)
 - a matching `.sha256` checksum file
 
 The archive is uploaded both as a workflow artifact and as a GitHub Release
@@ -42,7 +42,7 @@ When updating an existing install, keep runtime state:
 
 `data/` includes the main runtime database and every private skill database
 under `data/skills/`; preserve the whole directory rather than selecting only
-`rustclaw.db`.
+`agent-runtime.db`.
 
 Use the package as a source of updated binaries, scripts, prompts, migrations,
 and `UI/dist`. Do not overwrite live secrets or channel settings with packaged
@@ -53,5 +53,5 @@ directories, atomically replaces each prebuilt binary so the running `clawd`
 executable can be upgraded, and then restarts `clawd`. A systemd-managed Linux
 installation schedules that restart in a separate transient unit so stopping
 the old service cannot kill its own restart process. If the host already has a
-RustClaw nginx site, it copies the packaged `UI/dist` into that site without
+Agent Runtime nginx site, it copies the packaged `UI/dist` into that site without
 rebuilding. A local install with no nginx site remains nginx-free.

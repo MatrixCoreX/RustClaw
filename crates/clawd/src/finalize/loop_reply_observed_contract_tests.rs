@@ -23,7 +23,7 @@ fn matrix_exact_path_list_prefers_latest_path_result() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/missing.md",
+        "file not found: /home/guagua/agent-runtime/plan/missing.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_3",
@@ -60,7 +60,7 @@ fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/missing.md",
+        "file not found: /home/guagua/agent-runtime/plan/missing.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -112,7 +112,7 @@ fn non_exact_path_locator_does_not_replace_model_output_with_observed_listing() 
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        "file not found: /home/guagua/agent-runtime/plan/extra_missing_repair_probe.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -155,7 +155,7 @@ fn non_exact_strict_path_locator_does_not_replace_model_output() {
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        "file not found: /home/guagua/agent-runtime/plan/extra_missing_repair_probe.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -199,7 +199,7 @@ fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search(
     loop_state.executed_step_results.push(err_step_result(
         "step_1",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        "file not found: /home/guagua/agent-runtime/plan/extra_missing_repair_probe.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -301,19 +301,19 @@ fn scalar_exact_observation_keeps_written_file_path_synthesis() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "fs_basic",
-        r#"{"action":"write_text","path":"/home/guagua/rustclaw/pwd_line_abs.txt"}"#,
+        r#"{"action":"write_text","path":"/home/guagua/agent-runtime/pwd_line_abs.txt"}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_3",
         "synthesize_answer",
-        "/home/guagua/rustclaw/pwd_line_abs.txt",
+        "/home/guagua/agent-runtime/pwd_line_abs.txt",
     ));
-    let answer = "/home/guagua/rustclaw/pwd_line_abs.txt".to_string();
+    let answer = "/home/guagua/agent-runtime/pwd_line_abs.txt".to_string();
     loop_state.last_publishable_synthesis_output = Some(answer.clone());
     loop_state
         .output_vars
@@ -353,19 +353,19 @@ fn exact_scalar_path_keeps_plain_written_path_synthesis() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "fs_basic",
-        r#"{"action":"write_text","path":"/home/guagua/rustclaw/pwd_line_abs.txt"}"#,
+        r#"{"action":"write_text","path":"/home/guagua/agent-runtime/pwd_line_abs.txt"}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_3",
         "synthesize_answer",
-        "/home/guagua/rustclaw/pwd_line_abs.txt",
+        "/home/guagua/agent-runtime/pwd_line_abs.txt",
     ));
-    let answer = "/home/guagua/rustclaw/pwd_line_abs.txt".to_string();
+    let answer = "/home/guagua/agent-runtime/pwd_line_abs.txt".to_string();
     loop_state.last_publishable_synthesis_output = Some(answer.clone());
     loop_state
         .output_vars
@@ -408,18 +408,18 @@ fn exact_scalar_path_replaces_write_status_with_written_path() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "fs_basic",
-        "written 21 bytes to /home/guagua/rustclaw/pwd_line_abs.txt",
+        "written 21 bytes to /home/guagua/agent-runtime/pwd_line_abs.txt",
     ));
-    let status = "written 21 bytes to /home/guagua/rustclaw/pwd_line_abs.txt".to_string();
+    let status = "written 21 bytes to /home/guagua/agent-runtime/pwd_line_abs.txt".to_string();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_3", "synthesize_answer", &status));
-    let answer = "/home/guagua/rustclaw/pwd_line_abs.txt".to_string();
+    let answer = "/home/guagua/agent-runtime/pwd_line_abs.txt".to_string();
     loop_state.last_publishable_synthesis_output = Some(status.clone());
     loop_state
         .output_vars
@@ -471,7 +471,7 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "image_generate",
-        r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","duration":10,"resolution":"768P","model_kind":"dry_run","adapter_kind":"media_job_poll","output_path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]}}"#,
+        r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","duration":10,"resolution":"768P","model_kind":"dry_run","adapter_kind":"media_job_poll","output_path":"/home/guagua/agent-runtime/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/agent-runtime/document/media_dry_run/image_status_card.png"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]}}"#,
     ));
 
     let (answer, summary) =
@@ -480,7 +480,7 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
 
     assert_eq!(
         answer,
-        "/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"
+        "/home/guagua/agent-runtime/document/media_dry_run/image_status_card.png"
     );
     assert!(summary.contract_ok);
 
@@ -526,14 +526,14 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
     audio_loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "audio_synthesize",
-        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[],"response_format":"mp3","voice":"male-qn-qingse"}}"#,
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3"}],"outputs":[],"response_format":"mp3","voice":"male-qn-qingse"}}"#,
     ));
     let (audio_answer, audio_summary) =
         direct_exact_scalar_path_from_dry_run_payload(&audio_loop_state, Some(&agent_run_context))
             .expect("audio dry_run payload should project planned output");
     assert_eq!(
         audio_answer,
-        "/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"
+        "/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3"
     );
     assert!(audio_summary.contract_ok);
 
@@ -541,14 +541,14 @@ fn exact_scalar_path_projects_only_media_dry_run_path() {
     music_loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "music_generate",
-        r#"{"text":"MUSIC_GENERATE_DRY_RUN","extra":{"adapter_kind":"media_job_poll","dry_run":true,"provider":"minimax","model":"music-2.6","model_kind":"minimax_native","output_path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"}],"pending_async_job_contract":{"job_id":"provider:music_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:music_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"music_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[],"request":{"audio_setting":{"format":"mp3"},"output_format":"hex"}}}"#,
+        r#"{"text":"MUSIC_GENERATE_DRY_RUN","extra":{"adapter_kind":"media_job_poll","dry_run":true,"provider":"minimax","model":"music-2.6","model_kind":"minimax_native","output_path":"/home/guagua/agent-runtime/document/media_dry_run/ambient_loop.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/agent-runtime/document/media_dry_run/ambient_loop.mp3"}],"pending_async_job_contract":{"job_id":"provider:music_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:music_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"music_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[],"request":{"audio_setting":{"format":"mp3"},"output_format":"hex"}}}"#,
     ));
     let (music_answer, music_summary) =
         direct_exact_scalar_path_from_dry_run_payload(&music_loop_state, Some(&agent_run_context))
             .expect("music dry_run payload should project planned output");
     assert_eq!(
         music_answer,
-        "/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"
+        "/home/guagua/agent-runtime/document/media_dry_run/ambient_loop.mp3"
     );
     assert!(music_summary.contract_ok);
 }
@@ -573,7 +573,7 @@ fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
         "schema_version": 1,
         "action": "run",
         "status": "ok",
-        "command": "echo \"Current working directory: $(pwd)\" > /home/guagua/rustclaw/pwd_line_abs.txt",
+        "command": "echo \"Current working directory: $(pwd)\" > /home/guagua/agent-runtime/pwd_line_abs.txt",
         "command_output": "",
         "stdout": "",
         "stderr": "",
@@ -581,11 +581,11 @@ fn exact_scalar_path_prefers_latest_path_synthesis_over_run_cmd_status() {
         "complete": true,
         "artifacts": [{
             "kind": "file",
-            "path": "/home/guagua/rustclaw/pwd_line_abs.txt"
+            "path": "/home/guagua/agent-runtime/pwd_line_abs.txt"
         }]
     })
     .to_string();
-    let answer = "/home/guagua/rustclaw/pwd_line_abs.txt".to_string();
+    let answer = "/home/guagua/agent-runtime/pwd_line_abs.txt".to_string();
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", &status));
@@ -706,14 +706,14 @@ fn loop_contract_observed_answer_preserves_explicit_json_delivery() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
-        r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#,
+        r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#,
     ));
     loop_state
         .delivery_messages
         .push("**执行过程**\n1. 调用技能 `system_basic`".to_string());
     loop_state
         .delivery_messages
-        .push(r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#.to_string());
+        .push(r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#.to_string());
     let task = claimed_task("task-loop-contract-json");
     let mut finalizer_summary = None;
 
@@ -726,7 +726,7 @@ fn loop_contract_observed_answer_preserves_explicit_json_delivery() {
 
     assert_eq!(
         loop_state.delivery_messages.last().map(String::as_str),
-        Some(r#"{"path":"/home/guagua/rustclaw/README.md","size_bytes":24929}"#)
+        Some(r#"{"path":"/home/guagua/agent-runtime/README.md","size_bytes":24929}"#)
     );
     assert!(finalizer_summary.is_none());
 }
@@ -744,7 +744,7 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
-    let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#;
+    let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/agent-runtime","workspace_root":"/home/guagua/agent-runtime"}"#;
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -761,7 +761,7 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
                 step_id: "step_2".to_string(),
                 action_type: "respond".to_string(),
                 skill: "respond".to_string(),
-                args: serde_json::json!({"content":"/home/guagua/rustclaw"}),
+                args: serde_json::json!({"content":"/home/guagua/agent-runtime"}),
                 depends_on: Vec::new(),
                 why: String::new(),
             }])),
@@ -778,11 +778,11 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
 
     assert_eq!(
         loop_state.delivery_messages,
-        vec!["/home/guagua/rustclaw".to_string()]
+        vec!["/home/guagua/agent-runtime".to_string()]
     );
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("/home/guagua/rustclaw")
+        Some("/home/guagua/agent-runtime")
     );
     assert_eq!(
         finalizer_summary.and_then(|summary| summary.grounded_ok),
@@ -802,7 +802,7 @@ fn grounded_latest_synthesis_replaces_structured_json_delivery() {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
-    let raw = r#"{"system_health":{"kernel_release":"6.17.0-29-generic"},"workspace_root":"/home/guagua/rustclaw"}"#;
+    let raw = r#"{"system_health":{"kernel_release":"6.17.0-29-generic"},"workspace_root":"/home/guagua/agent-runtime"}"#;
     let answer = "6.17.0-29-generic";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
@@ -846,7 +846,7 @@ fn grounded_terminal_respond_rejects_ungrounded_content() {
         output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
-    let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#;
+    let raw = r#"{"arch":"x86_64","cwd":"/home/guagua/agent-runtime","workspace_root":"/home/guagua/agent-runtime"}"#;
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state
@@ -1087,7 +1087,7 @@ fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     let polluted_delivery =
-        "scripts: {\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}\nname: rustclaw-nl-fixture";
+        "scripts: {\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}\nname: agent-runtime-nl-fixture";
     loop_state
         .delivery_messages
         .push(polluted_delivery.to_string());
@@ -1096,7 +1096,7 @@ fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"scripts","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"},{"exists":true,"field_path":"name","resolved_field_path":"name","value":"rustclaw-nl-fixture","value_text":"rustclaw-nl-fixture","value_type":"string"}]}"#,
+        r#"{"action":"read_fields","path":"/repo/package.json","format":"json","results":[{"exists":true,"field_path":"scripts","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"},{"exists":true,"field_path":"name","resolved_field_path":"name","value":"agent-runtime-nl-fixture","value_text":"agent-runtime-nl-fixture","value_type":"string"}]}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
@@ -1123,10 +1123,10 @@ fn scalar_contract_replaces_multi_line_read_fields_delivery_with_unique_observed
         &mut finalizer_summary,
     );
 
-    assert_eq!(delivery, vec!["rustclaw-nl-fixture".to_string()]);
+    assert_eq!(delivery, vec!["agent-runtime-nl-fixture".to_string()]);
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("rustclaw-nl-fixture")
+        Some("agent-runtime-nl-fixture")
     );
     assert!(finalizer_summary.is_some());
 }
@@ -1175,9 +1175,9 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
 fn unclassified_strict_summary_preserves_publishable_model_answer() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new();
-    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let observed = "/home/guagua/agent-runtime\nguagua\nThinkPad-X1\n";
     let synthesis =
-        "The current working directory is /home/guagua/rustclaw. The logged-in user is guagua. The hostname is ThinkPad-X1.";
+        "The current working directory is /home/guagua/agent-runtime. The logged-in user is guagua. The hostname is ThinkPad-X1.";
     loop_state
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", observed));

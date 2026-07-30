@@ -389,7 +389,7 @@ pub(super) fn fetch_quote_from_coinbase(
     );
     let v: Value = client
         .get(url)
-        .header("User-Agent", "RustClaw-Crypto-Skill/1.0")
+        .header("User-Agent", "agent-crypto-skill/1.0")
         .send()
         .map_err(|err| format!("coinbase quote request failed: {err}"))?
         .json()
@@ -614,7 +614,7 @@ pub(super) fn fetch_book_ticker_from_coinbase(
     );
     let v: Value = client
         .get(url)
-        .header("User-Agent", "RustClaw-Crypto-Skill/1.0")
+        .header("User-Agent", "agent-crypto-skill/1.0")
         .send()
         .map_err(|err| format!("coinbase bookTicker request failed: {err}"))?
         .json()

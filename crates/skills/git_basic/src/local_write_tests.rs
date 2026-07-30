@@ -11,7 +11,7 @@ struct TestRepository {
 impl TestRepository {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "rustclaw-git-local-write-{}-{}",
+            "agent-runtime-git-local-write-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -20,10 +20,10 @@ impl TestRepository {
         ));
         std::fs::create_dir_all(&root).expect("create repository");
         git(&root, &["init", "--quiet"]);
-        git(&root, &["config", "user.name", "RustClaw Test"]);
+        git(&root, &["config", "user.name", "Agent Runtime Test"]);
         git(
             &root,
-            &["config", "user.email", "rustclaw-test@example.invalid"],
+            &["config", "user.email", "agent-runtime-test@example.invalid"],
         );
         std::fs::write(root.join("tracked.txt"), "initial\n").expect("fixture");
         git(&root, &["add", "--", "tracked.txt"]);

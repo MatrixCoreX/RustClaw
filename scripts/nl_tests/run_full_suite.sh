@@ -13,7 +13,7 @@ RUN_LOG="${RUN_DIR}/run.log"
 BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID_VALUE="${USER_ID:-1985996990}"
 CHAT_ID_VALUE="${CHAT_ID:-1985996990}"
-USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+USER_KEY_VALUE="${APP_USER_KEY:-${USER_KEY:-}}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-180}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 NETWORK_RETRY_COUNT_VALUE="${NETWORK_RETRY_COUNT:-5}"
@@ -44,7 +44,7 @@ Options:
   --base-url URL        clawd base url
   --user-id ID          user id for submits
   --chat-id ID          base chat id for submits
-  --user-key KEY        RustClaw user key
+  --user-key KEY        Agent Runtime user key
   --wait-seconds N      max wait per case
   --poll-seconds N      poll interval
   --network-retries N   retry count for submit/query network failures

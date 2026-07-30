@@ -1,7 +1,7 @@
 # Code Index Contract
 
 `code_index` is the planner-facing repository intelligence boundary. It keeps
-an incremental machine index at `.rustclaw/index/repository-v1.json` and
+an incremental machine index at `.agent-runtime/index/repository-v1.json` and
 returns structured definitions, references, tests, changed-file impact, and
 bounded source ranges.
 

@@ -1,4 +1,5 @@
 import type { WorkspaceUpdateStatus } from "../types/api";
+import { productCopy } from "./product-identity";
 
 export type UiLanguage = "zh" | "en";
 
@@ -29,7 +30,7 @@ export interface WorkspaceVersionDisplay {
 }
 
 function copy(lang: UiLanguage, zh: string, en: string): string {
-  return lang === "zh" ? zh : en;
+  return productCopy(lang === "zh" ? zh : en);
 }
 
 export function buildWorkspaceVersionDisplay(
@@ -151,8 +152,8 @@ export function formatWorkspaceUpdateNextStep(
   if (!key) return status?.next_step || null;
   const labels: Record<string, string> = {
     "workspace_update.cancel_requested": copy(lang, "正在停止当前编译进程。", "Stopping the current build process."),
-    "workspace_update.invalid_git_repo": copy(lang, "请确认 RustClaw 目录是有效 Git 仓库。", "Confirm the RustClaw directory is a valid Git repository."),
-    "workspace_update.git_unavailable": copy(lang, "请确认当前用户可以在 RustClaw 目录中运行 git。", "Confirm the current user can run git in the RustClaw directory."),
+    "workspace_update.invalid_git_repo": copy(lang, "请确认 {product_name} 目录是有效 Git 仓库。", "Confirm the {product_name} directory is a valid Git repository."),
+    "workspace_update.git_unavailable": copy(lang, "请确认当前用户可以在 {product_name} 目录中运行 git。", "Confirm the current user can run git in the {product_name} directory."),
     "workspace_update.remote_fetch_required_failed": copy(
       lang,
       "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
@@ -231,8 +232,8 @@ export function formatWorkspaceUpdateNextStep(
     ),
     "workspace_update.restart_wait": copy(
       lang,
-      "RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
-      "RustClaw is restarting. Wait 10-20 seconds, then refresh the page.",
+      "{product_name} 正在重启，请等待 10-20 秒后刷新页面。",
+      "{product_name} is restarting. Wait 10-20 seconds, then refresh the page.",
     ),
     "workspace_update.full_restart_failed": copy(
       lang,
@@ -291,8 +292,8 @@ export function formatWorkspaceUpdateNextStep(
     ),
     "workspace_update.release_deploy_restart_scheduled": copy(
       lang,
-      "Release 包已部署，RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
-      "The Release package was deployed and RustClaw is restarting. Wait 10-20 seconds, then refresh the page.",
+      "Release 包已部署，{product_name} 正在重启，请等待 10-20 秒后刷新页面。",
+      "The Release package was deployed and {product_name} is restarting. Wait 10-20 seconds, then refresh the page.",
     ),
     "workspace_update.release_deploy_restart_failed": copy(
       lang,
@@ -311,13 +312,13 @@ export function formatWorkspaceUpdateNextStep(
     ),
     "workspace_update.source_checkout_restart_scheduled": copy(
       lang,
-      "源码模式已启用，RustClaw 正在重启；恢复后会显示 Git 拉取与编译功能。",
-      "Source mode is enabled and RustClaw is restarting. Git pull and build controls will appear after recovery.",
+      "源码模式已启用，{product_name} 正在重启；恢复后会显示 Git 拉取与编译功能。",
+      "Source mode is enabled and {product_name} is restarting. Git pull and build controls will appear after recovery.",
     ),
     "workspace_update.source_checkout_restart_failed": copy(
       lang,
-      "源码模式已启用，但自动重启失败。请在服务器上手动重启 RustClaw。",
-      "Source mode was enabled, but automatic restart failed. Restart RustClaw manually on the server.",
+      "源码模式已启用，但自动重启失败。请在服务器上手动重启 {product_name}。",
+      "Source mode was enabled, but automatic restart failed. Restart {product_name} manually on the server.",
     ),
     "workspace_update.canceled": copy(
       lang,
@@ -382,8 +383,8 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
   if (running && status?.mode === "nginx_disable") {
     return copy(
       lang,
-      "正在停止 nginx、删除 RustClaw 站点配置和专用 UI 部署。",
-      "Stopping nginx and removing the RustClaw site configuration and dedicated UI deployment.",
+      "正在停止 nginx、删除 {product_name} 站点配置和专用 UI 部署。",
+      "Stopping nginx and removing the {product_name} site configuration and dedicated UI deployment.",
     );
   }
   if (running && status?.step === "downloading_release") {
@@ -396,7 +397,7 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
     return copy(
       lang,
       "正在验证源码并迁移本地运行状态，成功后会重启并启用 Git 拉取与编译。",
-      "Validating source and migrating local runtime state. RustClaw will restart with Git pull and build controls when complete.",
+      "Validating source and migrating local runtime state. {product_name} will restart with Git pull and build controls when complete.",
     );
   }
   return formatWorkspaceUpdateStep(status?.step, lang);
@@ -479,15 +480,15 @@ function workspaceUpdateNotice(
       title: copy(
         lang,
         status.mode === "release_deploy"
-          ? "Release 包已部署，RustClaw 正在重启。"
+          ? "Release 包已部署，{product_name} 正在重启。"
           : status.mode === "source_checkout"
-            ? "源码模式已启用，RustClaw 正在重启。"
-            : "编译/部署已完成，RustClaw 正在重启。",
+            ? "源码模式已启用，{product_name} 正在重启。"
+            : "编译/部署已完成，{product_name} 正在重启。",
         status.mode === "release_deploy"
-          ? "Release package deployed and RustClaw is restarting."
+          ? "Release package deployed and {product_name} is restarting."
           : status.mode === "source_checkout"
-            ? "Source mode is enabled and RustClaw is restarting."
-            : "Build/deploy completed and RustClaw is restarting.",
+            ? "Source mode is enabled and {product_name} is restarting."
+            : "Build/deploy completed and {product_name} is restarting.",
       ),
       detail: nextStep ?? copy(
         lang,
@@ -550,14 +551,14 @@ function workspaceUpdateNotice(
           : status.mode === "nginx_disable"
             ? "nginx 远程入口已不可用；需要恢复时请从服务器终端或直连 webd 重新启用。"
           : status.mode === "nginx_enable"
-            ? "现在可以通过主机 80 端口打开 RustClaw；nginx 已使用当前 UI。"
+            ? "现在可以通过主机 80 端口打开 {product_name}；nginx 已使用当前 UI。"
           : "当前构建流程已成功结束。",
         status.mode === "ui_only"
           ? "The page will refresh automatically and use the new version. The progress run has ended."
           : status.mode === "nginx_disable"
             ? "The nginx remote entry is unavailable. Re-enable it from the server terminal or a direct webd connection when needed."
           : status.mode === "nginx_enable"
-            ? "RustClaw is now available through the host's port 80, using the current UI."
+            ? "{product_name} is now available through the host's port 80, using the current UI."
           : "The current build completed successfully.",
       ),
     };

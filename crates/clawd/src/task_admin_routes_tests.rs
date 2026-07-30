@@ -74,7 +74,7 @@ fn state_with_goal_task(task_id: &str, payload: Value) -> crate::AppState {
 
 fn auth_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert("x-rustclaw-key", HeaderValue::from_static(USER_KEY));
+    headers.insert("x-agent-key", HeaderValue::from_static(USER_KEY));
     headers
 }
 

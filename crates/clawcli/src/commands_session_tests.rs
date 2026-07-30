@@ -108,7 +108,7 @@ fn session_store_archive_delete_and_fork_use_machine_metadata() {
         "session_id": "task-session-store",
         "task_ids": ["task-session-store"],
         "active_goal_id": "goal-store",
-        "workspace_root": "/tmp/rustclaw",
+        "workspace_root": "/tmp/agent-runtime",
         "latest_checkpoint_id": "ckpt-store",
         "latest_event_seq": "77",
         "archived": false

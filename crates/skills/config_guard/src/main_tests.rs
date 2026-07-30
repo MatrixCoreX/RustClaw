@@ -22,10 +22,8 @@ fn error_extra_merges_machine_contract_and_details() {
 }
 
 fn temp_root(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "rustclaw_config_guard_{name}_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("agent_config_guard_{name}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("configs")).expect("create temp configs");
     root
@@ -48,7 +46,8 @@ fn resolve_config_path_falls_back_for_missing_configs_config_toml() {
     let root = temp_root("missing_requested");
     let default_path = root.join("configs/config.toml");
     std::fs::write(&default_path, "[tools]\n").expect("write default config");
-    let obj = json!({ "path": root.join("rustclaw/configs/config.toml").display().to_string() });
+    let obj =
+        json!({ "path": root.join("agent-runtime/configs/config.toml").display().to_string() });
     let resolved = resolve_config_path(&root, obj.as_object().expect("object"));
 
     assert_eq!(resolved, default_path);

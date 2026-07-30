@@ -29,7 +29,7 @@ pub(crate) fn run_reload_skills(base_url: &str, key: &str) -> Result<()> {
     let url = format!("{}/admin/reload-skills", client::base_v1(base_url));
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .send()
         .context("reload-skills failed")?;
     let status = resp.status();

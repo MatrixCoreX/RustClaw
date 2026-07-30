@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 fn state_with_batch_registry() -> AppState {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-action-batch-contract-{}-{}",
+        "agent-runtime-action-batch-contract-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
@@ -32,6 +32,7 @@ planner_capabilities = [
     let _ = std::fs::remove_dir_all(root);
     let mut state = AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(["batch_fixture".to_string()].into_iter().collect()),
     })));

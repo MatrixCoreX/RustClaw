@@ -181,7 +181,7 @@ pub(crate) fn manager_supported_on_platform(manager: &str, platform: &str) -> bo
     match manager {
         "systemd" | "service" => platform == "linux",
         "launchd" => platform == "macos",
-        "brew_services" | "process_only" | "rustclaw" | "unknown" => true,
+        "brew_services" | "process_only" | "agent_runtime" | "unknown" => true,
         _ => false,
     }
 }
@@ -548,8 +548,8 @@ fn workspace_root() -> PathBuf {
 pub(super) fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -> Vec<String> {
     let mut evidence = Vec::new();
     match manager {
-        "rustclaw" => {
-            if !super::RUSTCLAW_SERVICES.contains(&target) {
+        "agent_runtime" => {
+            if !super::AGENT_SERVICES.contains(&target) {
                 evidence.push(format!("service {} not in whitelist, no log path", target));
                 return evidence;
             }

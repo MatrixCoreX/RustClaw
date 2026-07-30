@@ -36,7 +36,7 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
             &command_line,
             transcript_path.to_str().expect("transcript path"),
         ])
-        .env("RUSTCLAW_CLAWCLI_SESSION_STORE", &session_store)
+        .env("APP_CLAWCLI_SESSION_STORE", &session_store)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -529,7 +529,7 @@ fn spawn_chat(
             "--conversation-id",
             "conversation-golden",
         ])
-        .env("RUSTCLAW_CLAWCLI_SESSION_STORE", session_store)
+        .env("APP_CLAWCLI_SESSION_STORE", session_store)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

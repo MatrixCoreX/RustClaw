@@ -56,8 +56,8 @@ pub struct SecretValue {
     inner: String,
 }
 
-pub const SECRET_TOKEN_REFERENCE_PREFIX: &str = "rustclaw-secret://v1/";
-const SECRET_TOKEN_STORE_DIR_ENV: &str = "RUSTCLAW_SECRET_TOKEN_DIR";
+pub const SECRET_TOKEN_REFERENCE_PREFIX: &str = "agent-secret://v1/";
+const SECRET_TOKEN_STORE_DIR_ENV: &str = "APP_SECRET_TOKEN_DIR";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SecretTokenRecord {
@@ -375,7 +375,7 @@ pub fn secret_token_store_dir() -> PathBuf {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| env::temp_dir().join("rustclaw-secret-tokens"))
+        .unwrap_or_else(|| env::temp_dir().join("agent-secret-tokens"))
 }
 
 fn token_record_path(store_dir: &Path, token: &str) -> PathBuf {

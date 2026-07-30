@@ -608,7 +608,7 @@ fn machine_output_artifact_refs_are_promoted_to_the_result_envelope() {
         "kind": "tool_output_artifact",
         "artifact_refs": [{
             "id": "tool-output:task:stdout",
-            "path": ".rustclaw/artifacts/tool-output/task/stdout.log",
+            "path": ".agent-runtime/artifacts/tool-output/task/stdout.log",
             "media_type": "text/plain",
             "sha256": "abc123",
             "metadata": {

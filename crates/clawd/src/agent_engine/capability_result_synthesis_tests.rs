@@ -401,7 +401,7 @@ fn config_risk_results_use_generic_synthesis_without_domain_contract() {
 fn multiple_structured_fields_use_generic_synthesis_without_comparison_contract() {
     let mut loop_state = LoopState::default();
     for (path, field_path, value) in [
-        ("UI/package.json", "name", "rustclaw-ui"),
+        ("UI/package.json", "name", "agent-runtime-ui"),
         ("crates/clawd/Cargo.toml", "package.name", "clawd"),
     ] {
         loop_state
@@ -584,7 +584,7 @@ fn workspace_inventory_and_read_excerpt_use_generic_synthesis() {
                 "extra": {
                     "action": "read_range",
                     "path": "README.md",
-                    "excerpt": "1|# RustClaw\n2|A local agent runtime."
+                    "excerpt": "1|# Agent Runtime\n2|A local agent runtime."
                 }
             }),
         ),
@@ -776,7 +776,7 @@ fn explicit_model_observation_keeps_deep_evidence_and_drops_bulk_metadata() {
 fn result_nine_and_large_result_remain_content_addressed_and_recoverable() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-evidence-catalog-{}",
+        "agent-runtime-evidence-catalog-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&root).unwrap();

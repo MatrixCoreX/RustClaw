@@ -119,6 +119,13 @@ fn feishu_config_path(state: &AppState) -> PathBuf {
         .join("configs/channels/feishu.toml")
 }
 
+fn lark_config_path(state: &AppState) -> PathBuf {
+    state
+        .skill_rt
+        .workspace_root
+        .join("configs/channels/lark.toml")
+}
+
 fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
     let path = telegram_config_path(state);
     if !path.exists() {
@@ -163,6 +170,30 @@ fn read_feishu_config_raw(state: &AppState) -> anyhow::Result<String> {
     let raw = std::fs::read_to_string(&path)?;
     if raw.trim().is_empty() {
         return Ok(FEISHU_CONFIG_TEMPLATE.to_string());
+    }
+    Ok(raw)
+}
+
+fn read_lark_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
+    let path = lark_config_path(state);
+    if !path.exists() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    Ok(toml::from_str(&raw)?)
+}
+
+fn read_lark_config_raw(state: &AppState) -> anyhow::Result<String> {
+    let path = lark_config_path(state);
+    if !path.exists() {
+        return Ok(LARK_CONFIG_TEMPLATE.to_string());
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(LARK_CONFIG_TEMPLATE.to_string());
     }
     Ok(raw)
 }
@@ -272,6 +303,65 @@ fn reset_feishu_config_raw_preserving_format(raw: &str) -> String {
         ("encrypt_key", toml_string_literal("")),
     ] {
         output = upsert_section_key_line(&output, "feishu", key, &rendered_value);
+    }
+    output
+}
+
+fn update_lark_config_raw_preserving_format(raw: &str, app_id: &str, app_secret: &str) -> String {
+    let enabled = !app_id.trim().is_empty() && !app_secret.trim().is_empty();
+    let mut output = if raw.trim().is_empty() {
+        LARK_CONFIG_TEMPLATE.to_string()
+    } else {
+        raw.to_string()
+    };
+    for (key, rendered_value) in [
+        ("enabled", enabled.to_string()),
+        ("app_id", toml_string_literal(app_id.trim())),
+        ("app_secret", toml_string_literal(app_secret.trim())),
+        ("mode", toml_string_literal("long_connection")),
+        ("listen", toml_string_literal("0.0.0.0:8790")),
+        (
+            "clawd_base_url",
+            toml_string_literal("http://127.0.0.1:8787"),
+        ),
+        (
+            "api_base_url",
+            toml_string_literal("https://open.larksuite.com"),
+        ),
+        ("language", toml_string_literal("en-US")),
+        (
+            "i18n_path",
+            toml_string_literal("configs/i18n/larkd.en-US.toml"),
+        ),
+        ("image_inbox_dir", toml_string_literal("data/larkd/image")),
+        ("video_inbox_dir", toml_string_literal("data/larkd/video")),
+        ("audio_inbox_dir", toml_string_literal("data/larkd/audio")),
+        ("file_inbox_dir", toml_string_literal("data/larkd/file")),
+        ("verification_token", toml_string_literal("")),
+        ("encrypt_key", toml_string_literal("")),
+        ("request_timeout_seconds", "30".to_string()),
+        ("task_delivery_timeout_seconds", "600".to_string()),
+        ("text_chunk_chars", "4000".to_string()),
+    ] {
+        output = upsert_section_key_line(&output, "lark", key, &rendered_value);
+    }
+    output
+}
+
+fn reset_lark_config_raw_preserving_format(raw: &str) -> String {
+    let mut output = if raw.trim().is_empty() {
+        LARK_CONFIG_TEMPLATE.to_string()
+    } else {
+        raw.to_string()
+    };
+    for (key, rendered_value) in [
+        ("enabled", "false".to_string()),
+        ("app_id", toml_string_literal("")),
+        ("app_secret", toml_string_literal("")),
+        ("verification_token", toml_string_literal("")),
+        ("encrypt_key", toml_string_literal("")),
+    ] {
+        output = upsert_section_key_line(&output, "lark", key, &rendered_value);
     }
     output
 }

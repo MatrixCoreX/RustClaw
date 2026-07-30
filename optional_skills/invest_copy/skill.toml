@@ -5,7 +5,7 @@ schema_version = 2
 name = "invest_copy"
 version = "0.1.8"
 description = "Turn grounded research data into investment-oriented copy with explicit risk context."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/invest-copy-skill"
 working_directory = "."
 timeout_seconds = 90
-environment_allowlist = ["ANTHROPIC_API_KEY", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "RUSTCLAW_INTERNAL_LLM_TOKEN", "RUSTCLAW_INTERNAL_LLM_URL", "RUSTCLAW_SELECTED_LLM_PROVIDER_TYPE", "RUSTCLAW_SELECTED_LLM_VENDOR", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "ANTHROPIC_API_KEY", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_VENDOR", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]

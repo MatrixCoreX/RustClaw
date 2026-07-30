@@ -28,7 +28,7 @@ pub(super) fn get_v1_json(
     let url = format!("{}{}", client::base_v1(base_url), path);
     let resp = client::make_client()?
         .get(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .send()
         .with_context(|| format!("request {context_label} failed"))?;
     let status = resp.status();

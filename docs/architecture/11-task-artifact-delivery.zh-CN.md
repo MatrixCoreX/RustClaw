@@ -9,7 +9,7 @@
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw 会把成功任务输出的文件转换为经过鉴权、可持久恢复的任务产物。浏览器读取
+Agent Runtime 会把成功任务输出的文件转换为经过鉴权、可持久恢复的任务产物。浏览器读取
 机器可解析的产物清单，根据类型展示预览或下载控件，不解析助手回复中的自然语言。
 
 ## 交付流程
@@ -38,7 +38,7 @@ flowchart LR
 ```
 
 任务成功时，`clawd` 收集结构化的本地输出引用，确认来源位于工作区内，将允许交付的
-文件复制到 `.rustclaw/artifacts/delivery/<task_id>/<artifact_id>/`，并在持久化任务
+文件复制到 `.agent-runtime/artifacts/delivery/<task_id>/<artifact_id>/`，并在持久化任务
 结果中增加 `artifacts` 数组。每条清单包含稳定 ID、文件名、媒体类别、MIME 类型、
 字节数、SHA-256 摘要，以及同源下载和预览路径。
 

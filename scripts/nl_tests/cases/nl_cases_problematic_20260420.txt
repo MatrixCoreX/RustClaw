@@ -54,7 +54,7 @@ manual|followup_switch_dir_then_ordinal_first|count_overrun,list_limit|先列出
 # Evidence:
 #   scripts/nl_suite_logs/clarify_focus_20260420/20260420_215413/run.log
 #   scripts/nl_suite_logs/modelio_deictic_fix_20260421_rerun/20260421_001543/run.log
-clarify|clarify_deictic_model_io_tail|看一下那个 model io log 最后 4 行，再一句话说有什么现象|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+clarify|clarify_deictic_model_io_tail|看一下那个 model io log 最后 4 行，再一句话说有什么现象|/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/logs/model_io.log
 
 # Fixed on 2026-04-21.
 # Original symptom: in the aborted broad rerun, turn1 directly answered via historical alias
@@ -67,7 +67,7 @@ clarify|clarify_deictic_model_io_tail|看一下那个 model io log 最后 4 行�
 # Evidence:
 #   scripts/nl_suite_logs/dynamic_guard_clarify_rerun/20260420_215119/run.log
 #   scripts/nl_suite_logs/readme_deictic_fix_20260421/20260421_001019/run.log
-clarify|clarify_deictic_readme_again|读一下那个 README 开头，然后一句话总结|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+clarify|clarify_deictic_readme_again|读一下那个 README 开头，然后一句话总结|/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md
 
 # Fixed on 2026-04-21.
 # Original symptom:

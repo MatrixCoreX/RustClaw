@@ -7,7 +7,7 @@ pub(crate) fn run_health(base_url: &str, key: Option<&str>) -> Result<()> {
     let url = format!("{}/health", client::base_v1(base_url));
     let mut req = Client::new().get(&url);
     if let Some(k) = key {
-        req = req.header("x-rustclaw-key", k);
+        req = req.header("x-agent-key", k);
     }
     let resp = req.send().context("request failed")?;
     let status = resp.status();

@@ -40,7 +40,7 @@ fn resume_steering_prompt_preserves_multilingual_input_as_opaque_json() {
 
     let envelope: Value =
         serde_json::from_str(payload["text"].as_str().expect("steering prompt")).expect("JSON");
-    assert_eq!(envelope["protocol"], "rustclaw.resume_input.v1");
+    assert_eq!(envelope["protocol"], "agent.resume_input.v1");
     assert_eq!(envelope["original_request"], "initial request");
     assert_eq!(envelope["user_message"], "继续，但不要改公开接口");
     assert_eq!(envelope["new_constraints"]["verification"], "必須");

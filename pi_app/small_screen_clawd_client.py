@@ -36,7 +36,7 @@ def localhost_api_request(method, path, user_key="", body=None):
     headers = {}
     stripped_key = (user_key or "").strip()
     if stripped_key:
-        headers["X-RustClaw-Key"] = stripped_key
+        headers["X-Agent-Key"] = stripped_key
     if body is not None:
         headers["Content-Type"] = "application/json"
     host, port = _api_host_port()
@@ -106,7 +106,7 @@ def post_admin_webd_account(user_key, username, password):
         return False, str(exc)
 
 
-def reset_admin_login_account(username="rustclaw", password="rustclaw123456"):
+def reset_admin_login_account(username="admin", password="123456"):
     admin_key = load_enabled_admin_user_key()
     if not admin_key:
         return False, "enabled admin key not found"

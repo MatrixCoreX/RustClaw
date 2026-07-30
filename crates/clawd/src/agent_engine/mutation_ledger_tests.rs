@@ -298,11 +298,11 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
         attempt_no: 1,
         receipt: safe_mutation_outcome_projection(Some(&serde_json::json!({
             "pending_async_job": {
-                "job_id": "local_process:/tmp/rustclaw-job-1",
+                "job_id": "local_process:/tmp/agent-runtime-job-1",
                 "status": "accepted",
                 "poll_after_seconds": 1,
                 "expires_at": 2_000_000_000,
-                "cancel_ref": "local_process:/tmp/rustclaw-job-1",
+                "cancel_ref": "local_process:/tmp/agent-runtime-job-1",
                 "message_key": "clawd.task.async_job_pending"
             }
         }))),
@@ -342,7 +342,7 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
             .as_ref()
             .and_then(|value| value.pointer("/pending_async_job/job_id"))
             .and_then(serde_json::Value::as_str),
-        Some("local_process:/tmp/rustclaw-job-1")
+        Some("local_process:/tmp/agent-runtime-job-1")
     );
     assert_eq!(
         loop_state
@@ -355,7 +355,7 @@ fn completed_async_mutation_rebuilds_waiting_checkpoint_without_replay() {
     assert_eq!(replay_output["idempotency_replay"], true);
     assert_eq!(
         replay_output["recorded_result"]["structured_extra"]["pending_async_job"]["job_id"],
-        "local_process:/tmp/rustclaw-job-1"
+        "local_process:/tmp/agent-runtime-job-1"
     );
 }
 

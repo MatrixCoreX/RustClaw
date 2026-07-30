@@ -1,13 +1,13 @@
-# RustClaw 技能前置条件与绑定方式
+# Agent Runtime 技能前置条件与绑定方式
 
-这份文档给 RustClaw 回答“某个 skill 怎么开通 / 怎么绑定 / 怎么配置 / 缺什么前置条件”时使用。目标不是背固定话术，而是让模型知道当前仓库里真实的配置入口、作用域和下一步操作方式。
+这份文档给 Agent Runtime 回答“某个 skill 怎么开通 / 怎么绑定 / 怎么配置 / 缺什么前置条件”时使用。目标不是背固定话术，而是让模型知道当前仓库里真实的配置入口、作用域和下一步操作方式。
 
 ## 回答原则
 
 1. 先说真实入口，再说操作建议。优先说明它到底是改配置文件、写环境变量、走本地数据库、调用已有 API，还是需要本机依赖 / 第三方登录。
 2. 明确作用域。要分清这是“当前机器全局配置”“当前仓库配置”“按 `user_key` 存储的用户级绑定”，还是“当前会话 / 当前通道登录态”。
 3. 如果只差一个关键信息，就顺手追问。不要只停在说明层。若缺的是普通参数或路径，可以直接追问；若缺的是 secret / token / password / API key，优先引导用户走专用命令、UI、本地配置或 API，不要让用户把敏感值发到普通对话。
-4. 不要先把能自动做的事推回给用户手改。如果 RustClaw 已经有 `read_file` / `write_file` / `run_cmd` / 现成 API，就优先让模型知道可以继续调用底层能力落地修改。
+4. 不要先把能自动做的事推回给用户手改。如果 Agent Runtime 已经有 `read_file` / `write_file` / `run_cmd` / 现成 API，就优先让模型知道可以继续调用底层能力落地修改。
 5. 不要把 `configs/*.toml` 和数据库型绑定混为一谈。尤其是 `crypto`：交易所凭据正常路径是按 `user_key` 写入本地数据库，不是让用户直接改 `configs/crypto.toml`。
 6. `configs/` 下的配置文件修改是 admin 权限能力。当前任务不是 admin 时，应该直接回复没有权限，不要继续尝试修改。
 
@@ -16,9 +16,9 @@
 | 技能 | 真实前置条件 / 配置入口 | 回答时应强调什么，下一步该问什么 |
 | --- | --- | --- |
 | `run_cmd` `read_file` `write_file` `list_dir` `make_dir` `remove_file` | 无额外绑定；直接依赖当前工作区和本机权限 | 这些是本地基础能力，不需要单独开通。若用户要改文件、写文件、创建目录或执行命令，直接继续执行即可。 |
-| `schedule` | 无第三方绑定；依赖 RustClaw 调度能力 | 如果用户问怎么用，说明需要任务内容和时间表达式；下一步追问“你要我帮你建什么定时任务、什么时候触发”。 |
+| `schedule` | 无第三方绑定；依赖 Agent Runtime 调度能力 | 如果用户问怎么用，说明需要任务内容和时间表达式；下一步追问“你要我帮你建什么定时任务、什么时候触发”。 |
 | `system_basic` `process_basic` `health_check` `log_analyze` `service_control` `task_control` `config_guard` | 无第三方绑定；直接依赖本机环境、服务和配置文件 | 这些属于本地运维 / 检查能力。通常不需要额外配置；如果失败，多半是权限、目标服务不存在，或路径不对。 |
-| `archive_basic` `fs_search` `git_basic` `package_manager` `install_module` `docker_basic` `db_basic` `http_basic` `doc_parse` `transform` | 主要依赖本机命令、文件和网络；`git_basic` 读 `configs/git_basic.toml`；`db_basic` 默认库是 `data/rustclaw.db` | 这类 skill 通常不用“绑定账号”。如果用户要改默认行为，再去改对应配置或命令参数。`db_basic` 这类要追问具体库路径 / SQL / 目标表。 |
+| `archive_basic` `fs_search` `git_basic` `package_manager` `install_module` `docker_basic` `db_basic` `http_basic` `doc_parse` `transform` | 主要依赖本机命令、文件和网络；`git_basic` 读 `configs/git_basic.toml`；`db_basic` 默认库是 `data/agent-runtime.db` | 这类 skill 通常不用“绑定账号”。如果用户要改默认行为，再去改对应配置或命令参数。`db_basic` 这类要追问具体库路径 / SQL / 目标表。 |
 | `rss_fetch` | 读 `configs/rss.toml`；源列表、分类、失败退避都在这里 | 告诉用户 RSS 不是账号绑定型 skill，重点是 feed 源配置。若要补源，追问“你要加到哪个 category，feed URL 是什么”。 |
 | `browser_web` | 依赖 `crates/skills/browser_web/browser_web.js`、Node.js、Playwright；等待策略在 `configs/browser_web_wait_map.json` | 如果用户问为什么不能用，优先说明是本机浏览器依赖型 skill。下一步追问“要不要我先检查 / 安装 Node.js 和 Playwright，或帮你调 wait map”。 |
 | `web_search_extract` | 搜索后端来自 `args.backend` / `WEB_SEARCH_BACKEND`；`serpapi` 需要 `SERPAPI_API_KEY`；DuckDuckGo HTML 路径可零 key 运行 | 说明它是“搜索后端 + 抽取”型 skill，不是仓库配置文件绑定为主。若用户要更稳的搜索，追问“你要不要配 `SERPAPI_API_KEY`，或者先继续走 DuckDuckGo fallback”。 |

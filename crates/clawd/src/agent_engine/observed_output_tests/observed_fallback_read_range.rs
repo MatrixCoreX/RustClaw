@@ -14,7 +14,7 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
                 ),
                 (
                     "__OBSERVED_OUTPUTS__",
-                    "### step_1 skill(read_file)\n# RustClaw",
+                    "### step_1 skill(read_file)\n# Agent Runtime",
                 ),
                 ("__CONFIG_RESPONSE_LANGUAGE__", "zh-CN"),
                 ("__REQUEST_LANGUAGE_HINT__", "mixed"),
@@ -35,7 +35,7 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
         .find("BEGIN_OBSERVED_OUTPUTS_DATA")
         .expect("observed data start marker");
     let observed = prompt
-        .find("### step_1 skill(read_file)\n# RustClaw")
+        .find("### step_1 skill(read_file)\n# Agent Runtime")
         .expect("rendered observed data");
     let data_end = prompt
         .find("END_OBSERVED_OUTPUTS_DATA")
@@ -138,15 +138,15 @@ fn unclassified_status_observation_uses_regular_synthesis_template() {
 #[test]
 fn observed_answer_language_compatibility_rejects_clear_request_language_mismatch() {
     assert!(!observed_answer_language_compatible(
-        "当前工作目录是 /home/guagua/rustclaw；进程 clawd 正在监听 8787。",
+        "当前工作目录已经确认，相关服务正在正常监听，请继续执行下一步操作。",
         "en",
     ));
     assert!(observed_answer_language_compatible(
-        "The working directory is /home/guagua/rustclaw; process clawd is listening on 8787.",
+        "The working directory is /home/guagua/agent-runtime; process clawd is listening on 8787.",
         "en",
     ));
     assert!(observed_answer_language_compatible(
-        "/home/guagua/rustclaw",
+        "/home/guagua/agent-runtime",
         "en",
     ));
     assert!(observed_answer_language_compatible(
@@ -187,7 +187,7 @@ fn observed_answer_language_compatibility_accepts_language_neutral_machine_field
 #[test]
 fn observed_answer_language_compatibility_accepts_machine_fields_with_observed_content() {
     let english_content =
-        "path: /home/guagua/rustclaw/README.md\nline_count: 1432\nfirst_line: # RustClaw";
+        "path: /home/guagua/agent-runtime/README.md\nline_count: 1432\nfirst_line: # Agent Runtime";
     let multilingual_content =
         "path=/tmp/notes.md\nline_count=12\nfirst_line=服务状态已恢复";
 
@@ -216,7 +216,7 @@ fn read_range_observation_preserves_bounded_machine_metadata() {
         "start_line": 1,
         "end_line": 1,
         "line_count": 1432,
-        "excerpt": "1|# RustClaw"
+        "excerpt": "1|# Agent Runtime"
     });
 
     let observation = read_range_observed_candidate(&value).expect("read range observation");
@@ -227,7 +227,7 @@ fn read_range_observation_preserves_bounded_machine_metadata() {
     assert!(observation.contains("end_line=1"));
     assert!(observation.contains("requested_n=1"));
     assert!(observation.contains("mode=head"));
-    assert!(observation.ends_with("\n# RustClaw"));
+    assert!(observation.ends_with("\n# Agent Runtime"));
 }
 
 #[test]
@@ -310,13 +310,13 @@ fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_mach
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"action":"inventory_dir","counts":{"files":4,"total":4},"entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"}],"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
+        r#"{"action":"inventory_dir","counts":{"files":4,"total":4},"entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"}],"path":"/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route.selection.structured_field_selector = Some("path".to_string());
     route.locator_kind = OutputLocatorKind::Path;
     route.locator_hint =
-        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+        "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
     route.selection.list_selector.limit = Some(3);
     let answer = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
 
@@ -512,7 +512,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "read_file",
-        "RustClaw is deployed locally and keeps task state in sqlite.",
+        "Agent Runtime is deployed locally and keeps task state in sqlite.",
     ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -541,7 +541,7 @@ fn direct_answer_defers_doc_parse_content_to_model_synthesis() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "doc_parse",
-            r##"{"text":"# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution.\n\n## Overview\nMore text."}"##,
+            r##"{"text":"# Agent Runtime\n\n<img src=\"./Agent Runtime.png\" width=\"420\" />\n\nAgent Runtime is a local Rust agent runtime centered on clawd and designed for multi-channel task execution.\n\n## Overview\nMore text."}"##,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -568,7 +568,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "doc_parse",
-            r##"{"text":"# RustClaw\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."}"##,
+            r##"{"text":"# Agent Runtime\n\nAgent Runtime is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."}"##,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -597,7 +597,7 @@ fn direct_answer_defers_filename_content_to_model_synthesis() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|\n3|<img src=\"./Agent Runtime.png\" width=\"420\" />\n4|"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -625,7 +625,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","mode":"range","start_line":1,"end_line":4,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
+            r#"{"action":"read_range","mode":"range","start_line":1,"end_line":4,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|\n3|<img src=\"./Agent Runtime.png\" width=\"420\" />\n4|"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -647,7 +647,7 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n")
+        Some("# Agent Runtime\n\n<img src=\"./Agent Runtime.png\" width=\"420\" />\n")
     );
 }
 
@@ -657,7 +657,7 @@ fn exact_observation_output_read_range_direct_answer_preserves_visible_blank_lin
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
-            r#"{"action":"read_range","mode":"head","requested_n":2,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|"}"#,
+            r#"{"action":"read_range","mode":"head","requested_n":2,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -680,7 +680,7 @@ fn exact_observation_output_read_range_direct_answer_preserves_visible_blank_lin
 
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("# RustClaw\n")
+        Some("# Agent Runtime\n")
     );
 }
 
@@ -736,8 +736,8 @@ fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
     ));
     let skill_output = serde_json::json!({
             "action": "read_range",
-            "path": "/home/guagua/rustclaw/logs/clawd.log",
-            "resolved_path": "/home/guagua/rustclaw/logs/clawd.log",
+            "path": "/home/guagua/agent-runtime/logs/clawd.log",
+            "resolved_path": "/home/guagua/agent-runtime/logs/clawd.log",
             "mode": "tail",
             "requested_n": 2,
             "excerpt": "1858|2026-05-13T18:29:58Z finalize_ok\n1859|2026-05-13T18:29:59Z prior task mentioned release_checklist.md"
@@ -808,7 +808,7 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|\n3|A tool runtime\n4|"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -838,7 +838,7 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_basic",
-            r#"{"action":"read_range","path":"/tmp/service_notes.md","resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes."}"#,
+            r#"{"action":"read_range","path":"/tmp/service_notes.md","resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|\n3|Agent Runtime test fixture service notes."}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -869,7 +869,7 @@ fn path_inspection_contract_does_not_passthrough_read_range() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/rustclaw.service","resolved_path":"/tmp/rustclaw.service","excerpt":"1|[Unit]\n2|Description=RustClaw Service\n3|[Service]\n4|ExecStart=/bin/bash start-all-bin.sh"}"#,
+            r#"{"action":"read_range","path":"/tmp/agent-runtime.service","resolved_path":"/tmp/agent-runtime.service","excerpt":"1|[Unit]\n2|Description=Agent Runtime Service\n3|[Service]\n4|ExecStart=/bin/bash start-all-bin.sh"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,
@@ -878,7 +878,7 @@ fn path_inspection_contract_does_not_passthrough_read_range() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Filename,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -886,7 +886,7 @@ fn path_inspection_contract_does_not_passthrough_read_range() {
         };
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
-        auto_locator_path: Some("/tmp/rustclaw.service".to_string()),
+        auto_locator_path: Some("/tmp/agent-runtime.service".to_string()),
         ..AgentRunContext::default()
     };
 
@@ -903,7 +903,7 @@ fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_inte
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Agent Runtime\n2|\n3|A tool runtime\n4|"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,

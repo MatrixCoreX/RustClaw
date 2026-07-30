@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-# 脚本所在目录 = RustClaw 根目录
+# 脚本所在目录 = agent runtime 根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
@@ -20,11 +20,11 @@ HOST_TARGET="$(host_rust_target 2>/dev/null || true)"
 
 default_nginx_root() {
   if [[ "$HOST_OS" == "macos" ]]; then
-    printf '%s\n' "$HOME/.rustclaw/nginx-ui"
+    printf '%s\n' "$HOME/.$APP_DATA_NAMESPACE/nginx-ui"
     return
   fi
 
-  printf '%s\n' "/var/www/html/rustclaw"
+  printf '%s\n' "/var/www/html/$APP_DATA_NAMESPACE"
 }
 
 NGINX_ROOT_DEFAULT="$(default_nginx_root)"
@@ -64,7 +64,7 @@ usage() {
   echo "  $0                    # deploy existing UI/dist to default nginx root"
   echo "  $0 --copy             # deploy existing UI/dist"
   echo "  $0 --build            # build UI, then deploy"
-  echo "  $0 --path /srv/http/rustclaw   # deploy to custom path"
+  echo "  $0 --path /srv/http/agent-system   # deploy to custom path"
 }
 
 nginx_conf_path() {
@@ -74,23 +74,23 @@ nginx_conf_path() {
       brew_prefix="$(brew --prefix 2>/dev/null || true)"
     fi
     if [[ -n "$brew_prefix" ]]; then
-      printf '%s\n' "$brew_prefix/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "$brew_prefix/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
     if [[ -d "/opt/homebrew/etc/nginx" ]]; then
-      printf '%s\n' "/opt/homebrew/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "/opt/homebrew/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
     if [[ -d "/usr/local/etc/nginx" ]]; then
-      printf '%s\n' "/usr/local/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "/usr/local/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
   fi
   if [[ -d "/etc/nginx/sites-available" ]]; then
-    printf '%s\n' "/etc/nginx/sites-available/rustclaw-ui.conf"
+    printf '%s\n' "/etc/nginx/sites-available/${APP_SERVICE_NAME}-ui.conf"
     return
   fi
-  printf '%s\n' "/etc/nginx/conf.d/rustclaw-ui.conf"
+  printf '%s\n' "/etc/nginx/conf.d/${APP_SERVICE_NAME}-ui.conf"
 }
 
 nginx_main_conf_path() {
@@ -344,37 +344,6 @@ ensure_nginx_site_link() {
   echo "Ensured nginx site link: $site_link -> $conf_path"
 }
 
-remove_stale_nginx_ui_entries() {
-  local conf_path="$1"
-  local site_link="$2"
-  local stale_path=""
-  local removed_any=1
-
-  for stale_path in \
-    "/etc/nginx/conf.d/rustclaw-ui.conf" \
-    "/etc/nginx/sites-available/rustclaw-ui.conf" \
-    "/etc/nginx/sites-enabled/rustclaw-ui.conf"
-  do
-    if [[ "$stale_path" == "$conf_path" ]] || [[ -n "$site_link" && "$stale_path" == "$site_link" ]]; then
-      continue
-    fi
-    if [[ ! -e "$stale_path" && ! -L "$stale_path" ]]; then
-      continue
-    fi
-
-    if path_writable_or_creatable "$stale_path"; then
-      rm -f "$stale_path"
-      echo "Removed stale nginx entry: $stale_path"
-    else
-      sudo rm -f "$stale_path"
-      echo "Removed stale nginx entry: $stale_path (sudo)."
-    fi
-    removed_any=0
-  done
-
-  return "$removed_any"
-}
-
 systemctl_available() {
   command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1
 }
@@ -500,7 +469,7 @@ write_nginx_config() {
   local ui_root="$2"
   local proxy_upstream="$3"
   cat <<NGX
-# RustClaw UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
+# Agent Runtime UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
 server {
     listen 0.0.0.0:80;
     listen [::]:80;
@@ -717,9 +686,6 @@ else
 fi
 
 ensure_nginx_site_link "$NGINX_CONF" "$NGINX_SITE_LINK"
-if remove_stale_nginx_ui_entries "$NGINX_CONF" "$NGINX_SITE_LINK"; then
-  NGINX_CONFIG_CHANGED=1
-fi
 
 if [[ "$HOST_OS" != "macos" ]] && { [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; }; then
   if [[ -w /etc/nginx/sites-enabled ]]; then

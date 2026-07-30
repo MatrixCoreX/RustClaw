@@ -4,8 +4,8 @@ use tracing::{debug, info};
 
 use super::{
     append_delivery_message, append_progress_hint, build_safe_skill_args_summary,
-    encode_progress_i18n, execute_prepared_skill_action, normalize_skill_arg_aliases,
-    register_step_output, resolve_arg_string, resolve_arg_value,
+    encode_progress_i18n, execute_prepared_skill_action, normalize_registry_argument_aliases,
+    normalize_skill_arg_aliases, register_step_output, resolve_arg_string, resolve_arg_value,
     rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
     rewrite_tool_path_with_written_aliases, ActionLoopDecision, AgentLoopGuardPolicy,
     AgentRunContext, AppState, ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome,
@@ -520,7 +520,15 @@ pub(super) async fn handle_call_tool_action(
                 crate::truncate_for_log(&resolved_args.to_string())
             );
         }
-        if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+        let registry = state.get_skills_registry();
+        let registry_aliases_changed = normalize_registry_argument_aliases(
+            registry.as_deref(),
+            &normalized_skill,
+            &mut resolved_args,
+        );
+        let adapter_normalization_changed =
+            normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args);
+        if registry_aliases_changed || adapter_normalization_changed {
             info!(
                 "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",
                 task.task_id,
@@ -679,7 +687,15 @@ pub(super) async fn handle_call_skill_action(
                 crate::truncate_for_log(&resolved_args.to_string())
             );
         }
-        if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+        let registry = state.get_skills_registry();
+        let registry_aliases_changed = normalize_registry_argument_aliases(
+            registry.as_deref(),
+            &normalized_skill,
+            &mut resolved_args,
+        );
+        let adapter_normalization_changed =
+            normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args);
+        if registry_aliases_changed || adapter_normalization_changed {
             info!(
                 "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",
                 task.task_id,

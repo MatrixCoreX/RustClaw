@@ -271,7 +271,10 @@ fn wechat_i18n_binding_keys_are_locale_specific_with_key_fallback() {
             .to_string_lossy()
             .to_string(),
     );
-    let missing = test_wechat_section("missing", "/tmp/rustclaw-no-such-i18n.toml".to_string());
+    let missing = test_wechat_section(
+        "missing",
+        "/tmp/agent-runtime-no-such-i18n.toml".to_string(),
+    );
 
     assert!(wechat_t(&zh, "wechat.msg.bind_success").contains("绑定成功"));
     assert!(!wechat_t(&zh, "wechat.msg.bind_key_required_for_chat").contains("Please send"));

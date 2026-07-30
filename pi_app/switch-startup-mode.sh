@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODE="${1:-status}"
 PI_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVICE_NAME="rustclaw-small-screen-headless.service"
+SERVICE_NAME="agent-small-screen-headless.service"
 SERVICE_SRC="${PI_APP_DIR}/systemd/${SERVICE_NAME}"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"
 TARGET_USER="${SUDO_USER:-${USER}}"
@@ -67,7 +67,7 @@ set_headless_mode() {
 show_status() {
   local default_target autostart_state svc_enabled svc_active autologin
   default_target="$(systemctl get-default 2>/dev/null || true)"
-  if [[ -f "${TARGET_HOME}/.config/autostart/rustclaw-small-screen.desktop" ]]; then
+  if [[ -f "${TARGET_HOME}/.config/autostart/agent-small-screen.desktop" ]]; then
     autostart_state="enabled"
   else
     autostart_state="disabled"

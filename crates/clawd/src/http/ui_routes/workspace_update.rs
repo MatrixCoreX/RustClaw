@@ -303,17 +303,23 @@ fn latest_release_check_due(status: &WorkspaceUpdateStatus, force_refresh: bool,
         .unwrap_or(true)
 }
 
-fn release_platform_prefixes() -> Option<(&'static str, &'static str)> {
-    release_platform_prefixes_for(std::env::consts::OS, std::env::consts::ARCH)
+fn release_platform_prefixes() -> Option<(String, String)> {
+    let release_prefix =
+        release_platform_prefixes_for(std::env::consts::OS, std::env::consts::ARCH)?;
+    let app_id = claw_core::product_identity::product_identity().release_artifact_id();
+    Some((
+        release_prefix.to_string(),
+        format!("{app_id}-{release_prefix}"),
+    ))
 }
 
-fn release_platform_prefixes_for(os: &str, arch: &str) -> Option<(&'static str, &'static str)> {
+fn release_platform_prefixes_for(os: &str, arch: &str) -> Option<&'static str> {
     if os != "linux" {
         return None;
     }
     match arch {
-        "aarch64" => Some(("pi-aarch64-", "RustClaw-pi-aarch64-")),
-        "x86_64" => Some(("ubuntu-x86_64-", "RustClaw-ubuntu-x86_64-")),
+        "aarch64" => Some("pi-aarch64-"),
+        "x86_64" => Some("ubuntu-x86_64-"),
         _ => None,
     }
 }
@@ -333,7 +339,11 @@ fn select_latest_compatible_release_tag(
         if !tag.starts_with(release_prefix) {
             return None;
         }
-        let expected_archive = format!("RustClaw-{tag}.tar.gz");
+        let app_id = asset_prefix
+            .strip_suffix(release_prefix)
+            .unwrap_or("agent-system-")
+            .trim_end_matches('-');
+        let expected_archive = format!("{app_id}-{tag}.tar.gz");
         let has_compatible_archive = release
             .get("assets")
             .and_then(Value::as_array)
@@ -387,13 +397,10 @@ impl LatestReleaseLookupError {
 async fn fetch_latest_release_tag() -> Result<String, LatestReleaseLookupError> {
     let (release_prefix, asset_prefix) =
         release_platform_prefixes().ok_or(LatestReleaseLookupError::UnsupportedPlatform)?;
-    let repo = std::env::var("RUSTCLAW_RELEASE_REPO")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "MatrixCoreX/RustClaw".to_string());
+    let repo = claw_core::product_identity::product_identity().release_repository();
     let url = format!(
         "https://api.github.com/repos/{}/releases?per_page=20",
-        repo.trim()
+        repo
     );
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(RELEASE_CHECK_TIMEOUT_SECONDS))
@@ -402,7 +409,7 @@ async fn fetch_latest_release_tag() -> Result<String, LatestReleaseLookupError> 
     let response = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header(reqwest::header::USER_AGENT, "RustClaw-version-check")
+        .header(reqwest::header::USER_AGENT, "Agent-System-version-check")
         .send()
         .await
         .map_err(|error| {
@@ -419,7 +426,7 @@ async fn fetch_latest_release_tag() -> Result<String, LatestReleaseLookupError> 
         .json::<Vec<Value>>()
         .await
         .map_err(|_| LatestReleaseLookupError::InvalidResponse)?;
-    select_latest_compatible_release_tag(&releases, release_prefix, asset_prefix)
+    select_latest_compatible_release_tag(&releases, &release_prefix, &asset_prefix)
         .ok_or(LatestReleaseLookupError::CompatibleReleaseNotFound)
 }
 
@@ -1362,10 +1369,13 @@ fn schedule_workspace_update_clawd_restart(workspace_root: &Path) -> Result<(), 
 
 #[cfg(target_os = "linux")]
 fn schedule_workspace_update_systemd_restart() -> Result<(), String> {
-    let service_unit =
-        std::env::var("RUSTCLAW_SYSTEMD_UNIT").unwrap_or_else(|_| "rustclaw.service".to_string());
+    let service_unit = ["agent-runtime-core.service", "agent-runtime.service"]
+        .into_iter()
+        .find(|unit| Path::new("/etc/systemd/system").join(unit).exists())
+        .map(str::to_string)
+        .ok_or_else(|| "configured systemd unit was not found".to_string())?;
     if !is_safe_systemd_unit_name(&service_unit) {
-        return Err("RUSTCLAW_SYSTEMD_UNIT contains unsupported characters".to_string());
+        return Err("APP_SYSTEMD_UNIT contains unsupported characters".to_string());
     }
 
     let systemctl = ["/usr/bin/systemctl", "/bin/systemctl"]
@@ -1373,7 +1383,7 @@ fn schedule_workspace_update_systemd_restart() -> Result<(), String> {
         .find(|path| Path::new(path).is_file())
         .ok_or_else(|| "systemctl not found for systemd-managed restart".to_string())?;
     let transient_unit = format!(
-        "rustclaw-restart-{}-{}",
+        "agent-restart-{}-{}",
         std::process::id(),
         current_unix_ts()
     );
@@ -1427,7 +1437,7 @@ fn schedule_workspace_update_direct_restart(workspace_root: &Path) -> Result<(),
          fi; \
          pkill -TERM -f '[t]arget/release/clawd|cargo run -p clawd' >/dev/null 2>&1 || true; \
          sleep 1; \
-         RUSTCLAW_SKIP_BANNER=1 nohup bash ./component_start/start-clawd.sh release > logs/restart-clawd.log 2>&1 &",
+         APP_SKIP_BANNER=1 nohup bash ./component_start/start-clawd.sh release > logs/restart-clawd.log 2>&1 &",
         shell_escape_arg(workspace.as_ref())
     );
     let spawn_result = StdCommand::new("nohup")

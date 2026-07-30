@@ -13,7 +13,7 @@ use tokio::process::Command;
 
 use crate::ClaimedTask;
 
-const SESSION_ROOT: &str = ".rustclaw/pty_sessions";
+const SESSION_DIR_NAME: &str = "pty_sessions";
 const DEFAULT_PAGE_BYTES: usize = 64 * 1024;
 const MAX_PAGE_BYTES: usize = 1024 * 1024;
 const MIN_SESSION_OUTPUT_BYTES: u64 = 1024;
@@ -129,7 +129,7 @@ pub(super) async fn execute_existing_session_action(
     args: &Map<String, Value>,
 ) -> Result<String, PtySessionError> {
     let session_id = required_session_id(args)?;
-    let session_dir = session_dir(workspace_root, session_id)?;
+    let session_dir = existing_session_dir(workspace_root, session_id)?;
     validate_existing_session_dir(workspace_root, &session_dir)?;
     let spec = read_launch_spec(&session_dir)?;
     ensure_owner(task, &spec)?;
@@ -227,7 +227,7 @@ async fn spawn_session_runner(
 }
 
 fn locate_session_runner(workspace_root: &Path) -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("RUSTCLAW_PTY_SESSION_RUNNER")
+    if let Some(path) = claw_core::product_identity::env_os("PTY_SESSION_RUNNER")
         .map(PathBuf::from)
         .filter(|path| path.is_file())
     {
@@ -433,6 +433,33 @@ fn ensure_owner(task: Option<&ClaimedTask>, spec: &PtyLaunchSpec) -> Result<(), 
 }
 
 fn session_dir(workspace_root: &Path, session_id: &str) -> Result<PathBuf, PtySessionError> {
+    validate_session_id(session_id)?;
+    Ok(
+        claw_core::workspace_state::workspace_state_root(workspace_root)
+            .join(SESSION_DIR_NAME)
+            .join(session_id),
+    )
+}
+
+fn existing_session_dir(
+    workspace_root: &Path,
+    session_id: &str,
+) -> Result<PathBuf, PtySessionError> {
+    validate_session_id(session_id)?;
+    Ok(
+        claw_core::workspace_state::known_workspace_state_roots(workspace_root)
+            .into_iter()
+            .map(|root| root.join(SESSION_DIR_NAME).join(session_id))
+            .find(|path| path.exists())
+            .unwrap_or_else(|| {
+                claw_core::workspace_state::workspace_state_root(workspace_root)
+                    .join(SESSION_DIR_NAME)
+                    .join(session_id)
+            }),
+    )
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), PtySessionError> {
     if session_id.is_empty()
         || session_id.len() > 96
         || !session_id
@@ -441,15 +468,15 @@ fn session_dir(workspace_root: &Path, session_id: &str) -> Result<PathBuf, PtySe
     {
         return Err(machine_error("pty_session_id_invalid"));
     }
-    Ok(workspace_root.join(SESSION_ROOT).join(session_id))
+    Ok(())
 }
 
 fn create_session_directories(
     workspace_root: &Path,
     session_dir: &Path,
 ) -> Result<(), PtySessionError> {
-    let state_root = workspace_root.join(".rustclaw");
-    let sessions_root = state_root.join("pty_sessions");
+    let state_root = claw_core::workspace_state::workspace_state_root(workspace_root);
+    let sessions_root = state_root.join(SESSION_DIR_NAME);
     ensure_real_directory(&state_root)?;
     ensure_real_directory(&sessions_root)?;
     fs::create_dir(session_dir)
@@ -481,9 +508,22 @@ fn validate_existing_session_dir(
     workspace_root: &Path,
     session_dir: &Path,
 ) -> Result<(), PtySessionError> {
+    let sessions_root = session_dir
+        .parent()
+        .ok_or_else(|| machine_error("pty_session_state_path_unsafe"))?;
+    let state_root = sessions_root
+        .parent()
+        .ok_or_else(|| machine_error("pty_session_state_path_unsafe"))?;
+    if sessions_root.file_name().and_then(|value| value.to_str()) != Some(SESSION_DIR_NAME)
+        || !claw_core::workspace_state::known_workspace_state_roots(workspace_root)
+            .iter()
+            .any(|known| known == state_root)
+    {
+        return Err(machine_error("pty_session_state_path_unsafe"));
+    }
     for path in [
-        workspace_root.join(".rustclaw"),
-        workspace_root.join(SESSION_ROOT),
+        state_root.to_path_buf(),
+        sessions_root.to_path_buf(),
         session_dir.to_path_buf(),
     ] {
         let metadata = fs::symlink_metadata(&path)

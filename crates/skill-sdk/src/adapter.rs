@@ -802,7 +802,7 @@ fn materialize_file_symlink(path: &Path) -> SkillSdkResult<()> {
         )
         .phase("artifact"));
     }
-    let replacement = path.with_extension("rustclaw-materialized");
+    let replacement = path.with_extension("agent-materialized");
     fs::copy(&target, &replacement)?;
     set_executable(&replacement)?;
     fs::remove_file(path)?;
@@ -1008,7 +1008,7 @@ fn seed_private_cargo_home(
     if packages.is_empty() {
         return Ok(());
     }
-    let source_home = std::env::var_os("RUSTCLAW_CARGO_SOURCE_CACHE")
+    let source_home = std::env::var_os("APP_CARGO_SOURCE_CACHE")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("CARGO_HOME").map(PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo")))

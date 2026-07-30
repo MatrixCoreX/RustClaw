@@ -1,8 +1,8 @@
 use super::tests::{install_test_registry, test_state};
-use super::{evidence_policy_action_policy_error, preflight_permission_decision, LoopState};
+use super::{evidence_policy_action_policy_error, LoopState};
 
 #[test]
-fn preflight_permission_decision_marks_media_dry_run_as_low_risk_observe() {
+fn evidence_policy_preflight_rejects_non_x_dry_run() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -29,25 +29,32 @@ planner_capabilities = [
         "dry_run": true
     });
 
-    let permission = preflight_permission_decision(
+    let err = evidence_policy_action_policy_error(
         &state,
+        &LoopState::new(),
         "image_generate",
         &args,
-        "media_dry_run_probe",
-        "media_dry_run_probe",
+        "call_skill",
+    )
+    .expect("non-X dry-run must be rejected before execution");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("non-X dry-run rejection should be structured");
+    assert_eq!(parsed.error_code, "contract_action_rejected");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("dry_run_reserved_for_x"))
     );
-
-    assert_eq!(permission["risk_level"], serde_json::json!("low"));
-    assert_eq!(permission["needs_confirmation"], false);
-    assert_eq!(permission["action_effect"], serde_json::json!("observe"));
 }
 
 #[test]
-fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
+fn evidence_policy_preflight_rejects_run_cmd_dry_run() {
     let state = test_state();
     let loop_state = LoopState::new();
     let args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN",
+        "command": "sleep 2 && echo APP_ASYNC_DRY_RUN",
         "async_start": true,
         "poll_after_seconds": 2,
         "expires_in_seconds": 600,
@@ -66,9 +73,7 @@ fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
             .extra
             .as_ref()
             .and_then(|extra| extra.get("reason_code")),
-        Some(&serde_json::json!(
-            "run_cmd_dry_run_requires_preview_contract"
-        ))
+        Some(&serde_json::json!("dry_run_reserved_for_x"))
     );
     assert_eq!(
         parsed.extra.as_ref().and_then(|extra| extra.get("dry_run")),
@@ -78,12 +83,12 @@ fn evidence_policy_preflight_requires_explicit_run_cmd_dry_run_field() {
         parsed
             .extra
             .as_ref()
-            .and_then(|extra| extra.get("forbidden_effect")),
-        Some(&serde_json::json!("local_process_start"))
+            .and_then(|extra| extra.get("allowed_skill")),
+        Some(&serde_json::json!("x"))
     );
 
     let live_args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN",
+        "command": "sleep 2 && echo APP_ASYNC_DRY_RUN",
         "async_start": true,
         "poll_after_seconds": 2,
         "expires_in_seconds": 600

@@ -12,7 +12,7 @@ const MACOS_SEATBELT_BACKEND: &str = "macos_seatbelt";
 const REMOTE_CONTAINER_BACKEND: &str = "remote_container";
 const DIRECT_BACKEND: &str = "direct";
 #[cfg(target_os = "linux")]
-const INTERNAL_WRITABLE_ROOT: &str = "/run/rustclaw-writable";
+const INTERNAL_WRITABLE_ROOT: &str = "/tmp/agent-runtime-writable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessNetworkPolicy {
@@ -357,11 +357,7 @@ fn prepare_bubblewrap(
     }
     let mut additional_writable_targets = Vec::new();
     if !request.additional_writable_paths.is_empty() {
-        command
-            .arg("--tmpfs")
-            .arg("/run")
-            .arg("--dir")
-            .arg(INTERNAL_WRITABLE_ROOT);
+        command.arg("--dir").arg(INTERNAL_WRITABLE_ROOT);
     }
     for (index, path) in request.additional_writable_paths.iter().enumerate() {
         let source = canonical_directory(path)?;

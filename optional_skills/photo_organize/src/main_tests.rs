@@ -45,8 +45,10 @@ fn error_extra_exposes_machine_contract() {
 
 #[test]
 fn missing_explicit_source_is_a_verified_pre_dispatch_failure() {
-    let root =
-        std::env::temp_dir().join(format!("rustclaw-photo-preflight-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-photo-preflight-{}",
+        std::process::id()
+    ));
     let args = serde_json::json!({
         "action": "organize",
         "mode": "copy",
@@ -69,7 +71,7 @@ fn missing_explicit_source_is_a_verified_pre_dispatch_failure() {
 
 #[test]
 fn installed_runner_resolves_relative_source_against_workspace() {
-    let workspace = Path::new("/workspace/rustclaw");
+    let workspace = Path::new("/workspace/agent-runtime");
     let installed_version = Path::new("/packages/photo/versions/0.1.8");
     assert_eq!(
         resolve_source_path(
@@ -110,7 +112,7 @@ fn mountinfo_discovery_keeps_real_media_mounts() {
 #[test]
 fn media_style_discovery_handles_raspberry_pi_user_mounts() {
     let base = std::env::temp_dir().join(format!(
-        "rustclaw-photo-organize-test-{}",
+        "agent-runtime-photo-organize-test-{}",
         std::process::id()
     ));
     let media = base.join("media");

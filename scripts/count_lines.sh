@@ -22,7 +22,7 @@ count_by_ext() {
   printf "  %-12s %8s 行\n" "$desc" "${count:-0}"
 }
 
-echo "RustClaw 项目代码行数统计（排除 target/node_modules/.git 等）"
+echo "Agent runtime 项目代码行数统计（排除 target/node_modules/.git 等）"
 echo "================================================================"
 
 # 所有参与统计的源码文件

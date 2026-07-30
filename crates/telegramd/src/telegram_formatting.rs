@@ -874,7 +874,7 @@ pub(super) fn looks_like_general_command_token(core: &str) -> bool {
     }
     matches!(
         lower.as_str(),
-        "rustclaw"
+        "agentctl"
             | "cargo"
             | "npm"
             | "pnpm"
@@ -1045,7 +1045,7 @@ pub(super) fn looks_like_shell_command_line(text: &str) -> bool {
         "pnpm",
         "yarn",
         "cargo",
-        "rustclaw",
+        "agentctl",
         "git",
         "curl",
         "wget",

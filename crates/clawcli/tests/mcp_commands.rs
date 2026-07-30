@@ -57,7 +57,7 @@ fn serve_requests(listener: TcpListener, count: usize) {
         let (mut stream, _) = listener.accept().expect("accept CLI request");
         let request = read_request(&mut stream);
         let lower = request.to_ascii_lowercase();
-        assert!(lower.contains("x-rustclaw-key: test-admin-key"));
+        assert!(lower.contains("x-agent-key: test-admin-key"));
         let first_line = request.lines().next().unwrap_or_default();
         let body = if first_line.starts_with("GET /v1/admin/mcp/servers ") {
             json!({

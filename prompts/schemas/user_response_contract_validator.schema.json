@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/user_response_contract_validator.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/user_response_contract_validator.schema.json",
   "title": "UserResponseContractValidationOut",
   "description": "Schema for the JSON object returned by prompts/user_response_contract_validator_prompt.md. Mirrors UserResponseContractValidationOut in crates/clawd/src/fallback.rs.",
   "type": "object",

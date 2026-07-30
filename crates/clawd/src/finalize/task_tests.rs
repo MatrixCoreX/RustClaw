@@ -370,7 +370,7 @@ fn existing_file_delivery_token_answer_canonicalizes_workspace_relative_path() {
         .expect("clock")
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "rustclaw_finalize_file_token_{}_{}",
+        "agent_finalize_file_token_{}_{}",
         std::process::id(),
         nonce
     ));
@@ -570,7 +570,7 @@ fn answer_verifier_failure_machine_json_is_detected() {
     assert!(answer_text_is_machine_json_payload(
         r#"{"message_key":"answer_verifier_required_evidence_block","missing_evidence_fields":["output_format"]}"#,
     ));
-    assert!(!answer_text_is_machine_json_payload("rustclaw"));
+    assert!(!answer_text_is_machine_json_payload("agent-runtime"));
 }
 
 #[test]
@@ -893,7 +893,7 @@ fn missing_file_search_evidence_is_detected_without_route_hint() {
             ..Default::default()
         });
     let answer = crate::AskReply::llm(
-        "文件 `definitely_missing_named_file_rustclaw_001.txt` 未找到。".to_string(),
+        "文件 `definitely_missing_named_file_agent_001.txt` 未找到。".to_string(),
     )
     .with_task_journal(journal);
     assert!(journal_has_missing_file_search_evidence(
@@ -920,7 +920,7 @@ fn missing_file_delivery_reply_uses_output_contract_file_token_even_without_want
             ..Default::default()
         });
     let answer = crate::AskReply::llm(
-        "找不到文件 `definitely_missing_named_file_rustclaw_001.txt`。".to_string(),
+        "找不到文件 `definitely_missing_named_file_agent_001.txt`。".to_string(),
     )
     .with_task_journal(journal);
     let mut route = crate::IntentOutputContract::default();

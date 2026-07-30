@@ -5,7 +5,7 @@ schema_version = 2
 name = "install_module"
 version = "0.1.8"
 description = "Use module.preview_install for every preview-only request; module.install is the separate high-risk mutating capability."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/install-module-skill"
 working_directory = "."
 timeout_seconds = 30
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_WORKSPACE_STATE_DIR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
@@ -50,7 +50,7 @@ update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_install", "install"] }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "minItems" = 1, "maxItems" = 64, "items" = { "type" = "string", "minLength" = 1, "maxLength" = 256 } }, "ecosystem" = { "type" = "string", "enum" = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, "version" = { "type" = "string", "maxLength" = 128 }, "scope" = { "type" = "string", "enum" = ["project", "tool_cache"] }, "project_path" = { "type" = "string" }, "dry_run" = { "type" = "boolean" } } }
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_install", "install"] }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "minItems" = 1, "maxItems" = 64, "items" = { "type" = "string", "minLength" = 1, "maxLength" = 256 } }, "ecosystem" = { "type" = "string", "enum" = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, "version" = { "type" = "string", "maxLength" = 128 }, "scope" = { "type" = "string", "enum" = ["project", "tool_cache"] }, "project_path" = { "type" = "string" } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
 capabilities = [{ "name" = "module.preview_install", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["module|modules"], "optional" = ["ecosystem", "version", "scope", "project_path"], "timeout_seconds" = 30, "action" = "preview_install" }, { "name" = "module.install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["module|modules"], "optional" = ["ecosystem", "version", "scope", "project_path"], "timeout_seconds" = 30, "action" = "install" }]

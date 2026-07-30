@@ -120,7 +120,8 @@ fn deterministic_missing_observed_target_uses_generic_machine_shape() {
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::OneSentence;
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
+    route.locator_hint =
+        "/home/guagua/agent-runtime/document/nl_tool200/group_02/memo.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -130,7 +131,7 @@ fn deterministic_missing_observed_target_uses_generic_machine_shape() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt","error":"not found"}],"include_missing":true}"#,
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/home/guagua/agent-runtime/document/nl_tool200/group_02/memo.txt","error":"not found"}],"include_missing":true}"#,
     ));
 
     let answer = deterministic_missing_observed_target_answer(
@@ -143,7 +144,7 @@ fn deterministic_missing_observed_target_uses_generic_machine_shape() {
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/agent-runtime/document/nl_tool200/group_02/memo.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
     );
 }
 
@@ -154,12 +155,12 @@ fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
     route.requires_content_evidence = false;
     route.response_shape = OutputResponseShape::OneSentence;
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+    route.locator_hint = "/tmp/agent-runtime-missing-ja.txt".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
         original_user_request: Some(
-            "/tmp/rustclaw-missing-ja.txt が存在するか確認してください".to_string(),
+            "/tmp/agent-runtime-missing-ja.txt が存在するか確認してください".to_string(),
         ),
         ..Default::default()
     };
@@ -167,12 +168,12 @@ fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/tmp/rustclaw-missing-ja.txt","error":"not found"}],"include_missing":true}"#,
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/tmp/agent-runtime-missing-ja.txt","error":"not found"}],"include_missing":true}"#,
     ));
 
     let answer = deterministic_missing_observed_target_answer(
         &state,
-        "/tmp/rustclaw-missing-ja.txt が存在するか確認してください",
+        "/tmp/agent-runtime-missing-ja.txt が存在するか確認してください",
         &loop_state,
         Some(&agent_run_context),
     )
@@ -180,7 +181,7 @@ fn deterministic_missing_observed_target_machine_payload_is_language_neutral() {
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/agent-runtime-missing-ja.txt`\nkind=missing\nfinal_answer_shape=summary_with_evidence"
     );
 }
 
@@ -421,7 +422,7 @@ fn deterministic_observed_execution_status_keeps_recovered_content_answer() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "read_file",
-        "file not found: /home/guagua/rustclaw/plan/missing.md",
+        "file not found: /home/guagua/agent-runtime/plan/missing.md",
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_3",
@@ -468,7 +469,7 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
                     action_type: "call_skill".to_string(),
                     skill: "run_cmd".to_string(),
                     args: serde_json::json!({
-                        "command": "definitely_missing_command_rustclaw_user_ops_13579"
+                        "command": "definitely_missing_command_agent_user_ops_13579"
                     }),
                     depends_on: vec!["step_1".to_string()],
                     why: String::new(),
@@ -478,7 +479,7 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
                     action_type: "respond".to_string(),
                     skill: "respond".to_string(),
                     args: serde_json::json!({
-                        "content": "第二步挂了，`definitely_missing_command_rustclaw_user_ops_13579` 命令不存在。"
+                        "content": "第二步挂了，`definitely_missing_command_agent_user_ops_13579` 命令不存在。"
                     }),
                     depends_on: vec!["step_2".to_string()],
                     why: String::new(),
@@ -487,7 +488,7 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
             verify_result: None,
         });
     let planned =
-        "第二步挂了，`definitely_missing_command_rustclaw_user_ops_13579` 命令不存在。".to_string();
+        "第二步挂了，`definitely_missing_command_agent_user_ops_13579` 命令不存在。".to_string();
     loop_state.delivery_messages.push(planned.clone());
     loop_state.last_user_visible_respond = Some(planned.clone());
     loop_state
@@ -503,7 +504,7 @@ fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
     assert!(!replace_delivery_with_deterministic_observed_execution_status_answer(
         &state,
         &task,
-        "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+        "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_agent_user_ops_13579，只告诉我哪一步挂了",
         &mut loop_state,
         &mut finalizer_summary,
     ));
@@ -544,7 +545,7 @@ fn model_failure_delivery_is_not_replaced_by_generic_status() {
                     action_type: "call_skill".to_string(),
                     skill: "run_cmd".to_string(),
                     args: serde_json::json!({
-                        "command": "definitely_missing_command_rustclaw_user_ops_13579"
+                        "command": "definitely_missing_command_agent_user_ops_13579"
                     }),
                     depends_on: vec!["step_1".to_string()],
                     why: String::new(),
@@ -571,7 +572,7 @@ fn model_failure_delivery_is_not_replaced_by_generic_status() {
         !replace_delivery_with_deterministic_observed_execution_status_answer(
             &state,
             &task,
-            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_agent_user_ops_13579，只告诉我哪一步挂了",
             &mut loop_state,
             &mut finalizer_summary,
         )
@@ -760,7 +761,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_user_visible_respond = Some(
-        "step_2: definitely_missing_command_rustclaw_render_ko_0605 failed with exit code 127"
+        "step_2: definitely_missing_command_agent_render_ko_0605 failed with exit code 127"
             .to_string(),
     );
     loop_state.last_publishable_synthesis_output = Some("RC_RENDER_KO_OK".to_string());
@@ -770,7 +771,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "run_cmd",
-        "__RC_SKILL_ERROR__:{\"error_code\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_rustclaw_render_ko_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
+        "__RC_SKILL_ERROR__:{\"error_code\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_agent_render_ko_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
     ));
 
     backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
@@ -778,7 +779,7 @@ fn structured_failure_request_prefers_final_respond_over_synthesis_stdout() {
     assert_eq!(
         loop_state.delivery_messages,
         vec![
-            "step_2: definitely_missing_command_rustclaw_render_ko_0605 failed with exit code 127"
+            "step_2: definitely_missing_command_agent_render_ko_0605 failed with exit code 127"
                 .to_string()
         ]
     );
@@ -810,9 +811,9 @@ fn generic_execution_status_ignores_contract_gap_errors() {
             "Command failed with exit code 127",
             Some("linux"),
             Some(serde_json::json!({
-                "command": "definitely_missing_command_rustclaw_67890",
+                "command": "definitely_missing_command_agent_67890",
                 "exit_code": 127,
-                "stderr": "bash: line 1: definitely_missing_command_rustclaw_67890: command not found\n",
+                "stderr": "bash: line 1: definitely_missing_command_agent_67890: command not found\n",
                 "stdout": serde_json::Value::Null,
             })),
         ),

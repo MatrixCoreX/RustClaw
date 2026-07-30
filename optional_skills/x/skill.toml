@@ -5,7 +5,7 @@ schema_version = 2
 name = "x"
 version = "0.1.8"
 description = "Draft or publish social posts through X/Twitter-like channel tooling. Preview/dry-run requests should call this skill with dry_run=true instead of answering as ordinary chat text."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"

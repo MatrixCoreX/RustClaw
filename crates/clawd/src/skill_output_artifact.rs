@@ -120,7 +120,7 @@ pub(crate) fn spill_skill_text_if_needed(
     let artifact_id = uuid::Uuid::new_v4().to_string();
     let task_key = machine_path_component(task_id, "task");
     let skill_key = machine_path_component(skill_name, "skill");
-    let relative_path = PathBuf::from(".rustclaw")
+    let relative_path = PathBuf::from(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
         .join("artifacts")
         .join("skill-output")
         .join(task_key)
@@ -209,7 +209,7 @@ pub(crate) fn publish_existing_task_artifact(
     let namespace_key = machine_path_component(namespace, "output");
     let task_key = machine_path_component(task_id, "task");
     let suffix_key = machine_path_component(suffix, "data");
-    let relative_path = PathBuf::from(".rustclaw")
+    let relative_path = PathBuf::from(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
         .join("artifacts")
         .join(&namespace_key)
         .join(task_key)
@@ -253,7 +253,7 @@ pub(crate) fn publish_canonical_evidence_artifact(
 ) -> io::Result<PublishedArtifact> {
     let sha256 = format!("{:x}", Sha256::digest(bytes));
     let task_key = machine_path_component(task_id, "task");
-    let relative_path = PathBuf::from(".rustclaw")
+    let relative_path = PathBuf::from(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
         .join("artifacts")
         .join("canonical-evidence")
         .join(task_key)
@@ -371,7 +371,7 @@ fn restrict_evidence_permissions(_path: &Path) -> io::Result<()> {
 }
 
 fn preview_limit_bytes() -> usize {
-    std::env::var("RUSTCLAW_SKILL_OUTPUT_PREVIEW_BYTES")
+    claw_core::product_identity::env_string("SKILL_OUTPUT_PREVIEW_BYTES")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(DEFAULT_PREVIEW_BYTES)

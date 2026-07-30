@@ -22,7 +22,13 @@ fn auth_lifecycle_test_state() -> AppState {
 }
 
 fn seed_kb_user_data(state: &AppState, user_key: &str) {
-    let db = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let db = state
+        .core
+        .skill_storage
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
     let payload = serde_json::json!({
         "namespace": "docs",
         "owner_user_key": user_key,
@@ -60,7 +66,13 @@ fn seed_kb_user_data(state: &AppState, user_key: &str) {
 }
 
 fn kb_user_row_counts(state: &AppState, user_key: &str) -> (i64, i64) {
-    let db = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let db = state
+        .core
+        .skill_storage
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
     let namespaces = db
         .query_row(
             "SELECT COUNT(*) FROM kb_namespaces WHERE owner_user_key = ?1",
@@ -218,7 +230,7 @@ fn ensure_bootstrap_admin_key_creates_default_webd_login_for_empty_db() {
         .expect("created key");
 
     let login_key =
-        verify_webd_password_login(&db, "rustclaw", "123456").expect("verify default webd login");
+        verify_webd_password_login(&db, "admin", "123456").expect("verify default webd login");
     assert_eq!(login_key.as_deref(), Some(created_key.as_str()));
 }
 
@@ -240,7 +252,7 @@ fn ensure_bootstrap_admin_key_backfills_default_webd_login_for_existing_admin() 
 
     assert_eq!(created_key, None);
     let login_key =
-        verify_webd_password_login(&db, "rustclaw", "123456").expect("verify default webd login");
+        verify_webd_password_login(&db, "admin", "123456").expect("verify default webd login");
     assert_eq!(login_key.as_deref(), Some("rk-existing-admin"));
 }
 
@@ -294,7 +306,13 @@ fn admin_rotation_rebinds_crypto_and_kb_storage() {
     assert_eq!(kb_user_row_counts(&state, old_user_key), (0, 0));
     assert_eq!(kb_user_row_counts(&state, &new_user_key), (1, 1));
 
-    let kb = state.core.skill_storage.kb_pool().get().expect("KB db");
+    let kb = state
+        .core
+        .skill_storage
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
     let (payload, source_ref, metadata): (String, String, String) = kb
         .query_row(
             "SELECT n.payload_json, r.source_ref, r.metadata_json

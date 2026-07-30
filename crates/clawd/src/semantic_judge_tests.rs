@@ -93,10 +93,10 @@ fn local_publishable_accepts_real_content() {
 #[test]
 fn local_delivery_artifact_guard_accepts_paths_and_file_tokens() {
     assert!(looks_like_concrete_delivery_artifact(
-        "/home/guagua/rustclaw/document/pwd_line.txt"
+        "/home/guagua/agent-runtime/document/pwd_line.txt"
     ));
     assert!(looks_like_concrete_delivery_artifact(
-        "FILE:/home/guagua/rustclaw/document/pwd_line.txt"
+        "FILE:/home/guagua/agent-runtime/document/pwd_line.txt"
     ));
     assert!(looks_like_concrete_delivery_artifact(
         "C:\\Users\\demo\\pwd_line.txt"

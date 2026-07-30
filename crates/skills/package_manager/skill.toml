@@ -5,7 +5,7 @@ schema_version = 2
 name = "package_manager"
 version = "0.1.8"
 description = "Detect native package managers and preview or perform policy-gated package installation."
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/package-manager-skill"
 working_directory = "."
 timeout_seconds = 30
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_WORKSPACE_STATE_DIR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
@@ -50,10 +50,10 @@ update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, "package" = { "type" = "string" }, "packages" = { "type" = "array", "items" = { "type" = "string" } }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "items" = { "type" = "string" } }, "manager" = { "type" = "string", "enum" = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, "path" = { "type" = "string" }, "root" = { "type" = "string" }, "project_path" = { "type" = "string" }, "workspace" = { "type" = "string" }, "dry_run" = { "type" = "boolean" }, "use_sudo" = { "type" = "boolean" } } }
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, "package" = { "type" = "string" }, "packages" = { "type" = "array", "items" = { "type" = "string" } }, "module" = { "type" = "string" }, "modules" = { "type" = "array", "items" = { "type" = "string" } }, "manager" = { "type" = "string", "enum" = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, "path" = { "type" = "string" }, "root" = { "type" = "string" }, "project_path" = { "type" = "string" }, "workspace" = { "type" = "string" }, "use_sudo" = { "type" = "boolean" } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
-capabilities = [{ "name" = "package.detect_manager", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["manager", "path", "root", "project_path", "workspace"], "timeout_seconds" = 30, "action" = "detect" }, { "name" = "package.install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "install" }, { "name" = "package.smart_install_preview", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install_preview" }, { "name" = "package.smart_install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install" }, { "name" = "package.uninstall", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "dry_run", "use_sudo"], "timeout_seconds" = 30, "action" = "uninstall" }]
+capabilities = [{ "name" = "package.detect_manager", "effect" = "observe", "execution_mode" = "sync_short", "required" = [], "optional" = ["manager", "path", "root", "project_path", "workspace"], "timeout_seconds" = 30, "action" = "detect" }, { "name" = "package.install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "install" }, { "name" = "package.smart_install_preview", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install_preview" }, { "name" = "package.smart_install", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "smart_install" }, { "name" = "package.uninstall", "effect" = "mutate", "execution_mode" = "async_preferred", "required" = ["package|packages|module|modules"], "optional" = ["manager", "use_sudo"], "timeout_seconds" = 30, "action" = "uninstall" }]
 
 [capability_request.permissions]
 llm_gateway = false

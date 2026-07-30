@@ -114,7 +114,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 normalized_user_key() {
-  printf '%s' "${USER_KEY:-${RUSTCLAW_USER_KEY:-}}" | xargs
+  printf '%s' "${USER_KEY:-${APP_USER_KEY:-}}" | xargs
 }
 
 auto_admin_key() {
@@ -188,7 +188,7 @@ with config_path.open("rb") as f:
     data = tomllib.load(f)
 db_path = (((data.get("database") or {}).get("sqlite_path")) or "").strip()
 if not db_path:
-    print(root / "data" / "rustclaw.db")
+    print(root / "data" / "agent-runtime.db")
 else:
     p = Path(db_path)
     print(p if p.is_absolute() else root / p)

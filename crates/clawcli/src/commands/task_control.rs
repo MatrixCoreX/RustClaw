@@ -19,7 +19,7 @@ pub(crate) fn run_active(
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()
@@ -50,7 +50,7 @@ pub(crate) fn run_automation_runs(
     let payload = automation_runs_request_payload(user_id, chat_id, job_id, limit);
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()
@@ -103,7 +103,7 @@ pub(crate) fn run_cancel(
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()
@@ -280,7 +280,7 @@ pub(crate) fn run_cancel_index(
     });
     let resp = client::make_client()?
         .post(&url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("content-type", "application/json")
         .json(&payload)
         .send()

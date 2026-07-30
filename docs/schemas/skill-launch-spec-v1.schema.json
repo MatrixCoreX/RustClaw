@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.dev/schemas/skill-launch-spec-v1.schema.json",
+  "$id": "https://agent-runtime.dev/schemas/skill-launch-spec-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "skill_name", "version", "adapter", "launcher", "program", "args", "working_directory", "environment", "environment_allowlist", "timeout_seconds", "sandbox_profile", "runtime_network", "install_root", "manifest_digest", "receipt_digest"],

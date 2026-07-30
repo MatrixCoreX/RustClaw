@@ -25,6 +25,10 @@ import {
   type ServerChatThreadProjection,
 } from "../lib/chat-history";
 import { followTaskEventStream } from "../lib/task-event-stream";
+import {
+  appStorageKey,
+  CLIENT_ORIGIN_HEADER,
+} from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
 import { extractTaskArtifacts, normalizeTaskArtifacts } from "../lib/task-artifacts";
 import {
@@ -119,7 +123,6 @@ export interface ChatThreadState {
   threads: ChatThreadRecord[];
 }
 
-const LEGACY_CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
 export interface UseChatRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
@@ -255,7 +258,6 @@ export function useChatRuntime({
       conversationHistoryScopeRef.current = scope;
       setChatThreadState(loadChatThreadState(t, scope));
       setChatHistoryCursor(null);
-      window.localStorage.removeItem(LEGACY_CHAT_THREAD_STORAGE_KEY);
     }
     let cancelled = false;
     const restore = async () => {
@@ -894,8 +896,8 @@ export function useChatRuntime({
       setChatError(
         availability === "insecure_context"
           ? t(
-              "浏览器禁止 HTTP IP 地址使用麦克风。请通过受信任的 HTTPS 地址访问；如果浏览器就在 RustClaw 主机上，也可以使用 localhost。",
-              "Browsers block microphone access on HTTP IP addresses. Use a trusted HTTPS address, or localhost when the browser runs on the RustClaw host.",
+              "浏览器禁止 HTTP IP 地址使用麦克风。请通过受信任的 HTTPS 地址访问；如果浏览器就在 {product_name} 主机上，也可以使用 localhost。",
+              "Browsers block microphone access on HTTP IP addresses. Use a trusted HTTPS address, or localhost when the browser runs on the {product_name} host.",
             )
           : t(
               "当前浏览器不支持直接录音，请改用支持录音的现代浏览器或上传音频文件。",
@@ -1145,7 +1147,7 @@ export function useChatRuntime({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-RustClaw-Client": "ui",
+          [CLIENT_ORIGIN_HEADER]: "ui",
         },
         body: JSON.stringify(submitBody),
       });
@@ -1911,7 +1913,7 @@ function upsertThreadMessage(messages: ChatMessage[], message: ChatMessage): Cha
 }
 
 const SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY =
-  "rustclaw.ui.chat.selected_voice_input_device.v1";
+  appStorageKey("ui.chat.selected_voice_input_device.v1");
 
 function loadSelectedVoiceInputDeviceId(): string {
   if (typeof window === "undefined") return "";

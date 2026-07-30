@@ -10,7 +10,7 @@
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw 把 DOCX、XLSX 和 PPTX 作为不可信的结构化工件处理。Planner 根据
+Agent Runtime 把 DOCX、XLSX 和 PPTX 作为不可信的结构化工件处理。Planner 根据
 registry metadata 选择延迟加载的 Office capability；runtime 不会通过匹配用户
 语言中的固定短语来选择格式或操作。
 

@@ -119,9 +119,7 @@ fn authorize_task_admin_request(
     headers: &HeaderMap,
     requested_user_id: i64,
 ) -> Result<i64, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|v| v.to_str().ok())
+    let provided_key = crate::auth_key_from_headers(headers)
         .map(str::trim)
         .filter(|v| !v.is_empty());
     if let Some(raw_key) = provided_key {
@@ -156,9 +154,7 @@ fn require_task_admin_identity(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(AuthIdentity, String), (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|v| v.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(headers)
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
@@ -242,9 +238,7 @@ pub(super) async fn list_active_tasks(
     headers: HeaderMap,
     Json(req): Json<ActiveTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|value| value.to_str().ok())
+    let provided_key = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let tasks = if provided_key.is_some() {

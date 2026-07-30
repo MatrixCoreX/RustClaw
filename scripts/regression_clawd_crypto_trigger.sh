@@ -92,7 +92,7 @@ need_cmd jq
 need_cmd python3
 
 if [[ -z "$BASE_URL" ]]; then
-  BASE_URL="http://${RUSTCLAW_INTERNAL_LISTEN:-127.0.0.1:8787}"
+  BASE_URL="http://${APP_INTERNAL_LISTEN:-127.0.0.1:8787}"
 fi
 BASE_URL="${BASE_URL%/}"
 

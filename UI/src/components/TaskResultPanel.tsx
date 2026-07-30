@@ -369,8 +369,8 @@ export function TaskResultPanel({
                   <p className="mt-1 text-sm text-amber-50/80">
                     {approvalPending
                       ? t(
-                          `RustClaw 准备执行 ${approvalRequest.actionCount} 项会修改数据或访问外部系统的操作。`,
-                          `RustClaw is ready to run ${approvalRequest.actionCount} action(s) that may change data or access an external system.`,
+                          `{product_name} 准备执行 ${approvalRequest.actionCount} 项会修改数据或访问外部系统的操作。`,
+                          `{product_name} is ready to run ${approvalRequest.actionCount} action(s) that may change data or access an external system.`,
                         )
                       : t(
                           "这条记录显示当前任务的一次性授权状态。",

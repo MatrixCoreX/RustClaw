@@ -169,7 +169,7 @@ pub fn edit_docx(
                     &mut members,
                     "header",
                     "header1.xml",
-                    "rIdRustClawHeader",
+                    "rIdAgentHeader",
                 )?;
                 document =
                     ensure_section_reference(&document, "headerReference", &relationship_id)?;
@@ -187,7 +187,7 @@ pub fn edit_docx(
                     &mut members,
                     "footer",
                     "footer1.xml",
-                    "rIdRustClawFooter",
+                    "rIdAgentFooter",
                 )?;
                 document =
                     ensure_section_reference(&document, "footerReference", &relationship_id)?;
@@ -290,7 +290,7 @@ fn apply_create_operation(
         "add_hyperlink" => {
             let text = operation.string("text")?;
             let url = operation.string("url")?;
-            let id = format!("rIdRustClawLink{}", parts.relationships.len() + 1);
+            let id = format!("rIdAgentLink{}", parts.relationships.len() + 1);
             parts
                 .relationships
                 .push((id.clone(), "hyperlink".to_string(), url.to_string(), true));
@@ -403,7 +403,7 @@ fn add_image(parts: &mut DocxParts, operation: &NormalizedOperation) -> OfficeRe
     let extension = image_extension(&path)?;
     let index = parts.media.len() + 1;
     let member = format!("word/media/image{index}.{extension}");
-    let relation_id = format!("rIdRustClawImage{index}");
+    let relation_id = format!("rIdAgentImage{index}");
     parts.media.push((member.clone(), bytes));
     parts.relationships.push((
         relation_id.clone(),
@@ -470,7 +470,7 @@ fn build_docx_package(parts: DocxParts) -> BTreeMap<String, Vec<u8>> {
     );
     members.insert(
         "docProps/app.xml".into(),
-        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>RustClaw</Application></Properties>"#.to_vec(),
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>agent-runtime</Application></Properties>"#.to_vec(),
     );
     members.insert(
         "word/styles.xml".into(),
@@ -498,7 +498,7 @@ fn build_docx_package(parts: DocxParts) -> BTreeMap<String, Vec<u8>> {
     relationships.extend(parts.relationships.clone());
     if parts.header.is_some() {
         relationships.push((
-            "rIdRustClawHeader".into(),
+            "rIdAgentHeader".into(),
             "header".into(),
             "header1.xml".into(),
             false,
@@ -506,7 +506,7 @@ fn build_docx_package(parts: DocxParts) -> BTreeMap<String, Vec<u8>> {
     }
     if parts.footer.is_some() {
         relationships.push((
-            "rIdRustClawFooter".into(),
+            "rIdAgentFooter".into(),
             "footer".into(),
             "footer1.xml".into(),
             false,
@@ -553,7 +553,7 @@ fn add_note_relationships(
 ) {
     if !parts.footnotes.is_empty() {
         relationships.push((
-            "rIdRustClawFootnotes".into(),
+            "rIdAgentFootnotes".into(),
             "footnotes".into(),
             "footnotes.xml".into(),
             false,
@@ -561,7 +561,7 @@ fn add_note_relationships(
     }
     if !parts.endnotes.is_empty() {
         relationships.push((
-            "rIdRustClawEndnotes".into(),
+            "rIdAgentEndnotes".into(),
             "endnotes".into(),
             "endnotes.xml".into(),
             false,
@@ -569,7 +569,7 @@ fn add_note_relationships(
     }
     if !parts.comments.is_empty() {
         relationships.push((
-            "rIdRustClawComments".into(),
+            "rIdAgentComments".into(),
             "comments".into(),
             "comments.xml".into(),
             false,
@@ -588,7 +588,7 @@ fn merge_auxiliary_parts(
             "/word/header1.xml",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
         )?;
-        ensure_document_relation(members, "header", "header1.xml", "rIdRustClawHeader")?;
+        ensure_document_relation(members, "header", "header1.xml", "rIdAgentHeader")?;
     }
     if let Some(footer) = parts.footer.take() {
         members.insert("word/footer1.xml".into(), footer_xml(&footer).into_bytes());
@@ -597,7 +597,7 @@ fn merge_auxiliary_parts(
             "/word/footer1.xml",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
         )?;
-        ensure_document_relation(members, "footer", "footer1.xml", "rIdRustClawFooter")?;
+        ensure_document_relation(members, "footer", "footer1.xml", "rIdAgentFooter")?;
     }
 
     let mut relationships = std::mem::take(&mut parts.relationships);
@@ -616,7 +616,7 @@ fn merge_auxiliary_parts(
             .iter_mut()
             .find(|(_, kind, target, _)| kind == "image" && *target == old_target)
         {
-            let new_id = format!("rIdRustClawImage{}", uuid::Uuid::new_v4().simple());
+            let new_id = format!("rIdAgentImage{}", uuid::Uuid::new_v4().simple());
             parts.body = parts.body.replace(
                 &format!("r:embed=\"{}\"", xml(id)),
                 &format!("r:embed=\"{new_id}\""),
@@ -631,7 +631,7 @@ fn merge_auxiliary_parts(
     for (id, kind, target, external) in &mut relationships {
         if kind != "image" {
             let old_id = id.clone();
-            let new_id = format!("rIdRustClaw{}", uuid::Uuid::new_v4().simple());
+            let new_id = format!("rIdAgent{}", uuid::Uuid::new_v4().simple());
             parts.body = parts.body.replace(
                 &format!("r:id=\"{}\"", xml(&old_id)),
                 &format!("r:id=\"{new_id}\""),
@@ -647,7 +647,7 @@ fn merge_auxiliary_parts(
         "footnotes",
         "footnote",
         "footnoteReference",
-        "rIdRustClawFootnotes",
+        "rIdAgentFootnotes",
         std::mem::take(&mut parts.footnotes),
     )?;
     merge_notes(
@@ -656,7 +656,7 @@ fn merge_auxiliary_parts(
         "endnotes",
         "endnote",
         "endnoteReference",
-        "rIdRustClawEndnotes",
+        "rIdAgentEndnotes",
         std::mem::take(&mut parts.endnotes),
     )?;
     merge_comments(
@@ -746,7 +746,7 @@ fn merge_comments(
             &source,
             "</w:comments>",
             &format!(
-                "<w:comment w:id=\"{new_id}\" w:author=\"RustClaw\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:comment>",
+                "<w:comment w:id=\"{new_id}\" w:author=\"agent-runtime\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:comment>",
                 xml(value)
             ),
         )?;
@@ -757,7 +757,7 @@ fn merge_comments(
         "/word/comments.xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml",
     )?;
-    ensure_singleton_document_relation(members, "comments", "comments.xml", "rIdRustClawComments")?;
+    ensure_singleton_document_relation(members, "comments", "comments.xml", "rIdAgentComments")?;
     Ok(())
 }
 
@@ -1501,12 +1501,12 @@ fn section_xml(landscape: bool, header: bool, footer: bool) -> (String, String, 
         (12_240, 15_840, "")
     };
     let header_ref = if header {
-        "<w:headerReference w:type=\"default\" r:id=\"rIdRustClawHeader\"/>".to_string()
+        "<w:headerReference w:type=\"default\" r:id=\"rIdAgentHeader\"/>".to_string()
     } else {
         String::new()
     };
     let footer_ref = if footer {
-        "<w:footerReference w:type=\"default\" r:id=\"rIdRustClawFooter\"/>".to_string()
+        "<w:footerReference w:type=\"default\" r:id=\"rIdAgentFooter\"/>".to_string()
     } else {
         String::new()
     };
@@ -1554,7 +1554,7 @@ fn comments_xml(values: &[String]) -> String {
     );
     for (index, value) in values.iter().enumerate() {
         output.push_str(&format!(
-            "<w:comment w:id=\"{index}\" w:author=\"RustClaw\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:comment>",
+            "<w:comment w:id=\"{index}\" w:author=\"agent-runtime\"><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:comment>",
             xml(value)
         ));
     }

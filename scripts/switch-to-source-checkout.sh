@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Convert a packaged RustClaw runtime into a complete Git source checkout.
+# Convert a packaged agent runtime into a complete Git source checkout.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-REPOSITORY="${RUSTCLAW_SOURCE_REPOSITORY:-https://github.com/MatrixCoreX/RustClaw.git}"
-BRANCH="${RUSTCLAW_SOURCE_BRANCH:-main}"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/product_identity.sh"
+REPOSITORY="https://github.com/${APP_RELEASE_REPOSITORY}.git"
+BRANCH="${APP_SOURCE_BRANCH:-main}"
 KEEP_BACKUPS=1
 
 STAGE_DIR=""
@@ -18,12 +20,12 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/switch-to-source-checkout.sh [options]
 
-Clone and verify the RustClaw source repository, preserve local runtime state,
+Clone and verify the configured source repository, preserve local runtime state,
 then atomically replace a packaged installation with the source checkout.
 
 Options:
   --root DIR
-      RustClaw runtime root. Default: repository root containing this script.
+      Agent runtime root. Default: repository root containing this script.
   --repo URL
       Git repository URL or local test repository.
   --branch NAME

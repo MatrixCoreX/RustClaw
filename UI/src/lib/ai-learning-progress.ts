@@ -1,4 +1,5 @@
 import type { LearningAudience } from "./ai-learning";
+import { appStorageKey } from "./product-identity";
 
 export interface AiLearningProgress {
   audience: LearningAudience;
@@ -12,7 +13,7 @@ interface LearningProgressStorage {
 }
 
 const AUDIENCES: LearningAudience[] = ["beginner", "operator", "developer"];
-const STORAGE_PREFIX = "rustclaw.ai-learning.progress.v1";
+const STORAGE_PREFIX = appStorageKey("ai-learning.progress.v1");
 
 function storageKey(language: string): string {
   return `${STORAGE_PREFIX}.${language}`;
@@ -33,7 +34,8 @@ export function loadLearningProgress(
 ): AiLearningProgress {
   const fallback = emptyLearningProgress();
   try {
-    const raw = storage.getItem(storageKey(language));
+    const canonicalKey = storageKey(language);
+    const raw = storage.getItem(canonicalKey);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<AiLearningProgress>;
     const audience = AUDIENCES.includes(parsed.audience as LearningAudience)

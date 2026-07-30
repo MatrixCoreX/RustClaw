@@ -354,7 +354,7 @@ async function downloadImageToFile(url, outputPath, networkPolicy = {}) {
                 signal: controller.signal,
                 redirect: 'manual',
                 headers: {
-                    'user-agent': 'RustClaw/1.0',
+                    'user-agent': 'agent-browser-skill/1.0',
                     'accept': 'image/*,*/*;q=0.8',
                 },
             });

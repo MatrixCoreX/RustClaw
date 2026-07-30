@@ -1221,7 +1221,7 @@ async fn restart_clawd(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("only admin can restart RustClaw".to_string()),
+                error: Some("only admin can restart the agent runtime".to_string()),
             }),
         );
     }
@@ -1232,7 +1232,7 @@ async fn restart_clawd(
             Json(ApiResponse {
                 ok: true,
                 data: Some(json!({
-                    "message": "restart triggered; start-all-bin.sh will restart RustClaw in a few seconds",
+                    "message": "restart triggered; start-all-bin.sh will restart the agent runtime in a few seconds",
                     "restart_triggered": true,
                     "script": "start-all-bin.sh",
                     "log": "logs/restart-system.log"

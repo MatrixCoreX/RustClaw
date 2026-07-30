@@ -591,7 +591,7 @@ async fn fetch_active_tasks(
         base_url.trim_end_matches('/')
     ));
     if let Some(key) = user_key {
-        req = req.header("x-rustclaw-key", key);
+        req = req.header("x-agent-key", key);
     }
     let resp = req
         .json(&json!({
@@ -620,7 +620,7 @@ async fn fetch_task_detail(
         task_id
     ));
     if let Some(key) = user_key {
-        req = req.header("x-rustclaw-key", key);
+        req = req.header("x-agent-key", key);
     }
     let resp = req
         .send()
@@ -642,7 +642,7 @@ async fn cancel_all_tasks(
         base_url.trim_end_matches('/')
     ));
     if let Some(key) = user_key {
-        req = req.header("x-rustclaw-key", key);
+        req = req.header("x-agent-key", key);
     }
     let resp = req
         .json(&json!({
@@ -671,7 +671,7 @@ async fn cancel_one_task(
         base_url.trim_end_matches('/')
     ));
     if let Some(key) = user_key {
-        req = req.header("x-rustclaw-key", key);
+        req = req.header("x-agent-key", key);
     }
     let resp = req
         .json(&json!({
@@ -751,7 +751,7 @@ async fn post_task_control_by_id(
 ) -> Result<Value, String> {
     let mut req = client.post(format!("{}{}", base_url.trim_end_matches('/'), path));
     if let Some(key) = user_key {
-        req = req.header("x-rustclaw-key", key);
+        req = req.header("x-agent-key", key);
     }
     let resp = req
         .json(&payload)

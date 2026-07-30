@@ -9,7 +9,7 @@ fn temp_workspace(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("rustclaw_prompts_hot_reload_{name}_{unique}"));
+    let path = std::env::temp_dir().join(format!("agent_prompts_hot_reload_{name}_{unique}"));
     std::fs::create_dir_all(&path).unwrap();
     path
 }

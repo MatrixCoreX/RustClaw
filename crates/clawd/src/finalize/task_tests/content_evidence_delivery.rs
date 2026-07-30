@@ -18,13 +18,13 @@ fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_1",
             "fs_basic",
-            r#"{"extra":{"action":"read_range","mode":"head","requested_n":80,"excerpt":"1|[app]\n2|name = \"RustClaw NL Fixture\"\n3|mode = \"test\"","path":"/tmp/app_config.toml"}}"#,
+            r#"{"extra":{"action":"read_range","mode":"head","requested_n":80,"excerpt":"1|[app]\n2|name = \"Agent Runtime NL Fixture\"\n3|mode = \"test\"","path":"/tmp/app_config.toml"}}"#,
         ));
 
     let mut answer_text =
-        "RustClaw fixture config summary.\n\nFILE:/tmp/app_config.toml".to_string();
+        "Agent Runtime fixture config summary.\n\nFILE:/tmp/app_config.toml".to_string();
     let mut answer_messages = vec![
-        "RustClaw fixture config summary.".to_string(),
+        "Agent Runtime fixture config summary.".to_string(),
         "FILE:/tmp/app_config.toml".to_string(),
     ];
 
@@ -35,12 +35,12 @@ fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
         &mut answer_messages,
     ));
 
-    assert!(answer_text.starts_with("[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\""));
-    assert!(answer_text.contains("RustClaw fixture config summary."));
+    assert!(answer_text.starts_with("[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\""));
+    assert!(answer_text.contains("Agent Runtime fixture config summary."));
     assert!(answer_text.contains("FILE:/tmp/app_config.toml"));
     assert_eq!(
         answer_messages.first().map(String::as_str),
-        Some("[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"")
+        Some("[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\"")
     );
 }
 
@@ -59,10 +59,10 @@ fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_p
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_1",
             "fs_basic",
-            r#"{"extra":{"action":"read_text_range","mode":"head","requested_n":80,"excerpt":"1|[app]\n2|name = \"RustClaw NL Fixture\"\n3|mode = \"test\"","resolved_path":"/tmp/app_config.toml"}}"#,
+            r#"{"extra":{"action":"read_text_range","mode":"head","requested_n":80,"excerpt":"1|[app]\n2|name = \"Agent Runtime NL Fixture\"\n3|mode = \"test\"","resolved_path":"/tmp/app_config.toml"}}"#,
         ));
 
-    let mut answer_text = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"\n\nRustClaw fixture config summary.".to_string();
+    let mut answer_text = "[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\"\n\nAgent Runtime fixture config summary.".to_string();
     let mut answer_messages = vec![answer_text.clone()];
 
     assert!(backfill_content_evidence_file_delivery_from_journal(
@@ -73,7 +73,7 @@ fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_p
     ));
 
     assert!(answer_text.starts_with("FILE:/tmp/app_config.toml"));
-    assert!(answer_text.contains("[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\""));
+    assert!(answer_text.contains("[app]\nname = \"Agent Runtime NL Fixture\"\nmode = \"test\""));
     assert_eq!(
         answer_messages.first().map(String::as_str),
         Some("FILE:/tmp/app_config.toml")

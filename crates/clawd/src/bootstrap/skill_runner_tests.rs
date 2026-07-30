@@ -8,7 +8,7 @@ struct TempRoot {
 impl TempRoot {
     fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_skill_runner_{name}_{}_{}",
+            "agent_skill_runner_{name}_{}_{}",
             std::process::id(),
             unique_suffix()
         ));

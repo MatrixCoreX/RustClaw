@@ -262,13 +262,13 @@ fn resolve_config_path(root: &PathBuf, obj: &serde_json::Map<String, Value>) -> 
     if requested.is_file() {
         return requested;
     }
-    if default_path.is_file() && looks_like_rustclaw_config_path(&requested) {
+    if default_path.is_file() && looks_like_runtime_config_path(&requested) {
         return default_path;
     }
     requested
 }
 
-fn looks_like_rustclaw_config_path(path: &std::path::Path) -> bool {
+fn looks_like_runtime_config_path(path: &std::path::Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name == "config.toml")

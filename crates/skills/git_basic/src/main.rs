@@ -236,7 +236,7 @@ fn execute(args: Value) -> Result<(String, Value), GitBasicError> {
     execute_with_workspace_root_and_permissions(
         &workspace_root,
         args,
-        env_permission_enabled("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE"),
+        env_permission_enabled("APP_ALLOW_PATH_OUTSIDE_WORKSPACE"),
     )
 }
 

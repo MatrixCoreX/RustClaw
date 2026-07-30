@@ -344,7 +344,7 @@ pub(crate) fn update_task_success(
     Ok(())
 }
 
-fn attach_task_artifacts_after_success(
+pub(super) fn attach_task_artifacts_after_success(
     state: &AppState,
     task_id: &str,
     claim_attempt: i64,

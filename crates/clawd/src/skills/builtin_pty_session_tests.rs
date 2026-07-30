@@ -6,8 +6,10 @@ struct TestWorkspace {
 
 impl TestWorkspace {
     fn new() -> Self {
-        let root =
-            std::env::temp_dir().join(format!("rustclaw-pty-session-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!(
+            "agent-runtime-pty-session-{}",
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&root).unwrap();
         Self { root }
     }
@@ -33,10 +35,12 @@ fn session_state_rejects_symlinked_runtime_roots() {
     use std::os::unix::fs::symlink;
 
     let workspace = TestWorkspace::new();
-    let external =
-        std::env::temp_dir().join(format!("rustclaw-pty-external-{}", uuid::Uuid::new_v4()));
+    let external = std::env::temp_dir().join(format!(
+        "agent-runtime-pty-external-{}",
+        uuid::Uuid::new_v4()
+    ));
     fs::create_dir_all(&external).unwrap();
-    symlink(&external, workspace.root.join(".rustclaw")).unwrap();
+    symlink(&external, workspace.root.join(".agent-runtime")).unwrap();
     let dir = session_dir(&workspace.root, "session-1").unwrap();
 
     let error = create_session_directories(&workspace.root, &dir).unwrap_err();

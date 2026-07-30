@@ -200,7 +200,7 @@
     color: var(--theme-icon-soft-color);
   }
 
-  .rustclaw-logo {
+  .app-logo {
     display: inline-block;
     flex-shrink: 0;
     border-radius: 0.75rem;
@@ -209,12 +209,12 @@
       0 0 0 1px rgba(255, 255, 255, 0.16);
   }
 
-  .rustclaw-logo-header {
+  .app-logo-header {
     width: 2rem;
     height: 2rem;
   }
 
-  .rustclaw-logo-hero {
+  .app-logo-hero {
     width: 2.4rem;
     height: 2.4rem;
   }
@@ -555,15 +555,17 @@
     box-shadow: var(--theme-panel-shadow);
   }
 
-  .setup-step-card,
-  .setup-channel-card {
+  .setup-step-card {
     @apply rounded-[22px] border p-4 transition;
     border-color: var(--theme-border);
     background: rgba(0, 0, 0, 0.22);
   }
 
   .setup-channel-card {
-    min-height: 32rem;
+    @apply rounded-[20px] border p-3 transition;
+    min-height: 27rem;
+    border-color: var(--theme-border);
+    background: rgba(0, 0, 0, 0.22);
   }
 
   .setup-step-card {
@@ -574,6 +576,11 @@
   .setup-step-card:hover,
   .setup-channel-card:hover {
     background: color-mix(in srgb, rgba(0, 0, 0, 0.22) 82%, white 18%);
+  }
+
+  .channel-service-stop-button {
+    order: 99;
+    margin-inline-start: auto;
   }
 
   .setup-step-index {

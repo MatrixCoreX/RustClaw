@@ -4,8 +4,8 @@ schema_version = 2
 [package]
 name = "system_basic"
 version = "0.1.8"
-description = "Inspect structured host, workspace, process, port, and RustClaw runtime facts."
-protocol = "rustclaw-jsonl-v1"
+description = "Inspect structured host, workspace, process, port, and agent runtime facts."
+protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/system-basic-skill"
 working_directory = "."
 timeout_seconds = 45
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUST_LOG", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_WORKSPACE_STATE_DIR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "RUST_LOG", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]

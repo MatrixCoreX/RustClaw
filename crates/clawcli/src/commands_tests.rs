@@ -228,7 +228,7 @@ fn task_report_json_exposes_stable_machine_fields() {
 
     let report = task_report_json(&task, true);
 
-    assert_eq!(report["report_kind"], "rustclaw_task_report");
+    assert_eq!(report["report_kind"], "agent_task_report");
     assert_eq!(report["task_id"], "task-report");
     assert_eq!(report["goal_id"], "goal-report");
     assert_eq!(report["session_id"], "user_chat:7:9");
@@ -526,7 +526,7 @@ fn coding_review_json_focuses_on_coding_evidence() {
 
     let review = coding_review_json(&task, false);
 
-    assert_eq!(review["report_kind"], "rustclaw_coding_review");
+    assert_eq!(review["report_kind"], "agent_coding_review");
     assert_eq!(review["task_id"], "task-review");
     assert_eq!(review["coding"]["changed_file_count"], 1);
     assert_eq!(review["coding"]["verification_command_count"], 1);
@@ -607,7 +607,7 @@ fn subagent_report_json_collects_child_results_and_events() {
 
     let report = subagent_report_json(&task);
 
-    assert_eq!(report["report_kind"], "rustclaw_subagent_report");
+    assert_eq!(report["report_kind"], "agent_subagent_report");
     assert_eq!(report["task_id"], "task-subagents");
     assert_eq!(report["team_count"], 1);
     assert_eq!(report["teams"][0]["team_id"], "subagent-batch:1:2");
@@ -702,7 +702,7 @@ fn permission_report_json_collects_structured_decisions() {
 
     let report = permission_report_json(&task);
 
-    assert_eq!(report["report_kind"], "rustclaw_permission_report");
+    assert_eq!(report["report_kind"], "agent_permission_report");
     assert_eq!(report["permission_entry_count"], 2);
     assert_eq!(
         report["permission_entries"][0]["decision"],
@@ -791,7 +791,7 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
 
     let snapshot = tui_snapshot_json(&active, Some(&selected));
 
-    assert_eq!(snapshot["snapshot_kind"], "rustclaw_cli_tui");
+    assert_eq!(snapshot["snapshot_kind"], "agent_cli_tui");
     assert_eq!(
         snapshot["active"]["data"]["tasks"][0]["task_id"],
         "task-tui"
@@ -863,7 +863,7 @@ fn tui_export_json_wraps_snapshot_and_selected_task_id() {
 
     let export = tui_export_json(&active, Some(&selected));
 
-    assert_eq!(export["export_kind"], "rustclaw_cli_tui_export");
+    assert_eq!(export["export_kind"], "agent_cli_tui_export");
     assert_eq!(export["selected_task_id"], "task-tui-export");
     assert_eq!(
         export["snapshot"]["selected_task"]["task_lifecycle"]["can_cancel"],
@@ -1430,17 +1430,17 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         resume["coding"]["verification_commands"][0],
         "cargo test -p clawcli"
     );
-    assert!(verification_file.contains("\"artifact_kind\": \"rustclaw_exec_verification\""));
+    assert!(verification_file.contains("\"artifact_kind\": \"agent_exec_verification\""));
     assert!(verification_file.contains("\"verification_status\": \"verified\""));
     assert!(verification_file.contains("\"coding_state\""));
     assert!(verification_file.contains("\"completed_side_effect_count\": 1"));
     assert!(verification_file.contains("\"cargo test -p clawcli\""));
-    assert!(diff_summary_file.contains("\"artifact_kind\": \"rustclaw_exec_diff_summary\""));
+    assert!(diff_summary_file.contains("\"artifact_kind\": \"agent_exec_diff_summary\""));
     assert!(diff_summary_file.contains("\"summary_code\": \"clawcli_exec_artifacts\""));
     assert!(diff_summary_file.contains("\"crates/clawcli/src/main.rs\""));
     assert_eq!(llm_summary["llm_call_count"], 2);
     assert_eq!(llm_summary["by_prompt"][0]["prompt_label"], "planner");
-    assert_eq!(index["artifact_kind"], "rustclaw_exec_artifact_index");
+    assert_eq!(index["artifact_kind"], "agent_exec_artifact_index");
     assert_eq!(index["task_id"], "task-exec-artifact");
     assert_eq!(index["file_count"], 8);
     assert!(index["files"]
@@ -1511,14 +1511,14 @@ fn exec_compact_text_lines_include_coding_budget_and_resume_tokens() {
 
     let index = exec_artifact_index_json(
         &summary,
-        std::path::Path::new("/tmp/rustclaw-artifacts"),
+        std::path::Path::new("/tmp/agent-runtime-artifacts"),
         &[("summary", "summary.json"), ("index", "index.json")],
     );
-    assert_eq!(index["artifact_kind"], "rustclaw_exec_artifact_index");
+    assert_eq!(index["artifact_kind"], "agent_exec_artifact_index");
     assert_eq!(index["file_count"], 2);
     assert_eq!(
         index["files"][0]["absolute_path"],
-        "/tmp/rustclaw-artifacts/summary.json"
+        "/tmp/agent-runtime-artifacts/summary.json"
     );
 }
 
@@ -1610,7 +1610,7 @@ fn exec_profile_resolves_machine_options_without_prompt_semantics() {
     assert!(!options.fail_on_background);
     assert_eq!(
         options.artifact_dir.as_deref(),
-        Some(std::path::Path::new("artifacts/rustclaw-exec/long-tail"))
+        Some(std::path::Path::new("artifacts/agent-exec/long-tail"))
     );
 
     let release_gate = exec_effective_options(
@@ -1887,7 +1887,7 @@ fn goal_status_summary_and_text_lines_use_goal_projection() {
     };
 
     let summary = goal_status_summary_json(&task);
-    assert_eq!(summary["report_kind"], "rustclaw_goal_status");
+    assert_eq!(summary["report_kind"], "agent_goal_status");
     assert_eq!(summary["task_id"], "task-goal");
     assert_eq!(summary["goal"]["goal_status"], "background");
     assert_eq!(summary["goal"]["objective"], "ship feature");

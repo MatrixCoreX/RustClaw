@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-# 脚本所在目录 = RustClaw 根目录
+# 脚本所在目录 = agent runtime 根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
@@ -14,19 +14,19 @@ configure_python3_with_tomllib
 UI_DIR="$SCRIPT_DIR/UI"
 # npm run build 在 UI 下的默认输出目录（Vite 默认 dist）
 DIST_DIR="$UI_DIR/dist"
-BUILD_STAMP_FILE="$DIST_DIR/.rustclaw-ui-build-fingerprint"
-DEPS_STAMP_FILE="$UI_DIR/node_modules/.rustclaw-ui-dependency-fingerprint"
+BUILD_STAMP_FILE="$DIST_DIR/.agent-ui-build-fingerprint"
+DEPS_STAMP_FILE="$UI_DIR/node_modules/.agent-ui-dependency-fingerprint"
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 HOST_TARGET="$(host_rust_target 2>/dev/null || true)"
 
 default_nginx_root() {
   if [[ "$HOST_OS" == "macos" ]]; then
-    printf '%s\n' "$HOME/.rustclaw/nginx-ui"
+    printf '%s\n' "$HOME/.$APP_DATA_NAMESPACE/nginx-ui"
     return
   fi
 
-  printf '%s\n' "/var/www/html/rustclaw"
+  printf '%s\n' "/var/www/html/$APP_DATA_NAMESPACE"
 }
 
 NGINX_ROOT_DEFAULT="$(default_nginx_root)"
@@ -108,9 +108,9 @@ ensure_ui_deps() {
 }
 
 ui_node_options() {
-  local heap_mb="${RUSTCLAW_UI_NODE_MAX_OLD_SPACE_MB:-1536}"
+  local heap_mb="${APP_UI_NODE_MAX_OLD_SPACE_MB:-1536}"
   if [[ ! "$heap_mb" =~ ^[0-9]+$ ]] || (( heap_mb < 512 )); then
-    echo "Error: RUSTCLAW_UI_NODE_MAX_OLD_SPACE_MB must be an integer of at least 512." >&2
+    echo "Error: APP_UI_NODE_MAX_OLD_SPACE_MB must be an integer of at least 512." >&2
     return 1
   fi
 
@@ -166,9 +166,9 @@ usage() {
   echo "  --deploy        Only copy UI/dist and refresh nginx config."
   echo "  --copy          Same as --deploy."
   echo "  --deploy-if-configured"
-  echo "                  Build UI, then update nginx only when a RustClaw nginx site already exists."
+  echo "                  Build UI, then update nginx only when an agent UI site already exists."
   echo "  --copy-if-configured"
-  echo "                  Copy existing UI/dist only when a RustClaw nginx site already exists."
+  echo "                  Copy existing UI/dist only when an agent UI site already exists."
   echo "  --path DIR      Nginx site root (default: $NGINX_ROOT_DEFAULT)."
   echo "  (no args)       Build UI only. Local deployment does not require nginx."
   echo "  host platform   Auto-detected as ${HOST_OS}/${HOST_ARCH} ${HOST_TARGET:+($HOST_TARGET)}."
@@ -180,7 +180,7 @@ usage() {
   echo "  $0 --deploy           # only copy existing UI/dist"
   echo "  $0 --build --deploy   # cloud/server: build + deploy nginx"
   echo "  $0 --copy-if-configured # release update: copy prebuilt UI only for an existing nginx site"
-  echo "  $0 --deploy --path /srv/http/rustclaw   # deploy to custom path"
+  echo "  $0 --deploy --path /srv/http/agent-system   # deploy to custom path"
 }
 
 hash_file() {
@@ -219,6 +219,10 @@ compute_ui_build_fingerprint() {
     fi
   done
 
+  printf '%s  %s\n' \
+    "$(hash_file "$APP_PRODUCT_IDENTITY_CONFIG")" \
+    "product_identity.toml" >> "$manifest"
+
   local dir
   for dir in "$UI_DIR/src" "$UI_DIR/public"; do
     if [[ -d "$dir" ]]; then
@@ -239,23 +243,23 @@ nginx_conf_path() {
       brew_prefix="$(brew --prefix 2>/dev/null || true)"
     fi
     if [[ -n "$brew_prefix" ]]; then
-      printf '%s\n' "$brew_prefix/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "$brew_prefix/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
     if [[ -d "/opt/homebrew/etc/nginx" ]]; then
-      printf '%s\n' "/opt/homebrew/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "/opt/homebrew/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
     if [[ -d "/usr/local/etc/nginx" ]]; then
-      printf '%s\n' "/usr/local/etc/nginx/servers/rustclaw-ui.conf"
+      printf '%s\n' "/usr/local/etc/nginx/servers/${APP_SERVICE_NAME}-ui.conf"
       return
     fi
   fi
   if [[ -d "/etc/nginx/sites-available" ]]; then
-    printf '%s\n' "/etc/nginx/sites-available/rustclaw-ui.conf"
+    printf '%s\n' "/etc/nginx/sites-available/${APP_SERVICE_NAME}-ui.conf"
     return
   fi
-  printf '%s\n' "/etc/nginx/conf.d/rustclaw-ui.conf"
+  printf '%s\n' "/etc/nginx/conf.d/${APP_SERVICE_NAME}-ui.conf"
 }
 
 nginx_main_conf_path() {
@@ -504,37 +508,6 @@ ensure_nginx_site_link() {
   echo "Ensured nginx site link: $site_link -> $conf_path"
 }
 
-remove_stale_nginx_ui_entries() {
-  local conf_path="$1"
-  local site_link="$2"
-  local stale_path=""
-  local removed_any=1
-
-  for stale_path in \
-    "/etc/nginx/conf.d/rustclaw-ui.conf" \
-    "/etc/nginx/sites-available/rustclaw-ui.conf" \
-    "/etc/nginx/sites-enabled/rustclaw-ui.conf"
-  do
-    if [[ "$stale_path" == "$conf_path" ]] || [[ -n "$site_link" && "$stale_path" == "$site_link" ]]; then
-      continue
-    fi
-    if [[ ! -e "$stale_path" && ! -L "$stale_path" ]]; then
-      continue
-    fi
-
-    if path_writable_or_creatable "$stale_path"; then
-      rm -f "$stale_path"
-      echo "Removed stale nginx entry: $stale_path"
-    else
-      sudo rm -f "$stale_path"
-      echo "Removed stale nginx entry: $stale_path (sudo)."
-    fi
-    removed_any=0
-  done
-
-  return "$removed_any"
-}
-
 systemctl_available() {
   command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1
 }
@@ -592,7 +565,7 @@ nginx_ui_config_is_tls_managed() {
 nginx_ui_site_is_configured() {
   local conf_path="$1"
   [[ -f "$conf_path" ]] || return 1
-  grep -Fq "RustClaw UI" "$conf_path" \
+  grep -Fq "Agent Runtime UI" "$conf_path" \
     && grep -Fq "location ^~ /v1/" "$conf_path" \
     && grep -Fq "location ^~ /webd/" "$conf_path"
 }
@@ -672,7 +645,7 @@ write_nginx_config() {
   local ui_root="$2"
   local proxy_upstream="$3"
   cat <<NGX
-# RustClaw UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
+# Agent Runtime UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
 server {
     listen 0.0.0.0:80;
     listen [::]:80;
@@ -836,19 +809,19 @@ if [[ -n "$DEPLOY_IF_CONFIGURED" ]]; then
       EXISTING_NGINX_ROOT="$(nginx_ui_root_from_config "$NGINX_CONF" 2>/dev/null || true)"
       if [[ -n "$EXISTING_NGINX_ROOT" ]]; then
         NGINX_ROOT="$EXISTING_NGINX_ROOT"
-        echo "Using existing RustClaw nginx UI root: $NGINX_ROOT"
+        echo "Using existing agent nginx UI root: $NGINX_ROOT"
       fi
     fi
     if [[ -n "$DO_BUILD" ]]; then
-      echo "Existing RustClaw nginx site detected; UI assets will be deployed after the build."
+      echo "Existing agent nginx site detected; UI assets will be deployed after the build."
     else
-      echo "Existing RustClaw nginx site detected; prebuilt UI assets will be deployed."
+      echo "Existing agent nginx site detected; prebuilt UI assets will be deployed."
     fi
   else
     if [[ -n "$DO_BUILD" ]]; then
-      echo "No deployed RustClaw nginx site detected; keeping local build-only mode."
+      echo "No deployed agent nginx site detected; keeping local build-only mode."
     else
-      echo "No deployed RustClaw nginx site detected; skipping UI deployment."
+      echo "No deployed agent nginx site detected; skipping UI deployment."
     fi
   fi
 fi
@@ -925,9 +898,6 @@ if [[ -n "$DO_DEPLOY" ]]; then
   fi
 
   ensure_nginx_site_link "$NGINX_CONF" "$NGINX_SITE_LINK"
-  if remove_stale_nginx_ui_entries "$NGINX_CONF" "$NGINX_SITE_LINK"; then
-    NGINX_CONFIG_CHANGED=1
-  fi
 
   if [[ "$HOST_OS" != "macos" ]] && { [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; }; then
     if [[ -w /etc/nginx/sites-enabled ]]; then

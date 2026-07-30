@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/schemas/external_skill_implementation.schema.json",
+  "$id": "https://agent-runtime.invalid/schemas/external_skill_implementation.schema.json",
   "title": "External Skill Implementation Output",
   "description": "Schema for the JSON object returned by `extension_manager_skill_implementation_system_prompt.md` and consumed by `crates/skills/extension_manager/src/main.rs::parse_external_skill_implementation_from_text`.",
   "type": "object",

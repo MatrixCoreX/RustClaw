@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-const ARTIFACT_ROOT: &str = ".rustclaw";
 const ARTIFACT_DIR: &str = "artifacts/tool-output";
 const MIN_HARD_LIMIT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HARD_LIMIT_BYTES: usize = 64 * 1024 * 1024;
@@ -84,8 +83,7 @@ impl CommandOutputArtifactWriter {
     pub(super) fn new(workspace_root: &Path, task_id: &str, excerpt_limit_bytes: usize) -> Self {
         let task_key = machine_path_component(task_id);
         let artifact_id = uuid::Uuid::new_v4().to_string();
-        let artifact_dir = workspace_root
-            .join(ARTIFACT_ROOT)
+        let artifact_dir = claw_core::workspace_state::workspace_state_root(workspace_root)
             .join(ARTIFACT_DIR)
             .join(task_key);
         let stdout_path = artifact_dir.join(format!("{artifact_id}.stdout.log"));

@@ -528,12 +528,12 @@ fn build_workbook(
     members.insert("xl/styles.xml".into(), styles_xml().as_bytes().to_vec());
     members.insert(
         "docProps/core.xml".into(),
-        br#"<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"><cp:keywords>RustClaw verified workbook</cp:keywords></cp:coreProperties>"#.to_vec(),
+        br#"<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"><cp:keywords>agent-runtime verified workbook</cp:keywords></cp:coreProperties>"#.to_vec(),
     );
     members.insert(
         "docProps/app.xml".into(),
         format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\"><Application>RustClaw</Application><Sheets>{}</Sheets></Properties>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\"><Application>agent-runtime</Application><Sheets>{}</Sheets></Properties>",
             sheets.len()
         )
         .into_bytes(),
@@ -1287,7 +1287,7 @@ fn comments_xml(comments: &BTreeMap<String, String>) -> String {
         })
         .collect::<String>();
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><authors><author>RustClaw</author></authors><commentList>{values}</commentList></comments>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><authors><author>agent-runtime</author></authors><commentList>{values}</commentList></comments>"
     )
 }
 

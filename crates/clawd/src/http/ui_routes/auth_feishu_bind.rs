@@ -95,7 +95,7 @@ async fn get_auth_key_full_handler(
     }
 }
 
-fn clamp_feishu_bind_ttl_seconds(raw: Option<u64>) -> u64 {
+fn clamp_channel_bind_ttl_seconds(raw: Option<u64>) -> u64 {
     raw.unwrap_or(FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS)
         .clamp(
             FEISHU_BIND_SESSION_MIN_TTL_SECONDS,
@@ -104,13 +104,13 @@ fn clamp_feishu_bind_ttl_seconds(raw: Option<u64>) -> u64 {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct FeishuOfficialRegistrationInitResponse {
+struct OfficialRegistrationInitResponse {
     #[serde(default)]
     supported_auth_methods: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct FeishuOfficialRegistrationBeginResponse {
+struct OfficialRegistrationBeginResponse {
     #[serde(default)]
     device_code: String,
     #[serde(default)]
@@ -122,44 +122,92 @@ struct FeishuOfficialRegistrationBeginResponse {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct FeishuOfficialRegistrationUserInfo {
+struct OfficialRegistrationUserInfo {
     #[serde(default)]
     open_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct FeishuOfficialRegistrationPollResponse {
+struct OfficialRegistrationPollResponse {
     #[serde(default)]
     client_id: Option<String>,
     #[serde(default)]
     client_secret: Option<String>,
     #[serde(default)]
-    user_info: Option<FeishuOfficialRegistrationUserInfo>,
+    user_info: Option<OfficialRegistrationUserInfo>,
     #[serde(default)]
     error: Option<String>,
     #[serde(default)]
     error_description: Option<String>,
 }
 
-fn feishu_accounts_base_url() -> String {
-    std::env::var("RUSTCLAW_FEISHU_ACCOUNTS_BASE_URL")
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgentAppChannel {
+    Feishu,
+    Lark,
+}
+
+impl AgentAppChannel {
+    fn channel(self) -> &'static str {
+        match self {
+            Self::Feishu => "feishu",
+            Self::Lark => "lark",
+        }
+    }
+
+    fn service(self) -> &'static str {
+        match self {
+            Self::Feishu => "feishud",
+            Self::Lark => "larkd",
+        }
+    }
+
+    fn accounts_env(self) -> &'static str {
+        match self {
+            Self::Feishu => "FEISHU_ACCOUNTS_BASE_URL",
+            Self::Lark => "LARK_ACCOUNTS_BASE_URL",
+        }
+    }
+
+    fn default_accounts_base_url(self) -> &'static str {
+        match self {
+            Self::Feishu => FEISHU_OFFICIAL_ACCOUNTS_BASE_URL,
+            Self::Lark => LARK_OFFICIAL_ACCOUNTS_BASE_URL,
+        }
+    }
+
+    fn app_link_base_url(self) -> &'static str {
+        match self {
+            Self::Feishu => "https://applink.feishu.cn",
+            Self::Lark => "https://applink.larksuite.com",
+        }
+    }
+}
+
+fn official_accounts_base_url(platform: AgentAppChannel) -> String {
+    claw_core::product_identity::env_string(platform.accounts_env())
         .ok()
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| FEISHU_OFFICIAL_ACCOUNTS_BASE_URL.to_string())
+        .unwrap_or_else(|| platform.default_accounts_base_url().to_string())
 }
 
-async fn call_feishu_official_registration<T: DeserializeOwned>(
+async fn call_official_registration<T: DeserializeOwned>(
     state: &AppState,
+    platform: AgentAppChannel,
     params: &[(&str, &str)],
 ) -> anyhow::Result<T> {
-    let url = format!("{}/oauth/v1/app/registration", feishu_accounts_base_url());
+    let url = format!(
+        "{}/oauth/v1/app/registration",
+        official_accounts_base_url(platform)
+    );
     let resp = state.core.http_client.post(url).form(params).send().await?;
     let status = resp.status();
     let body = resp.text().await?;
     serde_json::from_str::<T>(&body).map_err(|err| {
         anyhow::anyhow!(
-            "decode feishu registration response failed: status={} body={} err={}",
+            "decode {} registration response failed: status={} body={} err={}",
+            platform.channel(),
             status,
             body,
             err
@@ -167,23 +215,26 @@ async fn call_feishu_official_registration<T: DeserializeOwned>(
     })
 }
 
-async fn begin_feishu_official_registration(
+async fn begin_official_registration(
     state: &AppState,
-) -> anyhow::Result<FeishuOfficialRegistrationBeginResponse> {
-    let init = call_feishu_official_registration::<FeishuOfficialRegistrationInitResponse>(
-        state,
-        &[("action", "init")],
-    )
-    .await?;
+    platform: AgentAppChannel,
+) -> anyhow::Result<OfficialRegistrationBeginResponse> {
+    let init = call_official_registration::<OfficialRegistrationInitResponse>(
+        state, platform, &[("action", "init")],
+    ).await?;
     if !init
         .supported_auth_methods
         .iter()
         .any(|method| method == "client_secret")
     {
-        anyhow::bail!("feishu registration does not support client_secret auth");
+        anyhow::bail!(
+            "{} registration does not support client_secret auth",
+            platform.channel()
+        );
     }
-    let begin = call_feishu_official_registration::<FeishuOfficialRegistrationBeginResponse>(
+    let begin = call_official_registration::<OfficialRegistrationBeginResponse>(
         state,
+        platform,
         &[
             ("action", "begin"),
             ("archetype", "PersonalAgent"),
@@ -193,39 +244,55 @@ async fn begin_feishu_official_registration(
     )
     .await?;
     if begin.device_code.trim().is_empty() || begin.verification_uri_complete.trim().is_empty() {
-        anyhow::bail!("feishu registration did not return a device_code or verification url");
+        anyhow::bail!(
+            "{} registration did not return a device_code or verification url",
+            platform.channel()
+        );
     }
     Ok(begin)
 }
 
-async fn poll_feishu_official_registration(
+async fn poll_official_registration(
     state: &AppState,
+    platform: AgentAppChannel,
     device_code: &str,
-) -> anyhow::Result<FeishuOfficialRegistrationPollResponse> {
-    call_feishu_official_registration::<FeishuOfficialRegistrationPollResponse>(
+) -> anyhow::Result<OfficialRegistrationPollResponse> {
+    call_official_registration::<OfficialRegistrationPollResponse>(
         state,
+        platform,
         &[("action", "poll"), ("device_code", device_code)],
     )
     .await
 }
 
-fn feishu_entry_url_for_app_id(app_id: &str) -> Option<String> {
+fn agent_app_entry_url_for_app_id(platform: AgentAppChannel, app_id: &str) -> Option<String> {
     let trimmed = app_id.trim();
     if trimmed.is_empty() {
         return None;
     }
     Some(format!(
-        "https://applink.feishu.cn/client/bot/open?appId={trimmed}"
+        "{}/client/bot/open?appId={trimmed}",
+        platform.app_link_base_url()
     ))
 }
 
-fn feishu_bind_entry_url(
+fn channel_bind_entry_url(
     state: &AppState,
+    platform: AgentAppChannel,
     session: Option<&PendingChannelBindSession>,
 ) -> Option<String> {
-    let config = load_feishu_config_response(state, None).ok()?;
-    if config.bind_ready {
-        if let Some(entry_url) = feishu_entry_url_for_app_id(&config.app_id) {
+    let configured_app_id = match platform {
+        AgentAppChannel::Feishu => load_feishu_config_response(state, None)
+            .ok()
+            .filter(|config| config.bind_ready)
+            .map(|config| config.app_id),
+        AgentAppChannel::Lark => load_lark_config_response(state, None)
+            .ok()
+            .filter(|config| config.bind_ready)
+            .map(|config| config.app_id),
+    };
+    if let Some(app_id) = configured_app_id {
+        if let Some(entry_url) = agent_app_entry_url_for_app_id(platform, &app_id) {
             return Some(entry_url);
         }
     }
@@ -234,11 +301,12 @@ fn feishu_bind_entry_url(
         .filter(|url| !url.trim().is_empty())
 }
 
-fn feishu_bind_session_response(
+fn channel_bind_session_response(
     state: &AppState,
+    platform: AgentAppChannel,
     session: PendingChannelBindSession,
 ) -> FeishuBindSessionStatusResponse {
-    let entry_url = feishu_bind_entry_url(state, Some(&session));
+    let entry_url = channel_bind_entry_url(state, platform, Some(&session));
     FeishuBindSessionStatusResponse {
         session_id: session.id,
         channel: session.channel,
@@ -251,10 +319,13 @@ fn feishu_bind_session_response(
         updated_at: session.updated_at,
         expires_at: session.expires_at,
         entry_url,
+        poll_interval_seconds: session
+            .install_poll_interval_seconds
+            .and_then(|seconds| u64::try_from(seconds).ok()),
     }
 }
 
-fn maybe_expire_feishu_bind_session(
+fn maybe_expire_channel_bind_session(
     db: &mut rusqlite::Connection,
     session: PendingChannelBindSession,
 ) -> anyhow::Result<PendingChannelBindSession> {
@@ -267,16 +338,31 @@ fn maybe_expire_feishu_bind_session(
     Ok(session)
 }
 
-fn write_feishu_generated_credentials(
+fn write_generated_credentials(
     state: &AppState,
+    platform: AgentAppChannel,
     app_id: &str,
     app_secret: &str,
 ) -> anyhow::Result<()> {
-    let raw = read_feishu_config_raw(state)?;
-    let output = update_feishu_config_raw_preserving_format(&raw, app_id, app_secret);
+    let (relative_path, output) = match platform {
+        AgentAppChannel::Feishu => {
+            let raw = read_feishu_config_raw(state)?;
+            (
+                "configs/channels/feishu.toml",
+                update_feishu_config_raw_preserving_format(&raw, app_id, app_secret),
+            )
+        }
+        AgentAppChannel::Lark => {
+            let raw = read_lark_config_raw(state)?;
+            (
+                "configs/channels/lark.toml",
+                update_lark_config_raw_preserving_format(&raw, app_id, app_secret),
+            )
+        }
+    };
     write_workspace_and_mounted_file(
         &state.skill_rt.workspace_root,
-        "configs/channels/feishu.toml",
+        relative_path,
         &output,
     )?;
     Ok(())
@@ -286,7 +372,7 @@ async fn start_service_if_needed(state: &AppState, service: &str) -> anyhow::Res
     if service_is_running(service) {
         return Ok(());
     }
-    let profile = std::env::var("RUSTCLAW_START_PROFILE")
+    let profile = claw_core::product_identity::env_string("START_PROFILE")
         .ok()
         .filter(|v| matches!(v.as_str(), "debug" | "release"))
         .unwrap_or_else(|| runtime_profile_default().to_string());
@@ -313,8 +399,9 @@ async fn start_service_if_needed(state: &AppState, service: &str) -> anyhow::Res
     Ok(())
 }
 
-async fn maybe_complete_feishu_official_scan(
+async fn maybe_complete_official_scan(
     state: &AppState,
+    platform: AgentAppChannel,
     session: PendingChannelBindSession,
 ) -> anyhow::Result<PendingChannelBindSession> {
     if !matches!(session.status.as_str(), "pending" | "detected") {
@@ -329,7 +416,7 @@ async fn maybe_complete_feishu_official_scan(
         return Ok(session);
     };
 
-    let poll = poll_feishu_official_registration(state, device_code).await?;
+    let poll = poll_official_registration(state, platform, device_code).await?;
     if let (Some(client_id), Some(client_secret), Some(_open_id)) = (
         poll.client_id
             .as_deref()
@@ -345,8 +432,8 @@ async fn maybe_complete_feishu_official_scan(
             .map(str::trim)
             .filter(|value| !value.is_empty()),
     ) {
-        write_feishu_generated_credentials(state, client_id, client_secret)?;
-        if let Err(err) = start_service_if_needed(state, "feishud").await {
+        write_generated_credentials(state, platform, client_id, client_secret)?;
+        if let Err(err) = start_service_if_needed(state, platform.service()).await {
             let mut db = state
                 .core
                 .db
@@ -387,20 +474,23 @@ async fn maybe_complete_feishu_official_scan(
     }
 }
 
-fn find_detectable_feishu_bind_session(
+fn find_detectable_channel_bind_session(
     db: &rusqlite::Connection,
+    platform: AgentAppChannel,
     bind_token: Option<&str>,
 ) -> anyhow::Result<Option<PendingChannelBindSession>> {
     let Some(bind_token) = bind_token.map(str::trim).filter(|token| !token.is_empty()) else {
         return Ok(None);
     };
-    get_pending_channel_bind_session_by_token(db, bind_token)
+    Ok(get_pending_channel_bind_session_by_token(db, bind_token)?
+        .filter(|session| session.channel == platform.channel()))
 }
 
-async fn start_feishu_bind_session_handler(
-    State(state): State<AppState>,
+async fn start_channel_bind_session(
+    state: AppState,
     headers: HeaderMap,
-    Json(req): Json<StartFeishuBindSessionRequest>,
+    req: StartFeishuBindSessionRequest,
+    platform: AgentAppChannel,
 ) -> (
     StatusCode,
     Json<ApiResponse<FeishuBindSessionStatusResponse>>,
@@ -424,12 +514,15 @@ async fn start_feishu_bind_session_handler(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("only admin can start feishu binds".to_string()),
+                error: Some(format!(
+                    "only admin can start {} binds",
+                    platform.channel()
+                )),
             }),
         );
     }
 
-    let ttl_seconds = clamp_feishu_bind_ttl_seconds(req.expires_in_seconds);
+    let ttl_seconds = clamp_channel_bind_ttl_seconds(req.expires_in_seconds);
     let default_expires_at = current_unix_ts()
         .saturating_add(ttl_seconds as i64)
         .to_string();
@@ -449,7 +542,7 @@ async fn start_feishu_bind_session_handler(
         };
         match create_pending_channel_bind_session(
             &mut db,
-            "feishu",
+            platform.channel(),
             &identity.user_key,
             &default_expires_at,
         ) {
@@ -460,38 +553,50 @@ async fn start_feishu_bind_session_handler(
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("create feishu bind session failed: {err}")),
+                        error: Some(format!(
+                            "create {} bind session failed: {err}",
+                            platform.channel()
+                        )),
                     }),
                 );
             }
         }
     };
 
-    let config = match load_feishu_config_response(&state, Some(&identity.user_key)) {
-        Ok(config) => config,
+    let bind_ready = match platform {
+        AgentAppChannel::Feishu => load_feishu_config_response(&state, Some(&identity.user_key))
+            .map(|config| config.bind_ready),
+        AgentAppChannel::Lark => load_lark_config_response(&state, Some(&identity.user_key))
+            .map(|config| config.bind_ready),
+    };
+    let bind_ready = match bind_ready {
+        Ok(bind_ready) => bind_ready,
         Err(err) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("read feishu config failed: {err}")),
+                    error: Some(format!(
+                        "read {} config failed: {err}",
+                        platform.channel()
+                    )),
                 }),
             );
         }
     };
-    if config.bind_ready {
+    if bind_ready {
         return (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
-                data: Some(feishu_bind_session_response(&state, session)),
+                data: Some(channel_bind_session_response(&state, platform, session)),
                 error: None,
             }),
         );
     }
 
-    let begin = match begin_feishu_official_registration(&state).await {
+    let begin = match begin_official_registration(&state, platform).await {
         Ok(begin) => begin,
         Err(err) => {
             let mut db = match state.core.db.get() {
@@ -513,7 +618,10 @@ async fn start_feishu_bind_session_handler(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("start feishu official registration failed: {err}")),
+                    error: Some(format!(
+                        "start {} official registration failed: {err}",
+                        platform.channel()
+                    )),
                 }),
             );
         }
@@ -547,7 +655,7 @@ async fn start_feishu_bind_session_handler(
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
-                data: Some(feishu_bind_session_response(&state, session)),
+                data: Some(channel_bind_session_response(&state, platform, session)),
                 error: None,
             }),
         ),
@@ -557,17 +665,19 @@ async fn start_feishu_bind_session_handler(
                 ok: false,
                 data: None,
                 error: Some(format!(
-                    "persist feishu official registration failed: {err}"
+                    "persist {} official registration failed: {err}",
+                    platform.channel()
                 )),
             }),
         ),
     }
 }
 
-async fn get_feishu_bind_session_handler(
-    State(state): State<AppState>,
+async fn get_channel_bind_session(
+    state: AppState,
     headers: HeaderMap,
-    AxumPath(session_id): AxumPath<i64>,
+    session_id: i64,
+    platform: AgentAppChannel,
 ) -> (
     StatusCode,
     Json<ApiResponse<FeishuBindSessionStatusResponse>>,
@@ -591,7 +701,10 @@ async fn get_feishu_bind_session_handler(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("only admin can inspect feishu binds".to_string()),
+                error: Some(format!(
+                    "only admin can inspect {} binds",
+                    platform.channel()
+                )),
             }),
         );
     }
@@ -612,17 +725,20 @@ async fn get_feishu_bind_session_handler(
         };
         match get_pending_channel_bind_session_by_id(&db, session_id) {
             Ok(Some(session)) => {
-                if session.user_key != identity.user_key {
+                if session.user_key != identity.user_key || session.channel != platform.channel() {
                     return (
                         StatusCode::NOT_FOUND,
                         Json(ApiResponse {
                             ok: false,
                             data: None,
-                            error: Some("feishu bind session not found".to_string()),
+                            error: Some(format!(
+                                "{} bind session not found",
+                                platform.channel()
+                            )),
                         }),
                     );
                 }
-                match maybe_expire_feishu_bind_session(&mut db, session) {
+                match maybe_expire_channel_bind_session(&mut db, session) {
                     Ok(session) => session,
                     Err(err) => {
                         return (
@@ -630,7 +746,10 @@ async fn get_feishu_bind_session_handler(
                             Json(ApiResponse {
                                 ok: false,
                                 data: None,
-                                error: Some(format!("refresh feishu bind session failed: {err}")),
+                                error: Some(format!(
+                                    "refresh {} bind session failed: {err}",
+                                    platform.channel()
+                                )),
                             }),
                         );
                     }
@@ -642,7 +761,10 @@ async fn get_feishu_bind_session_handler(
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some("feishu bind session not found".to_string()),
+                        error: Some(format!(
+                            "{} bind session not found",
+                            platform.channel()
+                        )),
                     }),
                 );
             }
@@ -652,19 +774,22 @@ async fn get_feishu_bind_session_handler(
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("get feishu bind session failed: {err}")),
+                        error: Some(format!(
+                            "get {} bind session failed: {err}",
+                            platform.channel()
+                        )),
                     }),
                 );
             }
         }
     };
 
-    match maybe_complete_feishu_official_scan(&state, session).await {
+    match maybe_complete_official_scan(&state, platform, session).await {
         Ok(session) => (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
-                data: Some(feishu_bind_session_response(&state, session)),
+                data: Some(channel_bind_session_response(&state, platform, session)),
                 error: None,
             }),
         ),
@@ -673,15 +798,19 @@ async fn get_feishu_bind_session_handler(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("refresh feishu bind session failed: {err}")),
+                error: Some(format!(
+                    "refresh {} bind session failed: {err}",
+                    platform.channel()
+                )),
             }),
         ),
     }
 }
 
-async fn detect_feishu_bind_session_handler(
-    State(state): State<AppState>,
-    Json(req): Json<DetectFeishuBindSessionRequest>,
+async fn detect_channel_bind_session(
+    state: AppState,
+    req: DetectFeishuBindSessionRequest,
+    platform: AgentAppChannel,
 ) -> (
     StatusCode,
     Json<ApiResponse<DetectFeishuBindSessionResponse>>,
@@ -730,7 +859,7 @@ async fn detect_feishu_bind_session_handler(
             );
         }
     };
-    let Some(session) = (match find_detectable_feishu_bind_session(&db, bind_token) {
+    let Some(session) = (match find_detectable_channel_bind_session(&db, platform, bind_token) {
         Ok(session) => session,
         Err(err) => {
             return (
@@ -738,7 +867,10 @@ async fn detect_feishu_bind_session_handler(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("load feishu bind session failed: {err}")),
+                    error: Some(format!(
+                        "load {} bind session failed: {err}",
+                        platform.channel()
+                    )),
                 }),
             );
         }
@@ -756,7 +888,7 @@ async fn detect_feishu_bind_session_handler(
         );
     };
 
-    let session = match maybe_expire_feishu_bind_session(&mut db, session) {
+    let session = match maybe_expire_channel_bind_session(&mut db, session) {
         Ok(session) => session,
         Err(err) => {
             return (
@@ -764,7 +896,10 @@ async fn detect_feishu_bind_session_handler(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("refresh feishu bind session failed: {err}")),
+                    error: Some(format!(
+                        "refresh {} bind session failed: {err}",
+                        platform.channel()
+                    )),
                 }),
             );
         }
@@ -776,7 +911,7 @@ async fn detect_feishu_bind_session_handler(
                 ok: true,
                 data: Some(DetectFeishuBindSessionResponse {
                     matched: false,
-                    session: Some(feishu_bind_session_response(&state, session)),
+                    session: Some(channel_bind_session_response(&state, platform, session)),
                 }),
                 error: None,
             }),
@@ -799,7 +934,10 @@ async fn detect_feishu_bind_session_handler(
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("detect feishu bind session failed: {err}")),
+                        error: Some(format!(
+                            "detect {} bind session failed: {err}",
+                            platform.channel()
+                        )),
                     }),
                 );
             }
@@ -812,7 +950,10 @@ async fn detect_feishu_bind_session_handler(
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("finalize feishu bind session failed: {err}")),
+                        error: Some(format!(
+                            "finalize {} bind session failed: {err}",
+                            platform.channel()
+                        )),
                     }),
                 );
             }
@@ -825,11 +966,75 @@ async fn detect_feishu_bind_session_handler(
             ok: true,
             data: Some(DetectFeishuBindSessionResponse {
                 matched: true,
-                session: Some(feishu_bind_session_response(&state, session)),
+                session: Some(channel_bind_session_response(&state, platform, session)),
             }),
             error: None,
         }),
     )
+}
+
+async fn start_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<StartFeishuBindSessionRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
+    start_channel_bind_session(state, headers, req, AgentAppChannel::Feishu).await
+}
+
+async fn start_lark_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<StartFeishuBindSessionRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
+    start_channel_bind_session(state, headers, req, AgentAppChannel::Lark).await
+}
+
+async fn get_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
+    get_channel_bind_session(state, headers, session_id, AgentAppChannel::Feishu).await
+}
+
+async fn get_lark_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
+    get_channel_bind_session(state, headers, session_id, AgentAppChannel::Lark).await
+}
+
+async fn detect_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    Json(req): Json<DetectFeishuBindSessionRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<DetectFeishuBindSessionResponse>>,
+) {
+    detect_channel_bind_session(state, req, AgentAppChannel::Feishu).await
+}
+
+async fn detect_lark_bind_session_handler(
+    State(state): State<AppState>,
+    Json(req): Json<DetectFeishuBindSessionRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<DetectFeishuBindSessionResponse>>,
+) {
+    detect_channel_bind_session(state, req, AgentAppChannel::Lark).await
 }
 
 async fn update_auth_key_handler(
@@ -1001,9 +1206,7 @@ pub(crate) fn require_ui_identity(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<Value>>)> {
-    let Some(raw_key) = headers
-        .get("x-rustclaw-key")
-        .and_then(|v| v.to_str().ok())
+    let Some(raw_key) = crate::auth_key_from_headers(headers)
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {

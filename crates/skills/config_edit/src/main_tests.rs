@@ -21,10 +21,8 @@ fn error_extra_merges_machine_contract_and_details() {
 }
 
 fn temp_root(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "rustclaw_config_edit_{name}_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("agent_config_edit_{name}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("configs")).expect("create temp config dir");
     root

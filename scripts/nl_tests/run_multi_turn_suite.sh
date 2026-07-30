@@ -20,7 +20,7 @@ SUMMARY_JSONL=""
 BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID_VALUE="${USER_ID:-1985996990}"
 CHAT_ID_VALUE="${CHAT_ID:-1985996990}"
-USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+USER_KEY_VALUE="${APP_USER_KEY:-${USER_KEY:-}}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-600}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 PROVIDER_RETRIES_VALUE="${PROVIDER_RETRIES:-2}"
@@ -47,7 +47,7 @@ Options:
   --user-id ID          user id for submitted tasks
   --chat-id ID          base chat id; auto-increments per case
   --reuse-chat-id-base  do not add a run-scoped offset to the base chat id
-  --user-key KEY        RustClaw user key; omitted => auto-detect first enabled admin key
+  --user-key KEY        Agent Runtime user key; omitted => auto-detect first enabled admin key
   --wait-seconds N      max wait per turn (default: 600)
   --poll-seconds N      poll interval seconds (default: 1)
   --provider-retries N  retry count when provider is unavailable/capacity-limited (default: 2)

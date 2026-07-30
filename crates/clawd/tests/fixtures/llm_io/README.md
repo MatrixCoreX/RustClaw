@@ -75,7 +75,7 @@ parse with a clear error.
 | `case`                                 | `String`       | yes      | Must equal the parent directory name (cross-check). |
 | `description`                          | `String?`      | no       | Human-readable note, ignored by assertions. |
 | `user_text`                            | `String`       | yes      | Original user input; harness writes it as `tasks.payload_json`'s `text` field. |
-| `freeze_now`                           | `String`       | yes      | Wallclock injected via `RUSTCLAW_TEST_FREEZE_NOW`. **Must match recording time** (otherwise normalizer prompt's `__NOW__` field shifts the FNV-1a hash and fixture misses). RFC-3339 (e.g. `2026-04-19T12:00:00+08:00`) or `%Y-%m-%d %H:%M:%S %:z`. |
+| `freeze_now`                           | `String`       | yes      | Wallclock injected via `APP_TEST_FREEZE_NOW`. **Must match recording time** (otherwise normalizer prompt's `__NOW__` field shifts the FNV-1a hash and fixture misses). RFC-3339 (e.g. `2026-04-19T12:00:00+08:00`) or `%Y-%m-%d %H:%M:%S %:z`. |
 | `user_id`                              | `i64`          | no, default `1`  | Seeded into the `tasks` row. |
 | `chat_id`                              | `i64`          | no, default `1`  | Seeded into the `tasks` row. |
 | `prior_turns`                          | `Vec<Object>`  | no       | Optional synthetic history for clarify/context follow-ups. Each item seeds one succeeded prior `ask` row before replaying the current turn. Fields: `user_text` (required), `assistant_text` (required), `updated_at` (required exact timestamp from recording, because it is rendered into recent-execution context and therefore affects `prompt_hash`), `final_status` (optional, default `success`). |

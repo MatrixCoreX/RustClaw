@@ -11,6 +11,7 @@ kind = "builtin"
 planner_kind = "tool"
 group = "system"
 aliases = ["shell", "exec"]
+argument_aliases = { command = ["cmd", "shell_command"] }
 timeout_seconds = 60
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
@@ -24,6 +25,7 @@ required_bins = ["bash"]
 optional_bins = ["sudo"]
 platform_notes = ["Executes through bash on Linux/macOS; sudo use is gated by task policy."]
 description = "Inspect command permission, preview a resumable background-command contract, run one-shot commands, or manage durable PTY command sessions."
+description_zh = "检查命令权限、预览可恢复的后台命令流程、运行一次性命令，或管理持久 PTY 命令会话。"
 semantic_tags = ["command_execution", "command_permission_preview", "background_command_preview", "async_checkpoint_preview", "cli_help", "terminal_session", "pty_session", "interactive_process"]
 planner_capability_aliases = { "system.run_cmd" = "system.run_command", "system.shell_run" = "system.run_command", "run_cmd" = "system.run_command" }
 planner_capabilities = [
@@ -59,6 +61,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/read_file.md"
 output_kind = "text"
 description = "Read bounded file content and return structured path and content evidence."
+description_zh = "分段读取文件内容，并返回结构化的路径和内容证据。"
 risk_level = "low"
 auto_invocable = true
 side_effect = false
@@ -81,6 +84,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/write_file.md"
 output_kind = "text"
 description = "Write or replace workspace file content through a permission-gated operation."
+description_zh = "通过权限控制写入或替换工作区文件内容。"
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -90,6 +94,47 @@ capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
 input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" }, append = { type = "boolean" }, mode = { type = "string", enum = ["overwrite", "replace", "write", "append"] }, create_parents = { type = "boolean" }, parents = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
+name = "media_download"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+group = "video"
+supported_os = ["linux", "macos"]
+install_mode = "on_demand"
+package_manifest = "optional_skills/media_download/skill.toml"
+aliases = ["media_downloader", "download_media", "video_download"]
+timeout_seconds = 3600
+prompt_file = "prompts/layers/generated/skills/media_download.md"
+output_kind = "file"
+description = "Download accessible public media, resolve direct media URLs, transcribe local video or audio, OCR local images, and prepare videos for X."
+description_zh = "下载可公开访问的视频和媒体，解析媒体直链，转写本地音视频，识别图片文字，并为 X 准备兼容视频。"
+semantic_tags = ["public_media_download", "direct_media_url", "video_download", "audio_transcription", "image_ocr", "x_video_compatibility"]
+capabilities = ["net", "fs.read", "fs.write", "exec"]
+risk_level = "high"
+auto_invocable = true
+requires_confirmation = true
+side_effect = true
+retryable = true
+required_bins = ["python3"]
+optional_bins = ["yt-dlp", "ffmpeg", "ffprobe", "tesseract", "chromium", "google-chrome", "whisper-cli"]
+platform_notes = ["Public-content media operations use a Python adapter; optional local tools are required only by the actions that need them."]
+confirmation_exempt_when = [
+  { action = "capabilities" },
+  { action = "resolve" },
+  { action = "download" },
+]
+planner_capabilities = [
+  { name = "media_download.capabilities", action = "capabilities", effect = "observe", optional = [], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "media_download.resolve", action = "resolve", effect = "observe", required = ["share"], optional = ["platform", "profile_limit", "profile_interval_seconds", "network_timeout_seconds", "browser_fallback", "operation_timeout_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "media_download.download", action = "download", effect = "mutate", required = ["share"], optional = ["platform", "deliver_to_user", "output_name", "profile_limit", "profile_interval_seconds", "network_timeout_seconds", "browser_fallback", "save_meta", "show_info", "x_compatible", "overwrite", "operation_timeout_seconds"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "media_download.transcribe", action = "transcribe", effect = "mutate", required = ["input_path"], optional = ["engine", "language", "extract_audio_only", "translate", "fast", "no_gpu", "timestamps", "overwrite", "operation_timeout_seconds"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "media_download.ocr", action = "ocr", effect = "mutate", required = ["input_paths"], optional = ["language", "preprocess", "psm", "min_line_confidence", "overwrite", "operation_timeout_seconds"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "media_download.prepare_x", action = "prepare_x", effect = "mutate", required = ["input_path"], optional = ["check_only", "force", "crf", "overwrite", "operation_timeout_seconds"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+]
+input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["capabilities", "download", "resolve", "transcribe", "ocr", "prepare_x"] }, share = { type = "string", minLength = 1, maxLength = 20000 }, platform = { type = "string", enum = ["auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube"] }, deliver_to_user = { type = "boolean" }, output_name = { type = "string", minLength = 1, maxLength = 255 }, profile_limit = { anyOf = [{ type = "integer", minimum = 1, maximum = 500 }, { type = "string", enum = ["all"] }] }, profile_interval_seconds = { type = "number", minimum = 0, maximum = 60 }, network_timeout_seconds = { type = "number", minimum = 1, maximum = 120 }, operation_timeout_seconds = { type = "integer", minimum = 5, maximum = 3500 }, browser_fallback = { type = "boolean" }, save_meta = { type = "boolean" }, show_info = { type = "boolean" }, engine = { type = "string", enum = ["whisper", "funasr"] }, language = { type = "string", minLength = 1, maxLength = 64 }, translate = { type = "boolean" }, fast = { type = "boolean" }, no_gpu = { type = "boolean" }, timestamps = { type = "boolean" }, x_compatible = { type = "boolean" }, overwrite = { type = "boolean" }, input_path = { type = "string", minLength = 1, maxLength = 4096 }, input_paths = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 4096 } }, extract_audio_only = { type = "boolean" }, preprocess = { type = "boolean" }, psm = { type = "integer", minimum = 0, maximum = 13 }, min_line_confidence = { type = "number", minimum = -1, maximum = 100 }, check_only = { type = "boolean" }, force = { type = "boolean" }, crf = { type = "integer", minimum = 16, maximum = 35 } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["schema_version", "source_skill", "status", "action"], properties = { schema_version = { type = "integer" }, source_skill = { type = "string" }, status = { type = "string", enum = ["ok", "error"] }, action = { type = "string" }, count = { type = "integer" }, urls = { type = "array", items = { type = "string" } }, artifacts = { type = "array", items = { type = "object" } }, saved_files = { type = "array", items = { type = "object" } }, delivery = { type = "object" }, output_directory = { type = "string" }, error_code = { type = "string" }, message_key = { type = "string" }, retryable = { type = "boolean" } } } } }
 
 [[skills]]
 name = "workspace_patch"
@@ -103,6 +148,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/workspace_patch.md"
 output_kind = "text"
 description = "Apply, inspect, verify, or rewind reviewable workspace patches and checkpoints."
+description_zh = "应用、检查、验证或回退可审查的工作区补丁与检查点。"
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -126,6 +172,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/list_dir.md"
 output_kind = "text"
 description = "List direct directory entries with structured path metadata."
+description_zh = "列出目录的直接子项，并返回结构化路径信息。"
 risk_level = "low"
 auto_invocable = true
 requires_confirmation = false
@@ -150,10 +197,12 @@ kind = "builtin"
 planner_kind = "tool"
 group = "filesystem"
 aliases = []
+argument_aliases = { parents = ["create_parents", "create_parent_dirs", "mkdir_parents"] }
 timeout_seconds = 30
 prompt_file = "prompts/skills/make_dir.md"
 output_kind = "text"
 description = "Create workspace directories, including required parent directories."
+description_zh = "在工作区创建目录，并可同时创建所需的父目录。"
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -177,6 +226,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/remove_file.md"
 output_kind = "text"
 description = "Remove a workspace file through a permission-gated operation."
+description_zh = "通过权限控制删除工作区文件。"
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -200,6 +250,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/fs_basic.md"
 output_kind = "text"
 description = "Use list_entries for complete direct-child inventories, replace_text for unique local edits, and find_entries for bounded recursive discovery."
+description_zh = "完整列出目录子项、精确替换文件文字，并在限定范围内递归查找文件。"
 semantic_tags = ["path_facts", "directory_inventory", "bounded_file_read", "file_search", "content_search", "path_compare", "file_write", "exact_text_replace", "workspace_patch", "workspace_diff", "workspace_checkpoint", "child_patch_review", "child_patch_decision", "scalar_count", "path_inspection"]
 risk_level = "high"
 auto_invocable = false
@@ -289,6 +340,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/code_index.md"
 output_kind = "text"
 description = "Incremental repository code index using parser-derived Rust symbols, definitions, references, tests, changed-file impact, and bounded context ranges."
+description_zh = "增量索引代码仓库，查询 Rust 符号、定义、引用、测试、改动影响和限定范围的上下文。"
 semantic_tags = ["repository_index", "symbol_search", "definition_lookup", "reference_lookup", "test_impact", "bounded_code_context"]
 risk_level = "low"
 auto_invocable = true
@@ -322,7 +374,8 @@ aliases = ["structured_config", "config_field"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/config_basic.md"
 output_kind = "text"
-description = "config.guard_rustclaw_config owns RustClaw safety and risk checks; config.validate parses syntax only; read_field(s), list_keys, and summarize_structure inspect documents."
+description = "config.guard_config owns host configuration safety and risk checks; config.validate parses syntax only; read_field(s), list_keys, and summarize_structure inspect documents."
+description_zh = "检查结构化配置字段、键和文档结构；可验证语法，并由配置安全检查识别风险。"
 semantic_tags = ["structured_config", "toml", "json", "yaml", "field_read", "key_listing", "structured_keys", "structure_summary", "empty_value_count", "false_boolean_count", "config_validation", "config_guard"]
 risk_level = "low"
 auto_invocable = true
@@ -331,7 +384,7 @@ retryable = true
 capabilities = ["fs.read"]
 preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
-platform_notes = ["Virtual planner tool; runtime read actions delegate to system_basic and RustClaw config guard."]
+platform_notes = ["Virtual planner tool; runtime read actions delegate to system_basic and the host config guard."]
 planner_capability_aliases = { "config_basic.read_field" = "config.read_field" }
 planner_capabilities = [
   { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], optional = ["format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "scalar" },
@@ -340,9 +393,8 @@ planner_capabilities = [
   { name = "config.list_keys", action = "list_keys", effect = "observe", required = ["path"], optional = ["field_path", "format", "max_keys"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.summarize_structure", action = "summarize_structure", description = "Safely summarize a structured document or selected subtree with exact empty/null/container and false-boolean counts plus machine field paths, without returning scalar values.", semantic_tags = ["structured_summary", "empty_fields", "empty_values", "disabled_boolean_inventory", "safe_config_inventory"], effect = "observe", required = ["path"], optional = ["field_path", "format", "max_paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.validate", action = "validate", description = "Parse structured configuration syntax only; does not assess safety or operational risk.", semantic_tags = ["syntax_validation", "structured_parse"], effect = "validate", required = ["path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "config.guard_rustclaw_config", action = "guard_rustclaw_config", description = "Run the authoritative RustClaw semantic safety and configuration risk check instead of reading raw file text.", semantic_tags = ["rustclaw_config_safety", "config_risk_scan", "config_problem_check"], effect = "validate", required = ["path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields", "list_keys", "summarize_structure", "validate", "guard_rustclaw_config"] }, path = { type = "string", minLength = 1 }, field_path = { type = "string", minLength = 1, description = "Dot/bracket structured path. For an array item selected by name/id/key, use a filter such as skills[?(@.name=='fs_basic')].prompt_file or rooted shorthand skills.fs_basic.prompt_file." }, field_paths = { anyOf = [ { type = "string", minLength = 1 }, { type = "array", minItems = 1, items = { type = "string", minLength = 1 } } ], description = "One or more field_path selectors; each supports array filters and rooted array-item shorthand." }, format = { type = "string" }, validation_profile = { type = "string", enum = ["syntax_only", "rustclaw_semantic_guard"] }, max_keys = { type = "integer", minimum = 1, maximum = 1000 }, max_paths = { type = "integer", minimum = 1, maximum = 1000 } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields", "list_keys", "summarize_structure", "validate", "guard_config"] }, path = { type = "string", minLength = 1 }, field_path = { type = "string", minLength = 1, description = "Dot/bracket structured path. For an array item selected by name/id/key, use a filter such as skills[?(@.name=='fs_basic')].prompt_file or rooted shorthand skills.fs_basic.prompt_file." }, field_paths = { anyOf = [ { type = "string", minLength = 1 }, { type = "array", minItems = 1, items = { type = "string", minLength = 1 } } ], description = "One or more field_path selectors; each supports array filters and rooted array-item shorthand." }, format = { type = "string" }, validation_profile = { type = "string", enum = ["syntax_only", "host_semantic_guard"] }, max_keys = { type = "integer", minimum = 1, maximum = 1000 }, max_paths = { type = "integer", minimum = 1, maximum = 1000 } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -354,10 +406,12 @@ planner_kind = "tool"
 group = "config"
 package_manifest = "crates/skills/config_edit/skill.toml"
 aliases = ["config_mutation", "config_write", "config_set"]
+argument_aliases = { value = ["new_value", "target_value"] }
 timeout_seconds = 45
 prompt_file = "prompts/skills/config_edit.md"
 output_kind = "text"
-description = "Planner-facing structured config mutation tool. Use for plan/apply/validate/guard/read-back workflows when changing RustClaw config fields."
+description = "Planner-facing structured config mutation tool. Use for plan/apply/validate/guard/read-back workflows when changing host runtime config fields."
+description_zh = "以结构化流程规划、应用、验证、安全检查并回读宿主运行配置的修改。"
 semantic_tags = ["structured_config", "config_mutation", "toml", "json", "field_write", "field_read_back", "config_validation", "config_guard", "restart_recommendation"]
 risk_level = "high"
 auto_invocable = true
@@ -386,7 +440,7 @@ planner_capabilities = [
   { name = "config.set_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "config.validate_after_change", action = "validate_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.guard_after_change", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "config.guard_config", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "config.guard_config", action = "guard_config", description = "Run the authoritative host semantic safety and configuration risk check instead of reading raw file text.", semantic_tags = ["host_config_safety", "config_risk_scan", "config_problem_check"], effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.guard", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.risk", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.read_back", action = "read_back", effect = "observe", required = ["field_path"], optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -407,20 +461,21 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/schedule.md"
 output_kind = "text"
 description = "Preview, create, list, pause, resume, or delete durable scheduled tasks."
+description_zh = "预览、创建、查看、暂停、恢复或删除持久化定时任务。"
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = false
 planner_capabilities = [
-  { name = "schedule.create", action = "create", effect = "mutate", required = ["text|intent"], optional = ["timezone", "schedule", "task", "mode", "dry_run", "preview_only"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "schedule.create", action = "create", effect = "mutate", required = ["text|intent"], optional = ["timezone", "schedule", "task", "mode", "preview_only"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "schedule.preview", action = "preview", effect = "observe", required = ["text|intent"], optional = ["timezone", "schedule", "task"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
   { name = "schedule.list", action = "list", effect = "observe", optional = ["text|intent", "target_job_id"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "schedule.delete", action = "delete", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "schedule.pause", action = "pause", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "schedule.resume", action = "resume", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["compile", "create", "preview", "list", "delete", "pause", "resume"] }, text = { type = "string" }, raw = { type = "string" }, intent = { type = "object" }, kind = { type = "string" }, timezone = { type = "string" }, schedule = { type = "object" }, task = { type = "object" }, target_job_id = { type = "string" }, mode = { type = "string" }, dry_run = { type = "boolean" }, preview_only = { type = "boolean" }, create_real = { type = "boolean" } } }
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["compile", "create", "preview", "list", "delete", "pause", "resume"] }, text = { type = "string" }, raw = { type = "string" }, intent = { type = "object" }, kind = { type = "string" }, timezone = { type = "string" }, schedule = { type = "object" }, task = { type = "object" }, target_job_id = { type = "string" }, mode = { type = "string" }, preview_only = { type = "boolean" }, create_real = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -443,13 +498,14 @@ retryable = true
 supported_os = ["linux", "macos"]
 platform_notes = ["Runs inside the shared Rust agent runtime; child process, worktree, and path boundaries use the existing Linux/macOS platform adapters."]
 description = "Delegate bounded read-only review, exploration, and verification to trusted child-agent roles, or schedule persistent isolated child work through an explicit high-risk capability."
+description_zh = "把限定范围的只读审查、探索和验证交给可信子 Agent，或在明确授权后安排持久隔离任务。"
 semantic_tags = ["agent_delegation", "child_agent", "readonly_review", "bounded_parallel", "persistent_child_task"]
 planner_capabilities = [
-  { name = "agent.subagent", action = "inline_readonly", effect = "observe", required = ["role", "objective", "context_refs", "allowed_capabilities"], optional = ["required", "budget", "context_slice", "result_contract", "dry_run", "expected_failure"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
-  { name = "agent.subagent_batch", action = "bounded_parallel_readonly", effect = "observe", required = ["children"], optional = ["dry_run", "expected_failure", "max_parallel"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "agent.subagent", action = "inline_readonly", effect = "observe", required = ["role", "objective", "context_refs", "allowed_capabilities"], optional = ["required", "budget", "context_slice", "result_contract", "expected_failure"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
+  { name = "agent.subagent_batch", action = "bounded_parallel_readonly", effect = "observe", required = ["children"], optional = ["expected_failure", "max_parallel"], risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
   { name = "agent.subagent_persistent", action = "persistent_child_task", effect = "mutate", required = ["role|children", "objective|children", "allowed_capabilities|children"], optional = ["context_refs", "required", "budget", "context_slice", "result_contract", "children", "max_parallel", "node_id", "depends_on", "owned_paths"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "lifecycle_result" },
 ]
-input_schema = { type = "object", additionalProperties = false, properties = { action = { type = "string", enum = ["inline_readonly", "bounded_parallel_readonly", "persistent_child_task"] }, role = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_-]*$" }, objective = { type = "string", minLength = 1, maxLength = 4096 }, context_refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, required = { type = "boolean" }, allowed_capabilities = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 160, pattern = "^[a-z0-9][a-z0-9_.:/-]*$" } }, budget = { type = "object", additionalProperties = false, properties = { max_rounds = { type = "integer", minimum = 1, maximum = 12 }, max_tool_calls = { type = "integer", minimum = 1, maximum = 64 }, max_context_chars = { type = "integer", minimum = 256, maximum = 32768 }, timeout_ms = { type = "integer", minimum = 1000, maximum = 3600000 } } }, context_slice = { type = "object", additionalProperties = false, properties = { refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, max_context_chars = { type = "integer", minimum = 256, maximum = 4096 } } }, result_contract = { type = "object", additionalProperties = false, properties = { output_format = { type = "string", enum = ["machine_json"] }, required_keys = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.-]*$" } }, require_evidence = { type = "boolean" }, allow_partial = { type = "boolean" } } }, dry_run = { type = "boolean" }, expected_failure = { type = "boolean" }, children = { type = "array", minItems = 1, maxItems = 16, items = { type = "object", additionalProperties = false, required = ["role", "objective", "context_refs", "allowed_capabilities"], properties = { role = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_-]*$" }, objective = { type = "string", minLength = 1, maxLength = 4096 }, context_refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, required = { type = "boolean" }, allowed_capabilities = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 160, pattern = "^[a-z0-9][a-z0-9_.:/-]*$" } }, budget = { type = "object", additionalProperties = false, properties = { max_rounds = { type = "integer", minimum = 1, maximum = 12 }, max_tool_calls = { type = "integer", minimum = 1, maximum = 64 }, max_context_chars = { type = "integer", minimum = 256, maximum = 32768 }, timeout_ms = { type = "integer", minimum = 1000, maximum = 3600000 } } }, context_slice = { type = "object", additionalProperties = false, properties = { refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, max_context_chars = { type = "integer", minimum = 256, maximum = 4096 } } }, result_contract = { type = "object", additionalProperties = false, properties = { output_format = { type = "string", enum = ["machine_json"] }, required_keys = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.-]*$" } }, require_evidence = { type = "boolean" }, allow_partial = { type = "boolean" } } }, node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, depends_on = { type = "array", maxItems = 16, items = { type = "object", additionalProperties = false, required = ["node_id"], properties = { node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, required = { type = "boolean" } } } }, owned_paths = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 1024 } } } } }, max_parallel = { type = "integer", minimum = 1, maximum = 16 }, node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, depends_on = { type = "array", maxItems = 16, items = { type = "object", additionalProperties = false, required = ["node_id"], properties = { node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, required = { type = "boolean" } } } }, owned_paths = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 1024 } } } }
+input_schema = { type = "object", additionalProperties = false, properties = { action = { type = "string", enum = ["inline_readonly", "bounded_parallel_readonly", "persistent_child_task"] }, role = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_-]*$" }, objective = { type = "string", minLength = 1, maxLength = 4096 }, context_refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, required = { type = "boolean" }, allowed_capabilities = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 160, pattern = "^[a-z0-9][a-z0-9_.:/-]*$" } }, budget = { type = "object", additionalProperties = false, properties = { max_rounds = { type = "integer", minimum = 1, maximum = 12 }, max_tool_calls = { type = "integer", minimum = 1, maximum = 64 }, max_context_chars = { type = "integer", minimum = 256, maximum = 32768 }, timeout_ms = { type = "integer", minimum = 1000, maximum = 3600000 } } }, context_slice = { type = "object", additionalProperties = false, properties = { refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, max_context_chars = { type = "integer", minimum = 256, maximum = 4096 } } }, result_contract = { type = "object", additionalProperties = false, properties = { output_format = { type = "string", enum = ["machine_json"] }, required_keys = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.-]*$" } }, require_evidence = { type = "boolean" }, allow_partial = { type = "boolean" } } }, expected_failure = { type = "boolean" }, children = { type = "array", minItems = 1, maxItems = 16, items = { type = "object", additionalProperties = false, required = ["role", "objective", "context_refs", "allowed_capabilities"], properties = { role = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_-]*$" }, objective = { type = "string", minLength = 1, maxLength = 4096 }, context_refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, required = { type = "boolean" }, allowed_capabilities = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 160, pattern = "^[a-z0-9][a-z0-9_.:/-]*$" } }, budget = { type = "object", additionalProperties = false, properties = { max_rounds = { type = "integer", minimum = 1, maximum = 12 }, max_tool_calls = { type = "integer", minimum = 1, maximum = 64 }, max_context_chars = { type = "integer", minimum = 256, maximum = 32768 }, timeout_ms = { type = "integer", minimum = 1000, maximum = 3600000 } } }, context_slice = { type = "object", additionalProperties = false, properties = { refs = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 1024 } }, max_context_chars = { type = "integer", minimum = 256, maximum = 4096 } } }, result_contract = { type = "object", additionalProperties = false, properties = { output_format = { type = "string", enum = ["machine_json"] }, required_keys = { type = "array", minItems = 1, maxItems = 16, items = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.-]*$" } }, require_evidence = { type = "boolean" }, allow_partial = { type = "boolean" } } }, node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, depends_on = { type = "array", maxItems = 16, items = { type = "object", additionalProperties = false, required = ["node_id"], properties = { node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, required = { type = "boolean" } } } }, owned_paths = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 1024 } } } } }, max_parallel = { type = "integer", minimum = 1, maximum = 16 }, node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, depends_on = { type = "array", maxItems = 16, items = { type = "object", additionalProperties = false, required = ["node_id"], properties = { node_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[a-z0-9][a-z0-9_.:-]*$" }, required = { type = "boolean" } } } }, owned_paths = { type = "array", minItems = 1, maxItems = 32, items = { type = "string", minLength = 1, maxLength = 1024 } } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -467,6 +523,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/x.md"
 output_kind = "text"
 description = "Draft or publish social posts through X/Twitter-like channel tooling. Preview/dry-run requests should call this skill with dry_run=true instead of answering as ordinary chat text."
+description_zh = "起草或发布 X/Twitter 社交内容；支持先预览草稿，再确认是否对外发布。"
 semantic_tags = ["publishing", "social_post", "draft_preview", "dry_run", "external_channel"]
 risk_level = "high"
 auto_invocable = true
@@ -492,7 +549,8 @@ aliases = ["system", "system_query"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/system_basic.md"
 output_kind = "text"
-description = "Inspect structured host, workspace, process, port, and RustClaw runtime facts."
+description = "Inspect structured host, workspace, process, port, and agent runtime facts."
+description_zh = "查看宿主、工作区、进程、端口和 Agent 运行时的结构化状态信息。"
 risk_level = "low"
 auto_invocable = true
 side_effect = false
@@ -528,6 +586,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/http_basic.md"
 output_kind = "text"
 description = "Raw HTTP/API request tool for status checks, response previews, validation, and downloads; use browser_web for browser-rendered page titles, readable page text, page summaries, screenshots, or extraction artifacts."
+description_zh = "发送原始 HTTP/API 请求，用于状态检查、响应预览、验证和下载；网页阅读与截图请使用浏览器技能。"
 semantic_tags = ["http.raw_request", "http.status_check", "api.request", "response_preview", "download_response"]
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
@@ -551,6 +610,7 @@ group = "system"
 package_manifest = "crates/skills/git_basic/skill.toml"
 aliases = ["git"]
 description = "Inspect workspace Git repositories and perform confirmation-gated local stage, commit, branch-create, and safe checkout actions. Remote mutations are unavailable."
+description_zh = "检查工作区 Git 仓库，并在确认后执行本地暂存、提交、建分支和安全切换；不执行远程修改。"
 semantic_tags = ["repository_status", "repository_history", "repository_diff", "repository_revision", "source_control", "local_stage", "local_commit", "local_branch"]
 risk_level = "high"
 auto_invocable = false
@@ -609,21 +669,19 @@ group = "system"
 package_manifest = "crates/skills/install_module/skill.toml"
 aliases = ["module_install", "install_modules"]
 description = "Use module.preview_install for every preview-only request; module.install is the separate high-risk mutating capability."
+description_zh = "预览模块安装方案；实际安装是独立的高风险操作，需要明确确认。"
 timeout_seconds = 30
 prompt_file = "prompts/skills/install_module.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["python3", "npm", "cargo", "go"]
 platform_notes = ["Language ecosystem installers are action-dependent; use package_manager for OS packages."]
-semantic_tags = ["module_install", "dependency_install", "dry_run"]
-confirmation_exempt_when = [
-  { action = "install", dry_run = true },
-]
+semantic_tags = ["module_install", "dependency_install"]
 planner_capabilities = [
   { name = "module.preview_install", action = "preview_install", effect = "observe", required = ["module|modules"], optional = ["ecosystem", "version", "scope", "project_path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false, final_answer_shape = "summary_with_evidence" },
   { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version", "scope", "project_path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = false },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_install", "install"] }, module = { type = "string" }, modules = { type = "array", minItems = 1, maxItems = 64, items = { type = "string", minLength = 1, maxLength = 256 } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string", maxLength = 128 }, scope = { type = "string", enum = ["project", "tool_cache"] }, project_path = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_install", "install"] }, module = { type = "string" }, modules = { type = "array", minItems = 1, maxItems = 64, items = { type = "string", minLength = 1, maxLength = 256 } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string", maxLength = 128 }, scope = { type = "string", enum = ["project", "tool_cache"] }, project_path = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -636,6 +694,7 @@ group = "ops"
 package_manifest = "crates/skills/process_basic/skill.toml"
 aliases = ["process", "process_manager"]
 description = "Inspect local processes and listening ports through structured process actions instead of ad-hoc shell commands."
+description_zh = "通过结构化操作检查本机进程和监听端口。"
 semantic_tags = ["service_status", "runtime_health", "runtime_process", "clawd_process", "listening_port"]
 preferred_over_run_cmd = true
 validation_actions = ["ps", "port_list"]
@@ -667,24 +726,21 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/package_manager.md"
 output_kind = "text"
 description = "Detect native package managers and preview or perform policy-gated package installation."
+description_zh = "检测系统包管理器，预览安装方案，并在策略许可后安装软件包。"
 supported_os = ["linux", "macos"]
 required_bins = ["sh", "id"]
 optional_bins = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew", "sudo"]
 platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package managers before Homebrew fallback."]
 semantic_tags = ["package.detect_manager"]
-confirmation_exempt_when = [
-  { action = "install", dry_run = true },
-  { action = "smart_install", dry_run = true },
-]
 preferred_over_run_cmd = true
 planner_capabilities = [
   { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager", "path", "root", "project_path", "workspace"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
   { name = "package.smart_install_preview", action = "smart_install_preview", effect = "observe", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
-  { name = "package.smart_install", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
-  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
+  { name = "package.smart_install", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
+  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string", enum = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, path = { type = "string" }, root = { type = "string" }, project_path = { type = "string" }, workspace = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install_preview", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string", enum = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] }, path = { type = "string" }, root = { type = "string" }, project_path = { type = "string" }, workspace = { type = "string" }, use_sudo = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -698,6 +754,7 @@ package_manifest = "crates/skills/archive_basic/skill.toml"
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "archive_basic" }
 aliases = ["archive", "archive_tool"]
 description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
+description_zh = "查看、读取、打包和解压 ZIP/TAR 压缩包。"
 semantic_tags = ["archive_catalog", "archive_content", "archive_artifact", "archive_extract"]
 risk_level = "high"
 auto_invocable = false
@@ -733,6 +790,7 @@ group = "system"
 package_manifest = "crates/skills/db_basic/skill.toml"
 aliases = ["database", "sqlite_tool"]
 description = "Run read-only SQLite queries and confirmed SQLite mutations through structured database actions."
+description_zh = "执行只读 SQLite 查询，并在确认后修改 SQLite 数据。"
 semantic_tags = ["sqlite_query", "sqlite_catalog", "sqlite_version"]
 risk_level = "high"
 auto_invocable = false
@@ -784,6 +842,7 @@ group = "ops"
 package_manifest = "crates/skills/docker_basic/skill.toml"
 aliases = ["docker", "docker_ops"]
 description = "Inspect Docker containers/images/version and perform targeted container lifecycle actions through structured Docker actions."
+description_zh = "检查 Docker 版本、容器和镜像，并对指定容器执行生命周期操作。"
 semantic_tags = ["docker.list_containers", "docker.list_images", "docker.version", "docker.read_logs", "docker.lifecycle"]
 preferred_over_run_cmd = true
 validation_actions = ["ps", "images", "version", "inspect"]
@@ -833,6 +892,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/fs_search.md"
 output_kind = "text"
 description = "Typed recursive path/glob and literal/regex content search with opaque snapshot pages, explicit completeness, verified ripgrep fast paths, and a safe Rust fallback."
+description_zh = "按路径、通配符、普通文本或正则表达式递归搜索文件内容，并返回可分页的完整性信息。"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "fs_search" }
@@ -850,6 +910,7 @@ supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "rss_fetch" }
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
 description = "Fetch configured RSS/Atom feeds and maintain a verified source-candidate lifecycle. The model may propose evidence-backed candidates, but deterministic URL/feed validation and explicit confirmed promotion control active configuration."
+description_zh = "获取已配置的 RSS/Atom 订阅，并通过验证、预览和明确确认管理候选订阅源。"
 semantic_tags = ["rss.fetch_entries", "rss.latest", "rss.feed_fetch", "rss.source_health", "rss.source_discovery", "external_news"]
 capabilities = ["net", "fs.write"]
 risk_level = "low"
@@ -886,6 +947,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
 output_kind = "image"
 description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
+description_zh = "理解 URL、文件路径或 Base64 输入的图片与截图，可进行描述、内容提取、对比和总结。"
 semantic_tags = ["image.describe", "image.extract", "image.compare", "screenshot.summary"]
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘，只声明 llm + net；runtime 通过当前主模型连接下发 provider-neutral
@@ -917,11 +979,13 @@ group = "image"
 package_manifest = "crates/skills/image_generate/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
+argument_aliases = { prompt = ["subject", "description", "instruction", "text", "query"], size = ["resolution", "dimensions"] }
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_generate.md"
 output_kind = "image"
 description = "Generate images through provider-neutral adapters, or preview provider/model, planned outputs, and async job contracts without calling a provider or writing a file."
-semantic_tags = ["image_generation", "text_to_image", "media_generation", "image_generation_preview", "media_dry_run", "planned_media_output", "async_media_contract"]
+description_zh = "通过统一适配器生成图片，也可先预览服务商、模型、输出计划和异步任务信息。"
+semantic_tags = ["image_generation", "text_to_image", "media_generation", "image_generation_preview", "planned_media_output", "async_media_contract"]
 # §P4.1 主体首批示例：image_generate 走外部 LLM provider 生成图，
 # 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
 # 注意：image_generation / image_edit / image_vision / [llm]（chat&规划）
@@ -936,6 +1000,7 @@ semantic_tags = ["image_generation", "text_to_image", "media_generation", "image
 # 否则 spawn path 会按 manifest 拒绝注入对应凭证（fail-loud）。
 capabilities = [
     "llm",
+    "llm.credential_fallback.image_generation_minimax_api_key",
     "net",
     "fs.write",
     "secrets.image_generation_minimax_api_key",
@@ -945,11 +1010,11 @@ capabilities = [
 side_effect = true
 planner_capabilities = [
   { name = "image.preview_generate", action = "preview_generate", effect = "observe", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "summary_with_evidence" },
-  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds", "dry_run", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
-  { name = "image.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
-  { name = "image.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
+  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
+  { name = "image.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
+  { name = "image.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["generate", "preview_generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["generate", "preview_generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -961,10 +1026,12 @@ group = "image"
 package_manifest = "crates/skills/image_edit/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = ["image_modify", "image_editor", "edit_image", "image_outpaint"]
+argument_aliases = { instruction = ["prompt", "query", "text"] }
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
 output_kind = "image"
 description = "Edit, extend, or transform images through provider-neutral media adapters."
+description_zh = "通过统一媒体适配器编辑、扩展或转换图片。"
 # §P4.1 / §P4.4 E1.d：image_edit 调远端 vendor 编辑图，落盘到 workspace。
 # 默认 default_vendor=minimax（见 configs/image.toml [image_edit]）。运行时优先使用
 # IMAGE_EDIT_<VENDOR>_API_KEY；未配置专用 key 时，技能可复用同厂商全局 key
@@ -998,6 +1065,7 @@ timeout_seconds = 120
 prompt_file = "prompts/skills/audio_transcribe.md"
 output_kind = "text"
 description = "Preview or transcribe local or remote audio through a provider-neutral adapter."
+description_zh = "预览或转写本地及远程音频。"
 capabilities = ["llm", "net", "fs.read"]
 risk_level = "low"
 auto_invocable = true
@@ -1018,19 +1086,21 @@ group = "audio"
 package_manifest = "crates/skills/audio_synthesize/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = []
+argument_aliases = { text = ["input", "prompt", "content"] }
 timeout_seconds = 90
 prompt_file = "prompts/skills/audio_synthesize.md"
 output_kind = "text"
 description = "Preview or synthesize speech audio through provider-neutral media adapters."
+description_zh = "预览或合成语音音频。"
 capabilities = ["llm", "net", "fs.write"]
 side_effect = true
 planner_capabilities = [
   { name = "audio.preview_synthesize", action = "preview_synthesize", effect = "observe", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "response_format", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "summary_with_evidence" },
-  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "response_format", "dry_run", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
-  { name = "audio.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
-  { name = "audio.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
+  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "response_format", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
+  { name = "audio.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
+  { name = "audio.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_synthesize", "synthesize", "poll", "cancel"] }, text = { type = "string" }, input = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, response_format = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_synthesize", "synthesize", "poll", "cancel"] }, text = { type = "string" }, input = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, response_format = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1042,20 +1112,22 @@ group = "video"
 package_manifest = "crates/skills/video_generate/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = ["video_generation", "generate_video", "text_to_video", "image_to_video"]
+argument_aliases = { prompt = ["subject", "description", "instruction", "text", "query"] }
 timeout_seconds = 900
 prompt_file = "prompts/skills/video_generate.md"
 output_kind = "file"
 description = "Create provider-backed video generation tasks from text and optional frame images, then optionally poll and save the generated video file."
+description_zh = "根据文字和可选的首尾帧图片创建视频生成任务，并可查询进度、保存生成的视频。"
 semantic_tags = ["video_generation", "text_to_video", "image_to_video", "first_last_frame_video"]
 capabilities = ["llm", "net", "fs.read", "fs.write"]
 side_effect = true
 planner_capabilities = [
   { name = "video.preview_generate", action = "preview_generate", effect = "observe", required = ["prompt"], optional = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "vendor", "model", "max_poll_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "summary_with_evidence" },
-  { name = "video.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "wait_for_completion", "download", "dry_run", "vendor", "model", "max_poll_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
-  { name = "video.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "download", "output_path", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
-  { name = "video.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
+  { name = "video.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "wait_for_completion", "download", "vendor", "model", "max_poll_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
+  { name = "video.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "download", "output_path", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
+  { name = "video.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, first_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, first_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, duration = { type = "integer", minimum = 1 }, resolution = { type = "string" }, output_path = { type = "string" }, wait_for_completion = { type = "boolean" }, download = { type = "boolean" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" }, max_poll_seconds = { type = "integer", minimum = 1 }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, first_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, first_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, duration = { type = "integer", minimum = 1 }, resolution = { type = "string" }, output_path = { type = "string" }, wait_for_completion = { type = "boolean" }, download = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" }, max_poll_seconds = { type = "integer", minimum = 1 }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1067,20 +1139,22 @@ group = "audio"
 package_manifest = "crates/skills/music_generate/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = ["music_generation", "generate_music", "song_generate", "text_to_music"]
+argument_aliases = { prompt = ["description", "subject", "theme", "text"] }
 timeout_seconds = 360
 prompt_file = "prompts/skills/music_generate.md"
 output_kind = "file"
 description = "Generate provider-backed music/audio files from a musical prompt, lyrics, instrumental mode, or cover-generation inputs."
+description_zh = "根据音乐描述、歌词、纯音乐模式或翻唱输入生成音乐与音频文件。"
 semantic_tags = ["music_generation", "song_generation", "instrumental_music", "cover_music"]
 capabilities = ["llm", "net", "fs.write"]
 side_effect = true
 planner_capabilities = [
   { name = "music.preview_generate", action = "preview_generate", effect = "observe", required = ["prompt|lyrics"], optional = ["description", "lyrics_optimizer", "is_instrumental", "format", "response_format", "output_path", "audio_url", "audio_base64", "cover_feature_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "summary_with_evidence" },
-  { name = "music.generate", action = "generate", effect = "external", required = ["prompt|lyrics"], optional = ["description", "lyrics_optimizer", "is_instrumental", "format", "response_format", "output_path", "audio_url", "audio_base64", "cover_feature_id", "dry_run", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
-  { name = "music.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
-  { name = "music.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
+  { name = "music.generate", action = "generate", effect = "external", required = ["prompt|lyrics"], optional = ["description", "lyrics_optimizer", "is_instrumental", "format", "response_format", "output_path", "audio_url", "audio_base64", "cover_feature_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
+  { name = "music.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true },
+  { name = "music.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = true, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, description = { type = "string" }, lyrics = { type = "string" }, lyrics_optimizer = { type = "boolean" }, is_instrumental = { type = "boolean" }, format = { type = "string" }, response_format = { type = "string" }, output_path = { type = "string" }, audio_url = { type = "string" }, audio_base64 = { type = "string" }, cover_feature_id = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_generate", "generate", "poll", "cancel"] }, prompt = { type = "string" }, description = { type = "string" }, lyrics = { type = "string" }, lyrics_optimizer = { type = "boolean" }, is_instrumental = { type = "boolean" }, format = { type = "string" }, response_format = { type = "string" }, output_path = { type = "string" }, audio_url = { type = "string" }, audio_base64 = { type = "string" }, cover_feature_id = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, poll_after_seconds = { type = "integer", minimum = 0 }, poll_after_ms = { type = "integer", minimum = 0 }, expires_at = { type = "integer", minimum = 0 }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, vendor = { type = "string" }, model = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1094,8 +1168,9 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
 output_kind = "text"
-description = "Run baseline host and RustClaw runtime health diagnostics with runtime-owned overall_status, clawd_visible, and db_available probes; prefer this before narrower inspection."
-semantic_tags = ["service_status", "runtime_health", "system_health", "rustclaw_runtime", "rustclaw_self_check", "clawd_health", "database_availability", "local_runtime_health"]
+description = "Run baseline host and agent runtime health diagnostics with runtime-owned overall_status, clawd_visible, and db_available probes; prefer this before narrower inspection."
+description_zh = "执行宿主与 Agent 运行时的基础健康检查，汇总服务可见性、数据库可用性和整体状态。"
+semantic_tags = ["service_status", "runtime_health", "system_health", "agent_runtime", "agent_self_check", "clawd_health", "database_availability", "local_runtime_health"]
 preferred_over_run_cmd = true
 risk_level = "low"
 auto_invocable = true
@@ -1124,6 +1199,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
 description = "Analyze log files or log directories for errors, warnings, failures, timeouts, notable anomalies, and recovery signals; prefer this over generic file reading when the user asks for log health or anomaly judgment."
+description_zh = "分析日志文件或目录中的错误、警告、失败、超时、异常与恢复信号。"
 semantic_tags = ["log_analysis", "log_anomaly", "error_summary", "warning_summary", "failure_diagnosis", "recovery_summary"]
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
@@ -1144,8 +1220,10 @@ planner_kind = "tool"
 group = "ops"
 package_manifest = "crates/skills/service_control/skill.toml"
 aliases = []
-description = "Check, verify, diagnose, and control RustClaw, systemd/service, Homebrew services, and launchd services with structured status evidence."
-semantic_tags = ["service_status", "service_logs", "service_start_stop", "runtime_health", "rustclaw_service_status", "clawd_status", "rustclaw_runtime_health"]
+argument_aliases = { target = ["unit", "name"], manager_type = ["manager"] }
+description = "Check, verify, diagnose, and control the agent runtime, systemd/service, Homebrew services, and launchd services with structured status evidence."
+description_zh = "检查、验证、诊断和控制 Agent 运行时及 systemd、Homebrew、launchd 服务。"
+semantic_tags = ["service_status", "service_logs", "service_start_stop", "runtime_health", "agent_service_status", "clawd_status", "agent_runtime_health"]
 preferred_over_run_cmd = true
 validation_actions = ["status", "verify", "logs"]
 timeout_seconds = 30
@@ -1168,7 +1246,7 @@ planner_capabilities = [
   { name = "service.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },
   { name = "service_control.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, service = { type = "string" }, target = { type = "string" }, manager_type = { type = "string", enum = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "rustclaw", "unknown"] }, lines = { type = "integer", minimum = 1, maximum = 500 } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["status", "start", "stop", "restart", "reload", "logs", "verify", "diagnose_start_failure", "diagnose_unhealthy_state"] }, service = { type = "string" }, target = { type = "string" }, manager_type = { type = "string", enum = ["brew_services", "launchd", "systemd", "service", "docker_compose", "docker_container", "supervisor", "process_only", "agent_runtime", "unknown"] }, lines = { type = "integer", minimum = 1, maximum = 500 } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1186,8 +1264,9 @@ output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses authenticated local clawd HTTP APIs; no external command dependency."]
-description = "List, inspect, cancel, resume, and pause RustClaw tasks through the local task control API, bind planner-selected session aliases through structured state evidence, and expose no-mutation lifecycle previews. Read-only preview actions project provider-failure recovery, retryable tool-failure observations, missing-field and blocked repair envelopes, and coding repair-loop machine contracts without calling a provider, executing a command, or mutating the workspace."
-semantic_tags = ["task_status", "task_control", "runtime_tasks", "task_lifecycle_fields", "session_alias_binding", "conversation_alias", "task_cancel_dry_run", "cancel_preview", "resume_preview", "resume_entrypoint", "renewable_lease", "provider_failure_preview", "provider_blocker", "quota_wait", "checkpoint_policy", "retryable_failure_observation", "forbidden_repeat_signature", "bounded_repair_attempts", "missing_field_repair", "blocked_repair_state", "repair_observation", "coding_repair_preview", "failed_verification", "passing_verification", "rewind_reference", "dry_run_observation"]
+description = "List, inspect, cancel, resume, and pause agent tasks through the local task control API, bind planner-selected session aliases through structured state evidence, and expose no-mutation lifecycle previews. Read-only preview actions project provider-failure recovery, retryable tool-failure observations, missing-field and blocked repair envelopes, and coding repair-loop machine contracts without calling a provider, executing a command, or mutating the workspace."
+description_zh = "查看、检查、取消、恢复和暂停 Agent 任务，并提供不修改状态的任务生命周期与故障恢复预览。"
+semantic_tags = ["task_status", "task_control", "runtime_tasks", "task_lifecycle_fields", "session_alias_binding", "conversation_alias", "resume_preview", "resume_entrypoint", "renewable_lease", "provider_failure_preview", "provider_blocker", "quota_wait", "checkpoint_policy", "retryable_failure_observation", "forbidden_repeat_signature", "bounded_repair_attempts", "missing_field_repair", "blocked_repair_state", "repair_observation", "coding_repair_preview", "failed_verification", "passing_verification", "rewind_reference"]
 planner_capabilities = [
   { name = "session.bind_alias", action = "bind_session_alias", effect = "observe", required = ["alias", "target"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
   { name = "task_control.list", action = "list", effect = "observe", optional = ["status", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
@@ -1198,13 +1277,12 @@ planner_capabilities = [
   { name = "agent.preview_retryable_failure_observation", action = "preview_retryable_failure_observation", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, final_answer_shape = "lifecycle_result" },
   { name = "agent.preview_repair_observation", action = "preview_repair_observation", description = "Preview bounded repair or failure-ownership attribution; use repair_kind=provider_external_blocker for failure_class=external_blocker and provider_blocker=true.", semantic_tags = ["repair_envelope", "failure_ownership_attribution", "external_blocker", "provider_blocker", "non_code_failure", "non_route_failure"], effect = "observe", required = ["repair_kind"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, final_answer_shape = "lifecycle_result" },
   { name = "coding_workflow.preview_repair", action = "preview_coding_repair", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
-  { name = "task_control.cancel_dry_run", action = "cancel_all", effect = "observe", optional = ["dry_run"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "task_control.cancel_all", action = "cancel_all", effect = "mutate", optional = ["confirm", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
-  { name = "task_control.cancel_one", action = "cancel_one", effect = "mutate", required = ["index"], optional = ["confirm", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
-  { name = "task_control.resume", action = "resume", effect = "mutate", required = ["task_id"], optional = ["checkpoint_id", "resume_reason", "user_message", "new_constraints", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
-  { name = "task_control.pause", action = "pause", effect = "mutate", required = ["task_id"], optional = ["pause_seconds", "dry_run"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+  { name = "task_control.cancel_all", action = "cancel_all", effect = "mutate", optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+  { name = "task_control.cancel_one", action = "cancel_one", effect = "mutate", required = ["index"], optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+  { name = "task_control.resume", action = "resume", effect = "mutate", required = ["task_id"], optional = ["checkpoint_id", "resume_reason", "user_message", "new_constraints"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+  { name = "task_control.pause", action = "pause", effect = "mutate", required = ["task_id"], optional = ["pause_seconds"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "list_with_first_detail", "get", "cancel_all", "cancel_one", "preview_resume", "preview_provider_failure", "preview_retryable_failure_observation", "preview_repair_observation", "preview_coding_repair", "bind_session_alias", "resume", "pause"] }, alias = { type = "string", maxLength = 256 }, target = { type = "string", maxLength = 4096 }, failure_class = { type = "string", enum = ["timeout", "transport_retryable", "provider_retryable_response", "rate_limited", "quota_exhausted", "provider_non_retryable_business", "local_non_retryable"] }, repair_kind = { type = "string", enum = ["missing_required_argument", "bounded_repair_blocked", "provider_external_blocker"] }, index = { type = "integer" }, task_id = { type = "string" }, checkpoint_id = { type = "string" }, resume_reason = { type = "string" }, user_message = { type = "string" }, new_constraints = { type = "object" }, pause_seconds = { type = "integer" }, status = { type = "string" }, limit = { type = "integer" }, dry_run = { type = "boolean" }, confirm = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "list_with_first_detail", "get", "cancel_all", "cancel_one", "preview_resume", "preview_provider_failure", "preview_retryable_failure_observation", "preview_repair_observation", "preview_coding_repair", "bind_session_alias", "resume", "pause"] }, alias = { type = "string", maxLength = 256 }, target = { type = "string", maxLength = 4096 }, failure_class = { type = "string", enum = ["timeout", "transport_retryable", "provider_retryable_response", "rate_limited", "quota_exhausted", "provider_non_retryable_business", "local_non_retryable"] }, repair_kind = { type = "string", enum = ["missing_required_argument", "bounded_repair_blocked", "provider_external_blocker"] }, index = { type = "integer" }, task_id = { type = "string" }, checkpoint_id = { type = "string" }, resume_reason = { type = "string" }, user_message = { type = "string" }, new_constraints = { type = "object" }, pause_seconds = { type = "integer" }, status = { type = "string" }, limit = { type = "integer" }, confirm = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1220,7 +1298,8 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/config_guard.md"
 output_kind = "text"
-description = "Inspect RustClaw configuration for missing, inconsistent, or risky structured values."
+description = "Inspect host runtime configuration for missing, inconsistent, or risky structured values."
+description_zh = "检查宿主运行配置中缺失、不一致或有风险的结构化值。"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["scan"] }, path = { type = "string" }, profile = { type = "string" } } }
@@ -1242,6 +1321,7 @@ timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
 output_kind = "text"
 description = "Query crypto market data and read account positions through the agent. Exchange trading and order mutations exist only for explicit direct/admin skill calls."
+description_zh = "查询加密货币行情和账户持仓；交易与下单只允许明确的管理员直接调用。"
 semantic_tags = ["crypto.quote", "crypto.price", "asset.quote"]
 capabilities = ["net"]
 risk_level = "high"
@@ -1278,6 +1358,7 @@ timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
 description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
+description_zh = "按股票代码、公司名称或别名查询 A 股实时行情。"
 semantic_tags = ["stock.quote", "a_share.quote", "asset.quote"]
 capabilities = ["net", "llm"]
 risk_level = "low"
@@ -1305,6 +1386,7 @@ timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
 output_kind = "text"
 description = "Query current weather or daily forecasts for a concrete city/place or coordinates through Open-Meteo."
+description_zh = "通过 Open-Meteo 查询指定城市、地点或坐标的当前天气与逐日预报。"
 semantic_tags = ["weather.current", "weather.forecast", "external_weather"]
 capabilities = ["net"]
 risk_level = "low"
@@ -1332,14 +1414,15 @@ timeout_seconds = 20
 prompt_file = "prompts/skills/map_merchant.md"
 output_kind = "text"
 description = "Recommend nearby merchants or places from structured location and preference inputs."
+description_zh = "根据位置和偏好推荐附近商户或地点。"
 capabilities = ["net"]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
 retryable = true
 planner_capabilities = [
-  { name = "map.preview_merchant_recommend", action = "preview_recommend", effect = "observe", optional = ["provider", "city", "address", "place", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "sort_by", "top_k", "latitude", "longitude"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
-  { name = "map.merchant_recommend", action = "recommend", effect = "observe", optional = ["provider", "city", "address", "place", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "sort_by", "top_k", "latitude", "longitude"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "map.preview_merchant_recommend", action = "preview_recommend", effect = "observe", required = ["city|district|address|place|location|q|latitude+longitude"], optional = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "map.merchant_recommend", action = "recommend", effect = "observe", required = ["city|district|address|place|location|q|latitude+longitude"], optional = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = false },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_recommend", "recommend"] }, provider = { type = "string" }, city = { type = "string" }, district = { type = "string" }, address = { type = "string" }, place = { type = "string" }, location = { type = "string" }, q = { type = "string" }, keyword = { type = "string" }, category = { type = "string" }, cuisine = { type = "string" }, price_level = { anyOf = [ { type = "string" }, { type = "number" } ] }, max_distance_meters = { type = "number", minimum = 0 }, radius = { type = "number", minimum = 0 }, sort_by = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 10 }, latitude = { description = "Optional latitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -90, maximum = 90 }, { type = "null" } ] }, longitude = { description = "Optional longitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -180, maximum = 180 }, { type = "null" } ] } } }
 
@@ -1363,6 +1446,7 @@ group = "filesystem"
 package_manifest = "crates/skills/doc_parse/skill.toml"
 aliases = ["parse_doc", "document_parse", "doc_reader"]
 description = "Extract semantic content from supported local documents for reading, summaries, key points, sections, and tables; not for OOXML package integrity or Office artifact revision inspection."
+description_zh = "提取本地文档的正文、章节和表格，用于阅读、总结与要点整理。"
 timeout_seconds = 20
 prompt_file = "prompts/skills/doc_parse.md"
 output_kind = "text"
@@ -1388,6 +1472,7 @@ group = "office"
 package_manifest = "crates/skills/office_workspace/skill.toml"
 aliases = ["office_artifact", "ooxml_workspace"]
 description = "Authoritatively inspect and validate DOCX, XLSX, and PPTX package structure and integrity, including unavailable inputs that require structured Office failures; also read, create, preview, and transactionally edit Office artifacts."
+description_zh = "检查和验证 DOCX、XLSX、PPTX 文件结构与完整性，并可读取、创建、预览和事务化编辑 Office 文件。"
 timeout_seconds = 120
 prompt_file = "prompts/skills/office_workspace.md"
 output_kind = "text"
@@ -1691,6 +1776,7 @@ group = "system"
 package_manifest = "crates/skills/transform/skill.toml"
 aliases = ["transform_data", "data_transform", "table_transform"]
 description = "Transform structured records from JSON arrays/objects or CSV: sort, filter, rename, project, group, aggregate, deduplicate, and render JSON, markdown tables, or CSV."
+description_zh = "转换 JSON 或 CSV 结构化数据：排序、筛选、重命名、选列、分组、聚合、去重，并输出 JSON、Markdown 表格或 CSV。"
 timeout_seconds = 20
 prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
@@ -1720,6 +1806,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/invest_copy.md"
 output_kind = "text"
 description = "Turn grounded research data into investment-oriented copy with explicit risk context."
+description_zh = "把有依据的研究数据整理成投资主题文案，并明确呈现风险背景。"
 risk_level = "medium"
 capabilities = ["llm"]
 auto_invocable = false
@@ -1742,6 +1829,7 @@ timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
 output_kind = "text"
 description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
+description_zh = "搜索网页并返回规范化结果、摘要、引用和可继续提取的链接。"
 semantic_tags = ["web.search_results", "search_results", "external_web_search", "url_discovery"]
 capabilities = ["net"]
 risk_level = "low"
@@ -1766,10 +1854,12 @@ group = "news/web"
 package_manifest = "crates/skills/kb/skill.toml"
 supported_os = ["linux", "macos"]
 aliases = ["knowledge_base", "kb_ingest", "kb_search"]
+argument_aliases = { namespace = ["kb_name", "kb_namespace", "knowledge_base_name"] }
 timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
 output_kind = "text"
 description = "Ingest local files into a namespace index and search or inspect indexed knowledge-base namespaces."
+description_zh = "把本地文件导入命名空间索引，并搜索或查看知识库内容。"
 storage = { kind = "sqlite", schema_version = 3, migration_owner = "kb" }
 semantic_tags = ["knowledge_base", "document_ingest", "retrieval_index"]
 capabilities = ["fs.read", "fs.write"]
@@ -1804,6 +1894,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
 description = "Open exact public URLs through a policy-guarded headless browser and return bounded untrusted page evidence, canonical metadata, citations, screenshots, and structured partial/failure results."
+description_zh = "通过受策略保护的无头浏览器打开公开网页，返回页面内容、元数据、引用、截图和结构化结果。"
 semantic_tags = ["browser.open_extract", "browser.open_url", "webpage.title", "webpage.readable_text", "webpage.metadata", "webpage.summary", "browser_page_extract", "url_content_summary"]
 capabilities = ["net", "fs.write"]
 risk_level = "low"
@@ -1833,6 +1924,7 @@ timeout_seconds = 180
 prompt_file = "prompts/skills/photo_organize.md"
 output_kind = "text"
 description = "Front-door routing contract: photo organization without source_dir is executable, not a clarification. Call photo_organize with action=organize and mode=plan so the skill can discover external drive / USB candidates and preview a unique candidate or return observed candidates."
+description_zh = "整理照片并生成计划；未指定来源目录时可自动发现外接硬盘或 USB 中的候选照片目录。"
 semantic_tags = ["photo.organize", "exif_classification", "external_drive_discovery", "source_dir_optional_discovery"]
 memory_policy = { profile = "skill_scoped", include = ["preferences", "relevant_facts", "knowledge_docs"], exclude = ["long_term_summary", "recent_related_events", "assistant_results", "similar_triggers", "unfinished_goals", "recent_snippets"], max_chars = 900, reason = "photo_organize_structured_args_stable_memory_only" }
 risk_level = "high"
@@ -1844,7 +1936,6 @@ confirmation_exempt_when = [
   { action = "prepare" },
   { action = "preview" },
   { action = "plan" },
-  { action = "dry_run" },
   { action = "organize", mode = "plan" },
   { action = "organize", organize_mode = "plan" },
 ]
@@ -1853,7 +1944,7 @@ planner_capabilities = [
   { name = "photo.prepare_source_candidates", action = "prepare", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "photo.apply_organization", action = "organize", effect = "mutate", required = ["source_dir"], optional = ["output_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["prepare", "preview", "plan", "dry_run", "organize"] }, source_dir = { type = "string" }, output_dir = { type = "string" }, mode = { type = "string" }, organize_mode = { type = "string" }, group_by = { type = "array", items = { type = "string", enum = ["brand", "model", "lens", "focal_length", "year", "year_month", "date"] }, uniqueItems = true }, capture_year = { anyOf = [ { type = "string" }, { type = "integer" } ] }, capture_month = { anyOf = [ { type = "string" }, { type = "integer" } ] }, capture_date = { type = "string" }, selected_brands = { type = "array", items = { type = "string" } }, selected_models = { type = "array", items = { type = "string" } }, selected_lenses = { type = "array", items = { type = "string" } }, include_subdirs = { type = "boolean" }, preview_limit = { type = "integer", minimum = 1, maximum = 100 } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["prepare", "preview", "plan", "organize"] }, source_dir = { type = "string" }, output_dir = { type = "string" }, mode = { type = "string" }, organize_mode = { type = "string" }, group_by = { type = "array", items = { type = "string", enum = ["brand", "model", "lens", "focal_length", "year", "year_month", "date"] }, uniqueItems = true }, capture_year = { anyOf = [ { type = "string" }, { type = "integer" } ] }, capture_month = { anyOf = [ { type = "string" }, { type = "integer" } ] }, capture_date = { type = "string" }, selected_brands = { type = "array", items = { type = "string" } }, selected_models = { type = "array", items = { type = "string" } }, selected_lenses = { type = "array", items = { type = "string" } }, include_subdirs = { type = "boolean" }, preview_limit = { type = "integer", minimum = 1, maximum = 100 } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1870,6 +1961,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/extension_manager.md"
 output_kind = "text"
 description = "Assess capability gaps and scaffold, validate, register, or remove external skills."
+description_zh = "评估能力缺口，并创建、验证、注册或移除外部技能。"
 risk_level = "high"
 capabilities = ["llm"]
 auto_invocable = false

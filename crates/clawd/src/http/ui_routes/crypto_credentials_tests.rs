@@ -16,7 +16,7 @@ async fn call_api(
     let mut builder = Request::builder()
         .method(method)
         .uri("/v1/auth/crypto-credentials")
-        .header("x-rustclaw-key", TEST_KEY);
+        .header("x-agent-key", TEST_KEY);
     let body = match body {
         Some(value) => {
             builder = builder.header("content-type", "application/json");

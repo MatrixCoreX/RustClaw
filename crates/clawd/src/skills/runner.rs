@@ -8,6 +8,7 @@ use claw_core::skill_registry::{Capability, CapabilityIsolationProfile, PlannerC
 
 use crate::{AppState, ClaimedTask};
 
+use super::credential_fallback::provision_skill_secret_envs;
 use super::{
     action_scoped_planner_mapping, apply_skill_runner_env_isolation, current_task_auth_role,
     place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
@@ -83,12 +84,45 @@ fn inherited_sandbox_backend(backend: &'static str) -> Option<&'static str> {
 fn runner_additional_writable_paths(
     secret_store_directory: Option<&std::path::Path>,
     skill_storage_directory: Option<&std::path::Path>,
+    artifact_output_directory: Option<&std::path::Path>,
 ) -> Vec<std::path::PathBuf> {
     secret_store_directory
         .into_iter()
         .chain(skill_storage_directory)
+        .chain(artifact_output_directory)
         .map(std::path::Path::to_path_buf)
         .collect()
+}
+
+fn invocation_artifact_output_directory(
+    workspace_root: &std::path::Path,
+    task_id: &str,
+    skill_name: &str,
+) -> std::path::PathBuf {
+    fn component(value: &str, fallback: &str) -> String {
+        let normalized: String = value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .take(96)
+            .collect();
+        if normalized.is_empty() {
+            fallback.to_string()
+        } else {
+            normalized
+        }
+    }
+
+    claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+        .join("skill-invocations")
+        .join(component(task_id, "task"))
+        .join(component(skill_name, "skill"))
+        .join(uuid::Uuid::new_v4().to_string())
 }
 
 fn sandbox_target_for_source(
@@ -157,19 +191,44 @@ pub(crate) async fn run_skill_with_runner_once(
 ) -> Result<serde_json::Value, String> {
     let dispatch_started = std::time::Instant::now();
     let package_root = state.skill_rt.workspace_root.join("data/skill-packages");
-    let installed_launch = rustclaw_skill_sdk::SkillRuntimeResolver::new(&package_root)
-        .resolve(canonical_skill_name)
+    let skill_views = state.get_skill_views_snapshot();
+    let admission_binding = skill_views
+        .binding
+        .admission_bindings
+        .get(canonical_skill_name);
+    let resolver = skill_sdk::SkillRuntimeResolver::new(&package_root);
+    let installed_launch = admission_binding
+        .map_or_else(
+            || resolver.pin_current(canonical_skill_name),
+            |binding| {
+                resolver.pin_exact(
+                    canonical_skill_name,
+                    &binding.version,
+                    &binding.manifest_digest,
+                    &binding.install_receipt_digest,
+                )
+            },
+        )
         .map_err(|error| {
             format!(
                 "verified skill package unavailable: skill={canonical_skill_name} code={} detail={}",
                 error.code, error.detail
             )
         })?;
-    let credential_context = if canonical_skill_name == "crypto" {
-        exchange_credential_context_for_task(state, task)
-    } else {
-        serde_json::json!({})
-    };
+    let version_lease = skill_sdk::InstallReceiptStore::new(&package_root)
+        .acquire_version_lease(canonical_skill_name, &installed_launch.install_root)
+        .map_err(|error| {
+            format!(
+                "skill version lease unavailable: skill={canonical_skill_name} code={} detail={}",
+                error.code, error.detail
+            )
+        })?;
+    tracing::debug!(
+        skill = canonical_skill_name,
+        version = installed_launch.version,
+        install_dir = version_lease.install_dir(),
+        "skill_version_lease_acquired"
+    );
     let user_key_for_skill = task
         .user_key
         .clone()
@@ -180,6 +239,14 @@ pub(crate) async fn run_skill_with_runner_once(
         .as_ref()
         .and_then(|descriptor| std::path::Path::new(&descriptor.database_path).parent())
         .map(std::path::Path::to_path_buf);
+    let artifact_output_directory = invocation_artifact_output_directory(
+        &state.skill_rt.workspace_root,
+        &task.task_id,
+        canonical_skill_name,
+    );
+    std::fs::create_dir_all(&artifact_output_directory).map_err(|error| {
+        format!("skill artifact directory unavailable: skill={canonical_skill_name} error={error}")
+    })?;
     if !state.skill_rt.skill_runner_path.exists() {
         return Err(format!(
             "skill-runner binary not found: path={} (workspace_root={})",
@@ -202,10 +269,15 @@ pub(crate) async fn run_skill_with_runner_once(
     let skill_uses_llm = caps
         .iter()
         .any(|cap| matches!(cap, claw_core::skill_registry::Capability::Llm));
+    let selected_llm_connection = skill_uses_llm
+        .then(|| crate::llm_gateway::selected_llm_connection(state, Some(task)))
+        .flatten();
     let secret_envs = {
         let broker = claw_core::secrets::global_or_default();
-        match claw_core::secrets::provision_secret_envs(broker.as_ref(), &caps) {
-            Ok(pairs) => {
+        match provision_skill_secret_envs(broker.as_ref(), &caps, selected_llm_connection.as_ref())
+        {
+            Ok(provisioned) => {
+                let pairs = provisioned.envs;
                 if !pairs.is_empty() {
                     let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
                     tracing::info!(
@@ -213,6 +285,17 @@ pub(crate) async fn run_skill_with_runner_once(
                         canonical_skill_name,
                         names,
                         broker.label()
+                    );
+                }
+                if !provisioned.fallback_credentials.is_empty() {
+                    tracing::info!(
+                        skill = canonical_skill_name,
+                        selected_vendor = selected_llm_connection
+                            .as_ref()
+                            .map(|connection| connection.vendor.as_str())
+                            .unwrap_or("unknown"),
+                        fallback_credentials = ?provisioned.fallback_credentials,
+                        "skill_dispatch_multimodal_credential_fallback"
                     );
                 }
                 pairs
@@ -226,10 +309,20 @@ pub(crate) async fn run_skill_with_runner_once(
                     env_names,
                     broker.label()
                 );
-                return Err(format!(
-                    "skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
-                    broker.label(),
-                    env_names.join(", ")
+                return Err(super::structured_skill_error_from_parts(
+                    canonical_skill_name,
+                    "skill_credentials_missing",
+                    "required skill credentials are not configured",
+                    Some(std::env::consts::OS),
+                    Some(json!({
+                        "message_key": "clawd.skill.credentials_missing",
+                        "retryable": false,
+                        "failure_phase": "pre_dispatch",
+                        "side_effect_applied": false,
+                        "recovery_action": "configure_credentials",
+                        "credential_envs": env_names,
+                        "broker": broker.label(),
+                    })),
                 ));
             }
             Err(claw_core::secrets::ProvisionError::Lookup { name, source }) => {
@@ -240,33 +333,42 @@ pub(crate) async fn run_skill_with_runner_once(
                     source,
                     broker.label()
                 );
-                return Err(format!(
-                    "skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}",
-                    broker.label()
+                return Err(super::structured_skill_error_from_parts(
+                    canonical_skill_name,
+                    "skill_credential_lookup_failed",
+                    "skill credential lookup failed",
+                    Some(std::env::consts::OS),
+                    Some(json!({
+                        "message_key": "clawd.skill.credential_lookup_failed",
+                        "retryable": false,
+                        "failure_phase": "pre_dispatch",
+                        "side_effect_applied": false,
+                        "recovery_action": "repair_credential_broker",
+                        "credential_ref": name,
+                        "broker": broker.label(),
+                        "detail": source.to_string(),
+                    })),
                 ));
             }
         }
     };
 
     let secret_token_ttl = Duration::from_secs(300);
-    let selected_llm_connection = skill_uses_llm
-        .then(|| crate::llm_gateway::selected_llm_connection(state, Some(task)))
-        .flatten();
+    let internal_skill_context = json!({
+        "task_id": task.task_id.clone(),
+        "user_id": task.user_id,
+        "chat_id": task.chat_id,
+        "user_key": task.user_key.clone(),
+        "channel": task.channel.clone(),
+        "external_user_id": task.external_user_id.clone(),
+        "external_chat_id": task.external_chat_id.clone(),
+        "kind": task.kind.clone(),
+        "payload_json": task.payload_json.clone(),
+        "skill_name": canonical_skill_name,
+    });
     let internal_llm_token = if skill_uses_llm {
-        let internal_llm_context = json!({
-            "task_id": task.task_id.clone(),
-            "user_id": task.user_id,
-            "chat_id": task.chat_id,
-            "user_key": task.user_key.clone(),
-            "channel": task.channel.clone(),
-            "external_user_id": task.external_user_id.clone(),
-            "external_chat_id": task.external_chat_id.clone(),
-            "kind": task.kind.clone(),
-            "payload_json": task.payload_json.clone(),
-            "skill_name": canonical_skill_name,
-        });
         match claw_core::secrets::issue_secret_token_value(
-            &claw_core::secrets::SecretValue::new(internal_llm_context.to_string()),
+            &claw_core::secrets::SecretValue::new(internal_skill_context.to_string()),
             secret_token_ttl,
         ) {
             Ok(token) => Some(token),
@@ -276,6 +378,27 @@ pub(crate) async fn run_skill_with_runner_once(
                 ));
             }
         }
+    } else {
+        None
+    };
+    let admission_capable = state.get_skills_registry().is_some_and(|registry| {
+        registry
+            .planner_capabilities(canonical_skill_name)
+            .iter()
+            .any(|capability| capability.name == "extension.register_skill")
+    });
+    let internal_admission_token = if admission_capable {
+        Some(
+            claw_core::secrets::issue_secret_token_value(
+                &claw_core::secrets::SecretValue::new(internal_skill_context.to_string()),
+                secret_token_ttl,
+            )
+            .map_err(|error| {
+                format!(
+                    "skill `{canonical_skill_name}` failed to issue internal admission token: {error}"
+                )
+            })?,
+        )
     } else {
         None
     };
@@ -347,6 +470,7 @@ pub(crate) async fn run_skill_with_runner_once(
     let additional_writable_paths = runner_additional_writable_paths(
         secret_token_scope.as_ref().map(|scope| scope.store_dir()),
         storage_writable_directory.as_deref(),
+        Some(&artifact_output_directory),
     );
     let network = if caps.iter().any(|cap| {
         matches!(
@@ -396,6 +520,12 @@ pub(crate) async fn run_skill_with_runner_once(
         &additional_writable_paths,
         &prepared.additional_writable_targets,
     );
+    let sandbox_artifact_output_directory = sandbox_target_for_source(
+        Some(&artifact_output_directory),
+        &additional_writable_paths,
+        &prepared.additional_writable_targets,
+    )
+    .ok_or_else(|| "skill artifact sandbox target unavailable".to_string())?;
     let storage_descriptor = map_storage_descriptor_to_sandbox(
         storage_descriptor,
         sandbox_storage_directory.as_deref(),
@@ -404,8 +534,8 @@ pub(crate) async fn run_skill_with_runner_once(
         state,
         task,
         source,
-        credential_context,
         storage_descriptor,
+        &sandbox_artifact_output_directory,
         execution_context,
     );
     let req_line = serde_json::json!({
@@ -416,12 +546,22 @@ pub(crate) async fn run_skill_with_runner_once(
         "external_user_id": task.external_user_id,
         "external_chat_id": crate::task_external_chat_id(task),
         "skill_name": canonical_skill_name,
+        "expected_skill_version": installed_launch.version.clone(),
+        "expected_manifest_digest": installed_launch.manifest_digest.clone(),
+        "expected_receipt_digest": installed_launch.receipt_digest.clone(),
+        "expected_registry_generation": skill_views.binding.registry_generation,
+        "expected_registry_generation_digest": skill_views.binding.registry_generation_digest.clone(),
+        "expected_base_registry_digest": skill_views.binding.base_registry_digest.clone(),
+        "expected_overlay_generation_digest": skill_views.binding.overlay_generation_digest.clone(),
+        "expected_policy_digest": admission_binding.and_then(|binding| binding.policy_digest.clone()),
+        "expected_admission_receipt_digest": admission_binding
+            .map(|binding| binding.admission_receipt_digest.clone()),
         "args": args,
         "context": skill_context
     })
     .to_string();
     let inherited_sandbox_backend = inherited_sandbox_backend(prepared.backend);
-    let internal_listen = std::env::var("RUSTCLAW_INTERNAL_LISTEN").ok();
+    let internal_listen = claw_core::product_identity::env_string("INTERNAL_LISTEN").ok();
     let local_clawd_base_url =
         local_clawd_base_url_from_internal_listen(internal_listen.as_deref());
     let mut cmd = prepared.command;
@@ -438,7 +578,7 @@ pub(crate) async fn run_skill_with_runner_once(
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env("CLAWD_BASE_URL", &local_clawd_base_url)
         .env(
-            "RUSTCLAW_UNRESTRICTED_ADMIN",
+            "APP_UNRESTRICTED_ADMIN",
             if execution_policy.has_unrestricted_admin_authority() {
                 "1"
             } else {
@@ -446,7 +586,7 @@ pub(crate) async fn run_skill_with_runner_once(
             },
         )
         .env(
-            "RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE",
+            "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
             if task_allows_path_outside_workspace(state, Some(task)) {
                 "1"
             } else {
@@ -454,7 +594,7 @@ pub(crate) async fn run_skill_with_runner_once(
             },
         )
         .env(
-            "RUSTCLAW_ALLOW_SUDO",
+            "APP_ALLOW_SUDO",
             if task_allows_sudo(state, Some(task)) {
                 "1"
             } else {
@@ -462,42 +602,50 @@ pub(crate) async fn run_skill_with_runner_once(
             },
         )
         .env(
-            "RUSTCLAW_SKILL_PACKAGES_ROOT",
+            "APP_SKILL_PACKAGES_ROOT",
             package_root.display().to_string(),
         )
         .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
+        )
+        .env(
+            "APP_WORKSPACE_STATE_DIR",
+            claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME,
         );
     if let Some(token_store_dir) = sandbox_token_store_dir {
         cmd.env(
-            "RUSTCLAW_SECRET_TOKEN_DIR",
+            "APP_SECRET_TOKEN_DIR",
             token_store_dir.display().to_string(),
         );
     }
     if let Some(backend) = inherited_sandbox_backend {
-        cmd.env(rustclaw_skill_sdk::PARENT_SANDBOX_BACKEND_ENV, backend);
+        cmd.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, backend);
     } else if let Some(storage_directory) = sandbox_storage_directory {
         cmd.env(
-            rustclaw_skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+            skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
             storage_directory,
         );
     }
     if let Some(token) = &internal_llm_token {
         cmd.env(
-            "RUSTCLAW_INTERNAL_LLM_URL",
+            "AGENT_INTERNAL_LLM_URL",
             format!("{}/v1/internal/llm/text", local_clawd_base_url),
         )
-        .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token);
+        .env("AGENT_INTERNAL_LLM_TOKEN", token);
+    }
+    if let Some(token) = &internal_admission_token {
+        cmd.env(
+            "AGENT_INTERNAL_ADMISSION_URL",
+            format!("{}/v1/internal/skills/admit", local_clawd_base_url),
+        )
+        .env("AGENT_INTERNAL_ADMISSION_TOKEN", token);
     }
     if let Some(connection) = &selected_llm_connection {
         cmd.env("OPENAI_BASE_URL", &connection.base_url)
             .env("OPENAI_MODEL", &connection.model)
-            .env("RUSTCLAW_SELECTED_LLM_VENDOR", &connection.vendor)
-            .env(
-                "RUSTCLAW_SELECTED_LLM_PROVIDER_TYPE",
-                &connection.provider_type,
-            );
+            .env("APP_SELECTED_LLM_VENDOR", &connection.vendor)
+            .env("APP_SELECTED_LLM_PROVIDER_TYPE", &connection.provider_type);
     }
     if !selected_provider_key_tokens.is_empty() {
         tracing::info!(
@@ -608,13 +756,37 @@ pub(crate) async fn run_skill_with_runner_once(
         return Err(format!("empty skill-runner output: {detail}"));
     }
 
-    let response: serde_json::Value = serde_json::from_str(out_line.trim())
+    let mut response: serde_json::Value = serde_json::from_str(out_line.trim())
         .map_err(|err| format!("invalid skill-runner json: {err}"))?;
+    remap_sandbox_artifact_paths(
+        &mut response,
+        &sandbox_artifact_output_directory,
+        &artifact_output_directory,
+    );
+    validate_runner_execution_binding(
+        &response,
+        &installed_launch.skill_name,
+        &installed_launch.version,
+        &installed_launch.manifest_digest,
+        &installed_launch.receipt_digest,
+        skill_views.binding.registry_generation,
+        skill_views.binding.registry_generation_digest.as_deref(),
+        skill_views.binding.base_registry_digest.as_deref(),
+        skill_views.binding.overlay_generation_digest.as_deref(),
+        admission_binding.and_then(|binding| binding.policy_digest.as_deref()),
+        admission_binding.map(|binding| binding.admission_receipt_digest.as_str()),
+    )?;
     tracing::info!(
         skill = canonical_skill_name,
         version = installed_launch.version,
         adapter = installed_launch.adapter.as_token(),
         receipt_digest = installed_launch.receipt_digest,
+        registry_generation = skill_views.binding.registry_generation,
+        registry_generation_digest = skill_views
+            .binding
+            .registry_generation_digest
+            .as_deref()
+            .unwrap_or("unavailable"),
         duration_ms = dispatch_started.elapsed().as_millis() as u64,
         status = response
             .get("status")
@@ -623,6 +795,77 @@ pub(crate) async fn run_skill_with_runner_once(
         "verified_skill_execution_completed"
     );
     Ok(response)
+}
+
+fn validate_runner_execution_binding(
+    response: &Value,
+    expected_skill_name: &str,
+    expected_version: &str,
+    expected_manifest_digest: &str,
+    expected_receipt_digest: &str,
+    expected_registry_generation: u64,
+    expected_registry_generation_digest: Option<&str>,
+    expected_base_registry_digest: Option<&str>,
+    expected_overlay_generation_digest: Option<&str>,
+    expected_policy_digest: Option<&str>,
+    expected_admission_receipt_digest: Option<&str>,
+) -> Result<(), String> {
+    let binding = response.pointer("/extra/execution_binding");
+    if binding.is_none()
+        && response
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status != "ok")
+    {
+        return Ok(());
+    }
+    let binding = binding
+        .and_then(Value::as_object)
+        .ok_or_else(|| "skill runner execution binding is missing".to_string())?;
+    for (field, expected_value) in [
+        ("skill_name", expected_skill_name),
+        ("version", expected_version),
+        ("manifest_digest", expected_manifest_digest),
+        ("receipt_digest", expected_receipt_digest),
+    ] {
+        let actual = binding.get(field).and_then(Value::as_str);
+        if actual != Some(expected_value) {
+            return Err(format!(
+                "skill runner execution binding mismatch: field={field}"
+            ));
+        }
+    }
+    if binding.get("registry_generation").and_then(Value::as_u64)
+        != Some(expected_registry_generation)
+    {
+        return Err(
+            "skill runner execution binding mismatch: field=registry_generation".to_string(),
+        );
+    }
+    for (field, expected_value) in [
+        (
+            "registry_generation_digest",
+            expected_registry_generation_digest,
+        ),
+        ("base_registry_digest", expected_base_registry_digest),
+        (
+            "overlay_generation_digest",
+            expected_overlay_generation_digest,
+        ),
+        ("policy_digest", expected_policy_digest),
+        (
+            "admission_receipt_digest",
+            expected_admission_receipt_digest,
+        ),
+    ] {
+        let actual = binding.get(field).and_then(Value::as_str);
+        if actual != expected_value {
+            return Err(format!(
+                "skill runner execution binding mismatch: field={field}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn action_scoped_runner_capabilities(
@@ -634,6 +877,9 @@ fn action_scoped_runner_capabilities(
     };
     capabilities.retain(|capability| match capability {
         Capability::Llm => {
+            mapping.network_access != Some(false) && mapping.credential_access != Some(false)
+        }
+        Capability::LlmCredentialFallback(_) => {
             mapping.network_access != Some(false) && mapping.credential_access != Some(false)
         }
         Capability::Net => mapping.network_access != Some(false),
@@ -665,8 +911,8 @@ pub(crate) fn build_runner_skill_context(
     state: &AppState,
     task: &ClaimedTask,
     source: &str,
-    credential_context: Value,
     storage_descriptor: Option<crate::skill_storage::SkillStorageDescriptor>,
+    artifact_output_directory: &std::path::Path,
     execution_context: Option<&super::SkillExecutionContext>,
 ) -> Value {
     let mut ctx = serde_json::Map::new();
@@ -709,13 +955,16 @@ pub(crate) fn build_runner_skill_context(
             .map(Value::String)
             .unwrap_or(Value::Null),
     );
-    ctx.insert("exchange_credentials".to_string(), credential_context);
     if let Some(storage_descriptor) = storage_descriptor {
         ctx.insert(
             "skill_storage".to_string(),
             serde_json::to_value(storage_descriptor).unwrap_or(Value::Null),
         );
     }
+    ctx.insert(
+        "artifact_output_directory".to_string(),
+        Value::String(artifact_output_directory.display().to_string()),
+    );
     if let Some(execution_context) = execution_context {
         ctx.insert(
             "execution".to_string(),
@@ -768,20 +1017,30 @@ pub(crate) fn build_runner_skill_context(
     Value::Object(ctx)
 }
 
-pub(crate) fn exchange_credential_context_for_task(
-    state: &AppState,
-    task: &ClaimedTask,
-) -> serde_json::Value {
-    let Some(user_key) = task
-        .user_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return serde_json::json!({});
-    };
-    crate::repo::crypto_credential_context_for_user_key(state, user_key)
-        .unwrap_or_else(|_| serde_json::json!({}))
+fn remap_sandbox_artifact_paths(
+    value: &mut Value,
+    sandbox_directory: &std::path::Path,
+    host_directory: &std::path::Path,
+) {
+    match value {
+        Value::String(text) => {
+            let sandbox = sandbox_directory.to_string_lossy();
+            if let Some(suffix) = text.strip_prefix(sandbox.as_ref()) {
+                *text = format!("{}{}", host_directory.display(), suffix);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                remap_sandbox_artifact_paths(item, sandbox_directory, host_directory);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values_mut() {
+                remap_sandbox_artifact_paths(item, sandbox_directory, host_directory);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 fn storage_descriptor_for_skill(

@@ -327,13 +327,13 @@ fn slo_error_response_exposes_only_machine_contract_fields() {
 #[test]
 fn local_async_job_health_distinguishes_terminal_and_stale_dead_jobs() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-slo-async-jobs-{}",
+        "agent-runtime-slo-async-jobs-{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos()
     ));
-    let async_root = root.join(".rustclaw").join("async_jobs");
+    let async_root = root.join(".agent-runtime").join("async_jobs");
     let terminal = async_root.join("terminal");
     let orphaned = async_root.join("orphaned");
     fs::create_dir_all(&terminal).expect("terminal dir");
@@ -397,7 +397,7 @@ async fn slo_handler_requires_admin_and_returns_windowed_machine_metrics() {
     drop(db);
     let mut headers = HeaderMap::new();
     headers.insert(
-        "x-rustclaw-key",
+        "x-agent-key",
         axum::http::HeaderValue::from_static("slo-admin"),
     );
 

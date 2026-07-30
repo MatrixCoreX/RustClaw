@@ -7,7 +7,7 @@ fn observed_scalar_output_can_stop_loop_without_second_round() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
+        r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"agent-runtime","value":"agent-runtime","value_type":"string"}"#,
     ));
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -256,7 +256,7 @@ fn bounded_read_range_observe_only_round_uses_incremental_planner() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for Agent Runtime NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
     ));
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -311,7 +311,7 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
         "status": "ok",
         "target": "clawd",
         "service_name": "clawd",
-        "manager_type": "rustclaw",
+        "manager_type": "agent_runtime",
         "requested_action": "status",
         "executed_actions": ["status"],
         "pre_state": "clawd=running",
@@ -336,7 +336,7 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
     route.locator_kind = OutputLocatorKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "service_control".to_string(),
-        args: json!({"action":"status","target":"clawd","manager_type":"rustclaw"}),
+        args: json!({"action":"status","target":"clawd","manager_type":"agent_runtime"}),
     }];
 
     let context = AgentRunContext {
@@ -361,9 +361,11 @@ fn service_control_status_protocol_output_continues_for_model_synthesis() {
 fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
     let mut loop_state = LoopState::new();
     loop_state.has_tool_or_skill_output = true;
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/agent-runtime\n",
+    ));
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command":"pwd"}),
@@ -439,7 +441,7 @@ fn unscoped_workspace_evidence_drafting_continues_after_doc_read() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|## Setup"}"#,
+        r#"{"action":"read_range","path":"README.md","excerpt":"1|# Agent Runtime\n2|## Setup"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.requires_content_evidence = true;
@@ -498,15 +500,15 @@ fn path_inspection_waits_for_model_synthesis_after_observation() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":1190},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"agent-runtime.service","resolved_path":"/home/guagua/agent-runtime/agent-runtime.service","size_bytes":1190},"path":"/home/guagua/agent-runtime/agent-runtime.service"}],"include_missing":true}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.locator_hint = "rustclaw.service".to_string();
+    route.locator_hint = "agent-runtime.service".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
-        args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
+        args: json!({"action":"path_batch_facts","paths":["/home/guagua/agent-runtime/agent-runtime.service"]}),
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
@@ -606,7 +608,7 @@ fn extract_fields_free_output_can_stop_before_second_round() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "system_basic",
-        r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
+        r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/agent-runtime.db","value":"data/agent-runtime.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
     route.locator_kind = OutputLocatorKind::Path;

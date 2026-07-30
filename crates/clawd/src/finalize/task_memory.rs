@@ -107,7 +107,7 @@ pub(super) fn insert_ask_memory_pair(
 
 fn build_unfinished_goal_memory_text(prompt: &str, blocker: &str) -> String {
     serde_json::json!({
-        "schema": "rustclaw.memory.unfinished_goal.v1",
+        "schema": "agent.memory.unfinished_goal.v1",
         "message_key": "memory.unfinished_goal",
         "user_request": prompt.trim(),
         "blocker": blocker.trim(),

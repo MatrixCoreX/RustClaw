@@ -3,8 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/product_identity.sh"
 
-PROFILE="${RUSTCLAW_PROFILE:-release}"
+PROFILE="${APP_PROFILE:-release}"
 PID_DIR="$SCRIPT_DIR/.pids"
 MOUNTED_CONFIG_DIR="$SCRIPT_DIR/docker/config"
 MOUNTED_CONFIG_FILE="$MOUNTED_CONFIG_DIR/config.toml"
@@ -19,7 +21,7 @@ ACTIVE_CHANNELS_DIR="$SCRIPT_DIR/configs/channels"
 # UI/runtime config changes must survive container restarts through the mounted
 # config file. Host development does not set this path, so local mutations do
 # not rewrite the repository's independent Docker deployment template.
-export RUSTCLAW_CONFIG_PERSIST_PATH="${RUSTCLAW_CONFIG_PERSIST_PATH:-$MOUNTED_CONFIG_FILE}"
+export APP_CONFIG_PERSIST_PATH="${APP_CONFIG_PERSIST_PATH:-$MOUNTED_CONFIG_FILE}"
 
 sync_config_from_mount() {
   if [[ -f "$MOUNTED_CONFIG_FILE" ]]; then
@@ -57,7 +59,7 @@ sync_config_from_mount() {
 }
 
 cleanup() {
-  "$SCRIPT_DIR/stop-rustclaw.sh" || true
+  "$SCRIPT_DIR/stop-agent.sh" || true
 }
 
 handle_signal() {

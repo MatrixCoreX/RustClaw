@@ -10,7 +10,7 @@ use tokio::process::Command;
 ///   PATH 之类），其它一切配置（API key、model、workspace 路径等）必须由 clawd 通过
 ///   `cmd.env(...)` 显式注入或经 `SecretsBroker` 走 `secrets.<usage>_<vendor>_api_key`
 ///   契约下来 —— 这才是 §3.4 "secrets 成为唯一渠道" 的真正落地。
-/// * 严格模式默认开启；只有显式设置 `RUSTCLAW_SKILL_ENV_STRICT=0|false|off|no`
+/// * 严格模式默认开启；只有显式设置 `APP_SKILL_ENV_STRICT=0|false|off|no`
 ///   才临时关闭。skill 若依赖未声明的环境变量会立即暴露配置缺口。
 /// * 列表保持小而稳：扩列前请先评估能否用 manifest capability 替代。
 pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
@@ -32,11 +32,11 @@ pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
 
 /// Runtime switch for strict child-process environment isolation.
 ///
-/// Isolation is enabled by default. Set `RUSTCLAW_SKILL_ENV_STRICT=0|false|off|no`
+/// Isolation is enabled by default. Set `APP_SKILL_ENV_STRICT=0|false|off|no`
 /// only as an explicit compatibility escape hatch.
 pub(crate) fn skill_runner_env_strict_enabled() -> bool {
     !matches!(
-        std::env::var("RUSTCLAW_SKILL_ENV_STRICT")
+        claw_core::product_identity::env_string("SKILL_ENV_STRICT")
             .ok()
             .as_deref()
             .map(str::trim)
@@ -137,9 +137,9 @@ pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
 }
 
 mod builtin;
+mod credential_fallback;
 mod error_contract;
 mod memory_context;
-mod output_dirs;
 mod result_enrichment;
 mod runner;
 
@@ -156,7 +156,6 @@ pub(crate) use error_contract::{
     parse_structured_skill_error, structured_skill_error_from_parts, StructuredSkillError,
 };
 pub(crate) use memory_context::inject_skill_memory_context;
-pub(crate) use output_dirs::ensure_default_output_dir_for_skill_args;
 use result_enrichment::enrich_runtime_owned_skill_extra;
 pub(crate) use runner::{run_skill_with_runner, run_skill_with_runner_once};
 
@@ -509,8 +508,7 @@ fn prepare_builtin_run_cmd_async_start_args(
     }
     let job_uuid = uuid::Uuid::new_v4().to_string();
     let job_id = ["local_process", job_uuid.as_str()].join(":");
-    let job_dir = workspace_root
-        .join(".rustclaw")
+    let job_dir = claw_core::workspace_state::workspace_state_root(workspace_root)
         .join("async_jobs")
         .join(&job_uuid);
     let poll_after_seconds = obj
@@ -1362,6 +1360,33 @@ fn action_scoped_isolation_profile(
         .and_then(|mapping| mapping.isolation_profile)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SkillTimeoutResolution {
+    seconds: u64,
+    source: &'static str,
+}
+
+fn resolve_skill_timeout(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> SkillTimeoutResolution {
+    let capability_timeout = action_scoped_planner_mapping(state, skill_name, args)
+        .and_then(|mapping| mapping.timeout_seconds);
+    let registry_timeout = state.get_skills_registry().as_ref().and_then(|registry| {
+        let timeout = registry.timeout_seconds(skill_name);
+        (timeout > 0).then_some(timeout)
+    });
+    let (seconds, source) = capability_timeout
+        .map(|timeout| (timeout, "capability"))
+        .or_else(|| registry_timeout.map(|timeout| (timeout, "registry")))
+        .unwrap_or((state.skill_rt.skill_timeout_seconds, "global"));
+    SkillTimeoutResolution {
+        seconds: seconds.clamp(1, 86_400),
+        source,
+    }
+}
+
 fn skill_execution_isolation_error(skill_name: &str, detail: String) -> String {
     structured_skill_error_from_parts(
         skill_name,
@@ -1482,31 +1507,6 @@ fn audit_high_risk_skill_start(
     }
 }
 
-/// §P4.1 fallback：当 `SkillsRegistry` 还没装载（启动早期 / 某些测试 stub）时
-/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
-/// `AppState::is_builtin_skill`**——它优先从 registry 拿 kind，failure 才退到这里。
-///
-/// 维护规则：本列表必须与 `configs/skills_registry.toml` / `docker/config/skills_registry.toml`
-/// 中 `kind = "builtin"` 的 skill 一一对应；新增/删除 builtin 时同步改这里，并由
-/// `crates/clawd/tests/config_templates.rs` 的 `registry_covers_all_required_builtins`
-/// 负责守底（registry 必须覆盖这里列出的每一个名字）。
-pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
-    matches!(
-        name,
-        "run_cmd"
-            | "code_index"
-            | "fs_basic"
-            | "config_basic"
-            | "read_file"
-            | "write_file"
-            | "list_dir"
-            | "make_dir"
-            | "remove_file"
-            | "workspace_patch"
-            | "schedule"
-    )
-}
-
 pub(crate) async fn run_skill_with_runner_outcome(
     state: &AppState,
     task: &ClaimedTask,
@@ -1566,6 +1566,16 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         );
         skill_name = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         args = rewrite.runtime_args;
+    }
+    if skill_name != "x" && args.get("dry_run").and_then(Value::as_bool) == Some(true) {
+        return Err(policy_block_error(
+            "dry_run_reserved_for_x",
+            vec![format!("skill: {skill_name}"), "dry_run: true".to_string()],
+            vec![
+                "allowed_skill=x".to_string(),
+                "required_contract=explicit_preview_action_or_real_execution".to_string(),
+            ],
+        ));
     }
 
     let policy_token = format!("skill:{skill_name}");
@@ -1721,25 +1731,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         SkillKind::External | SkillKind::Runner => {}
     }
 
-    let skill_timeout_secs = state
-        .get_skills_registry()
-        .as_ref()
-        .and_then(|r| {
-            let s = r.timeout_seconds(&skill_name);
-            if s > 0 {
-                Some(state.skill_rt.skill_timeout_seconds.max(s))
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| match skill_name.as_str() {
-            "image_generate" | "image_edit" => state.skill_rt.skill_timeout_seconds.max(180),
-            "image_vision" => state.skill_rt.skill_timeout_seconds.max(90),
-            "audio_transcribe" => state.skill_rt.skill_timeout_seconds.max(120),
-            "audio_synthesize" => state.skill_rt.skill_timeout_seconds.max(90),
-            "crypto" => state.skill_rt.skill_timeout_seconds.max(60),
-            _ => state.skill_rt.skill_timeout_seconds,
-        });
+    let timeout = resolve_skill_timeout(state, &skill_name, &args);
+    let skill_timeout_secs = timeout.seconds;
+    tracing::debug!(
+        skill = skill_name,
+        timeout_seconds = skill_timeout_secs,
+        timeout_source = timeout.source,
+        "skill_timeout_resolved"
+    );
 
     let _permit = state
         .skill_rt
@@ -1750,11 +1749,6 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
     let args = inject_skill_memory_context(execution_state, task, &skill_name, args);
-    let args = ensure_default_output_dir_for_skill_args(
-        &execution_state.skill_rt.workspace_root,
-        &skill_name,
-        args,
-    );
     let source = match task_runtime_channel(execution_state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
@@ -1886,3 +1880,7 @@ mod success_extra_tests;
 #[cfg(test)]
 #[path = "skills_async_start_args_tests.rs"]
 mod async_start_args_tests;
+
+#[cfg(test)]
+#[path = "skills_timeout_tests.rs"]
+mod timeout_tests;

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Guard against reintroducing the retired `agent_mode` payload switch.
 
-RustClaw's ordinary ask path now defaults to the agent loop. Channel/UI clients
+The ordinary ask path now defaults to the agent loop. Channel/UI clients
 should submit the user's text and machine context, not a legacy boolean that
 implies ordinary semantic routing can be disabled before the planner.
 """

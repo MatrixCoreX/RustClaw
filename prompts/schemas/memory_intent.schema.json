@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rustclaw.local/prompts/schemas/memory_intent.schema.json",
+  "$id": "https://agent-runtime.invalid/prompts/schemas/memory_intent.schema.json",
   "title": "MemoryIntentOut",
   "description": "Schema for structured memory intent extraction. Mirrors `MemoryIntentOut` / `MemoryAction` in `crates/clawd/src/memory/intent.rs`. The model decides semantic memory actions; runtime validates schema, confidence, source evidence, scope, TTL, and safety before writing.",
   "type": "object",

@@ -10,7 +10,7 @@
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw 把面向浏览器的安全边界集中在 `webd`，把 `clawd` 保留为内部核心
+Agent Runtime 把面向浏览器的安全边界集中在 `webd`，把 `clawd` 保留为内部核心
 API。这样不会出现绕过浏览器会话网关的第二套公开 UI/API 入口。
 
 ## 当前访问拓扑
@@ -61,13 +61,13 @@ flowchart LR
 
 ## 首页操作
 
-首页会显示 nginx 是否已安装、正在运行、已配置 RustClaw 站点，以及 UI 是否已部署。
+首页会显示 nginx 是否已安装、正在运行、已配置 Agent Runtime 站点，以及 UI 是否已部署。
 仅管理员可执行下列后台操作：
 
-- **启用/修复 nginx**：检查系统软件源版本，按需安装或更新 nginx，写入 RustClaw
+- **启用/修复 nginx**：检查系统软件源版本，按需安装或更新 nginx，写入 Agent Runtime
   站点，部署已有 `UI/dist`，验证配置后启动或重载。Linux 使用对应包管理器，macOS
   使用 Homebrew。
-- **关闭 nginx**：停止并禁用服务，删除 RustClaw 站点和专用 UI 部署，但不卸载 nginx；
+- **关闭 nginx**：停止并禁用服务，删除 Agent Runtime 站点和专用 UI 部署，但不卸载 nginx；
   操作前会明确提示云服务器或域名入口将无法继续访问。
 
 操作返回机器状态和错误键。面向用户的中英文说明由 UI 渲染，运行时不解析固定自然语言。

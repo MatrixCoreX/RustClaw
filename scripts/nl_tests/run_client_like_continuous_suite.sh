@@ -12,10 +12,10 @@ USER_ID_VALUE="${USER_ID:-2403753217836067397}"
 CHAT_ID_VALUE="${CHAT_ID:--1002403753217}"
 EXTERNAL_CHAT_ID_VALUE="${EXTERNAL_CHAT_ID:-}"
 EXTERNAL_USER_ID_VALUE="${EXTERNAL_USER_ID:-}"
-USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+USER_KEY_VALUE="${APP_USER_KEY:-${USER_KEY:-}}"
 CHANNEL_VALUE="${CLIENT_LIKE_CHANNEL:-telegram}"
-CONFIG_PATH_VALUE="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
-DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
+CONFIG_PATH_VALUE="${APP_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
+DB_PATH_VALUE="${APP_DB_PATH:-}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-1200}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LLM_INFRA_TURN_RETRIES_VALUE="${LLM_INFRA_TURN_RETRIES:-3}"
@@ -54,13 +54,13 @@ What it tests:
 
 Options:
   --base-url URL             clawd base URL. Default: http://127.0.0.1:8787
-  --user-id ID               RustClaw/Telegram-side user id. Default: deterministic large id
+  --user-id ID               Agent Runtime/Telegram-side user id. Default: deterministic large id
   --chat-id ID               Telegram raw chat id. Default: deterministic negative group id
   --external-user-id ID      Telegramd-compatible external_user_id. Default: user-id
   --external-chat-id ID      Telegramd-compatible external_chat_id. Default: chat-id
   --channel CHANNEL          Submission channel: ui or telegram. Default:
                              CLIENT_LIKE_CHANNEL or telegram
-  --user-key KEY             RustClaw user key. Default: RUSTCLAW_USER_KEY/USER_KEY or first enabled admin key
+  --user-key KEY             Agent Runtime user key. Default: APP_USER_KEY/USER_KEY or first enabled admin key
   --config PATH              config.toml used to resolve DB path for assertions
   --db-path PATH             main SQLite DB path for assertions
   --wait-seconds N           max wait per turn. Default: 1200
@@ -302,7 +302,7 @@ resolve_admin_key() {
   fi
   USER_KEY_VALUE="$("${ROOT_DIR}/scripts/auth-key.sh" list | awk '$2 == "admin" && $3 == "enabled" { print $1; exit }')"
   if [[ -z "${USER_KEY_VALUE:-}" ]]; then
-    echo "No enabled admin key found. Pass --user-key or set RUSTCLAW_USER_KEY." >&2
+    echo "No enabled admin key found. Pass --user-key or set APP_USER_KEY." >&2
     exit 2
   fi
 }
@@ -327,7 +327,7 @@ except ModuleNotFoundError:
 root = Path(sys.argv[1]).resolve()
 config_path = Path(sys.argv[2]).resolve()
 cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
-raw = cfg.get("database", {}).get("sqlite_path", "data/rustclaw.db")
+raw = cfg.get("database", {}).get("sqlite_path", "data/agent-runtime.db")
 path = Path(raw)
 if not path.is_absolute():
     path = root / path
@@ -1064,7 +1064,7 @@ def capability_family_names(name: str) -> set[str]:
         "fs_search": {"fs_search", "fs_basic"},
         # Read-only service status may be answered through process inventory.
         "service_control": {"service_control", "process_basic", "health_check"},
-        # RustClaw config guard is now exposed through config_edit.guard_config;
+        # Agent Runtime config guard is now exposed through config_edit.guard_config;
         # config_guard remains a compatibility label in older NL case tags.
         "config_guard": {"config_guard", "config_edit", "config_basic"},
         # Native child delegation is traced by exact planner capability while
@@ -1280,7 +1280,7 @@ PY
 
 materialize_case_prompt() {
   local prompt="${1:-}"
-  printf '%s' "${prompt//__RUSTCLAW_TEST_BASE_URL__/${BASE_URL}}"
+  printf '%s' "${prompt//__APP_TEST_BASE_URL__/${BASE_URL}}"
 }
 
 reset_case_fixture_files() {
@@ -2289,13 +2289,13 @@ fi
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
 请记住下面这段较长的上下文，后续我会基于它继续问问题。不要执行外部工具，只需要用中文确认已收到。
 
-项目背景：RustClaw 是一个多渠道 agent 控制台，非技术用户会通过 Telegram、网页、微信、飞书等渠道连续交互。真实客户端不会每条消息都换 chat，而是在同一个会话里不断累积任务、短期记忆、长期摘要、最近执行记录和澄清状态。测试必须模拟这种连续会话，否则空库短句测试无法发现 intent normalizer 在长上下文下超过模型窗口的问题。
+项目背景：Agent Runtime 是一个多渠道 agent 控制台，非技术用户会通过 Telegram、网页、微信、飞书等渠道连续交互。真实客户端不会每条消息都换 chat，而是在同一个会话里不断累积任务、短期记忆、长期摘要、最近执行记录和澄清状态。测试必须模拟这种连续会话，否则空库短句测试无法发现 intent normalizer 在长上下文下超过模型窗口的问题。
 
 验证目标：连续消息应落入同一个 effective_chat_id；后续 ask 应能读取前序消息形成的 recent_turns_full、last_turn_full、memory_context；即使上下文变长，也不应返回“模型暂时不可用”或“我没看出这条消息要做什么”。
 EOF
 
 PROMPTS=(
-  "你好，我正在做 RustClaw 的真实客户端连续会话测试，请用一句中文回复确认。"
+  "你好，我正在做 Agent Runtime 的真实客户端连续会话测试，请用一句中文回复确认。"
   "请记住测试编号 ${TEST_ID}，后续我会问你这个编号。"
   "$HEAVY_CONTEXT_PROMPT"
   "刚才我让你记住的测试编号是什么？只回答编号。"

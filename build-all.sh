@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zh: 构建整个 RustClaw 工作区；运行时提示保持英文，中文说明仅作为维护注释。
+# zh: 构建整个 agent runtime 工作区；运行时提示保持英文，中文说明仅作为维护注释。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -232,8 +232,8 @@ BUILD_PROFILE="release"
 DO_CLEAN=0
 REQUESTED_TARGET="host"
 EXTRA_TARGETS=()
-TOOLCHAIN_MODE="${RUSTCLAW_TOOLCHAIN_MODE:-ensure}"
-PRESERVE_NGINX="${RUSTCLAW_PRESERVE_NGINX:-0}"
+TOOLCHAIN_MODE="${APP_TOOLCHAIN_MODE:-ensure}"
+PRESERVE_NGINX="${APP_PRESERVE_NGINX:-0}"
 
 # Release-only build; keep compatibility with legacy `release` arguments.
 # Use SKIP_UI=1 or `no-ui` to skip the UI build.
@@ -294,7 +294,7 @@ case "$TOOLCHAIN_MODE" in
 	ensure|check|update)
 		;;
 	*)
-		echo "Unsupported RUSTCLAW_TOOLCHAIN_MODE: $TOOLCHAIN_MODE (expected ensure, check, or update)."
+		echo "Unsupported APP_TOOLCHAIN_MODE: $TOOLCHAIN_MODE (expected ensure, check, or update)."
 		exit 1
 		;;
 esac
@@ -302,7 +302,7 @@ esac
 case "$PRESERVE_NGINX" in
 	0|1) ;;
 	*)
-		echo "RUSTCLAW_PRESERVE_NGINX must be 0 or 1."
+		echo "APP_PRESERVE_NGINX must be 0 or 1."
 		exit 1
 		;;
 esac
@@ -319,8 +319,8 @@ if [[ -d "$SCRIPT_DIR/UI" ]] && [[ "$SKIP_UI" != "1" ]]; then
 fi
 
 if [[ "$TOOLCHAIN_MODE" == "update" ]]; then
-	rustclaw_update_rust
-	rustclaw_update_package_toolchains "$INCLUDE_UI_TOOLCHAIN"
+	agent_update_rust
+	agent_update_package_toolchains "$INCLUDE_UI_TOOLCHAIN"
 fi
 
 ensure_cargo
@@ -331,10 +331,10 @@ if [[ "$INCLUDE_UI_TOOLCHAIN" == "1" ]]; then
 fi
 
 if [[ "$TOOLCHAIN_MODE" == "check" ]]; then
-	rustclaw_check_toolchain_updates "$INCLUDE_UI_TOOLCHAIN"
+	agent_check_toolchain_updates "$INCLUDE_UI_TOOLCHAIN"
 fi
-rustclaw_report_build_toolchains
-rustclaw_validate_build_toolchains "$INCLUDE_UI_TOOLCHAIN"
+agent_report_build_toolchains
+agent_validate_build_toolchains "$INCLUDE_UI_TOOLCHAIN"
 
 echo "Syncing skill docs (INTERFACE.md + prompts/layers/generated/skills/*.md)..."
 python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
@@ -432,8 +432,8 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 		echo "Runner packages unsupported for target=$target: ${UNSUPPORTED_PACKAGES[*]}"
 	fi
 
-	RUSTCLAW_BUILD_EXCLUDED_PACKAGES="$(printf '%s\n' "${BUILD_EXCLUDED_PACKAGES[@]:-}")"
-	export RUSTCLAW_BUILD_EXCLUDED_PACKAGES
+	APP_BUILD_EXCLUDED_PACKAGES="$(printf '%s\n' "${BUILD_EXCLUDED_PACKAGES[@]:-}")"
+	export APP_BUILD_EXCLUDED_PACKAGES
 	REQUIRED_BINS=()
 	while IFS= read -r bin; do
 		[[ -n "$bin" ]] && REQUIRED_BINS+=("$bin")
@@ -448,7 +448,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 workspace_members = set(data.get("workspace_members", []))
 excluded = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
+    for value in os.environ.get("APP_BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = {
@@ -497,13 +497,13 @@ PY
 		python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
 			--target "$target" \
 			--binary-dir "$OUT_DIR" \
-			--sdk-cli "$OUT_DIR/rustclaw-skill" \
+			--sdk-cli "$OUT_DIR/skillctl" \
 			--package-root "$SCRIPT_DIR/target/skill-packages/$target"
 		echo "Activating verified proactive skill receipts for the local runtime..."
 		python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
 			--target host \
 			--binary-dir "$OUT_DIR" \
-			--sdk-cli "$OUT_DIR/rustclaw-skill" \
+			--sdk-cli "$OUT_DIR/skillctl" \
 			--package-root "$SCRIPT_DIR/data/skill-packages"
 	fi
 done
@@ -512,7 +512,7 @@ if [[ "$UI_BUILT" == "1" ]]; then
 	if [[ "$PRESERVE_NGINX" == "1" ]]; then
 		echo "Preserving nginx as requested; UI/dist was built but nginx was not modified."
 	elif [[ "$PRIMARY_TARGET" == "$HOST_TARGET" ]]; then
-		echo "Checking whether an existing RustClaw nginx site needs the latest UI..."
+		echo "Checking whether an existing agent UI nginx site needs the latest UI..."
 		bash "$SCRIPT_DIR/build-ui-nginx.sh" --copy-if-configured
 	else
 		echo "Skipping nginx UI deployment for cross-target build: $PRIMARY_TARGET"

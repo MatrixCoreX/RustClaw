@@ -59,8 +59,8 @@ def main() -> int:
             encoding="utf-8",
         )
         env = os.environ.copy()
-        env["RUSTCLAW_CONFIG_PATH"] = str(config)
-        env["RUSTCLAW_CRYPTO_CONFIG_PATH"] = str(crypto)
+        env["APP_CONFIG_PATH"] = str(config)
+        env["APP_CRYPTO_CONFIG_PATH"] = str(crypto)
         command = [str(IMPORT_SCRIPT), "--user-key", "rk-import-test"]
         for _ in range(2):
             subprocess.run(

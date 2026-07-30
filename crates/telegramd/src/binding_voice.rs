@@ -85,7 +85,7 @@ pub(super) fn maybe_with_user_key_header(
     user_key: Option<&str>,
 ) -> reqwest::RequestBuilder {
     if let Some(k) = user_key.map(str::trim).filter(|v| !v.is_empty()) {
-        req.header("X-RustClaw-Key", k)
+        req.header("X-Agent-Key", k)
     } else {
         req
     }

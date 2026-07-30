@@ -362,11 +362,11 @@ fn validate_knowledge_candidate_rejects_plain_locator_alias_fact() {
         should_persist: true,
         kind: "project_fact".to_string(),
         namespace: KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
-        fact: "那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
+        fact: "那个配置文件 maps to /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
         confidence: 0.97,
         reason: "plain locator alias mapping should stay session-scoped".to_string(),
         fact_key: "config_alias".to_string(),
-        fact_value: "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
+        fact_value: "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
         conflict_group: "project_facts:config_alias".to_string(),
         expires_at_ts: None,
     };

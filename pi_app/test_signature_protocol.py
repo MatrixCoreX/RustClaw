@@ -21,7 +21,7 @@ class SignatureProtocolTests(unittest.TestCase):
         if action_arg is not None:
             command.append(str(action_arg))
         env = os.environ.copy()
-        env["RUSTCLAW_SIGNATURE_SIMULATOR_STATE"] = str(state_path)
+        env["APP_SIGNATURE_SIMULATOR_STATE"] = str(state_path)
         result = subprocess.run(
             command,
             capture_output=True,

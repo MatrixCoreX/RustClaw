@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clear chat/session memory tables in the main RustClaw SQLite DB (default: data/rustclaw.db).
+Clear chat/session memory tables in the main agent-runtime SQLite DB.
 
 Removes:
   memories, long_term_memories, user_preferences,
@@ -11,10 +11,10 @@ Does NOT remove: users, tasks, channel_bindings, auth_keys, scheduled_jobs, audi
 
 Usage (stop clawd first to avoid SQLITE_BUSY):
   python3 scripts/clear_chat_memory_from_db.py
-  python3 scripts/clear_chat_memory_from_db.py /path/to/rustclaw.db
+  python3 scripts/clear_chat_memory_from_db.py /path/to/agent-runtime.db
 
 Env:
-  RUSTCLAW_DB  — override default path (still overridden by argv[1])
+  APP_DB  — override default path (still overridden by argv[1])
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ import sys
 
 
 def main() -> int:
-    default = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rustclaw.db")
-    path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RUSTCLAW_DB", default)
+    default = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "agent-runtime.db")
+    path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("APP_DB", default)
     if not os.path.isfile(path):
         print(f"error: database file not found: {path}", file=sys.stderr)
         return 2

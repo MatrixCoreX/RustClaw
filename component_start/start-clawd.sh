@@ -19,8 +19,8 @@ mkdir -p "$LOG_DIR"
 # For non-interactive callers (e.g. start-all.sh with nohup redirection),
 # keep caller-managed redirection to avoid duplicate log lines.
 if [[ -t 1 ]]; then
-  if [[ -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-    export RUSTCLAW_LOG_COLOR=1
+  if [[ -z "${APP_LOG_COLOR:-}" ]]; then
+    export APP_LOG_COLOR=1
   fi
   # Terminal side keeps ANSI colors; log file side strips them via sed (use $'...' so \x1b is ESC).
   exec > >(tee >(sed $'s/\x1b\\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
@@ -42,7 +42,7 @@ import os
 import tomllib
 from pathlib import Path
 
-cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
+cfg_path = Path(os.environ["APP_CONFIG_PATH"])
 cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 vendor = str(llm.get("selected_vendor", "") or "")
@@ -57,7 +57,7 @@ if [[ -z "${CURRENT_VENDOR}" || -z "${CURRENT_MODEL}" ]]; then
 fi
 
 if [[ "$NEED_FIRST_SELECT" == "1" ]]; then
-  if [[ ! -t 0 || ! -t 1 || "${RUSTCLAW_MODEL_SELECT:-1}" == "0" ]]; then
+  if [[ ! -t 0 || ! -t 1 || "${APP_MODEL_SELECT:-1}" == "0" ]]; then
     echo "First startup requires interactive provider/model selection." # zh: 首次启动需要交互选择模型厂商与模型。
     exit 1
   fi
@@ -68,7 +68,7 @@ import os
 import tomllib
 from pathlib import Path
 
-cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
+cfg_path = Path(os.environ["APP_CONFIG_PATH"])
 cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 vendors = ["openai", "google", "anthropic", "grok", "deepseek", "qwen", "minimax", "mimo", "custom"]
@@ -123,7 +123,7 @@ import re
 import sys
 from pathlib import Path
 
-cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
+cfg_path = Path(os.environ["APP_CONFIG_PATH"])
 text = cfg_path.read_text(encoding="utf-8")
 vendor = sys.argv[1]
 model = sys.argv[2]
@@ -156,13 +156,13 @@ ACTIVE_MODEL="${CHOSEN_MODEL:-$CURRENT_MODEL}"
 
 if [[ -n "${ACTIVE_VENDOR}" ]]; then
   CURRENT_API_KEY="$(
-RUSTCLAW_ACTIVE_VENDOR="${ACTIVE_VENDOR}" python3 - <<'PY'
+APP_ACTIVE_VENDOR="${ACTIVE_VENDOR}" python3 - <<'PY'
 import os
 import tomllib
 from pathlib import Path
 
-vendor = os.environ.get("RUSTCLAW_ACTIVE_VENDOR", "")
-cfg = tomllib.loads(Path(os.environ["RUSTCLAW_CONFIG_PATH"]).read_text(encoding="utf-8"))
+vendor = os.environ.get("APP_ACTIVE_VENDOR", "")
+cfg = tomllib.loads(Path(os.environ["APP_CONFIG_PATH"]).read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
 section = llm.get(vendor, {})
 if isinstance(section, dict):
@@ -174,7 +174,7 @@ PY
   ENV_API_KEY="$(component_vendor_api_key_from_env "$ACTIVE_VENDOR")"
 
   if [[ ( -z "${CURRENT_API_KEY}" || "${CURRENT_API_KEY}" == REPLACE_ME* ) && -z "${ENV_API_KEY}" ]]; then
-    if [[ ! -t 0 || ! -t 1 || "${RUSTCLAW_MODEL_SELECT:-1}" == "0" ]]; then
+    if [[ ! -t 0 || ! -t 1 || "${APP_MODEL_SELECT:-1}" == "0" ]]; then
       echo "The api_key for current vendor (${ACTIVE_VENDOR}) is missing from config and environment. Interactive input is required before startup." # zh: 当前厂商(${ACTIVE_VENDOR})的配置和环境变量中都缺少 api_key，必须交互填写后才能启动。
       exit 1
     fi
@@ -188,19 +188,19 @@ PY
       echo "api_key cannot be empty and cannot be a REPLACE_ME placeholder." # zh: api_key 不能为空，且不能是 REPLACE_ME 占位值。
     done
 
-    export RUSTCLAW_INPUT_API_KEY="${INPUT_API_KEY}"
-    export RUSTCLAW_ACTIVE_VENDOR="${ACTIVE_VENDOR}"
+    export APP_INPUT_API_KEY="${INPUT_API_KEY}"
+    export APP_ACTIVE_VENDOR="${ACTIVE_VENDOR}"
     python3 - <<'PY'
 import os
 import re
 from pathlib import Path
 
-vendor = os.environ.get("RUSTCLAW_ACTIVE_VENDOR", "")
-api_key = os.environ.get("RUSTCLAW_INPUT_API_KEY", "")
+vendor = os.environ.get("APP_ACTIVE_VENDOR", "")
+api_key = os.environ.get("APP_INPUT_API_KEY", "")
 if not vendor or not api_key:
     raise SystemExit(0)
 
-cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
+cfg_path = Path(os.environ["APP_CONFIG_PATH"])
 text = cfg_path.read_text(encoding="utf-8")
 
 section_pat = rf"(?ms)^(\[llm\.{re.escape(vendor)}\]\n)(.*?)(?=^\[|\Z)"

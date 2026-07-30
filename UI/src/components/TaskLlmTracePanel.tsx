@@ -207,6 +207,7 @@ export function TaskLlmTracePanel({
       ? taskLlmDebug.calls
       : taskLlmDebug?.entries ?? [];
   const callCount = taskLlmDebug?.call_count ?? calls.length;
+  const runtimeTraceLayer = taskLlmDebug?.trace_layers?.agent_decisions;
   const availabilityStatus = taskLlmTraceAvailabilityStatus(taskLlmDebug);
   const retentionDays = taskLlmDebug?.trace_availability?.retention_days ?? 7;
   const timelineRows = agentFlowTimelineRows(taskLlmDebug);
@@ -254,9 +255,9 @@ export function TaskLlmTracePanel({
                 provider_data={taskLlmDebug.trace_layers.provider_data.classification}
               </span>
             ) : null}
-            {taskLlmDebug.trace_layers?.rustclaw_decisions?.classification ? (
+            {runtimeTraceLayer?.classification ? (
               <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
-                runtime_data={taskLlmDebug.trace_layers.rustclaw_decisions.classification}
+                runtime_data={runtimeTraceLayer.classification}
               </span>
             ) : null}
             {taskLlmDebug.redaction?.field_count ? (
@@ -499,7 +500,7 @@ export function TaskLlmTracePanel({
                     {call.flow ? (
                       <div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-400/5 p-3">
                         <p className="mb-2 text-xs font-medium text-sky-100">
-                          {t("RustClaw 流程", "RustClaw flow")}
+                          {t("{product_name} 流程", "{product_name} flow")}
                         </p>
                         <div className="grid gap-2 text-[11px] md:grid-cols-2">
                           <FlowField label={t("流程阶段", "Flow stage")} value={call.flow.flow_stage} />

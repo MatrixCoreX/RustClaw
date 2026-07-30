@@ -1083,7 +1083,7 @@ pub(crate) fn verify_plan(
                     &normalized_skill,
                     Some(&step.args),
                 ) || is_confirmation_like_skill(&normalized_skill)
-                    || high_risk_side_effect_requires_confirmation(effect, step_risk, &step.args));
+                    || high_risk_side_effect_requires_confirmation(effect, step_risk));
             let step_requires_confirmation = execution_policy.approval_required(
                 risk_requires_confirmation,
                 effective_plan_result.needs_confirmation,

@@ -70,7 +70,7 @@ fn collect_nginx_ui_status() -> NginxUiStatus {
     let config = nginx_config_candidates()
         .into_iter()
         .find_map(|path| std::fs::read_to_string(path).ok())
-        .filter(|content| nginx_config_is_rustclaw_site(content));
+        .filter(|content| nginx_config_is_agent_site(content));
     let configured = config.is_some();
     let ui_deployed = config
         .as_deref()
@@ -107,24 +107,24 @@ fn nginx_executable_exists() -> bool {
 fn nginx_config_candidates() -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
         return vec![
-            PathBuf::from("/opt/homebrew/etc/nginx/servers/rustclaw-ui.conf"),
-            PathBuf::from("/usr/local/etc/nginx/servers/rustclaw-ui.conf"),
+            PathBuf::from("/opt/homebrew/etc/nginx/servers/agent-runtime-ui.conf"),
+            PathBuf::from("/usr/local/etc/nginx/servers/agent-runtime-ui.conf"),
         ];
     }
     vec![
-        PathBuf::from("/etc/nginx/sites-enabled/rustclaw-ui.conf"),
-        PathBuf::from("/etc/nginx/conf.d/rustclaw-ui.conf"),
+        PathBuf::from("/etc/nginx/sites-enabled/agent-runtime-ui.conf"),
+        PathBuf::from("/etc/nginx/conf.d/agent-runtime-ui.conf"),
     ]
 }
 
-fn nginx_config_is_rustclaw_site(content: &str) -> bool {
+fn nginx_config_is_agent_site(content: &str) -> bool {
     let proxy_upstreams = content
         .split("proxy_pass ")
         .skip(1)
         .filter_map(|segment| segment.split(';').next().map(str::trim))
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
-    content.lines().any(|line| line.contains("RustClaw UI"))
+    content.to_ascii_lowercase().contains("agent runtime ui")
         && content.contains("location ^~ /v1/")
         && content.contains("location ^~ /webd/")
         && proxy_upstreams.len() >= 2

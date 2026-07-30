@@ -137,6 +137,8 @@ pub struct FeishuBindSessionStatusResponse {
     pub expires_at: String,
     #[serde(default)]
     pub entry_url: Option<String>,
+    #[serde(default)]
+    pub poll_interval_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

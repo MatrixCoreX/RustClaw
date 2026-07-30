@@ -33,6 +33,7 @@ fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -322,7 +323,7 @@ fn long_term_source_recall_skips_unfinished_goal_runtime_memory() {
         "local",
         None,
         MEMORY_ROLE_USER,
-        "帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚",
+        "帮我写一个 Agent Runtime 生产环境部署方案，包含启动、日志和回滚",
         2000,
         MemoryWriteKind::Default,
     )
@@ -336,9 +337,9 @@ fn long_term_source_recall_skips_unfinished_goal_runtime_memory() {
         None,
         MEMORY_ROLE_SYSTEM,
         &serde_json::json!({
-            "schema": "rustclaw.memory.unfinished_goal.v1",
+            "schema": "agent-runtime.memory.unfinished_goal.v1",
             "message_key": "memory.unfinished_goal",
-            "user_request": "帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚",
+            "user_request": "帮我写一个 Agent Runtime 生产环境部署方案，包含启动、日志和回滚",
             "blocker": "provider timeout",
         })
         .to_string(),

@@ -1923,7 +1923,7 @@ def run_self_test() -> int:
     fixture_ref = portable_path_ref(
         ROOT / "scripts/nl_tests/fixtures/client_like_runs/coding_loop_repair"
     )
-    if fixture_ref.startswith("/") or "rustclaw" in fixture_ref.split("/")[:1]:
+    if fixture_ref.startswith("/") or "agent-runtime" in fixture_ref.split("/")[:1]:
         print(f"SELF_TEST_FAIL fixture_ref:{fixture_ref}")
         return 1
     with tempfile.TemporaryDirectory(prefix="rollout-metrics-") as tmp:
@@ -2134,17 +2134,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--provider",
-        default=os.environ.get("RUSTCLAW_NL_PROVIDER", "unknown"),
+        default=os.environ.get("APP_NL_PROVIDER", "unknown"),
         help="Provider bucket to attach when run JSON does not expose one",
     )
     parser.add_argument(
         "--vendor",
-        default=os.environ.get("RUSTCLAW_NL_VENDOR", "unknown"),
+        default=os.environ.get("APP_NL_VENDOR", "unknown"),
         help="Vendor bucket to attach when run JSON does not expose one",
     )
     parser.add_argument(
         "--budget-profile",
-        default=os.environ.get("RUSTCLAW_NL_BUDGET_PROFILE", "unknown"),
+        default=os.environ.get("APP_NL_BUDGET_PROFILE", "unknown"),
         help="Budget profile fallback when run JSON does not expose one",
     )
     parser.add_argument("--print-json", action="store_true", help="Also print JSON to stdout")

@@ -76,8 +76,8 @@ export function McpConfigSection({
           <h2 className="mt-1 text-lg font-semibold">{t("外部工具服务器", "External tool servers")}</h2>
           <p className="mt-2 text-sm leading-6 text-white/60">
             {t(
-              "连接可信的本地或远程工具。密钥只填写环境变量名；RustClaw 不会在此页面读取或显示变量值。",
-              "Connect trusted local or remote tools. Enter environment variable names only; RustClaw does not read or display their values here.",
+              "连接可信的本地或远程工具。密钥只填写环境变量名；{product_name} 不会在此页面读取或显示变量值。",
+              "Connect trusted local or remote tools. Enter environment variable names only; {product_name} does not read or display their values here.",
             )}
           </p>
         </div>
@@ -141,7 +141,7 @@ export function McpConfigSection({
       ) : null}
       {config?.restart_required ? (
         <p className="mt-4 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          {t("新设置会在重启 RustClaw 后生效。", "The new settings take effect after RustClaw restarts.")}
+          {t("新设置会在重启 {product_name} 后生效。", "The new settings take effect after {product_name} restarts.")}
         </p>
       ) : null}
 
@@ -306,7 +306,7 @@ export function McpConfigSection({
                     className="theme-input mt-3 min-h-24 resize-y font-mono"
                     value={server.envRefsText}
                     onChange={(event) => onServerChange(index, { envRefsText: event.target.value })}
-                    placeholder="API_TOKEN=RUSTCLAW_MCP_TOKEN"
+                    placeholder="API_TOKEN=APP_MCP_TOKEN"
                   />
                 </details>
               ) : null}
@@ -318,7 +318,7 @@ export function McpConfigSection({
                     className="theme-input font-mono"
                     value={server.authTokenEnv}
                     onChange={(event) => onServerChange(index, { authTokenEnv: event.target.value })}
-                    placeholder="RUSTCLAW_MCP_TOKEN"
+                    placeholder="APP_MCP_TOKEN"
                     autoComplete="off"
                   />
                 </label>
@@ -332,7 +332,7 @@ export function McpConfigSection({
                       className="theme-input font-mono"
                       value={server.oauthClientIdEnv}
                       onChange={(event) => onServerChange(index, { oauthClientIdEnv: event.target.value })}
-                      placeholder="RUSTCLAW_MCP_CLIENT_ID"
+                      placeholder="APP_MCP_CLIENT_ID"
                       autoComplete="off"
                     />
                   </label>
@@ -342,7 +342,7 @@ export function McpConfigSection({
                       className="theme-input font-mono"
                       value={server.oauthClientSecretEnv}
                       onChange={(event) => onServerChange(index, { oauthClientSecretEnv: event.target.value })}
-                      placeholder="RUSTCLAW_MCP_CLIENT_SECRET"
+                      placeholder="APP_MCP_CLIENT_SECRET"
                       autoComplete="off"
                     />
                   </label>

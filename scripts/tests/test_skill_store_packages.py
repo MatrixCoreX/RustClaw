@@ -42,7 +42,7 @@ class SkillStorePackagesTest(unittest.TestCase):
 name = "{name}"
 version = "1.0.0"
 description = "fixture"
-protocol = "rustclaw-jsonl-v1"
+protocol = "agent-jsonl-v1"
 supported_os = {list(supported_os)!r}
 supported_arch = {list(supported_arch)!r}
 license = "MIT"

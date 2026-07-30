@@ -14,17 +14,22 @@ use crate::{
     SkillLaunchSpec, SkillRuntimeResolver,
 };
 
-const ADAPTERS: [(&str, BuildAdapter, &[&str]); 5] = [
+const ADAPTERS: [(&str, BuildAdapter, &[&str]); 6] = [
     ("rust", BuildAdapter::Cargo, &["cargo"]),
     ("python", BuildAdapter::Python, &["python3"]),
     ("node", BuildAdapter::Node, &["node", "npm"]),
     ("go", BuildAdapter::Go, &["go"]),
     ("prebuilt", BuildAdapter::Prebuilt, &["python3"]),
+    (
+        "generic_process",
+        BuildAdapter::GenericProcess,
+        &["python3"],
+    ),
 ];
 
 #[test]
 fn reference_languages_share_protocol_and_atomic_lifecycle() {
-    let require_all = std::env::var_os("RUSTCLAW_REQUIRE_REFERENCE_ADAPTERS").is_some();
+    let require_all = std::env::var_os("APP_REQUIRE_REFERENCE_ADAPTERS").is_some();
     if !sandbox_backend_present() {
         assert!(
             !require_all,
@@ -77,14 +82,49 @@ fn reference_languages_share_protocol_and_atomic_lifecycle() {
                 .receipt_digest,
             first.receipt_digest
         );
+
+        replace_once(
+            &manifest_path,
+            "working_directory = \"../escape\"",
+            "working_directory = \".\"",
+        );
+        let shared_toolchain = temp.path().join("shared-toolchains").join(language);
+        fs::create_dir_all(&shared_toolchain).expect("shared toolchain fixture");
+        fs::write(shared_toolchain.join("sentinel"), b"keep").expect("shared toolchain sentinel");
+        store
+            .remove_installed_versions(&first.skill_name)
+            .expect("uninstall adapter fixture");
+        assert!(
+            SkillRuntimeResolver::new(&package_root)
+                .resolve(&first.skill_name)
+                .is_err(),
+            "uninstalled {language} package must no longer resolve"
+        );
+        assert!(
+            shared_toolchain.join("sentinel").is_file(),
+            "uninstalling {language} must preserve shared toolchains"
+        );
+        let reinstalled =
+            install(&manifest_path, &workspace, &package_root).expect("reinstall adapter fixture");
+        let relaunched = SkillRuntimeResolver::new(&package_root)
+            .resolve(&reinstalled.skill_name)
+            .expect("resolve reinstalled adapter fixture");
+        prove_action_contract(language, &relaunched, &output_root);
         exercised.insert(language);
         eprintln!("REFERENCE_CONFORMANCE adapter={language} ok");
     }
 
     let required = if require_all {
-        &["rust", "python", "node", "go", "prebuilt"][..]
+        &[
+            "rust",
+            "python",
+            "node",
+            "go",
+            "prebuilt",
+            "generic_process",
+        ][..]
     } else {
-        &["rust", "python", "node", "prebuilt"][..]
+        &["rust", "python", "node", "prebuilt", "generic_process"][..]
     };
     for required in required {
         assert!(

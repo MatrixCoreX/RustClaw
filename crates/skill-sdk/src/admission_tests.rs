@@ -29,6 +29,7 @@ fn host_grant_must_be_subset_of_package_request() {
         permissions: RuntimePermissionRequest::default(),
         risk_level: HostRiskLevel::High,
         auto_invocable: false,
+        requires_confirmation: true,
         approval_source: ApprovalSource::Operator,
         approved_at_unix: 1,
     };

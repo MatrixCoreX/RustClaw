@@ -14,6 +14,7 @@ PROFILE="release"
 AUTO_BUILD=0
 RAW=0
 ALLOW_NETWORK=0
+TIMEOUT_SECONDS="${SKILL_TIMEOUT_SECONDS:-}"
 ARGS_JSON=""
 CONTEXT_JSON="${CONTEXT_JSON:-null}"
 USER_ID="${USER_ID:-1}"
@@ -32,6 +33,7 @@ Options:
   --chat-id N               Request chat_id (default: 1)
   --auto-build              Auto build missing runner/skill binary
   --network                 Approve manifest-declared install network for this run
+  --timeout-seconds N       Optional runner cap; defaults to the skill manifest timeout
   --raw                     Print raw one-line JSON response
   --help, -h                Show help
 
@@ -79,6 +81,10 @@ while [[ $# -gt 0 ]]; do
       ALLOW_NETWORK=1
       shift
       ;;
+    --timeout-seconds)
+      TIMEOUT_SECONDS="${2:-}"
+      shift 2
+      ;;
     --raw)
       RAW=1
       shift
@@ -118,6 +124,14 @@ echo "$CONTEXT_JSON" | jq -e '. == null or type == "object"' >/dev/null 2>&1 || 
   echo "--context must be a JSON object or null"
   exit 2
 }
+if [[ -n "$TIMEOUT_SECONDS" && ! "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "--timeout-seconds must be a positive integer"
+  exit 2
+fi
+if [[ -n "$TIMEOUT_SECONDS" && "$TIMEOUT_SECONDS" -gt 86400 ]]; then
+  echo "--timeout-seconds must not exceed 86400"
+  exit 2
+fi
 
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
 SKILL_RECORD="$(
@@ -126,7 +140,7 @@ SKILL_RECORD="$(
 )" || exit 1
 canonical_skill="$(jq -r '.skill_name' <<<"$SKILL_RECORD")"
 manifest_path="$(jq -r '.manifest_path' <<<"$SKILL_RECORD")"
-SDK_CLI="$ROOT_DIR/target/$PROFILE/rustclaw-skill"
+SDK_CLI="$ROOT_DIR/target/$PROFILE/skillctl"
 PACKAGE_ROOT="$ROOT_DIR/data/skill-packages"
 
 if [[ ! -x "$RUNNER" ]]; then
@@ -142,7 +156,7 @@ fi
 if [[ "$AUTO_BUILD" == "1" ]]; then
   if [[ ! -x "$SDK_CLI" ]]; then
     configure_cargo_build_environment
-    (cd "$ROOT_DIR" && cargo build -p rustclaw-skill-sdk --release)
+    (cd "$ROOT_DIR" && cargo build -p agent-skill-sdk --release)
   fi
   install_args=(install-local "$manifest_path" "$ROOT_DIR" "$PACKAGE_ROOT")
   [[ "$ALLOW_NETWORK" == "1" ]] && install_args+=(--network)
@@ -153,11 +167,32 @@ elif [[ ! -f "$PACKAGE_ROOT/$canonical_skill/current.json" ]]; then
   exit 1
 fi
 
+pointer_path="$PACKAGE_ROOT/$canonical_skill/current.json"
+install_dir="$(jq -er '.install_dir | select(type == "string" and length > 0)' "$pointer_path")"
+pointer_receipt_digest="$(jq -er '.receipt_digest | select(type == "string" and length == 64)' "$pointer_path")"
+receipt_path="$PACKAGE_ROOT/$canonical_skill/versions/$install_dir/install-receipt.json"
+if [[ ! -f "$receipt_path" ]]; then
+  echo "installed skill receipt is missing: $receipt_path"
+  exit 1
+fi
+expected_skill_version="$(jq -er '.version | select(type == "string" and length > 0)' "$receipt_path")"
+expected_manifest_digest="$(jq -er '.manifest_digest | select(type == "string" and length == 64)' "$receipt_path")"
+expected_receipt_digest="$pointer_receipt_digest"
+jq -e --arg skill "$canonical_skill" --arg digest "$pointer_receipt_digest" \
+  '.skill_name == $skill and .schema_version >= 1 and $digest != ""' \
+  "$receipt_path" >/dev/null || {
+  echo "installed skill receipt does not match the selected skill: $canonical_skill"
+  exit 1
+}
+
 request_id="skill-call-${SKILL_NAME}-$(date +%s)-$RANDOM"
 req="$(
   jq -nc \
     --arg rid "$request_id" \
-    --arg skill "$SKILL_NAME" \
+    --arg skill "$canonical_skill" \
+    --arg version "$expected_skill_version" \
+    --arg manifest_digest "$expected_manifest_digest" \
+    --arg receipt_digest "$expected_receipt_digest" \
     --argjson args "$ARGS_JSON" \
     --argjson context "$CONTEXT_JSON" \
     --argjson uid "$USER_ID" \
@@ -167,14 +202,29 @@ req="$(
       user_id: $uid,
       chat_id: $cid,
       skill_name: $skill,
+      expected_skill_version: $version,
+      expected_manifest_digest: $manifest_digest,
+      expected_receipt_digest: $receipt_digest,
+      expected_registry_generation: 0,
+      expected_registry_generation_digest: null,
+      expected_base_registry_digest: null,
+      expected_overlay_generation_digest: null,
+      expected_policy_digest: null,
+      expected_admission_receipt_digest: null,
       args: $args,
       context: $context
     }'
 )"
 
+if [[ -n "$TIMEOUT_SECONDS" ]]; then
+  export SKILL_TIMEOUT_SECONDS="$TIMEOUT_SECONDS"
+else
+  unset SKILL_TIMEOUT_SECONDS
+fi
+
 resp="$(printf '%s\n' "$req" | \
   WORKSPACE_ROOT="$ROOT_DIR" \
-  RUSTCLAW_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
+  APP_SKILL_PACKAGES_ROOT="$PACKAGE_ROOT" \
   "$RUNNER")"
 
 if [[ "$RAW" == "1" ]]; then

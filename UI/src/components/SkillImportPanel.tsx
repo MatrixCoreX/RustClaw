@@ -47,7 +47,7 @@ export function SkillImportPanel({
           <div>
             <p className="text-[10px] uppercase tracking-[0.28em] text-sky-100/70">{t("第三方技能", "Third-party skills")}</p>
             <h3 className="mt-2 text-base font-semibold text-white">
-              {t("把别人做好的技能接入进来，扩展 RustClaw 的能力。", "Bring in ready-made skills to extend what RustClaw can do.")}
+              {t("把别人做好的技能接入进来，扩展 {product_name} 的能力。", "Bring in ready-made skills to extend what {product_name} can do.")}
             </h3>
             <p className="mt-2 text-sm text-white/65">
               {t(

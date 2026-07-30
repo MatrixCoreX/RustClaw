@@ -58,6 +58,7 @@ struct LlmConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     api_key: String,
@@ -1009,7 +1010,7 @@ fn upload_local_audio_to_oss_and_sign_url(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .unwrap_or("rustclaw/audio");
+        .unwrap_or("agent-media/audio");
     let ttl_seconds = cfg.oss_url_ttl_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
 
     let bytes = std::fs::read(local_path).map_err(|err| format!("read audio failed: {err}"))?;
@@ -1429,6 +1430,21 @@ fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
     }
 }
 
+fn inherit_provider_connection_from_llm(
+    target: &mut Option<VendorConfig>,
+    source: &Option<VendorConfig>,
+) {
+    let (Some(target), Some(source)) = (target.as_mut(), source.as_ref()) else {
+        return;
+    };
+    if target.base_url.trim().is_empty() && !source.base_url.trim().is_empty() {
+        target.base_url = source.base_url.clone();
+    }
+    if target.api_key.trim().is_empty() && !source.api_key.trim().is_empty() {
+        target.api_key = source.api_key.clone();
+    }
+}
+
 fn apply_option_string_env(target: &mut Option<String>, key: &str) {
     if let Some(value) = env_non_empty(key) {
         *target = Some(value);
@@ -1476,6 +1492,32 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(
         &mut cfg.audio_transcribe.providers.custom,
         "AUDIO_TRANSCRIBE_CUSTOM_API_KEY",
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.openai,
+        &cfg.llm.openai,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.google,
+        &cfg.llm.google,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.anthropic,
+        &cfg.llm.anthropic,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.audio_transcribe.providers.grok, &cfg.llm.grok);
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.deepseek,
+        &cfg.llm.deepseek,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.audio_transcribe.providers.qwen, &cfg.llm.qwen);
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.minimax,
+        &cfg.llm.minimax,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_transcribe.providers.custom,
+        &cfg.llm.custom,
     );
     apply_option_string_env(
         &mut cfg.audio_transcribe.oss_access_key_id,
@@ -1559,7 +1601,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_allows_external_paths() -> bool {
-    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+    std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn to_workspace_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {

@@ -90,7 +90,7 @@ fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
                 }],
                 planner_notes: String::new(),
                 plan_kind: crate::PlanKind::Single,
-                raw_plan_text: r#"{"steps":[{"type":"call_capability","capability":"filesystem.read_text_range","args":{"path":"/tmp/rustclaw/logs/base_skill_contracts","mode":"tail","n":2}}]}"#.to_string(),
+                raw_plan_text: r#"{"steps":[{"type":"call_capability","capability":"filesystem.read_text_range","args":{"path":"/tmp/agent-runtime/logs/base_skill_contracts","mode":"tail","n":2}}]}"#.to_string(),
             }),
             ..Default::default()
         });
@@ -102,7 +102,7 @@ fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "fs_basic",
-        r#"{"extra":{"action":"inventory_dir","path":"/tmp/rustclaw/logs/base_skill_contracts","resolved_path":"/tmp/rustclaw/logs/base_skill_contracts","names_by_kind":{"dirs":[],"files":["alpha.log","beta.log","gamma.log","omega.log"],"other":[]},"counts":{"dirs":0,"files":4,"hidden":0,"total":4},"sort_by":"name"}}"#,
+        r#"{"extra":{"action":"inventory_dir","path":"/tmp/agent-runtime/logs/base_skill_contracts","resolved_path":"/tmp/agent-runtime/logs/base_skill_contracts","names_by_kind":{"dirs":[],"files":["alpha.log","beta.log","gamma.log","omega.log"],"other":[]},"counts":{"dirs":0,"files":4,"hidden":0,"total":4},"sort_by":"name"}}"#,
     ));
     let mut finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
         stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
@@ -155,7 +155,7 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","mode":"head","requested_n":10,"start_line":1,"end_line":9,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|\n5|- `configs/app_config.toml`: sample runtime config\n6|- `docs/`: sample docs and notes\n7|- `logs/`: sample log files\n8|- `data/test_contract.sqlite`: sample SQLite database\n9|- `tmp/test_bundle.zip`: sample archive","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":10,"start_line":1,"end_line":9,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for Agent Runtime NL regression tests.\n4|\n5|- `configs/app_config.toml`: sample runtime config\n6|- `docs/`: sample docs and notes\n7|- `logs/`: sample log files\n8|- `data/test_contract.sqlite`: sample SQLite database\n9|- `tmp/test_bundle.zip`: sample archive","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
     ));
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
@@ -183,7 +183,7 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
         &mut finalizer_summary,
     ));
 
-    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests.\n\n- `configs/app_config.toml`: sample runtime config\n- `docs/`: sample docs and notes\n- `logs/`: sample log files\n- `data/test_contract.sqlite`: sample SQLite database\n- `tmp/test_bundle.zip`: sample archive";
+    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for Agent Runtime NL regression tests.\n\n- `configs/app_config.toml`: sample runtime config\n- `docs/`: sample docs and notes\n- `logs/`: sample log files\n- `data/test_contract.sqlite`: sample SQLite database\n- `tmp/test_bundle.zip`: sample archive";
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some(expected)
@@ -215,7 +215,7 @@ fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for Agent Runtime NL regression tests.\n4|","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
     ));
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
@@ -243,7 +243,7 @@ fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
         &mut finalizer_summary,
     ));
 
-    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests.";
+    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for Agent Runtime NL regression tests.";
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some(expected)
@@ -601,7 +601,8 @@ fn generic_content_tail_read_keeps_machine_projection_for_model_synthesis() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let machine_projection = "path=/home/guagua/rustclaw/logs/clawd.log\ncontent_excerpt:\n1|old";
+    let machine_projection =
+        "path=/home/guagua/agent-runtime/logs/clawd.log\ncontent_excerpt:\n1|old";
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state
         .delivery_messages
@@ -881,7 +882,7 @@ fn generic_tail_read_does_not_reconstruct_model_summary_from_step_history() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":20,"path":"/home/guagua/rustclaw/logs/clawd.run.log","excerpt":"1|INFO task_call verifier_result\n2|INFO task_call task_journal_summary"}"#,
+        r#"{"action":"read_range","mode":"tail","requested_n":20,"path":"/home/guagua/agent-runtime/logs/clawd.run.log","excerpt":"1|INFO task_call verifier_result\n2|INFO task_call task_journal_summary"}"#,
     ));
     loop_state
         .executed_step_results

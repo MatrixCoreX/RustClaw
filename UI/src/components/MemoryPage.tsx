@@ -70,7 +70,7 @@ export function MemoryPage({
               {t("记忆管理", "Memory Control")}
             </p>
             <h3 className="mt-2 text-base font-semibold text-white">
-              {t("查看和管理 RustClaw 会用于回复的记忆。", "Review and manage the memory RustClaw can use in replies.")}
+              {t("查看和管理 {product_name} 会用于回复的记忆。", "Review and manage the memory {product_name} can use in replies.")}
             </h3>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
               {t(
@@ -165,7 +165,7 @@ export function MemoryPage({
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
             <h4 className="text-sm font-semibold text-white">{t("长期记忆开关", "Long-Term Memory")}</h4>
             <p className="mt-2 text-xs leading-5 text-white/55">
-              {t("关闭后不再写入和使用长期记忆；保存配置后需要重启 RustClaw 才会生效。", "When off, long-term memory is no longer written or used. Restart RustClaw after saving for the change to take effect.")}
+              {t("关闭后不再写入和使用长期记忆；保存配置后需要重启 {product_name} 才会生效。", "When off, long-term memory is no longer written or used. Restart {product_name} after saving for the change to take effect.")}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <span
@@ -303,7 +303,7 @@ export function MemoryPage({
           <div>
             <h4 className="text-sm font-semibold text-white">{t("近期记录", "Recent Records")}</h4>
             <p className="mt-1 text-xs leading-5 text-white/55">
-              {t("近期记录帮助 RustClaw 理解当前对话上下文。带安全标记的内容默认隐藏。", "Recent records help RustClaw understand the current chat context. Safety-flagged content is hidden by default.")}
+              {t("近期记录帮助 {product_name} 理解当前对话上下文。带安全标记的内容默认隐藏。", "Recent records help {product_name} understand the current chat context. Safety-flagged content is hidden by default.")}
             </p>
           </div>
           <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">

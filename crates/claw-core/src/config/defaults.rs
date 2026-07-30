@@ -6,107 +6,12 @@ pub(super) fn default_skill_max_concurrency() -> usize {
     1
 }
 
-/// No-registry compatibility fallback for operator-facing fixed-on skills.
-pub fn base_skill_names() -> &'static [&'static str] {
-    core_skills_always_enabled()
-}
-
-/// No-registry compatibility fallback. New policy belongs in
-/// `skills_registry.toml` through `fixed_on = true`.
-pub fn core_skills_always_enabled() -> &'static [&'static str] {
-    &[
-        "run_cmd",
-        "code_index",
-        "fs_basic",
-        "config_basic",
-        "config_edit",
-        "read_file",
-        "write_file",
-        "list_dir",
-        "make_dir",
-        "remove_file",
-        "schedule",
-        "subagent",
-        "extension_manager",
-        "kb",
-        "rss_fetch",
-        "system_basic",
-        "process_basic",
-        "config_guard",
-        "fs_search",
-        "git_basic",
-        "service_control",
-        "archive_basic",
-    ]
-}
-
-/// Bundled skills distributed through Skill Store. They remain discoverable in
-/// the registry but are not enabled or compiled by the default installation.
-pub fn skill_store_optional_skill_names() -> &'static [&'static str] {
-    &[
-        "crypto",
-        "invest_copy",
-        "map_merchant",
-        "photo_organize",
-        "stock",
-        "weather",
-        "x",
-    ]
-}
-
 pub(super) fn default_uninstalled_skills() -> Vec<String> {
-    skill_store_optional_skill_names()
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect()
+    Vec::new()
 }
 
 pub(super) fn default_skills_list() -> Vec<String> {
-    // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
-    vec![
-        "run_cmd".to_string(),
-        "code_index".to_string(),
-        "fs_basic".to_string(),
-        "config_basic".to_string(),
-        "config_edit".to_string(),
-        "read_file".to_string(),
-        "write_file".to_string(),
-        "list_dir".to_string(),
-        "make_dir".to_string(),
-        "remove_file".to_string(),
-        "schedule".to_string(),
-        "subagent".to_string(),
-        "system_basic".to_string(),
-        "http_basic".to_string(),
-        "git_basic".to_string(),
-        "install_module".to_string(),
-        "process_basic".to_string(),
-        "package_manager".to_string(),
-        "archive_basic".to_string(),
-        "db_basic".to_string(),
-        "docker_basic".to_string(),
-        "fs_search".to_string(),
-        "rss_fetch".to_string(),
-        "image_vision".to_string(),
-        "image_generate".to_string(),
-        "image_edit".to_string(),
-        "audio_transcribe".to_string(),
-        "audio_synthesize".to_string(),
-        "video_generate".to_string(),
-        "music_generate".to_string(),
-        "health_check".to_string(),
-        "log_analyze".to_string(),
-        "service_control".to_string(),
-        "task_control".to_string(),
-        "config_guard".to_string(),
-        "doc_parse".to_string(),
-        "office_workspace".to_string(),
-        "transform".to_string(),
-        "web_search_extract".to_string(),
-        "kb".to_string(),
-        "browser_web".to_string(),
-        "extension_manager".to_string(),
-    ]
+    Vec::new()
 }
 
 pub(super) fn default_global_rpm() -> usize {
@@ -373,6 +278,19 @@ pub(super) fn default_worker_running_recovery_check_interval_seconds() -> u64 {
 
 pub(super) fn default_tools_profile() -> String {
     "coding".to_string()
+}
+
+pub(super) fn default_tool_access_profiles() -> std::collections::HashMap<String, Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct ProfileFile {
+        profiles: std::collections::HashMap<String, Vec<String>>,
+    }
+
+    toml::from_str::<ProfileFile>(include_str!(
+        "../../../../configs/tool_access_profiles.toml"
+    ))
+    .expect("configs/tool_access_profiles.toml must be valid")
+    .profiles
 }
 
 pub(super) fn default_telegram_quick_result_wait_seconds() -> u64 {

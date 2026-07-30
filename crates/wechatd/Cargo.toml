@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "RustClaw WeChat channel daemon (MVP skeleton)"
+description = "WeChat channel daemon for the agent runtime (MVP skeleton)"
 
 [dependencies]
 anyhow.workspace = true

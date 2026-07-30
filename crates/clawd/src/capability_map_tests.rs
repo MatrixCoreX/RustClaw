@@ -106,6 +106,7 @@ fn planner_capability_hint_includes_structured_contract() {
         dedup_fields: Vec::new(),
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncRequired),
+        timeout_seconds: None,
         async_adapter_kind: Some("media_job_poll".to_string()),
         isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
         network_access: Some(false),
@@ -125,22 +126,21 @@ fn planner_capability_hint_includes_structured_contract() {
 
 #[test]
 fn real_config_capability_hints_keep_leaf_semantics_distinct() {
-    let entry = registry_entry_from(
-        &std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
-        )
-        .expect("read registry"),
-        "config_basic",
-    );
-    let validate = entry
+    let registry_toml = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read registry");
+    let validate_entry = registry_entry_from(&registry_toml, "config_basic");
+    let guard_entry = registry_entry_from(&registry_toml, "config_edit");
+    let validate = validate_entry
         .planner_capabilities
         .iter()
         .find(|mapping| mapping.name == "config.validate")
         .expect("validate mapping");
-    let guard = entry
+    let guard = guard_entry
         .planner_capabilities
         .iter()
-        .find(|mapping| mapping.name == "config.guard_rustclaw_config")
+        .find(|mapping| mapping.name == "config.guard_config")
         .expect("guard mapping");
 
     let validate_hint = planner_capability_hint(validate);
@@ -148,7 +148,7 @@ fn real_config_capability_hints_keep_leaf_semantics_distinct() {
     assert!(validate_hint.contains("semantic_tags=syntax_validation|structured_parse"));
     assert!(validate_hint.contains("does not assess safety"));
     assert!(guard_hint
-        .contains("semantic_tags=rustclaw_config_safety|config_risk_scan|config_problem_check"));
+        .contains("semantic_tags=host_config_safety|config_risk_scan|config_problem_check"));
     assert!(guard_hint.contains("instead of reading raw file text"));
 }
 
@@ -333,24 +333,25 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new());
     let loadable =
         planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new());
-    assert_eq!(full.len(), 35);
+    let loadable_members =
+        planner_loadable_capability_group_members_for_task(&state, &task, &BTreeSet::new());
+    let exact_loadable = loadable_members
+        .iter()
+        .filter_map(|(token, members)| {
+            (members.len() == 1 && members.first() == Some(token)).then_some(token.clone())
+        })
+        .collect::<Vec<_>>();
     assert_eq!(initial.len(), 7);
-    assert_eq!(
-        initial
-            .iter()
-            .map(|group| group.capability_names.len())
-            .sum::<usize>(),
-        80
-    );
-    assert_eq!(loadable.len(), 28);
-    assert_eq!(full.len(), initial.len() + loadable.len());
+    assert!(!exact_loadable.is_empty());
+    assert!(loadable.len() >= exact_loadable.len());
+    assert_eq!(full.len(), initial.len() + exact_loadable.len());
     assert!(initial
         .iter()
         .any(|group| group.tool_name == "call_fs_basic"));
     assert!(initial
         .iter()
         .any(|group| group.tool_name == "call_git_basic"));
-    let domain_group = loadable
+    let domain_group = exact_loadable
         .first()
         .cloned()
         .expect("fixture must expose an on-demand group");

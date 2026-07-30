@@ -67,6 +67,7 @@ struct LlmConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     api_key: String,
@@ -1258,6 +1259,21 @@ fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
     }
 }
 
+fn inherit_provider_connection_from_llm(
+    target: &mut Option<VendorConfig>,
+    source: &Option<VendorConfig>,
+) {
+    let (Some(target), Some(source)) = (target.as_mut(), source.as_ref()) else {
+        return;
+    };
+    if target.base_url.trim().is_empty() && !source.base_url.trim().is_empty() {
+        target.base_url = source.base_url.clone();
+    }
+    if target.api_key.trim().is_empty() && !source.api_key.trim().is_empty() {
+        target.api_key = source.api_key.clone();
+    }
+}
+
 fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
@@ -1305,6 +1321,33 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
         &mut cfg.audio_synthesize.providers.custom,
         "AUDIO_SYNTHESIZE_CUSTOM_API_KEY",
     );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.openai,
+        &cfg.llm.openai,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.google,
+        &cfg.llm.google,
+    );
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.anthropic,
+        &cfg.llm.anthropic,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.audio_synthesize.providers.grok, &cfg.llm.grok);
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.deepseek,
+        &cfg.llm.deepseek,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.audio_synthesize.providers.qwen, &cfg.llm.qwen);
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.minimax,
+        &cfg.llm.minimax,
+    );
+    inherit_provider_connection_from_llm(&mut cfg.audio_synthesize.providers.mimo, &cfg.llm.mimo);
+    inherit_provider_connection_from_llm(
+        &mut cfg.audio_synthesize.providers.custom,
+        &cfg.llm.custom,
+    );
 }
 
 fn first_model_candidate<'a>(
@@ -1348,7 +1391,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn runtime_allows_external_paths() -> bool {
-    std::env::var("RUSTCLAW_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
+    std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
 fn normalize_format(raw: &str) -> String {

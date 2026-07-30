@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rustclaw_fs_discovery::{
+use fs_discovery::{
     discover, Completeness, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector,
     MatchMode, TargetKind,
 };

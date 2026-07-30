@@ -2,9 +2,9 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use rustclaw_skill_sdk::{ArtifactSpill, BoundedResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use skill_sdk::{ArtifactSpill, BoundedResult};
 
 const SKILL_NAME: &str = "package_manager";
 
@@ -342,6 +342,12 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
+fn workspace_state_root() -> PathBuf {
+    let state_dir =
+        std::env::var("APP_WORKSPACE_STATE_DIR").unwrap_or_else(|_| ".agent-runtime".to_string());
+    workspace_root().join(state_dir)
+}
+
 fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
     let raw = Path::new(input);
     let mut normalized = PathBuf::new();
@@ -515,7 +521,7 @@ fn manage_packages(
 
     let full_text = format_command_output(&output.stdout, &output.stderr);
     let spill = ArtifactSpill::new(
-        workspace_root().join(".rustclaw/artifacts/skill-output"),
+        workspace_state_root().join("artifacts/skill-output"),
         SKILL_NAME,
     )
     .map_err(|error| error.to_string())?;

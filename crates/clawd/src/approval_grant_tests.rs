@@ -16,6 +16,7 @@ fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(HashSet::new()),
             }))),
@@ -59,6 +60,7 @@ fn state_with_workspace_registry() -> AppState {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     });

@@ -1,5 +1,6 @@
 use claw_core::types::ExchangeCredentialStatus;
 use rusqlite::{params, OptionalExtension};
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::{now_ts, AppState};
@@ -26,7 +27,7 @@ pub(crate) fn status_for_user_key(
     let db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     let mut out = Vec::new();
@@ -86,7 +87,7 @@ pub(crate) fn upsert_for_user_key(
     let db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     db.execute(
@@ -109,6 +110,7 @@ pub(crate) fn upsert_for_user_key(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn credential_context_for_user_key(
     state: &AppState,
     user_key: &str,
@@ -120,7 +122,7 @@ pub(crate) fn credential_context_for_user_key(
     let db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     let mut stmt = db.prepare(
@@ -159,7 +161,7 @@ pub(crate) fn rebind_user_key(
     let db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     db.execute(
@@ -176,7 +178,7 @@ pub(crate) fn take_for_user_key(
     let mut db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     let rows = select_credentials(&db, Some(user_key))?;
@@ -193,7 +195,7 @@ pub(crate) fn take_all(state: &AppState) -> anyhow::Result<Vec<StoredExchangeCre
     let mut db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     let rows = select_credentials(&db, None)?;
@@ -210,7 +212,7 @@ pub(crate) fn restore(state: &AppState, rows: &[StoredExchangeCredential]) -> an
     let mut db = state
         .core
         .skill_storage
-        .crypto_pool()
+        .pool_for("crypto")?
         .get()
         .map_err(|error| anyhow::anyhow!("crypto storage pool: {error}"))?;
     let tx = db.transaction()?;

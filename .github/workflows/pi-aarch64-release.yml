@@ -39,6 +39,7 @@ jobs:
           INPUT_PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
           set -euo pipefail
+          source scripts/product_identity.sh
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_TAG}" ]]; then
             release_tag="${INPUT_TAG}"
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -58,10 +59,10 @@ jobs:
 
           case "${release_tag}" in
             pi-aarch64-*)
-              package_name="RustClaw-${release_tag}.tar.gz"
+              package_name="${APP_RELEASE_ARTIFACT_ID}-${release_tag}.tar.gz"
               ;;
             *)
-              package_name="RustClaw-pi-aarch64-${release_tag}.tar.gz"
+              package_name="${APP_RELEASE_ARTIFACT_ID}-pi-aarch64-${release_tag}.tar.gz"
               ;;
           esac
           {
@@ -143,11 +144,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist-release
-          RUSTCLAW_RELEASE_BIN_DIR="$PWD/target/${RUST_TARGET}/release" \
-            RUSTCLAW_PACKAGE_TARGET="${RUST_TARGET}" \
-            RUSTCLAW_BUNDLE_DIR="$PWD/dist-release" \
-            RUSTCLAW_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
-            RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY=1 \
+          APP_RELEASE_BIN_DIR="$PWD/target/${RUST_TARGET}/release" \
+            APP_PACKAGE_TARGET="${RUST_TARGET}" \
+            APP_BUNDLE_DIR="$PWD/dist-release" \
+            APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
+            APP_SKIP_LOCAL_PACKAGE_COPY=1 \
             ./package-release.sh
           (cd dist-release && sha256sum "${{ steps.meta.outputs.package_name }}" > "${{ steps.meta.outputs.package_name }}.sha256")
 
@@ -155,12 +156,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          target/release/rustclaw-skill receipt-verify \
+          target/release/skillctl receipt-verify \
             "target/skill-packages/${RUST_TARGET}" \
             health_check
           while IFS= read -r skill_name; do
             [[ -n "${skill_name}" ]] || continue
-            target/release/rustclaw-skill receipt-verify \
+            target/release/skillctl receipt-verify \
               "target/prebuilt-skill-packages/${RUST_TARGET}" \
               "${skill_name}" >/dev/null
           done < <(
@@ -171,7 +172,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rustclaw-pi-aarch64
+          name: agent-runtime-pi-aarch64
           path: |
             dist-release/${{ steps.meta.outputs.package_name }}
             dist-release/${{ steps.meta.outputs.package_name }}.sha256
@@ -181,13 +182,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/product_identity.sh
           {
-            printf '%s\n' "RustClaw Raspberry Pi aarch64 runtime package."
+          printf '%s\n' "Agent runtime Raspberry Pi aarch64 package."
             printf '\n'
             printf 'Target: %s\n' "${RUST_TARGET}"
             printf 'Commit: %s\n' "${GITHUB_SHA}"
             printf '\n'
-            printf '%s\n' "This package contains prebuilt Rust binaries, platform-matched Skill Store packages, and UI/dist assets. On Pi, keep existing runtime configs/data, replace the packaged runtime files, then restart RustClaw."
+            printf '%s\n' "This package contains prebuilt Rust binaries, platform-matched Skill Store packages, and UI/dist assets. On Pi, keep existing runtime configs/data, replace the packaged runtime files, then restart ${APP_DISPLAY_NAME}."
           } > release-notes.md
 
       - name: Publish GitHub Release
@@ -213,7 +215,7 @@ jobs:
             gh release create "${RELEASE_TAG}" \
               "dist-release/${PACKAGE_NAME}" \
               "dist-release/${PACKAGE_NAME}.sha256" \
-              --title "RustClaw Pi aarch64 ${RELEASE_TAG}" \
+            --title "Agent runtime Pi aarch64 ${RELEASE_TAG}" \
               --notes-file release-notes.md \
               "${release_flags[@]}"
           fi

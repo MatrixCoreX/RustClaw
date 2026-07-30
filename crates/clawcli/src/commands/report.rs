@@ -34,7 +34,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     let context_budget = context_budget_report_json(&task.raw_data);
     let context_compaction = context_compaction_report_json(&task.raw_data);
     json!({
-        "report_kind": "rustclaw_task_report",
+        "report_kind": "agent_task_report",
         "task_id": task.task_id,
         "goal_id": task_goal_id(&task.raw_data),
         "session_id": session.get("session_id").cloned().unwrap_or(Value::Null),
@@ -311,7 +311,7 @@ fn context_compaction_report_json(data: &Value) -> Value {
 pub(super) fn coding_review_json(task: &task::TaskStatusView, include_events: bool) -> Value {
     let report = task_report_json(task, include_events);
     json!({
-        "report_kind": "rustclaw_coding_review",
+        "report_kind": "agent_coding_review",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),
@@ -497,7 +497,7 @@ pub(super) fn coding_verification_artifact_json(task: &task::TaskStatusView) -> 
     let report = task_report_json(task, false);
     json!({
         "schema_version": 1,
-        "artifact_kind": "rustclaw_exec_verification",
+        "artifact_kind": "agent_exec_verification",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),
@@ -532,7 +532,7 @@ pub(super) fn coding_diff_summary_artifact_json(task: &task::TaskStatusView) -> 
     let report = task_report_json(task, false);
     json!({
         "schema_version": 1,
-        "artifact_kind": "rustclaw_exec_diff_summary",
+        "artifact_kind": "agent_exec_diff_summary",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),
@@ -551,7 +551,7 @@ pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
         collect_subagent_event_fields(event, &mut signals);
     }
     json!({
-        "report_kind": "rustclaw_subagent_report",
+        "report_kind": "agent_subagent_report",
         "task_id": task.task_id,
         "status": task.status,
         "execution_state": task.execution_state(),

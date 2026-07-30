@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keep only the newest published GitHub Release for one RustClaw platform.
+# Keep only the newest published GitHub Release for one agent-runtime platform.
 set -euo pipefail
 
 usage() {

@@ -535,8 +535,24 @@ async fn get_skills_config(
         }
     };
     let baseline = collect_skills_baseline(&parsed, &state);
-    let switches = collect_skill_switches(&parsed, &state);
-    let uninstalled = collect_uninstalled_skills(&parsed, &state);
+    let mut switches = collect_skill_switches(&parsed, &state);
+    let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
+    let admission_snapshot = match admission_service(&state)
+        .and_then(|service| service.snapshot().map_err(|error| error.to_string()))
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read skill admission state failed: {error}")),
+                }),
+            );
+        }
+    };
+    project_admission_config_state(&admission_snapshot, &mut switches, &mut uninstalled);
     let mut baseline_visible = baseline
         .iter()
         .filter(|s| !hide_skill_in_ui(&state, s))
@@ -986,8 +1002,19 @@ async fn update_skills_config(
     headers: HeaderMap,
     Json(req): Json<UpdateSkillsConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("skill_admission_admin_required".to_string()),
+            }),
+        );
     }
     let (raw, parsed) = match read_skill_config_file(&state) {
         Ok(v) => v,
@@ -1002,8 +1029,34 @@ async fn update_skills_config(
             );
         }
     };
-    let baseline = collect_skills_baseline(&parsed, &state);
-    let uninstalled = collect_uninstalled_skills(&parsed, &state);
+    let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
+    let existing_switches = collect_skill_switches(&parsed, &state);
+    let service = match admission_service(&state) {
+        Ok(service) => service,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("initialize skill admission failed: {error}")),
+                }),
+            );
+        }
+    };
+    let original_admission = match service.snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read skill admission state failed: {error}")),
+                }),
+            );
+        }
+    };
     let fixed_on_skills = state
         .fixed_on_skill_names()
         .into_iter()
@@ -1011,7 +1064,8 @@ async fn update_skills_config(
     let tool_skill_names = registry_tool_capability_names(&state)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let mut switches = BTreeMap::new();
+    let mut persisted_switches = BTreeMap::new();
+    let mut admission_updates = Vec::new();
     for (k, v) in req.skill_switches {
         let skill = state.resolve_canonical_skill_name(k.trim());
         if skill.is_empty() || hide_skill_in_ui(&state, &skill) {
@@ -1019,35 +1073,95 @@ async fn update_skills_config(
         }
         let is_core = fixed_on_skills.contains(&skill);
         let is_tool = tool_skill_names.contains(&skill);
-        switches.insert(skill, if is_core || is_tool { true } else { v });
+        let requested = if is_core || is_tool { true } else { v };
+        if let Some(current) = original_admission.state(&skill) {
+            let target = match (current, requested) {
+                (skill_sdk::AdmissionState::Enabled, false) => {
+                    Some(skill_sdk::AdmissionState::InstalledDisabled)
+                }
+                (skill_sdk::AdmissionState::InstalledDisabled, true) => {
+                    Some(skill_sdk::AdmissionState::Enabled)
+                }
+                _ => None,
+            };
+            if let Some(target) = target {
+                admission_updates.push((skill.clone(), target));
+            }
+            if let Some(existing) = existing_switches.get(&skill) {
+                persisted_switches.insert(skill, *existing);
+            }
+        } else {
+            persisted_switches.insert(skill, requested);
+        }
     }
-    let rendered = render_switches_inline_table(&switches);
+    for (skill, target) in admission_updates {
+        if let Err(error) = service.set_state(&skill, target, None) {
+            let rollback = service.rollback_to_generation(original_admission.generation);
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!(
+                        "update skill admission state failed: {error}; rollback={rollback:?}"
+                    )),
+                }),
+            );
+        }
+    }
+    let rendered = render_switches_inline_table(&persisted_switches);
     let updated = upsert_skill_switches_line(&raw, &rendered);
-    if let Err(err) = write_runtime_config_file(&state, &updated) {
+    if updated != raw {
+        if let Err(err) = write_runtime_config_file(&state, &updated) {
+            let rollback = service.rollback_to_generation(original_admission.generation);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!(
+                        "write skills config failed: {err}; admission_rollback={rollback:?}"
+                    )),
+                }),
+            );
+        }
+    }
+    if let Err(error) = reload_skill_views(&state) {
+        let config_rollback = (updated != raw).then(|| write_runtime_config_file(&state, &raw));
+        let admission_rollback = service.rollback_to_generation(original_admission.generation);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("write skills config failed: {err}")),
+                error: Some(format!(
+                    "reload skill state failed: {error}; config_rollback={config_rollback:?}; admission_rollback={admission_rollback:?}"
+                )),
             }),
         );
     }
-    let effective = compute_effective_enabled(&baseline, &switches, &uninstalled, &state);
-    let mut effective_visible = effective
-        .iter()
-        .filter(|s| !hide_skill_in_ui(&state, s))
-        .cloned()
-        .collect::<Vec<_>>();
-    effective_visible.sort_unstable();
-    let mut runtime_visible = state
+    let current_admission = match service.snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read updated skill admission state failed: {error}")),
+                }),
+            );
+        }
+    };
+    let mut switches = persisted_switches;
+    project_admission_config_state(&current_admission, &mut switches, &mut uninstalled);
+    let mut effective = state
         .get_skills_list()
         .iter()
         .filter(|s| !hide_skill_in_ui(&state, s))
         .cloned()
         .collect::<Vec<_>>();
-    runtime_visible.sort_unstable();
-    let restart_required = skills_restart_required(&runtime_visible, &effective_visible);
+    effective.sort_unstable();
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1057,7 +1171,9 @@ async fn update_skills_config(
                 "skill_switches": switches,
                 "uninstalled_skill_names": uninstalled,
                 "effective_enabled_skills_preview": effective,
-                "restart_required": restart_required
+                "restart_required": false,
+                "registry_generation": current_admission.generation,
+                "registry_generation_digest": current_admission.generation_digest,
             })),
             error: None,
         }),
@@ -1069,8 +1185,19 @@ async fn uninstall_external_skill(
     headers: HeaderMap,
     Json(req): Json<UninstallExternalSkillRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("skill_admission_admin_required".to_string()),
+            }),
+        );
     }
     let skill_name = state.resolve_canonical_skill_name(req.skill_name.trim());
     if skill_name.is_empty() {
@@ -1115,69 +1242,77 @@ async fn uninstall_external_skill(
         );
     }
 
-    let registry_raw = match read_skills_registry_file(&state) {
-        Ok(raw) => raw,
-        Err(err) => {
+    let service = match admission_service(&state) {
+        Ok(service) => service,
+        Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("read skills registry failed: {err}")),
+                    error: Some(format!("initialize skill admission failed: {error}")),
                 }),
             );
         }
     };
-    let (updated_registry, removed_from_registry) =
-        remove_skill_registry_block(&registry_raw, &skill_name);
-    if !removed_from_registry {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("skill registry block not found for {skill_name}")),
-            }),
-        );
-    }
-    if let Err(err) = write_skills_registry_file(&state, &updated_registry) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("write skills registry failed: {err}")),
-            }),
-        );
-    }
+    let tombstone = match service.set_state(
+        &skill_name,
+        skill_sdk::AdmissionState::Tombstoned,
+        None,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("tombstone external skill failed: {error}")),
+                }),
+            );
+        }
+    };
+    let reload = match reload_skill_views(&state) {
+        Ok(result) => result,
+        Err(error) => {
+            let rollback = service.rollback_generation(tombstone.generation);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!(
+                        "reload tombstoned skill failed: {error}; rollback={rollback:?}"
+                    )),
+                }),
+            );
+        }
+    };
 
-    let mut removed_bundle = false;
-    if let Some(manifest_rel) = entry.package_manifest.as_deref() {
-        let manifest_path = Path::new(manifest_rel);
-        let bundle_path = manifest_path
-            .parent()
-            .map(|parent| state.skill_rt.workspace_root.join(parent));
-        let allowed_root = state.skill_rt.workspace_root.join("third_party");
-        if let Some(bundle_path) = bundle_path.filter(|path| {
-            !manifest_path.is_absolute() && path.starts_with(&allowed_root) && path.exists()
-        }) {
-            match std::fs::remove_dir_all(&bundle_path) {
-                Ok(_) => removed_bundle = true,
-                Err(err) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some(format!("remove imported bundle failed: {err}")),
-                        }),
-                    );
-                }
+    let bundle_path = state
+        .skill_rt
+        .workspace_root
+        .join("data/skills/imports")
+        .join(&skill_name);
+    let removed_bundle = if bundle_path.is_dir() {
+        match std::fs::remove_dir_all(&bundle_path) {
+            Ok(()) => true,
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("remove skill-owned source bundle failed: {error}")),
+                    }),
+                );
             }
         }
-    }
+    } else {
+        false
+    };
 
-    let removed_package = match rustclaw_skill_sdk::InstallReceiptStore::new(skill_package_root(&state))
+    let removed_package = match skill_sdk::InstallReceiptStore::new(skill_package_root(&state))
         .remove_installed_versions(&skill_name)
     {
         Ok(value) => value,
@@ -1193,72 +1328,6 @@ async fn uninstall_external_skill(
         }
     };
 
-    let mut removed_prompt = false;
-    let registry_prompt_rel_path = entry.prompt_file.trim();
-    if !registry_prompt_rel_path.is_empty() {
-        let prompt_body_path = if let Some(prompt_body_rel) =
-            prompt_layers::canonical_skill_prompt_body_rel_path(registry_prompt_rel_path)
-        {
-            state.skill_rt.workspace_root.join(prompt_body_rel)
-        } else if Path::new(registry_prompt_rel_path).is_absolute() {
-            PathBuf::from(registry_prompt_rel_path)
-        } else {
-            state.skill_rt.workspace_root.join(registry_prompt_rel_path)
-        };
-        match remove_managed_prompt_file(&prompt_body_path) {
-            Ok(value) => removed_prompt = value,
-            Err(err) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("remove prompt file failed: {err}")),
-                    }),
-                );
-            }
-        }
-    }
-
-    let (runtime_raw, _) = match read_skill_config_file(&state) {
-        Ok(v) => v,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skills config failed: {err}")),
-                }),
-            );
-        }
-    };
-    let updated_runtime = remove_runtime_skill_state(&runtime_raw, &state, &skill_name);
-    if let Err(err) = write_runtime_config_file(&state, &updated_runtime) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("write skills config failed: {err}")),
-            }),
-        );
-    }
-
-    let reload = match reload_skill_views(&state) {
-        Ok(result) => result,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("reload skill views failed: {err}")),
-                }),
-            );
-        }
-    };
-
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1267,7 +1336,10 @@ async fn uninstall_external_skill(
                 "skill_name": skill_name,
                 "removed_bundle": removed_bundle,
                 "removed_package": removed_package,
-                "removed_prompt": removed_prompt,
+                "removed_prompt": false,
+                "private_data_preserved": true,
+                "config_preserved": true,
+                "registry_generation": tombstone.generation,
                 "reload": reload,
             })),
             error: None,

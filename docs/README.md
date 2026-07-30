@@ -1,4 +1,4 @@
-# RustClaw Documentation / RustClaw 文档索引
+# Agent Runtime Documentation / Agent Runtime 文档索引
 
 The documents intentionally tracked in Git are maintained as English and
 Simplified Chinese pairs. Machine tokens, commands, paths, API routes and

@@ -56,7 +56,7 @@ flowchart TD
     L --> M[Journal projections<br/>context_budget + context_compaction + memory_trace]
 ```
 
-After a successful task result is persisted, RustClaw stores eligible short-term
+After a successful task result is persisted, Agent Runtime stores eligible short-term
 turn records and starts preference/fact extraction asynchronously. Durable
 preference and fact changes use a structured memory-intent schema. Users can
 inspect, expire, or delete the stored records.

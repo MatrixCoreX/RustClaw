@@ -19,7 +19,7 @@ struct TempRepo {
 impl TempRepo {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_parent_child_patch_{label}_{}_{}",
+            "agent_parent_child_patch_{label}_{}_{}",
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
@@ -688,8 +688,8 @@ fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
 fn init_git_repo(path: &Path) {
     for args in [
         ["init", "--quiet"].as_slice(),
-        ["config", "user.email", "rustclaw-test@example.invalid"].as_slice(),
-        ["config", "user.name", "RustClaw Test"].as_slice(),
+        ["config", "user.email", "agent-runtime-test@example.invalid"].as_slice(),
+        ["config", "user.name", "Agent Runtime Test"].as_slice(),
     ] {
         assert!(git_status(path, args).success());
     }

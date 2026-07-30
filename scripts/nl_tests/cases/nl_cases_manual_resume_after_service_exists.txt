@@ -4,7 +4,7 @@ act|act_show_package_json_name||读取 package.json 里的 name 字段，只输�
 act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值
 chat_act|chat_act_disk_usage_brief||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
 chat_act|chat_act_list_then_explain_docs||列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
-file|write_and_deliver_json|write_and_deliver,side_effect|生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+file|write_and_deliver_json|write_and_deliver,side_effect|生成一个 JSON 文件 document/manual_meta.json，内容包含 app=Agent Runtime 和 test=nl，然后把文件发给我
 chat_act|act_git_branch_scalar||看看当前 git 分支叫什么，只给我分支名
 chat_act|act_git_status_brief||看看这个仓库现在有没有未提交改动，用一句话告诉我
 chat_act|act_health_check_brief||帮我做一次基础健康检查，只列最重要的结论
@@ -16,7 +16,7 @@ chat_act|act_transform_json_table||把这个 JSON 数组按 score 从高到低�
 chat_act|act_package_manager_detect_cn||帮我看看这台机器识别到的包管理器是什么，简短告诉我
 chat_act|act_process_top_brief_cn||看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
 chat_act|act_db_schema_version_cn||查一下 data/db-basic-contract.sqlite 的 schema version 是多少，简短告诉我
-chat_act|act_http_local_health_cn||请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
+chat_act|act_http_local_health_cn||请求一下 __APP_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 chat_act|act_workspace_glance_cn||快速看一下当前工作区，简短告诉我这里大概是什么项目
 chat_act|act_release_note_brief||读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后用一句话说它更像提醒什么
 act|act_fixture_package_name_scalar||去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只输出值

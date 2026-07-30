@@ -14,7 +14,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 const INDEX_SCHEMA_VERSION: u32 = 1;
-const INDEX_RELATIVE_PATH: &str = ".rustclaw/index/repository-v1.json";
+const INDEX_RELATIVE_PATH: &str = ".agent-runtime/index/repository-v1.json";
 const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_MAX_FILES: usize = 20_000;
 const HARD_MAX_FILES: usize = 50_000;
@@ -375,7 +375,7 @@ fn excluded_directory(name: &str) -> bool {
     matches!(
         name,
         ".git"
-            | ".rustclaw"
+            | ".agent-runtime"
             | "target"
             | "node_modules"
             | "dist"
@@ -1066,7 +1066,7 @@ fn query_result(
         "page": page,
         "truncated": truncated,
         "provenance": {
-            "source": "rustclaw_repository_index",
+            "source": "agent_repository_index",
             "backend": "syn_ast_with_file_fallback",
             "index_ref": INDEX_RELATIVE_PATH,
             "generated_at": index.generated_at,
@@ -1129,7 +1129,7 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         })),
         "generated_at": index.generated_at,
         "refreshed_at": refresh.refreshed_at,
-        "index_source": "rustclaw_repository_index",
+        "index_source": "agent_repository_index",
         "index_backend": "syn_ast_with_file_fallback",
         "fallback_file_count": fallback_file_count,
         "parse_status_counts": parse_status_counts,

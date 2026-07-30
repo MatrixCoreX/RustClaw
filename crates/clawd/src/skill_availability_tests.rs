@@ -18,7 +18,7 @@ fn missing_required_bin_marks_skill_unavailable() {
 name = "needs_missing_bin"
 enabled = true
 supported_os = ["linux", "macos"]
-required_bins = ["definitely_missing_rustclaw_test_bin_20260511"]
+required_bins = ["definitely_missing_agent_test_bin_20260511"]
 "#,
         "needs_missing_bin",
     );
@@ -26,7 +26,7 @@ required_bins = ["definitely_missing_rustclaw_test_bin_20260511"]
     assert!(!availability.is_available());
     assert_eq!(
         availability.missing_required_bins,
-        vec!["definitely_missing_rustclaw_test_bin_20260511"]
+        vec!["definitely_missing_agent_test_bin_20260511"]
     );
 }
 

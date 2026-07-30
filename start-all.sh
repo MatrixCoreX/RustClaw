@@ -10,42 +10,25 @@ source "$SCRIPT_DIR/scripts/shell_compat.sh"
 configure_platform_command_path
 configure_python3_with_tomllib
 configure_cargo_build_environment
-print_rustclaw_version "$SCRIPT_DIR"
+print_app_version "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
 	. "$HOME/.cargo/env"
 fi
 
 # Enable colored log tags on interactive terminals unless overridden.
-if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-	export RUSTCLAW_LOG_COLOR=1
+if [[ -t 1 && -z "${APP_LOG_COLOR:-}" ]]; then
+	export APP_LOG_COLOR=1
 fi
 
-print_rustclaw_banner() {
-	cat <<'EOF'
-######################################################################################
-                    __!---===[[[  @@@@  ]]]===---!__
-           _!@#￥%……&*()_/      <<<<>>>>      \_!@#￥%……&*()_
-        _!@#￥%……&*()_/      <<<<  @@  >>>>      \_!@#￥%……&*()_
-      !@#￥%……&*()_+       <<<<  @@@@@@  >>>>       +_)(*&……%￥#@!
-      !@#￥%……&*()_+=======<<<<==@@@==@@@==>>>>=======+_)(*&……%￥#@!
-      !@#￥%……&*()_+       >>>>  @@@@@@  <<<<       +_)(*&……%￥#@!
-        !_)(*&……%￥#@!\      >>>>  @@  <<<<      /!@#￥%……&*()_
-           !@#￥%……&*()_\      >>>><<<<      /_)(*&……%￥#@!
-                     --===!!![[[  @@@@  ]]]!!!===--
-
-########   ##    ##   #######   ########      #######   ##         ######    ##      ##
-##    ##   ##    ##   ##           ##         ##        ##        ##    ##   ##  ##  ##
-########   ##    ##   #######      ##         ##        ##        ########   ##  ##  ##
-##   ##    ##    ##        ##      ##         ##        ##        ##    ##   ##  ##  ##
-##    ##    ######    #######      ##         #######   ########  ##    ##    ###  ###
-
-########################################################################################
-EOF
+print_app_banner() {
+	local banner="$APP_TERMINAL_BANNER"
+	banner="${banner//\{display_name\}/$APP_DISPLAY_NAME}"
+	printf '\n%s\n\n' "$banner"
 }
 
-if [[ -z "${RUSTCLAW_SKIP_BANNER:-}" ]]; then
-	print_rustclaw_banner
+if [[ -z "${APP_SKIP_BANNER:-}" ]]; then
+	print_app_banner
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -58,10 +41,10 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 #   telegram | whatsapp_web | both | whatsapp_cloud | all
 SELECTED_VENDOR_ARG="${1:-}"
 SELECTED_MODEL_ARG="${2:-}"
-PROFILE="${3:-${RUSTCLAW_START_PROFILE:-release}}"
-CHANNELS_ARG="${4:-${RUSTCLAW_START_CHANNELS:-}}"
-ENABLE_UI="${RUSTCLAW_ENABLE_UI:-0}"
-UI_FORCE_REBUILD="${RUSTCLAW_UI_FORCE_REBUILD:-0}"
+PROFILE="${3:-${APP_START_PROFILE:-release}}"
+CHANNELS_ARG="${4:-${APP_START_CHANNELS:-}}"
+ENABLE_UI="${APP_ENABLE_UI:-0}"
+UI_FORCE_REBUILD="${APP_UI_FORCE_REBUILD:-0}"
 case "$PROFILE" in
 release) ;;
 *)
@@ -69,7 +52,7 @@ release) ;;
 	exit 1
 	;;
 esac
-export RUSTCLAW_START_PROFILE="$PROFILE"
+export APP_START_PROFILE="$PROFILE"
 
 if [[ -n "$SELECTED_VENDOR_ARG" ]]; then
 	python3 - "$SCRIPT_DIR/configs/config.toml" "$SELECTED_VENDOR_ARG" "$SELECTED_MODEL_ARG" <<'PY'
@@ -123,7 +106,7 @@ PY
 fi
 
 # Batch start should be non-interactive.
-export RUSTCLAW_MODEL_SELECT=0
+export APP_MODEL_SELECT=0
 
 run_embedded_setup() {
 	local config_path="$SCRIPT_DIR/configs/config.toml"
@@ -202,7 +185,7 @@ PY
 		done <<<"$proactive_skill_specs"
 	fi
 
-	local receipt_cli="$SCRIPT_DIR/$target_dir/rustclaw-skill"
+	local receipt_cli="$SCRIPT_DIR/$target_dir/skillctl"
 	if [[ ! -x "$receipt_cli" ]]; then
 		echo "Skill receipt CLI missing: $receipt_cli"
 		exit 1
@@ -291,13 +274,13 @@ apply_channel_flags() {
 	local enable_wechat="$5"
 	local enable_feishu="$6"
 	local enable_lark="$7"
-	export RUSTCLAW_ENABLE_WEBD="$enable_webd"
-	export RUSTCLAW_ENABLE_TG="$enable_tg"
-	export RUSTCLAW_ENABLE_WA_WEB="$enable_wa_web"
-	export RUSTCLAW_ENABLE_WA_CLOUD="$enable_wa_cloud"
-	export RUSTCLAW_ENABLE_WECHAT="$enable_wechat"
-	export RUSTCLAW_ENABLE_FEISHU="$enable_feishu"
-	export RUSTCLAW_ENABLE_LARK="$enable_lark"
+	export APP_ENABLE_WEBD="$enable_webd"
+	export APP_ENABLE_TG="$enable_tg"
+	export APP_ENABLE_WA_WEB="$enable_wa_web"
+	export APP_ENABLE_WA_CLOUD="$enable_wa_cloud"
+	export APP_ENABLE_WECHAT="$enable_wechat"
+	export APP_ENABLE_FEISHU="$enable_feishu"
+	export APP_ENABLE_LARK="$enable_lark"
 
 	python3 - <<'PY'
 import os
@@ -338,13 +321,13 @@ def write_flag(path_str: str, updates):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
-enable_webd = os.environ.get("RUSTCLAW_ENABLE_WEBD", "0") == "1"
-enable_tg = os.environ.get("RUSTCLAW_ENABLE_TG", "0") == "1"
-enable_wa_web = os.environ.get("RUSTCLAW_ENABLE_WA_WEB", "0") == "1"
-enable_wa_cloud = os.environ.get("RUSTCLAW_ENABLE_WA_CLOUD", "0") == "1"
-enable_wechat = os.environ.get("RUSTCLAW_ENABLE_WECHAT", "0") == "1"
-enable_feishu = os.environ.get("RUSTCLAW_ENABLE_FEISHU", "0") == "1"
-enable_lark = os.environ.get("RUSTCLAW_ENABLE_LARK", "0") == "1"
+enable_webd = os.environ.get("APP_ENABLE_WEBD", "0") == "1"
+enable_tg = os.environ.get("APP_ENABLE_TG", "0") == "1"
+enable_wa_web = os.environ.get("APP_ENABLE_WA_WEB", "0") == "1"
+enable_wa_cloud = os.environ.get("APP_ENABLE_WA_CLOUD", "0") == "1"
+enable_wechat = os.environ.get("APP_ENABLE_WECHAT", "0") == "1"
+enable_feishu = os.environ.get("APP_ENABLE_FEISHU", "0") == "1"
+enable_lark = os.environ.get("APP_ENABLE_LARK", "0") == "1"
 
 write_flag("configs/channels/webd.toml", [("webd", "enabled", enable_webd)])
 write_flag("configs/channels/telegram.toml", [("telegram_bot", "enabled", enable_tg)])
@@ -589,12 +572,12 @@ choose_channel_mode
 echo "Step 2/5: Service selection skipped; startup follows enable flags." # zh: 第 2/5 步：跳过服务选择，按 enabled 配置自动启动。
 
 choose_ui_mode() {
-	if [[ "${RUSTCLAW_ENABLE_UI:-}" == "1" ]]; then
+	if [[ "${APP_ENABLE_UI:-}" == "1" ]]; then
 		ENABLE_UI=1
 		return 0
 	fi
 	ENABLE_UI=0
-	unset RUSTCLAW_UI_DIST || true
+	unset APP_UI_DIST || true
 	return 0
 }
 
@@ -677,8 +660,8 @@ build_ui_if_needed() {
 	fi
 	local reason
 	if ! reason="$(ui_assets_need_build)"; then
-		export RUSTCLAW_UI_DIST="$SCRIPT_DIR/UI/dist"
-		echo "UI assets are up-to-date: $RUSTCLAW_UI_DIST"
+		export APP_UI_DIST="$SCRIPT_DIR/UI/dist"
+		echo "UI assets are up-to-date: $APP_UI_DIST"
 		return 0
 	fi
 	echo "UI build required: ${reason:-unknown_reason}"
@@ -732,8 +715,8 @@ start_clawd() {
 		echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
 		return 0
 	fi
-	nohup "$CLAWD_BIN" >"$LOG_DIR/clawd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/clawd.log" "$CLAWD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/clawd.pid"
 	echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
 }
@@ -763,8 +746,8 @@ PY
 		echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
 		return 0
 	fi
-	nohup "$WEBD_BIN" >"$LOG_DIR/webd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/webd.log" "$WEBD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/webd.pid"
 	echo "Starting webd binary, PID=$pid, log: $LOG_DIR/webd.log" # zh: webd 二进制启动中，PID=$pid, 日志: $LOG_DIR/webd.log
 }
@@ -790,8 +773,8 @@ PY
 		echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
 		return 0
 	fi
-	nohup "$TELEGRAMD_BIN" >"$LOG_DIR/telegramd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/telegramd.log" "$TELEGRAMD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/telegramd.pid"
 	echo "Starting telegramd binary, PID=$pid, log: $LOG_DIR/telegramd.log" # zh: telegramd 二进制启动中，PID=$pid, 日志: $LOG_DIR/telegramd.log
 }
@@ -821,8 +804,12 @@ PY
 		echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
 		return 0
 	fi
-	nohup "$WHATSAPP_WEBD_BIN" >"$LOG_DIR/whatsapp_webd.log" 2>&1 &
-	local pid=$!
+	if ! bash "$SCRIPT_DIR/scripts/whatsapp_web_bridge_deps.sh" --ensure; then
+		echo "Failed to prepare WhatsApp Web bridge dependencies."
+		return 1
+	fi
+	launch_detached_process "$LOG_DIR/whatsapp_webd.log" "$WHATSAPP_WEBD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/whatsapp_webd.pid"
 	echo "Starting whatsapp_webd, PID=$pid, log: $LOG_DIR/whatsapp_webd.log" # zh: whatsapp_webd 启动中，PID=$pid, 日志: $LOG_DIR/whatsapp_webd.log
 }
@@ -852,8 +839,8 @@ PY
 		echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
 		return 0
 	fi
-	nohup "$WHATSAPPD_BIN" >"$LOG_DIR/whatsappd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/whatsappd.log" "$WHATSAPPD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/whatsappd.pid"
 	echo "Starting whatsappd binary, PID=$pid, log: $LOG_DIR/whatsappd.log" # zh: whatsappd 二进制启动中，PID=$pid, 日志: $LOG_DIR/whatsappd.log
 }
@@ -886,8 +873,8 @@ PY
 		return 0
 	fi
 	export FEISHU_CONFIG_PATH="${FEISHU_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/feishu.toml}"
-	nohup "$FEISHUD_BIN" >"$LOG_DIR/feishud.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/feishud.log" "$FEISHUD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/feishud.pid"
 	echo "Starting feishud binary, PID=$pid, log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动中，PID=$pid, 日志: $LOG_DIR/feishud.log
 }
@@ -920,8 +907,8 @@ PY
 		return 0
 	fi
 	export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
-	nohup "$WECHATD_BIN" >"$LOG_DIR/wechatd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/wechatd.log" "$WECHATD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/wechatd.pid"
 	echo "Starting wechatd binary, PID=$pid, log: $LOG_DIR/wechatd.log"
 }
@@ -954,8 +941,8 @@ PY
 		return 0
 	fi
 	export LARK_CONFIG_PATH="${LARK_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/lark.toml}"
-	nohup "$LARKD_BIN" >"$LOG_DIR/larkd.log" 2>&1 &
-	local pid=$!
+	launch_detached_process "$LOG_DIR/larkd.log" "$LARKD_BIN"
+	local pid="$DETACHED_PROCESS_PID"
 	echo "$pid" >"$PID_DIR/larkd.pid"
 	echo "Starting larkd binary, PID=$pid, log: $LOG_DIR/larkd.log"
 }

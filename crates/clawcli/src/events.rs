@@ -212,7 +212,7 @@ where
     );
     let response = client::make_stream_client_with_timeout(request_timeout)?
         .get(url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("accept", "text/event-stream")
         .header("last-event-id", cursor.to_string())
         .send()
@@ -239,7 +239,7 @@ pub(crate) fn read_task_event_snapshot(
     );
     let response = client::make_stream_client_with_timeout(None)?
         .get(url)
-        .header("x-rustclaw-key", key)
+        .header("x-agent-key", key)
         .header("accept", "text/event-stream")
         .header("last-event-id", cursor.to_string())
         .send()

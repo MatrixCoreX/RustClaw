@@ -18,11 +18,10 @@ pub(crate) use execution_isolation_patch::{
     ValidatedChildPatchArtifact,
 };
 
-const ISOLATION_ROOT_DIR: &str = ".rustclaw";
 const ISOLATION_DIR: &str = "isolation";
 const TEMP_DIR: &str = "temp";
 const WORKTREE_DIR: &str = "worktrees";
-const MARKER_FILE: &str = ".rustclaw-isolation.json";
+const MARKER_FILE: &str = ".agent-isolation.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ExecutionIsolationPlan {
@@ -263,7 +262,7 @@ pub(crate) fn isolation_profile_from_token(token: &str) -> Option<CapabilityIsol
 }
 
 fn isolation_base(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(ISOLATION_ROOT_DIR).join(ISOLATION_DIR)
+    claw_core::workspace_state::workspace_state_root(workspace_root).join(ISOLATION_DIR)
 }
 
 pub(super) fn isolation_artifact_dir(workspace_root: &Path) -> PathBuf {
@@ -304,7 +303,7 @@ fn ensure_safe_allocation_path(plan: &ExecutionIsolationPlan) -> Result<()> {
 
 fn write_isolation_marker(plan: &ExecutionIsolationPlan, created_at_unix: u64) -> Result<()> {
     let marker = json!({
-        "marker_kind": "rustclaw_execution_isolation",
+        "marker_kind": "agent_execution_isolation",
         "task_key": plan.task_key,
         "profile": plan.profile,
         "creation_kind": plan.creation_kind,
@@ -521,7 +520,7 @@ pub(super) fn remove_child_patch_artifact(plan: &ExecutionIsolationPlan) -> Resu
 fn read_isolation_marker(path: &Path) -> Option<Value> {
     let body = fs::read_to_string(path.join(MARKER_FILE)).ok()?;
     let marker: Value = serde_json::from_str(&body).ok()?;
-    (marker.get("marker_kind").and_then(Value::as_str) == Some("rustclaw_execution_isolation"))
+    (marker.get("marker_kind").and_then(Value::as_str) == Some("agent_execution_isolation"))
         .then_some(marker)
 }
 

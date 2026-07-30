@@ -17,7 +17,7 @@ fn pass_for_default_contract() {
 
 #[test]
 fn reject_for_empty_candidate() {
-    let v = verify_output_contract(&contract_existence("rustclaw.service"), "  ", "?");
+    let v = verify_output_contract(&contract_existence("agent-runtime.service"), "  ", "?");
     assert_eq!(v.owner_layer(), "output_contract_verifier");
     assert_eq!(v.reason_code(), Some("candidate_empty"));
     assert!(matches!(v, OutputContractVerdict::Reject { .. }));
@@ -27,17 +27,17 @@ fn reject_for_empty_candidate() {
 fn path_inspection_no_longer_autoprepends_or_hard_rejects() {
     assert_eq!(
         verify_output_contract(
-            &contract_existence("rustclaw.service"),
-            "/home/guagua/rustclaw/rustclaw.service",
+            &contract_existence("agent-runtime.service"),
+            "/home/guagua/agent-runtime/agent-runtime.service",
             "?",
         ),
         OutputContractVerdict::Pass
     );
     assert_eq!(
         verify_output_contract(
-            &contract_existence("rustclaw.service"),
-            "这是一个 systemd 服务单元文件，用于在系统启动时拉起 rustclaw 守护进程。",
-            "检查仓库里有没有 rustclaw.service",
+            &contract_existence("agent-runtime.service"),
+            "这是一个 systemd 服务单元文件，用于在系统启动时拉起 agent-runtime 守护进程。",
+            "检查仓库里有没有 agent-runtime.service",
         ),
         OutputContractVerdict::Pass
     );

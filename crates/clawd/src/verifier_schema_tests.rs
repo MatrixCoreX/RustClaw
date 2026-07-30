@@ -113,6 +113,7 @@ fn invalid_office_cursor_pattern_is_a_blocking_model_error() {
         .skill_views_snapshot
         .write()
         .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(std::sync::Arc::new(registry)),
         skills_list: std::sync::Arc::new(enabled),
     });

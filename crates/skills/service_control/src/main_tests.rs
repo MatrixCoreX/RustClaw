@@ -78,25 +78,25 @@ fn verify_failure_not_overwritten_by_ok_summary() {
 }
 
 #[test]
-fn manager_rustclaw_whitelist() {
+fn manager_agent_whitelist() {
     let args = json!({"action": "status", "target": "clawd"});
     let out = execute("req-m1".to_string(), args, None).unwrap();
-    assert_eq!(out.manager_type, "rustclaw");
+    assert_eq!(out.manager_type, "agent_runtime");
 }
 
 #[test]
-fn rustclaw_service_target_overrides_incompatible_manager_hint() {
+fn agent_service_target_overrides_incompatible_manager_hint() {
     let args = json!({"action": "status", "target": "clawd", "manager_type": "systemd"});
-    let out = execute("req-rustclaw-manager-hint".to_string(), args, None).unwrap();
-    assert_eq!(out.manager_type, "rustclaw");
+    let out = execute("req-agent-runtime-manager-hint".to_string(), args, None).unwrap();
+    assert_eq!(out.manager_type, "agent_runtime");
     assert_eq!(out.status, "ok");
 }
 
 #[test]
-fn rustclaw_status_without_user_key_falls_back_to_process_scan() {
+fn agent_status_without_user_key_falls_back_to_process_scan() {
     let args = json!({"action": "status", "target": "clawd"});
-    let out = execute("req-rustclaw-fallback".to_string(), args, None).unwrap();
-    assert_eq!(out.manager_type, "rustclaw");
+    let out = execute("req-agent-runtime-fallback".to_string(), args, None).unwrap();
+    assert_eq!(out.manager_type, "agent_runtime");
     assert_eq!(out.status, "ok");
     assert!(out.failure_reason.is_empty());
     assert!(
@@ -122,9 +122,9 @@ fn runner_status_response_serializes_target_alias() {
 }
 
 #[test]
-fn status_without_target_defaults_to_rustclaw_manager() {
+fn status_without_target_defaults_to_agent_manager() {
     let input = parse_input(&json!({"action": "status"})).unwrap();
-    assert_eq!(resolve_manager(&input, None), "rustclaw");
+    assert_eq!(resolve_manager(&input, None), "agent_runtime");
 }
 
 #[test]

@@ -73,7 +73,7 @@ fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&temp_dir);
-    let file_path = temp_dir.join("rustclaw.service");
+    let file_path = temp_dir.join("agent-runtime.service");
     std::fs::write(&file_path, "unit").expect("write fixture file");
     let resolved = file_path
         .canonicalize()
@@ -91,7 +91,7 @@ fn run_cmd_exists_token_is_not_interpreted_as_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -121,7 +121,7 @@ fn run_cmd_not_found_token_is_not_interpreted_as_a_path_verdict() {
             delivery_required: false,
             locator_kind: OutputLocatorKind::Path,
             delivery_intent: OutputDeliveryIntent::None,
-            locator_hint: "rustclaw.service".to_string(),
+            locator_hint: "agent-runtime.service".to_string(),
             selection: crate::OutputSelectionContract {
                 structured_field_selector: Some("exists,path".to_string()),
                 ..Default::default()
@@ -465,7 +465,7 @@ fn direct_answer_defers_health_check_os_summary_to_llm() {
     let agent_run_context = AgentRunContext {
         output_contract: Some(route_result.clone()),
         user_request: Some(
-            "做一次基础健康检查，只总结操作系统；RustClaw 自身不要总结，直接给我关键字段。"
+            "做一次基础健康检查，只总结操作系统；Agent Runtime 自身不要总结，直接给我关键字段。"
                 .to_string(),
         ),
         ..AgentRunContext::default()

@@ -279,6 +279,7 @@ fn test_state() -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                binding: Default::default(),
                 registry: None,
                 skills_list: Arc::new(
                     ["crypto".to_string(), "stock".to_string()]
@@ -314,6 +315,7 @@ fn test_state_with_registry(toml: &str, skills: &[&str]) -> AppState {
     let _ = std::fs::remove_file(path);
     let mut state = test_state();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(registry),
         skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
     })));
@@ -493,7 +495,9 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     };
     let mut loop_state = crate::agent_engine::LoopState::new();
     loop_state.output_contract = Some(planner_output_contract);
-    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state
+        .delivery_messages
+        .push("# Agent Runtime".to_string());
     loop_state.output_vars.insert(
         "agent_loop.decision_envelope".to_string(),
         serde_json::json!({
@@ -548,7 +552,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
         .and_then(serde_json::Value::as_str)
         .is_some());
     assert!(reply.text.contains("control_intent"));
-    assert!(reply.text.contains("# RustClaw"));
+    assert!(reply.text.contains("# Agent Runtime"));
 }
 
 #[tokio::test]
@@ -560,7 +564,9 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new();
-    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state
+        .delivery_messages
+        .push("# Agent Runtime".to_string());
     loop_state.output_vars.insert(
         "agent_loop.first_act_decision_envelope".to_string(),
         serde_json::json!({
@@ -615,7 +621,9 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_from_route_machine
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new();
-    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state
+        .delivery_messages
+        .push("# Agent Runtime".to_string());
     loop_state.output_vars.insert(
         "agent_loop.first_act_decision_envelope".to_string(),
         serde_json::json!({

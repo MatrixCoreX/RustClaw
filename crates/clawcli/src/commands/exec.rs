@@ -123,19 +123,19 @@ pub(super) fn exec_effective_options(
         },
         Some("coding") => ExecProfileDefaults {
             timeout_seconds: Some(900),
-            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/coding")),
+            artifact_dir: Some(PathBuf::from("artifacts/agent-exec/coding")),
             ..ExecProfileDefaults::default()
         },
         Some("release-gate") => ExecProfileDefaults {
             timeout_seconds: Some(600),
             fail_on_background: true,
-            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/release-gate")),
+            artifact_dir: Some(PathBuf::from("artifacts/agent-exec/release-gate")),
             ..ExecProfileDefaults::default()
         },
         Some("long-tail") => ExecProfileDefaults {
             timeout_seconds: Some(3600),
             continue_on_background: true,
-            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/long-tail")),
+            artifact_dir: Some(PathBuf::from("artifacts/agent-exec/long-tail")),
             ..ExecProfileDefaults::default()
         },
         Some(other) => anyhow::bail!("exec_profile_unknown:{other}"),
@@ -990,7 +990,7 @@ pub(super) fn exec_artifact_index_json(
         })
         .collect::<Vec<_>>();
     json!({
-        "artifact_kind": "rustclaw_exec_artifact_index",
+        "artifact_kind": "agent_exec_artifact_index",
         "schema_version": 1,
         "task_id": summary.get("task_id").cloned().unwrap_or(Value::Null),
         "status": summary.get("status").cloned().unwrap_or(Value::Null),

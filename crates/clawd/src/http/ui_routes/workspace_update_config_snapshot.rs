@@ -147,7 +147,7 @@ pub(super) async fn restore_workspace_update_config_snapshot(
             .and_then(|name| name.to_str())
             .ok_or_else(|| "workspace_update_config_restore_name_invalid".to_string())?;
         let process_id = std::process::id();
-        let temporary = parent.join(format!(".rustclaw_update_{process_id}_{file_name}"));
+        let temporary = parent.join(format!(".agent_update_{process_id}_{file_name}"));
         tokio::fs::write(&temporary, bytes)
             .await
             .map_err(|_| "workspace_update_config_restore_write_failed".to_string())?;

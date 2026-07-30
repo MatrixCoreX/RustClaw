@@ -16,7 +16,7 @@ struct TempRepo {
 impl TempRepo {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "rustclaw_patch_artifact_{label}_{}_{}",
+            "agent_patch_artifact_{label}_{}_{}",
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
@@ -63,7 +63,7 @@ fn child_worktree_patch_contains_tracked_and_untracked_changes_without_staging()
     let patch = fs::read_to_string(patch_path).expect("read patch");
     assert!(patch.contains("diff --git a/README.md b/README.md"));
     assert!(patch.contains("diff --git a/src/new.txt b/src/new.txt"));
-    assert!(!patch.contains(".rustclaw-isolation.json"));
+    assert!(!patch.contains(".agent-isolation.json"));
     assert!(git_status(&plan.execution_root, &["diff", "--cached", "--quiet"]).success());
     assert!(git_status(&repo.path, &["apply", "--check", patch_path]).success());
 
@@ -95,8 +95,8 @@ fn unchanged_child_worktree_returns_empty_review_artifact() {
 fn init_git_repo(path: &Path) {
     for args in [
         ["init", "--quiet"].as_slice(),
-        ["config", "user.email", "rustclaw-test@example.invalid"].as_slice(),
-        ["config", "user.name", "RustClaw Test"].as_slice(),
+        ["config", "user.email", "agent-runtime-test@example.invalid"].as_slice(),
+        ["config", "user.name", "Agent Runtime Test"].as_slice(),
     ] {
         assert!(git_status(path, args).success());
     }

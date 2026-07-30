@@ -23,7 +23,8 @@ def _writable_pi_app_dir():
 
 
 def _settings_file():
-    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_config.json")
+    root = _writable_pi_app_dir()
+    return os.path.join(root, ".agent_small_screen_config.json")
 
 
 def _default_settings():
@@ -62,6 +63,41 @@ def _root_dir():
 
 def _config_path():
     return os.path.join(_root_dir(), "configs", "config.toml")
+
+
+def _product_identity_path():
+    selected = os.environ.get("APP_PRODUCT_IDENTITY_CONFIG", "").strip()
+    return selected or os.path.join(_root_dir(), "configs", "product_identity.toml")
+
+
+def _load_product_identity():
+    if tomllib is None:
+        raise RuntimeError("Python 3.11 or newer is required to read product identity")
+    path = _product_identity_path()
+    try:
+        with open(path, "rb") as source:
+            config = tomllib.load(source)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Unable to read product identity config: {path}") from exc
+    if config.get("schema_version") != 1:
+        raise RuntimeError(f"Unsupported product identity schema: {path}")
+    return config, path
+
+
+def load_product_display_name():
+    config, path = _load_product_identity()
+    display_name = str(config.get("display_name") or "").strip()
+    if not display_name:
+        raise RuntimeError(f"Product identity display_name is missing: {path}")
+    return display_name
+
+
+def load_product_splash_image():
+    config, path = _load_product_identity()
+    filename = str(config.get("small_screen_splash_image") or "").strip()
+    if not filename or filename in (".", "..") or "/" in filename or "\\" in filename:
+        raise RuntimeError(f"Product identity small_screen_splash_image is invalid: {path}")
+    return filename
 
 
 def _load_settings_dict():
@@ -225,14 +261,16 @@ def save_auth_key(user_key):
 
 def _load_sqlite_path_from_config():
     if tomllib is None:
-        return os.path.join(_root_dir(), "data", "rustclaw.db")
+        raise RuntimeError("Python 3.11 or newer is required to read runtime configuration")
     try:
         with open(_config_path(), "rb") as f:
             cfg = tomllib.load(f)
-        db_rel = (((cfg or {}).get("database") or {}).get("sqlite_path")) or "data/rustclaw.db"
+        db_rel = str(((cfg or {}).get("database") or {}).get("sqlite_path") or "").strip()
+        if not db_rel:
+            raise RuntimeError("database.sqlite_path is missing")
         return os.path.join(_root_dir(), db_rel)
-    except Exception:
-        return os.path.join(_root_dir(), "data", "rustclaw.db")
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Unable to read runtime database path: {_config_path()}") from exc
 
 
 def _generate_user_key():

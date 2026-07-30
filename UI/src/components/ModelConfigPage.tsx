@@ -101,7 +101,7 @@ export function ModelConfigPage({
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+    <section className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
       <div className="mb-5">
         <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
           <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("第一步", "Step one")}</p>
@@ -110,14 +110,14 @@ export function ModelConfigPage({
           </h3>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
             {t(
-              "这里只处理 RustClaw 的主大模型。第一次使用时，先选厂商、模型、接口地址和 API Key，保存后如果提示需要重启，就再重启一次。",
-              "This section only handles RustClaw's main LLM. For first-time setup, choose the vendor, model, endpoint, and API key. After saving, restart if the page tells you to.",
+              "这里只处理 {product_name} 的主大模型。第一次使用时，先选厂商、模型、接口地址和 API Key，保存后如果提示需要重启，就再重启一次。",
+              "This section only handles {product_name}'s main LLM. For first-time setup, choose the vendor, model, endpoint, and API key. After saving, restart if the page tells you to.",
             )}
           </p>
         </div>
       </div>
 
-      <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="order-1 mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{t("大模型设置", "LLM Settings")}</h3>
           <div className="flex items-center gap-2">
@@ -285,14 +285,23 @@ export function ModelConfigPage({
         </div>
       </div>
 
-      <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <details className="group order-3 mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl [&::-webkit-details-marker]:hidden">
           <div>
             <h3 className="text-base font-semibold">{t("模型能力目录", "Model Capability Catalog")}</h3>
             <p className="mt-1 text-sm text-white/55">
               {t("这里展示运行时从配置读取到的模型、能力和长尾任务边界。", "This shows runtime model, capability, and long-tail task boundaries read from configuration.")}
             </p>
           </div>
+          <span className="theme-topbar-btn shrink-0 px-3 py-2 text-xs font-medium">
+            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+            <span className="group-open:hidden">{t("展开查看", "Show")}</span>
+            <span className="hidden group-open:inline">{t("收起", "Hide")}</span>
+          </span>
+        </summary>
+
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <div className="mb-3 flex justify-end">
           <button
             type="button"
             onClick={() => void onFetchModelCatalog()}
@@ -302,7 +311,7 @@ export function ModelConfigPage({
             {modelCatalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             {t("刷新", "Refresh")}
           </button>
-        </div>
+          </div>
 
         {modelCatalogError ? (
           <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{modelCatalogError}</p>
@@ -375,9 +384,10 @@ export function ModelConfigPage({
             </pre>
           </details>
         ) : null}
-      </div>
+        </div>
+      </details>
 
-      <div className="mt-6 space-y-6">
+      <div className="order-2 mb-5 space-y-6">
         <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -452,7 +462,10 @@ export function ModelConfigPage({
 
               <MultimodalConfigSection
                 title={t("声音模块", "Audio Modules")}
-                description={t("语音合成、语音转写可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/audio.toml）。", "Configure vendor, model, base URL and API key per audio module. Saved to configs/audio.toml.")}
+                description={t(
+                  "语音合成、语音转写可分别配置厂商、模型及 API 地址与密钥。使用本地 Whisper 时，语音转写填写：厂商 custom、模型 local-whisper、API 地址 http://127.0.0.1:8178/v1，API Key 留空；如本地模型尚未安装，先运行 scripts/download-whisper-model.sh，保存后重启服务。配置写入 configs/audio.toml。",
+                  "Configure vendor, model, base URL, and API key per audio module. For local Whisper transcription, enter vendor custom, model local-whisper, API URL http://127.0.0.1:8178/v1, and leave API Key empty. If the local model is not installed, run scripts/download-whisper-model.sh first, then save and restart the services. Saved to configs/audio.toml.",
+                )}
                 entries={[
                   { key: "audio_synthesize", label: t("语音合成", "Audio TTS") },
                   { key: "audio_transcribe", label: t("语音转写", "Audio STT") },

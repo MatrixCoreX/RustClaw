@@ -217,8 +217,8 @@ def check_shared_lib(root: Path) -> list[str]:
     failures = require_substrings(
         source,
         [
-            'RUSTCLAW_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-            'source "${RUSTCLAW_SCRIPTS_DIR}/shell_compat.sh"',
+            'APP_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'source "${APP_SCRIPTS_DIR}/shell_compat.sh"',
         ],
         "scripts/lib.sh",
     )

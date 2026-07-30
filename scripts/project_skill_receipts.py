@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--registry", type=Path, default=ROOT / "configs/skills_registry.toml")
     parser.add_argument("--binary-dir", type=Path, default=ROOT / "target/release")
     parser.add_argument("--package-root", type=Path, default=ROOT / "data/skill-packages")
-    parser.add_argument("--sdk-cli", type=Path, default=ROOT / "target/release/rustclaw-skill")
+    parser.add_argument("--sdk-cli", type=Path, default=ROOT / "target/release/skillctl")
     parser.add_argument("--skill", action="append", default=[])
     parser.add_argument("--target", default="host")
     parser.add_argument(

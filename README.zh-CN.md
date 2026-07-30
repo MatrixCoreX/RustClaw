@@ -1,15 +1,13 @@
-# RustClaw
-
-<img src="./RustClaw.png" width="420" />
+# Agent Runtime
 
 英文版：`README.md`
 
-RustClaw 是一个以 `clawd` 为核心的本地 Rust Agent Runtime。它把多通道接入、任务执行、技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
+Agent Runtime 是一个以 `clawd` 为核心的本地 Rust Agent Runtime。它把多通道接入、任务执行、技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
 
 <!-- ai-learning-stage: foundations -->
 ## 项目概览
 
-RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”的场景，而不是只给命令行使用者。
+Agent Runtime 面向“消息端或浏览器里就能完成日常使用和管理”的场景，而不是只给命令行使用者。
 
 当前仓库的主要能力包括：
 
@@ -40,10 +38,29 @@ RustClaw 面向“消息端或浏览器里就能完成日常使用和管理”�
 
 通信渠道不是必选项。先确认浏览器里的 Agent 可以正常工作，有跨应用使用需求时再配置渠道。
 
+### 产品身份与安全改名
+
+`configs/product_identity.toml` 是唯一产品身份来源。显示名、发布包 ID、发布仓库、
+小屏启动图和终端 banner 会统一投影到 Rust 运行时、Shell/发布脚本和 UI 构建。
+业务代码和普通技能不得再维护第二套品牌默认值。
+
+修改这个配置只改变展示和发布包装，不会改变中性规范入口 `agentctl`、`clawd`、
+`webd`、`skillctl`、`clawcli`，也不会改变 `agent-runtime` 服务/数据命名空间、
+`X-Agent-Key`、API 路由、权限、任务与会话记录、技能存储和回执。因此改名不要求
+修改普通技能源码，也不需要迁移功能数据。
+
+发布产品身份修改前运行双品牌合同：
+
+```bash
+python3 scripts/check_product_identity_coupling.py --self-test
+python3 scripts/check_product_identity_coupling.py
+bash scripts/product_identity_tests.sh --with-ui
+```
+
 <!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop 架构
 
-RustClaw 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由 planner 决定回复、澄清或执行，并可调用能力、按证据合成、修复、继续、checkpoint 或停止。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，不解析用户语言短语。
+Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由 planner 决定回复、澄清或执行，并可调用能力、按证据合成、修复、继续、checkpoint 或停止。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，不解析用户语言短语。
 
 ### 请求与 Agent Loop 流程
 
@@ -135,7 +152,7 @@ flowchart TD
 | 是否使用共享 skill dispatcher？ | 是，planner 选择 `call_skill` 或 capability 解析到 skill 时使用。 | 是。把 `payload.skill_name` 派发到同一套 builtin / external / runner 技能协议。 |
 | 结果是否能用 `task_id` 查询？ | 是。 | 是。直接技能结果保存到原始 task row，可通过 `GET /v1/tasks/{task_id}` 或 `clawcli get` 读取。 |
 
-操作上：用户给自然语言请求时使用 `kind=ask`，让 RustClaw 自己判断回答、澄清、规划或执行。API 调用方已经知道明确技能和参数时使用 `kind=run_skill`，只把 RustClaw 当作任务队列、鉴权、生命周期和结果投影层来运行该技能。
+操作上：用户给自然语言请求时使用 `kind=ask`，让 Agent Runtime 自己判断回答、澄清、规划或执行。API 调用方已经知道明确技能和参数时使用 `kind=run_skill`，只把 Agent Runtime 当作任务队列、鉴权、生命周期和结果投影层来运行该技能。
 
 - `Planner-owned front door`：物化文本/语音/附件，并根据 task 身份、显式 API 字段、结构化 locator facts 和安全/预算 profile 构造 `TurnBoundaryEnvelope`。它不做语义 LLM 调用，也没有普通 respond/clarify/execute 分支。
 - `Agent-loop 语义权威`：每个普通自然语言任务都会进入循环，由 planner 决定回复、澄清、调用能力、执行工具或技能、按证据合成、修复、checkpoint 或停止。
@@ -212,7 +229,7 @@ flowchart TD
 
 ## 自然语言契约边界
 
-RustClaw 的原则是：自然语言理解交给 LLM，运行时只消费结构化契约。Planner 可以阅读用户表达、示例、技能文档和多语言提示词，但在运行时执行前必须把理解落到结构化 action。Planner 前的 front door 只能通过 `TurnBoundaryEnvelope` 提供已经认证的机器事实，不能推断普通语义意图。
+Agent Runtime 的原则是：自然语言理解交给 LLM，运行时只消费结构化契约。Planner 可以阅读用户表达、示例、技能文档和多语言提示词，但在运行时执行前必须把理解落到结构化 action。Planner 前的 front door 只能通过 `TurnBoundaryEnvelope` 提供已经认证的机器事实，不能推断普通语义意图。
 
 运行时允许依赖的确定性输入包括：
 
@@ -233,11 +250,11 @@ python3 scripts/check_no_nl_hardmatch.py
 <!-- ai-learning-stage: context-memory -->
 ## 记忆系统
 
-RustClaw 记忆分为短期对话记录、结构化用户偏好、长期事实卡和检索索引。目标是让记忆能帮助当前任务，同时避免旧助手输出变成新的隐藏指令。
+Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事实卡和检索索引。目标是让记忆能帮助当前任务，同时避免旧助手输出变成新的隐藏指令。
 
 ### 写入路径
 
-`ask` 任务收尾后，RustClaw 可以持久化：
+`ask` 任务收尾后，Agent Runtime 可以持久化：
 
 - `memories` 短期记录：按 `user_key`、`user_id`、`chat_id`、角色、类型、显著性和安全标记分组
 - `user_preferences` 用户偏好：例如 `response_language`、`response_style`、`response_format`、`agent_display_name`
@@ -433,15 +450,15 @@ Rust、Python、Node、Go、prebuilt、生命周期、安全和发布说明见
 
 ```bash
 # 安装本地命令入口，不配置 nginx
-bash install-rustclaw-cmd.sh --user --no-deploy-ui
+bash install-agent-cmd.sh --user --no-deploy-ui
 
 # 最简启动
-rustclaw start -q
+agentctl start -q
 
 # 状态、健康和日志
-rustclaw -status
-rustclaw -health
-rustclaw -logs clawd 200 --follow
+agentctl -status
+agentctl -health
+agentctl -logs clawd 200 --follow
 ```
 
 关键原则：
@@ -454,21 +471,21 @@ rustclaw -logs clawd 200 --follow
 
 ## 身份与访问控制
 
-RustClaw 使用 `user_key` 作为跨 UI 和消息通道的主身份标识。
+Agent Runtime 使用 `user_key` 作为跨 UI 和消息通道的主身份标识。
 
 - 权限按 `user_key` 解析
 - 会话按 `channel + external_chat_id` 解析
-- 浏览器 UI 通过 `X-RustClaw-Key` 传递身份
+- 浏览器 UI 通过 `X-Agent-Key` 传递身份
 - 当鉴权表为空时，`clawd` 可以引导生成首个管理员 key
 
 常用 key 管理命令：
 
 ```bash
-rustclaw -key list
-rustclaw -key generate user
-rustclaw -key generate admin
-rustclaw -key add rk-xxxx admin
-rustclaw -key disable rk-xxxx
+agentctl -key list
+agentctl -key generate user
+agentctl -key generate admin
+agentctl -key add rk-xxxx admin
+agentctl -key disable rk-xxxx
 ```
 
 ### Telegram 通信端边界
@@ -511,14 +528,14 @@ flowchart LR
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
 - 桌面端点击主操作区域任意位置都会自动收起左侧导航，可用导航开关再次展开；移动端选择页面或点击菜单外部后会关闭导航菜单。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
-- 首页“系统依赖检查”会检查 RustClaw 运行、源码/UI 构建以及内置工具和技能使用的本机依赖，显示检测到的版本和对应能力。服务已具备无交互包管理权限时，管理员可按依赖白名单启动 Linux 包管理器或 macOS Homebrew 安装；安装作为异步作业运行，刷新页面后仍可查看进行中状态和失败日志。浏览器不能提交任意软件包名、系统命令或操作系统密码。
+- 首页“系统依赖检查”会检查 Agent Runtime 运行、源码/UI 构建以及内置工具和技能使用的本机依赖，显示检测到的版本和对应能力。服务已具备无交互包管理权限时，管理员可按依赖白名单启动 Linux 包管理器或 macOS Homebrew 安装；安装作为异步作业运行，刷新页面后仍可查看进行中状态和失败日志。浏览器不能提交任意软件包名、系统命令或操作系统密码。
 
 `clawd` 固定使用内部地址 `127.0.0.1:8787`，不再提供面向用户的监听配置。`webd` 从 `configs/channels/webd.toml` 读取监听地址，可使用 `0.0.0.0:8788` 提供设备 IP 直连，也可使用 `127.0.0.1:8788` 只允许 nginx/本机访问。首页切换访问范围时会保留原端口，只原子修改监听地址。Docker 只发布 `8788`，不发布 `8787`；容器网络中改为 loopback 前必须单独确认网络拓扑。
 
-常用接口（请求时带上当前 UI/user key 的 `X-RustClaw-Key`）：
+常用接口（请求时带上当前 UI/user key 的 `X-Agent-Key`）：
 
 - `GET /v1/health`
-- `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、RustClaw 数据卷存储、运行时长和机器可读的缺失字段
+- `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、Agent Runtime 数据卷存储、运行时长和机器可读的缺失字段
 - `GET /v1/system/dependencies`：返回 Linux/macOS 依赖、已安装版本、使用该依赖的工具/技能和可安装状态
 - `POST /v1/admin/system-dependencies/install`：管理员按固定 `dependency_id` 启动受控异步安装，不接受任意命令或包名
 - `POST /v1/tasks`
@@ -534,10 +551,10 @@ flowchart LR
 - `GET /v1/admin/webd-exposure`：返回 webd 的监听地址、端口、进程和对外直连状态
 - `POST /v1/admin/webd-exposure`：原子切换 webd 的对外/仅本机监听范围，并按平台安排重启
 - `POST /v1/admin/workspace-update/nginx-enable`：按 Linux/macOS 平台检查、安装或更新 nginx，修复并启动入口，再部署已有 UI 资源
-- `POST /v1/admin/workspace-update/nginx-disable`：停止并禁用 nginx，删除 RustClaw 站点和专用 UI 部署；云服务器执行后会失去该 Web 入口
+- `POST /v1/admin/workspace-update/nginx-disable`：停止并禁用 nginx，删除 Agent Runtime 站点和专用 UI 部署；云服务器执行后会失去该 Web 入口
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
-- `GET/POST /v1/auth/crypto-credentials`：按当前 `X-RustClaw-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
+- `GET/POST /v1/auth/crypto-credentials`：按当前 `X-Agent-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
 - `GET /v1/models/catalog`：返回不含密钥的模型/厂商能力目录，供 UI Models 页面和教学模式 `model_catalog_trace` 使用
 - `GET /v1/nni/device/status`：返回 NNI helper 状态、支持的操作，以及是否检测到设备签名芯片
 - `POST /v1/nni/device/action`：执行 `pubkey`、`sign_timestamp`、`tng_device_pubkey`、`tng_device_cert`、`tng_signer_cert` 或 `tng_root_cert`
@@ -546,11 +563,11 @@ flowchart LR
 
 ```bash
 curl http://127.0.0.1:8787/v1/health \
-  -H "X-RustClaw-Key: rk-xxxx"
+  -H "X-Agent-Key: rk-xxxx"
 
 curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "Content-Type: application/json" \
-  -H "X-RustClaw-Key: rk-xxxx" \
+  -H "X-Agent-Key: rk-xxxx" \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
@@ -567,7 +584,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ### 如何验证 Provider
 
-MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；它的 `--self-test` 会覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`，之后 gate 才信任配置派生的元数据。`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；它的 `--self-test` 会覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`，之后 gate 才信任配置派生的元数据。`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `APP_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
 
 ### 发布门禁如何证明结果
 
@@ -651,14 +668,14 @@ UI 相关说明：
 - 源码位于 `UI/`
 - 构建产物位于 `UI/dist`
 - `build-ui-nginx.sh` 默认只构建 `UI/dist`；只有显式传 `--deploy` 才会配置 nginx
-- `build-ui-nginx.sh --deploy-if-configured` 只更新机器上已存在的 RustClaw nginx 站点，本地更新不会因此写系统配置
+- `build-ui-nginx.sh --deploy-if-configured` 只更新机器上已存在的 Agent Runtime nginx 站点，本地更新不会因此写系统配置
 - `build-all.sh` 的完整编译流程会调用上述按需部署模式：没有 nginx 时只更新 `UI/dist`，已经部署 nginx 时会把最新 UI 同步到现有站点的实际 `root`
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
-- `install-rustclaw-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
+- `install-agent-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
 - 管理员打开首页时会自动检查源码版本和当前平台可用的 GitHub Release，并显示运行版本与最新 Release 标签
 - Release 包安装只检查和展示 Release 更新，不执行 Git 命令，也不显示源码编译区；管理员可通过“切换到源码模式”先安全克隆、验证并迁移完整源码，成功重启后才启用 Git 拉取与编译入口
 - 首页系统信息区显示系统/版本、架构、内存、系统存储、部署类型和运行时长，不暴露主机路径或环境变量；Linux/macOS 缺失的指标会显示为部分数据，不会让整个首页失败
-- 首页依赖区优先展示缺失项；发布包运行依赖、源码构建依赖和按需能力依赖分开标记，未安装的可选能力不会被误报为 RustClaw 核心故障
+- 首页依赖区优先展示缺失项；发布包运行依赖、源码构建依赖和按需能力依赖分开标记，未安装的可选能力不会被误报为 Agent Runtime 核心故障
 - 只有真实构建或部署任务才显示进度；完整编译/部署、仅 UI、仅 clawd 成功完成后会自动刷新一次页面
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
@@ -667,7 +684,37 @@ UI 相关说明：
 <!-- ai-learning-stage: capabilities-artifacts -->
 ## 技能体系
 
-RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
+### 准入、热插拔、更新与卸载
+
+仓库维护的 core/bundled 技能来自只读 base registry。运行时导入统一经过
+`SkillAdmissionService`；UI、CLI 和 extension manager 都不能直接修改 Git 跟踪的
+registry、配置或 prompt。准入流程会验证类型化 manifest，使用声明的 adapter 隔离构建，
+执行 JSONL 或类型化 HTTP 协议冒烟，验证不可变 package receipt，由宿主授予 policy，
+最后原子发布 data-root overlay generation。
+
+```mermaid
+flowchart LR
+    A[Package + capability request] --> B[校验 + 隔离 adapter 构建]
+    B --> C[协议冒烟 + 不可变 receipt]
+    C --> D[宿主 policy grant]
+    D --> E[原子 overlay generation]
+    E --> F[Planner catalog + resolver + verifier]
+    F --> G[固定版本/receipt/policy 执行]
+    G --> H[结构化结果 + 证据]
+    E --> I[更新发布下一代]
+    I --> J[旧版本 lease 排空]
+    J --> K[版本 GC]
+    E --> L[禁用/撤权/tombstone]
+    L --> M[阻止新调用]
+    M --> J
+```
+
+外部包安装后默认禁用或等待批准；只有宿主显式 grant 才能启用。禁用或撤权会立即
+阻止新调用，运行中的调用继续使用已经固定的 generation 和版本 lease 收尾。卸载先
+tombstone，再排空 lease，只删除技能自己的 package；技能私有数据默认保留，Cargo、
+Python、Node、Go 等共享工具链和缓存永远不会随技能卸载。
+
+Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为：
 
 - 系统与运维：`system_basic`、`process_basic`、`service_control`、`health_check`、`log_analyze`、`task_control`
 - 文件与开发工具：`run_cmd`、`fs_basic`、`config_basic`、`config_edit`、`config_guard`、`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
@@ -760,8 +807,8 @@ Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_ap
 ## 开发说明
 
 - 如果你是源码开发者，`build-all.sh` 是最贴近当前仓库脚本行为的统一构建入口
-- Linux 本机构建默认复用当前 Rust 工具链自带的 LLD；内存不高于 16 GiB 时 Cargo 默认单作业，本地重复构建默认保留增量编译。可显式设置 `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` 覆盖默认值，排查 linker 兼容性时可设置 `RUSTCLAW_DISABLE_BUNDLED_LLD=1`。
-- 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
+- Linux 本机构建默认复用当前 Rust 工具链自带的 LLD。ARM 和内存紧张的主机使用一个 Cargo job；总内存 12-16 GiB、当前至少 8 GiB 可用且至少四个 CPU 的 x86 主机使用两个 job；更大的主机保留 Cargo 自身默认值。本地重复构建保留增量编译。可显式设置 `CARGO_BUILD_JOBS` / `CARGO_INCREMENTAL` 覆盖默认值，排查 linker 兼容性时可设置 `APP_DISABLE_BUNDLED_LLD=1`。
+- 如果你是部署或体验使用者，`install-agent-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
 - 安装器会校验带 `tomllib` 的 Python 3.11+；macOS 缺失时安装当前 Homebrew `python` 公式，运行和编译入口会精确选择该解释器，同时不替换已经选定的 Rust 工具链
 - 如果只想重建本地 UI，使用 `build-ui-nginx.sh`；只有 nginx 托管的服务器才使用 `deploy-ui-nginx.sh`
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步

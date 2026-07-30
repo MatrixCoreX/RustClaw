@@ -1,6 +1,6 @@
 # clawcli Exec And Replay
 
-`clawcli exec` is the script-friendly task runner for RustClaw. It submits an
+`clawcli exec` is the script-friendly task runner for Agent Runtime. It submits an
 `ask` task or resumes an existing task, waits by default, returns a stable exit
 code, and can write machine-readable artifacts for CI.
 
@@ -38,7 +38,7 @@ Write CI artifacts:
 ```bash
 clawcli exec \
   --json \
-  --artifact-dir artifacts/rustclaw-exec \
+  --artifact-dir artifacts/agent-runtime-exec \
   --timeout-seconds 600 \
   "make the requested code change and run the focused tests"
 ```
@@ -77,9 +77,9 @@ choose skills, or change planner behavior.
 | Profile | Defaults |
 | --- | --- |
 | `quick` | `timeout_seconds=120` |
-| `coding` | `timeout_seconds=900`, `artifact_dir=artifacts/rustclaw-exec/coding` |
-| `release-gate` | `timeout_seconds=600`, `fail_on_background=true`, `artifact_dir=artifacts/rustclaw-exec/release-gate` |
-| `long-tail` | `timeout_seconds=3600`, `continue_on_background=true`, `artifact_dir=artifacts/rustclaw-exec/long-tail` |
+| `coding` | `timeout_seconds=900`, `artifact_dir=artifacts/agent-runtime-exec/coding` |
+| `release-gate` | `timeout_seconds=600`, `fail_on_background=true`, `artifact_dir=artifacts/agent-runtime-exec/release-gate` |
+| `long-tail` | `timeout_seconds=3600`, `continue_on_background=true`, `artifact_dir=artifacts/agent-runtime-exec/long-tail` |
 
 Explicit CLI flags override profile defaults where a value is provided:
 
@@ -194,8 +194,8 @@ clawcli session delete "$TASK_ID" --json
 ```
 
 `session list` and `session show` persist a compact local session store under
-`RUSTCLAW_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/rustclaw/`, or
-`~/.local/state/rustclaw/`. The store records `session_id`, `task_ids`,
+`APP_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/agent-runtime/`, or
+`~/.local/state/agent-runtime/`. The store records `session_id`, `task_ids`,
 `active_goal_id`, `workspace_root`, `latest_checkpoint_id`, `latest_event_seq`,
 `archived`, and optional `forked_from` fields for CLI navigation. It is local
 operator metadata, not a server-side semantic route source.

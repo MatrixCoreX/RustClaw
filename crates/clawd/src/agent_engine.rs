@@ -49,8 +49,8 @@ mod support;
 mod user_output_path;
 
 use self::arg_resolver::{
-    normalize_skill_arg_aliases, resolve_arg_string, resolve_arg_value,
-    rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
+    normalize_registry_argument_aliases, normalize_skill_arg_aliases, resolve_arg_string,
+    resolve_arg_value, rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
     rewrite_tool_path_with_written_aliases,
 };
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};

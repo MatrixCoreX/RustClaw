@@ -8,7 +8,7 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-`config_edit` is the structured config mutation tool. Use it when the user asks to change a RustClaw configuration value, enable or disable a skill switch, switch a selected model/vendor, update a bounded config field, validate the result, read the value back, or report whether restart is needed.
+`config_edit` is the structured config mutation tool. Use it when the user asks to change an agent-runtime configuration value, enable or disable a skill switch, switch a selected model/vendor, update a bounded config field, validate the result, read the value back, or report whether restart is needed.
 
 Use `config_basic` for read-only config queries. Use `config_edit` for config mutations. After `apply_config_change`, prefer `config_edit.read_back` for the edited field so the mutation proof stays in the same structured workflow.
 
@@ -17,7 +17,7 @@ The default `path` is `configs/config.toml` when the user does not specify a con
 Do not use natural-language phrase matching in code. The LLM should map user intent to a structured field mutation, and this tool enforces the structured contract.
 
 ## Config Entry Points (from interface)
-- Main RustClaw config: `configs/config.toml`.
+- Main agent-runtime config: `configs/config.toml`.
 - Audio/STT config: `configs/audio.toml`.
 - Other module configs: inspect current registry/interface docs or config files first, then pass the concrete config file path.
 - Environment variables and secrets are not edited by this tool.
@@ -61,7 +61,7 @@ Optional:
 
 ### `guard_config`
 
-Run a structured RustClaw config risk guard. It reports known risky fields such as real-looking secrets and sudo/path policy flags. Obsolete filesystem scan-limit keys are returned separately as structured deprecations and do not control runtime search.
+Run a structured agent-runtime config risk guard. It reports known risky fields such as real-looking secrets and sudo/path policy flags. Obsolete filesystem scan-limit keys are returned separately as structured deprecations and do not control runtime search.
 
 Optional:
 - `path`: config file path, default `configs/config.toml`.

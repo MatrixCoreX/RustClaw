@@ -23,7 +23,7 @@ SUMMARY_JSONL=""
 BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID_VALUE="${USER_ID:-1985996990}"
 CHAT_ID_VALUE="${CHAT_ID:-1985996990}"
-USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
+USER_KEY_VALUE="${APP_USER_KEY:-${USER_KEY:-}}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-180}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 # Default 1 (was 2): 之前默认 2 意味着上游一抖手就把同一个 case ×3 调用，浪费
@@ -65,7 +65,7 @@ Options:
   --user-id ID          User id for submit
   --chat-id ID          Base chat id for submit
   --reuse-chat-id-base  Do not add a run-scoped offset to the base chat id
-  --user-key KEY        RustClaw user key
+  --user-key KEY        Agent Runtime user key
   --wait-seconds N      Max wait seconds per case
   --poll-seconds N      Poll interval seconds
   --provider-retries N  Retry count when provider is unavailable/capacity-limited (default: 1)

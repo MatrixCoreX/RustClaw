@@ -4,12 +4,10 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rustclaw_skill_sdk::{
-    BoundedResult, ContinuationDescriptor, ExpectedPathKind, SkillPathPolicy,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use skill_sdk::{BoundedResult, ContinuationDescriptor, ExpectedPathKind, SkillPathPolicy};
 
 const SKILL_NAME: &str = "process_basic";
 
@@ -187,7 +185,7 @@ fn validate_kill_target(pid: i64) -> Result<(), String> {
     Ok(())
 }
 
-fn path_policy_error(error: rustclaw_skill_sdk::SkillSdkError) -> String {
+fn path_policy_error(error: skill_sdk::SkillSdkError) -> String {
     format!("{}: {}", error.code, error.detail)
 }
 

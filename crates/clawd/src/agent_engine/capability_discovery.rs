@@ -93,16 +93,14 @@ pub(super) fn handle_capability_group_load(
         );
     }
     let groups = parse_requested_groups(args)?;
-    let loadable = crate::capability_map::planner_loadable_capability_group_names_for_task(
+    let loadable = crate::capability_map::planner_loadable_capability_group_members_for_task(
         state,
         task,
         &loop_state.loaded_capability_skills,
-    )
-    .into_iter()
-    .collect::<BTreeSet<_>>();
+    );
     let invalid = groups
         .iter()
-        .filter(|group| !loadable.contains(*group))
+        .filter(|group| !loadable.contains_key(*group))
         .cloned()
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
@@ -113,7 +111,14 @@ pub(super) fn handle_capability_group_load(
         .to_string());
     }
 
-    let evicted_scopes = activate_registry_groups(loop_state, &groups);
+    let resolved_skills = groups
+        .iter()
+        .flat_map(|group| loadable.get(group).into_iter().flatten().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    let evicted_scopes = activate_registry_groups(loop_state, &resolved_skills);
     let expanded = crate::capability_map::planner_disclosed_native_capability_groups_for_task(
         state,
         task,
@@ -121,13 +126,14 @@ pub(super) fn handle_capability_group_load(
     );
     let loaded_capabilities = expanded
         .iter()
-        .filter(|group| groups.contains(&group.skill_name))
+        .filter(|group| resolved_skills.contains(&group.skill_name))
         .flat_map(|group| group.capability_names.iter().cloned())
         .collect::<Vec<_>>();
     let output = json!({
         "schema_version": 1,
         "status": "ok",
-        "loaded_groups": groups,
+        "requested_groups": groups,
+        "loaded_groups": resolved_skills,
         "loaded_capabilities": loaded_capabilities,
         "evicted_scopes": evicted_scopes,
         "active_scopes": loop_state.active_capability_scopes,
@@ -163,7 +169,7 @@ pub(super) fn handle_capability_group_load(
         "round={} step={} capability_groups_loaded={} active_scopes={}",
         loop_state.round_no,
         step_in_round,
-        groups.join(","),
+        resolved_skills.join(","),
         loop_state.active_capability_scopes.join(",")
     ));
     *loop_state

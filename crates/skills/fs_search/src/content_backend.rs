@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use rustclaw_fs_discovery::{ripgrep_text_search, CaseMode, RipgrepTextRequest, TextPatternKind};
+use fs_discovery::{ripgrep_text_search, CaseMode, RipgrepTextRequest, TextPatternKind};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 

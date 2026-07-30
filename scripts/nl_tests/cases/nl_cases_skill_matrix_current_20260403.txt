@@ -19,7 +19,7 @@ chat_act|builtin_remove_file_smoke|builtin,builtin_skill:remove_file,skill:remov
 # Runner skills: mostly local/read-only
 chat|skill_chat_brief_joke|skill:chat,local|讲一个简短冷笑话
 chat_act|skill_system_basic_info_brief|skill:system_basic,local|帮我看一下这台机器的基础系统信息，简短告诉我最关键的几项
-chat_act|skill_http_basic_local_health|skill:http_basic,local,conditional|请求一下 __RUSTCLAW_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
+chat_act|skill_http_basic_local_health|skill:http_basic,local,conditional|请求一下 __APP_TEST_BASE_URL__/v1/health ，如果能通就简短总结结果
 chat_act|skill_git_basic_status|skill:git_basic,local|看一下当前仓库 git 状态，简短告诉我最值得注意的变化
 chat_act|skill_process_basic_top_cpu|skill:process_basic,local|看一下当前最占 CPU 的前 5 个进程，简短告诉我最值得注意的是哪个
 chat_act|skill_package_manager_detect|skill:package_manager,local|检测这台机器上的包管理器，简短告诉我结果
@@ -30,15 +30,15 @@ chat_act|skill_health_check_summary|skill:health_check,local|帮我做一次基�
 chat_act|skill_log_analyze_fixture_app|any_skill:log_analyze+fs_basic,covers:log_analysis,requires_tool_call=true,local|分析 scripts/nl_tests/fixtures/device_local/logs/app.log，简短说有没有明显异常
 chat_act|skill_service_control_clawd_status|skill:service_control,local,conditional|检查 clawd 服务状态，简短告诉我
 chat_act|skill_task_control_list|skill:task_control,local|看看当前任务队列里有没有任务，简短告诉我结果
-chat_act|skill_config_guard_validate_main|any_skill:config_basic+config_edit,capability:config.guard_rustclaw_config,covers:config_guard,requires_tool_call=true,local_readonly|检查 configs/config.toml 有没有明显配置问题，简短给我结论
+chat_act|skill_config_guard_validate_main|any_skill:config_basic+config_edit,capability:config.guard_agent-runtime_config,covers:config_guard,requires_tool_call=true,local_readonly|检查 configs/config.toml 有没有明显配置问题，简短给我结论
 chat_act|skill_doc_parse_readme|skill:doc_parse,local|解析 scripts/nl_tests/fixtures/device_local/docs/service_notes.md，返回解析器报告的 metadata.type、sections_count 和第一个 section title；不要用普通文件读取代替文档解析
 chat_act|skill_transform_json_table|skill:transform,direct_allowed,local|把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
 chat_act|skill_kb_ingest_then_report|skill:kb,local,side_effect|把 README.md 导入一个名为 demo_docs_nl 的知识库，简短告诉我是否成功
 
 # Runner skills: local side-effect outputs
 file|skill_archive_basic_pack_skill_calls|skill:archive_basic,local,side_effect|把 scripts/skill_calls 打成 zip，保存到 document/skill_calls_smoke.zip，然后把文件发给我
-file|skill_audio_synthesize_short_cn|skill:audio_synthesize,network,side_effect|把“RustClaw 技能测试通过”合成一段语音，保存到 document/skill_audio_smoke.mp3，然后把文件发给我
-file|skill_image_generate_test_card|skill:image_generate,network,side_effect|生成一张极简测试图片，写上 RustClaw NL Smoke，保存到 document/skill_generate_smoke.png，然后把文件发给我
+file|skill_audio_synthesize_short_cn|skill:audio_synthesize,network,side_effect|把“Agent Runtime 技能测试通过”合成一段语音，保存到 document/skill_audio_smoke.mp3，然后把文件发给我
+file|skill_image_generate_test_card|skill:image_generate,network,side_effect|生成一张极简测试图片，写上 Agent Runtime NL Smoke，保存到 document/skill_generate_smoke.png，然后把文件发给我
 
 # Runner skills: network / external integrations
 chat_act|skill_rss_fetch_latest_general|skill:rss_fetch,network|抓取最新 3 条综合 RSS 新闻，简短列出来

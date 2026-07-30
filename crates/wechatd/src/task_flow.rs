@@ -416,7 +416,7 @@ pub(super) async fn submit_wechat_task_with_payload(
         if let Some(ref key) = user_key {
             let k = key.trim();
             if !k.is_empty() {
-                req = req.header("X-RustClaw-Key", k);
+                req = req.header("X-Agent-Key", k);
             }
         }
         let resp = match req.send().await {

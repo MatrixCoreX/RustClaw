@@ -10,7 +10,7 @@ Next: [Task artifact delivery](11-task-artifact-delivery.md)
 
 <!-- ai-learning-navigation:end -->
 
-RustClaw keeps browser-facing security in `webd` and keeps `clawd` as an
+Agent Runtime keeps browser-facing security in `webd` and keeps `clawd` as an
 internal core API. This prevents a second public UI/API entry from bypassing
 the browser session gateway.
 
@@ -68,14 +68,14 @@ listener reachable from their proxy network instead of assuming host loopback.
 ## Dashboard Operations
 
 The dashboard reports whether nginx is installed, running, configured for
-RustClaw, and serving a deployed UI. Admin-only actions use the existing
+Agent Runtime, and serving a deployed UI. Admin-only actions use the existing
 background workspace-operation state:
 
 - **Enable/Repair nginx** checks the system package version, installs or updates
-  nginx when needed, writes the RustClaw site, deploys existing `UI/dist`,
+  nginx when needed, writes the Agent Runtime site, deploys existing `UI/dist`,
   validates configuration, and starts or reloads it. Linux package managers and
   Homebrew on macOS are handled explicitly.
-- **Disable nginx** stops and disables the service, removes the RustClaw site and
+- **Disable nginx** stops and disables the service, removes the Agent Runtime site and
   its dedicated UI deployment, and warns that a cloud/domain entry will become
   unreachable. nginx itself is not uninstalled.
 

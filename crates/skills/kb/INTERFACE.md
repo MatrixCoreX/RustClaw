@@ -4,7 +4,7 @@
 
 `kb` is a local namespace-based knowledge retrieval layer for user-managed documents.
 
-Use it when the user wants RustClaw to:
+Use it when the user wants the agent runtime to:
 - build a searchable knowledge base from local files or directories
 - add/update indexed materials under a named namespace
 - search previously indexed documents by natural-language query
@@ -113,7 +113,7 @@ Natural-language intent mapping:
   `stats.retrieval_mode`, `total_candidates`, and `retrieval_candidates`.
 - Non-admin source paths are confined to the canonical workspace root. A
   verified `unrestricted_admin` runner context may index absolute paths visible
-  to the RustClaw operating-system user; request arguments cannot grant this.
+  to the agent-runtime operating-system user; request arguments cannot grant this.
 
 ## Config Entry Points
 

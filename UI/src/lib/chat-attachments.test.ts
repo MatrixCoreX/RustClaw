@@ -20,11 +20,11 @@ test("formats structured vision result fields", () => {
       JSON.stringify({
         summary: "A status card is visible.",
         objects: ["card", "logo"],
-        visible_text: ["RustClaw", "OK"],
+        visible_text: ["Agent Runtime", "OK"],
         uncertainties: ["small text"],
       }),
     ),
-    "A status card is visible.\n\nObjects: card, logo\n\nVisible text: RustClaw ; OK\n\nUncertainties: small text",
+    "A status card is visible.\n\nObjects: card, logo\n\nVisible text: Agent Runtime ; OK\n\nUncertainties: small text",
   );
 });
 

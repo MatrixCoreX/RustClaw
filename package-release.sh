@@ -12,9 +12,9 @@ configure_python3_with_tomllib
 source "${SCRIPT_DIR}/scripts/version_info.sh"
 cd "$SCRIPT_DIR"
 
-EXPLICIT_RELEASE_BIN_DIR="${RUSTCLAW_RELEASE_BIN_DIR:-}"
+EXPLICIT_RELEASE_BIN_DIR="${APP_RELEASE_BIN_DIR:-}"
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
-BUILD_RELEASE_DIR="${RUSTCLAW_BUILD_RELEASE_DIR:-$SCRIPT_DIR/target/release}"
+BUILD_RELEASE_DIR="${APP_BUILD_RELEASE_DIR:-$SCRIPT_DIR/target/release}"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
@@ -51,13 +51,13 @@ if [[ -z "$HOST_RUST_TARGET" ]]; then
   echo "Unable to determine the host Rust target."
   exit 1
 fi
-RUSTCLAW_PACKAGE_TARGET="${RUSTCLAW_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
-RUSTCLAW_BUILD_EXCLUDED_PACKAGES="$(
+APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
+BUILD_EXCLUDED_PACKAGES="$(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
-    --scope build-excludes --target "$RUSTCLAW_PACKAGE_TARGET" --format packages
+    --scope build-excludes --target "$APP_PACKAGE_TARGET" --format packages
 )"
-export RUSTCLAW_BUILD_EXCLUDED_PACKAGES
-echo "Package target: $RUSTCLAW_PACKAGE_TARGET"
+export BUILD_EXCLUDED_PACKAGES
+echo "Package target: $APP_PACKAGE_TARGET"
 
 REQUIRED_BINS_RAW="$(
   python3 - "$WORKSPACE_METADATA_FILE" <<'PY'
@@ -70,7 +70,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 workspace_members = set(data.get("workspace_members", []))
 excluded_packages = {
     value.strip()
-    for value in os.environ.get("RUSTCLAW_BUILD_EXCLUDED_PACKAGES", "").splitlines()
+    for value in os.environ.get("BUILD_EXCLUDED_PACKAGES", "").splitlines()
     if value.strip()
 }
 bins = set()
@@ -117,7 +117,7 @@ fi
 echo "[3/6] Prepare staging directory..."
 STAGE_ROOT="$(mktemp -d)"
 trap 'rm -rf "$STAGE_ROOT"' EXIT
-STAGE_PROJECT_DIR="$STAGE_ROOT/RustClaw"
+STAGE_PROJECT_DIR="$STAGE_ROOT/$APP_RELEASE_ARTIFACT_ID"
 mkdir -p "$STAGE_PROJECT_DIR"
 
 copy_if_exists() {
@@ -135,18 +135,21 @@ copy_if_exists "prompts"
 copy_if_exists "migrations"
 copy_if_exists "scripts"
 copy_if_exists "pi_app"
-copy_if_exists "services/wa-web-bridge"
+copy_if_exists "services/wa-web-bridge/index.js"
+copy_if_exists "services/wa-web-bridge/package.json"
+copy_if_exists "services/wa-web-bridge/package-lock.json"
 copy_if_exists "README.md"
 copy_if_exists "README.zh-CN.md"
 copy_if_exists "USAGE.md"
-copy_if_exists "rustclaw"
-copy_if_exists "install-rustclaw-cmd.sh"
+copy_if_exists "agentctl"
+copy_if_exists "install-agent-cmd.sh"
 copy_if_exists "build-ui-nginx.sh"
 copy_if_exists "deploy-ui-nginx.sh"
 copy_if_exists "start-all.sh"
 copy_if_exists "start-all-bin.sh"
 copy_if_exists "component_start"
-copy_if_exists "stop-rustclaw.sh"
+copy_if_exists "stop-agent.sh"
+copy_if_exists "install-agent-cmd.sh"
 copy_if_exists "deploy-github-release.sh"
 while IFS= read -r manifest_path; do
   [[ -n "$manifest_path" ]] || continue
@@ -158,14 +161,14 @@ while IFS= read -r manifest_path; do
   cp -R "$manifest_path" "$STAGE_PROJECT_DIR/$manifest_rel"
 done < <(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
-    --scope all-runners --target "$RUSTCLAW_PACKAGE_TARGET" --format manifests
+    --scope all-runners --target "$APP_PACKAGE_TARGET" --format manifests
 )
-RUSTCLAW_PACKAGE_VERSION="$(rustclaw_version_from_root "$SCRIPT_DIR")"
-if [[ "$RUSTCLAW_PACKAGE_VERSION" == "unknown" ]]; then
-  echo "Unable to resolve RustClaw package version."
+PACKAGE_VERSION="$(app_version_from_root "$SCRIPT_DIR")"
+if [[ "$PACKAGE_VERSION" == "unknown" ]]; then
+  echo "Unable to resolve agent-runtime package version."
   exit 1
 fi
-printf '%s\n' "$RUSTCLAW_PACKAGE_VERSION" > "$STAGE_PROJECT_DIR/VERSION"
+printf '%s\n' "$PACKAGE_VERSION" > "$STAGE_PROJECT_DIR/VERSION"
 
 if [[ -d "$SCRIPT_DIR/UI/dist" ]]; then
   mkdir -p "$STAGE_PROJECT_DIR/UI"
@@ -179,7 +182,7 @@ for bin in "${REQUIRED_BINS[@]}"; do
   cp -R "$(resolve_release_bin "$bin")" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
 
-RECEIPT_SOURCE_DIR="${RUSTCLAW_SKILL_RECEIPTS_DIR:-$SCRIPT_DIR/target/skill-packages/$RUSTCLAW_PACKAGE_TARGET}"
+RECEIPT_SOURCE_DIR="${APP_SKILL_RECEIPTS_DIR:-$SCRIPT_DIR/target/skill-packages/$APP_PACKAGE_TARGET}"
 if [[ ! -d "$RECEIPT_SOURCE_DIR" ]]; then
   echo "Missing verified proactive skill receipts: $RECEIPT_SOURCE_DIR"
   echo "Run the platform build/projection step before packaging."
@@ -188,19 +191,19 @@ fi
 mkdir -p "$STAGE_PROJECT_DIR/data/skill-packages"
 cp -R "$RECEIPT_SOURCE_DIR/." "$STAGE_PROJECT_DIR/data/skill-packages/"
 
-PRECOMPILED_SOURCE_DIR="${RUSTCLAW_PRECOMPILED_SKILLS_DIR:-$SCRIPT_DIR/target/prebuilt-skill-packages/$RUSTCLAW_PACKAGE_TARGET}"
-SKILL_VERIFY_CLI="${RUSTCLAW_SKILL_VERIFY_CLI:-$SCRIPT_DIR/target/release/rustclaw-skill}"
+PRECOMPILED_SOURCE_DIR="${APP_PRECOMPILED_SKILLS_DIR:-$SCRIPT_DIR/target/prebuilt-skill-packages/$APP_PACKAGE_TARGET}"
+SKILL_VERIFY_CLI="${APP_SKILL_VERIFY_CLI:-$SCRIPT_DIR/target/release/skillctl}"
 PLATFORM_PRECOMPILED_SKILLS=()
 while IFS= read -r skill_name; do
   [[ -n "$skill_name" ]] && PLATFORM_PRECOMPILED_SKILLS+=("$skill_name")
 done < <(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
-    --scope platform-precompiled --target "$RUSTCLAW_PACKAGE_TARGET" --format skills
+    --scope platform-precompiled --target "$APP_PACKAGE_TARGET" --format skills
 )
 if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
   if [[ ! -d "$PRECOMPILED_SOURCE_DIR" ]]; then
     echo "Missing platform Skill Store precompiles: $PRECOMPILED_SOURCE_DIR"
-    echo "Run scripts/precompile_skill_store.sh $RUSTCLAW_PACKAGE_TARGET before packaging."
+    echo "Run scripts/precompile_skill_store.sh $APP_PACKAGE_TARGET before packaging."
     exit 1
   fi
   if [[ ! -x "$SKILL_VERIFY_CLI" ]]; then
@@ -273,22 +276,22 @@ PY
 
 echo "[5.5/6] Packaged scripts already use release defaults."
 
-echo "[6/6] Create package in RustClaw_bundle and current dir..."
-BUNDLE_DIR="${RUSTCLAW_BUNDLE_DIR:-$HOME/RustClaw_bundle}"
+echo "[6/6] Create package in the configured bundle directory and current dir..."
+BUNDLE_DIR="${APP_BUNDLE_DIR:-$HOME/${APP_RELEASE_ARTIFACT_ID}-bundle}"
 mkdir -p "$BUNDLE_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
-PACKAGE_BASENAME="${RUSTCLAW_PACKAGE_BASENAME:-RustClaw-runtime-release-${TS}.tar.gz}"
+PACKAGE_BASENAME="${APP_PACKAGE_BASENAME:-${APP_RELEASE_ARTIFACT_ID}-runtime-release-${TS}.tar.gz}"
 OUT="$BUNDLE_DIR/$PACKAGE_BASENAME"
-tar -czf "$OUT" -C "$STAGE_ROOT" RustClaw
+tar -czf "$OUT" -C "$STAGE_ROOT" "$APP_RELEASE_ARTIFACT_ID"
 LOCAL_OUT="$SCRIPT_DIR/$(basename "$OUT")"
-if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
   cp -f "$OUT" "$LOCAL_OUT"
 fi
 
 cleanup_old_packages() {
   local dir="$1"
   local keep_file="$2"
-  local pattern="$dir/RustClaw-runtime-release-*.tar.gz"
+  local pattern="$dir/${APP_RELEASE_ARTIFACT_ID}-runtime-release-*.tar.gz"
   shopt -s nullglob
   local files=( $pattern )
   shopt -u nullglob
@@ -302,13 +305,13 @@ cleanup_old_packages() {
 
 echo "[6.5/6] Remove older release packages..."
 cleanup_old_packages "$BUNDLE_DIR" "$OUT"
-if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
   cleanup_old_packages "$SCRIPT_DIR" "$LOCAL_OUT"
 fi
 
 echo "Package created: $OUT"
 ls -lh "$OUT"
-if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
   echo "Local copy created: $LOCAL_OUT"
   ls -lh "$LOCAL_OUT"
 fi

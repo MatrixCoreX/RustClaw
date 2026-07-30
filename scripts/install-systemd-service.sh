@@ -3,13 +3,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/product_identity.sh"
 
 ACTION="install"
 WORKSPACE="$ROOT_DIR"
 RUN_USER="${SUDO_USER:-$(id -un)}"
-UNIT_NAME="rustclaw.service"
-UNIT_DIR="${RUSTCLAW_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
-RUNTIME_ENV_SCRIPT="${RUSTCLAW_RUNTIME_ENV_SCRIPT:-}"
+UNIT_NAME="${APP_SERVICE_NAME}.service"
+UNIT_DIR="${APP_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+RUNTIME_ENV_SCRIPT="${APP_RUNTIME_ENV_SCRIPT:-}"
 OUTPUT_PATH=""
 ENABLE_SERVICE=0
 START_SERVICE=0
@@ -20,10 +22,10 @@ Usage:
   bash scripts/install-systemd-service.sh [options]
 
 Options:
-  --workspace PATH       RustClaw workspace/runtime directory
-  --user USER            Operating-system user that runs RustClaw
+  --workspace PATH       Agent workspace/runtime directory
+  --user USER            Operating-system user that runs the Agent runtime
   --runtime-env PATH     Optional shell environment file sourced by startup scripts
-  --unit-name NAME       Systemd unit name (default: rustclaw.service)
+  --unit-name NAME       Systemd unit name (default: configured product service name)
   --unit-dir PATH        Systemd unit directory (default: /etc/systemd/system)
   --output PATH          Render the unit to PATH without installing it
   --print                Render the unit to stdout without installing it
@@ -114,7 +116,7 @@ require_systemd_host() {
     exit 3
   fi
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo "systemctl is unavailable; use direct RustClaw process startup." >&2
+    echo "systemctl is unavailable; use direct Agent process startup." >&2
     exit 3
   fi
   if [[ ! -d /run/systemd/system ]]; then
@@ -139,7 +141,7 @@ if [[ -z "$WORKSPACE" || ! -d "$WORKSPACE" ]]; then
 fi
 WORKSPACE="$(cd "$WORKSPACE" && pwd)"
 
-for required in start-all-bin.sh stop-rustclaw.sh; do
+for required in start-all-bin.sh stop-agent.sh; do
   if [[ ! -f "$WORKSPACE/$required" ]]; then
     echo "Missing runtime script: $WORKSPACE/$required" >&2
     exit 2
@@ -192,15 +194,15 @@ render_unit() {
   local workspace_path home_env_q config_env_q unit_env_q start_q stop_q pid_path
   workspace_path="$(systemd_path "$WORKSPACE")"
   home_env_q="$(systemd_quote "HOME=$RUN_HOME")"
-  config_env_q="$(systemd_quote "RUSTCLAW_CONFIG_PATH=$WORKSPACE/configs/config.toml")"
-  unit_env_q="$(systemd_quote "RUSTCLAW_SYSTEMD_UNIT=$UNIT_NAME")"
+  config_env_q="$(systemd_quote "APP_CONFIG_PATH=$WORKSPACE/configs/config.toml")"
+  unit_env_q="$(systemd_quote "APP_SYSTEMD_UNIT=$UNIT_NAME")"
   start_q="$(systemd_quote "$WORKSPACE/start-all-bin.sh")"
-  stop_q="$(systemd_quote "$WORKSPACE/stop-rustclaw.sh")"
+  stop_q="$(systemd_quote "$WORKSPACE/stop-agent.sh")"
   pid_path="$(systemd_path "$WORKSPACE/.pids/clawd.pid")"
 
   cat <<EOF
 [Unit]
-Description=RustClaw Runtime
+Description=Agent Runtime
 Wants=network-online.target
 After=network-online.target
 
@@ -212,13 +214,13 @@ WorkingDirectory=$workspace_path
 Environment=$home_env_q
 Environment=$config_env_q
 Environment=$unit_env_q
-Environment="RUSTCLAW_MODEL_SELECT=0"
-Environment="RUSTCLAW_LOG_COLOR=0"
+Environment="APP_MODEL_SELECT=0"
+Environment="APP_LOG_COLOR=0"
 Environment="RUST_LOG=info"
 EOF
   if [[ -n "$RUNTIME_ENV_SCRIPT" ]]; then
     printf 'Environment=%s\n' \
-      "$(systemd_quote "RUSTCLAW_RUNTIME_ENV_SCRIPT=$RUNTIME_ENV_SCRIPT")"
+      "$(systemd_quote "APP_RUNTIME_ENV_SCRIPT=$RUNTIME_ENV_SCRIPT")"
   fi
   cat <<EOF
 ExecStart=/bin/bash $start_q release

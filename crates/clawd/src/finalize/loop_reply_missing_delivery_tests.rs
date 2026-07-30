@@ -141,7 +141,7 @@ async fn observed_execution_without_delivery_uses_exact_scalar_path_projection()
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "audio_synthesize",
-        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
     ));
     let mut route = free_route_result();
     route.delivery_required = false;
@@ -168,7 +168,7 @@ async fn observed_execution_without_delivery_uses_exact_scalar_path_projection()
     assert!(!reply.should_fail_task, "reply: {}", reply.text);
     assert_eq!(
         reply.text,
-        "/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"
+        "/home/guagua/agent-runtime/document/media_dry_run/audio_check.mp3"
     );
 }
 
@@ -241,7 +241,7 @@ fn structured_failure_message_is_grounded_in_failed_step() {
                     action_type: "call_skill".to_string(),
                     skill: "run_cmd".to_string(),
                     args: serde_json::json!({
-                        "command": "definitely_missing_command_rustclaw_render_zh_0605"
+                        "command": "definitely_missing_command_agent_render_zh_0605"
                     }),
                     depends_on: vec!["step_1".to_string()],
                     why: String::new(),
@@ -255,10 +255,10 @@ fn structured_failure_message_is_grounded_in_failed_step() {
     loop_state.executed_step_results.push(err_step_result(
         "step_2",
         "run_cmd",
-        "__RC_SKILL_ERROR__:{\"error_kind\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_rustclaw_render_zh_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
+        "__RC_SKILL_ERROR__:{\"error_kind\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_agent_render_zh_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
     ));
     let message =
-        "step_2: definitely_missing_command_rustclaw_render_zh_0605 failed with exit code 127";
+        "step_2: definitely_missing_command_agent_render_zh_0605 failed with exit code 127";
 
     assert!(planned_delivery_identifies_failed_observed_step(
         message,

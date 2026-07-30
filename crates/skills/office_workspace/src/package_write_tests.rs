@@ -47,9 +47,9 @@ fn cleanup_respects_age_and_exact_temp_package_names() {
         .file_name()
         .and_then(|name| name.to_str())
         .expect("name");
-    let stale = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
-    let recent = parent.join(format!(".{file_name}.rustclaw-{}.tmp", Uuid::new_v4()));
-    let unrelated = parent.join(format!(".{file_name}.rustclaw-not-a-uuid.tmp"));
+    let stale = parent.join(format!(".{file_name}.agent-{}.tmp", Uuid::new_v4()));
+    let recent = parent.join(format!(".{file_name}.agent-{}.tmp", Uuid::new_v4()));
+    let unrelated = parent.join(format!(".{file_name}.agent-not-a-uuid.tmp"));
     std::fs::write(&stale, b"stale").expect("stale");
     std::fs::write(&recent, b"recent").expect("recent");
     std::fs::write(&unrelated, b"unrelated").expect("unrelated");

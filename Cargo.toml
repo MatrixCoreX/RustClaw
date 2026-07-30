@@ -59,7 +59,7 @@ members = [
 version = "0.1.8"
 edition = "2021"
 license = "MIT"
-authors = ["RustClaw"]
+authors = ["Agent System Contributors"]
 repository = ""
 
 [patch.crates-io]

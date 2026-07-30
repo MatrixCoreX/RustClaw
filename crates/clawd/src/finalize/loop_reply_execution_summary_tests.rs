@@ -303,7 +303,7 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "system_basic",
-        r#"{"action":"extract_field","field_path":"name","value_text":"rustclaw-nl-fixture"}"#,
+        r#"{"action":"extract_field","field_path":"name","value_text":"agent-runtime-nl-fixture"}"#,
     ));
     let mut route = scalar_route_result();
     route.response_shape = crate::OutputResponseShape::Strict;
@@ -312,11 +312,11 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
         output_contract: Some(route.clone()),
         ..Default::default()
     };
-    let mut delivery = vec!["rustclaw-nl-fixture".to_string()];
+    let mut delivery = vec!["agent-runtime-nl-fixture".to_string()];
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery, vec!["rustclaw-nl-fixture"]);
+    assert_eq!(delivery, vec!["agent-runtime-nl-fixture"]);
     assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
 }
 
@@ -331,18 +331,18 @@ fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"description","value_text":"Local fixture package for RustClaw NL regression tests"}"#,
+        r#"{"action":"extract_field","exists":true,"field_path":"description","value_text":"Local fixture package for Agent Runtime NL regression tests"}"#,
     ));
     let mut delivery = vec![
         "**実行過程**\n1. ツール `config_basic`を呼び出しました".to_string(),
-        "Local fixture package for RustClaw NL regression tests".to_string(),
+        "Local fixture package for Agent Runtime NL regression tests".to_string(),
     ];
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
     assert_eq!(
         delivery,
-        vec!["Local fixture package for RustClaw NL regression tests"]
+        vec!["Local fixture package for Agent Runtime NL regression tests"]
     );
     assert!(!delivery
         .iter()
@@ -362,9 +362,9 @@ fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_edit",
-        r#"{"action":"guard_config","format":"toml","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","risk_count":3,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true","telegram.sendfile.full_access=true"]}"#,
+        r#"{"action":"guard_config","format":"toml","path":"/home/guagua/agent-runtime/configs/config.toml","resolved_path":"/home/guagua/agent-runtime/configs/config.toml","risk_count":3,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true","telegram.sendfile.full_access=true"]}"#,
     ));
-    let answer = "Found 3 config risk(s) in `/home/guagua/rustclaw/configs/config.toml`: tools.allow_sudo=true; tools.allow_path_outside_workspace=true; telegram.sendfile.full_access=true.";
+    let answer = "Found 3 config risk(s) in `/home/guagua/agent-runtime/configs/config.toml`: tools.allow_sudo=true; tools.allow_path_outside_workspace=true; telegram.sendfile.full_access=true.";
     let mut delivery = vec![
         "**実行過程**\n1. スキル `config_edit`（action=guard_config）を呼び出しました".to_string(),
         answer.to_string(),
@@ -478,14 +478,15 @@ fn execution_summary_suppressed_for_multi_structured_scalar_synthesis() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "config_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw-nl-fixture"}"#,
+        r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"agent-runtime-nl-fixture"}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "config_basic",
         r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd"}"#,
     ));
-    loop_state.last_publishable_synthesis_output = Some("rustclaw-nl-fixture != clawd".to_string());
+    loop_state.last_publishable_synthesis_output =
+        Some("agent-runtime-nl-fixture != clawd".to_string());
     let mut route = free_route_result();
     route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
@@ -548,7 +549,7 @@ fn execution_summary_is_not_attached_for_multiple_execution_steps() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     loop_state
         .executed_step_results
@@ -876,20 +877,20 @@ fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(free_route_result()),
         ..Default::default()
     };
-    let mut delivery = vec!["/home/guagua/rustclaw".to_string()];
+    let mut delivery = vec!["/home/guagua/agent-runtime".to_string()];
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
     assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
-        Some("/home/guagua/rustclaw")
+        Some("/home/guagua/agent-runtime")
     );
     assert!(delivery
         .iter()
@@ -908,7 +909,7 @@ fn execution_summary_skips_for_exact_observation_output_route() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "run_cmd",
-        "/home/guagua/rustclaw\n",
+        "/home/guagua/agent-runtime\n",
     ));
 
     assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
@@ -1036,10 +1037,10 @@ fn execution_summary_skips_for_exact_sentence_count_contract() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "doc_parse",
-        "RustClaw is a local Rust agent runtime centered on clawd.",
+        "Agent Runtime is a local Rust agent runtime centered on clawd.",
     ));
     let mut delivery = vec![
-        "RustClaw 是一个本地 Rust agent 运行时。它以 clawd 为核心。它面向多渠道任务执行。"
+        "Agent Runtime 是一个本地 Rust agent 运行时。它以 clawd 为核心。它面向多渠道任务执行。"
             .to_string(),
     ];
 
@@ -1242,7 +1243,7 @@ fn execution_summary_suppressed_for_path_inspection_contract() {
     route.response_shape = OutputResponseShape::OneSentence;
     route.requires_content_evidence = false;
     route.locator_kind = OutputLocatorKind::Path;
-    route.locator_hint = "rustclaw.service".to_string();
+    route.locator_hint = "agent-runtime.service".to_string();
     route.selection.structured_field_selector = Some("exists,path".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
         output_contract: Some(route.clone()),
@@ -1252,13 +1253,13 @@ fn execution_summary_suppressed_for_path_inspection_contract() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_search",
-        r#"{"action":"find_name","count":1,"results":["rustclaw.service"]}"#,
+        r#"{"action":"find_name","count":1,"results":["agent-runtime.service"]}"#,
     ));
-    let mut delivery = vec!["有，路径：rustclaw.service".to_string()];
+    let mut delivery = vec!["有，路径：agent-runtime.service".to_string()];
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery, vec!["有，路径：rustclaw.service"]);
+    assert_eq!(delivery, vec!["有，路径：agent-runtime.service"]);
     assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
 }
 
@@ -1273,16 +1274,16 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_search",
-        r#"{"action":"find_name","count":1,"results":["rustclaw.service"],"root":""}"#,
+        r#"{"action":"find_name","count":1,"results":["agent-runtime.service"],"root":""}"#,
     ));
-    let mut delivery = vec!["有，路径：rustclaw.service".to_string()];
+    let mut delivery = vec!["有，路径：agent-runtime.service".to_string()];
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
     assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
-        Some("有，路径：rustclaw.service")
+        Some("有，路径：agent-runtime.service")
     );
     assert!(delivery
         .iter()

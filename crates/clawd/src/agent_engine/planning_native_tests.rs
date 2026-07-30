@@ -453,7 +453,7 @@ fn native_respond_projects_matching_machine_fields_without_model_path_guessing()
                 "output": {
                     "path": "/workspace/README.md",
                     "line_count": 844,
-                    "first_line": "# RustClaw"
+                    "first_line": "# Agent Runtime"
                 }
             }),
         ));
@@ -466,7 +466,7 @@ fn native_respond_projects_matching_machine_fields_without_model_path_guessing()
             "fields": [
                 {"name": "path", "value_json": "\"/workspace/README.md\""},
                 {"name": "line_count", "value_json": "844"},
-                {"name": "first_line", "value_json": "\"# RustClaw\""}
+                {"name": "first_line", "value_json": "\"# Agent Runtime\""}
             ],
             "observed_fields": [],
             "exact_field_count": 3
@@ -489,7 +489,7 @@ fn native_respond_projects_matching_machine_fields_without_model_path_guessing()
         json!({
             "path": "/workspace/README.md",
             "line_count": 844,
-            "first_line": "# RustClaw"
+            "first_line": "# Agent Runtime"
         })
     );
 

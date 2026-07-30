@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn single_file_delivery_rejects_token_mixed_with_prose() {
     let root = std::env::temp_dir().join(format!(
-        "rustclaw-answer-verifier-token-only-{}",
+        "agent-runtime-answer-verifier-token-only-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).expect("create temp root");
@@ -164,19 +164,23 @@ fn scalar_json_read_range_candidate_can_satisfy_field_value_gap() {
                 "extra": {
                     "action": "read_range",
                     "path": "/tmp/package.json",
-                    "excerpt": "1|{\n2|  \"name\": \"rustclaw\",\n3|  \"private\": true\n4|}"
+                    "excerpt": "1|{\n2|  \"name\": \"agent-runtime\",\n3|  \"private\": true\n4|}"
                 },
-                "text": "{\"action\":\"read_range\",\"path\":\"/tmp/package.json\",\"excerpt\":\"1|{\\n2|  \\\"name\\\": \\\"rustclaw\\\",\\n3|  \\\"private\\\": true\\n4|}\"}"
+                "text": "{\"action\":\"read_range\",\"path\":\"/tmp/package.json\",\"excerpt\":\"1|{\\n2|  \\\"name\\\": \\\"agent-runtime\\\",\\n3|  \\\"private\\\": true\\n4|}\"}"
             })
             .to_string(),
         ));
 
     assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
     assert!(structurally_satisfies_answer_contract(
-        &route, &journal, "rustclaw"
+        &route,
+        &journal,
+        "agent-runtime"
     ));
     assert!(structural_satisfaction_can_skip_verifier(
-        &route, &journal, "rustclaw"
+        &route,
+        &journal,
+        "agent-runtime"
     ));
 }
 
@@ -497,12 +501,12 @@ fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
         .push(crate::task_journal::TaskJournalStepTrace::ok(
             "step_think",
             "think",
-            json!({"path": "/tmp/rustclaw/report.md"}).to_string(),
+            json!({"path": "/tmp/agent-runtime/report.md"}).to_string(),
         ));
     assert!(!structurally_satisfies_answer_contract(
         &path_route,
         &path_journal,
-        "/tmp/rustclaw/report.md"
+        "/tmp/agent-runtime/report.md"
     ));
 
     let mut scalar_route = route_with_mode();
@@ -544,18 +548,17 @@ fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
             "fs_basic",
             json!({
                 "action": "write_text",
-                "path": "/tmp/rustclaw/report.md"
+                "path": "/tmp/agent-runtime/report.md"
             })
             .to_string(),
         ));
 
-    assert!(
-        observed_single_path_values_from_evidence_map(&journal).contains("/tmp/rustclaw/report.md")
-    );
+    assert!(observed_single_path_values_from_evidence_map(&journal)
+        .contains("/tmp/agent-runtime/report.md"));
     assert!(structurally_satisfies_answer_contract(
         &route,
         &journal,
-        "/tmp/rustclaw/report.md"
+        "/tmp/agent-runtime/report.md"
     ));
 }
 

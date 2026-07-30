@@ -86,6 +86,9 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(execution_mode) = mapping.execution_mode {
         parts.push(format!("execution_mode={}", execution_mode.as_token()));
     }
+    if let Some(timeout_seconds) = mapping.timeout_seconds {
+        parts.push(format!("timeout_seconds={timeout_seconds}"));
+    }
     if let Some(async_adapter_kind) = mapping.async_adapter_kind.as_deref() {
         parts.push(format!("async_adapter_kind={async_adapter_kind}"));
     }
@@ -317,15 +320,25 @@ pub(crate) fn planner_loadable_capability_group_names_for_task(
     task: &ClaimedTask,
     loaded_skills: &BTreeSet<String>,
 ) -> Vec<String> {
+    planner_loadable_capability_group_members_for_task(state, task, loaded_skills)
+        .into_keys()
+        .collect()
+}
+
+pub(crate) fn planner_loadable_capability_group_members_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    loaded_skills: &BTreeSet<String>,
+) -> BTreeMap<String, Vec<String>> {
     if child_allowed_capabilities(state, task).is_some() {
-        return Vec::new();
+        return BTreeMap::new();
     }
     let Some(registry) = state.get_skills_registry() else {
-        return Vec::new();
+        return BTreeMap::new();
     };
     let mut skills = state.planner_available_skills_for_task(task);
     skills.sort();
-    skills
+    let loadable_skills = skills
         .into_iter()
         .filter(|skill| {
             registry.get(skill).is_some_and(|entry| {
@@ -334,7 +347,50 @@ pub(crate) fn planner_loadable_capability_group_names_for_task(
                     && !entry.planner_capabilities.is_empty()
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let exact_skill_tokens = loadable_skills.iter().cloned().collect::<BTreeSet<_>>();
+    let mut groups = loadable_skills
+        .iter()
+        .map(|skill| (skill.clone(), vec![skill.clone()]))
+        .collect::<BTreeMap<_, _>>();
+
+    for skill in &loadable_skills {
+        let Some(group) = registry
+            .get(skill)
+            .and_then(|entry| entry.group.as_deref())
+            .and_then(planner_registry_group_token)
+        else {
+            continue;
+        };
+        if exact_skill_tokens.contains(&group) {
+            continue;
+        }
+        groups.entry(group).or_default().push(skill.clone());
+    }
+    groups
+}
+
+fn planner_registry_group_token(group: &str) -> Option<String> {
+    let mut token = String::with_capacity(group.len());
+    let mut last_was_separator = false;
+    for ch in group.trim().chars() {
+        let normalized = if ch.is_ascii_alphanumeric() {
+            last_was_separator = false;
+            ch.to_ascii_lowercase()
+        } else if matches!(ch, '_' | '-' | '.') {
+            last_was_separator = false;
+            ch
+        } else {
+            if last_was_separator {
+                continue;
+            }
+            last_was_separator = true;
+            '_'
+        };
+        token.push(normalized);
+    }
+    let token = token.trim_matches('_');
+    (!token.is_empty() && token.len() <= 64).then(|| token.to_string())
 }
 
 fn planner_native_capability_groups_for_task_filtered(

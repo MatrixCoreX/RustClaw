@@ -71,9 +71,15 @@ export function groupSkillNames(
   };
 }
 
-export function skillDescription(lang: UiLanguage, itemDescription?: string | null): string {
-  const description = itemDescription?.trim();
+export function skillDescription(
+  lang: UiLanguage,
+  itemDescription?: string | null,
+  itemDescriptionZh?: string | null,
+): string {
+  const description = (lang === "zh" ? itemDescriptionZh : itemDescription)?.trim();
   if (description) return description;
+  const fallbackDescription = itemDescription?.trim();
+  if (fallbackDescription) return fallbackDescription;
   return copy(lang, "该技能暂无说明。", "No description is available for this skill.");
 }
 
@@ -127,7 +133,7 @@ export function skillUsageExamples(item: SkillListItem | undefined, lang: UiLang
   const examples = (item.planner_capability_details ?? [])
     .slice(0, 5)
     .map((detail) => capabilityExample(detail, lang));
-  const description = skillDescription(lang, item.description);
+  const description = skillDescription(lang, item.description, item.description_zh);
   const generic = lang === "zh"
     ? [
         `请帮我处理这项需求：${description}`,

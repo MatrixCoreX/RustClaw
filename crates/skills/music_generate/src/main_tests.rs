@@ -89,7 +89,7 @@ fn preview_action_forces_dry_run_without_writing_file() {
 }
 
 #[test]
-fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
+fn dedicated_provider_empty_connection_falls_back_to_shared_minimax_connection() {
     let mut cfg = RootConfig::default();
     cfg.llm.minimax = Some(VendorConfig {
         base_url: "https://shared.example/v1".to_string(),
@@ -99,7 +99,7 @@ fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
         adapter_kind: None,
     });
     cfg.music_generation.providers.minimax = Some(VendorConfig {
-        base_url: "https://dedicated.example/v1".to_string(),
+        base_url: String::new(),
         api_key: String::new(),
         model: "music-2.6".to_string(),
         timeout_seconds: None,
@@ -108,7 +108,7 @@ fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
 
     let resolved = resolved_vendor_config(&cfg, VendorKind::MiniMax).expect("provider");
 
-    assert_eq!(resolved.base_url, "https://dedicated.example/v1");
+    assert_eq!(resolved.base_url, "https://shared.example/v1");
     assert_eq!(resolved.api_key, "shared-key");
     assert_eq!(resolved.model, "music-2.6");
     assert_eq!(resolved.timeout_seconds, Some(88));
@@ -145,7 +145,7 @@ fn custom_provider_can_dry_run_with_explicit_adapter_kind() {
 
 #[test]
 fn resolve_output_path_uses_requested_workspace_path() {
-    let workspace = PathBuf::from("/tmp/rustclaw-music-test");
+    let workspace = PathBuf::from("/tmp/agent-runtime-music-test");
     let out = resolve_output_path(&workspace, "music/download", Some("tmp/song.mp3"), "mp3")
         .expect("output path");
     assert_eq!(out, workspace.join("tmp/song.mp3"));
@@ -292,7 +292,7 @@ fn cancel_live_without_provider_adapter_returns_structured_contract() {
 fn unique_temp_root(name: &str) -> PathBuf {
     let mut root = std::env::temp_dir();
     root.push(format!(
-        "rustclaw-{name}-{}",
+        "agent-runtime-{name}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")

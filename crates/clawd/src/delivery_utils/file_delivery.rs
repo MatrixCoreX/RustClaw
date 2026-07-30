@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rustclaw_fs_discovery::{
+use fs_discovery::{
     discover, Completeness, DiscoveryBudget, DiscoveryPolicy, DiscoveryRequest, DiscoverySelector,
     MatchMode, TargetKind,
 };
@@ -343,7 +343,7 @@ fn resolve_file_delivery_locator(
         system_root,
         project_root,
         None,
-        rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
+        fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
     )
 }
 
@@ -696,7 +696,7 @@ pub(crate) fn scan_filename_matches(project_root: &Path, file_name: &str) -> Fil
         project_root,
         file_name,
         None,
-        rustclaw_fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
+        fs_discovery::DEFAULT_HARD_ENTRY_LIMIT,
     )
     .result
 }

@@ -15,6 +15,7 @@ fn state() -> AppState {
     let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
     let mut state = AppState::test_default_with_fixture_provider();
     state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     })));

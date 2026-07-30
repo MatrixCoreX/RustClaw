@@ -1,6 +1,6 @@
 # clawcli Exec 与 Replay
 
-`clawcli exec` 是 RustClaw 面向脚本的任务 runner。它提交 `ask` 任务或恢复已有任务，默认等待，返回稳定 exit code，并可为 CI 写入机器可读 artifact。
+`clawcli exec` 是 Agent Runtime 面向脚本的任务 runner。它提交 `ask` 任务或恢复已有任务，默认等待，返回稳定 exit code，并可为 CI 写入机器可读 artifact。
 
 `clawcli replay` 导出和检查已记录任务 bundle，默认不调用实时模型 provider 或工具。
 
@@ -35,7 +35,7 @@ clawcli exec --resume-task-id "$TASK_ID" --json "continue from the current check
 ```bash
 clawcli exec \
   --json \
-  --artifact-dir artifacts/rustclaw-exec \
+  --artifact-dir artifacts/agent-runtime-exec \
   --timeout-seconds 600 \
   "make the requested code change and run the focused tests"
 ```
@@ -68,7 +68,7 @@ Profile 只设置 CLI 机器参数，不路由自然语言、不选技能、不�
 | Profile | 默认值 |
 | --- | --- |
 | `quick` | `timeout_seconds=120` |
-| `coding` | `timeout_seconds=900`，`artifact_dir=artifacts/rustclaw-exec/coding` |
+| `coding` | `timeout_seconds=900`，`artifact_dir=artifacts/agent-runtime-exec/coding` |
 | `release-gate` | `timeout_seconds=600`，`fail_on_background=true` |
 | `long-tail` | `timeout_seconds=3600`，`continue_on_background=true` |
 
@@ -154,7 +154,7 @@ clawcli session fork "$TASK_ID" "$TASK_ID.fork" --json
 clawcli session delete "$TASK_ID" --json
 ```
 
-Session store 位于 `RUSTCLAW_CLAWCLI_SESSION_STORE`、`$XDG_STATE_HOME/rustclaw/` 或 `~/.local/state/rustclaw/`，只保存 CLI 导航机器元数据，不是服务端语义路由源。
+Session store 位于 `APP_CLAWCLI_SESSION_STORE`、`$XDG_STATE_HOME/agent-runtime/` 或 `~/.local/state/agent-runtime/`，只保存 CLI 导航机器元数据，不是服务端语义路由源。
 
 ## CI 示例
 

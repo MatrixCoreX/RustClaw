@@ -537,7 +537,7 @@ fn x_preview_output_counts_as_generic_content_evidence() {
                 "status": "ok",
                 "action": "post",
                 "source_skill": "x",
-                "draft_text": "RustClaw release notes",
+                "draft_text": "Agent Runtime release notes",
                 "outcome": "dry_run",
                 "dry_run": true,
                 "published": false
@@ -645,14 +645,14 @@ fn json_wrapped_read_range_excerpt_samples_tail_line_evidence() {
             "action": "read_range",
             "excerpt": excerpt,
             "path": "scripts/nl_tests/fixtures/device_local/logs/app.log",
-            "resolved_path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log"
+            "resolved_path": "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/logs/app.log"
         })
         .to_string(),
         "extra": {
             "action": "read_range",
             "excerpt": excerpt,
             "path": "scripts/nl_tests/fixtures/device_local/logs/app.log",
-            "resolved_path": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log"
+            "resolved_path": "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/logs/app.log"
         }
     })
     .to_string();
@@ -684,7 +684,7 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
         "overall_status": "healthy",
         "clawd_log": {"exists": true, "keyword_error_count": 43, "modified_ts": 1779824680, "size_bytes": 1046356},
         "clawd_process_count": 1,
-        "log_dir": "/home/guagua/rustclaw/logs",
+        "log_dir": "/home/guagua/agent-runtime/logs",
         "system_health": {
             "arch": "x86_64",
             "cpu_count": 8,
@@ -704,7 +704,7 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
         },
         "telegramd_log": {"exists": true, "keyword_error_count": 1, "modified_ts": 1779821271, "size_bytes": 942},
         "telegramd_process_count": 0,
-        "workspace_root": "/home/guagua/rustclaw"
+        "workspace_root": "/home/guagua/agent-runtime"
     });
     let output = json!({ "extra": output, "text": "health_check structured output" });
 
@@ -861,7 +861,7 @@ fn unstructured_secret_bearing_text_is_not_machine_evidence() {
     let output = concat!(
         "The files are builtin_write_smoke.txt, full_suite_trace_note.txt, gen-1778122040.png, ",
         "and hello.sh; secrets sk-123456789012345678901234 and ",
-        "rustclaw-secret://v1/12345678-1234-1234-1234-123456789abc should not be exposed."
+        "agent-secret://v1/12345678-1234-1234-1234-123456789abc should not be exposed."
     );
 
     assert!(observed_evidence_from_output(Some(output)).is_none());
@@ -944,7 +944,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
             "files": ["entry_0.txt", "entry_2.txt", "entry_4.txt"],
             "other": []
         },
-        "path": "/home/guagua/rustclaw",
+        "path": "/home/guagua/agent-runtime",
         "sort_by": "mtime_desc"
     });
     let output_text = output.to_string();
@@ -1039,15 +1039,15 @@ fn wrapped_system_basic_info_counts_as_generic_field_value_evidence() {
                 "extra": {
                     "arch": "x86_64",
                     "current_user": "guagua",
-                    "cwd": "/home/guagua/rustclaw",
+                    "cwd": "/home/guagua/agent-runtime",
                     "hostname": "ThinkPad-X1",
                     "os": "linux",
                     "pid": 2268074,
                     "process_rss_bytes": 3084288,
                     "uptime_seconds": "868570.44",
-                    "workspace_root": "/home/guagua/rustclaw"
+                    "workspace_root": "/home/guagua/agent-runtime"
                 },
-                "text": "{\"arch\":\"x86_64\",\"current_user\":\"guagua\",\"cwd\":\"/home/guagua/rustclaw\",\"hostname\":\"ThinkPad-X1\",\"os\":\"linux\",\"pid\":2268074,\"process_rss_bytes\":3084288,\"uptime_seconds\":\"868570.44\",\"workspace_root\":\"/home/guagua/rustclaw\"}"
+                "text": "{\"arch\":\"x86_64\",\"current_user\":\"guagua\",\"cwd\":\"/home/guagua/agent-runtime\",\"hostname\":\"ThinkPad-X1\",\"os\":\"linux\",\"pid\":2268074,\"process_rss_bytes\":3084288,\"uptime_seconds\":\"868570.44\",\"workspace_root\":\"/home/guagua/agent-runtime\"}"
             })
             .to_string(),
         ),
@@ -1087,10 +1087,10 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
         })
         .collect::<Vec<_>>();
     let output = json!({
-        "text": "RustClaw is a local Rust agent runtime.",
+        "text": "Agent Runtime is a local Rust agent runtime.",
         "sections": sections,
         "metadata": {
-            "path": "/home/guagua/rustclaw/README.md",
+            "path": "/home/guagua/agent-runtime/README.md",
             "type": "md"
         },
         "status": "ok"
@@ -1126,8 +1126,8 @@ fn run_cmd_process_structured_output_counts_as_generic_command_evidence() {
             "schema_version": 1,
             "action": "run",
             "status": "ok",
-            "command_output": "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml",
-            "stdout": "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml",
+            "command_output": "154421 clawd /home/guagua/agent-runtime/target/release/clawd --config /home/guagua/agent-runtime/configs/config.toml",
+            "stdout": "154421 clawd /home/guagua/agent-runtime/target/release/clawd --config /home/guagua/agent-runtime/configs/config.toml",
             "stderr": "",
             "exit_code": 0,
             "complete": true

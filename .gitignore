@@ -13,11 +13,13 @@
 /data/
 /release-bin/
 /skills_output/
-/.rustclaw/
+/.agent-runtime/
 /plan/
 /docs/*
 !/docs/architecture/
 !/docs/architecture/*.md
+!/docs/schemas/
+!/docs/schemas/*.json
 /document/
 /scripts/nl_suite_logs/
 /skill_develop/.cache/
@@ -35,10 +37,7 @@ Untitled
 /UI/.vite/
 /pi_app/dist/
 /pi_app/build/
-/pi_app/.rustclaw_small_screen_key
-/pi_app/.rustclaw_small_screen_lang
-/pi_app/.rustclaw_small_screen_theme
-/pi_app/.rustclaw_small_screen_show_*
+/pi_app/.agent_small_screen_config.json
 
 # =============================================================================
 # Editor / OS
