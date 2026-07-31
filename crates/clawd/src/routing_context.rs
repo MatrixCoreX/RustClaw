@@ -30,6 +30,7 @@ fn query_recent_execution_rows(
     user_id: i64,
     chat_id: i64,
     user_key: Option<&str>,
+    conversation_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String, String, String)>> {
     let mut stmt = db.prepare(
@@ -42,21 +43,35 @@ fn query_recent_execution_rows(
              (?3 IS NOT NULL AND user_key = ?3)
              OR (?3 IS NULL AND (user_key IS NULL OR TRIM(user_key) = ''))
            )
+           AND (
+             ?4 IS NULL
+             OR (
+               json_valid(payload_json)
+               AND json_type(payload_json, '$.conversation_id') = 'text'
+               AND json_extract(payload_json, '$.conversation_id') = ?4
+             )
+           )
          ORDER BY CAST(updated_at AS INTEGER) DESC
-         LIMIT ?4",
+         LIMIT ?5",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
-        let kind: String = row.get(0)?;
-        let payload_json: String = row.get(1)?;
-        let result_json: String = row.get(2)?;
-        let updated_at: String = row.get(3)?;
-        Ok((kind, payload_json, result_json, updated_at))
-    })?;
+    let rows = stmt.query_map(
+        params![user_id, chat_id, user_key, conversation_id, limit as i64],
+        |row| {
+            let kind: String = row.get(0)?;
+            let payload_json: String = row.get(1)?;
+            let result_json: String = row.get(2)?;
+            let updated_at: String = row.get(3)?;
+            Ok((kind, payload_json, result_json, updated_at))
+        },
+    )?;
     let mut out = Vec::new();
     for row in rows {
-        let row = row?;
+        let mut row = row?;
         if should_skip_recent_execution_row(state, &row.0, &row.2) {
-            continue;
+            // Keep the newer turn as a structural recency barrier so an older
+            // capability target cannot become the apparent latest anchor.
+            // Only omit the transient assistant reply from prompt-visible data.
+            row.2 = r#"{"text":"[transient_assistant_reply_omitted]"}"#.to_string();
         }
         out.push(row);
     }
@@ -119,6 +134,7 @@ fn load_recent_execution_rows(
     task: &ClaimedTask,
     limit: usize,
 ) -> Vec<(String, String, String, String)> {
+    let conversation_id = crate::conversation_state::task_conversation_id(task);
     let user_key = task
         .user_key
         .as_deref()
@@ -137,6 +153,7 @@ fn load_recent_execution_rows(
         task.user_id,
         task.chat_id,
         user_key,
+        conversation_id.as_deref(),
         limit,
     ) {
         Ok(v) => v,
@@ -153,6 +170,7 @@ fn load_recent_execution_rows(
             task.user_id,
             legacy_chat_id,
             user_key,
+            conversation_id.as_deref(),
             limit,
         )
         .unwrap_or_default();
@@ -193,12 +211,10 @@ fn render_recent_execution_context(
 }
 
 fn render_recent_execution_anchor_context(rows: &[(String, String, String, String)]) -> String {
-    let Some(anchor) = rows
-        .iter()
-        .find_map(|(kind, payload_json, result_json, updated_at)| {
-            extract_execution_anchor(kind, payload_json, result_json, updated_at)
-        })
-    else {
+    let Some((kind, payload_json, result_json, updated_at)) = rows.first() else {
+        return "<none>".to_string();
+    };
+    let Some(anchor) = extract_execution_anchor(kind, payload_json, result_json, updated_at) else {
         return "<none>".to_string();
     };
 
@@ -250,7 +266,7 @@ fn render_recent_execution_anchor_context(rows: &[(String, String, String, Strin
         truncate_snippet(&anchor.result, 220)
     ));
     lines.push(
-        "- anchor_rule=Use this anchor only as supporting evidence for genuinely short follow-up requests. Reuse it only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this anchor override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.".to_string(),
+        "- anchor_rule=Use this anchor only as supporting evidence for genuinely short follow-up requests. Reuse it only when the current request or recent context already binds exactly one concrete target of the correct type. A concrete target in a newer recent turn takes precedence; never replace it with this older anchor target. Do not let this anchor override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.".to_string(),
     );
     format!("### RECENT_EXECUTION_ANCHOR\n{}", lines.join("\n"))
 }

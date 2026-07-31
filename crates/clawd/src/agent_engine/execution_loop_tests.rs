@@ -3,7 +3,7 @@ use super::{
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
     check_repeat_action_guard, finalize_execute_round_outcome,
     prior_structured_observation_satisfies_read_only_action,
-    registry_allows_repeated_idempotent_action,
+    registry_allows_repeated_idempotent_action, safe_command_preview,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
@@ -62,11 +62,11 @@ fn task_fixture(id: &str) -> crate::ClaimedTask {
 }
 
 #[test]
-fn active_tool_event_is_machine_only_and_omits_arguments() {
+fn active_tool_event_includes_only_a_redacted_command_preview() {
     let action = crate::AgentAction::CallCapability {
         capability: "terminal.run_command".to_string(),
         args: serde_json::json!({
-            "command": "private command",
+            "command": "curl https://private.example/?token=secret",
             "user_text": "do not publish this",
         }),
     };
@@ -82,9 +82,27 @@ fn active_tool_event_is_machine_only_and_omits_arguments() {
     assert_eq!(payload["action_ref"], "terminal.run_command");
     assert_eq!(payload["requested_capability"], "terminal.run_command");
     assert!(payload["tool_or_skill"].is_null());
+    assert_eq!(payload["command_preview"], "curl");
     assert!(payload.get("args").is_none());
-    assert!(!payload.to_string().contains("private command"));
+    assert!(!payload.to_string().contains("private.example"));
+    assert!(!payload.to_string().contains("secret"));
     assert!(!payload.to_string().contains("do not publish this"));
+}
+
+#[test]
+fn command_preview_keeps_a_safe_executable_and_subcommand_only() {
+    assert_eq!(
+        safe_command_preview("cargo test -p clawd"),
+        Some("cargo test".to_string())
+    );
+    assert_eq!(
+        safe_command_preview("git status --short"),
+        Some("git status".to_string())
+    );
+    assert_eq!(
+        safe_command_preview("TOKEN=secret ffmpeg -i private.mp4 output.mp4"),
+        Some("ffmpeg".to_string())
+    );
 }
 
 fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {

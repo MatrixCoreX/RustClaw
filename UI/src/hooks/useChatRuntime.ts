@@ -24,6 +24,10 @@ import {
   projectConversationHistory,
   type ServerChatThreadProjection,
 } from "../lib/chat-history";
+import {
+  emptyChatActivity,
+  reduceChatActivity,
+} from "../lib/chat-activity";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import {
   appStorageKey,
@@ -183,6 +187,7 @@ export function useChatRuntime({
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [chatWorking, setChatWorking] = useState(false);
+  const [chatActivity, setChatActivity] = useState(emptyChatActivity);
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingAvailability] = useState(voiceRecordingAvailability);
   const chatVoiceRecordingSupported = chatVoiceRecordingAvailability === "available";
@@ -745,6 +750,7 @@ export function useChatRuntime({
     chatSendingValueRef.current = true;
     setChatSending(true);
     setChatWorking(true);
+    setChatActivity(emptyChatActivity());
     try {
       const presentation = new AssistantPresentationReducer();
       let streamedAssistantMessageId: string | null = null;
@@ -752,6 +758,7 @@ export function useChatRuntime({
         apiFetch,
         taskId,
         async (event) => {
+          setChatActivity((current) => reduceChatActivity(current, event));
           const decoded = decodeAssistantPresentationEvent(event);
           if (!decoded) {
             if (event.event_kind === "task_final") setChatWorking(false);
@@ -1041,6 +1048,7 @@ export function useChatRuntime({
     chatSendingValueRef.current = true;
     setChatSending(true);
     setChatWorking(true);
+    setChatActivity(emptyChatActivity());
     setChatError(null);
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -1195,6 +1203,7 @@ export function useChatRuntime({
       let streamedAssistantMessageId: string | null = null;
       let completedPresentationText: string | null = null;
       await followTaskEventStream(apiFetch, submittedTaskId, async (event) => {
+        setChatActivity((current) => reduceChatActivity(current, event));
         const decoded = decodeAssistantPresentationEvent(event);
         if (!decoded) {
           if (event.event_kind === "task_final") setChatWorking(false);
@@ -1337,6 +1346,7 @@ export function useChatRuntime({
     activeChatTeachingRunId,
     chatSending,
     chatWorking,
+    chatActivity,
     chatRecording,
     chatVoiceRecordingSupported,
     chatVoiceRecordingAvailability,
@@ -1517,12 +1527,26 @@ export function retainLocalDraftsForPagedRestore(
   current: ChatThreadState,
 ): ChatThreadState {
   const threads = current.threads.filter(
-    (thread) => !threadHasServerHistory(thread) || threadHasPendingTask(thread),
+    (thread) =>
+      threadHasPendingTask(thread) ||
+      (!threadHasServerHistory(thread) && !threadIsPristineWelcome(thread)),
   );
   return {
     activeThreadId: current.activeThreadId,
     threads,
   };
+}
+
+function threadIsPristineWelcome(thread: ChatThreadRecord): boolean {
+  return (
+    !thread.input.trim() &&
+    !thread.teachingMode &&
+    !thread.lastTaskId &&
+    (thread.teachingRuns ?? []).length === 0 &&
+    thread.messages.length === 1 &&
+    thread.messages[0].role === "system" &&
+    thread.messages[0].id.startsWith("chat-system-welcome-")
+  );
 }
 
 function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord | null {

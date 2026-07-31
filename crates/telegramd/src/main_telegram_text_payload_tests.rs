@@ -89,3 +89,11 @@ fn command_example_line_uses_structural_separator_rule() {
     assert!(looks_like_command_example_line("Example: /help"));
     assert!(!looks_like_command_example_line("Example: plain text"));
 }
+
+#[test]
+fn video_file_token_is_classified_as_delivery_not_code() {
+    assert!(has_delivery_prefix("VIDEO_FILE:/tmp/video.mp4"));
+    assert!(!payload_uses_code_block("VIDEO_FILE:/tmp/video.mp4"));
+    assert!(has_delivery_prefix("MUSIC_FILE:/tmp/audio.mp3"));
+    assert!(!payload_uses_code_block("MUSIC_FILE:/tmp/audio.mp3"));
+}

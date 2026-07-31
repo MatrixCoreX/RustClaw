@@ -5211,6 +5211,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cipher",
+ "claw-core",
  "hex",
  "md-5",
  "rand 0.8.5",

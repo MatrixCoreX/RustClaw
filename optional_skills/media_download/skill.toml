@@ -3,7 +3,7 @@ schema_version = 2
 [package]
 name = "media_download"
 version = "0.1.0"
-description = "Download accessible public media, resolve direct media URLs, transcribe local video or audio, OCR local images, and prepare videos for X through structured actions."
+description = "Download public videos and images from Douyin, Kuaishou, Xiaohongshu, TikTok, and YouTube; resolve direct media URLs, transcribe local video or audio, OCR local images, and prepare videos for X through structured actions."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]

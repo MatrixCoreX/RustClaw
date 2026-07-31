@@ -662,6 +662,10 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     );
     assert_eq!(store_item(&initial, "media_download")["installed"], false);
     assert_eq!(
+        store_item(&initial, "media_download")["description_zh"],
+        "支持抖音、快手、小红书、TikTok 和 YouTube：下载可公开访问的视频与图片，解析媒体直链；也可转写本地音视频、识别图片文字，并为 X 准备兼容视频。"
+    );
+    assert_eq!(
         store_item(&initial, "media_download")["source_kind"],
         "bundled_optional"
     );

@@ -1,8 +1,19 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, install_tls_crypto_provider,
-    is_unbound_allowed_command, lark_media_agent_context,
+    is_unbound_allowed_command, lark_media_agent_context, send_lark_answer, LarkConfig,
+    LarkSection,
 };
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::routing::post;
+use axum::{Json, Router};
+use reqwest::Client;
+use serde_json::json;
 use serde_json::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 
 #[test]
 fn tls_crypto_provider_installation_is_idempotent() {
@@ -83,4 +94,108 @@ fn lark_media_agent_context_uses_machine_fields() {
     );
     assert_eq!(value["locator"]["kind"], "workspace_relative_path");
     assert_eq!(value["locator"]["path"], "data/larkd/video/chat/file.mp4");
+}
+
+#[tokio::test]
+async fn lark_outbound_delivery_sends_text_image_and_video_file() {
+    #[derive(Clone, Default)]
+    struct MockState {
+        image_uploads: Arc<AtomicUsize>,
+        file_uploads: Arc<AtomicUsize>,
+        message_types: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn mock_token() -> Json<Value> {
+        Json(json!({
+            "tenant_access_token": "tenant-token",
+            "expire": 7200
+        }))
+    }
+
+    async fn mock_image_upload(State(state): State<MockState>, _body: Bytes) -> Json<Value> {
+        state.image_uploads.fetch_add(1, Ordering::SeqCst);
+        Json(json!({ "code": 0, "data": { "image_key": "image-key" } }))
+    }
+
+    async fn mock_file_upload(State(state): State<MockState>, _body: Bytes) -> Json<Value> {
+        state.file_uploads.fetch_add(1, Ordering::SeqCst);
+        Json(json!({ "code": 0, "data": { "file_key": "file-key" } }))
+    }
+
+    async fn mock_message(
+        State(state): State<MockState>,
+        Json(payload): Json<Value>,
+    ) -> Json<Value> {
+        state
+            .message_types
+            .lock()
+            .expect("message types")
+            .push(payload["msg_type"].as_str().unwrap_or_default().to_string());
+        Json(json!({ "code": 0 }))
+    }
+
+    let mock_state = MockState::default();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock lark");
+    let addr = listener.local_addr().expect("mock lark addr");
+    let app = Router::new()
+        .route(
+            "/open-apis/auth/v3/tenant_access_token/internal",
+            post(mock_token),
+        )
+        .route("/open-apis/im/v1/images", post(mock_image_upload))
+        .route("/open-apis/im/v1/files", post(mock_file_upload))
+        .route("/open-apis/im/v1/messages", post(mock_message))
+        .with_state(mock_state.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock lark");
+    });
+
+    let root = std::env::temp_dir().join(format!(
+        "lark-outbound-media-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("create fixture dir");
+    let image = root.join("image.jpg");
+    let video = root.join("video.mp4");
+    std::fs::write(&image, b"image").expect("write image fixture");
+    std::fs::write(&video, b"video").expect("write video fixture");
+    let answer = format!(
+        "download complete\nIMAGE_FILE:{}\nVIDEO_FILE:{}",
+        image.display(),
+        video.display()
+    );
+    let config = LarkConfig {
+        lark: LarkSection {
+            api_base_url: format!("http://{addr}"),
+            app_id: "app-id".to_string(),
+            app_secret: "app-secret".to_string(),
+            ..LarkSection::default()
+        },
+    };
+    let token_cache = RwLock::new(None);
+    send_lark_answer(
+        &config,
+        &Client::new(),
+        &token_cache,
+        &root,
+        "chat-id",
+        &answer,
+        3500,
+    )
+    .await
+    .expect("send outbound answer");
+
+    assert_eq!(mock_state.image_uploads.load(Ordering::SeqCst), 1);
+    assert_eq!(mock_state.file_uploads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *mock_state.message_types.lock().expect("message types"),
+        vec!["text", "image", "media"]
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture dir");
 }

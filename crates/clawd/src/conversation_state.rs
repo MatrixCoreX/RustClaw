@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::{AppState, ClaimedTask};
 
 const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
+const MAX_CONVERSATION_ID_BYTES: usize = 128;
 
 #[path = "conversation_alias.rs"]
 mod conversation_alias;
@@ -74,6 +75,20 @@ fn effective_user_key(task: &ClaimedTask) -> String {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| format!("anon:{}:{}", task.user_id, task.chat_id))
+}
+
+pub(crate) fn task_conversation_id(task: &ClaimedTask) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(&task.payload_json).ok()?;
+    let conversation_id = payload.get("conversation_id")?.as_str()?.trim();
+    if conversation_id.is_empty()
+        || conversation_id.len() > MAX_CONVERSATION_ID_BYTES
+        || !conversation_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
+    {
+        return None;
+    }
+    Some(conversation_id.to_string())
 }
 
 fn normalized_locale_hint(payload: Option<&Value>) -> Option<String> {

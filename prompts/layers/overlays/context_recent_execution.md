@@ -10,6 +10,7 @@ Version: 2026-07-17.2
 Context contract:
 - Use this block only as supporting evidence for genuinely short follow-up requests.
 - Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type.
+- A concrete target in a newer recent turn takes precedence over an older execution anchor. Never replace that newer target with the anchor's target.
 - Do not let this block override a required clarification.
 - Do not treat an artifact-type noun alone as a concrete target.
 

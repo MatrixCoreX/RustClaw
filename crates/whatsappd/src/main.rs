@@ -1042,7 +1042,16 @@ fn spawn_task_result_delivery(
         match out {
             Ok(answers) => {
                 for answer in answers {
-                    let _ = send_answer(&state, &wa_id, &answer).await;
+                    if let Err(err) = send_answer(&state, &wa_id, &answer).await {
+                        warn!("whatsapp outbound delivery failed: {err}");
+                        let msg = wa_t_with(
+                            &state,
+                            WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                            &[("error", &err.to_string())],
+                            WA_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+                        );
+                        let _ = send_whatsapp_text(&state, &wa_id, &msg).await;
+                    }
                 }
             }
             Err(err) => {
@@ -1060,27 +1069,58 @@ fn spawn_task_result_delivery(
 
 async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Result<()> {
     const IMAGE_PREFIX: &str = "IMAGE_FILE:";
+    const VIDEO_PREFIX: &str = "VIDEO_FILE:";
     const FILE_PREFIX: &str = "FILE:";
     const VOICE_PREFIX: &str = "VOICE_FILE:";
+    const MUSIC_PREFIX: &str = "MUSIC_FILE:";
 
     let image_paths = extract_prefixed_paths(answer, IMAGE_PREFIX);
+    let video_paths = extract_prefixed_paths(answer, VIDEO_PREFIX);
     let file_paths = extract_prefixed_paths(answer, FILE_PREFIX);
     let voice_paths = extract_prefixed_paths(answer, VOICE_PREFIX);
-    let text_without_tokens =
-        strip_prefixed_tokens(answer, &[IMAGE_PREFIX, FILE_PREFIX, VOICE_PREFIX])
-            .trim()
-            .to_string();
+    let music_paths = extract_prefixed_paths(answer, MUSIC_PREFIX);
+    let text_without_tokens = strip_prefixed_tokens(
+        answer,
+        &[
+            IMAGE_PREFIX,
+            VIDEO_PREFIX,
+            FILE_PREFIX,
+            VOICE_PREFIX,
+            MUSIC_PREFIX,
+        ],
+    )
+    .trim()
+    .to_string();
 
     if !text_without_tokens.is_empty() {
         send_whatsapp_text(state, wa_id, &text_without_tokens).await?;
     }
 
     for p in &image_paths {
-        let media_id = upload_media(state, &p, "image/jpeg").await?;
+        let media_id = upload_media(
+            state,
+            p,
+            claw_core::channel_media_limits::WhatsappCloudMediaKind::Image,
+        )
+        .await?;
         send_whatsapp_media_by_id(state, wa_id, "image", &media_id, None).await?;
     }
+    for p in &video_paths {
+        let media_id = upload_media(
+            state,
+            p,
+            claw_core::channel_media_limits::WhatsappCloudMediaKind::Video,
+        )
+        .await?;
+        send_whatsapp_media_by_id(state, wa_id, "video", &media_id, None).await?;
+    }
     for p in &file_paths {
-        let media_id = upload_media(state, &p, "application/octet-stream").await?;
+        let media_id = upload_media(
+            state,
+            p,
+            claw_core::channel_media_limits::WhatsappCloudMediaKind::Document,
+        )
+        .await?;
         let filename = Path::new(&p)
             .file_name()
             .and_then(|v| v.to_str())
@@ -1088,14 +1128,30 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
         send_whatsapp_media_by_id(state, wa_id, "document", &media_id, filename.as_deref()).await?;
     }
     for p in &voice_paths {
-        let media_id = upload_media(state, &p, "audio/ogg").await?;
+        let media_id = upload_media(
+            state,
+            p,
+            claw_core::channel_media_limits::WhatsappCloudMediaKind::Audio,
+        )
+        .await?;
+        send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?;
+    }
+    for p in &music_paths {
+        let media_id = upload_media(
+            state,
+            p,
+            claw_core::channel_media_limits::WhatsappCloudMediaKind::Audio,
+        )
+        .await?;
         send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?;
     }
 
     if text_without_tokens.is_empty()
         && image_paths.is_empty()
+        && video_paths.is_empty()
         && file_paths.is_empty()
         && voice_paths.is_empty()
+        && music_paths.is_empty()
     {
         send_whatsapp_text(state, wa_id, answer).await?;
     }
@@ -1108,7 +1164,7 @@ fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix(prefix) {
             let cleaned = normalize_path_token(rest.trim());
-            if !cleaned.is_empty() && Path::new(cleaned).exists() && Path::new(cleaned).is_file() {
+            if !cleaned.is_empty() {
                 out.push(cleaned.to_string());
             }
         }
@@ -1132,7 +1188,22 @@ fn normalize_path_token(token: &str) -> &str {
     token.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '，' | ',' | ':' | '：' | ';'))
 }
 
-async fn upload_media(state: &AppState, path: &str, mime: &str) -> anyhow::Result<String> {
+async fn upload_media(
+    state: &AppState,
+    path: &str,
+    kind: claw_core::channel_media_limits::WhatsappCloudMediaKind,
+) -> anyhow::Result<String> {
+    let path_ref = Path::new(path);
+    let (mime, max_bytes, media_label) =
+        claw_core::channel_media_limits::whatsapp_cloud_upload_spec(path_ref, kind)
+            .map_err(anyhow::Error::msg)?;
+    claw_core::channel_media_limits::validate_local_media_file(
+        path_ref,
+        "WhatsApp Cloud",
+        media_label,
+        max_bytes,
+    )
+    .map_err(anyhow::Error::msg)?;
     let bytes = fs::read(path).with_context(|| format!("read media file failed: {path}"))?;
     let filename = Path::new(path)
         .file_name()
@@ -1189,6 +1260,7 @@ async fn send_whatsapp_media_by_id(
     });
     match media_type {
         "image" => body["image"] = json!({ "id": media_id }),
+        "video" => body["video"] = json!({ "id": media_id }),
         "audio" => body["audio"] = json!({ "id": media_id }),
         _ => {
             let mut doc = json!({ "id": media_id });

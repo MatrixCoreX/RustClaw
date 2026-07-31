@@ -71,6 +71,14 @@ function loadConfig() {
     i18n,
     imageInboxDir: path.join(workspaceRoot, String(waCloud.image_inbox_dir || "image/upload")),
     audioInboxDir: path.join(workspaceRoot, String(waCloud.audio_inbox_dir || "audio/upload")),
+    artifactOutboxDir: path.join(
+      workspaceRoot,
+      String(ww.artifact_outbox_dir || ".agent-runtime/artifacts/channel-outbox/whatsapp-web")
+    ),
+    maxOutboundImageBytes: Number(ww.max_outbound_image_bytes || 100 * 1024 * 1024),
+    maxOutboundVideoBytes: Number(ww.max_outbound_video_bytes || 100 * 1024 * 1024),
+    maxOutboundAudioBytes: Number(ww.max_outbound_audio_bytes || 100 * 1024 * 1024),
+    maxOutboundFileBytes: Number(ww.max_outbound_file_bytes || 2 * 1024 * 1024 * 1024),
   };
 }
 
@@ -440,7 +448,31 @@ function taskSuccessMessages(task) {
       .filter((v) => v.length > 0);
     if (out.length > 0) return out;
   }
-  return [String(task.result_json?.text || "done")];
+  const fallback = String(task.result_json?.text || "").trim();
+  if (fallback) return [fallback];
+  return taskSuccessArtifacts(task).length > 0 ? [] : ["done"];
+}
+
+function taskSuccessArtifacts(task) {
+  const artifacts = task?.result_json?.artifacts;
+  if (!Array.isArray(artifacts)) return [];
+  return artifacts.filter((artifact) => {
+    return (
+      artifact &&
+      typeof artifact === "object" &&
+      typeof artifact.download_url === "string" &&
+      artifact.download_url.trim().length > 0
+    );
+  });
+}
+
+function taskArtifactDeliveryEnabled(task) {
+  const results = task?.result_json?.task_journal?.trace?.capability_results;
+  if (!Array.isArray(results)) return true;
+  const flags = results
+    .map((result) => result?.data?.extra?.delivery?.deliver_to_user)
+    .filter((value) => typeof value === "boolean");
+  return flags.length === 0 || flags.some(Boolean);
 }
 
 async function pollTaskResult(taskId, waitSeconds, identity) {
@@ -453,11 +485,146 @@ async function pollTaskResult(taskId, waitSeconds, identity) {
       continue;
     }
     if (task.status === "succeeded") {
-      return taskSuccessMessages(task);
+      return task;
     }
     throw new Error(task.error_text || `task status=${task.status}`);
   }
   throw new Error("task_result_wait_timeout");
+}
+
+function outboundLimitForArtifact(artifact) {
+  const kind = String(artifact?.kind || "").toLowerCase();
+  const mime = String(artifact?.mime_type || "").toLowerCase();
+  if (kind === "image" || mime.startsWith("image/")) return cfg.maxOutboundImageBytes;
+  if (kind === "video" || mime.startsWith("video/")) return cfg.maxOutboundVideoBytes;
+  if (kind === "audio" || mime.startsWith("audio/")) return cfg.maxOutboundAudioBytes;
+  return cfg.maxOutboundFileBytes;
+}
+
+function taskArtifactDownloadUrl(taskId, artifact) {
+  const raw = String(artifact?.download_url || "").trim();
+  if (!raw.startsWith("/")) {
+    throw new Error("WhatsApp Web 附件投送失败：任务附件地址无效");
+  }
+  const base = new URL(cfg.clawdBaseUrl);
+  const resolved = new URL(raw, base);
+  const expectedPrefix = `/v1/tasks/${encodeURIComponent(String(taskId))}/artifacts/`;
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(expectedPrefix)) {
+    throw new Error("WhatsApp Web 附件投送失败：任务附件地址不属于当前任务");
+  }
+  return resolved.toString();
+}
+
+function safeArtifactFilename(artifact) {
+  const raw = path.basename(String(artifact?.filename || "attachment.bin").trim());
+  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "");
+  return safe || "attachment.bin";
+}
+
+async function materializeTaskArtifact(taskId, artifact, identity) {
+  const maxBytes = outboundLimitForArtifact(artifact);
+  const declaredBytes = Number(artifact?.size_bytes || 0);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    validateOutboundFileSize(declaredBytes, String(artifact?.kind || "文件"), maxBytes);
+  }
+  const userKey = String(identity?.user_key || "").trim();
+  if (!userKey) throw new Error("WhatsApp Web 附件投送失败：缺少已绑定的访问凭据");
+  const response = await fetch(taskArtifactDownloadUrl(taskId, artifact), {
+    headers: { "x-agent-key": userKey },
+  });
+  if (!response.ok) {
+    throw new Error(`WhatsApp Web 附件读取失败（HTTP ${response.status}）`);
+  }
+  const contentLength = Number(response.headers?.get?.("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    validateOutboundFileSize(contentLength, String(artifact?.kind || "文件"), maxBytes);
+  }
+  const body = Buffer.from(await response.arrayBuffer());
+  validateOutboundFileSize(body.length, String(artifact?.kind || "文件"), maxBytes);
+  const artifactId = String(artifact?.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const outputPath = path.join(
+    cfg.artifactOutboxDir,
+    String(taskId).replace(/[^a-zA-Z0-9._-]/g, "_"),
+    artifactId,
+    safeArtifactFilename(artifact)
+  );
+  ensureParentDir(outputPath);
+  fs.writeFileSync(outputPath, body);
+  return outputPath;
+}
+
+function validateOutboundFileSize(size, mediaLabel, maxBytes) {
+  if (!Number.isFinite(size) || size <= 0) {
+    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：附件为空`);
+  }
+  if (Number.isFinite(maxBytes) && maxBytes > 0 && size > maxBytes) {
+    const actualMiB = (size / 1024 / 1024).toFixed(2);
+    const maxMiB = (maxBytes / 1024 / 1024).toFixed(0);
+    throw new Error(
+      `WhatsApp Web ${mediaLabel}过大：${actualMiB} MiB，本地安全上限为 ${maxMiB} MiB。请压缩后重试，或改为在 UI 中下载原文件。`
+    );
+  }
+  return size;
+}
+
+async function sendTaskArtifact(jid, taskId, artifact, identity) {
+  const localPath = await materializeTaskArtifact(taskId, artifact, identity);
+  const kind = String(artifact?.kind || "").toLowerCase();
+  const mime = String(artifact?.mime_type || "application/octet-stream").toLowerCase();
+  try {
+    validateOutboundFile(localPath, kind || "文件", outboundLimitForArtifact(artifact));
+    if (kind === "image" || mime.startsWith("image/")) {
+      await sendWaMessage(jid, { image: { url: localPath }, mimetype: mime });
+    } else if (kind === "video" || mime.startsWith("video/")) {
+      await sendWaMessage(jid, { video: { url: localPath }, mimetype: mime });
+    } else if (kind === "audio" || mime.startsWith("audio/")) {
+      await sendWaMessage(jid, { audio: { url: localPath }, mimetype: mime, ptt: false });
+    } else {
+      await sendWaMessage(jid, {
+        document: { url: localPath },
+        fileName: safeArtifactFilename(artifact),
+        mimetype: mime,
+      });
+    }
+  } finally {
+    fs.rmSync(localPath, { force: true });
+  }
+}
+
+function stripStructuredArtifactTokens(message, artifacts) {
+  const deliveredNames = new Set(artifacts.map(safeArtifactFilename));
+  return String(message || "")
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      for (const prefix of ["IMAGE_FILE:", "VIDEO_FILE:", "FILE:", "VOICE_FILE:"]) {
+        if (!trimmed.startsWith(prefix)) continue;
+        const rawPath = trimmed
+          .slice(prefix.length)
+          .trim()
+          .replace(/^['"`]+|['"`]+$/g, "");
+        const normalized = path
+          .basename(rawPath)
+          .replace(/[^a-zA-Z0-9._-]/g, "_")
+          .replace(/^\.+/, "");
+        return !deliveredNames.has(normalized);
+      }
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
+async function sendTaskResult(jid, taskId, task, identity) {
+  const messages = taskSuccessMessages(task);
+  const artifacts = taskArtifactDeliveryEnabled(task) ? taskSuccessArtifacts(task) : [];
+  for (const artifact of artifacts) {
+    await sendTaskArtifact(jid, taskId, artifact, identity);
+  }
+  for (const answer of messages) {
+    const remaining = stripStructuredArtifactTokens(answer, artifacts);
+    if (remaining) await sendAnswer(jid, remaining);
+  }
 }
 
 function extractTokenPaths(answer, prefix) {
@@ -467,8 +634,30 @@ function extractTokenPaths(answer, prefix) {
     .filter((line) => line.startsWith(prefix))
     .map((line) => line.slice(prefix.length).trim().replace(/^['"`]+|['"`]+$/g, ""))
     .filter((p) => p.length > 0)
-    .filter((p) => fs.existsSync(path.resolve(cfg.workspaceRoot, p)) || fs.existsSync(p))
     .map((p) => (path.isAbsolute(p) ? p : path.resolve(cfg.workspaceRoot, p)));
+}
+
+function validateOutboundFile(filePath, mediaLabel, maxBytes) {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (err) {
+    throw new Error(`WhatsApp Web ${mediaLabel}文件无法读取：${filePath}（${err.message || err}）`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：${filePath} 不是普通文件`);
+  }
+  if (stat.size === 0) {
+    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：${filePath} 是空文件`);
+  }
+  if (Number.isFinite(maxBytes) && maxBytes > 0 && stat.size > maxBytes) {
+    const actualMiB = (stat.size / 1024 / 1024).toFixed(2);
+    const maxMiB = (maxBytes / 1024 / 1024).toFixed(0);
+    throw new Error(
+      `WhatsApp Web ${mediaLabel}过大：${actualMiB} MiB，本地安全上限为 ${maxMiB} MiB。请压缩后重试，或改为在 UI 中下载原文件。`
+    );
+  }
+  return stat.size;
 }
 
 function stripTokens(answer) {
@@ -478,6 +667,7 @@ function stripTokens(answer) {
       const t = line.trimStart();
       return !(
         t.startsWith("IMAGE_FILE:") ||
+        t.startsWith("VIDEO_FILE:") ||
         t.startsWith("FILE:") ||
         t.startsWith("VOICE_FILE:")
       );
@@ -489,6 +679,7 @@ function stripTokens(answer) {
 async function sendAnswer(jid, answer) {
   const text = stripTokens(answer);
   const imagePaths = extractTokenPaths(answer, "IMAGE_FILE:");
+  const videoPaths = extractTokenPaths(answer, "VIDEO_FILE:");
   const filePaths = extractTokenPaths(answer, "FILE:");
   const voicePaths = extractTokenPaths(answer, "VOICE_FILE:");
 
@@ -496,22 +687,35 @@ async function sendAnswer(jid, answer) {
     await sendWaMessage(jid, { text });
   }
   for (const p of imagePaths) {
+    validateOutboundFile(p, "图片", cfg.maxOutboundImageBytes);
     await sendWaMessage(jid, { image: { url: p } });
   }
+  for (const p of videoPaths) {
+    validateOutboundFile(p, "视频", cfg.maxOutboundVideoBytes);
+    await sendWaMessage(jid, { video: { url: p } });
+  }
   for (const p of filePaths) {
+    validateOutboundFile(p, "文件", cfg.maxOutboundFileBytes);
     await sendWaMessage(jid, {
       document: { url: p },
       fileName: path.basename(p),
     });
   }
   for (const p of voicePaths) {
+    validateOutboundFile(p, "音频", cfg.maxOutboundAudioBytes);
     await sendWaMessage(jid, {
       audio: { url: p },
       ptt: true,
       mimetype: "audio/ogg; codecs=opus",
     });
   }
-  if (!text && imagePaths.length === 0 && filePaths.length === 0 && voicePaths.length === 0) {
+  if (
+    !text &&
+    imagePaths.length === 0 &&
+    videoPaths.length === 0 &&
+    filePaths.length === 0 &&
+    voicePaths.length === 0
+  ) {
     await sendWaMessage(jid, { text: answer });
   }
 }
@@ -526,18 +730,14 @@ async function runTaskFlow(
 ) {
   const taskId = await submitTask(externalUserId, jid, kind, payload, identity);
   try {
-    const out = await pollTaskResult(taskId, quickWait, identity);
-    for (const answer of out) {
-      await sendAnswer(jid, answer);
-    }
+    const task = await pollTaskResult(taskId, quickWait, identity);
+    await sendTaskResult(jid, taskId, task, identity);
   } catch (err) {
     if (String(err.message || err) === "task_result_wait_timeout") {
       setTimeout(async () => {
         try {
-          const finalOut = await pollTaskResult(taskId, 600, identity);
-          for (const answer of finalOut) {
-            await sendAnswer(jid, answer);
-          }
+          const task = await pollTaskResult(taskId, 600, identity);
+          await sendTaskResult(jid, taskId, task, identity);
         } catch (e) {
           await sendWaMessage(jid, {
             text: tr("whatsapp_web.msg.process_failed", "Processing failed: {error}", {
@@ -680,7 +880,12 @@ async function handleInboundMessage(msg, upsertType = "notify") {
     const skill = (firstSpace >= 0 ? rest.slice(0, firstSpace) : rest).trim();
     const args = (firstSpace >= 0 ? rest.slice(firstSpace + 1) : "").trim();
     if (!skill) {
-      await sendWaMessage(jid, { text: "Usage: /run <skill_name> <args>" });
+      await sendWaMessage(jid, {
+        text: tr(
+          "whatsapp_web.msg.run_usage",
+          "Usage: /run <skill_name> <args>"
+        ),
+      });
       return;
     }
     await runTaskFlow(jid, externalUserId, "run_skill", { skill_name: skill, args }, identity);
@@ -830,7 +1035,7 @@ function startHttpServer() {
       if (!sock) {
         return res.status(503).json({ ok: false, error: "wa socket not ready" });
       }
-      await sendWaMessage(to, { text });
+      await sendAnswer(to, text);
       return res.json({ ok: true });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err.message || err) });
@@ -898,6 +1103,7 @@ module.exports = {
   buildSubmitTaskBody,
   canonicalUserJid,
   extractBindKeyCandidate,
+  extractTokenPaths,
   extractTextContent,
   isGroupJid,
   isLoopbackHost,
@@ -909,5 +1115,14 @@ module.exports = {
   resolveIdentity,
   stableUserId,
   submitTask,
+  stripTokens,
+  stripStructuredArtifactTokens,
+  taskArtifactDeliveryEnabled,
+  taskArtifactDownloadUrl,
+  taskSuccessArtifacts,
+  taskSuccessMessages,
+  materializeTaskArtifact,
+  validateOutboundFile,
+  validateOutboundFileSize,
   shouldProcessUpsertMessage,
 };

@@ -6455,6 +6455,7 @@ def handle_resolved_media(
     known_candidate_urls = {candidate.url for candidate in candidates}
     missing_audio_candidate = False
     browser_audio_retry_attempted = False
+    silent_fallback_path: Path | None = None
 
     while True:
         if not pending_candidates:
@@ -6519,7 +6520,7 @@ def handle_resolved_media(
                 print(f"Rejected candidate: {exc}", file=sys.stderr)
             continue
 
-        if audio_text_processing_requested(args) and video_transcriber.probe_audio_stream(saved_path) is False:
+        if video_transcriber.probe_audio_stream(saved_path) is False:
             missing_audio_candidate = True
             last_error = DouyinDownloadError(
                 f"Downloaded candidate contains no audio stream ({candidate.source})"
@@ -6528,8 +6529,19 @@ def handle_resolved_media(
                 f"audio_candidate_rejected: no audio stream ({candidate.source})",
                 file=sys.stderr,
             )
+            if silent_fallback_path is None:
+                silent_fallback_path = output_path.with_name(
+                    f".{output_path.stem}.silent-fallback{output_path.suffix}"
+                )
+                silent_fallback_path.unlink(missing_ok=True)
+                saved_path.replace(silent_fallback_path)
+            else:
+                saved_path.unlink(missing_ok=True)
             continue
 
+        if silent_fallback_path is not None:
+            silent_fallback_path.unlink(missing_ok=True)
+            silent_fallback_path = None
         if args.save_meta:
             save_metadata(
                 saved_path.with_suffix(".json"),
@@ -6542,6 +6554,27 @@ def handle_resolved_media(
         handle_downloaded_video(saved_path, args)
         return 0
 
+    if silent_fallback_path is not None and not audio_text_processing_requested(args):
+        output_path.unlink(missing_ok=True)
+        silent_fallback_path.replace(output_path)
+        if args.save_meta:
+            save_metadata(
+                output_path.with_suffix(".json"),
+                platform,
+                item_id,
+                all_video_candidates,
+                image_candidates,
+                logs,
+            )
+        print(
+            "audio_candidate_fallback: all usable candidates are silent; preserving the best video",
+            file=sys.stderr,
+        )
+        handle_downloaded_video(output_path, args)
+        return 0
+
+    if silent_fallback_path is not None:
+        silent_fallback_path.unlink(missing_ok=True)
     raise DouyinDownloadError(f"All candidates failed. Last error: {last_error}")
 
 

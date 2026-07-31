@@ -557,6 +557,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
     planner_user_request: &str,
     chat_memory_budget_chars: usize,
 ) -> TaskContextBundle {
+    let conversation_id = crate::conversation_state::task_conversation_id(task);
     let planner_view = PlannerContextView {
         visible_skills: state.planner_available_skills_for_task(task),
     };
@@ -585,6 +586,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             task.user_key.as_deref(),
             task.user_id,
             task.chat_id,
+            conversation_id.as_deref(),
             64,
             560,
             48_000,
@@ -603,6 +605,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             task.user_key.as_deref(),
             task.user_id,
             task.chat_id,
+            conversation_id.as_deref(),
             1200,
             2400,
         ),

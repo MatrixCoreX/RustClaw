@@ -9,11 +9,12 @@
 - Never read system-browser cookies. The skill supports public content only and does not bypass DRM, private-content access, paywalls, or platform authorization.
 - This document teaches usage only. Host admission and policy grants remain authoritative.
 
-## Natural-Language Routing
+## Planner Selection Notes
 
 - “帮我下载这条抖音/快手/小红书/TikTok/YouTube 视频” -> `download`
 - A message consisting only of a supported public URL -> `download`; do not ask whether the user wants resolution or download.
 - A complete copied Douyin, Kuaishou, or Xiaohongshu share message containing a supported URL -> pass the complete text as `share` and run `download` immediately.
+- These are semantic capability rules for the planner, not runtime phrase matching. Select by the current request shape and the newest concrete target.
 - Default download delivery is `deliver_to_user=true`: send the downloaded media back to the originating communication channel and expose it in the UI.
 - If the user explicitly says not to send the media back (for example, “不要发我”), set `deliver_to_user=false`. Do not remove that phrase from `share`; the downloader still extracts the URL from the complete text. Reply with the saved local path only and do not emit a delivery artifact.
 - “只解析这个分享链接的媒体直链，不要下载” -> `resolve`

@@ -397,6 +397,14 @@ export function DashboardPage({
                           {t("当前显示缓存版本，远端检查暂时失败。", "Showing the cached version because the remote check failed.")}
                         </p>
                       ) : null}
+                      {latestReleaseStatus === "git_tag" ? (
+                        <p className="mt-1 text-[11px] leading-4 text-white/55">
+                          {t(
+                            "已从远端 Git 标签识别版本；Release 附件将在更新时再次验证。",
+                            "Version identified from the remote Git tag; the Release asset will be verified again during update.",
+                          )}
+                        </p>
+                      ) : null}
                       {latestReleaseStatus === "unavailable" ? (
                         <p
                           className="mt-1 text-[11px] leading-4 text-amber-200/75"

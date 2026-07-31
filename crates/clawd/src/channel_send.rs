@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
 use serde_json::json;
 use toml::Value as TomlValue;
@@ -68,6 +69,7 @@ const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
 const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
+const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/outbound-temp";
 
 fn default_wechat_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
@@ -95,6 +97,25 @@ async fn materialize_wechat_outbound_media(
     }
 }
 
+async fn materialize_channel_outbound_media(
+    state: &AppState,
+    media: &WechatOutboundMedia,
+    channel_tag: &str,
+) -> Result<PathBuf, String> {
+    match &media.source {
+        WechatOutboundSource::LocalPath(path) => Ok(path.clone()),
+        WechatOutboundSource::RemoteUrl(url) => {
+            download_remote_media_to_temp(
+                &state.core.http_client,
+                url,
+                Path::new(CHANNEL_MEDIA_OUTBOUND_TEMP_DIR),
+                channel_tag,
+            )
+            .await
+        }
+    }
+}
+
 pub(crate) async fn send_telegram_message(
     state: &AppState,
     chat_id: i64,
@@ -104,9 +125,16 @@ pub(crate) async fn send_telegram_message(
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
     }
+    let media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
+    let stripped = strip_wechat_delivery_lines(text);
+    let send_text = if stripped.trim().is_empty() && media.is_empty() && !text.trim().is_empty() {
+        text
+    } else {
+        stripped.as_str()
+    };
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
     let chunks = chunk_text_for_channel(
-        text,
+        send_text,
         TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
@@ -114,7 +142,7 @@ pub(crate) async fn send_telegram_message(
         info!(
             "send_chunks channel=telegram chat_id={} original_len={} chunk_count={}",
             chat_id,
-            text.len(),
+            send_text.len(),
             n
         );
     }
@@ -149,6 +177,81 @@ pub(crate) async fn send_telegram_message(
             return Err(format!("status={status} body={body}"));
         }
     }
+    for item in &media {
+        let path = materialize_channel_outbound_media(state, item, "telegram").await?;
+        let (method, field, max_bytes, label) = match item.kind {
+            WechatOutboundKind::Image => {
+                let size = claw_core::channel_media_limits::validate_local_media_file(
+                    &path,
+                    "Telegram",
+                    "图片",
+                    claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                )?;
+                if size <= claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES {
+                    (
+                        "sendPhoto",
+                        "photo",
+                        claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES,
+                        "图片",
+                    )
+                } else {
+                    (
+                        "sendDocument",
+                        "document",
+                        claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                        "文件",
+                    )
+                }
+            }
+            WechatOutboundKind::Video => (
+                "sendVideo",
+                "video",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                "视频",
+            ),
+            WechatOutboundKind::Audio => (
+                "sendAudio",
+                "audio",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                "音频",
+            ),
+            WechatOutboundKind::File => (
+                "sendDocument",
+                "document",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                "文件",
+            ),
+        };
+        claw_core::channel_media_limits::validate_local_media_file(
+            &path, "Telegram", label, max_bytes,
+        )?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|err| format!("read Telegram outbound media failed: {err}"))?;
+        let filename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("file.bin")
+            .to_string();
+        let form = Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part(field, Part::bytes(bytes).file_name(filename));
+        let resp = state
+            .core
+            .http_client
+            .post(format!("https://api.telegram.org/bot{token}/{method}"))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|err| err.to_string())?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "Telegram {label}投送失败：status={status} body={body}"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -173,9 +276,16 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
     if base.is_empty() {
         return Err("whatsapp api_base is empty".to_string());
     }
+    let media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
+    let stripped = strip_wechat_delivery_lines(text);
+    let send_text = if stripped.trim().is_empty() && media.is_empty() && !text.trim().is_empty() {
+        text
+    } else {
+        stripped.as_str()
+    };
     let url = format!("{base}/v23.0/{phone_number_id}/messages");
     let chunks = chunk_text_for_channel(
-        text,
+        send_text,
         WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
@@ -183,7 +293,7 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
         info!(
             "send_chunks channel=whatsapp_cloud to={} original_len={} chunk_count={}",
             to,
-            text.len(),
+            send_text.len(),
             n
         );
     }
@@ -221,6 +331,100 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(format!("status={status} body={body}"));
+        }
+    }
+    for item in &media {
+        let path = materialize_channel_outbound_media(state, item, "whatsapp-cloud").await?;
+        let (kind, message_type) = match item.kind {
+            WechatOutboundKind::Image => (
+                claw_core::channel_media_limits::WhatsappCloudMediaKind::Image,
+                "image",
+            ),
+            WechatOutboundKind::Video => (
+                claw_core::channel_media_limits::WhatsappCloudMediaKind::Video,
+                "video",
+            ),
+            WechatOutboundKind::Audio => (
+                claw_core::channel_media_limits::WhatsappCloudMediaKind::Audio,
+                "audio",
+            ),
+            WechatOutboundKind::File => (
+                claw_core::channel_media_limits::WhatsappCloudMediaKind::Document,
+                "document",
+            ),
+        };
+        let (mime, max_bytes, label) =
+            claw_core::channel_media_limits::whatsapp_cloud_upload_spec(&path, kind)?;
+        claw_core::channel_media_limits::validate_local_media_file(
+            &path,
+            "WhatsApp Cloud",
+            label,
+            max_bytes,
+        )?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|err| format!("read WhatsApp Cloud outbound media failed: {err}"))?;
+        let filename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("file.bin")
+            .to_string();
+        let part = Part::bytes(bytes)
+            .file_name(filename.clone())
+            .mime_str(mime)
+            .map_err(|err| format!("prepare WhatsApp Cloud media failed: {err}"))?;
+        let form = Form::new()
+            .text("messaging_product", "whatsapp")
+            .part("file", part);
+        let upload_resp = state
+            .core
+            .http_client
+            .post(format!("{base}/v23.0/{phone_number_id}/media"))
+            .bearer_auth(token)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|err| format!("WhatsApp Cloud {label}上传失败：{err}"))?;
+        if !upload_resp.status().is_success() {
+            let status = upload_resp.status();
+            let body = upload_resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "WhatsApp Cloud {label}上传失败：status={status} body={body}"
+            ));
+        }
+        let upload_body: serde_json::Value = upload_resp
+            .json()
+            .await
+            .map_err(|err| format!("decode WhatsApp Cloud media response failed: {err}"))?;
+        let media_id = upload_body
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "WhatsApp Cloud media response missing id".to_string())?;
+        let mut body = json!({
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": message_type,
+        });
+        let mut media_body = json!({ "id": media_id });
+        if message_type == "document" {
+            media_body["filename"] = json!(filename);
+        }
+        body[message_type] = media_body;
+        let send_resp = state
+            .core
+            .http_client
+            .post(&url)
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| format!("WhatsApp Cloud {label}发送失败：{err}"))?;
+        if !send_resp.status().is_success() {
+            let status = send_resp.status();
+            let body = send_resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "WhatsApp Cloud {label}发送失败：status={status} body={body}"
+            ));
         }
     }
     Ok(())
@@ -429,7 +633,7 @@ pub(crate) async fn send_wechat_text_message(
                 )
                 .await?
             }
-            WechatOutboundKind::File => {
+            WechatOutboundKind::Audio | WechatOutboundKind::File => {
                 let fname = file_path
                     .file_name()
                     .and_then(|s| s.to_str())
@@ -599,54 +803,17 @@ pub(crate) async fn send_feishu_text_message(
     let config = state.channels.feishu_send_config.as_ref().ok_or_else(|| {
         "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string()
     })?;
-    let token = get_tenant_access_token(
-        &state.core.http_client,
+    send_feishu_lark_answer(
+        state,
+        "feishu",
+        "飞书",
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
-    )
-    .await?;
-    let base = config.api_base_url.trim_end_matches('/');
-    let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
-    let chunks = chunk_text_for_channel(
+        receive_id,
         text,
-        FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
-    );
-    let n = chunks.len();
-    if n > 1 {
-        info!(
-            "send_chunks channel=feishu receive_id={} original_len={} chunk_count={}",
-            receive_id,
-            text.len(),
-            n
-        );
-    }
-    for (i, chunk) in chunks.into_iter().enumerate() {
-        let body = if n > 1 {
-            format!("（{}/{}）\n{}", i + 1, n, chunk)
-        } else {
-            chunk
-        };
-        let resp = state
-            .core
-            .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "receive_id": receive_id,
-                "msg_type": "text",
-                "content": json!({ "text": body }).to_string()
-            }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let resp_body = resp.text().await.unwrap_or_default();
-            return Err(format!("feishu send status={status} body={resp_body}"));
-        }
-    }
-    Ok(())
+    )
+    .await
 }
 
 pub(crate) async fn send_lark_text_message(
@@ -657,39 +824,57 @@ pub(crate) async fn send_lark_text_message(
     let config = state.channels.lark_send_config.as_ref().ok_or_else(|| {
         "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string()
     })?;
-    let token = get_tenant_access_token(
-        &state.core.http_client,
+    send_feishu_lark_answer(
+        state,
+        "lark",
+        "Lark",
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
-    )
-    .await?;
-    let base = config.api_base_url.trim_end_matches('/');
-    let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
-    let chunks = chunk_text_for_channel(
+        receive_id,
         text,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_feishu_lark_answer(
+    state: &AppState,
+    channel_tag: &str,
+    channel_label: &str,
+    api_base_url: &str,
+    app_id: &str,
+    app_secret: &str,
+    receive_id: &str,
+    answer: &str,
+) -> Result<(), String> {
+    let token =
+        get_tenant_access_token(&state.core.http_client, api_base_url, app_id, app_secret).await?;
+    let base = api_base_url.trim_end_matches('/');
+    let message_url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
+    let media = extract_wechat_outbound_media(answer, &state.skill_rt.workspace_root);
+    let stripped = strip_wechat_delivery_lines(answer);
+    let send_text = if stripped.trim().is_empty() && media.is_empty() && !answer.trim().is_empty() {
+        answer
+    } else {
+        stripped.as_str()
+    };
+    let chunks = chunk_text_for_channel(
+        send_text,
         FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
-    if n > 1 {
-        info!(
-            "send_chunks channel=lark receive_id={} original_len={} chunk_count={}",
-            receive_id,
-            text.len(),
-            n
-        );
-    }
-    for (i, chunk) in chunks.into_iter().enumerate() {
+    for (index, chunk) in chunks.into_iter().enumerate() {
         let body = if n > 1 {
-            format!("（{}/{}）\n{}", i + 1, n, chunk)
+            format!("（{}/{}）\n{}", index + 1, n, chunk)
         } else {
             chunk
         };
         let resp = state
             .core
             .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .post(&message_url)
+            .header("Authorization", format!("Bearer {token}"))
             .json(&json!({
                 "receive_id": receive_id,
                 "msg_type": "text",
@@ -697,11 +882,148 @@ pub(crate) async fn send_lark_text_message(
             }))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|err| err.to_string())?;
         if !resp.status().is_success() {
             let status = resp.status();
-            let resp_body = resp.text().await.unwrap_or_default();
-            return Err(format!("lark send status={status} body={resp_body}"));
+            let response_body = resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "{channel_label} 文本发送失败：status={status} body={response_body}"
+            ));
+        }
+    }
+
+    for item in &media {
+        let path = materialize_channel_outbound_media(state, item, channel_tag).await?;
+        let (upload_url, field_name, file_type, msg_type, key_name, max_bytes, label) =
+            match item.kind {
+                WechatOutboundKind::Image => {
+                    let size = claw_core::channel_media_limits::validate_local_media_file(
+                        &path,
+                        channel_label,
+                        "图片",
+                        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                    )?;
+                    if size <= claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES {
+                        (
+                            format!("{base}/open-apis/im/v1/images"),
+                            "image",
+                            "message",
+                            "image",
+                            "image_key",
+                            claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES,
+                            "图片",
+                        )
+                    } else {
+                        (
+                            format!("{base}/open-apis/im/v1/files"),
+                            "file",
+                            "stream",
+                            "file",
+                            "file_key",
+                            claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                            "文件",
+                        )
+                    }
+                }
+                WechatOutboundKind::Video => {
+                    let is_mp4 = path
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("mp4"));
+                    (
+                        format!("{base}/open-apis/im/v1/files"),
+                        "file",
+                        if is_mp4 { "mp4" } else { "stream" },
+                        if is_mp4 { "media" } else { "file" },
+                        "file_key",
+                        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                        "视频",
+                    )
+                }
+                WechatOutboundKind::Audio | WechatOutboundKind::File => (
+                    format!("{base}/open-apis/im/v1/files"),
+                    "file",
+                    "stream",
+                    "file",
+                    "file_key",
+                    claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                    "文件",
+                ),
+            };
+        claw_core::channel_media_limits::validate_local_media_file(
+            &path,
+            channel_label,
+            label,
+            max_bytes,
+        )?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|err| format!("read {channel_label} outbound media failed: {err}"))?;
+        let filename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("file.bin")
+            .to_string();
+        let part = Part::bytes(bytes).file_name(filename.clone());
+        let form = if field_name == "image" {
+            Form::new()
+                .text("image_type", file_type.to_string())
+                .part(field_name, part)
+        } else {
+            Form::new()
+                .text("file_type", file_type.to_string())
+                .text("file_name", filename)
+                .part(field_name, part)
+        };
+        let upload_resp = state
+            .core
+            .http_client
+            .post(upload_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|err| format!("{channel_label} {label}上传失败：{err}"))?;
+        if !upload_resp.status().is_success() {
+            let status = upload_resp.status();
+            let body = upload_resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "{channel_label} {label}上传失败：status={status} body={body}"
+            ));
+        }
+        let upload_body: serde_json::Value = upload_resp
+            .json()
+            .await
+            .map_err(|err| format!("decode {channel_label} media response failed: {err}"))?;
+        let pointer = format!("/data/{key_name}");
+        let media_key = upload_body
+            .pointer(&pointer)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("{channel_label} media response missing {key_name}"))?;
+        let content = match key_name {
+            "image_key" => json!({ "image_key": media_key }),
+            "file_key" => json!({ "file_key": media_key }),
+            _ => return Err(format!("unsupported {channel_label} media key: {key_name}")),
+        };
+        let resp = state
+            .core
+            .http_client
+            .post(&message_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&json!({
+                "receive_id": receive_id,
+                "msg_type": msg_type,
+                "content": content.to_string()
+            }))
+            .send()
+            .await
+            .map_err(|err| format!("{channel_label} {label}发送失败：{err}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "{channel_label} {label}发送失败：status={status} body={body}"
+            ));
         }
     }
     Ok(())

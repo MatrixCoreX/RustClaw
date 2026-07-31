@@ -4,7 +4,7 @@
 //! API 与长连接均使用国际版端点（默认 open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,11 @@ use claw_core::types::{
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
+use claw_core::wechat_reply_media::{
+    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
+    WechatOutboundSource,
+};
+use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -795,6 +800,7 @@ fn handle_text_message_to_clawd(
     let poll_interval = Duration::from_millis(1500);
     let delivery_timeout_secs = state.config.lark.task_delivery_timeout_seconds;
     let chunk_chars = state.config.lark.text_chunk_chars.max(100);
+    let workspace_root = state.workspace_root.clone();
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
@@ -982,21 +988,35 @@ fn handle_text_message_to_clawd(
                 }
                 TaskStatus::Succeeded => {
                     for to_send in lark_task_success_messages(task, &config) {
-                        for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
-                            if let Err(e) = send_lark_text(
+                        if let Err(e) = send_lark_answer(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &workspace_root,
+                            &chat_id_delivery,
+                            &to_send,
+                            chunk_chars,
+                        )
+                        .await
+                        {
+                            warn!(
+                                "larkd: send success payload failed task_id={} err={}",
+                                task_id, e
+                            );
+                            let error_msg = lark_t_with(
+                                &config,
+                                LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                                &[("error", &e)],
+                                LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+                            );
+                            let _ = send_lark_text(
                                 &config,
                                 &client,
                                 &token_cache,
                                 &chat_id_delivery,
-                                &chunk,
+                                &error_msg,
                             )
-                            .await
-                            {
-                                warn!(
-                                    "larkd: send success text failed task_id={} err={}",
-                                    task_id, e
-                                );
-                            }
+                            .await;
                         }
                     }
                     info!(
@@ -1324,6 +1344,242 @@ async fn send_lark_text(
         receive_id,
         text.len()
     );
+    Ok(())
+}
+
+async fn upload_lark_image(
+    config: &LarkConfig,
+    client: &Client,
+    token_cache: &RwLock<Option<(String, u64)>>,
+    path: &Path,
+) -> Result<String, String> {
+    claw_core::channel_media_limits::validate_local_media_file(
+        path,
+        "Lark",
+        "图片",
+        claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES,
+    )?;
+    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| format!("read outbound image failed: {e}"))?;
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image.jpg")
+        .to_string();
+    let image = Part::bytes(bytes)
+        .file_name(filename)
+        .mime_str("application/octet-stream")
+        .map_err(|e| format!("prepare outbound image failed: {e}"))?;
+    let form = Form::new()
+        .text("image_type", "message")
+        .part("image", image);
+    let url = format!(
+        "{}/open-apis/im/v1/images",
+        config.lark.api_base_url.trim_end_matches('/')
+    );
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("upload outbound image failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("upload outbound image status={}", resp.status()));
+    }
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode outbound image response failed: {e}"))?;
+    body.pointer("/data/image_key")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "upload outbound image response missing image_key".to_string())
+}
+
+async fn upload_lark_file(
+    config: &LarkConfig,
+    client: &Client,
+    token_cache: &RwLock<Option<(String, u64)>>,
+    path: &Path,
+    file_type: &str,
+) -> Result<String, String> {
+    claw_core::channel_media_limits::validate_local_media_file(
+        path,
+        "Lark",
+        "文件",
+        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+    )?;
+    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| format!("read outbound file failed: {e}"))?;
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file.bin")
+        .to_string();
+    let file = Part::bytes(bytes)
+        .file_name(filename.clone())
+        .mime_str("application/octet-stream")
+        .map_err(|e| format!("prepare outbound file failed: {e}"))?;
+    let form = Form::new()
+        .text("file_type", file_type.to_string())
+        .text("file_name", filename)
+        .part("file", file);
+    let url = format!(
+        "{}/open-apis/im/v1/files",
+        config.lark.api_base_url.trim_end_matches('/')
+    );
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("upload outbound file failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("upload outbound file status={}", resp.status()));
+    }
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode outbound file response failed: {e}"))?;
+    body.pointer("/data/file_key")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "upload outbound file response missing file_key".to_string())
+}
+
+async fn send_lark_media_key(
+    config: &LarkConfig,
+    client: &Client,
+    token_cache: &RwLock<Option<(String, u64)>>,
+    receive_id: &str,
+    msg_type: &str,
+    key_name: &str,
+    key: &str,
+) -> Result<(), String> {
+    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
+    let content = match key_name {
+        "image_key" => json!({ "image_key": key }),
+        "file_key" => json!({ "file_key": key }),
+        _ => return Err("unsupported outbound media key".to_string()),
+    };
+    let url = format!(
+        "{}/open-apis/im/v1/messages?receive_id_type=chat_id",
+        config.lark.api_base_url.trim_end_matches('/')
+    );
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&json!({
+            "receive_id": receive_id,
+            "msg_type": msg_type,
+            "content": content.to_string()
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("send outbound media failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("send outbound media status={}", resp.status()));
+    }
+    Ok(())
+}
+
+async fn send_lark_answer(
+    config: &LarkConfig,
+    client: &Client,
+    token_cache: &RwLock<Option<(String, u64)>>,
+    workspace_root: &Path,
+    receive_id: &str,
+    answer: &str,
+    chunk_chars: usize,
+) -> Result<(), String> {
+    let media = extract_wechat_outbound_media(answer, workspace_root);
+    let stripped = strip_wechat_delivery_lines(answer);
+    let text = if stripped.trim().is_empty() && media.is_empty() && !answer.trim().is_empty() {
+        answer
+    } else {
+        stripped.as_str()
+    };
+    for chunk in chunk_text_utf8(text, chunk_chars) {
+        send_lark_text(config, client, token_cache, receive_id, &chunk).await?;
+    }
+    for item in media {
+        let WechatOutboundSource::LocalPath(path) = item.source else {
+            return Err("remote outbound media requires a local artifact".to_string());
+        };
+        match item.kind {
+            WechatOutboundKind::Image => {
+                let size = claw_core::channel_media_limits::validate_local_media_file(
+                    &path,
+                    "Lark",
+                    "图片",
+                    claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                )?;
+                if size <= claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES {
+                    let key = upload_lark_image(config, client, token_cache, &path).await?;
+                    send_lark_media_key(
+                        config,
+                        client,
+                        token_cache,
+                        receive_id,
+                        "image",
+                        "image_key",
+                        &key,
+                    )
+                    .await?;
+                } else {
+                    let key =
+                        upload_lark_file(config, client, token_cache, &path, "stream").await?;
+                    send_lark_media_key(
+                        config,
+                        client,
+                        token_cache,
+                        receive_id,
+                        "file",
+                        "file_key",
+                        &key,
+                    )
+                    .await?;
+                }
+            }
+            WechatOutboundKind::Video => {
+                let is_mp4 = path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case("mp4"));
+                let file_type = if is_mp4 { "mp4" } else { "stream" };
+                let key = upload_lark_file(config, client, token_cache, &path, file_type).await?;
+                send_lark_media_key(
+                    config,
+                    client,
+                    token_cache,
+                    receive_id,
+                    if is_mp4 { "media" } else { "file" },
+                    "file_key",
+                    &key,
+                )
+                .await?;
+            }
+            WechatOutboundKind::Audio | WechatOutboundKind::File => {
+                let key = upload_lark_file(config, client, token_cache, &path, "stream").await?;
+                send_lark_media_key(
+                    config,
+                    client,
+                    token_cache,
+                    receive_id,
+                    "file",
+                    "file_key",
+                    &key,
+                )
+                .await?;
+            }
+        }
+    }
     Ok(())
 }
 

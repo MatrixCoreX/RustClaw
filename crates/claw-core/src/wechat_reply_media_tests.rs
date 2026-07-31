@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn audio_tokens_are_media_and_missing_paths_remain_visible_for_delivery_errors() {
+    let root = std::env::temp_dir();
+    let missing = root.join("definitely-missing-channel-audio.mp3");
+    let answer = format!(
+        "VOICE_FILE:{}\nMUSIC_FILE:{}",
+        missing.display(),
+        missing
+            .with_file_name("definitely-missing-channel-music.mp3")
+            .display()
+    );
+    let media = extract_wechat_outbound_media(&answer, &root);
+    assert_eq!(media.len(), 2);
+    assert!(media
+        .iter()
+        .all(|item| item.kind == WechatOutboundKind::Audio));
+    assert!(strip_wechat_delivery_lines(&answer).is_empty());
+}
+
 use std::fs;
 
 fn temp_media_path(name: &str) -> PathBuf {

@@ -1202,3 +1202,34 @@
     }
   }
 }
+@keyframes chat-activity-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+  55%,
+  100% {
+    transform: translateX(230%);
+  }
+}
+
+.chat-activity-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.chat-activity-sweep::after {
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 38%;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(167 243 208 / 0.13), transparent);
+  animation: chat-activity-sweep 2.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-activity-sweep::after {
+    animation: none;
+    opacity: 0;
+  }
+}

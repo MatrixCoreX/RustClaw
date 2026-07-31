@@ -211,6 +211,15 @@ async fn refresh_workspace_update_versions(
         }
     );
     let (local_commit, remote_commit, fetch_output) = git_versions;
+    let git_release_tag_fallback = if source_update_available
+        && latest_release_result
+            .as_ref()
+            .is_some_and(Result::is_err)
+    {
+        resolve_latest_workspace_release_tag(workspace_root).await
+    } else {
+        None
+    };
 
     let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.installation_kind = installation_kind.to_string();
@@ -247,16 +256,22 @@ async fn refresh_workspace_update_versions(
                 guard.latest_release_check_error = None;
             }
             Err(error) => {
-                if !error.can_use_cached_tag() {
-                    guard.latest_release_tag = None;
-                }
-                guard.latest_release_check_status = if guard.latest_release_tag.is_some() {
-                    "stale"
+                if let Some(tag) = git_release_tag_fallback.clone() {
+                    guard.latest_release_tag = Some(tag);
+                    guard.latest_release_check_status = "git_tag".to_string();
+                    guard.latest_release_check_error = Some(error.as_str().to_string());
                 } else {
-                    "unavailable"
+                    if !error.can_use_cached_tag() {
+                        guard.latest_release_tag = None;
+                    }
+                    guard.latest_release_check_status = if guard.latest_release_tag.is_some() {
+                        "stale"
+                    } else {
+                        "unavailable"
+                    }
+                    .to_string();
+                    guard.latest_release_check_error = Some(error.as_str().to_string());
                 }
-                .to_string();
-                guard.latest_release_check_error = Some(error.as_str().to_string());
             }
         }
     }
@@ -286,6 +301,25 @@ async fn refresh_workspace_update_versions(
         }
     }
     guard.clone()
+}
+
+async fn resolve_latest_workspace_release_tag(workspace_root: &Path) -> Option<String> {
+    let (release_prefix, _) = release_platform_prefixes()?;
+    resolve_latest_workspace_release_tag_for(workspace_root, &release_prefix).await
+}
+
+async fn resolve_latest_workspace_release_tag_for(
+    workspace_root: &Path,
+    release_prefix: &str,
+) -> Option<String> {
+    let pattern = format!("{release_prefix}*");
+    let args = ["tag", "--list", pattern.as_str(), "--sort=-version:refname"];
+    run_workspace_update_command("git", &args, workspace_root, 10)
+        .await
+        .ok()
+        .filter(|output| output.exit_code == Some(0))
+        .and_then(|output| first_output_line(&output.stdout_tail))
+        .filter(|tag| tag.starts_with(release_prefix))
 }
 
 fn latest_release_check_due(status: &WorkspaceUpdateStatus, force_refresh: bool, now: i64) -> bool {

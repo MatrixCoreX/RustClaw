@@ -138,6 +138,12 @@ test("builds a credential-free history scope only after authentication is ready"
   assert.equal(conversationHistoryScope(true, "key", null, 7), "");
   assert.equal(conversationHistoryScope(true, "webd", 42, 7), "webd:42:7");
   assert.equal(conversationHistoryScope(true, "key", 42, 7), "key:42:7");
+  const runtimeUserId = 2_403_753_217_836_067_397;
+  const runtimeChatId = 2_640_685_665_509_587_865;
+  assert.equal(
+    conversationHistoryScope(true, "key", runtimeUserId, runtimeChatId),
+    `key:${runtimeUserId}:${runtimeChatId}`,
+  );
 });
 
 test("uses an identity-scoped local cache key without credentials", () => {

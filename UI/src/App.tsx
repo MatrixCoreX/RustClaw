@@ -674,6 +674,7 @@ export default function App() {
     activeChatTeachingRunId,
     chatSending,
     chatWorking,
+    chatActivity,
     chatRecording,
     chatVoiceRecordingSupported,
     chatVoiceRecordingAvailability,
@@ -1563,6 +1564,7 @@ export default function App() {
             <ChatPage
               t={t}
               tSlash={tSlash}
+              artifactFetch={apiFetch}
               chatMessages={chatMessages}
               chatThreads={chatThreads}
               activeChatThreadId={activeChatThreadId}
@@ -1577,6 +1579,7 @@ export default function App() {
               activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
               chatWorking={chatWorking}
+              chatActivity={chatActivity}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
               chatVoiceRecordingAvailability={chatVoiceRecordingAvailability}

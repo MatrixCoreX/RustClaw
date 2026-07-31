@@ -21,7 +21,11 @@ export function conversationHistoryScope(
   chatId: number | null | undefined,
 ): string {
   if (!authReady || !authMode || userId == null || chatId == null) return "";
-  if (!Number.isSafeInteger(userId) || !Number.isSafeInteger(chatId)) return "";
+  // Runtime identities are signed 64-bit values. JSON parses them as finite
+  // JavaScript numbers even when they exceed Number.MAX_SAFE_INTEGER; they are
+  // still stable enough to isolate this browser-local cache across refreshes.
+  if (!Number.isFinite(userId) || !Number.isInteger(userId)) return "";
+  if (!Number.isFinite(chatId) || !Number.isInteger(chatId)) return "";
   return `${authMode}:${userId}:${chatId}`;
 }
 

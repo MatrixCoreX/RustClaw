@@ -10,6 +10,7 @@ description = "Weixin ilink CDN + AES helpers (aligned with @tencent-weixin/open
 [dependencies]
 aes = "0.8"
 base64.workspace = true
+claw-core = { path = "../claw-core" }
 cipher = "0.4"
 hex = "0.4"
 md-5 = "0.10"
