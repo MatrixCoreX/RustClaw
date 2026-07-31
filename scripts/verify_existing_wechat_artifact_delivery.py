@@ -108,6 +108,60 @@ def result_artifacts(raw_result: str | None) -> list[dict[str, Any]]:
     ]
 
 
+def execution_trace_summary(raw_result: str | None) -> dict[str, Any] | None:
+    try:
+        result = json.loads(raw_result or "{}")
+    except json.JSONDecodeError:
+        return None
+    trace = (((result.get("task_journal") or {}).get("trace") or {}))
+    capability_results = trace.get("capability_results") or []
+    selected = next(
+        (
+            item
+            for item in capability_results
+            if isinstance(item, dict)
+            and item.get("capability") == "media_download.download"
+            and item.get("status") == "ok"
+        ),
+        None,
+    )
+    if not selected:
+        return None
+    extra = (((selected.get("data") or {}).get("extra") or {}))
+    binding = extra.get("execution_binding")
+    required_binding_fields = (
+        "admission_receipt_digest",
+        "base_registry_digest",
+        "manifest_digest",
+        "overlay_generation_digest",
+        "policy_digest",
+        "receipt_digest",
+        "registry_generation",
+        "registry_generation_digest",
+        "skill_name",
+        "version",
+    )
+    if not isinstance(binding, dict) or any(
+        field not in binding for field in required_binding_fields
+    ):
+        return None
+    planner_actions = [
+        str((round_entry.get("first_action_capability_ref") or "")).strip()
+        for round_entry in trace.get("rounds") or []
+        if isinstance(round_entry, dict)
+        and str(round_entry.get("first_action_capability_ref") or "").strip()
+    ]
+    return {
+        "planner_actions": planner_actions,
+        "requested_capability": "media_download.download",
+        "resolved_capability": selected.get("capability"),
+        "capability_status": selected.get("status"),
+        "action": selected.get("action"),
+        "artifact_count": len(extra.get("artifacts") or []),
+        "execution_binding": {field: binding[field] for field in required_binding_fields},
+    }
+
+
 def delivery_artifact_path(task_id: str, artifact: dict[str, Any]) -> Path:
     artifact_id = str(artifact.get("id") or "").strip()
     raw_filename = str(artifact.get("filename") or "").strip()
@@ -199,7 +253,7 @@ def select_existing_proof(
     connection: sqlite3.Connection,
     log_text: str,
     task_id: str | None,
-) -> tuple[str, dict[str, Any], Path, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], Path, dict[str, Any], dict[str, Any]]:
     if task_id:
         rows = connection.execute(
             """
@@ -220,11 +274,14 @@ def select_existing_proof(
             """
         ).fetchall()
     for selected_task_id, raw_result in rows:
+        execution_trace = execution_trace_summary(raw_result)
+        if not execution_trace:
+            continue
         for artifact in result_artifacts(raw_result):
             artifact_path = delivery_artifact_path(str(selected_task_id), artifact)
             logged = logged_wechat_delivery(log_text, artifact_path)
             if artifact_path.is_file() and logged and not logged["later_delivery_error_observed"]:
-                return str(selected_task_id), artifact, artifact_path, logged
+                return str(selected_task_id), artifact, artifact_path, logged, execution_trace
     if task_id:
         raise VerificationError(f"task {task_id} has no complete WeChat artifact proof")
     raise VerificationError("no existing complete WeChat artifact proof was found")
@@ -237,7 +294,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     try:
         admin_key = enabled_admin_key(connection)
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
-        task_id, manifest, local_path, log_evidence = select_existing_proof(
+        task_id, manifest, local_path, log_evidence, execution_trace = select_existing_proof(
             connection,
             log_text,
             args.task_id,
@@ -308,6 +365,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "current_download_verified": True,
         },
         "communication_delivery": log_evidence,
+        "planner_and_execution": execution_trace,
         "redaction": {
             "status": "pass",
             "credentials_embedded": False,
