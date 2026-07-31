@@ -966,7 +966,18 @@ fn default_rustup_home() -> Option<std::ffi::OsString> {
 }
 
 fn cargo_jobs() -> String {
-    std::env::var("CARGO_BUILD_JOBS").unwrap_or_else(|_| "1".to_string())
+    let detected = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1);
+    cargo_jobs_for(std::env::var("CARGO_BUILD_JOBS").ok().as_deref(), detected)
+}
+
+fn cargo_jobs_for(configured: Option<&str>, detected: usize) -> String {
+    configured
+        .map(str::trim)
+        .filter(|value| value.parse::<usize>().is_ok_and(|jobs| jobs > 0))
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| detected.max(1).to_string())
 }
 
 fn seed_private_cargo_home(
@@ -1016,11 +1027,18 @@ fn seed_private_cargo_home(
             SkillSdkError::new("cargo_source_cache_unavailable", "cargo home is unknown")
                 .phase("dependencies")
         })?;
+    seed_locked_cargo_packages(private_home, &source_home, &packages)
+}
+
+fn seed_locked_cargo_packages(
+    private_home: &Path,
+    source_home: &Path,
+    packages: &[(String, String)],
+) -> SkillSdkResult<()> {
     let source_indexes = sorted_directories(&source_home.join("registry/index"))?;
     let source_caches = sorted_directories(&source_home.join("registry/cache"))?;
     for (name, version) in packages {
         let index_relative = crates_io_index_relative(&name);
-        let mut copied_index = false;
         for source_index in &source_indexes {
             let source_entry = source_index.join(".cache").join(&index_relative);
             if !source_entry.is_file() {
@@ -1041,10 +1059,8 @@ fn seed_private_cargo_home(
                 &source_entry,
                 &destination_index.join(".cache").join(&index_relative),
             )?;
-            copied_index = true;
         }
         let crate_name = format!("{name}-{version}.crate");
-        let mut copied_crate = false;
         for source_cache in &source_caches {
             let source_crate = source_cache.join(&crate_name);
             if !source_crate.is_file() {
@@ -1063,16 +1079,6 @@ fn seed_private_cargo_home(
                     .join(cache_name)
                     .join(&crate_name),
             )?;
-            copied_crate = true;
-        }
-        if !copied_index || !copied_crate {
-            return Err(SkillSdkError::new(
-                "cargo_locked_dependency_cache_missing",
-                format!(
-                    "package={name} version={version} index={copied_index} crate={copied_crate}"
-                ),
-            )
-            .phase("dependencies"));
         }
     }
     Ok(())

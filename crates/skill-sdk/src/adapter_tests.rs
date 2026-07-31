@@ -61,6 +61,70 @@ fn missing_and_unsafe_toolchain_names_are_structured_preflight_errors() {
 }
 
 #[test]
+fn cargo_jobs_use_explicit_positive_override_or_detected_parallelism() {
+    assert_eq!(cargo_jobs_for(Some("4"), 8), "4");
+    assert_eq!(cargo_jobs_for(None, 8), "8");
+    assert_eq!(cargo_jobs_for(Some("0"), 8), "8");
+    assert_eq!(cargo_jobs_for(Some("invalid"), 8), "8");
+    assert_eq!(cargo_jobs_for(None, 0), "1");
+}
+
+#[test]
+fn cargo_cache_seed_tolerates_platform_specific_locked_package_gaps() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source_home = temp.path().join("source");
+    let private_home = temp.path().join("private");
+    let source_index = source_home.join("registry/index/index-fixture");
+    let source_cache = source_home.join("registry/cache/cache-fixture");
+    let available_name = "available_fixture";
+    let available_version = "1.2.3";
+    let index_relative = crates_io_index_relative(available_name);
+
+    fs::create_dir_all(
+        source_index
+            .join(".cache")
+            .join(&index_relative)
+            .parent()
+            .expect("index parent"),
+    )
+    .expect("source index");
+    fs::create_dir_all(&source_cache).expect("source cache");
+    fs::write(source_index.join("config.json"), "{}").expect("index config");
+    fs::write(
+        source_index.join(".cache").join(&index_relative),
+        b"index entry",
+    )
+    .expect("index entry");
+    fs::write(
+        source_cache.join(format!("{available_name}-{available_version}.crate")),
+        b"crate archive",
+    )
+    .expect("crate archive");
+
+    seed_locked_cargo_packages(
+        &private_home,
+        &source_home,
+        &[
+            (available_name.to_string(), available_version.to_string()),
+            ("target_only_missing".to_string(), "9.9.9".to_string()),
+        ],
+    )
+    .expect("available packages should be seeded without requiring target-only archives");
+
+    assert!(private_home
+        .join("registry/index/index-fixture/.cache")
+        .join(index_relative)
+        .is_file());
+    assert!(private_home
+        .join("registry/cache/cache-fixture")
+        .join(format!("{available_name}-{available_version}.crate"))
+        .is_file());
+    assert!(!private_home
+        .join("registry/cache/cache-fixture/target_only_missing-9.9.9.crate")
+        .exists());
+}
+
+#[test]
 fn http_json_adapter_prepares_a_pinned_https_launch_without_local_toolchains() {
     let source = crate::tests::manifest_source()
         .replace("adapter = \"cargo\"", "adapter = \"http_json\"")
