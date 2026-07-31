@@ -4,7 +4,7 @@ use super::{
     check_repeat_action_guard, completed_terminal_termination_allows_replay,
     finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
     registry_allows_repeated_idempotent_action, safe_command_preview,
-    successful_structured_observation_satisfies_selector,
+    successful_structured_observation_satisfies_selector, terminal_poll_after_termination_is_fresh,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
@@ -800,6 +800,103 @@ fn repeat_guard_allows_observed_terminal_termination_replay() {
             3,
         ),
         None
+    );
+
+    loop_state.executed_step_results.push(successful_step(
+        "step_3",
+        "run_cmd",
+        r#"{"schema_version":1,"action":"terminal_terminate","status":"ok","data":{"termination_requested":false,"already_terminal":true}}"#,
+    ));
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 2);
+    assert!(!completed_terminal_termination_allows_replay(
+        &state,
+        &loop_state,
+        &action
+    ));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            4,
+        )
+        .as_deref(),
+        Some("repeat_action_limit")
+    );
+}
+
+#[test]
+fn repeat_guard_allows_one_fresh_terminal_poll_after_termination() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-repeat-terminal-poll-after-terminate");
+    let mut loop_state = super::LoopState::new();
+    let first_poll = r#"{"schema_version":1,"session_id":"session-1","status":"running","page":{"cursor":0,"end_byte":0}}"#;
+    loop_state
+        .executed_step_results
+        .push(successful_step("step_1", "run_cmd", first_poll));
+    loop_state.executed_step_results.push(successful_step(
+        "step_2",
+        "run_cmd",
+        r#"{"schema_version":1,"action":"terminal_terminate","status":"ok","data":{"termination_requested":true}}"#,
+    ));
+    let action = crate::AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({
+            "action": "terminal_poll",
+            "session_id": "session-1"
+        }),
+    };
+    let policy = test_policy(true);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert!(terminal_poll_after_termination_is_fresh(
+        &state,
+        &loop_state,
+        &action
+    ));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            3,
+        ),
+        None
+    );
+
+    loop_state.executed_step_results.push(successful_step(
+        "step_3",
+        "run_cmd",
+        r#"{"schema_version":1,"session_id":"session-1","status":"failed","reason_code":"pty_terminated","page":{"cursor":0,"end_byte":0}}"#,
+    ));
+    assert!(!terminal_poll_after_termination_is_fresh(
+        &state,
+        &loop_state,
+        &action
+    ));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            4,
+        )
+        .as_deref(),
+        Some("repeat_action_limit")
     );
 }
 

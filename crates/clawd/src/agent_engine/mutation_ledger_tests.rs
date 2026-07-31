@@ -1,6 +1,6 @@
 use super::{
-    load_task_mutation_reconciliation_directive, prepare_mutation_execution,
-    record_completed_without_replay, safe_mutation_outcome_projection,
+    complete_mutation_execution, load_task_mutation_reconciliation_directive,
+    prepare_mutation_execution, record_completed_without_replay, safe_mutation_outcome_projection,
     settle_verified_not_applied_mutation, MutationExecutionGuard,
 };
 
@@ -75,6 +75,55 @@ fn unclassified_mutation_fails_closed_into_ledger() {
     )
     .expect("prepare mutation");
     assert!(matches!(outcome, MutationExecutionGuard::Acquired(_)));
+}
+
+#[test]
+fn committed_terminal_termination_reenters_builtin_for_fresh_terminal_state() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    let args = serde_json::json!({
+        "action": "terminal_terminate",
+        "session_id": "session-1"
+    });
+    let fingerprint = "skill:run_cmd:terminal_terminate:session-1";
+    let first = prepare_mutation_execution(
+        &state,
+        &task,
+        "run_cmd",
+        &args,
+        fingerprint,
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare first terminal termination");
+    let MutationExecutionGuard::Acquired(lease) = first else {
+        panic!("first terminal termination must acquire the mutation ledger");
+    };
+    assert!(complete_mutation_execution(
+        &state,
+        &lease,
+        r#"{"status":"ok","action":"terminal_terminate"}"#,
+        Some(&serde_json::json!({
+            "schema_version": 1,
+            "source": "run_cmd",
+            "action": "terminal_terminate",
+            "status": "ok"
+        })),
+        &crate::execution_recipe::ValidationObservation::Passed,
+        false,
+    ));
+
+    let replay = prepare_mutation_execution(
+        &state,
+        &task,
+        "run_cmd",
+        &args,
+        fingerprint,
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare repeated terminal termination");
+
+    assert!(matches!(replay, MutationExecutionGuard::NotRequired));
 }
 
 #[test]

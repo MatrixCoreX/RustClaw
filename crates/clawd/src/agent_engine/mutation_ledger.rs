@@ -70,7 +70,15 @@ pub(super) fn prepare_mutation_execution(
             Ok(MutationExecutionGuard::Acquired(lease))
         }
         crate::repo::BeginTaskMutationOutcome::ReplaySuppressed(record) => {
-            Ok(MutationExecutionGuard::Completed(record))
+            if completed_terminal_termination_requires_fresh_execution(
+                normalized_skill,
+                args,
+                &record,
+            ) {
+                Ok(MutationExecutionGuard::NotRequired)
+            } else {
+                Ok(MutationExecutionGuard::Completed(record))
+            }
         }
         crate::repo::BeginTaskMutationOutcome::ReconciliationRequired(record) => {
             reconcile_uncertain_mutation_if_directed(
@@ -594,6 +602,16 @@ fn registry_action_is_idempotent(state: &AppState, normalized_skill: &str, args:
     state
         .get_skills_registry()
         .is_some_and(|registry| registry.resolved_idempotent(normalized_skill, action.as_deref()))
+}
+
+fn completed_terminal_termination_requires_fresh_execution(
+    normalized_skill: &str,
+    args: &Value,
+    record: &crate::repo::TaskMutationRecord,
+) -> bool {
+    normalized_skill == "run_cmd"
+        && normalized_action_token(args).as_deref() == Some("terminal_terminate")
+        && record.phase == crate::repo::task_mutation_ledger::TaskMutationPhase::Committed
 }
 
 fn mutation_action_ref(normalized_skill: &str, args: &Value) -> String {
