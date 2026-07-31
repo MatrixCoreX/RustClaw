@@ -40,6 +40,7 @@ CASE_IDS = (
     "heartbeat_70s_crosses_poll_windows",
     "concurrent_health_while_long_command_runs",
     "silent_35s_survives_5s_poll_and_idle_hint",
+    "concurrent_stdout_stderr_large_utf8_artifacts",
     "explicit_5s_deadline_stops_90s_command",
     "cancel_is_idempotent_and_removes_process_group",
 )
@@ -375,6 +376,19 @@ class Server:
             payload = error.read().decode(errors="replace")
             raise RegressionFailure(f"{method} {path} returned HTTP {error.code}: {payload}") from error
 
+    def request_bytes(self, path: str) -> bytes:
+        request = Request(
+            self.base_url + path,
+            method="GET",
+            headers={"X-Agent-Key": self.key},
+        )
+        try:
+            with urlopen(request, timeout=15) as response:
+                return response.read()
+        except HTTPError as error:
+            payload = error.read().decode(errors="replace")
+            raise RegressionFailure(f"GET {path} returned HTTP {error.code}: {payload}") from error
+
     def _wait_for_health(self) -> None:
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
@@ -642,6 +656,110 @@ def run_deadline_case(server: Server) -> dict[str, Any]:
     }
 
 
+def run_large_stream_artifact_case(server: Server) -> dict[str, Any]:
+    case = "concurrent_stdout_stderr_large_utf8_artifacts"
+    command = (
+        "(i=1; while [ \"$i\" -le 2500 ]; do "
+        "printf 'OUT_%04d_中文_🙂\\n' \"$i\"; i=$((i+1)); done) & out_pid=$!; "
+        "(i=1; while [ \"$i\" -le 2500 ]; do "
+        "printf 'ERR_%04d_错误_🚨\\n' \"$i\" >&2; i=$((i+1)); done) & err_pid=$!; "
+        "wait \"$out_pid\"; wait \"$err_pid\""
+    )
+    task_id = submit_command(
+        server,
+        {
+            "action": "exec",
+            "command": command,
+            "async_start": True,
+            "poll_after_seconds": 1,
+            "expires_in_seconds": 120,
+        },
+        case,
+    )
+    wait_for_checkpoint(server, task_id, case)
+    final, _ = wait_for_terminal(server, task_id, case, timeout=30)
+    assert_real_execution(case, final)
+    if (final.get("data") or {}).get("status") != "succeeded":
+        raise RegressionFailure(f"{case}: command did not succeed")
+    result = (final.get("data") or {}).get("result_json") or {}
+    if result.get("artifact_publish_status") != "published":
+        raise RegressionFailure(f"{case}: artifact publication failed")
+    if not result.get("output_truncated") or not result.get("truncated"):
+        raise RegressionFailure(f"{case}: large output was not marked truncated")
+
+    refs = {
+        str((ref.get("metadata") or {}).get("stream") or ""): ref
+        for ref in result.get("artifact_refs") or []
+        if isinstance(ref, dict)
+    }
+    descriptors = {
+        str(item.get("id") or ""): item
+        for item in result.get("artifacts") or []
+        if isinstance(item, dict)
+    }
+    ranges = {
+        str(item.get("artifact_ref") or ""): item
+        for item in result.get("range_handles") or []
+        if isinstance(item, dict)
+    }
+    verification: dict[str, Any] = {}
+    markers = {
+        "stdout": ("OUT_0001_中文_🙂", "OUT_2500_中文_🙂"),
+        "stderr": ("ERR_0001_错误_🚨", "ERR_2500_错误_🚨"),
+    }
+    for stream, (first_marker, last_marker) in markers.items():
+        ref = refs.get(stream)
+        if not ref:
+            raise RegressionFailure(f"{case}: {stream} artifact ref missing")
+        artifact_id = str(ref.get("id") or "")
+        descriptor = descriptors.get(artifact_id) or {}
+        range_handle = ranges.get(artifact_id) or {}
+        download_url = str(descriptor.get("download_url") or "")
+        if not download_url:
+            raise RegressionFailure(f"{case}: {stream} immutable download URL missing")
+        content = server.request_bytes(download_url)
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RegressionFailure(f"{case}: {stream} artifact is not valid UTF-8") from error
+        expected_total = int(result.get(f"{stream}_total_bytes") or 0)
+        preview_bytes = int(result.get(f"{stream}_preview_bytes") or 0)
+        cursor = int(result.get(f"{stream}_cursor") or 0)
+        if len(content) != expected_total or expected_total <= 32 * 1024:
+            raise RegressionFailure(f"{case}: {stream} total byte contract mismatch")
+        if cursor != preview_bytes or not (32 * 1024 <= preview_bytes <= 32 * 1024 + 3):
+            raise RegressionFailure(f"{case}: {stream} preview cursor contract mismatch")
+        if result.get(f"{stream}_encoding") != "utf-8" or "\ufffd" in str(
+            result.get(stream) or ""
+        ):
+            raise RegressionFailure(f"{case}: {stream} preview split a UTF-8 scalar")
+        if first_marker not in text or last_marker not in text:
+            raise RegressionFailure(f"{case}: {stream} artifact markers missing")
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if actual_sha256 != ref.get("sha256") or actual_sha256 != descriptor.get("sha256"):
+            raise RegressionFailure(f"{case}: {stream} artifact digest mismatch")
+        if range_handle.get("read_capability") != "artifact.read_range":
+            raise RegressionFailure(f"{case}: {stream} range capability missing")
+        if range_handle.get("start_byte") != 0 or range_handle.get("end_byte") != len(content):
+            raise RegressionFailure(f"{case}: {stream} range bounds mismatch")
+        verification[stream] = {
+            "artifact_id": artifact_id,
+            "size_bytes": len(content),
+            "sha256": actual_sha256,
+            "preview_bytes": preview_bytes,
+            "encoding": result.get(f"{stream}_encoding"),
+            "range_verified": True,
+            "download_verified": True,
+        }
+
+    write_json(LOG_DIR / case / "artifact_verification.json", verification)
+    return {
+        "task_id": task_id,
+        "streams": verification,
+        "status": "pass",
+    }
+
+
 def collect_pids(value: Any) -> set[int]:
     found: set[int] = set()
     if isinstance(value, dict):
@@ -789,6 +907,9 @@ def main(argv: list[str] | None = None) -> int:
             min_checkpoint_observations=4,
         )
         print("[PASS] 35s silent command", flush=True)
+
+        summary["cases"]["large_stream_artifacts"] = run_large_stream_artifact_case(server)
+        print("[PASS] concurrent large UTF-8 stream artifacts", flush=True)
 
         summary["cases"]["deadline_5s"] = run_deadline_case(server)
         print("[PASS] explicit 5s runtime deadline", flush=True)
