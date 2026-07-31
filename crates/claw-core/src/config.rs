@@ -151,6 +151,14 @@ pub struct TelegramConfig {
     pub max_audio_input_bytes: usize,
     #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
     pub ephemeral_image_saved_seconds: u64,
+    #[serde(default = "default_telegram_update_mode")]
+    pub update_mode: String,
+    #[serde(default = "default_telegram_webhook_listen")]
+    pub webhook_listen: String,
+    #[serde(default)]
+    pub webhook_public_url: String,
+    #[serde(default = "default_telegram_webhook_secret_env")]
+    pub webhook_secret_env: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -283,6 +291,10 @@ impl Default for TelegramConfig {
             voice_reply_mode_by_chat: HashMap::new(),
             max_audio_input_bytes: default_telegram_max_audio_input_bytes(),
             ephemeral_image_saved_seconds: default_telegram_ephemeral_image_saved_seconds(),
+            update_mode: default_telegram_update_mode(),
+            webhook_listen: default_telegram_webhook_listen(),
+            webhook_public_url: String::new(),
+            webhook_secret_env: default_telegram_webhook_secret_env(),
         }
     }
 }

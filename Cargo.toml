@@ -92,7 +92,7 @@ serde_json = "1"
 sha2 = "0.10"
 syn = { version = "2", features = ["full", "visit"] }
 # default-features = false + rustls 便于交叉编译 aarch64（无需 OpenSSL）
-teloxide = { version = "0.12", default-features = false, features = ["rustls", "ctrlc_handler"] }
+teloxide = { version = "0.12", default-features = false, features = ["rustls", "ctrlc_handler", "webhooks-axum"] }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
