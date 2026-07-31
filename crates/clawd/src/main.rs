@@ -43,6 +43,7 @@ mod conversation_state;
 #[path = "http/cors_tests.rs"]
 mod cors_tests;
 mod db_init;
+mod delivery_service;
 mod delivery_utils;
 mod evidence_policy;
 mod execution_adapters;
@@ -464,6 +465,7 @@ async fn run() -> anyhow::Result<()> {
         ensure_schedule_schema(&db)?;
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
+        repo::ensure_channel_delivery_receipt_schema(&db)?;
         ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
         repo::child_task_graph::ensure_child_task_graph_schema(&db)?;

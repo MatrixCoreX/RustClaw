@@ -292,7 +292,16 @@ fn scheduled_run_result_summary(result: &Value) -> Value {
         ),
         "notification": machine_object(
             result.get("notification"),
-            &["delivered", "runtime_channel", "error_code", "message_key"],
+            &[
+                "accepted",
+                "delivered",
+                "delivery_status",
+                "delivery_id",
+                "diagnostic_id",
+                "runtime_channel",
+                "error_code",
+                "message_key",
+            ],
         ),
     })
 }

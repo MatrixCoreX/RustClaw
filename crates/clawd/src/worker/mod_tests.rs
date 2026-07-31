@@ -1758,7 +1758,11 @@ fn schedule_notify_observation_marks_delivery_failure() {
         channel: "telegram".to_string(),
         runtime_channel: "telegram".to_string(),
         task_success: true,
+        accepted: false,
         delivered: false,
+        delivery_status: "failed".to_string(),
+        delivery_id: Some("delivery:task-1:schedule-terminal".to_string()),
+        diagnostic_id: Some("delivery:diag-1".to_string()),
         error_text: Some("telegram bot token is empty".to_string()),
     });
 
@@ -1788,4 +1792,57 @@ fn schedule_notify_observation_marks_delivery_failure() {
             .and_then(|value| value.as_str()),
         Some("delivery_error")
     );
+    assert_eq!(observation.get("accepted"), Some(&json!(false)));
+    assert_eq!(observation.get("delivered"), Some(&json!(false)));
+    assert_eq!(
+        observation
+            .get("delivery_status")
+            .and_then(|value| value.as_str()),
+        Some("failed")
+    );
+}
+
+#[test]
+fn schedule_notify_observation_keeps_accepted_distinct_from_delivered() {
+    let observation = super::schedule_notify_observation(&super::ScheduleNotifyOutcome {
+        job_id: "job-accepted".to_string(),
+        channel: "wechat".to_string(),
+        runtime_channel: "wechat".to_string(),
+        task_success: true,
+        accepted: true,
+        delivered: false,
+        delivery_status: "accepted".to_string(),
+        delivery_id: Some("delivery:task-accepted:schedule-terminal".to_string()),
+        diagnostic_id: None,
+        error_text: None,
+    });
+
+    assert_eq!(observation.get("status"), Some(&json!("ok")));
+    assert_eq!(observation.get("accepted"), Some(&json!(true)));
+    assert_eq!(observation.get("delivered"), Some(&json!(false)));
+    assert!(observation.get("error_code").is_none());
+    assert!(observation.get("failure_attribution").is_none());
+}
+
+#[test]
+fn schedule_notify_observation_marks_ambiguous_dispatch_as_pending() {
+    let observation = super::schedule_notify_observation(&super::ScheduleNotifyOutcome {
+        job_id: "job-query".to_string(),
+        channel: "telegram".to_string(),
+        runtime_channel: "telegram".to_string(),
+        task_success: true,
+        accepted: false,
+        delivered: false,
+        delivery_status: "query_required".to_string(),
+        delivery_id: None,
+        diagnostic_id: None,
+        error_text: None,
+    });
+
+    assert_eq!(observation.get("status"), Some(&json!("pending")));
+    assert_eq!(
+        observation.get("error_code"),
+        Some(&json!("channel_delivery_receipt_query_required"))
+    );
+    assert!(observation.get("failure_attribution").is_none());
 }

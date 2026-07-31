@@ -297,7 +297,11 @@ fn scheduled_run_history_listing_exposes_policy_provider_machine_summary() {
             "error_text": "visible provider prose"
         },
         "notification": {
+            "accepted": false,
             "delivered": false,
+            "delivery_status": "failed",
+            "delivery_id": "delivery:task_policy:schedule-terminal",
+            "diagnostic_id": "delivery:diag-policy",
             "runtime_channel": "ui",
             "error_code": "channel_send_failed"
         },
@@ -318,7 +322,17 @@ fn scheduled_run_history_listing_exposes_policy_provider_machine_summary() {
     );
     assert_eq!(summary["provider_status"]["provider"], "minimax");
     assert_eq!(summary["provider_status"]["status"], "failed");
+    assert_eq!(summary["notification"]["accepted"], false);
     assert_eq!(summary["notification"]["delivered"], false);
+    assert_eq!(summary["notification"]["delivery_status"], "failed");
+    assert_eq!(
+        summary["notification"]["delivery_id"],
+        "delivery:task_policy:schedule-terminal"
+    );
+    assert_eq!(
+        summary["notification"]["diagnostic_id"],
+        "delivery:diag-policy"
+    );
     assert_eq!(summary["notification"]["error_code"], "channel_send_failed");
     assert!(summary["policy_decision"].get("explanation").is_none());
     assert!(summary["provider_status"].get("error_text").is_none());
