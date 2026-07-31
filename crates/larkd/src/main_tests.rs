@@ -1,27 +1,79 @@
 use super::{
-    extract_bind_key_candidate, extract_pending_bind_token_candidate, install_tls_crypto_provider,
-    is_unbound_allowed_command, lark_media_agent_context, parse_im_text_from_event_body,
-    send_lark_answer, LarkConfig, LarkSection, LARK_BIND_REQUIRED_FALLBACK,
-    LARK_I18N_BIND_REQUIRED_KEY,
+    build_lark_long_connection_config, extract_bind_key_candidate,
+    extract_pending_bind_token_candidate, install_tls_crypto_provider, is_unbound_allowed_command,
+    lark_delivery_error_text, lark_media_agent_context, lark_provider_http_error,
+    parse_im_text_from_event_body, send_lark_answer, LarkConfig, LarkSection,
+    LARK_BIND_REQUIRED_FALLBACK, LARK_I18N_BIND_REQUIRED_KEY,
 };
 use crate::config_helpers::lark_t;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
+use claw_core::channel_open_platform::OpenPlatformTokenCache;
 use reqwest::Client;
 use serde_json::json;
 use serde_json::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 
 #[test]
 fn tls_crypto_provider_installation_is_idempotent() {
     install_tls_crypto_provider().expect("initial provider installation");
     install_tls_crypto_provider().expect("repeated provider installation");
     assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+}
+
+#[test]
+fn lark_long_connection_uses_its_configured_api_base() {
+    let section = LarkSection {
+        app_id: "fixture-app".to_string(),
+        app_secret: "fixture-secret".to_string(),
+        api_base_url: "https://lark.example.test/".to_string(),
+        ..LarkSection::default()
+    };
+    let sdk = build_lark_long_connection_config(&section);
+    assert_eq!(sdk.base_url, "https://lark.example.test");
+}
+
+#[test]
+fn lark_provider_code_overrides_legacy_http_status_classification() {
+    let encoded =
+        lark_provider_http_error("send_text", 400, r#"{"code":230020,"msg":"private prose"}"#);
+    let error = claw_core::channel_provider_error::ChannelProviderError::decode(&encoded)
+        .expect("typed provider error");
+    assert_eq!(
+        error.failure_class,
+        claw_core::channel_provider_error::ChannelProviderFailureClass::RateLimited
+    );
+    assert_eq!(error.provider_error_code.as_deref(), Some("230020"));
+    assert!(error.retryable);
+    assert!(!encoded.contains("private prose"));
+}
+
+#[test]
+fn lark_delivery_errors_resolve_to_localized_copy_without_machine_payloads() {
+    let config = LarkConfig {
+        lark: LarkSection {
+            language: "en-US".to_string(),
+            ..LarkSection::default()
+        },
+    };
+    let encoded = lark_provider_http_error(
+        "send_text",
+        400,
+        r#"{"code":99991403,"msg":"private prose"}"#,
+    );
+    let localized = lark_delivery_error_text(&config, &encoded);
+    assert!(localized.contains("quota"));
+    assert!(!localized.contains("private prose"));
+    assert!(!localized.contains("__CHANNEL_PROVIDER_ERROR"));
+
+    assert_eq!(
+        lark_delivery_error_text(&config, "unstructured internal detail"),
+        claw_core::channel_i18n::safe_generic_text_for_locale("en-US")
+    );
 }
 
 #[test]
@@ -143,7 +195,7 @@ fn lark_media_agent_context_uses_machine_fields() {
 }
 
 #[tokio::test]
-async fn lark_outbound_delivery_sends_text_image_and_video_file() {
+async fn lark_outbound_delivery_sends_text_image_video_and_opus_audio() {
     #[derive(Clone, Default)]
     struct MockState {
         image_uploads: Arc<AtomicUsize>,
@@ -177,7 +229,7 @@ async fn lark_outbound_delivery_sends_text_image_and_video_file() {
             .lock()
             .expect("message types")
             .push(payload["msg_type"].as_str().unwrap_or_default().to_string());
-        Json(json!({ "code": 0 }))
+        Json(json!({ "code": 0, "data": { "message_id": "om-lark-fixture" } }))
     }
 
     let mock_state = MockState::default();
@@ -209,12 +261,15 @@ async fn lark_outbound_delivery_sends_text_image_and_video_file() {
     std::fs::create_dir_all(&root).expect("create fixture dir");
     let image = root.join("image.jpg");
     let video = root.join("video.mp4");
+    let audio = root.join("voice.opus");
     std::fs::write(&image, b"image").expect("write image fixture");
     std::fs::write(&video, b"video").expect("write video fixture");
+    std::fs::write(&audio, b"audio").expect("write audio fixture");
     let answer = format!(
-        "download complete\nIMAGE_FILE:{}\nVIDEO_FILE:{}",
+        "download complete\nIMAGE_FILE:{}\nVIDEO_FILE:{}\nVOICE_FILE:{}",
         image.display(),
-        video.display()
+        video.display(),
+        audio.display()
     );
     let config = LarkConfig {
         lark: LarkSection {
@@ -224,7 +279,7 @@ async fn lark_outbound_delivery_sends_text_image_and_video_file() {
             ..LarkSection::default()
         },
     };
-    let token_cache = RwLock::new(None);
+    let token_cache = OpenPlatformTokenCache::default();
     send_lark_answer(
         &config,
         &Client::new(),
@@ -238,10 +293,10 @@ async fn lark_outbound_delivery_sends_text_image_and_video_file() {
     .expect("send outbound answer");
 
     assert_eq!(mock_state.image_uploads.load(Ordering::SeqCst), 1);
-    assert_eq!(mock_state.file_uploads.load(Ordering::SeqCst), 1);
+    assert_eq!(mock_state.file_uploads.load(Ordering::SeqCst), 2);
     assert_eq!(
         *mock_state.message_types.lock().expect("message types"),
-        vec!["text", "image", "media"]
+        vec!["text", "image", "media", "audio"]
     );
     std::fs::remove_dir_all(root).expect("remove fixture dir");
 }

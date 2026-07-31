@@ -120,6 +120,19 @@ pub fn safe_generic_text_for_locale(locale: &str) -> String {
         .expect("bundled channel common i18n must define safe generic error")
 }
 
+pub fn common_text_for_locale(locale: &str, key: &str) -> String {
+    let locale = normalized_common_locale(locale);
+    let dictionaries = common_i18n_dicts();
+    dictionaries
+        .get(locale)
+        .and_then(|dict| dict.get(key))
+        .or_else(|| dictionaries.get("en-US").and_then(|dict| dict.get(key)))
+        .filter(|text| !looks_like_machine_text(text, key))
+        .cloned()
+        .map(render_product_name)
+        .unwrap_or_else(|| safe_generic_text_for_locale(locale))
+}
+
 pub fn safe_generic_text_for_path(i18n_path: &str) -> String {
     safe_generic_text_for_locale(locale_hint_from_path(i18n_path))
 }

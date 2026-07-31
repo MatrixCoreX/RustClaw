@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_PATHS = (
+    "crates/claw-core/src/channel_open_platform.rs",
     "crates/clawd/src/channel_send.rs",
     "crates/telegramd/src",
     "crates/whatsappd/src",
@@ -98,6 +99,7 @@ def check_shared_contract(root: Path) -> list[str]:
         "retry_after_seconds",
         "RecipientBlocked",
         "TargetNotFound",
+        "QuotaExhausted",
         "message_key",
         "retryable",
         "diagnostic_id",
@@ -142,6 +144,28 @@ def check_telegram_contract(root: Path) -> list[str]:
     return findings
 
 
+def check_open_platform_contract(root: Path) -> list[str]:
+    relative = "crates/claw-core/src/channel_open_platform.rs"
+    path = root / relative
+    if not path.is_file():
+        return [f"open_platform_contract_file_missing:{relative}"]
+    text = path.read_text(encoding="utf-8")
+    required = (
+        "open_platform_provider_error",
+        "classify_open_platform_provider_code",
+        '"230020"',
+        '"99991400"',
+        '"99991403"',
+        "ChannelProviderFailureClass::QuotaExhausted",
+        "decode_open_platform_response",
+    )
+    return [
+        f"open_platform_contract_token_missing:{relative}:{token}"
+        for token in required
+        if token not in text
+    ]
+
+
 def run_self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="channel-provider-error-contract-") as tmp:
         root = Path(tmp)
@@ -181,6 +205,7 @@ def main() -> int:
     findings = scan(REPO_ROOT)
     contract_findings = check_shared_contract(REPO_ROOT)
     contract_findings.extend(check_telegram_contract(REPO_ROOT))
+    contract_findings.extend(check_open_platform_contract(REPO_ROOT))
     if findings or contract_findings:
         print("CHANNEL_PROVIDER_ERROR_CONTRACT_CHECK failed")
         for finding in findings:

@@ -19,6 +19,7 @@ pub enum ChannelProviderFailureClass {
     RecipientBlocked,
     TargetNotFound,
     RateLimited,
+    QuotaExhausted,
     PayloadRejected,
     ProviderUnavailable,
     Transport,
@@ -34,6 +35,7 @@ impl ChannelProviderFailureClass {
             Self::RecipientBlocked => "recipient_blocked",
             Self::TargetNotFound => "target_not_found",
             Self::RateLimited => "rate_limited",
+            Self::QuotaExhausted => "quota_exhausted",
             Self::PayloadRejected => "payload_rejected",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::Transport => "transport",
@@ -49,6 +51,7 @@ impl ChannelProviderFailureClass {
             Self::RecipientBlocked => "channel.provider.recipient_blocked",
             Self::TargetNotFound => "channel.provider.target_not_found",
             Self::RateLimited => "channel.provider.rate_limited",
+            Self::QuotaExhausted => "channel.provider.quota_exhausted",
             Self::PayloadRejected => "channel.provider.payload_rejected",
             Self::ProviderUnavailable => "channel.provider.unavailable",
             Self::Transport => "channel.provider.transport",
@@ -64,6 +67,7 @@ impl ChannelProviderFailureClass {
             Self::RecipientBlocked => "channel.error.provider_recipient_blocked",
             Self::TargetNotFound => "channel.error.provider_target_not_found",
             Self::RateLimited => "channel.error.provider_rate_limited",
+            Self::QuotaExhausted => "channel.error.provider_quota_exhausted",
             Self::PayloadRejected => "channel.error.provider_payload_rejected",
             Self::ProviderUnavailable | Self::Transport | Self::Unknown => {
                 "channel.error.provider_unavailable"

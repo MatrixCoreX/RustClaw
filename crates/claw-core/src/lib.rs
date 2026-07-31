@@ -10,6 +10,7 @@ pub mod channel_i18n;
 pub mod channel_ingress;
 pub mod channel_media_limits;
 pub mod channel_notice;
+pub mod channel_open_platform;
 pub mod channel_provider_error;
 pub mod config;
 pub mod hard_rules;

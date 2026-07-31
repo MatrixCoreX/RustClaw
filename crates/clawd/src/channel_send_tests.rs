@@ -35,3 +35,40 @@ fn telegram_http_rate_limit_keeps_retry_after_without_response_prose() {
     assert!(decoded.retryable);
     assert!(!encoded.contains("private reply"));
 }
+
+#[test]
+fn open_platform_provider_codes_override_legacy_http_status_for_each_region() {
+    for source_adapter in ["feishu_open_platform", "lark_open_platform"] {
+        let encoded = provider_http_error(
+            source_adapter,
+            "send_text",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"code":230020,"msg":"private reply"}"#,
+        );
+        let decoded = ChannelProviderError::decode(&encoded).expect("machine provider error");
+        assert_eq!(
+            decoded.failure_class,
+            claw_core::channel_provider_error::ChannelProviderFailureClass::RateLimited
+        );
+        assert_eq!(decoded.provider_error_code.as_deref(), Some("230020"));
+        assert!(decoded.retryable);
+        assert!(!encoded.contains("private reply"));
+    }
+}
+
+#[test]
+fn open_platform_monthly_quota_is_terminal_and_redacted() {
+    let encoded = provider_http_error(
+        "lark_open_platform",
+        "send_text",
+        reqwest::StatusCode::BAD_REQUEST,
+        r#"{"code":99991403,"msg":"private reply"}"#,
+    );
+    let decoded = ChannelProviderError::decode(&encoded).expect("machine provider error");
+    assert_eq!(
+        decoded.failure_class,
+        claw_core::channel_provider_error::ChannelProviderFailureClass::QuotaExhausted
+    );
+    assert!(!decoded.retryable);
+    assert!(!encoded.contains("private reply"));
+}

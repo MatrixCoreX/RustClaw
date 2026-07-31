@@ -114,12 +114,24 @@ fn bundled_common_catalogs_cover_supported_channel_locale_families() {
 }
 
 #[test]
+fn common_machine_keys_resolve_to_locale_copy_or_safe_fallback() {
+    let localized = common_text_for_locale("zh-CN", "channel.error.payload_too_large");
+    assert!(localized.contains("大小限制"));
+    assert!(!localized.contains("channel.error"));
+
+    let fallback = common_text_for_locale("zh-CN", "channel.error.unknown_fixture");
+    assert_eq!(fallback, safe_generic_text_for_locale("zh-CN"));
+}
+
+#[test]
 fn bundled_common_catalogs_cover_every_channel_provider_error_key() {
     let keys = [
         "channel.error.delivery_failed",
+        "channel.error.payload_too_large",
         "channel.error.provider_authentication",
         "channel.error.provider_permission_denied",
         "channel.error.provider_rate_limited",
+        "channel.error.provider_quota_exhausted",
         "channel.error.provider_payload_rejected",
         "channel.error.provider_unavailable",
         "channel.error.provider_invalid_response",

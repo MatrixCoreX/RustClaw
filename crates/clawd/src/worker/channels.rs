@@ -153,17 +153,13 @@ pub(crate) async fn send_task_channel_message(
             let receive_id = task_external_chat_id(task)
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for feishu task".to_string())?;
-            crate::channel_send::send_feishu_text_message(state, &receive_id, text)
-                .await
-                .map(|_| crate::channel_send::ChannelSendOutcome::default())
+            crate::channel_send::send_feishu_text_message(state, &receive_id, text).await
         }
         crate::RuntimeChannel::Lark => {
             let receive_id = task_external_chat_id(task)
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
-            crate::channel_send::send_lark_text_message(state, &receive_id, text)
-                .await
-                .map(|_| crate::channel_send::ChannelSendOutcome::default())
+            crate::channel_send::send_lark_text_message(state, &receive_id, text).await
         }
     }
 }

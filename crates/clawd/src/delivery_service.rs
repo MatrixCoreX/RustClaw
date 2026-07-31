@@ -7,6 +7,7 @@ use claw_core::channel_delivery::{
 use claw_core::channel_ingress::{
     default_adapter_for_channel, default_reply_target, ChannelReplyTarget,
 };
+use claw_core::channel_open_platform::{scoped_open_platform_receipt_key, OpenPlatformRegion};
 use claw_core::channel_provider_error::ChannelProviderError;
 use claw_core::types::ChannelKind;
 use serde_json::Value;
@@ -116,7 +117,16 @@ pub(crate) fn build_scheduled_delivery_envelope(
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     let delivery_id = format!("delivery:{}:schedule-terminal", task.task_id);
-    let idempotency_key = format!("{}:schedule-terminal", task.task_id);
+    let base_idempotency_key = format!("{}:schedule-terminal", task.task_id);
+    let idempotency_key = match channel {
+        ChannelKind::Feishu => {
+            scoped_open_platform_receipt_key(OpenPlatformRegion::Feishu, &base_idempotency_key)
+        }
+        ChannelKind::Lark => {
+            scoped_open_platform_receipt_key(OpenPlatformRegion::Lark, &base_idempotency_key)
+        }
+        _ => base_idempotency_key,
+    };
     let envelope = ChannelDeliveryEnvelope {
         schema_version: CHANNEL_DELIVERY_SCHEMA_VERSION,
         delivery_id,

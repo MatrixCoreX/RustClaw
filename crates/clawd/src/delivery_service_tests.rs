@@ -72,6 +72,37 @@ fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
 }
 
 #[test]
+fn feishu_and_lark_receipts_use_distinct_provider_namespaces() {
+    let state = AppState::test_default_with_fixture_provider();
+    let mut feishu_payload = payload();
+    feishu_payload["channel"] = json!("feishu");
+    feishu_payload["channel_ingress"]["channel"] = json!("feishu");
+    feishu_payload["channel_ingress"]["adapter"] = json!("feishu_open_platform");
+    let mut feishu_task = task(&feishu_payload);
+    feishu_task.channel = "feishu".to_string();
+
+    let mut lark_payload = feishu_payload.clone();
+    lark_payload["channel"] = json!("lark");
+    lark_payload["channel_ingress"]["channel"] = json!("lark");
+    lark_payload["channel_ingress"]["adapter"] = json!("lark_open_platform");
+    let mut lark_task = task(&lark_payload);
+    lark_task.channel = "lark".to_string();
+
+    let feishu = build_scheduled_delivery_envelope(&state, &feishu_task, &feishu_payload, "result")
+        .expect("build Feishu envelope");
+    let lark = build_scheduled_delivery_envelope(&state, &lark_task, &lark_payload, "result")
+        .expect("build Lark envelope");
+
+    assert!(feishu
+        .idempotency_key
+        .starts_with("feishu_open_platform_delivery:"));
+    assert!(lark
+        .idempotency_key
+        .starts_with("lark_open_platform_delivery:"));
+    assert_ne!(feishu.idempotency_key, lark.idempotency_key);
+}
+
+#[test]
 fn accepted_receipt_keeps_provider_ids_under_the_stable_idempotency_key() {
     let state = AppState::test_default_with_fixture_provider();
     let payload = payload();
