@@ -583,21 +583,42 @@ def run_health_concurrency(server: Server, long_task_id: str) -> dict[str, Any]:
     # Use a fixed host builtin for the concurrent queue check. Runner skills
     # intentionally require immutable package receipts, while this isolated
     # workspace contains no release receipts by design.
-    short_task_id = submit_skill(server, "list_dir", {"path": "."}, case)
-    started = time.monotonic()
-    short_task, _ = wait_for_terminal(server, short_task_id, case, timeout=20)
-    elapsed = time.monotonic() - started
+    list_case = f"{case}/list_dir"
+    list_task_id = submit_skill(server, "list_dir", {"path": "."}, list_case)
+    list_started = time.monotonic()
+    list_task, _ = wait_for_terminal(server, list_task_id, list_case, timeout=20)
+    list_elapsed = time.monotonic() - list_started
+
+    stat_case = f"{case}/stat_paths"
+    stat_task_id = submit_skill(
+        server,
+        "fs_basic",
+        {"action": "stat_paths", "path": "Cargo.toml"},
+        stat_case,
+    )
+    stat_started = time.monotonic()
+    stat_task, _ = wait_for_terminal(server, stat_task_id, stat_case, timeout=20)
+    stat_elapsed = time.monotonic() - stat_started
+
     long_during = query_task(server, long_task_id)
     write_json(LOG_DIR / case / "long_task_during_health.json", long_during)
-    assert_real_execution(case, short_task)
-    if (short_task.get("data") or {}).get("status") != "succeeded":
-        raise RegressionFailure(f"{case}: concurrent short task did not succeed")
+    assert_real_execution(list_case, list_task)
+    assert_real_execution(stat_case, stat_task)
+    if (list_task.get("data") or {}).get("status") != "succeeded":
+        raise RegressionFailure(f"{case}: concurrent list task did not succeed")
+    if (stat_task.get("data") or {}).get("status") != "succeeded":
+        raise RegressionFailure(f"{case}: concurrent stat task did not succeed")
+    stat_result = serialized_result(stat_task)
+    if "Cargo.toml" not in stat_result or '"kind":"file"' not in stat_result.replace(" ", ""):
+        raise RegressionFailure(f"{case}: concurrent stat task did not verify Cargo.toml")
     if (long_during.get("data") or {}).get("status") not in {"queued", "running"}:
         raise RegressionFailure(f"{case}: long command was not active when health completed")
     return {
-        "task_id": short_task_id,
+        "list_task_id": list_task_id,
+        "stat_task_id": stat_task_id,
         "health_elapsed_seconds": round(health_elapsed, 3),
-        "short_task_elapsed_seconds": round(elapsed, 3),
+        "list_task_elapsed_seconds": round(list_elapsed, 3),
+        "stat_task_elapsed_seconds": round(stat_elapsed, 3),
         "status": "pass",
     }
 
