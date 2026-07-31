@@ -4,6 +4,8 @@ const os = require("os");
 const path = require("path");
 
 const {
+  adapterDiagnosticId,
+  adapterError,
   bindIdentity,
   buildSubmitTaskBody,
   canonicalUserJid,
@@ -13,7 +15,10 @@ const {
   isGroupJid,
   isLoopbackHost,
   isSameAccountJid,
+  deliverySourceAllowed,
+  loginStatusSnapshot,
   messageTimestampSeconds,
+  normalizeDeliverySource,
   normalizeInternalApiBaseUrl,
   parseListenAddress,
   queryTask,
@@ -26,10 +31,55 @@ const {
   taskArtifactDownloadUrl,
   taskSuccessArtifacts,
   taskSuccessMessages,
+  updateLoginState,
   validateOutboundFile,
   validateOutboundFileSize,
   shouldProcessUpsertMessage,
 } = require("./index.js");
+
+assert.strictEqual(normalizeDeliverySource(" Scheduled_Task "), "scheduled_task");
+assert.strictEqual(deliverySourceAllowed("scheduled_task", false), false);
+assert.strictEqual(deliverySourceAllowed("proactive_notice", false), false);
+assert.strictEqual(deliverySourceAllowed("scheduled_task", true), true);
+assert.strictEqual(deliverySourceAllowed("background_completion", false), true);
+assert.strictEqual(deliverySourceAllowed("immediate_daemon", false), true);
+assert.strictEqual(deliverySourceAllowed("unknown", false), false);
+const adapterFailure = adapterError(
+  "adapter_send_failed",
+  "send_text",
+  "private provider prose"
+);
+assert.strictEqual(adapterFailure.error_code, "adapter_send_failed");
+assert.match(adapterFailure.diagnostic_id, /^whatsapp-web:[a-f0-9]{24}$/);
+assert.strictEqual(adapterFailure.retryable, false);
+assert.strictEqual(JSON.stringify(adapterFailure).includes("private provider prose"), false);
+assert.strictEqual(
+  adapterDiagnosticId("send_text", "same"),
+  adapterDiagnosticId("send_text", "same")
+);
+const adapterStatus = loginStatusSnapshot();
+assert.strictEqual(adapterStatus.adapter_mode, "experimental_unofficial");
+assert.strictEqual(adapterStatus.official_bot_api, false);
+assert.strictEqual(adapterStatus.transport, "baileys");
+assert.strictEqual(adapterStatus.proactive_send_enabled, false);
+assert.strictEqual(adapterStatus.local_safety_limits.image_bytes, 100 * 1024 * 1024);
+assert.strictEqual(adapterStatus.last_error, undefined);
+updateLoginState("reconnecting", {
+  errorCode: "connection_closed",
+  operation: "connection_update",
+  diagnosticMaterial: "private disconnect prose",
+});
+const reconnectingStatus = loginStatusSnapshot();
+assert.strictEqual(reconnectingStatus.phase, "reconnecting");
+assert.strictEqual(reconnectingStatus.connected, false);
+assert.strictEqual(reconnectingStatus.last_error_code, "connection_closed");
+assert.match(reconnectingStatus.last_diagnostic_id, /^whatsapp-web:[a-f0-9]{24}$/);
+assert.strictEqual(JSON.stringify(reconnectingStatus).includes("private disconnect prose"), false);
+updateLoginState("connected", { clearQr: true });
+const connectedStatus = loginStatusSnapshot();
+assert.strictEqual(connectedStatus.phase, "connected");
+assert.strictEqual(connectedStatus.connected, true);
+assert.strictEqual(connectedStatus.last_error_code, null);
 
 const mediaFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "wa-web-outbound-media-"));
 const imageFixture = path.join(mediaFixtureDir, "image.jpg");

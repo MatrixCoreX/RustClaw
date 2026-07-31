@@ -892,6 +892,7 @@ async fn run() -> anyhow::Result<()> {
             whatsapp_out_of_window_template_language,
             whatsapp_web_enabled: config.whatsapp_web.enabled,
             whatsapp_web_bridge_base_url: config.whatsapp_web.bridge_base_url.clone(),
+            whatsapp_web_allow_proactive_send: config.whatsapp_web.allow_proactive_send,
             future_adapters_enabled: Arc::new(
                 config
                     .adapters

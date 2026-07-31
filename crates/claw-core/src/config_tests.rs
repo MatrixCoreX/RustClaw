@@ -100,6 +100,17 @@ busy_timeout_ms = 2000
 }
 
 #[test]
+fn whatsapp_web_defaults_keep_proactive_delivery_off_and_local_limits_explicit() {
+    let config = super::WhatsappWebConfig::default();
+    assert!(!config.enabled);
+    assert!(!config.allow_proactive_send);
+    assert_eq!(config.max_outbound_image_bytes, 100 * 1024 * 1024);
+    assert_eq!(config.max_outbound_video_bytes, 100 * 1024 * 1024);
+    assert_eq!(config.max_outbound_audio_bytes, 100 * 1024 * 1024);
+    assert_eq!(config.max_outbound_file_bytes, 2 * 1024 * 1024 * 1024);
+}
+
+#[test]
 fn agents_toml_is_the_canonical_agent_source() {
     let dir = unique_temp_config_dir("canonical-agents");
     fs::create_dir_all(dir.join("channels")).expect("create temp config dir");

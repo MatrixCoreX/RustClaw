@@ -16,47 +16,43 @@ async fn whatsapp_web_login_status(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("whatsapp_web.bridge_base_url is empty".to_string()),
+                error: Some("whatsapp_web.not_configured".to_string()),
             }),
         );
     }
     let url = format!("{base}/v1/login-status");
     let resp = match state.core.http_client.get(&url).send().await {
         Ok(v) => v,
-        Err(err) => {
+        Err(_err) => {
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("request bridge login status failed: {err}")),
+                    error: Some("whatsapp_web.login_status_unavailable".to_string()),
                 }),
             );
         }
     };
     if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
         return (
             StatusCode::BAD_GATEWAY,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!(
-                    "bridge login status failed: status={status} body={body}"
-                )),
+                error: Some("whatsapp_web.login_status_unavailable".to_string()),
             }),
         );
     }
     let data = match resp.json::<Value>().await {
         Ok(v) => v,
-        Err(err) => {
+        Err(_err) => {
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("decode bridge login status failed: {err}")),
+                    error: Some("whatsapp_web.login_status_invalid".to_string()),
                 }),
             );
         }
@@ -336,33 +332,31 @@ async fn whatsapp_web_logout(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("whatsapp_web.bridge_base_url is empty".to_string()),
+                error: Some("whatsapp_web.not_configured".to_string()),
             }),
         );
     }
     let url = format!("{base}/v1/logout");
     let resp = match state.core.http_client.post(&url).send().await {
         Ok(v) => v,
-        Err(err) => {
+        Err(_err) => {
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("request bridge logout failed: {err}")),
+                    error: Some("whatsapp_web.logout_unavailable".to_string()),
                 }),
             );
         }
     };
     if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
         return (
             StatusCode::BAD_GATEWAY,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("bridge logout failed: status={status} body={body}")),
+                error: Some("whatsapp_web.logout_failed".to_string()),
             }),
         );
     }

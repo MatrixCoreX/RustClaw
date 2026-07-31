@@ -459,6 +459,21 @@ pub struct WhatsappWebConfig {
     pub auth_dir: String,
     #[serde(default = "default_whatsapp_web_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    /// Local adapter policy. This is not a provider-advertised WhatsApp limit.
+    #[serde(default = "default_whatsapp_web_max_outbound_image_bytes")]
+    pub max_outbound_image_bytes: u64,
+    /// Local adapter policy. This is not a provider-advertised WhatsApp limit.
+    #[serde(default = "default_whatsapp_web_max_outbound_video_bytes")]
+    pub max_outbound_video_bytes: u64,
+    /// Local adapter policy. This is not a provider-advertised WhatsApp limit.
+    #[serde(default = "default_whatsapp_web_max_outbound_audio_bytes")]
+    pub max_outbound_audio_bytes: u64,
+    /// Local adapter policy. This is not a provider-advertised WhatsApp limit.
+    #[serde(default = "default_whatsapp_web_max_outbound_file_bytes")]
+    pub max_outbound_file_bytes: u64,
+    /// Scheduled/proactive delivery is opt-in for this experimental adapter.
+    #[serde(default)]
+    pub allow_proactive_send: bool,
     #[serde(default = "default_whatsapp_web_language")]
     pub language: String,
     #[serde(default = "default_whatsapp_web_i18n_path")]
@@ -491,6 +506,11 @@ impl Default for WhatsappWebConfig {
             bridge_base_url: default_whatsapp_web_bridge_base_url(),
             auth_dir: default_whatsapp_web_auth_dir(),
             quick_result_wait_seconds: default_whatsapp_web_quick_result_wait_seconds(),
+            max_outbound_image_bytes: default_whatsapp_web_max_outbound_image_bytes(),
+            max_outbound_video_bytes: default_whatsapp_web_max_outbound_video_bytes(),
+            max_outbound_audio_bytes: default_whatsapp_web_max_outbound_audio_bytes(),
+            max_outbound_file_bytes: default_whatsapp_web_max_outbound_file_bytes(),
+            allow_proactive_send: false,
             language: default_whatsapp_web_language(),
             i18n_path: default_whatsapp_web_i18n_path(),
             admins: Vec::new(),

@@ -16,12 +16,29 @@ import {
   serviceControlActions,
   type CommunicationServiceAction,
 } from "../lib/communication-service-controls";
+import { formatBytes } from "../lib/display-format";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
 type SetupStepStatus = "done" | "attention" | "todo";
 type ServiceName = "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd";
 type ServiceAction = CommunicationServiceAction;
+
+function whatsappWebLoginErrorCopy(t: Translate, errorCode?: string | null): string | null {
+  if (!errorCode) return null;
+  switch (errorCode) {
+    case "connection_closed":
+      return t("连接已断开，适配器正在尝试重连。", "The connection closed and the adapter is reconnecting.");
+    case "logged_out":
+      return t("登录设备已移除，请重新扫码连接。", "The linked device was removed. Scan again to reconnect.");
+    case "qr_render_failed":
+      return t("二维码暂时无法显示，请刷新状态。", "The QR code could not be displayed. Refresh the status.");
+    case "reconnect_failed":
+      return t("自动重连失败，请重启服务后重新扫码。", "Automatic reconnection failed. Restart the service and scan again.");
+    default:
+      return t("实验适配器遇到连接错误，请按诊断编号排查。", "The experimental adapter encountered a connection error. Use the diagnostic ID for troubleshooting.");
+  }
+}
 
 interface ChannelServiceControlsProps {
   t: Translate;
@@ -473,11 +490,16 @@ export function CommunicationSetupPage({
           <div className="setup-channel-card channel-setup-card flex self-start flex-col">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h4 className="text-lg font-semibold text-white">WhatsApp Web</h4>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-lg font-semibold text-white">WhatsApp Web</h4>
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-100">
+                    {t("实验性连接", "Experimental")}
+                  </span>
+                </div>
                 <p className="mt-2 text-sm leading-7 text-white/65">
                   {t(
-                    "启动服务后，用手机 WhatsApp 扫描二维码即可登录，不需要填写 Cloud API 凭据。每位聊天用户首次使用时，还需要在私聊中发送 /key <登录密钥> 完成账号绑定。",
-                    "Start the service, then scan the QR code with WhatsApp on your phone. No Cloud API credentials are needed. On first use, each chat user must privately send /key <login key> to bind their account.",
+                    "这是通过 Baileys 兼容桥实现的扫码连接，不是 Meta 官方 Bot API。客户端变化可能影响稳定性和账号可用性。每位聊天用户首次使用时，还需要在私聊中发送 /key <登录密钥> 完成账号绑定。",
+                    "This QR connection uses a Baileys-compatible bridge; it is not Meta's official Bot API. Client changes may affect stability and account availability. On first use, each chat user must privately send /key <login key> to bind their account.",
                   )}
                 </p>
               </div>
@@ -488,6 +510,32 @@ export function CommunicationSetupPage({
             </div>
 
             <p className="mt-4 text-sm leading-7 text-white/65">{whatsappWebStatusSummary}</p>
+
+            <div className="mt-4 space-y-2 rounded-xl border border-amber-400/20 bg-amber-400/8 px-3 py-3 text-xs leading-6 text-amber-50/80">
+              <p>
+                {t(
+                  "二维码、登录、重连和移除设备只属于连接状态，不会写入 Agent 对话历史或记忆。",
+                  "QR, sign-in, reconnect, and device removal are connection state only and are not written to Agent chat history or memory.",
+                )}
+              </p>
+              <p>
+                {whatsappWebLoginStatus?.proactive_send_enabled
+                  ? t(
+                      "主动发送已显式开启。实验适配器可能有账号和稳定性风险，请谨慎使用。",
+                      "Proactive sending is explicitly enabled. Use it carefully because this experimental adapter may carry account and stability risks.",
+                    )
+                  : t(
+                      "主动发送默认关闭；用户发来消息后的任务结果回复不受影响。",
+                      "Proactive sending is off by default; task replies following an inbound user message are unaffected.",
+                    )}
+              </p>
+              {whatsappWebLoginStatus?.local_safety_limits ? (
+                <p>
+                  {t("本地保护上限（不是 WhatsApp 官方上限）", "Local safety limits (not official WhatsApp limits)")}：
+                  {t("图片", "image")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.image_bytes)} · {t("视频", "video")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.video_bytes)} · {t("音频", "audio")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.audio_bytes)} · {t("文件", "file")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.file_bytes)}
+                </p>
+              ) : null}
+            </div>
 
             <div className="mt-4 flex flex-1 flex-col gap-4 border-t border-white/10 pt-4">
               {whatsappWebConnected ? (
@@ -537,9 +585,14 @@ export function CommunicationSetupPage({
                 </div>
               )}
 
-              {whatsappWebLoginStatus?.last_error ? (
+              {whatsappWebLoginErrorCopy(t, whatsappWebLoginStatus?.last_error_code) ? (
                 <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                  {whatsappWebLoginStatus.last_error}
+                  {whatsappWebLoginErrorCopy(t, whatsappWebLoginStatus?.last_error_code)}
+                  {whatsappWebLoginStatus?.last_diagnostic_id ? (
+                    <span className="mt-1 block font-mono text-xs text-amber-100/65">
+                      {t("诊断编号", "Diagnostic ID")}: {whatsappWebLoginStatus.last_diagnostic_id}
+                    </span>
+                  ) : null}
                 </p>
               ) : null}
               {whatsappWebLoginError ? (

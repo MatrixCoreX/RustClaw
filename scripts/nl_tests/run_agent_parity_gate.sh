@@ -444,6 +444,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_wechat_ilink_delivery_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_whatsapp_cloud_delivery_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_whatsapp_cloud_delivery_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_whatsapp_web_experimental_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_whatsapp_web_experimental_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_long_files.py"
   python3 "${ROOT_DIR}/scripts/check_product_identity_coupling.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_product_identity_coupling.py"

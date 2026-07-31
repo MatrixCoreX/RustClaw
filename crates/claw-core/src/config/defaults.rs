@@ -361,6 +361,22 @@ pub(super) fn default_whatsapp_web_quick_result_wait_seconds() -> u64 {
     3
 }
 
+pub(super) fn default_whatsapp_web_max_outbound_image_bytes() -> u64 {
+    100 * 1024 * 1024
+}
+
+pub(super) fn default_whatsapp_web_max_outbound_video_bytes() -> u64 {
+    100 * 1024 * 1024
+}
+
+pub(super) fn default_whatsapp_web_max_outbound_audio_bytes() -> u64 {
+    100 * 1024 * 1024
+}
+
+pub(super) fn default_whatsapp_web_max_outbound_file_bytes() -> u64 {
+    2 * 1024 * 1024 * 1024
+}
+
 pub(super) fn default_whatsapp_web_i18n_path() -> String {
     "configs/i18n/whatsapp-webd.en-US.toml".to_string()
 }
