@@ -135,11 +135,56 @@ pub(super) async fn execute_existing_session_action(
     ensure_owner(task, &spec)?;
     match action {
         "terminal_poll" => poll_session(&session_dir, &spec, args),
-        "terminal_write" | "terminal_resize" | "terminal_signal" | "terminal_terminate" => {
+        "terminal_terminate" => terminate_session(&session_dir, args).await,
+        "terminal_write" | "terminal_resize" | "terminal_signal" => {
             send_control(&session_dir, action, args).await
         }
         _ => Err(machine_error("pty_session_action_unsupported")),
     }
+}
+
+async fn terminate_session(
+    session_dir: &Path,
+    args: &Map<String, Value>,
+) -> Result<String, PtySessionError> {
+    if let Some(metadata) = read_metadata(session_dir) {
+        if metadata.status != "running" {
+            return terminal_terminate_idempotent_response(&metadata);
+        }
+    }
+    match send_control(session_dir, "terminal_terminate", args).await {
+        Ok(response) => Ok(response),
+        Err(error) if error.code == "pty_control_timeout" => {
+            let Some(metadata) = read_metadata(session_dir) else {
+                return Err(error);
+            };
+            if metadata.status == "running" {
+                Err(error)
+            } else {
+                terminal_terminate_idempotent_response(&metadata)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn terminal_terminate_idempotent_response(
+    metadata: &PtySessionMetadata,
+) -> Result<String, PtySessionError> {
+    serde_json::to_string(&json!({
+        "schema_version": 1,
+        "request_id": uuid::Uuid::new_v4().to_string(),
+        "action": "terminal_terminate",
+        "status": "ok",
+        "data": {
+            "termination_requested": false,
+            "already_terminal": true,
+            "terminal_status": metadata.status,
+            "reason_code": metadata.reason_code,
+            "exit_code": metadata.exit_code,
+        },
+    }))
+    .map_err(|_| machine_error("pty_control_response_invalid"))
 }
 
 fn launch_spec_from_command(

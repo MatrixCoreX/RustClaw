@@ -288,6 +288,20 @@ async fn durable_runner_can_be_terminated_through_machine_control() {
         let polled: Value = serde_json::from_str(&polled).unwrap();
         if polled["status"] != "running" {
             assert_eq!(polled["reason_code"], "pty_terminated");
+            let repeated = execute_existing_session_action(
+                &workspace.root,
+                None,
+                "terminal_terminate",
+                json!({"session_id": session_id}).as_object().unwrap(),
+            )
+            .await
+            .expect("repeat terminal termination");
+            let repeated: Value = serde_json::from_str(&repeated).unwrap();
+            assert_eq!(repeated["status"], "ok");
+            assert_eq!(repeated["data"]["termination_requested"], false);
+            assert_eq!(repeated["data"]["already_terminal"], true);
+            assert_eq!(repeated["data"]["terminal_status"], polled["status"]);
+            assert_eq!(repeated["data"]["reason_code"], "pty_terminated");
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
