@@ -354,15 +354,13 @@ fn read_bounded_output(path: &Path, max_bytes: usize) -> BoundedProcessOutput {
     let total_bytes = std::fs::metadata(path)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    let mut bytes = Vec::with_capacity(max_bytes.min(total_bytes as usize));
+    let read_limit = max_bytes.saturating_add(3);
+    let mut bytes = Vec::with_capacity(read_limit.min(total_bytes as usize));
     if let Ok(file) = std::fs::File::open(path) {
-        let _ = file.take(max_bytes as u64).read_to_end(&mut bytes);
+        let _ = file.take(read_limit as u64).read_to_end(&mut bytes);
     }
-    let encoding = if std::str::from_utf8(&bytes).is_ok() {
-        "utf-8"
-    } else {
-        "utf-8-lossy"
-    };
+    let (visible_len, encoding) = crate::local_process_job::utf8_delta_boundary(&bytes, max_bytes);
+    bytes.truncate(visible_len);
     BoundedProcessOutput {
         text: String::from_utf8_lossy(&bytes).to_string(),
         total_bytes,

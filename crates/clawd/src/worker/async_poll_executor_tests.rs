@@ -192,7 +192,10 @@ fn async_poll_large_output_keeps_exact_artifact_and_bounded_preview() {
     let result = &payload["final_result_json"];
     assert_eq!(result["output_truncated"], true);
     assert_eq!(result["stdout_total_bytes"], stdout.len());
-    assert_eq!(result["stdout_preview_bytes"], 32 * 1024);
+    let preview_bytes = result["stdout_preview_bytes"].as_u64().unwrap();
+    assert!((32 * 1024..=32 * 1024 + 3).contains(&preview_bytes));
+    assert_eq!(result["stdout_encoding"], "utf-8");
+    assert!(!result["stdout"].as_str().unwrap().contains('\u{fffd}'));
     let artifact_path = workspace
         .path
         .join(result["artifact_refs"][0]["path"].as_str().unwrap());

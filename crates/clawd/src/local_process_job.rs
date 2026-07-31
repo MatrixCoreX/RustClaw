@@ -215,7 +215,7 @@ pub(crate) fn read_output_delta(
     }
 }
 
-fn utf8_delta_boundary(bytes: &[u8], requested_max: usize) -> (usize, &'static str) {
+pub(crate) fn utf8_delta_boundary(bytes: &[u8], requested_max: usize) -> (usize, &'static str) {
     match std::str::from_utf8(bytes) {
         Ok(text) => {
             let target = requested_max.min(bytes.len());
