@@ -185,20 +185,20 @@ pub(crate) async fn send_telegram_message(
                     &path,
                     "Telegram",
                     "图片",
-                    claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                    claw_core::channel_media_limits::telegram_file_max_bytes(),
                 )?;
-                if size <= claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES {
+                if size <= claw_core::channel_media_limits::telegram_image_max_bytes() {
                     (
                         "sendPhoto",
                         "photo",
-                        claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES,
+                        claw_core::channel_media_limits::telegram_image_max_bytes(),
                         "图片",
                     )
                 } else {
                     (
                         "sendDocument",
                         "document",
-                        claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                        claw_core::channel_media_limits::telegram_file_max_bytes(),
                         "文件",
                     )
                 }
@@ -206,19 +206,19 @@ pub(crate) async fn send_telegram_message(
             WechatOutboundKind::Video => (
                 "sendVideo",
                 "video",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
                 "视频",
             ),
             WechatOutboundKind::Audio => (
                 "sendAudio",
                 "audio",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
                 "音频",
             ),
             WechatOutboundKind::File => (
                 "sendDocument",
                 "document",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
                 "文件",
             ),
         };
@@ -806,6 +806,7 @@ pub(crate) async fn send_feishu_text_message(
     send_feishu_lark_answer(
         state,
         "feishu",
+        claw_core::channel_capabilities::ChannelAdapterKind::FeishuOpenPlatform,
         "飞书",
         &config.api_base_url,
         &config.app_id,
@@ -827,6 +828,7 @@ pub(crate) async fn send_lark_text_message(
     send_feishu_lark_answer(
         state,
         "lark",
+        claw_core::channel_capabilities::ChannelAdapterKind::LarkOpenPlatform,
         "Lark",
         &config.api_base_url,
         &config.app_id,
@@ -841,6 +843,7 @@ pub(crate) async fn send_lark_text_message(
 async fn send_feishu_lark_answer(
     state: &AppState,
     channel_tag: &str,
+    capability_adapter: claw_core::channel_capabilities::ChannelAdapterKind,
     channel_label: &str,
     api_base_url: &str,
     app_id: &str,
@@ -848,6 +851,14 @@ async fn send_feishu_lark_answer(
     receive_id: &str,
     answer: &str,
 ) -> Result<(), String> {
+    let image_max_bytes = claw_core::channel_media_limits::required_channel_media_max_bytes(
+        capability_adapter,
+        claw_core::channel_capabilities::ChannelCapabilityKind::SendImage,
+    );
+    let file_max_bytes = claw_core::channel_media_limits::required_channel_media_max_bytes(
+        capability_adapter,
+        claw_core::channel_capabilities::ChannelCapabilityKind::SendFile,
+    );
     let token =
         get_tenant_access_token(&state.core.http_client, api_base_url, app_id, app_secret).await?;
     let base = api_base_url.trim_end_matches('/');
@@ -901,16 +912,16 @@ async fn send_feishu_lark_answer(
                         &path,
                         channel_label,
                         "图片",
-                        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                        file_max_bytes,
                     )?;
-                    if size <= claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES {
+                    if size <= image_max_bytes {
                         (
                             format!("{base}/open-apis/im/v1/images"),
                             "image",
                             "message",
                             "image",
                             "image_key",
-                            claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES,
+                            image_max_bytes,
                             "图片",
                         )
                     } else {
@@ -920,7 +931,7 @@ async fn send_feishu_lark_answer(
                             "stream",
                             "file",
                             "file_key",
-                            claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                            file_max_bytes,
                             "文件",
                         )
                     }
@@ -936,7 +947,7 @@ async fn send_feishu_lark_answer(
                         if is_mp4 { "mp4" } else { "stream" },
                         if is_mp4 { "media" } else { "file" },
                         "file_key",
-                        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                        file_max_bytes,
                         "视频",
                     )
                 }
@@ -946,7 +957,7 @@ async fn send_feishu_lark_answer(
                     "stream",
                     "file",
                     "file_key",
-                    claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                    file_max_bytes,
                     "文件",
                 ),
             };

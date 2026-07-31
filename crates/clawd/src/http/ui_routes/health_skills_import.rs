@@ -454,6 +454,32 @@ async fn list_capabilities(
     )
 }
 
+async fn list_channel_capabilities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(channel_capabilities_payload()),
+            error: None,
+        }),
+    )
+}
+
+fn channel_capabilities_payload() -> Value {
+    json!({
+        "schema_version": claw_core::channel_capabilities::CHANNEL_CAPABILITY_SCHEMA_VERSION,
+        "policy_version": claw_core::channel_capabilities::CHANNEL_CAPABILITY_POLICY_VERSION,
+        "verified_at": claw_core::channel_capabilities::CHANNEL_CAPABILITY_VERIFIED_AT,
+        "capabilities": claw_core::channel_capabilities::channel_capability_catalog(),
+    })
+}
+
 fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     let registry_entry = state
         .get_skills_registry()

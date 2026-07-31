@@ -414,7 +414,7 @@ pub async fn send_weixin_image_from_file(
         file_path,
         "微信",
         "图片",
-        claw_core::channel_media_limits::WECHAT_IMAGE_SAFETY_MAX_BYTES,
+        claw_core::channel_media_limits::wechat_image_max_bytes(),
     )?;
     let plaintext = tokio::fs::read(file_path)
         .await
@@ -488,7 +488,7 @@ pub async fn send_weixin_video_from_file(
         file_path,
         "微信",
         "视频",
-        claw_core::channel_media_limits::WECHAT_OTHER_SAFETY_MAX_BYTES,
+        claw_core::channel_media_limits::wechat_file_max_bytes(),
     )?;
     let plaintext = tokio::fs::read(file_path)
         .await
@@ -557,7 +557,7 @@ pub async fn send_weixin_file_from_file(
         file_path,
         "微信",
         "文件",
-        claw_core::channel_media_limits::WECHAT_OTHER_SAFETY_MAX_BYTES,
+        claw_core::channel_media_limits::wechat_file_max_bytes(),
     )?;
     let plaintext = tokio::fs::read(file_path)
         .await

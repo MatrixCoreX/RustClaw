@@ -190,6 +190,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/skills", get(list_skills))
         .route("/capabilities", get(list_capabilities))
+        .route("/channel-capabilities", get(list_channel_capabilities))
         .route(
             "/skills/config",
             get(get_skills_config).post(update_skills_config),

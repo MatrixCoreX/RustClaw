@@ -1357,7 +1357,7 @@ async fn upload_feishu_image(
         path,
         "飞书",
         "图片",
-        claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES,
+        claw_core::channel_media_limits::feishu_image_max_bytes(),
     )?;
     let token = get_tenant_access_token(&config.feishu, client, token_cache).await?;
     let bytes = tokio::fs::read(path)
@@ -1410,7 +1410,7 @@ async fn upload_feishu_file(
         path,
         "飞书",
         "文件",
-        claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+        claw_core::channel_media_limits::feishu_file_max_bytes(),
     )?;
     let token = get_tenant_access_token(&config.feishu, client, token_cache).await?;
     let bytes = tokio::fs::read(path)
@@ -1518,9 +1518,9 @@ async fn send_feishu_answer(
                     &path,
                     "飞书",
                     "图片",
-                    claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
+                    claw_core::channel_media_limits::feishu_file_max_bytes(),
                 )?;
-                if size <= claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES {
+                if size <= claw_core::channel_media_limits::feishu_image_max_bytes() {
                     match upload_feishu_image(config, client, token_cache, &path).await {
                         Ok(key) => {
                             send_feishu_media_key(

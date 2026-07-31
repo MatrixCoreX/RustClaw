@@ -10,17 +10,16 @@ use std::path::Path;
 fn whatsapp_cloud_media_specs_reject_unsupported_formats_and_oversize_files() {
     use claw_core::channel_media_limits::{
         validate_local_media_file, whatsapp_cloud_upload_spec, WhatsappCloudMediaKind,
-        WHATSAPP_CLOUD_VIDEO_MAX_BYTES,
     };
 
     let root = std::env::temp_dir().join(format!("whatsapp-media-limit-{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create media limit dir");
     let video = root.join("oversized.mp4");
-    let file = std::fs::File::create(&video).expect("create sparse video");
-    file.set_len(WHATSAPP_CLOUD_VIDEO_MAX_BYTES + 1)
-        .expect("set sparse video length");
     let (mime, max_bytes, label) =
         whatsapp_cloud_upload_spec(&video, WhatsappCloudMediaKind::Video).expect("video spec");
+    let file = std::fs::File::create(&video).expect("create sparse video");
+    file.set_len(max_bytes + 1)
+        .expect("set sparse video length");
     assert_eq!(mime, "video/mp4");
     assert!(
         validate_local_media_file(&video, "WhatsApp Cloud", label, max_bytes)
