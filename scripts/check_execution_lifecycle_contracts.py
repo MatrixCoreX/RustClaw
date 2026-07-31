@@ -29,7 +29,12 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
         "read_output_delta",
         "process_identity_state",
         "maybe_escalate_cancel",
+        "recover_pending_cancel_escalations",
         "terminate_verified_process_group",
+    ),
+    "crates/clawd/src/main.rs": (
+        "recover_pending_cancel_escalations",
+        "restored pending local process cancellation escalation",
     ),
     "crates/clawd/src/worker/async_poll_executor.rs": (
         '"process_observation"',
@@ -57,6 +62,12 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
     ),
     "scripts/regression_long_tail_nl_flows.sh": (
         "non_x_dry_run",
+    ),
+    "scripts/regression_clawd_restart_boundaries.py": (
+        'CASE_IDS = ("start_boundary", "poll_boundary", "cancel_boundary")',
+        "cancel_escalated_signal",
+        "mutation_count",
+        "source_commit_pushed",
     ),
     "scripts/nl_tests/build_builtin_tool_skill_subset.py": (
         '"selected_non_x_dry_run_count"',

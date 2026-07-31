@@ -1,6 +1,6 @@
 use super::{
     maybe_escalate_cancel, process_identity_state, process_loss_is_stable, read_output_delta,
-    terminate_verified_process_group, ProcessIdentityState,
+    recover_pending_cancel_escalations, terminate_verified_process_group, ProcessIdentityState,
 };
 
 struct TempDirGuard {
@@ -173,6 +173,39 @@ fn durable_cancellation_escalates_a_verified_process_group() {
     let _ = child.wait();
     assert_eq!(
         std::fs::read_to_string(root.path().join("cancel_escalated_signal"))
+            .expect("escalation marker"),
+        "KILL"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn restart_recovery_escalates_a_durable_pending_cancellation() {
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+
+    let workspace = TempDirGuard::new("cancel_restart_recovery");
+    let job_dir = workspace
+        .path()
+        .join(".agent-runtime")
+        .join("async_jobs")
+        .join("job-1");
+    std::fs::create_dir_all(&job_dir).expect("create async job directory");
+    let run_script = job_dir.join("run.sh");
+    std::fs::write(&run_script, "#!/usr/bin/env bash\ntrap '' TERM\nsleep 30\n")
+        .expect("write script");
+    let mut command = Command::new("bash");
+    command.arg(&run_script).process_group(0);
+    let mut child = command.spawn().expect("spawn process group");
+    std::fs::write(job_dir.join("pid"), child.id().to_string()).expect("write pid");
+    std::fs::write(job_dir.join("cancel_requested_at"), "10").expect("write cancel marker");
+    std::fs::write(job_dir.join("terminate_grace_seconds"), "1").expect("write grace");
+    std::thread::sleep(std::time::Duration::from_millis(25));
+
+    assert_eq!(recover_pending_cancel_escalations(workspace.path(), 12), 1);
+    let _ = child.wait();
+    assert_eq!(
+        std::fs::read_to_string(job_dir.join("cancel_escalated_signal"))
             .expect("escalation marker"),
         "KILL"
     );

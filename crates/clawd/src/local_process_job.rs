@@ -301,17 +301,49 @@ fn signal_process(pid: u32, signal: &str) -> bool {
     }
 }
 
-pub(crate) fn schedule_kill_after_grace(job_dir: &Path, pid: u32, grace_seconds: u64) {
+pub(crate) fn schedule_kill_after_grace(job_dir: &Path, _pid: u32, grace_seconds: u64) {
     let job_dir = job_dir.to_path_buf();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(grace_seconds.max(1)));
-        if job_dir.join("cancel_requested_at").exists()
-            && !job_dir.join("exit_code").exists()
-            && signal_process_group(pid, "KILL")
-        {
-            let _ = write_atomic(&job_dir.join("cancel_escalated_signal"), "KILL");
-        }
+        let _ = maybe_escalate_cancel(&job_dir, crate::now_ts_u64() as i64);
     });
+}
+
+/// Restores pending TERM-to-KILL escalation timers from durable job metadata.
+pub(crate) fn recover_pending_cancel_escalations(workspace_root: &Path, now_ts: i64) -> usize {
+    let async_jobs = workspace_root.join(".agent-runtime").join("async_jobs");
+    let Ok(entries) = std::fs::read_dir(async_jobs) else {
+        return 0;
+    };
+    let mut recovered = 0;
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let job_dir = entry.path();
+        let Some(cancel_requested_at) = read_i64(&job_dir, "cancel_requested_at") else {
+            continue;
+        };
+        if job_dir.join("exit_code").exists() || job_dir.join("cancel_escalated_signal").exists() {
+            continue;
+        }
+        let grace_seconds = read_u64(&job_dir, "terminate_grace_seconds")
+            .unwrap_or(5)
+            .max(1)
+            .min(i64::MAX as u64) as i64;
+        let escalation_at = cancel_requested_at.saturating_add(grace_seconds);
+        if now_ts >= escalation_at {
+            let _ = maybe_escalate_cancel(&job_dir, now_ts);
+        } else if let Some(pid) = read_pid(&job_dir) {
+            let remaining_seconds = escalation_at.saturating_sub(now_ts) as u64;
+            schedule_kill_after_grace(&job_dir, pid, remaining_seconds);
+        }
+        recovered += 1;
+    }
+    recovered
 }
 
 /// Replays cancellation escalation from durable metadata after a service restart.
