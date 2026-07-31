@@ -1,8 +1,11 @@
 use super::{
-    extract_bind_key_candidate, extract_prefixed_paths, is_unbound_allowed_command,
-    strip_prefixed_tokens, WA_BIND_REQUIRED_FALLBACK, WA_I18N_BIND_REQUIRED_KEY,
+    extract_bind_key_candidate, is_unbound_allowed_command, WA_BIND_REQUIRED_FALLBACK,
+    WA_I18N_BIND_REQUIRED_KEY,
 };
 use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::channel_delivery_tokens::{
+    legacy_delivery_tokens, strip_legacy_local_delivery_lines, LegacyDeliveryKind,
+};
 use claw_core::channel_i18n::text_from_path;
 use std::path::Path;
 
@@ -56,17 +59,14 @@ fn outbound_media_tokens_preserve_text_and_extract_image_and_video() {
     );
 
     assert_eq!(
-        strip_prefixed_tokens(&answer, &["IMAGE_FILE:", "VIDEO_FILE:"]),
+        strip_legacy_local_delivery_lines(&answer),
         "download complete"
     );
-    assert_eq!(
-        extract_prefixed_paths(&answer, "IMAGE_FILE:"),
-        vec![image.to_string_lossy().to_string()]
-    );
-    assert_eq!(
-        extract_prefixed_paths(&answer, "VIDEO_FILE:"),
-        vec![video.to_string_lossy().to_string()]
-    );
+    let tokens = legacy_delivery_tokens(&answer);
+    assert_eq!(tokens[0].kind, LegacyDeliveryKind::Image);
+    assert_eq!(tokens[0].reference, image.to_string_lossy());
+    assert_eq!(tokens[1].kind, LegacyDeliveryKind::Video);
+    assert_eq!(tokens[1].reference, video.to_string_lossy());
     std::fs::remove_dir_all(root).expect("remove fixture dir");
 }
 

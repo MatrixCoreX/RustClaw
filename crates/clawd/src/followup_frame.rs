@@ -540,8 +540,14 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        if trimmed.starts_with("FILE:") {
-            let path = trimmed.trim_start_matches("FILE:").trim();
+        if let Some(token) = claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(
+            trimmed,
+        )
+        .filter(|token| {
+            token.location == claw_core::channel_delivery_tokens::LegacyDeliveryLocation::LocalFile
+                && token.kind == claw_core::channel_delivery_tokens::LegacyDeliveryKind::Auto
+        }) {
+            let path = token.reference.trim();
             if !path.is_empty() {
                 entries.push(path.to_string());
             }

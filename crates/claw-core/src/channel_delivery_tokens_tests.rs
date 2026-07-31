@@ -1,0 +1,61 @@
+use super::*;
+
+#[test]
+fn compatibility_decoder_parses_every_legacy_prefix_once() {
+    let text = concat!(
+        "caption\n",
+        "IMAGE_FILE:`/tmp/image.png`\n",
+        "VIDEO_FILE:/tmp/video.mp4\n",
+        "VOICE_FILE:/tmp/voice.ogg\n",
+        "MUSIC_FILE:/tmp/music.mp3\n",
+        "FILE_FILE:/tmp/document.pdf\n",
+        "FILE:/tmp/auto.bin\n",
+        "IMAGE_URL:https://example.invalid/image.png\n",
+        "VIDEO_URL:https://example.invalid/video.mp4\n",
+        "FILE_URL:https://example.invalid/file.pdf\n",
+        "MEDIA_URL:https://example.invalid/auto.bin\n",
+    );
+    let tokens = legacy_delivery_tokens(text);
+
+    assert_eq!(tokens.len(), 10);
+    assert_eq!(tokens[0].kind, LegacyDeliveryKind::Image);
+    assert_eq!(tokens[0].reference, "/tmp/image.png");
+    assert_eq!(tokens[4].kind, LegacyDeliveryKind::File);
+    assert_eq!(tokens[5].kind, LegacyDeliveryKind::Auto);
+    assert_eq!(tokens[6].location, LegacyDeliveryLocation::RemoteUrl);
+    assert_eq!(strip_legacy_delivery_lines(text), "caption");
+}
+
+#[test]
+fn local_projection_does_not_consume_remote_tokens_or_prefix_examples() {
+    let text = concat!(
+        "caption IMAGE_FILE:/tmp/example.png\n",
+        "IMAGE_FILE:/tmp/image.png\n",
+        "IMAGE_URL:https://example.invalid/image.png\n",
+    );
+
+    assert_eq!(
+        strip_legacy_local_delivery_lines(text),
+        concat!(
+            "caption IMAGE_FILE:/tmp/example.png\n",
+            "IMAGE_URL:https://example.invalid/image.png"
+        )
+    );
+    assert_eq!(
+        legacy_local_delivery_lines(text),
+        "IMAGE_FILE:/tmp/image.png"
+    );
+}
+
+#[test]
+fn empty_tokens_are_not_treated_as_delivery_lines() {
+    assert_eq!(parse_legacy_delivery_line("FILE:  `  "), None);
+    assert_eq!(
+        parse_legacy_delivery_line_ref("FILE:  ").map(|token| token.kind),
+        Some(LegacyDeliveryKind::Auto)
+    );
+    assert_eq!(
+        strip_legacy_delivery_lines("before\nFILE:  `  \nafter"),
+        "before\nafter"
+    );
+}

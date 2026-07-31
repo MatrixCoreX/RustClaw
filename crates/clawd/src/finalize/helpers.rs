@@ -263,28 +263,41 @@ pub(crate) enum PlannerArtifactKind {
 }
 
 pub(crate) fn parse_delivery_token(text: &str) -> Option<(DeliveryTokenKind, &str)> {
-    let trimmed = text.trim();
-    if let Some(rest) = trimmed.strip_prefix("FILE:") {
-        Some((DeliveryTokenKind::File, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("IMAGE_FILE:") {
-        Some((DeliveryTokenKind::ImageFile, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("VIDEO_FILE:") {
-        Some((DeliveryTokenKind::VideoFile, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("VOICE_FILE:") {
-        Some((DeliveryTokenKind::VoiceFile, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("MUSIC_FILE:") {
-        Some((DeliveryTokenKind::MusicFile, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("IMAGE_URL:") {
-        Some((DeliveryTokenKind::ImageUrl, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("VIDEO_URL:") {
-        Some((DeliveryTokenKind::VideoUrl, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("FILE_URL:") {
-        Some((DeliveryTokenKind::FileUrl, rest))
-    } else if let Some(rest) = trimmed.strip_prefix("MEDIA_URL:") {
-        Some((DeliveryTokenKind::MediaUrl, rest))
-    } else {
-        None
-    }
+    use claw_core::channel_delivery_tokens::{
+        parse_legacy_delivery_line_ref, LegacyDeliveryKind, LegacyDeliveryLocation,
+    };
+
+    let token = parse_legacy_delivery_line_ref(text)?;
+    let kind = match (token.kind, token.location) {
+        (LegacyDeliveryKind::Image, LegacyDeliveryLocation::LocalFile) => {
+            DeliveryTokenKind::ImageFile
+        }
+        (LegacyDeliveryKind::Video, LegacyDeliveryLocation::LocalFile) => {
+            DeliveryTokenKind::VideoFile
+        }
+        (LegacyDeliveryKind::Voice, LegacyDeliveryLocation::LocalFile) => {
+            DeliveryTokenKind::VoiceFile
+        }
+        (LegacyDeliveryKind::Music, LegacyDeliveryLocation::LocalFile) => {
+            DeliveryTokenKind::MusicFile
+        }
+        (
+            LegacyDeliveryKind::File | LegacyDeliveryKind::Auto,
+            LegacyDeliveryLocation::LocalFile,
+        ) => DeliveryTokenKind::File,
+        (LegacyDeliveryKind::Image, LegacyDeliveryLocation::RemoteUrl) => {
+            DeliveryTokenKind::ImageUrl
+        }
+        (LegacyDeliveryKind::Video, LegacyDeliveryLocation::RemoteUrl) => {
+            DeliveryTokenKind::VideoUrl
+        }
+        (LegacyDeliveryKind::File, LegacyDeliveryLocation::RemoteUrl) => DeliveryTokenKind::FileUrl,
+        (
+            LegacyDeliveryKind::Auto | LegacyDeliveryKind::Voice | LegacyDeliveryKind::Music,
+            LegacyDeliveryLocation::RemoteUrl,
+        ) => DeliveryTokenKind::MediaUrl,
+    };
+    Some((kind, token.reference))
 }
 
 pub(crate) fn parse_delivery_file_token(text: &str) -> Option<(DeliveryTokenKind, &str)> {
