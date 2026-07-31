@@ -664,7 +664,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(store_item(&initial, "media_download")["installed"], false);
     assert_eq!(
         store_item(&initial, "media_download")["description_zh"],
-        "支持抖音、快手、小红书、TikTok 和 YouTube：下载可公开访问的视频与图片，解析媒体直链；也可转写本地音视频、识别图片文字，并为 X 准备兼容视频。"
+        "支持抖音、快手、小红书、TikTok 和 YouTube 的 App 复制分享文案、短链和网页分享链接；无论来自 UI 还是通信端，默认直接排队下载并返回原始视频或图片，不反问操作类型。仅在用户明确要求时解析直链、转写、识别文字或转码；同一时间只运行一个媒体任务，前一任务失败或超时后会继续下一项。"
     );
     assert_eq!(
         store_item(&initial, "media_download")["source_kind"],

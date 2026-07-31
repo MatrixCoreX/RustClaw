@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import type { ModelConfigResponse } from "../types/api";
 import {
   MULTIMODAL_KEYS,
+  MULTIMODAL_SKILL_BY_KEY,
   buildModelCatalogEntryViews,
   buildMultimodalDraft,
   buildMultimodalMetaView,
   buildMultimodalSavePayload,
+  buildMultimodalSkillEnabledState,
   formatContextWindow,
   formatLlmTestMessage,
   formatMultimodalToken,
@@ -39,6 +41,34 @@ test("builds multimodal drafts from configured sections", () => {
   assert.deepEqual(Object.keys(draft).sort(), [...MULTIMODAL_KEYS].sort());
   assert.equal(draft.image_generation.model, "image-gen");
   assert.equal(draft.music_generation.vendor, "minimax");
+});
+
+test("maps every multimodal module to its independently switchable skill", () => {
+  assert.deepEqual(
+    MULTIMODAL_SKILL_BY_KEY,
+    {
+      image_edit: "image_edit",
+      image_generation: "image_generate",
+      image_vision: "image_vision",
+      audio_synthesize: "audio_synthesize",
+      audio_transcribe: "audio_transcribe",
+      video_generation: "video_generate",
+      music_generation: "music_generate",
+    },
+  );
+});
+
+test("builds multimodal switch state from the live runtime allow-set", () => {
+  const enabled = buildMultimodalSkillEnabledState({
+    runtime_enabled_skills: ["image_vision", "audio_transcribe", "music_generate"],
+    effective_enabled_skills_preview: ["image_edit"],
+  });
+
+  assert.equal(enabled.image_vision, true);
+  assert.equal(enabled.audio_transcribe, true);
+  assert.equal(enabled.music_generation, true);
+  assert.equal(enabled.image_edit, false);
+  assert.equal(enabled.video_generation, false);
 });
 
 test("trims multimodal save payload values", () => {
@@ -168,12 +198,12 @@ test("omits empty multimodal meta", () => {
 test("builds model catalog views from structured capability fields", () => {
   const views = buildModelCatalogEntryViews(
     {
-      schema_version: 1,
+      schema_version: 2,
       selected_provider: "minimax",
       selected_model: "MiniMax-M3",
       entries: [
         {
-          schema_version: 1,
+          schema_version: 2,
           provider: "minimax",
           model: "MiniMax-M3",
           models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
@@ -191,6 +221,7 @@ test("builds model catalog views from structured capability fields", () => {
           supports_image_understanding: true,
           supports_audio_transcription: true,
           supports_image_generation: true,
+          supports_image_edit: true,
           supports_audio_generation: true,
           supports_video_generation: true,
           supports_music_generation: true,
@@ -198,6 +229,7 @@ test("builds model catalog views from structured capability fields", () => {
           dry_run_supported: true,
           active_text_provider: true,
           config_source: [],
+          capability_source: ["https://platform.minimaxi.com/docs/guides/text-generation"],
         },
       ],
     },

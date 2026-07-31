@@ -1104,6 +1104,7 @@ export interface ModelCatalogEntry {
   supports_image_understanding: boolean;
   supports_audio_transcription: boolean;
   supports_image_generation: boolean;
+  supports_image_edit: boolean;
   supports_audio_generation: boolean;
   supports_video_generation: boolean;
   supports_music_generation: boolean;
@@ -1111,6 +1112,7 @@ export interface ModelCatalogEntry {
   dry_run_supported: boolean;
   active_text_provider: boolean;
   config_source: string[];
+  capability_source?: string[];
 }
 
 export interface ModelCatalogResponse {

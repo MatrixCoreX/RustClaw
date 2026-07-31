@@ -747,6 +747,27 @@ api_key = "video-secret"
 }
 
 #[test]
+fn model_sections_include_selected_vendor_model_cache() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[image_vision]
+default_vendor = "minimax"
+default_model = "MiniMax-M3"
+models = ["qwen-vl-max"]
+minimax_models = ["MiniMax-M3", "MiniMax-M3"]
+qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
+        "#,
+    )
+    .expect("parse");
+
+    let item = read_model_section(&parsed, "image_vision");
+
+    assert_eq!(item.available_models, vec!["MiniMax-M3"]);
+    assert_eq!(item.provider_supported, Some(true));
+    assert_eq!(item.unsupported_reason, None);
+}
+
+#[test]
 fn llm_context_window_metadata_reads_selected_vendor_static_config() {
     let parsed = toml::from_str::<toml::Value>(
         r#"
@@ -884,7 +905,7 @@ minimax_models = ["music-2.6"]
     assert!(body.ok);
     assert_eq!(body.error, None);
     let data = body.data.expect("catalog data");
-    assert_eq!(data["schema_version"], 1);
+    assert_eq!(data["schema_version"], 2);
     assert_eq!(data["selected_provider"], "minimax");
     assert_eq!(data["selected_model"], "MiniMax-M3");
     assert_eq!(data["last_guard_status"]["available"], true);
@@ -904,9 +925,9 @@ minimax_models = ["music-2.6"]
     assert_eq!(minimax["supports_image_input"], true);
     assert_eq!(minimax["supports_video_input"], true);
     assert_eq!(minimax["supports_image_understanding"], true);
-    assert_eq!(minimax["supports_video_generation"], true);
-    assert_eq!(minimax["supports_music_generation"], true);
-    assert_eq!(minimax["dry_run_supported"], true);
+    assert_eq!(minimax["supports_video_generation"], false);
+    assert_eq!(minimax["supports_music_generation"], false);
+    assert_eq!(minimax["dry_run_supported"], false);
     assert_eq!(minimax["active_text_provider"], true);
     assert!(
         !data.to_string().contains("catalog-secret"),

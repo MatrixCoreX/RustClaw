@@ -8,8 +8,10 @@ import {
 import {
   buildMultimodalDraft,
   buildMultimodalSavePayload,
+  buildMultimodalSkillEnabledState,
   formatLlmTestMessage,
   hasUnsavedMultimodalDraftChanges,
+  MULTIMODAL_SKILL_BY_KEY,
   updateMultimodalDraftField,
   type MultimodalKey,
 } from "../lib/model-config";
@@ -20,6 +22,7 @@ import type {
   ModelCatalogResponse,
   ModelConfigItem,
   ModelConfigResponse,
+  SkillsConfigResponse,
 } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -55,6 +58,9 @@ export function useModelConfigRuntime({
   const [multimodalDraft, setMultimodalDraft] = useState<Record<string, ModelConfigItem>>({});
   const [multimodalConfigSaving, setMultimodalConfigSaving] = useState(false);
   const [multimodalConfigSaveMessage, setMultimodalConfigSaveMessage] = useState<string | null>(null);
+  const [multimodalSkillEnabled, setMultimodalSkillEnabled] = useState<Record<string, boolean>>({});
+  const [multimodalSkillSwitchSaving, setMultimodalSkillSwitchSaving] = useState<MultimodalKey | null>(null);
+  const [multimodalSkillSwitchMessage, setMultimodalSkillSwitchMessage] = useState<string | null>(null);
   const [modelsAdvancedOpen, setModelsAdvancedOpen] = useState(false);
   const [modelCatalogData, setModelCatalogData] = useState<ModelCatalogResponse | null>(null);
   const [modelCatalogLoading, setModelCatalogLoading] = useState(false);
@@ -233,13 +239,21 @@ export function useModelConfigRuntime({
     setMultimodalConfigLoading(true);
     setMultimodalConfigError(null);
     try {
-      const res = await apiFetch("/v1/admin/model-config");
-      const body = (await res.json()) as ApiResponse<ModelConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `model config fetch failed (${res.status})`);
+      const [modelRes, skillsRes] = await Promise.all([
+        apiFetch("/v1/admin/model-config"),
+        apiFetch("/v1/skills/config"),
+      ]);
+      const modelBody = (await modelRes.json()) as ApiResponse<ModelConfigResponse>;
+      const skillsBody = (await skillsRes.json()) as ApiResponse<SkillsConfigResponse>;
+      if (!modelRes.ok || !modelBody.ok || !modelBody.data) {
+        throw new Error(modelBody.error || `model config fetch failed (${modelRes.status})`);
       }
-      setMultimodalConfigData(body.data);
-      setMultimodalDraft(buildMultimodalDraft(body.data));
+      if (!skillsRes.ok || !skillsBody.ok || !skillsBody.data) {
+        throw new Error(skillsBody.error || `skill config fetch failed (${skillsRes.status})`);
+      }
+      setMultimodalConfigData(modelBody.data);
+      setMultimodalDraft(buildMultimodalDraft(modelBody.data));
+      setMultimodalSkillEnabled(buildMultimodalSkillEnabledState(skillsBody.data));
     } catch (err) {
       setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
     } finally {
@@ -289,6 +303,46 @@ export function useModelConfigRuntime({
     }
   };
 
+  const setMultimodalSkillEnabledNow = async (key: MultimodalKey, enabled: boolean) => {
+    const skillName = MULTIMODAL_SKILL_BY_KEY[key];
+    setMultimodalSkillSwitchSaving(key);
+    setMultimodalSkillSwitchMessage(null);
+    setMultimodalConfigError(null);
+    try {
+      const currentRes = await apiFetch("/v1/skills/config");
+      const currentBody = (await currentRes.json()) as ApiResponse<SkillsConfigResponse>;
+      if (!currentRes.ok || !currentBody.ok || !currentBody.data) {
+        throw new Error(currentBody.error || `skill config fetch failed (${currentRes.status})`);
+      }
+      const skillSwitches = {
+        ...(currentBody.data.skill_switches ?? {}),
+        [skillName]: enabled,
+      };
+      const saveRes = await apiFetch("/v1/skills/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill_switches: skillSwitches }),
+      });
+      const saveBody = (await saveRes.json()) as ApiResponse<{
+        effective_enabled_skills_preview?: string[];
+        restart_required?: boolean;
+      }>;
+      if (!saveRes.ok || !saveBody.ok) {
+        throw new Error(saveBody.error || `skill config save failed (${saveRes.status})`);
+      }
+      setMultimodalSkillEnabled((previous) => ({ ...previous, [key]: enabled }));
+      setMultimodalSkillSwitchMessage(
+        enabled
+          ? t("这个多模态技能已开启，现在可以接收新调用。", "This multimodal skill is enabled and can receive new calls.")
+          : t("这个多模态技能已关闭，已有模型设置会保留。", "This multimodal skill is disabled; its model settings are preserved."),
+      );
+    } catch (err) {
+      setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+    } finally {
+      setMultimodalSkillSwitchSaving(null);
+    }
+  };
+
   const setMultimodalDraftKey = (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => {
     setMultimodalDraft((prev) => updateMultimodalDraftField(prev, key, field, value));
   };
@@ -332,6 +386,9 @@ export function useModelConfigRuntime({
     multimodalDraft,
     multimodalConfigSaving,
     multimodalConfigSaveMessage,
+    multimodalSkillEnabled,
+    multimodalSkillSwitchSaving,
+    multimodalSkillSwitchMessage,
     modelsAdvancedOpen,
     modelCatalogData,
     modelCatalogLoading,
@@ -354,6 +411,7 @@ export function useModelConfigRuntime({
     fetchMultimodalConfig,
     fetchModelCatalog,
     saveMultimodalConfig,
+    setMultimodalSkillEnabledNow,
     setMultimodalDraftKey,
     applyLlmVendorDraft,
     clearLlmConfigError,

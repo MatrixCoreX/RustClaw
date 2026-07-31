@@ -4,6 +4,7 @@ import type {
   ModelCatalogResponse,
   ModelConfigItem,
   ModelConfigResponse,
+  SkillsConfigResponse,
 } from "../types/api";
 
 export type UiLanguage = "zh" | "en";
@@ -20,6 +21,16 @@ export const MULTIMODAL_KEYS = [
 
 export type MultimodalKey = (typeof MULTIMODAL_KEYS)[number];
 export type MultimodalDraft = Record<string, ModelConfigItem>;
+
+export const MULTIMODAL_SKILL_BY_KEY: Record<MultimodalKey, string> = {
+  image_edit: "image_edit",
+  image_generation: "image_generate",
+  image_vision: "image_vision",
+  audio_synthesize: "audio_synthesize",
+  audio_transcribe: "audio_transcribe",
+  video_generation: "video_generate",
+  music_generation: "music_generate",
+};
 
 export interface MultimodalMetaView {
   capabilityBadges: string[];
@@ -72,6 +83,19 @@ export function buildMultimodalDraft(config: ModelConfigResponse): MultimodalDra
     };
   }
   return draft;
+}
+
+export function buildMultimodalSkillEnabledState(
+  config: Pick<SkillsConfigResponse, "runtime_enabled_skills" | "effective_enabled_skills_preview">,
+): Record<MultimodalKey, boolean> {
+  const enabledNames = new Set(
+    config.runtime_enabled_skills?.length > 0
+      ? config.runtime_enabled_skills
+      : config.effective_enabled_skills_preview ?? [],
+  );
+  return Object.fromEntries(
+    MULTIMODAL_KEYS.map((key) => [key, enabledNames.has(MULTIMODAL_SKILL_BY_KEY[key])]),
+  ) as Record<MultimodalKey, boolean>;
 }
 
 export function buildMultimodalSavePayload(draft: MultimodalDraft): Record<string, ModelConfigItem | undefined> {
@@ -199,6 +223,7 @@ const CATALOG_CAPABILITY_FIELDS: Array<[keyof ModelCatalogEntry, string]> = [
   ["supports_image_understanding", "image_understanding"],
   ["supports_audio_transcription", "audio_transcription"],
   ["supports_image_generation", "image_generation"],
+  ["supports_image_edit", "image_edit"],
   ["supports_audio_generation", "audio_generation"],
   ["supports_video_generation", "video_generation"],
   ["supports_music_generation", "music_generation"],
@@ -235,6 +260,13 @@ export function buildModelCatalogEntryViews(
     metaBadges.push(entry.dry_run_supported ? "dry_run_supported=1" : "dry_run_supported=0");
     if (entry.models.length > 0) {
       metaBadges.push(`${copy(lang, "模型池", "Pool")}: ${entry.models.slice(0, 4).join(", ")}${entry.models.length > 4 ? ` +${entry.models.length - 4}` : ""}`);
+    }
+    if ((entry.capability_source ?? []).length > 0) {
+      metaBadges.push(
+        `${copy(lang, "能力依据", "Capability source")}: ${(entry.capability_source ?? [])
+          .map((source) => (source.startsWith("http") ? copy(lang, "厂商文档", "Vendor docs") : formatMultimodalToken(source)))
+          .join(", ")}`,
+      );
     }
     return {
       key: `${entry.provider}:${entry.model}`,

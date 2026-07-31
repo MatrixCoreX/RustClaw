@@ -22,21 +22,24 @@ fn parse_vendor_ok() {
 }
 
 #[test]
-fn vendor_order_keeps_defaults_then_appends_fallbacks() {
-    let order = vendor_order(None, Some("mimo"), Some("minimax"));
-
-    assert_eq!(order.first(), Some(&VendorKind::Mimo));
-    assert_eq!(order.get(1), Some(&VendorKind::MiniMax));
-    assert!(order.contains(&VendorKind::Qwen));
-    assert_eq!(order.len(), 8);
+fn vendor_order_uses_only_independent_image_default() {
+    assert_eq!(
+        vendor_order(None, Some("minimax")),
+        vec![VendorKind::MiniMax]
+    );
 }
 
 #[test]
 fn vendor_order_honors_explicit_request_only() {
     assert_eq!(
-        vendor_order(Some("qwen"), Some("mimo"), Some("minimax")),
+        vendor_order(Some("qwen"), Some("minimax")),
         vec![VendorKind::Qwen]
     );
+}
+
+#[test]
+fn vendor_order_is_empty_without_image_configuration() {
+    assert!(vendor_order(None, None).is_empty());
 }
 
 #[test]
@@ -63,6 +66,38 @@ fn parse_action_accepts_extract_text() {
     );
 
     assert_eq!(parse_action(&obj).as_deref(), Ok("extract_text"));
+}
+
+#[test]
+fn parse_one_image_accepts_native_tool_text_wrapped_path() {
+    let workspace = Path::new("/tmp/image-vision-workspace");
+    let input = json!({
+        "$text": "{\"path\":\"/tmp/image-vision-workspace/downloaded.webp\"}"
+    });
+
+    let parsed = parse_one_image(&input, workspace).expect("wrapped path should parse");
+
+    match parsed {
+        ImageSource::Path(path) => {
+            assert_eq!(
+                path,
+                PathBuf::from("/tmp/image-vision-workspace/downloaded.webp")
+            );
+        }
+        _ => panic!("expected local path"),
+    }
+}
+
+#[test]
+fn parse_one_image_rejects_text_wrapper_with_extra_fields() {
+    let workspace = Path::new("/tmp/image-vision-workspace");
+    let input = json!({
+        "$text": "{\"path\":\"/tmp/image-vision-workspace/downloaded.webp\",\"url\":\"https://example.invalid/image.webp\"}"
+    });
+
+    let error = parse_one_image(&input, workspace).expect_err("ambiguous wrapper must fail");
+
+    assert_eq!(error, "image text wrapper must contain only path");
 }
 
 #[test]
@@ -101,27 +136,26 @@ fn provider_error_excerpt_redacts_secret_like_values() {
 }
 
 #[test]
-fn select_model_override_prefers_vendor_pool_over_global_default() {
-    let mut cfg = ImageSkillConfig {
-        default_vendor: Some("mimo".to_string()),
-        default_model: Some("mimo-v2.5".to_string()),
-        models: Some(vec!["mimo-v2.5".to_string()]),
+fn select_model_override_prefers_independent_default_model() {
+    let cfg = ImageSkillConfig {
+        default_vendor: Some("minimax".to_string()),
+        default_model: Some("MiniMax-M3".to_string()),
+        minimax_models: Some(vec!["MiniMax-M2.7".to_string()]),
         ..ImageSkillConfig::default()
     };
-    cfg.minimax_models = Some(vec!["MiniMax-Text-01".to_string()]);
 
     assert_eq!(
         select_model_override(&cfg, VendorKind::MiniMax, None),
-        Some("MiniMax-Text-01")
+        Some("MiniMax-M3")
     );
 }
 
 #[test]
 fn select_model_override_does_not_leak_default_model_to_other_vendor() {
     let cfg = ImageSkillConfig {
-        default_vendor: Some("mimo".to_string()),
-        default_model: Some("mimo-v2.5".to_string()),
-        models: Some(vec!["mimo-v2.5".to_string(), "mimo-v2-omni".to_string()]),
+        default_vendor: Some("minimax".to_string()),
+        default_model: Some("MiniMax-M3".to_string()),
+        models: Some(vec!["MiniMax-M3".to_string()]),
         ..ImageSkillConfig::default()
     };
 
@@ -134,9 +168,9 @@ fn select_model_override_does_not_leak_default_model_to_other_vendor() {
 #[test]
 fn select_model_override_honors_explicit_request() {
     let cfg = ImageSkillConfig {
-        default_vendor: Some("mimo".to_string()),
-        default_model: Some("mimo-v2.5".to_string()),
-        minimax_models: Some(vec!["MiniMax-Text-01".to_string()]),
+        default_vendor: Some("minimax".to_string()),
+        default_model: Some("MiniMax-M3".to_string()),
+        minimax_models: Some(vec!["MiniMax-M2.7".to_string()]),
         ..ImageSkillConfig::default()
     };
 
@@ -227,6 +261,82 @@ fn resolve_vendor_config_keeps_dedicated_provider_key() {
     assert_eq!(resolved.api_key, "vision-minimax-key");
     assert_eq!(resolved.base_url, "https://vision.example/v1");
     assert_eq!(resolved.model, "vision-model");
+}
+
+#[test]
+fn minimax_compat_dispatches_multimodal_request() {
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock minimax server");
+    let address = listener.local_addr().expect("mock server address");
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept minimax request");
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        let header_end = loop {
+            let read = stream.read(&mut chunk).expect("read minimax request");
+            assert!(read > 0, "request ended before headers");
+            request.extend_from_slice(&chunk[..read]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .expect("content length");
+        while request.len() < header_end + content_length {
+            let read = stream.read(&mut chunk).expect("read minimax body");
+            assert!(read > 0, "request ended before body");
+            request.extend_from_slice(&chunk[..read]);
+        }
+        let request = String::from_utf8_lossy(&request);
+        assert!(request.starts_with("POST /chat/completions "));
+        assert!(request.contains("\"model\":\"MiniMax-M3\""));
+        assert!(request.contains("data:image/png;base64,YWJj"));
+
+        let body = r#"{"choices":[{"message":{"content":"识别成功"}}]}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write minimax response");
+    });
+
+    let mut cfg = RootConfig::default();
+    cfg.image_vision.adapter_mode = Some("compat".to_string());
+    cfg.image_vision.providers.minimax = Some(vendor_cfg(
+        &format!("http://{address}"),
+        "test-minimax-key",
+        "MiniMax-M3",
+    ));
+    let images = vec![ImageSource::Base64(
+        "data:image/png;base64,YWJj".to_string(),
+    )];
+
+    let result = call_vendor_vision(
+        VendorKind::MiniMax,
+        &cfg,
+        Some("MiniMax-M3"),
+        5,
+        "识别图片文字",
+        &images,
+        1024,
+    )
+    .expect("minimax vision request");
+    server.join().expect("mock minimax server");
+
+    assert_eq!(result.0, "识别成功");
+    assert_eq!(result.1, "MiniMax-M3");
+    assert_eq!(result.2, "compat");
 }
 
 #[test]

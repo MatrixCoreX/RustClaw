@@ -96,9 +96,23 @@ pub(super) fn call_vendor_vision(
                 );
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
-            Err(format!(
-                "minimax model {model} is configured through a text-only compatible endpoint that does not support image input"
-            ))
+            let client = Client::builder()
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
+                .build()
+                .map_err(|err| format!("build minimax client failed: {err}"))?;
+            let text = openai_compat_vision(
+                &client,
+                &vcfg,
+                &model,
+                prompt,
+                images,
+                max_input_bytes,
+                vendor_name,
+                false,
+            )?;
+            Ok((text, model, "compat"))
         }
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();

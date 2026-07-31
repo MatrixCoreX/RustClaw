@@ -355,11 +355,7 @@ pub(super) fn infer_language_from_memory_snippets_llm(
         load_language_infer_prompt_template(workspace_root, preferred_prompt_vendor(cfg));
     let prompt = template.replace("__MEMORY_SNIPPETS__", memory_snippets);
     let t = infer_timeout_secs.clamp(5, 45).min(25);
-    for vk in vendor_order(
-        None,
-        cfg.image_vision.default_vendor.as_deref(),
-        cfg.llm.selected_vendor.as_deref(),
-    ) {
+    for vk in vendor_order(None, cfg.image_vision.default_vendor.as_deref()) {
         let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
             continue;
         };
@@ -506,11 +502,7 @@ pub(super) fn maybe_rewrite_image_vision_text_for_target_language(
         .replace("__TARGET_LANGUAGE__", lang)
         .replace("__ORIGINAL_OUTPUT__", &vision_output);
     let rewrite_timeout = task_timeout_seconds.clamp(10, 90).min(45);
-    for vk in vendor_order(
-        None,
-        cfg.image_vision.default_vendor.as_deref(),
-        cfg.llm.selected_vendor.as_deref(),
-    ) {
+    for vk in vendor_order(None, cfg.image_vision.default_vendor.as_deref()) {
         let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
             continue;
         };
