@@ -574,6 +574,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             &[
                 "fs.write",
                 "llm",
+                "llm.credential_fallback.image_generation_minimax_api_key",
                 "net",
                 "secrets.image_generation_minimax_api_key",
             ],
@@ -613,6 +614,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             &[
                 "fs.write",
                 "llm",
+                "llm.credential_fallback.image_generation_minimax_api_key",
                 "net",
                 "secrets.image_generation_minimax_api_key",
             ],

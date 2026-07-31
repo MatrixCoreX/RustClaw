@@ -410,6 +410,12 @@ pub async fn send_weixin_image_from_file(
     channel_version: &str,
     timeout_ms: u64,
 ) -> Result<(), String> {
+    claw_core::channel_media_limits::validate_local_media_file(
+        file_path,
+        "微信",
+        "图片",
+        claw_core::channel_media_limits::WECHAT_IMAGE_SAFETY_MAX_BYTES,
+    )?;
     let plaintext = tokio::fs::read(file_path)
         .await
         .map_err(|e| format!("read outbound image: {e}"))?;
@@ -478,6 +484,12 @@ pub async fn send_weixin_video_from_file(
     channel_version: &str,
     timeout_ms: u64,
 ) -> Result<(), String> {
+    claw_core::channel_media_limits::validate_local_media_file(
+        file_path,
+        "微信",
+        "视频",
+        claw_core::channel_media_limits::WECHAT_OTHER_SAFETY_MAX_BYTES,
+    )?;
     let plaintext = tokio::fs::read(file_path)
         .await
         .map_err(|e| format!("read outbound video: {e}"))?;
@@ -541,6 +553,12 @@ pub async fn send_weixin_file_from_file(
     channel_version: &str,
     timeout_ms: u64,
 ) -> Result<(), String> {
+    claw_core::channel_media_limits::validate_local_media_file(
+        file_path,
+        "微信",
+        "文件",
+        claw_core::channel_media_limits::WECHAT_OTHER_SAFETY_MAX_BYTES,
+    )?;
     let plaintext = tokio::fs::read(file_path)
         .await
         .map_err(|e| format!("read outbound file: {e}"))?;

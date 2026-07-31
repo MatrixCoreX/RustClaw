@@ -4,6 +4,7 @@ import { createRef, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ChatPage } from "../components/ChatPage";
+import { emptyChatActivity } from "./chat-activity";
 
 const t = (zh: string, _en: string) => zh;
 
@@ -11,6 +12,7 @@ function props(): ComponentProps<typeof ChatPage> {
   return {
     t,
     tSlash: (text) => text,
+    artifactFetch: async () => new Response(),
     chatMessages: [],
     chatThreads: [
       {
@@ -37,6 +39,7 @@ function props(): ComponentProps<typeof ChatPage> {
     activeChatTeachingRunId: null,
     chatSending: false,
     chatWorking: false,
+    chatActivity: emptyChatActivity(),
     chatRecording: false,
     chatVoiceRecordingSupported: false,
     chatVoiceRecordingAvailability: "media_devices_unavailable",
@@ -111,6 +114,54 @@ test("renders progressive controls for older history and long messages", () => {
   assert.match(markup, /9.8 KB/);
 });
 
+test("loads protected media through the authenticated fetcher instead of a raw media URL", () => {
+  const pageProps = props();
+  pageProps.chatMessages = [
+    {
+      id: "assistant-video",
+      role: "assistant",
+      text: "视频已下载",
+      ts: 1,
+      artifacts: [
+        {
+          schema_version: 1,
+          id: "artifact-video",
+          filename: "clip.mp4",
+          kind: "video",
+          mime_type: "video/mp4",
+          size_bytes: 1024,
+          sha256: "a".repeat(64),
+          download_url: "/v1/tasks/task-1/artifacts/artifact-video/content",
+          preview_url:
+            "/v1/tasks/task-1/artifacts/artifact-video/content?disposition=inline",
+        },
+      ],
+    },
+  ];
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.match(markup, /正在准备浏览器兼容版/);
+  assert.doesNotMatch(markup, /src="\/v1\/tasks\/task-1\/artifacts/);
+  assert.doesNotMatch(markup, /href="\/v1\/tasks\/task-1\/artifacts/);
+});
+
+test("keeps the send button aligned while allowing the shorter input to grow vertically", () => {
+  const markup = renderToStaticMarkup(<ChatPage {...props()} />);
+
+  assert.match(markup, /theme-input h-\[72px\] min-h-\[72px\] max-h-60 w-full resize-y/);
+  assert.match(markup, /theme-accent-btn min-h-\[72px\].*self-stretch/);
+});
+
+test("keeps the composer visible while scrolling only the chat interaction", () => {
+  const markup = renderToStaticMarkup(<ChatPage {...props()} />);
+
+  assert.match(markup, /md:h-full md:min-h-0.*md:overflow-hidden/);
+  assert.match(markup, /min-h-80 flex-1.*overflow-y-auto.*md:min-h-0/);
+  assert.match(markup, /shrink-0 pt-4/);
+  assert.doesNotMatch(markup, /lg:min-h-\[32rem\]/);
+});
+
 test("renders a newly prepended task above older task history", () => {
   const pageProps = props();
   pageProps.chatThreads = [
@@ -158,4 +209,26 @@ test("keeps an actionable HTTPS explanation when HTTP IP recording is blocked", 
 
   assert.match(markup, /语音需要 HTTPS/);
   assert.match(markup, /HTTP IP 页面使用麦克风/);
+});
+
+test("renders compact structured activity instead of a generic working label", () => {
+  const pageProps = props();
+  pageProps.chatSending = true;
+  pageProps.chatWorking = true;
+  pageProps.chatActivity = {
+    ...emptyChatActivity(),
+    stage: "running_tool",
+    activeName: "media.download",
+    commandPreview: "ffmpeg",
+    llmCallCount: 2,
+    roundNo: 3,
+  };
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.match(markup, /正在运行系统命令：ffmpeg/);
+  assert.match(markup, /\$ ffmpeg/);
+  assert.match(markup, /LLM 2/);
+  assert.match(markup, /第 3 轮/);
+  assert.match(markup, /chat-activity-sweep/);
 });

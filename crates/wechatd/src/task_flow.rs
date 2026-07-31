@@ -249,7 +249,7 @@ pub(super) async fn deliver_wechat_clawd_reply(
                 )
                 .await
             }
-            WechatOutboundKind::File => {
+            WechatOutboundKind::Audio | WechatOutboundKind::File => {
                 let fname = file_path
                     .file_name()
                     .and_then(|s| s.to_str())

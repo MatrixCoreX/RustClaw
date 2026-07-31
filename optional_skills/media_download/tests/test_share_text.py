@@ -1,7 +1,10 @@
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 TOOL_DIR = Path(__file__).parents[1] / "src" / "tool"
@@ -53,6 +56,105 @@ class ShareTextTest(unittest.TestCase):
             url,
             "xiaohongshu",
         )
+
+    def test_video_download_prefers_candidate_with_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            candidates = [
+                self.downloader.Candidate("https://media.test/video-only", "first", 1),
+                self.downloader.Candidate("https://media.test/with-audio", "second", 2),
+            ]
+            calls = []
+
+            def fake_download(candidate, output_path, **_kwargs):
+                calls.append(candidate.source)
+                output_path.write_bytes(candidate.source.encode("utf-8"))
+                return output_path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="clip.mp4",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+            )
+            with (
+                mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
+                mock.patch.object(
+                    self.downloader.video_transcriber,
+                    "probe_audio_stream",
+                    side_effect=[False, True],
+                ),
+                mock.patch.object(self.downloader, "handle_downloaded_video") as handled,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://v.douyin.com/example/",
+                    None,
+                    "douyin",
+                    "item-1",
+                    candidates,
+                    [],
+                    [],
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(calls, ["first", "second"])
+            self.assertEqual((output_dir / "clip.mp4").read_bytes(), b"second")
+            handled.assert_called_once_with(output_dir / "clip.mp4", args)
+
+    def test_genuinely_silent_video_keeps_best_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            candidates = [
+                self.downloader.Candidate("https://media.test/best", "best", 1),
+                self.downloader.Candidate("https://media.test/fallback", "fallback", 2),
+            ]
+
+            def fake_download(candidate, output_path, **_kwargs):
+                output_path.write_bytes(candidate.source.encode("utf-8"))
+                return output_path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="silent.mp4",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+            )
+            with (
+                mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
+                mock.patch.object(
+                    self.downloader.video_transcriber,
+                    "probe_audio_stream",
+                    side_effect=[False, False],
+                ),
+                mock.patch.object(self.downloader, "handle_downloaded_video") as handled,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://v.douyin.com/silent/",
+                    None,
+                    "douyin",
+                    "item-2",
+                    candidates,
+                    [],
+                    [],
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual((output_dir / "silent.mp4").read_bytes(), b"best")
+            handled.assert_called_once_with(output_dir / "silent.mp4", args)
 
 
 if __name__ == "__main__":

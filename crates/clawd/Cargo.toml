@@ -13,7 +13,7 @@ claw-core = { path = "../claw-core" }
 fs-discovery = { path = "../fs-discovery" }
 skill-sdk = { package = "agent-skill-sdk", path = "../skill-sdk" }
 wechat-ilink = { path = "../wechat-ilink" }
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
 reqwest-mcp.workspace = true
 rmcp.workspace = true
 rusqlite.workspace = true

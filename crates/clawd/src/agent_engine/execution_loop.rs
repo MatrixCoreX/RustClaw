@@ -19,6 +19,7 @@ fn active_tool_event_payload(
     step_in_round: usize,
     global_step: usize,
 ) -> Option<Value> {
+    let command_preview = command_preview_for_action(action);
     let (action_kind, action_ref, tool_or_skill, requested_capability) = match action {
         AgentAction::CallTool { tool, .. } => {
             ("call_tool", tool.as_str(), Some(tool.as_str()), None)
@@ -46,8 +47,67 @@ fn active_tool_event_payload(
         "action_ref": action_ref,
         "tool_or_skill": tool_or_skill,
         "requested_capability": requested_capability,
+        "command_preview": command_preview,
         "status": "running",
     }))
+}
+
+fn command_preview_for_action(action: &AgentAction) -> Option<String> {
+    let (action_ref, args) = match action {
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallCapability { capability, args } => (capability.as_str(), args),
+        AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => return None,
+    };
+    let normalized = action_ref.trim().to_ascii_lowercase().replace('-', "_");
+    if !normalized.ends_with("run_command")
+        && !normalized.ends_with("run_cmd")
+        && !normalized.ends_with("shell_run")
+    {
+        return None;
+    }
+    let command = args
+        .get("command")
+        .or_else(|| args.get("cmd"))
+        .and_then(Value::as_str)?;
+    safe_command_preview(command)
+}
+
+fn safe_command_preview(command: &str) -> Option<String> {
+    let first_line = command.lines().next()?.trim();
+    let mut tokens = first_line.split_whitespace();
+    let mut executable = tokens.next()?;
+    while executable.contains('=') && !executable.starts_with('=') {
+        executable = tokens.next()?;
+    }
+    let executable = executable.trim_matches(['\'', '"']);
+    let executable = executable.rsplit('/').next().unwrap_or(executable);
+    if executable.is_empty()
+        || !executable
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return None;
+    }
+    let mut preview = executable.chars().take(32).collect::<String>();
+    if matches!(executable, "curl" | "wget" | "bash" | "sh" | "zsh" | "fish") {
+        return Some(preview);
+    }
+    if let Some(subcommand) = tokens.next() {
+        let subcommand = subcommand.trim_matches(['\'', '"']);
+        if !subcommand.starts_with('-')
+            && subcommand.len() <= 32
+            && subcommand
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        {
+            preview.push(' ');
+            preview.push_str(subcommand);
+        }
+    }
+    Some(preview)
 }
 
 fn publish_active_tool_event(

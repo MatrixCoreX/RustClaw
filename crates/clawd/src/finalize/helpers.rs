@@ -210,6 +210,9 @@ impl FileTargetKind {
 pub(crate) enum DeliveryTokenKind {
     File,
     ImageFile,
+    VideoFile,
+    VoiceFile,
+    MusicFile,
     ImageUrl,
     VideoUrl,
     FileUrl,
@@ -221,6 +224,9 @@ impl DeliveryTokenKind {
         match self {
             Self::File => "FILE:",
             Self::ImageFile => "IMAGE_FILE:",
+            Self::VideoFile => "VIDEO_FILE:",
+            Self::VoiceFile => "VOICE_FILE:",
+            Self::MusicFile => "MUSIC_FILE:",
             Self::ImageUrl => "IMAGE_URL:",
             Self::VideoUrl => "VIDEO_URL:",
             Self::FileUrl => "FILE_URL:",
@@ -230,7 +236,9 @@ impl DeliveryTokenKind {
 
     pub(crate) fn canonical_prefix(self) -> &'static str {
         match self {
-            Self::File | Self::ImageFile => "FILE:",
+            Self::File | Self::ImageFile | Self::VideoFile | Self::VoiceFile | Self::MusicFile => {
+                "FILE:"
+            }
             Self::ImageUrl => "IMAGE_URL:",
             Self::VideoUrl => "VIDEO_URL:",
             Self::FileUrl => "FILE_URL:",
@@ -239,7 +247,10 @@ impl DeliveryTokenKind {
     }
 
     pub(crate) fn is_file_path(self) -> bool {
-        matches!(self, Self::File | Self::ImageFile)
+        matches!(
+            self,
+            Self::File | Self::ImageFile | Self::VideoFile | Self::VoiceFile | Self::MusicFile
+        )
     }
 }
 
@@ -257,6 +268,12 @@ pub(crate) fn parse_delivery_token(text: &str) -> Option<(DeliveryTokenKind, &st
         Some((DeliveryTokenKind::File, rest))
     } else if let Some(rest) = trimmed.strip_prefix("IMAGE_FILE:") {
         Some((DeliveryTokenKind::ImageFile, rest))
+    } else if let Some(rest) = trimmed.strip_prefix("VIDEO_FILE:") {
+        Some((DeliveryTokenKind::VideoFile, rest))
+    } else if let Some(rest) = trimmed.strip_prefix("VOICE_FILE:") {
+        Some((DeliveryTokenKind::VoiceFile, rest))
+    } else if let Some(rest) = trimmed.strip_prefix("MUSIC_FILE:") {
+        Some((DeliveryTokenKind::MusicFile, rest))
     } else if let Some(rest) = trimmed.strip_prefix("IMAGE_URL:") {
         Some((DeliveryTokenKind::ImageUrl, rest))
     } else if let Some(rest) = trimmed.strip_prefix("VIDEO_URL:") {

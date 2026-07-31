@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 pub enum WechatOutboundKind {
     Image,
     Video,
+    Audio,
     File,
 }
 
@@ -51,6 +52,26 @@ pub fn extract_wechat_outbound_media(
                 workspace_root,
                 normalize_token(rest),
                 Some(WechatOutboundKind::Video),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("VOICE_FILE:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Audio),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("MUSIC_FILE:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Audio),
             );
             continue;
         }
@@ -142,6 +163,8 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
             let t = line.trim();
             if t.starts_with("IMAGE_FILE:")
                 || t.starts_with("VIDEO_FILE:")
+                || t.starts_with("VOICE_FILE:")
+                || t.starts_with("MUSIC_FILE:")
                 || t.starts_with("FILE:")
                 || t.starts_with("FILE_FILE:")
                 || t.starts_with("IMAGE_URL:")
@@ -421,9 +444,10 @@ fn media_kind_from_token(token: &str) -> Option<WechatOutboundKind> {
     match token.trim().to_ascii_lowercase().as_str() {
         "image" | "image_file" | "photo" | "picture" => Some(WechatOutboundKind::Image),
         "video" | "video_file" => Some(WechatOutboundKind::Video),
-        "file" | "file_file" | "document" | "audio" | "audio_file" | "voice" | "voice_file" => {
-            Some(WechatOutboundKind::File)
+        "audio" | "audio_file" | "voice" | "voice_file" | "music" | "music_file" => {
+            Some(WechatOutboundKind::Audio)
         }
+        "file" | "file_file" | "document" => Some(WechatOutboundKind::File),
         _ => None,
     }
 }
@@ -467,9 +491,6 @@ fn parse_media_reference(
     }
     let local_token = normalize_local_token(&token);
     let path = resolve_workspace_path(workspace_root, local_token)?;
-    if !path.is_file() {
-        return None;
-    }
     Some(WechatOutboundMedia {
         kind: forced_kind.unwrap_or_else(|| classify_path_kind(&path)),
         source: WechatOutboundSource::LocalPath(path),
@@ -503,13 +524,7 @@ fn resolve_workspace_path(workspace_root: &Path, token: String) -> Option<PathBu
     } else {
         workspace_root.join(&token)
     };
-    candidate.canonicalize().ok().or_else(|| {
-        if candidate.is_file() {
-            Some(candidate)
-        } else {
-            None
-        }
-    })
+    Some(candidate.canonicalize().unwrap_or(candidate))
 }
 
 fn is_remote_url(token: &str) -> bool {
@@ -540,11 +555,25 @@ fn is_probably_video(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn is_probably_audio(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "aac" | "m4a" | "mp3" | "amr" | "ogg" | "opus" | "wav" | "flac"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn classify_path_kind(p: &Path) -> WechatOutboundKind {
     if is_probably_image(p) {
         WechatOutboundKind::Image
     } else if is_probably_video(p) {
         WechatOutboundKind::Video
+    } else if is_probably_audio(p) {
+        WechatOutboundKind::Audio
     } else {
         WechatOutboundKind::File
     }
@@ -571,6 +600,16 @@ fn classify_remote_kind(url: &str) -> WechatOutboundKind {
         || normalized.ends_with(".m4v")
     {
         WechatOutboundKind::Video
+    } else if normalized.ends_with(".aac")
+        || normalized.ends_with(".m4a")
+        || normalized.ends_with(".mp3")
+        || normalized.ends_with(".amr")
+        || normalized.ends_with(".ogg")
+        || normalized.ends_with(".opus")
+        || normalized.ends_with(".wav")
+        || normalized.ends_with(".flac")
+    {
+        WechatOutboundKind::Audio
     } else {
         WechatOutboundKind::File
     }

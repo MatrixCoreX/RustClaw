@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { emptyChatActivity, reduceChatActivity } from "./chat-activity";
+
+test("counts LLM starts without counting streamed fragments", () => {
+  const started = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 1,
+    task_id: "task-1",
+    event_kind: "model_turn",
+    payload: { type: "started", provider: "provider:model" },
+  });
+  const fragment = reduceChatActivity(started, {
+    schema_version: 1,
+    seq: 2,
+    task_id: "task-1",
+    event_kind: "model_turn",
+    payload: { type: "text_delta", text_delta_bytes: 20 },
+  });
+
+  assert.equal(started.llmCallCount, 1);
+  assert.equal(fragment.llmCallCount, 1);
+  assert.equal(fragment.stage, "llm_response");
+});
+
+test("shows only the structured tool name and round", () => {
+  const activity = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 4,
+    task_id: "task-1",
+    event_kind: "tool_active",
+    payload: {
+      action_ref: "media.download",
+      round_no: 2,
+      command_preview: "ffmpeg",
+      arguments: { secret: "must-not-be-projected" },
+    },
+  });
+
+  assert.equal(activity.stage, "running_tool");
+  assert.equal(activity.activeName, "media.download");
+  assert.equal(activity.roundNo, 2);
+  assert.equal(activity.commandPreview, "ffmpeg");
+  assert.equal(JSON.stringify(activity).includes("must-not-be-projected"), false);
+});
+
+test("ignores a replayed event sequence", () => {
+  const first = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 5,
+    task_id: "task-1",
+    event_kind: "model_turn",
+    payload: { type: "started" },
+  });
+  const replayed = reduceChatActivity(first, {
+    schema_version: 1,
+    seq: 5,
+    task_id: "task-1",
+    event_kind: "model_turn",
+    payload: { type: "started" },
+  });
+
+  assert.equal(replayed.llmCallCount, 1);
+});

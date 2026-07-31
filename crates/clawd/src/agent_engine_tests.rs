@@ -1087,6 +1087,18 @@ fn test_parse_delivery_token_normalizes_supported_prefixes() {
     assert_eq!(payload.trim(), "/tmp/demo.png");
     assert_eq!(kind.canonical_prefix(), "FILE:");
 
+    let (kind, path) =
+        crate::finalize::parse_delivery_token("MUSIC_FILE:/tmp/demo.mp3").expect("token");
+    assert_eq!(kind, crate::finalize::DeliveryTokenKind::MusicFile);
+    assert_eq!(path, "/tmp/demo.mp3");
+    assert_eq!(kind.canonical_prefix(), "FILE:");
+
+    let (kind, payload) =
+        crate::finalize::parse_delivery_token("VIDEO_FILE:/tmp/demo.mp4").expect("token");
+    assert_eq!(kind, crate::finalize::DeliveryTokenKind::VideoFile);
+    assert_eq!(payload.trim(), "/tmp/demo.mp4");
+    assert_eq!(kind.canonical_prefix(), "FILE:");
+
     let (kind, payload) =
         crate::finalize::parse_delivery_token("MEDIA_URL:https://example.com/a.mp4")
             .expect("token");

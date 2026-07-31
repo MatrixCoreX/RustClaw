@@ -135,6 +135,28 @@ fn workspace_release_version_prefers_release_tag_and_falls_back_to_version() {
 }
 
 #[tokio::test]
+async fn workspace_release_tag_fallback_uses_version_order_for_the_requested_platform() {
+    let root = temp_workspace_root();
+    run_workspace_update_test_git(&root, &["init"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "Agent Runtime Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@agent-runtime.local"]);
+    std::fs::write(root.join("README.md"), "fixture\n").expect("write release tag fixture");
+    run_workspace_update_test_git(&root, &["add", "README.md"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "fixture"]);
+    run_workspace_update_test_git(&root, &["tag", "ubuntu-x86_64-20260728-9"]);
+    run_workspace_update_test_git(&root, &["tag", "ubuntu-x86_64-20260728-10"]);
+    run_workspace_update_test_git(&root, &["tag", "pi-aarch64-20260729-1"]);
+
+    assert_eq!(
+        resolve_latest_workspace_release_tag_for(&root, "ubuntu-x86_64-")
+            .await
+            .as_deref(),
+        Some("ubuntu-x86_64-20260728-10")
+    );
+    std::fs::remove_dir_all(root).expect("remove release tag fallback fixture");
+}
+
+#[tokio::test]
 async fn workspace_update_refresh_reports_release_version_without_git_fields() {
     let root = temp_workspace_root();
     std::fs::write(root.join("VERSION"), "0.1.8\n").expect("write version");

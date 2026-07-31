@@ -19,6 +19,12 @@ bridge_base_url = "http://127.0.0.1:8092"
 auth_dir = "data/wa-web-auth"
 # 快速结果等待秒数；超时后转为异步回传
 quick_result_wait_seconds = 3
+# WhatsApp Web 没有稳定的机器人上传上限合同；以下是本地内存/上传安全阈值，
+# 平台仍可能因账号、客户端版本、媒体编码等因素拒绝更小的文件。
+max_outbound_image_bytes = 104857600
+max_outbound_video_bytes = 104857600
+max_outbound_audio_bytes = 104857600
+max_outbound_file_bytes = 2147483648
 # i18n 语言（优先尝试 configs/i18n/whatsapp-webd.<language>.toml）
 language = "en-US"
 # i18n 文件路径（当 language 对应文件不存在时回退到此路径）

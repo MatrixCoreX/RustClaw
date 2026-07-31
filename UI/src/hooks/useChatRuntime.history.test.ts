@@ -171,6 +171,50 @@ test("paged restore drops completed cache copies but preserves drafts and pendin
   assert.equal(retained.activeThreadId, completed.id);
 });
 
+test("refresh restore selects newest server history instead of an empty welcome thread", () => {
+  const pristineWelcome: ChatThreadRecord = {
+    id: "empty-refresh-thread",
+    title: "新任务",
+    messages: [
+      {
+        id: "chat-system-welcome-1",
+        role: "system",
+        text: "欢迎",
+        ts: 100,
+      },
+    ],
+    input: "",
+    createdAt: 100,
+    updatedAt: 100,
+    teachingMode: false,
+    externalChatId: "ui-empty-refresh-thread",
+    lastTaskId: null,
+    teachingRuns: [],
+  };
+  const restored = mergeServerConversationHistory(
+    retainLocalDraftsForPagedRestore({
+      activeThreadId: pristineWelcome.id,
+      threads: [pristineWelcome],
+    }),
+    [
+      {
+        id: "restored-history-thread",
+        externalChatId: "ui-restored-history-thread",
+        title: "最近的历史聊天",
+        messages: [{ id: "u-restored", role: "user", text: "继续", ts: 10 }],
+        createdAt: 10,
+        updatedAt: 11,
+        lastTaskId: "task-restored",
+        teachingRuns: [],
+      },
+    ],
+    t,
+  );
+
+  assert.deepEqual(restored.threads.map((item) => item.id), ["restored-history-thread"]);
+  assert.equal(restored.activeThreadId, "restored-history-thread");
+});
+
 test("more than 80 teaching runs and 120 messages remain reachable through incremental pages", () => {
   let state: ChatThreadState = { activeThreadId: "long-thread", threads: [] };
   for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {

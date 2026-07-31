@@ -45,6 +45,68 @@ fn content_disposition_keeps_unicode_only_in_rfc5987_value() {
     assert!(header.contains("filename*=UTF-8''%E6%9C%88%E6%8A%A5%202026.pdf"));
 }
 
+#[test]
+fn video_poster_validation_accepts_only_bounded_complete_jpeg_data() {
+    assert!(valid_video_poster(&[0xff, 0xd8, 0xff, 0xd9]));
+    assert!(!valid_video_poster(&[0xff, 0xd8, 0xff, 0x00]));
+    assert!(!valid_video_poster(&[0x89, b'P', b'N', b'G']));
+
+    let path = std::path::Path::new("/tmp/task-artifact/video.mp4");
+    assert_eq!(
+        video_poster_cache_path(path, "abc"),
+        Some(std::path::PathBuf::from(
+            "/tmp/task-artifact/.video-poster-v1-abc.jpg"
+        ))
+    );
+}
+
+#[test]
+fn browser_video_cache_is_separate_from_the_original_download() {
+    let path = std::path::Path::new("/tmp/task-artifact/video.mp4");
+    assert_eq!(
+        browser_video_cache_path(path, "abc"),
+        Some(std::path::PathBuf::from(
+            "/tmp/task-artifact/.video-browser-v1-abc.mp4"
+        ))
+    );
+    assert_ne!(browser_video_cache_path(path, "abc").as_deref(), Some(path));
+}
+
+#[tokio::test]
+async fn video_poster_rejects_non_video_artifacts_before_running_ffmpeg() {
+    let manifest = TaskArtifactManifest {
+        schema_version: 1,
+        id: "artifact-1".to_string(),
+        filename: "report.txt".to_string(),
+        kind: "file".to_string(),
+        mime_type: "text/plain".to_string(),
+        size_bytes: 4,
+        sha256: "a".repeat(64),
+        download_url: "/v1/tasks/task-1/artifacts/artifact-1/content".to_string(),
+        preview_url: None,
+    };
+    let response = serve_video_poster(std::path::Path::new("/not-used"), &manifest, true).await;
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn browser_video_rejects_non_video_artifacts_before_running_ffmpeg() {
+    let manifest = TaskArtifactManifest {
+        schema_version: 1,
+        id: "artifact-1".to_string(),
+        filename: "report.txt".to_string(),
+        kind: "file".to_string(),
+        mime_type: "text/plain".to_string(),
+        size_bytes: 4,
+        sha256: "a".repeat(64),
+        download_url: "/v1/tasks/task-1/artifacts/artifact-1/content".to_string(),
+        preview_url: None,
+    };
+    let response =
+        serve_browser_video_preview(std::path::Path::new("/not-used"), &manifest, true).await;
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
 #[tokio::test]
 async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     let root = std::env::temp_dir().join(format!(

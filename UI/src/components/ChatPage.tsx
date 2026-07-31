@@ -40,6 +40,15 @@ import {
   teachingMessageInteractive,
   teachingRunByMessageId,
 } from "../lib/chat-teaching";
+import type { ChatActivitySummary } from "../lib/chat-activity";
+import {
+  fetchTaskArtifactBlob,
+  MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES,
+  saveTaskArtifactBlob,
+  taskArtifactBrowserVideoUrl,
+  taskArtifactVideoPosterUrl,
+  type ArtifactFetch,
+} from "../lib/task-artifact-content";
 import { artifactPreviewKind } from "../lib/task-artifacts";
 import type { ChatAttachment, ChatMessage, TaskArtifact, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import type {
@@ -82,6 +91,7 @@ interface ChatTeachingRunSummary {
 export interface ChatPageProps {
   t: Translate;
   tSlash: TranslateSlash;
+  artifactFetch: ArtifactFetch;
   chatMessages: ChatMessage[];
   chatThreads: ChatThreadSummary[];
   activeChatThreadId: string;
@@ -96,6 +106,7 @@ export interface ChatPageProps {
   activeChatTeachingRunId: string | null;
   chatSending: boolean;
   chatWorking: boolean;
+  chatActivity: ChatActivitySummary;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
   chatVoiceRecordingAvailability: VoiceRecordingAvailability;
@@ -131,6 +142,7 @@ export interface ChatPageProps {
 export function ChatPage({
   t,
   tSlash,
+  artifactFetch,
   chatMessages,
   chatThreads,
   activeChatThreadId,
@@ -145,6 +157,7 @@ export function ChatPage({
   activeChatTeachingRunId,
   chatSending,
   chatWorking,
+  chatActivity,
   chatRecording,
   chatVoiceRecordingSupported,
   chatVoiceRecordingAvailability,
@@ -258,23 +271,23 @@ export function ChatPage({
     <section
       className={
         taskHistoryExpanded
-          ? "grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]"
-          : "grid gap-4 lg:grid-cols-[3.75rem_minmax(0,1fr)]"
+          ? "grid gap-4 md:h-full md:min-h-0 md:grid-cols-[18rem_minmax(0,1fr)] md:overflow-hidden"
+          : "grid gap-4 md:h-full md:min-h-0 md:grid-cols-[3.75rem_minmax(0,1fr)] md:overflow-hidden"
       }
     >
-      <aside className="self-start rounded-2xl border border-white/10 bg-white/5 p-3">
+      <aside className="self-start rounded-2xl border border-white/10 bg-white/5 p-3 md:h-full md:min-h-0 md:overflow-hidden">
         <div
           className={
             taskHistoryExpanded
               ? "mb-3 flex items-center justify-between gap-2"
-              : "flex items-center justify-between gap-2 lg:flex-col"
+              : "flex items-center justify-between gap-2 md:flex-col"
           }
         >
           <h3
             className={
               taskHistoryExpanded
                 ? "text-sm font-semibold"
-                : "text-sm font-semibold lg:sr-only"
+                : "text-sm font-semibold md:sr-only"
             }
           >
             {t("任务历史", "Task history")}
@@ -283,7 +296,7 @@ export function ChatPage({
             className={
               taskHistoryExpanded
                 ? "flex items-center gap-1"
-                : "flex items-center gap-1 lg:flex-col"
+                : "flex items-center gap-1 md:flex-col"
             }
           >
             <button
@@ -336,7 +349,7 @@ export function ChatPage({
                 className="min-w-0 flex-1 bg-transparent text-white/80 outline-none placeholder:text-white/35"
               />
             </label>
-            <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+            <div className="max-h-[34rem] space-y-2 overflow-auto pr-1 md:max-h-[calc(100vh-12rem)]">
           {visibleChatThreads.map((thread) => {
             const active = thread.id === activeChatThreadId;
             const renaming = thread.id === renamingThreadId;
@@ -475,8 +488,8 @@ export function ChatPage({
         </div>
       </aside>
 
-      <div className="min-w-0 rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5 md:h-full md:min-h-0 md:overflow-hidden">
+        <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs text-white/45">Agent</p>
             <h3 className="truncate text-base font-semibold" title={activeThread?.title}>
@@ -504,7 +517,7 @@ export function ChatPage({
 
       <div
         ref={messageListRef}
-        className="h-80 space-y-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3"
+        className="min-h-80 flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 md:min-h-0"
       >
         {chatMessages.map((message) => {
           const messageTeachingRun = teachingRunByMessage.get(message.id) ?? null;
@@ -574,6 +587,7 @@ export function ChatPage({
                       <TaskArtifactCard
                         key={`${message.id}-${artifact.id}`}
                         artifact={artifact}
+                        artifactFetch={artifactFetch}
                         t={t}
                       />
                     ))}
@@ -611,8 +625,9 @@ export function ChatPage({
             </div>
           );
         })}
-        {chatWorking ? <ChatWorkingIndicator t={t} /> : null}
-      </div>
+        {chatSending || chatWorking ? (
+          <ChatWorkingIndicator t={t} activity={chatActivity} />
+        ) : null}
 
       {teachingPanelVisible ? (
         <div className="mt-4 space-y-3">
@@ -649,7 +664,14 @@ export function ChatPage({
         </div>
       ) : null}
 
-      <div className="mt-4 grid shrink-0 gap-3 md:grid-cols-[1fr_auto]">
+      {chatError ? (
+        <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {t("聊天错误", "Chat error")}: {chatError}
+        </p>
+      ) : null}
+      </div>
+
+      <div className="shrink-0 pt-4">
         <div className="min-w-0">
           {chatAttachments.length > 0 ? (
             <div className="mb-3 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-2">
@@ -780,38 +802,35 @@ export function ChatPage({
                   )}
             </span>
           </div>
-          <textarea
-            className="theme-input min-h-24 w-full resize-none"
-            placeholder={t(
-              "例如：你好，请告诉我你现在能做什么；或上传附件让我看看",
-              "For example: Hello, tell me what you can do; or upload an attachment for review",
-            )}
-            value={chatInput}
-            onChange={(event) => onChatInputChange(event.target.value)}
-            onKeyDown={onChatInputKeyDown}
-          />
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3">
+            <textarea
+              className="theme-input h-[72px] min-h-[72px] max-h-60 w-full resize-y"
+              placeholder={t(
+                "例如：你好，请告诉我你现在能做什么；或上传附件让我看看",
+                "For example: Hello, tell me what you can do; or upload an attachment for review",
+              )}
+              value={chatInput}
+              onChange={(event) => onChatInputChange(event.target.value)}
+              onKeyDown={onChatInputKeyDown}
+            />
+            <button
+              type="button"
+              onClick={() => void onSendMessage()}
+              disabled={
+                chatSending || chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
+              }
+              className="theme-accent-btn min-h-[72px] min-w-20 shrink-0 self-stretch justify-center"
+            >
+              {chatSending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {t("发送", "Send")}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void onSendMessage()}
-          disabled={
-            chatSending || chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
-          }
-          className="theme-accent-btn shrink-0"
-        >
-          {chatSending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          {t("发送", "Send")}
-        </button>
       </div>
-      {chatError ? (
-        <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {t("聊天错误", "Chat error")}: {chatError}
-        </p>
-      ) : null}
       </div>
     </section>
   );
@@ -958,7 +977,56 @@ function TeachingRunHistory({
   );
 }
 
-function ChatWorkingIndicator({ t }: { t: Translate }) {
+function ChatWorkingIndicator({
+  t,
+  activity,
+}: {
+  t: Translate;
+  activity: ChatActivitySummary;
+}) {
+  const activityTitle = (() => {
+    switch (activity.stage) {
+      case "llm_request":
+        return activity.llmCallCount > 0
+          ? t(
+              `第 ${activity.llmCallCount} 次 LLM 调用正在处理`,
+              `LLM call ${activity.llmCallCount} is processing`,
+            )
+          : t("LLM 正在处理", "The LLM is processing");
+      case "llm_response":
+        return activity.llmCallCount > 0
+          ? t(
+              `第 ${activity.llmCallCount} 次 LLM 调用正在生成回复`,
+              `LLM call ${activity.llmCallCount} is generating a response`,
+            )
+          : t("正在生成回复", "Generating a response");
+      case "choosing_tool":
+        return t("正在选择下一步工具或技能", "Choosing the next tool or skill");
+      case "running_tool":
+        return activity.commandPreview
+          ? t(
+              `正在运行系统命令：${activity.commandPreview}`,
+              `Running system command: ${activity.commandPreview}`,
+            )
+          : activity.activeName
+          ? t(
+              `正在使用 ${activity.activeName}`,
+              `Using ${activity.activeName}`,
+            )
+          : t("正在调用工具或技能", "Calling a tool or skill");
+      case "tool_returned":
+        return activity.activeName
+          ? t(
+              `${activity.activeName} 已返回，继续处理`,
+              `${activity.activeName} returned; continuing`,
+            )
+          : t("工具已返回，继续处理", "The tool returned; continuing");
+      case "finalizing":
+        return t("正在整理最终结果", "Preparing the final result");
+      default:
+        return t("正在分析请求", "Analyzing the request");
+    }
+  })();
   return (
     <div
       role="status"
@@ -968,21 +1036,44 @@ function ChatWorkingIndicator({ t }: { t: Translate }) {
       className="space-y-1"
     >
       <div className="text-[11px] text-white/50">assistant</div>
-      <div className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-300/15 bg-emerald-500/15 px-3 py-2 text-sm text-white">
-        <Loader2
-          aria-hidden="true"
-          className="h-4 w-4 shrink-0 text-emerald-200 motion-safe:animate-spin"
-        />
-        <span className="motion-safe:animate-pulse">{t("正在处理", "Working")}</span>
-        <span aria-hidden="true" className="inline-flex items-center gap-1">
-          {[0, 1, 2].map((index) => (
+      <div className="chat-activity-sweep min-h-12 max-w-xl rounded-xl border border-emerald-300/20 bg-emerald-500/12 px-3 py-2.5 text-sm text-white">
+        <div className="relative z-[1] flex items-center gap-2">
+          <Loader2
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-emerald-200 motion-safe:animate-spin"
+          />
+          <span className="min-w-0 truncate font-medium" title={activityTitle}>
+            {activityTitle}
+          </span>
+        </div>
+        <div className="relative z-[1] mt-2 flex flex-wrap gap-1.5 text-[10px] text-white/60">
+          {activity.llmCallCount > 0 ? (
+            <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
+              LLM {activity.llmCallCount}
+            </span>
+          ) : null}
+          {activity.roundNo ? (
+            <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
+              {t(`第 ${activity.roundNo} 轮`, `Round ${activity.roundNo}`)}
+            </span>
+          ) : null}
+          {activity.activeName ? (
             <span
-              key={index}
-              className="h-1.5 w-1.5 rounded-full bg-emerald-200 motion-safe:animate-pulse"
-              style={{ animationDelay: `${index * 180}ms` }}
-            />
-          ))}
-        </span>
+              className="max-w-64 truncate rounded-full border border-white/10 bg-black/15 px-2 py-0.5 font-mono"
+              title={activity.activeName}
+            >
+              {activity.activeName}
+            </span>
+          ) : null}
+          {activity.commandPreview ? (
+            <span
+              className="max-w-64 truncate rounded-full border border-white/10 bg-black/15 px-2 py-0.5 font-mono"
+              title={activity.commandPreview}
+            >
+              $ {activity.commandPreview}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -1085,13 +1176,36 @@ function AttachmentPreview({
 
 function TaskArtifactCard({
   artifact,
+  artifactFetch,
   t,
 }: {
   artifact: TaskArtifact;
+  artifactFetch: ArtifactFetch;
   t: Translate;
 }) {
   const previewKind = artifactPreviewKind(artifact);
   const previewUrl = artifact.preview_url ?? null;
+  const mediaPreviewUrl =
+    previewKind === "video" && previewUrl
+      ? taskArtifactBrowserVideoUrl(previewUrl)
+      : previewUrl;
+  const videoPosterUrl =
+    previewKind === "video" && previewUrl ? taskArtifactVideoPosterUrl(previewUrl) : null;
+  const automaticPreview =
+    previewKind !== "none" &&
+    Boolean(previewUrl) &&
+    artifact.size_bytes <= MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES;
+  const [previewRequested, setPreviewRequested] = useState(automaticPreview);
+  const [previewState, setPreviewState] = useState<"idle" | "loading" | "ready" | "error">(
+    automaticPreview ? "loading" : "idle",
+  );
+  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
+  const [videoPosterObjectUrl, setVideoPosterObjectUrl] = useState<string | null>(null);
+  const [videoPreviewUnsupported, setVideoPreviewUnsupported] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const artifactFetchRef = useRef(artifactFetch);
+  artifactFetchRef.current = artifactFetch;
   const stopBubble = (event: { stopPropagation: () => void }) => event.stopPropagation();
   const icon =
     previewKind === "image" ? (
@@ -1106,48 +1220,194 @@ function TaskArtifactCard({
       <FileText className="h-5 w-5" />
     );
 
+  useEffect(() => {
+    if (!previewRequested || previewKind === "none" || !previewUrl) {
+      setPreviewState("idle");
+      setPreviewObjectUrl(null);
+      setVideoPreviewUnsupported(false);
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setPreviewState("loading");
+    setPreviewObjectUrl(null);
+    setVideoPreviewUnsupported(false);
+    if (!mediaPreviewUrl) {
+      setPreviewState("error");
+      return;
+    }
+    void fetchTaskArtifactBlob(artifactFetchRef.current, mediaPreviewUrl, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewObjectUrl(objectUrl);
+        setPreviewState("ready");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPreviewState("error");
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [artifact.id, mediaPreviewUrl, previewKind, previewRequested, previewUrl]);
+
+  useEffect(() => {
+    if (!previewRequested || !videoPosterUrl) {
+      setVideoPosterObjectUrl(null);
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setVideoPosterObjectUrl(null);
+    void fetchTaskArtifactBlob(artifactFetchRef.current, videoPosterUrl, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setVideoPosterObjectUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setVideoPosterObjectUrl(null);
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [artifact.id, previewRequested, videoPosterUrl]);
+
+  const downloadArtifact = async () => {
+    if (downloadLoading) return;
+    setDownloadLoading(true);
+    setDownloadError(null);
+    try {
+      const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url);
+      saveTaskArtifactBlob(blob, artifact.filename);
+    } catch {
+      setDownloadError(t("下载失败，请重新登录后再试。", "Download failed. Sign in again and retry."));
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  const requestPreview = () => {
+    setPreviewState("loading");
+    setPreviewRequested(true);
+  };
+
   return (
     <div
       className="min-w-0 overflow-hidden rounded-md border border-white/12 bg-black/20"
       onClick={stopBubble}
       onKeyDown={stopBubble}
     >
-      {previewKind === "image" && previewUrl ? (
+      {previewKind === "image" && previewObjectUrl ? (
         <a
-          href={previewUrl}
+          href={previewObjectUrl}
           target="_blank"
           rel="noreferrer"
           className="block border-b border-white/10 bg-black/20"
           title={t("打开图片预览", "Open image preview")}
         >
           <img
-            src={previewUrl}
+            src={previewObjectUrl}
             alt={artifact.filename}
             loading="lazy"
             className="h-44 w-full object-contain"
           />
         </a>
       ) : null}
-      {previewKind === "audio" && previewUrl ? (
+      {previewKind === "audio" && previewObjectUrl ? (
         <div className="border-b border-white/10 p-3">
           <audio
             controls
             preload="metadata"
-            src={previewUrl}
+            src={previewObjectUrl}
             className="h-9 w-full"
             title={artifact.filename}
           />
         </div>
       ) : null}
-      {previewKind === "video" && previewUrl ? (
+      {previewKind === "video" && previewObjectUrl && !videoPreviewUnsupported ? (
         <div className="border-b border-white/10 bg-black/25">
           <video
             controls
-            preload="metadata"
-            src={previewUrl}
+            playsInline
+            preload="auto"
+            src={previewObjectUrl}
+            poster={videoPosterObjectUrl ?? undefined}
             className="aspect-video w-full object-contain"
             title={artifact.filename}
+            onLoadedData={(event) => {
+              const video = event.currentTarget;
+              if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+                setVideoPreviewUnsupported(true);
+                return;
+              }
+              if (video.currentTime === 0 && Number.isFinite(video.duration) && video.duration > 0) {
+                video.currentTime = Math.min(0.05, video.duration / 100);
+              }
+            }}
+            onError={() => setVideoPreviewUnsupported(true)}
           />
+        </div>
+      ) : null}
+      {previewKind === "video" &&
+      videoPosterObjectUrl &&
+      ((previewObjectUrl && videoPreviewUnsupported) || previewState === "error") ? (
+        <div className="border-b border-white/10 bg-black/25">
+          <img
+            src={videoPosterObjectUrl}
+            alt={t(`${artifact.filename} 的视频封面`, `Video poster for ${artifact.filename}`)}
+            className="max-h-[32rem] w-full object-contain"
+          />
+          <p className="border-t border-white/10 px-3 py-2 text-xs text-white/65">
+            {previewState === "error"
+              ? t(
+                  "网页兼容版生成失败。高清原视频仍可下载，请重试预览或下载后播放。",
+                  "The browser-compatible copy could not be generated. The original high-quality video is still available to download; retry the preview or play it after downloading.",
+                )
+              : t(
+                  "网页兼容版仍无法播放。高清原视频可正常下载。",
+                  "The browser-compatible copy still cannot play. The original high-quality video remains available to download.",
+                )}
+          </p>
+        </div>
+      ) : null}
+      {previewKind !== "none" &&
+      previewUrl &&
+      !previewObjectUrl &&
+      !(previewKind === "video" && previewState === "error" && videoPosterObjectUrl) ? (
+        <div className="flex min-h-24 items-center justify-center border-b border-white/10 bg-black/20 p-3 text-center text-xs text-white/60">
+          {previewState === "error" ? (
+            <div>
+              <p>{t("预览加载失败。", "Preview failed to load.")}</p>
+              <button
+                type="button"
+                onClick={requestPreview}
+                className="mt-2 rounded-md border border-white/15 px-2.5 py-1.5 text-white/80 hover:bg-white/10"
+              >
+                {t("重新加载", "Retry")}
+              </button>
+            </div>
+          ) : previewRequested ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {previewKind === "video"
+                ? t(
+                    "正在准备浏览器兼容版，高清原视频不会改变…",
+                    "Preparing a browser-compatible copy; the original high-quality video will not be changed…",
+                  )
+                : t("正在加载预览…", "Loading preview…")}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={requestPreview}
+              className="rounded-md border border-white/15 px-3 py-2 text-white/80 hover:bg-white/10"
+            >
+              {t("加载预览", "Load preview")}
+            </button>
+          )}
         </div>
       ) : null}
       <div className="flex min-w-0 items-center gap-3 p-3">
@@ -1161,9 +1421,9 @@ function TaskArtifactCard({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {previewKind === "pdf" && previewUrl ? (
+          {previewKind === "pdf" && previewObjectUrl ? (
             <a
-              href={previewUrl}
+              href={previewObjectUrl}
               target="_blank"
               rel="noreferrer"
               className="theme-icon-btn h-8 w-8"
@@ -1173,17 +1433,27 @@ function TaskArtifactCard({
               <ExternalLink className="h-4 w-4" />
             </a>
           ) : null}
-          <a
-            href={artifact.download_url}
-            download={artifact.filename}
+          <button
+            type="button"
+            onClick={() => void downloadArtifact()}
+            disabled={downloadLoading}
             className="theme-icon-btn h-8 w-8"
             title={t("下载", "Download")}
             aria-label={t(`下载 ${artifact.filename}`, `Download ${artifact.filename}`)}
           >
-            <Download className="h-4 w-4" />
-          </a>
+            {downloadLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+          </button>
         </div>
       </div>
+      {downloadError ? (
+        <p className="border-t border-red-400/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+          {downloadError}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::params;
 
 #[test]
 fn extracts_generic_anchor_from_capability_result_envelope() {
@@ -62,4 +63,87 @@ fn extracts_run_skill_anchor_from_structured_payload() {
         1,
     );
     assert!(!context.contains(secret));
+}
+
+#[test]
+fn newer_non_execution_turn_invalidates_older_execution_anchor() {
+    let rows = vec![
+        (
+            "ask".to_string(),
+            r#"{"text":"target-beta"}"#.to_string(),
+            r#"{"text":"which operation"}"#.to_string(),
+            "200".to_string(),
+        ),
+        (
+            "ask".to_string(),
+            r#"{"text":"target-alpha"}"#.to_string(),
+            r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"target-alpha"}}]}}}"#.to_string(),
+            "100".to_string(),
+        ),
+    ];
+
+    assert_eq!(render_recent_execution_anchor_context(&rows), "<none>");
+    let context = render_recent_execution_context(&rows, 8);
+    assert!(context.contains("target-beta"));
+    assert!(context.contains("target-alpha"));
+    assert!(!context.contains("latest_capability="));
+}
+
+#[test]
+fn recent_execution_rows_are_scoped_to_current_conversation() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let db = state.core.db.get().expect("db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            user_key TEXT,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+    )
+    .expect("create tasks");
+    for (task_id, conversation_id, target, updated_at) in [
+        (
+            "task-selected",
+            "conversation-selected",
+            "target-beta",
+            "200",
+        ),
+        ("task-other", "conversation-other", "target-gamma", "300"),
+    ] {
+        db.execute(
+            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, status, updated_at)
+             VALUES (?1, 1, 2, 'test-user', 'ask', ?2, ?3, 'succeeded', ?4)",
+            params![
+                task_id,
+                serde_json::json!({
+                    "conversation_id": conversation_id,
+                    "text": target,
+                })
+                .to_string(),
+                serde_json::json!({ "text": format!("completed-{target}") }).to_string(),
+                updated_at,
+            ],
+        )
+        .expect("insert task");
+    }
+
+    let rows = query_recent_execution_rows(
+        &state,
+        &db,
+        1,
+        2,
+        Some("test-user"),
+        Some("conversation-selected"),
+        8,
+    )
+    .expect("query recent rows");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].1.contains("target-beta"));
+    assert!(!rows[0].1.contains("target-gamma"));
 }

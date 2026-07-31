@@ -7,8 +7,10 @@ pub(super) async fn send_text_or_image(
     answer: &str,
 ) -> anyhow::Result<()> {
     const PREFIX: &str = "IMAGE_FILE:";
+    const VIDEO_PREFIX: &str = "VIDEO_FILE:";
     const FILE_PREFIX: &str = "FILE:";
     const VOICE_PREFIX: &str = "VOICE_FILE:";
+    const MUSIC_PREFIX: &str = "MUSIC_FILE:";
     const EPHEMERAL_PREFIX: &str = "EPHEMERAL:";
     const EPHEMERAL_IMAGE_SAVED_TOKEN: &str = "EPHEMERAL:IMAGE_SAVED";
     let parsed_buttons = extract_url_buttons_from_text(answer);
@@ -16,11 +18,13 @@ pub(super) async fn send_text_or_image(
     let url_buttons = &parsed_buttons.buttons;
 
     let mut image_paths = dedupe_preserve_order(extract_prefixed_paths(answer, PREFIX));
+    let video_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VIDEO_PREFIX));
     let explicit_file_tokens = dedupe_preserve_order(extract_prefixed_tokens(answer, FILE_PREFIX));
     let (explicit_file_paths, missing_explicit_file_tokens) =
         resolve_delivery_paths(&explicit_file_tokens);
     let mut file_paths = explicit_file_paths.clone();
     let voice_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VOICE_PREFIX));
+    let music_paths = dedupe_preserve_order(extract_prefixed_paths(answer, MUSIC_PREFIX));
     let inferred_write_paths = if file_paths.is_empty() {
         dedupe_preserve_order(extract_written_file_paths(answer))
     } else {
@@ -36,16 +40,20 @@ pub(super) async fn send_text_or_image(
 
     if !image_paths.is_empty()
         || !file_paths.is_empty()
+        || !video_paths.is_empty()
         || !voice_paths.is_empty()
+        || !music_paths.is_empty()
         || !missing_explicit_file_tokens.is_empty()
     {
         debug!(
-            "phase=deliver_media chat_id={} answer_fp={} image_count={} file_count={} voice_count={} preface_preview={}",
+            "phase=deliver_media chat_id={} answer_fp={} image_count={} video_count={} file_count={} voice_count={} music_count={} preface_preview={}",
             chat_id.0,
             text_fingerprint_hex(answer),
             image_paths.len(),
+            video_paths.len(),
             file_paths.len(),
             voice_paths.len(),
+            music_paths.len(),
             text_preview_for_log(answer, 120)
         );
         let ephemeral_image_saved_hint = answer.lines().any(|line| {
@@ -54,7 +62,14 @@ pub(super) async fn send_text_or_image(
         });
         let mut text_without_tokens = strip_prefixed_tokens(
             answer,
-            &[PREFIX, FILE_PREFIX, VOICE_PREFIX, EPHEMERAL_PREFIX],
+            &[
+                PREFIX,
+                VIDEO_PREFIX,
+                FILE_PREFIX,
+                VOICE_PREFIX,
+                MUSIC_PREFIX,
+                EPHEMERAL_PREFIX,
+            ],
         )
         .trim()
         .to_string();
@@ -98,9 +113,13 @@ pub(super) async fn send_text_or_image(
             && missing_explicit_file_tokens.is_empty()
             && !inferred_write_paths.is_empty()
         {
-            if let Some(inline_text) =
-                inline_single_small_text_file(&file_paths, &image_paths, &voice_paths)
-            {
+            if let Some(inline_text) = inline_single_small_text_file(
+                &file_paths,
+                &image_paths,
+                &video_paths,
+                &voice_paths,
+                &music_paths,
+            ) {
                 let sent = if url_buttons.is_empty() {
                     send_telegram_text(bot, chat_id, &inline_text)
                         .await
@@ -134,12 +153,48 @@ pub(super) async fn send_text_or_image(
         }
 
         for path in image_paths {
-            bot.send_photo(chat_id, InputFile::file(path))
-                .await
-                .context("send image file failed")?;
+            let size = claw_core::channel_media_limits::validate_local_media_file(
+                Path::new(&path),
+                "Telegram",
+                "图片",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?;
+            if size <= claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES {
+                bot.send_photo(chat_id, InputFile::file(path))
+                    .await
+                    .context("send image file failed")?;
+            } else {
+                bot.send_document(chat_id, InputFile::file(path))
+                    .await
+                    .context("send oversized image as document failed")?;
+            }
+        }
+
+        for path in video_paths {
+            claw_core::channel_media_limits::validate_local_media_file(
+                Path::new(&path),
+                "Telegram",
+                "视频",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?;
+            if let Err(err) = bot.send_video(chat_id, InputFile::file(path.clone())).await {
+                warn!("send_video failed for {}: {}", path, err);
+                bot.send_document(chat_id, InputFile::file(path))
+                    .await
+                    .context("fallback send video as document failed")?;
+            }
         }
 
         for path in file_paths {
+            claw_core::channel_media_limits::validate_local_media_file(
+                Path::new(&path),
+                "Telegram",
+                "文件",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?;
             // FILE: always means "send as document/file", even for image extensions.
             bot.send_document(chat_id, InputFile::file(path))
                 .await
@@ -147,11 +202,33 @@ pub(super) async fn send_text_or_image(
         }
 
         for path in voice_paths {
+            claw_core::channel_media_limits::validate_local_media_file(
+                Path::new(&path),
+                "Telegram",
+                "语音",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?;
             if let Err(err) = bot.send_voice(chat_id, InputFile::file(path.clone())).await {
                 warn!("send_voice failed for {}: {}", path, err);
                 bot.send_document(chat_id, InputFile::file(path))
                     .await
                     .context("fallback send voice as document failed")?;
+            }
+        }
+        for path in music_paths {
+            claw_core::channel_media_limits::validate_local_media_file(
+                Path::new(&path),
+                "Telegram",
+                "音频",
+                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?;
+            if let Err(err) = bot.send_audio(chat_id, InputFile::file(path.clone())).await {
+                warn!("send_audio failed for {}: {}", path, err);
+                bot.send_document(chat_id, InputFile::file(path))
+                    .await
+                    .context("fallback send audio as document failed")?;
             }
         }
         return Ok(());
@@ -179,9 +256,16 @@ pub(super) async fn send_text_or_image(
 pub(super) fn inline_single_small_text_file(
     file_paths: &[String],
     image_paths: &[String],
+    video_paths: &[String],
     voice_paths: &[String],
+    music_paths: &[String],
 ) -> Option<String> {
-    if !image_paths.is_empty() || !voice_paths.is_empty() || file_paths.len() != 1 {
+    if !image_paths.is_empty()
+        || !video_paths.is_empty()
+        || !voice_paths.is_empty()
+        || !music_paths.is_empty()
+        || file_paths.len() != 1
+    {
         return None;
     }
     let path = file_paths.first()?;
@@ -974,7 +1058,9 @@ pub(super) fn code_or_command_block_body(text: &str) -> Option<String> {
 pub(super) fn has_delivery_prefix(text: &str) -> bool {
     text.starts_with("FILE:")
         || text.starts_with("IMAGE_FILE:")
+        || text.starts_with("VIDEO_FILE:")
         || text.starts_with("VOICE_FILE:")
+        || text.starts_with("MUSIC_FILE:")
         || text.starts_with("EPHEMERAL:")
 }
 
@@ -1407,7 +1493,14 @@ pub(super) fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
 pub(super) fn strip_delivery_tokens_for_tts(answer: &str) -> String {
     strip_prefixed_tokens(
         answer,
-        &["IMAGE_FILE:", "FILE:", "VOICE_FILE:", "EPHEMERAL:"],
+        &[
+            "IMAGE_FILE:",
+            "VIDEO_FILE:",
+            "FILE:",
+            "VOICE_FILE:",
+            "MUSIC_FILE:",
+            "EPHEMERAL:",
+        ],
     )
     .trim()
     .to_string()

@@ -321,6 +321,7 @@ pub(crate) fn apply_agent_loop_context_compaction(
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
+        crate::conversation_state::task_conversation_id(task).as_deref(),
         compacted_last_turn_segment_chars,
         compacted_last_turn_total_chars,
     );

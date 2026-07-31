@@ -12,15 +12,15 @@ use crate::{AgentRuntimeConfig, AppState};
 
 use super::{
     build_last_turn_full_context, build_memory_intent_llm_prompt,
-    build_recent_assistant_replies_context, clarify_assistant_placeholder,
-    classify_assistant_context_reply_kind, extract_result_text_for_recent_turns, insert_memory,
-    legacy_principal_chat_id, ordered_entries_from_assistant_reply,
-    provider_unavailable_assistant_placeholder, recall_memories_since_id, recall_user_preferences,
-    retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
-    retrieval_source_ref_for_preference, upsert_user_preferences_from_route_hint,
-    AssistantContextReplyKind, MemoryWriteKind, MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM,
-    MEMORY_ROLE_USER, MEMORY_TYPE_GENERIC, RETRIEVAL_PRODUCER_KB,
-    RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
+    build_recent_assistant_replies_context, build_recent_turns_full_context_with_sources,
+    clarify_assistant_placeholder, classify_assistant_context_reply_kind,
+    extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
+    ordered_entries_from_assistant_reply, provider_unavailable_assistant_placeholder,
+    recall_memories_since_id, recall_user_preferences, retrieval_source_ref_for_kb_chunk,
+    retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
+    upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
+    MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_TYPE_GENERIC,
+    RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
 };
 use serde_json::json;
 
@@ -58,6 +58,7 @@ fn create_tasks_table(db: &Connection) {
     db.execute_batch(
         "CREATE TABLE tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT NOT NULL,
@@ -71,6 +72,89 @@ fn create_tasks_table(db: &Connection) {
         );",
     )
     .expect("create tasks table");
+}
+
+#[test]
+fn recent_turn_context_keeps_latest_clarification_target_and_scopes_conversation() {
+    let state = test_state();
+    let db = state.core.db.get().expect("db");
+    create_tasks_table(&db);
+    db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'ask', ?5, ?6, NULL, 'succeeded', '100', '100')",
+        params![
+            "task-older-target",
+            1_i64,
+            2_i64,
+            "test-user",
+            r#"{"conversation_id":"conversation-selected","text":"target-alpha"}"#,
+            r#"{"text":"completed-alpha"}"#,
+        ],
+    )
+    .expect("insert older target");
+    db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'ask', ?5, ?6, NULL, 'succeeded', '200', '200')",
+        params![
+            "task-latest-target",
+            1_i64,
+            2_i64,
+            "test-user",
+            r#"{"conversation_id":"conversation-selected","text":"target-beta"}"#,
+            r#"{"text":"which action","task_journal":{"summary":{"final_status":"clarify"}}}"#,
+        ],
+    )
+    .expect("insert latest clarification target");
+    db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'ask', ?5, ?6, NULL, 'succeeded', '300', '300')",
+        params![
+            "task-other-conversation",
+            1_i64,
+            2_i64,
+            "test-user",
+            r#"{"conversation_id":"conversation-other","text":"target-gamma"}"#,
+            r#"{"text":"completed-gamma"}"#,
+        ],
+    )
+    .expect("insert other conversation target");
+    drop(db);
+
+    let (recent, sources) = build_recent_turns_full_context_with_sources(
+        &state,
+        Some("test-user"),
+        1,
+        2,
+        Some("conversation-selected"),
+        8,
+        400,
+        2400,
+    );
+    assert!(recent.contains("target-beta"));
+    assert!(recent.contains(clarify_assistant_placeholder()));
+    assert!(recent.contains("target-alpha"));
+    assert!(!recent.contains("target-gamma"));
+    assert_eq!(
+        sources,
+        vec![
+            "task-older-target".to_string(),
+            "task-latest-target".to_string()
+        ]
+    );
+
+    let last_turn = build_last_turn_full_context(
+        &state,
+        Some("test-user"),
+        1,
+        2,
+        Some("conversation-selected"),
+        400,
+        1200,
+    );
+    assert!(last_turn.contains("target-beta"));
+    assert!(last_turn.contains(clarify_assistant_placeholder()));
+    assert!(!last_turn.contains("target-alpha"));
+    assert!(!last_turn.contains("target-gamma"));
 }
 
 fn create_memories_table(db: &Connection) {
@@ -222,7 +306,7 @@ fn provider_unavailable_task_is_skipped_for_last_turn_context() {
     .expect("insert provider unavailable turn");
     drop(db);
 
-    let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, 400, 1200);
+    let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, None, 400, 1200);
     assert!(last_turn.contains("先列出 logs 目录下前 5 个文件名"));
     assert!(last_turn.contains("act_plan.log, clawd.log"));
     assert!(!last_turn.contains("一句话说有没有异常"));
@@ -249,7 +333,7 @@ fn last_turn_full_context_does_not_fallback_to_legacy_chat() {
     .expect("insert legacy chat task");
     drop(db);
 
-    let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, 400, 1200);
+    let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, None, 400, 1200);
     assert_eq!(last_turn, "<none>");
 }
 

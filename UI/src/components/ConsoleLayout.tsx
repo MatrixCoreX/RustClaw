@@ -94,7 +94,13 @@ export function ConsoleLayout({
   };
 
   return (
-    <div className="theme-shell min-h-screen">
+    <div
+      className={
+        currentPage === "chat"
+          ? "theme-shell min-h-screen md:h-screen md:overflow-hidden"
+          : "theme-shell min-h-screen"
+      }
+    >
       {factoryResetModal}
       <header className="theme-header sticky top-0 z-40 border-b border-white/10 px-3 sm:px-6">
         <div className="theme-header-inner mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 py-2">
@@ -207,7 +213,11 @@ export function ConsoleLayout({
         </div>
       </header>
 
-      <div className={`px-3 py-4 sm:px-6 sm:py-6 ${sidebarCollapsed ? "lg:pl-[88px]" : "lg:pl-[236px]"}`}>
+      <div
+        className={`px-3 py-4 sm:px-6 sm:py-6 ${
+          currentPage === "chat" ? "md:h-[calc(100vh-4rem)] md:overflow-hidden" : ""
+        } ${sidebarCollapsed ? "lg:pl-[88px]" : "lg:pl-[236px]"}`}
+      >
         <aside
           className={`fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] overflow-y-auto transition-[width] lg:block ${
             sidebarCollapsed ? "w-[72px]" : "w-[220px]"
@@ -304,7 +314,11 @@ export function ConsoleLayout({
         </aside>
 
         <main
-          className="mx-auto min-w-0 max-w-7xl space-y-4"
+          className={
+            currentPage === "chat"
+              ? "mx-auto min-w-0 max-w-none space-y-4 md:h-full md:overflow-hidden"
+              : "mx-auto min-w-0 max-w-7xl space-y-4"
+          }
           onClickCapture={collapseNavigationForContentClick}
         >
           {children}

@@ -536,6 +536,7 @@ fn query_recent_terminal_ask_turn_for_chat(
     user_id: i64,
     chat_id: i64,
     user_key: &str,
+    conversation_id: Option<&str>,
 ) -> anyhow::Result<Option<(String, String)>> {
     let mut stmt = db.prepare(
         "SELECT payload_json, result_json, error_text, status
@@ -543,19 +544,30 @@ fn query_recent_terminal_ask_turn_for_chat(
          WHERE user_id = ?1
            AND chat_id = ?2
            AND user_key = ?3
+           AND (
+             ?4 IS NULL
+             OR (
+               json_valid(payload_json)
+               AND json_type(payload_json, '$.conversation_id') = 'text'
+               AND json_extract(payload_json, '$.conversation_id') = ?4
+             )
+           )
            AND kind = 'ask'
            AND status IN ('succeeded', 'failed')
          ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
          LIMIT 8",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    })?;
+    let rows = stmt.query_map(
+        params![user_id, chat_id, user_key, conversation_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        },
+    )?;
     for row in rows {
         let (payload_json, result_json, error_text, status) = row?;
         let Some(user_text) = extract_last_turn_user_text_from_payload(&payload_json) else {
@@ -569,10 +581,7 @@ fn query_recent_terminal_ask_turn_for_chat(
         ) else {
             continue;
         };
-        if assistant_text == provider_unavailable_assistant_placeholder()
-            || assistant_text == clarify_assistant_placeholder()
-            || crate::fallback::is_known_clarify_fallback_text(state, &assistant_text)
-        {
+        if assistant_text == provider_unavailable_assistant_placeholder() {
             continue;
         }
         if assistant_text.trim().is_empty() {
@@ -595,6 +604,7 @@ fn query_recent_terminal_ask_turns_for_chat(
     user_id: i64,
     chat_id: i64,
     user_key: &str,
+    conversation_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<Vec<RecentTerminalAskTurn>> {
     let limit = limit.max(1).min(64);
@@ -604,20 +614,31 @@ fn query_recent_terminal_ask_turns_for_chat(
          WHERE user_id = ?1
            AND chat_id = ?2
            AND user_key = ?3
+           AND (
+             ?4 IS NULL
+             OR (
+               json_valid(payload_json)
+               AND json_type(payload_json, '$.conversation_id') = 'text'
+               AND json_extract(payload_json, '$.conversation_id') = ?4
+             )
+           )
            AND kind = 'ask'
            AND status IN ('succeeded', 'failed')
          ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
-         LIMIT ?4",
+         LIMIT ?5",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, String>(4)?,
-        ))
-    })?;
+    let rows = stmt.query_map(
+        params![user_id, chat_id, user_key, conversation_id, limit as i64],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        },
+    )?;
     let mut out = Vec::new();
     for row in rows {
         let (task_id, payload_json, result_json, error_text, status) = row?;
@@ -632,10 +653,7 @@ fn query_recent_terminal_ask_turns_for_chat(
         ) else {
             continue;
         };
-        if assistant_text == provider_unavailable_assistant_placeholder()
-            || assistant_text == clarify_assistant_placeholder()
-            || crate::fallback::is_known_clarify_fallback_text(state, &assistant_text)
-        {
+        if assistant_text == provider_unavailable_assistant_placeholder() {
             continue;
         }
         if assistant_text.trim().is_empty() {
@@ -683,6 +701,7 @@ pub(crate) fn build_recent_turns_full_context_with_sources(
     user_key: Option<&str>,
     user_id: i64,
     chat_id: i64,
+    conversation_id: Option<&str>,
     max_turns: usize,
     max_segment_chars: usize,
     max_total_chars: usize,
@@ -696,7 +715,13 @@ pub(crate) fn build_recent_turns_full_context_with_sources(
     let max_segment_chars = max_segment_chars.max(128);
     let max_total_chars = max_total_chars.max(512);
     let turns = query_recent_terminal_ask_turns_for_chat(
-        state, &db, user_id, chat_id, &user_key, max_turns,
+        state,
+        &db,
+        user_id,
+        chat_id,
+        &user_key,
+        conversation_id,
+        max_turns,
     )
     .unwrap_or_default();
     if turns.is_empty() {
@@ -735,6 +760,7 @@ pub(crate) fn build_last_turn_full_context(
     user_key: Option<&str>,
     user_id: i64,
     chat_id: i64,
+    conversation_id: Option<&str>,
     max_segment_chars: usize,
     max_total_chars: usize,
 ) -> String {
@@ -743,9 +769,14 @@ pub(crate) fn build_last_turn_full_context(
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
-    if let Ok(Some((user_text, assistant_text))) =
-        query_recent_terminal_ask_turn_for_chat(state, &db, user_id, chat_id, &user_key)
-    {
+    if let Ok(Some((user_text, assistant_text))) = query_recent_terminal_ask_turn_for_chat(
+        state,
+        &db,
+        user_id,
+        chat_id,
+        &user_key,
+        conversation_id,
+    ) {
         return format_last_turn_full_context(
             &user_text,
             &assistant_text,
