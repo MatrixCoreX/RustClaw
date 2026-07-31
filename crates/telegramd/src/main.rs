@@ -5,6 +5,7 @@ mod message_handler;
 mod task_delivery;
 mod telegram_buttons;
 mod telegram_formatting;
+mod telegram_media_delivery;
 
 use binding_voice::*;
 use commands::*;
@@ -12,6 +13,7 @@ use media_handlers::*;
 use message_handler::*;
 use task_delivery::*;
 use telegram_formatting::*;
+use telegram_media_delivery::*;
 
 use std::collections::HashMap;
 use std::collections::HashSet;

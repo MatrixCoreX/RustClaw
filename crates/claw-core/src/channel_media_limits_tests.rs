@@ -19,3 +19,30 @@ fn rejects_empty_and_oversized_files_before_upload() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn typed_preflight_exposes_machine_failures_without_localized_prose() {
+    let dir = std::env::temp_dir().join(format!(
+        "channel-media-preflight-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+
+    let missing = preflight_local_media_file(&dir.join("missing.bin"), 10).unwrap_err();
+    assert_eq!(missing.failure, LocalMediaPreflightFailure::Unreadable);
+    assert_eq!(missing.error_code(), "channel_media_unreadable");
+    assert_eq!(missing.message_key(), "channel.media.preflight.unreadable");
+
+    let not_file = preflight_local_media_file(&dir, 10).unwrap_err();
+    assert_eq!(not_file.failure, LocalMediaPreflightFailure::NotRegularFile);
+
+    let large = dir.join("large.bin");
+    let file = std::fs::File::create(&large).expect("create sparse file");
+    file.set_len(11).expect("set sparse length");
+    let too_large = preflight_local_media_file(&large, 10).unwrap_err();
+    assert_eq!(too_large.failure, LocalMediaPreflightFailure::TooLarge);
+    assert_eq!(too_large.actual_bytes, Some(11));
+    assert_eq!(too_large.max_bytes, 10);
+
+    let _ = std::fs::remove_dir_all(dir);
+}

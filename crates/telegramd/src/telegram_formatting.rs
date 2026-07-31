@@ -29,8 +29,10 @@ pub(super) async fn send_text_or_image(
                 .collect(),
         )
     };
-    let mut image_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Image)).0;
-    let video_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Video)).0;
+    let (mut image_paths, missing_image_paths) =
+        resolve_delivery_paths(&references(LegacyDeliveryKind::Image));
+    let (video_paths, missing_video_paths) =
+        resolve_delivery_paths(&references(LegacyDeliveryKind::Video));
     let explicit_file_tokens = dedupe_preserve_order(
         tokens
             .iter()
@@ -46,8 +48,19 @@ pub(super) async fn send_text_or_image(
     let (explicit_file_paths, missing_explicit_file_tokens) =
         resolve_delivery_paths(&explicit_file_tokens);
     let mut file_paths = explicit_file_paths.clone();
-    let voice_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Voice)).0;
-    let music_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Music)).0;
+    let (voice_paths, missing_voice_paths) =
+        resolve_delivery_paths(&references(LegacyDeliveryKind::Voice));
+    let (music_paths, missing_music_paths) =
+        resolve_delivery_paths(&references(LegacyDeliveryKind::Music));
+    let missing_media_paths = dedupe_preserve_order(
+        missing_image_paths
+            .into_iter()
+            .chain(missing_video_paths)
+            .chain(missing_explicit_file_tokens)
+            .chain(missing_voice_paths)
+            .chain(missing_music_paths)
+            .collect(),
+    );
     let inferred_write_paths = if file_paths.is_empty() {
         dedupe_preserve_order(extract_written_file_paths(answer))
     } else {
@@ -66,7 +79,7 @@ pub(super) async fn send_text_or_image(
         || !video_paths.is_empty()
         || !voice_paths.is_empty()
         || !music_paths.is_empty()
-        || !missing_explicit_file_tokens.is_empty()
+        || !missing_media_paths.is_empty()
     {
         debug!(
             "phase=deliver_media chat_id={} answer_fp={} image_count={} video_count={} file_count={} voice_count={} music_count={} preface_preview={}",
@@ -124,7 +137,7 @@ pub(super) async fn send_text_or_image(
                 });
             }
         } else if explicit_file_paths.is_empty()
-            && missing_explicit_file_tokens.is_empty()
+            && missing_media_paths.is_empty()
             && !inferred_write_paths.is_empty()
         {
             if let Some(inline_text) = inline_single_small_text_file(
@@ -153,103 +166,38 @@ pub(super) async fn send_text_or_image(
                 return Ok(());
             }
         }
-        if !missing_explicit_file_tokens.is_empty() {
+        for path in missing_media_paths {
             warn!(
-                "phase=deliver_media_missing_file chat_id={} missing_paths={:?}",
-                chat_id.0, missing_explicit_file_tokens
+                error_code = "channel_media_unreadable",
+                chat_id = chat_id.0,
+                filename = %telegram_media_filename(Path::new(&path)),
+                "Telegram media path failed preflight"
             );
-            let missing_paths = missing_explicit_file_tokens.join("\n");
-            let missing_text = state.i18n.t_with(
-                "telegram.msg.delivery_file_missing",
-                &[("paths", &missing_paths)],
-            );
-            let _ = send_telegram_text(bot, chat_id, &missing_text).await;
+            deliver_missing_telegram_media_path(bot, state, chat_id, &path).await?;
         }
 
         for path in image_paths {
-            let size = claw_core::channel_media_limits::validate_local_media_file(
-                Path::new(&path),
-                "Telegram",
-                "图片",
-                claw_core::channel_media_limits::telegram_file_max_bytes(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            if size <= claw_core::channel_media_limits::telegram_image_max_bytes() {
-                if let Err(err) = bot.send_photo(chat_id, InputFile::file(path.clone())).await {
-                    warn!(
-                        "send_photo failed for {}: {}; falling back to document",
-                        path, err
-                    );
-                    bot.send_document(chat_id, InputFile::file(path))
-                        .await
-                        .context("fallback send image as document failed")?;
-                }
-            } else {
-                bot.send_document(chat_id, InputFile::file(path))
-                    .await
-                    .context("send oversized image as document failed")?;
-            }
+            deliver_telegram_media_path(bot, state, chat_id, &path, TelegramMediaKind::Image)
+                .await?;
         }
 
         for path in video_paths {
-            claw_core::channel_media_limits::validate_local_media_file(
-                Path::new(&path),
-                "Telegram",
-                "视频",
-                claw_core::channel_media_limits::telegram_file_max_bytes(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            if let Err(err) = bot.send_video(chat_id, InputFile::file(path.clone())).await {
-                warn!("send_video failed for {}: {}", path, err);
-                bot.send_document(chat_id, InputFile::file(path))
-                    .await
-                    .context("fallback send video as document failed")?;
-            }
+            deliver_telegram_media_path(bot, state, chat_id, &path, TelegramMediaKind::Video)
+                .await?;
         }
 
         for path in file_paths {
-            claw_core::channel_media_limits::validate_local_media_file(
-                Path::new(&path),
-                "Telegram",
-                "文件",
-                claw_core::channel_media_limits::telegram_file_max_bytes(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            // FILE: always means "send as document/file", even for image extensions.
-            bot.send_document(chat_id, InputFile::file(path))
-                .await
-                .context("send document file failed")?;
+            deliver_telegram_media_path(bot, state, chat_id, &path, TelegramMediaKind::File)
+                .await?;
         }
 
         for path in voice_paths {
-            claw_core::channel_media_limits::validate_local_media_file(
-                Path::new(&path),
-                "Telegram",
-                "语音",
-                claw_core::channel_media_limits::telegram_file_max_bytes(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            if let Err(err) = bot.send_voice(chat_id, InputFile::file(path.clone())).await {
-                warn!("send_voice failed for {}: {}", path, err);
-                bot.send_document(chat_id, InputFile::file(path))
-                    .await
-                    .context("fallback send voice as document failed")?;
-            }
+            deliver_telegram_media_path(bot, state, chat_id, &path, TelegramMediaKind::Voice)
+                .await?;
         }
         for path in music_paths {
-            claw_core::channel_media_limits::validate_local_media_file(
-                Path::new(&path),
-                "Telegram",
-                "音频",
-                claw_core::channel_media_limits::telegram_file_max_bytes(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            if let Err(err) = bot.send_audio(chat_id, InputFile::file(path.clone())).await {
-                warn!("send_audio failed for {}: {}", path, err);
-                bot.send_document(chat_id, InputFile::file(path))
-                    .await
-                    .context("fallback send audio as document failed")?;
-            }
+            deliver_telegram_media_path(bot, state, chat_id, &path, TelegramMediaKind::Audio)
+                .await?;
         }
         return Ok(());
     }
