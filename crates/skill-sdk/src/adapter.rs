@@ -178,7 +178,7 @@ fn prepare_cargo(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage
 
 fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
     require_native_target(context, "python")?;
-    let python = find_program("python3")?;
+    let python = find_program_with_override("python3", "APP_PYTHON_BIN")?;
     let source_root = source_root(context)?;
     let runtime_source = context.staging_root.join("runtime/src");
     copy_source_tree(&source_root, &runtime_source)?;
@@ -915,6 +915,38 @@ fn find_program(name: &str) -> SkillSdkResult<PathBuf> {
         .ok_or_else(|| {
             SkillSdkError::new("toolchain_missing", format!("program={name}")).phase("preflight")
         })
+}
+
+fn find_program_with_override(name: &str, variable: &str) -> SkillSdkResult<PathBuf> {
+    match std::env::var_os(variable).filter(|value| !value.is_empty()) {
+        Some(value) => validate_program_override(variable, Path::new(&value)),
+        None => find_program(name),
+    }
+}
+
+fn validate_program_override(variable: &str, path: &Path) -> SkillSdkResult<PathBuf> {
+    if !path.is_absolute() {
+        return Err(SkillSdkError::new(
+            "toolchain_override_invalid",
+            format!("variable={variable} reason=path_not_absolute"),
+        )
+        .phase("preflight"));
+    }
+    let resolved = fs::canonicalize(path).map_err(|error| {
+        SkillSdkError::new(
+            "toolchain_override_invalid",
+            format!("variable={variable} error={error}"),
+        )
+        .phase("preflight")
+    })?;
+    if !resolved.is_file() || !is_executable(&resolved) {
+        return Err(SkillSdkError::new(
+            "toolchain_override_invalid",
+            format!("variable={variable} reason=not_executable"),
+        )
+        .phase("preflight"));
+    }
+    Ok(resolved)
 }
 
 fn tool_version(program: &Path, args: &[&str]) -> SkillSdkResult<String> {

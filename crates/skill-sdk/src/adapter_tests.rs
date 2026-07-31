@@ -125,6 +125,31 @@ fn cargo_cache_seed_tolerates_platform_specific_locked_package_gaps() {
 }
 
 #[test]
+fn toolchain_override_requires_an_absolute_executable() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let executable = temp.path().join("python3");
+    fs::write(&executable, b"#!/bin/sh\nexit 0\n").expect("fixture executable");
+    set_executable(&executable).expect("executable permission");
+
+    assert_eq!(
+        validate_program_override("APP_PYTHON_BIN", &executable).expect("valid override"),
+        fs::canonicalize(&executable).expect("canonical fixture"),
+    );
+    assert_eq!(
+        validate_program_override("APP_PYTHON_BIN", Path::new("python3"))
+            .expect_err("relative overrides must fail")
+            .code,
+        "toolchain_override_invalid",
+    );
+    assert_eq!(
+        validate_program_override("APP_PYTHON_BIN", &temp.path().join("missing"))
+            .expect_err("missing overrides must fail")
+            .code,
+        "toolchain_override_invalid",
+    );
+}
+
+#[test]
 fn http_json_adapter_prepares_a_pinned_https_launch_without_local_toolchains() {
     let source = crate::tests::manifest_source()
         .replace("adapter = \"cargo\"", "adapter = \"http_json\"")
