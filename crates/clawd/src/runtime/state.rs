@@ -205,6 +205,7 @@ pub(crate) struct SkillRuntime {
     pub(crate) skill_timeout_seconds: u64,
     pub(crate) skill_runner_path: PathBuf,
     pub(crate) skill_semaphore: Arc<Semaphore>,
+    pub(crate) skill_concurrency_gates: Arc<SkillConcurrencyGates>,
     pub(crate) tools_policy: Arc<ToolsPolicy>,
     pub(crate) cmd_timeout_seconds: u64,
     pub(crate) cmd_idle_timeout_seconds: u64,
@@ -217,6 +218,43 @@ pub(crate) struct SkillRuntime {
     pub(crate) default_locator_search_dir: PathBuf,
 }
 
+#[derive(Default)]
+pub(crate) struct SkillConcurrencyGates {
+    gates: Mutex<HashMap<String, SkillConcurrencyGate>>,
+}
+
+struct SkillConcurrencyGate {
+    limit: usize,
+    semaphore: Arc<Semaphore>,
+}
+
+impl SkillConcurrencyGates {
+    pub(crate) fn semaphore(&self, skill_name: &str, limit: usize) -> Arc<Semaphore> {
+        let limit = limit.max(1);
+        let mut gates = self.gates.lock().unwrap();
+        if let Some(gate) = gates.get(skill_name) {
+            if gate.limit != limit {
+                tracing::warn!(
+                    skill = skill_name,
+                    active_limit = gate.limit,
+                    requested_limit = limit,
+                    "skill_concurrency_limit_change_requires_restart"
+                );
+            }
+            return gate.semaphore.clone();
+        }
+        let semaphore = Arc::new(Semaphore::new(limit));
+        gates.insert(
+            skill_name.to_string(),
+            SkillConcurrencyGate {
+                limit,
+                semaphore: semaphore.clone(),
+            },
+        );
+        semaphore
+    }
+}
+
 impl SkillRuntime {
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
@@ -226,6 +264,7 @@ impl SkillRuntime {
             skill_timeout_seconds: 30,
             skill_runner_path: PathBuf::new(),
             skill_semaphore: Arc::new(Semaphore::new(1)),
+            skill_concurrency_gates: Arc::new(SkillConcurrencyGates::default()),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: 60,
             cmd_idle_timeout_seconds: 60,
@@ -1621,6 +1660,12 @@ impl AppState {
             .and_then(|r| r.manifest(canonical_name))
     }
 
+    pub(crate) fn skill_max_concurrency_for_dispatch(&self, canonical_name: &str) -> Option<usize> {
+        self.get_skills_registry()
+            .as_ref()
+            .and_then(|registry| registry.max_concurrency(canonical_name))
+    }
+
     pub(crate) fn mcp_tool(
         &self,
         capability: &str,
@@ -1720,3 +1765,7 @@ pub(crate) struct ClaimedTask {
 #[cfg(test)]
 #[path = "state_skill_store_tests.rs"]
 mod skill_store_tests;
+
+#[cfg(test)]
+#[path = "state_skill_concurrency_tests.rs"]
+mod skill_concurrency_tests;

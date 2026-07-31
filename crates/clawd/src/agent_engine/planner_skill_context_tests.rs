@@ -22,6 +22,25 @@ fn state() -> crate::AppState {
         .with_real_skill_registry()
 }
 
+fn state_with_all_bundled_skills_enabled() -> crate::AppState {
+    let state =
+        crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
+    let registry_path = state
+        .skill_rt
+        .workspace_root
+        .join("configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("real skill registry");
+    let enabled = registry.enabled_names().into_iter().collect();
+    *state.core.skill_views_snapshot.write().unwrap() =
+        std::sync::Arc::new(crate::SkillViewsSnapshot {
+            binding: Default::default(),
+            registry: Some(std::sync::Arc::new(registry)),
+            skills_list: std::sync::Arc::new(enabled),
+        });
+    state
+}
+
 fn full_visible_playbook_chars(state: &crate::AppState, task: &crate::ClaimedTask) -> usize {
     state
         .planner_available_skills_for_task(task)
@@ -166,6 +185,40 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         assert!(
             loadable_groups.iter().any(|skill| skill == deferred_skill),
             "deferred_skill={deferred_skill}; loadable_groups={loadable_groups:?}"
+        );
+    }
+}
+
+#[test]
+fn first_round_media_capability_describes_app_and_web_share_default_download() {
+    let state = state_with_all_bundled_skills_enabled();
+    let task = task();
+    let loop_state = super::super::LoopState {
+        round_no: 1,
+        ..Default::default()
+    };
+    let context = build_planner_skill_context(&state, &task, &loop_state);
+    let media_line = context
+        .quick_index_text
+        .lines()
+        .find(|line| line.contains("media_download.download(action=download"))
+        .expect("media download compact-index line");
+
+    for expected in [
+        "purpose=Default action for any supported public copied App share text",
+        "website share URL",
+        "without asking which operation is wanted",
+        "Treat UI and every communication channel identically",
+        "semantic_tags=default_media_share_action",
+        "douyin_share",
+        "kuaishou_share",
+        "xiaohongshu_share",
+        "tiktok_share",
+        "youtube_share",
+    ] {
+        assert!(
+            media_line.contains(expected),
+            "missing `{expected}` in media_line={media_line}"
         );
     }
 }

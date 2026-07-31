@@ -104,6 +104,27 @@ pub(crate) fn spawn_schedule_worker(state: AppState) {
     });
 }
 
+fn stamp_current_admin_policy_for_legacy_scheduled_job(
+    state: &AppState,
+    user_key: Option<&str>,
+    payload: &mut Value,
+) -> anyhow::Result<()> {
+    if !payload.is_object()
+        || crate::task_execution_policy::policy_payload(payload).is_some()
+        || user_key.is_none()
+    {
+        return Ok(());
+    }
+    let identity = crate::resolve_auth_identity_by_key(state, user_key.unwrap())?;
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        payload,
+        identity.as_ref(),
+        Some("schedule"),
+        None,
+    )
+    .map_err(|error| anyhow!(error.as_token()))
+}
+
 fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     let now = now_ts_u64() as i64;
     let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
@@ -175,6 +196,14 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
 
         let mut payload =
             serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
+        // Jobs created before execution-policy inheritance was introduced have
+        // no policy stamp. Re-resolve the current key on every wakeup so an
+        // enabled admin keeps admin authority while a revoked key cannot.
+        stamp_current_admin_policy_for_legacy_scheduled_job(
+            state,
+            job.user_key.as_deref(),
+            &mut payload,
+        )?;
         if let Value::Object(map) = &mut payload {
             map.insert("channel".to_string(), Value::String(job.channel.clone()));
             if let Some(v) = job.external_user_id.as_ref() {

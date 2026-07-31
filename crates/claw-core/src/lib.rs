@@ -14,6 +14,7 @@ pub mod prompt_layers;
 pub mod provider_failure_policy;
 pub mod secrets;
 pub mod skill_registry;
+pub mod task_delivery_artifacts;
 pub mod types;
 pub mod wechat_reply_media;
 pub mod workspace_state;

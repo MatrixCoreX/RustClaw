@@ -9,6 +9,11 @@ Do not encode default thresholds, windows, exchange, or direction in schedule ru
   semantically removing the scheduling wrapper (trigger date/time, recurrence, and reminder
   instruction). Do not repeat the whole raw scheduling request when a narrower task content is
   available. This is a multilingual semantic extraction rule, not a phrase-matching rule.
+- Scheduled `ask` tasks execute through the agent by default. Omit
+  `task.payload.schedule_task_mode` or set it to `agent` when the requested work must be performed
+  at trigger time. Set it to `direct_text` only when the user explicitly requests sending the
+  literal `task.payload.text` unchanged; never use `direct_text` for fetching, searching,
+  summarizing, translating, inspecting, generating, or other work.
 - Schedule previews derive `title` from that parsed task content. `schedule.content` remains a
   compatibility alias, but `task.payload.text` is the canonical field for new output.
 

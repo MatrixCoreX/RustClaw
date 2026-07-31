@@ -90,7 +90,77 @@ fn success_extra_preserves_helper_json_and_adds_source_skill() {
             .and_then(serde_json::Value::as_str),
         Some("Rust")
     );
+    assert_eq!(
+        extra
+            .pointer("/model_observation/items/0/title")
+            .and_then(serde_json::Value::as_str),
+        Some("Rust")
+    );
     assert!(browser_web_success_extra("plain text fallback").is_none());
+}
+
+#[test]
+fn success_extra_projects_bounded_page_content_for_model_and_verifier() {
+    let first_text = format!("{} first-page-tail", "a".repeat(9_000));
+    let second_text = format!("{} second-page-tail", "b".repeat(9_000));
+    let input = json!({
+        "status": "ok",
+        "summary": "browser_extract_result_set",
+        "success_count": 2,
+        "failure_count": 0,
+        "citations": ["https://one.example", "https://two.example"],
+        "items": [
+            {
+                "url": "https://one.example",
+                "final_url": "https://one.example/news",
+                "title": "First page",
+                "source": "one.example",
+                "text": first_text,
+                "content_excerpt": "old short excerpt",
+                "content_sha256": "sha256:first",
+                "fetch_method": "browser",
+                "response_status": 200,
+                "links": [{"text": "bulk metadata", "url": "https://one.example/other"}]
+            },
+            {
+                "url": "https://two.example",
+                "title": "Second page",
+                "source": "two.example",
+                "text": second_text,
+                "content_excerpt": "old short excerpt",
+                "content_sha256": "sha256:second",
+                "fetch_method": "browser",
+                "response_status": 200
+            }
+        ]
+    });
+
+    let extra = browser_web_success_extra(&input.to_string()).expect("structured extra");
+    let observation = extra.get("model_observation").expect("model observation");
+    let serialized = observation.to_string();
+
+    assert!(
+        serialized.len() < 24_000,
+        "observation bytes={}",
+        serialized.len()
+    );
+    assert_eq!(observation["items"].as_array().map(Vec::len), Some(2));
+    assert_eq!(observation["trust"]["instructions_executable"], false);
+    assert_eq!(observation["truncated"], true);
+    assert!(observation["items"][0]["content_excerpt"]
+        .as_str()
+        .is_some_and(|value| value.len() > 7_000));
+    assert!(observation["items"][1]["content_excerpt"]
+        .as_str()
+        .is_some_and(|value| value.len() > 7_000));
+    assert!(observation["items"][0].get("links").is_none());
+    assert_eq!(
+        extra
+            .pointer("/items/0/text")
+            .and_then(serde_json::Value::as_str)
+            .map(str::len),
+        Some(9_016)
+    );
 }
 
 #[test]

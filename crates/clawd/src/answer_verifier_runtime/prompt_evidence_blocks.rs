@@ -173,7 +173,7 @@ fn provider_safe_structured_output_projection(
 fn provider_safe_capability_result_evidence(
     result: &claw_core::capability_result::CapabilityResultEnvelope,
 ) -> serde_json::Value {
-    const MAX_STRUCTURED_RESULT_CHARS: usize = 8_000;
+    const MAX_STRUCTURED_RESULT_CHARS: usize = 24_000;
 
     let identity = result.canonical_evidence_identity();
     let explicit_observation = crate::capability_result::explicit_model_observation(&result.data);
@@ -212,6 +212,9 @@ fn provider_safe_capability_result_evidence(
             "result": value,
         });
     }
+    let observed_evidence =
+        crate::task_journal::observed_evidence_from_output(Some(sanitized.as_str()));
+    let content_evidence_projection = provider_safe_content_evidence_projection(&value);
     json!({
         "projection": "canonical_evidence_reference",
         "truncated": true,
@@ -219,8 +222,207 @@ fn provider_safe_capability_result_evidence(
         "evidence_id": identity.evidence_id,
         "sha256": identity.sha256,
         "size_bytes": identity.size_bytes,
+        "observed_evidence": observed_evidence,
+        "content_evidence_projection": content_evidence_projection,
         "recovery": "canonical_evidence_catalog.artifact_range",
     })
+}
+
+fn provider_safe_content_evidence_projection(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    const MAX_FACTS: usize = 64;
+    const MAX_TOTAL_CHARS: usize = 24_000;
+
+    let mut facts = Vec::new();
+    let mut remaining_chars = MAX_TOTAL_CHARS;
+    collect_provider_safe_content_evidence(
+        "",
+        value,
+        0,
+        &mut facts,
+        &mut remaining_chars,
+        MAX_FACTS,
+    );
+    facts
+}
+
+fn collect_provider_safe_content_evidence(
+    prefix: &str,
+    value: &serde_json::Value,
+    depth: usize,
+    out: &mut Vec<serde_json::Value>,
+    remaining_chars: &mut usize,
+    max_facts: usize,
+) {
+    const MAX_DEPTH: usize = 12;
+    const PRIORITY_KEYS: &[&str] = &[
+        "model_observation",
+        "items",
+        "results",
+        "candidates",
+        "pages",
+        "entries",
+        "extra",
+        "data",
+        "output",
+    ];
+
+    if depth > MAX_DEPTH || out.len() >= max_facts || *remaining_chars < 96 {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in PRIORITY_KEYS {
+                let Some(child) = map.get(*key) else {
+                    continue;
+                };
+                let field = provider_safe_content_field(prefix, key);
+                push_provider_safe_content_fact(
+                    &field,
+                    key,
+                    child,
+                    out,
+                    remaining_chars,
+                    max_facts,
+                );
+                collect_provider_safe_content_evidence(
+                    &field,
+                    child,
+                    depth + 1,
+                    out,
+                    remaining_chars,
+                    max_facts,
+                );
+            }
+            for (key, child) in map {
+                if PRIORITY_KEYS.contains(&key.as_str()) {
+                    continue;
+                }
+                let field = provider_safe_content_field(prefix, key);
+                push_provider_safe_content_fact(
+                    &field,
+                    key,
+                    child,
+                    out,
+                    remaining_chars,
+                    max_facts,
+                );
+                if child.is_object() || child.is_array() {
+                    collect_provider_safe_content_evidence(
+                        &field,
+                        child,
+                        depth + 1,
+                        out,
+                        remaining_chars,
+                        max_facts,
+                    );
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                if out.len() >= max_facts || *remaining_chars < 96 {
+                    break;
+                }
+                let field = format!("{prefix}[{index}]");
+                collect_provider_safe_content_evidence(
+                    &field,
+                    child,
+                    depth + 1,
+                    out,
+                    remaining_chars,
+                    max_facts,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_provider_safe_content_fact(
+    field: &str,
+    key: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<serde_json::Value>,
+    remaining_chars: &mut usize,
+    max_facts: usize,
+) {
+    const MAX_VALUE_CHARS: usize = 4_000;
+
+    if !provider_safe_content_evidence_leaf(key) || out.len() >= max_facts || *remaining_chars < 96
+    {
+        return;
+    }
+    let value_budget = MAX_VALUE_CHARS.min(
+        remaining_chars
+            .saturating_sub(field.chars().count())
+            .saturating_sub(80),
+    );
+    if value_budget == 0 {
+        return;
+    }
+    let projected = match value {
+        serde_json::Value::String(text) => {
+            serde_json::Value::String(provider_safe_content_value(text, value_budget))
+        }
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.clone(),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) if key == "field_value" => {
+            serde_json::Value::String(provider_safe_content_value(
+                &value.to_string(),
+                value_budget,
+            ))
+        }
+        _ => return,
+    };
+    let fact = json!({
+        "field": field,
+        "value": projected,
+    });
+    let fact_chars = fact.to_string().chars().count();
+    if fact_chars > *remaining_chars {
+        return;
+    }
+    *remaining_chars -= fact_chars;
+    out.push(fact);
+}
+
+fn provider_safe_content_evidence_leaf(key: &str) -> bool {
+    matches!(
+        key,
+        "body_preview"
+            | "canonical_url"
+            | "content_excerpt"
+            | "content_sha256"
+            | "description"
+            | "excerpt"
+            | "field_value"
+            | "final_url"
+            | "published_at"
+            | "snippet"
+            | "source"
+            | "status"
+            | "summary"
+            | "text"
+            | "title"
+            | "url"
+    )
+}
+
+fn provider_safe_content_field(prefix: &str, key: &str) -> String {
+    if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
+    }
+}
+
+fn provider_safe_content_value(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let value = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_none() {
+        value
+    } else {
+        format!("{value}...(truncated)")
+    }
 }
 
 pub(in crate::answer_verifier) fn execution_evidence_prompt_block(

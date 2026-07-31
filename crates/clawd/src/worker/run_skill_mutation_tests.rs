@@ -158,6 +158,61 @@ fn direct_run_skill_ambiguous_failure_checkpoints_instead_of_terminal_retry() {
 }
 
 #[test]
+fn direct_run_skill_verified_no_effect_failure_can_finalize_for_delivery() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-direct-verified-no-effect");
+    insert_active_task(&state, &task);
+    let args = serde_json::json!({
+        "action": "append_text",
+        "path": "notes.txt",
+        "content": "one"
+    });
+    let guard =
+        prepare_direct_run_skill_mutation(&state, &task, "fs_basic", &args).expect("prepare");
+    let DirectRunSkillMutationGuard::Acquired(lease) = &guard else {
+        panic!("expected acquired mutation");
+    };
+    let error = crate::skills::structured_skill_error_from_parts(
+        "fs_basic",
+        "not_found",
+        "the requested mutation target was not found",
+        None,
+        Some(serde_json::json!({
+            "schema_version": 1,
+            "source_skill": "fs_basic",
+            "status": "error",
+            "error_code": "not_found",
+            "message_key": "skill.fs_basic.not_found",
+            "retryable": false,
+            "failure_phase": "execution_no_effect",
+            "side_effect_applied": false
+        })),
+    );
+
+    assert!(persist_direct_run_skill_mutation_result(
+        &state,
+        &guard,
+        &Err(error)
+    ));
+
+    let db = state.core.db.get().expect("test db");
+    let (phase, reconciliation): (String, String) = db
+        .query_row(
+            "SELECT phase, reconciliation_json
+             FROM task_mutation_ledger
+             WHERE task_id = ?1 AND fingerprint_hash = ?2",
+            rusqlite::params![task.task_id, lease.record.fingerprint_hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("load mutation");
+    assert_eq!(phase, "intent_recorded");
+    let reconciliation: serde_json::Value =
+        serde_json::from_str(&reconciliation).expect("parse reconciliation");
+    assert_eq!(reconciliation["disposition"], "not_applied");
+    assert_eq!(reconciliation["failure_phase"], "execution_no_effect");
+}
+
+#[test]
 fn direct_run_skill_fingerprint_is_independent_of_object_key_order() {
     let left = serde_json::json!({
         "action": "apply",

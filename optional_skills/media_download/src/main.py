@@ -43,6 +43,12 @@ class SkillFailure(Exception):
         self.details = details or {}
 
 
+def _mark_not_applied(failure: SkillFailure, failure_phase: str) -> SkillFailure:
+    failure.details.setdefault("failure_phase", failure_phase)
+    failure.details.setdefault("side_effect_applied", False)
+    return failure
+
+
 def _args(request: dict[str, Any]) -> dict[str, Any]:
     args = request.get("args")
     if not isinstance(args, dict):
@@ -219,6 +225,17 @@ def _safe_output_name(args: dict[str, Any]) -> str | None:
     return value
 
 
+def _safe_text_output_name(args: dict[str, Any], default: str) -> str:
+    value = _safe_output_name(args) or default
+    if Path(value).suffix.lower() != ".txt":
+        raise SkillFailure(
+            "output_name for image text recognition must end with .txt",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_output_name",
+        )
+    return value
+
+
 def _tool(script: str) -> list[str]:
     entrypoint = TOOL_DIR / script
     if not entrypoint.is_file():
@@ -364,6 +381,8 @@ def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir
     command = _tool("image_ocr.py")
     command.extend(
         [
+            "--output",
+            str(output_dir / _safe_text_output_name(args, "image_text_ocr.txt")),
             "--output-dir",
             str(output_dir),
             "--language",
@@ -430,7 +449,43 @@ def _diagnostics(stderr: str) -> str:
     return value[-MAX_DIAGNOSTIC_CHARS:]
 
 
-def _failure_from_process(action: str, returncode: int, stderr: str, artifacts: list[dict[str, Any]]) -> SkillFailure:
+def _rollback_output_changes(
+    output_dir: Path,
+    before: dict[Path, tuple[int, int]],
+    after: dict[Path, tuple[int, int]],
+) -> bool:
+    changed = [path for path, signature in after.items() if before.get(path) != signature]
+    if any(path in before for path in changed):
+        return False
+    rollback_ok = True
+    for path in changed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            rollback_ok = False
+    directories = sorted(
+        (path for path in output_dir.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            continue
+    return rollback_ok and _snapshot(output_dir) == before
+
+
+def _failure_from_process(
+    action: str,
+    returncode: int,
+    stderr: str,
+    artifacts: list[dict[str, Any]],
+    *,
+    not_applied: bool = False,
+) -> SkillFailure:
     lowered = stderr.lower()
     if any(marker in lowered for marker in ("was not found in path", "is required", "no module named")):
         error_code = "dependency_unavailable"
@@ -443,12 +498,19 @@ def _failure_from_process(action: str, returncode: int, stderr: str, artifacts: 
         message_key = "media_download.error.execution_failed"
     retryable = any(marker in lowered for marker in ("timed out", "timeout", "temporarily", "connection reset"))
     readable = _diagnostics(stderr) or f"{action} failed with exit code {returncode}"
+    details: dict[str, Any] = {
+        "exit_code": returncode,
+        "diagnostics": readable,
+        "artifacts": [] if not_applied else artifacts,
+        "failure_phase": "execution_no_effect" if not_applied else "execution_partial",
+        "side_effect_applied": not not_applied,
+    }
     return SkillFailure(
         readable,
         error_code=error_code,
         message_key=message_key,
         retryable=retryable,
-        details={"exit_code": returncode, "diagnostics": readable, "artifacts": artifacts},
+        details=details,
     )
 
 
@@ -468,18 +530,34 @@ def _run_tool(action: str, command: list[str], output_dir: Path, timeout_seconds
         )
     except subprocess.TimeoutExpired as error:
         stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
+        after = _snapshot(output_dir)
+        changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
+        artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
+        not_applied = _rollback_output_changes(output_dir, before, after)
         raise SkillFailure(
             f"{action} timed out after {timeout_seconds} seconds",
             error_code="timeout",
             message_key="media_download.error.timeout",
             retryable=True,
-            details={"diagnostics": _diagnostics(stderr)},
+            details={
+                "diagnostics": _diagnostics(stderr),
+                "artifacts": [] if not_applied else artifacts,
+                "failure_phase": "execution_no_effect" if not_applied else "execution_partial",
+                "side_effect_applied": not not_applied,
+            },
         ) from error
     after = _snapshot(output_dir)
     changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
     artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
     if completed.returncode != 0:
-        raise _failure_from_process(action, completed.returncode, completed.stderr, artifacts)
+        not_applied = _rollback_output_changes(output_dir, before, after)
+        raise _failure_from_process(
+            action,
+            completed.returncode,
+            completed.stderr,
+            artifacts,
+            not_applied=not_applied,
+        )
     return completed.stdout, completed.stderr, artifacts
 
 
@@ -552,45 +630,57 @@ def _error(request_id: str, failure: SkillFailure) -> dict[str, Any]:
 
 
 def respond(request: dict[str, Any]) -> dict[str, Any]:
-    request_id = request.get("request_id")
-    if not isinstance(request_id, str) or not request_id.strip():
-        raise SkillFailure(
-            "request_id must be a non-empty string",
-            error_code="schema_error",
-            message_key="media_download.error.invalid_request_id",
-        )
-    args = _args(request)
-    action = _string(args, "action", required=True, max_length=64)
-    assert action is not None
-    if action not in SUPPORTED_ACTIONS:
-        raise SkillFailure(
-            f"unsupported action: {action}",
-            error_code="unsupported_action",
-            message_key="media_download.error.unsupported_action",
-        )
-    if action == "capabilities":
-        return _success(request_id, action, "Media download capabilities are available.", _capabilities_extra())
+    try:
+        request_id = request.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise SkillFailure(
+                "request_id must be a non-empty string",
+                error_code="schema_error",
+                message_key="media_download.error.invalid_request_id",
+            )
+        args = _args(request)
+        action = _string(args, "action", required=True, max_length=64)
+        assert action is not None
+        if action not in SUPPORTED_ACTIONS:
+            raise SkillFailure(
+                f"unsupported action: {action}",
+                error_code="unsupported_action",
+                message_key="media_download.error.unsupported_action",
+            )
+        if action == "capabilities":
+            return _success(
+                request_id,
+                action,
+                "Media download capabilities are available.",
+                _capabilities_extra(),
+            )
 
-    output_dir = _artifact_output_directory(request)
-    operation_timeout = _integer(
-        args,
-        "operation_timeout_seconds",
-        default=900,
-        minimum=5,
-        maximum=3_500,
-    )
-    if action == "download":
-        command = _build_download_command(args, output_dir, resolve_only=False)
-    elif action == "resolve":
-        command = _build_download_command(args, output_dir, resolve_only=True)
-    elif action == "transcribe":
-        command = _build_transcribe_command(request, args, output_dir)
-    elif action == "ocr":
-        command = _build_ocr_command(request, args, output_dir)
-    else:
-        command = _build_prepare_x_command(request, args, output_dir)
+        output_dir = _artifact_output_directory(request)
+        operation_timeout = _integer(
+            args,
+            "operation_timeout_seconds",
+            default=900,
+            minimum=5,
+            maximum=3_500,
+        )
+        if action == "download":
+            command = _build_download_command(args, output_dir, resolve_only=False)
+        elif action == "resolve":
+            command = _build_download_command(args, output_dir, resolve_only=True)
+        elif action == "transcribe":
+            command = _build_transcribe_command(request, args, output_dir)
+        elif action == "ocr":
+            command = _build_ocr_command(request, args, output_dir)
+        else:
+            command = _build_prepare_x_command(request, args, output_dir)
+    except SkillFailure as failure:
+        raise _mark_not_applied(failure, "pre_dispatch")
 
     stdout, stderr, artifacts = _run_tool(action, command, output_dir, operation_timeout)
+    if action == "ocr":
+        for artifact in artifacts:
+            artifact["recognition_source"] = "local_ocr"
+            artifact["recognition_engine"] = "tesseract"
     urls = _urls(stdout) if action == "resolve" else []
     if action == "resolve" and not urls:
         raise SkillFailure(
@@ -601,12 +691,13 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
         )
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
-    deliver_to_user = action != "download" or _bool(args, "deliver_to_user", True)
+    delivery_capable = action in {"download", "ocr"}
+    deliver_to_user = not delivery_capable or _bool(args, "deliver_to_user", True)
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
     result_artifacts = artifacts
     delivery = None
     saved_files = None
-    if action == "download":
+    if delivery_capable:
         delivery = {
             "intent": "artifact" if deliver_to_user else "save_only",
             "deliver_to_user": deliver_to_user,
@@ -615,7 +706,7 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             result_artifacts = []
             saved_files = artifacts
             locations = ", ".join(item["path"] for item in artifacts) or str(output_dir)
-            text = f"download completed with {count} {noun}{'' if count == 1 else 's'}. Saved locally at: {locations}"
+            text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}. Saved locally at: {locations}"
     extra = {
         "count": count,
         "urls": urls,
@@ -627,6 +718,11 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
         extra["delivery"] = delivery
     if saved_files is not None:
         extra["saved_files"] = saved_files
+    if action == "ocr":
+        extra["recognition"] = {
+            "source": "local_ocr",
+            "engine": "tesseract",
+        }
     return _success(
         request_id,
         action,

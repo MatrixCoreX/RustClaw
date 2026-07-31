@@ -522,7 +522,7 @@ pub(super) fn mark_mutation_execution_uncertain(
     }
 }
 
-pub(super) fn settle_verified_not_applied_mutation(
+pub(crate) fn settle_verified_not_applied_mutation(
     state: &AppState,
     lease: &crate::repo::TaskMutationLease,
     error: &str,

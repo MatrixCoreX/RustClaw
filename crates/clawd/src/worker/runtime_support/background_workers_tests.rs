@@ -310,3 +310,53 @@ fn scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal() {
     assert_eq!(next_payload["resume_trigger"], "scheduled_wakeup");
     assert_eq!(run_count, 1);
 }
+
+#[test]
+fn legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup() {
+    let state = test_state();
+    let admin_key = "rk-scheduled-legacy-admin";
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+             VALUES (?1, 'admin', 1, '1')",
+            rusqlite::params![admin_key],
+        )
+        .expect("insert admin key");
+    }
+
+    let mut enabled_payload = json!({"text": "scheduled fixture"});
+    stamp_current_admin_policy_for_legacy_scheduled_job(
+        &state,
+        Some(admin_key),
+        &mut enabled_payload,
+    )
+    .expect("stamp enabled admin");
+    assert_eq!(enabled_payload["_agent_execution_policy"]["mode"], "yolo");
+    assert_eq!(
+        enabled_payload["_agent_execution_policy"]["authority"],
+        "authenticated_admin"
+    );
+
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "UPDATE auth_keys SET enabled = 0 WHERE user_key = ?1",
+            rusqlite::params![admin_key],
+        )
+        .expect("revoke admin key");
+    }
+    let mut revoked_payload = json!({"text": "scheduled fixture"});
+    stamp_current_admin_policy_for_legacy_scheduled_job(
+        &state,
+        Some(admin_key),
+        &mut revoked_payload,
+    )
+    .expect("revalidate revoked admin");
+    assert!(
+        revoked_payload
+            .get(crate::task_execution_policy::POLICY_PAYLOAD_FIELD)
+            .is_none(),
+        "a revoked admin key must not receive an unrestricted policy stamp"
+    );
+}

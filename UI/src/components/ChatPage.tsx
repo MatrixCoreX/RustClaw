@@ -16,8 +16,10 @@ import {
   FileVideo,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
   MessageSquare,
   Mic,
+  Minimize2,
   Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
@@ -190,6 +192,7 @@ export function ChatPage({
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   const [taskHistoryExpanded, setTaskHistoryExpanded] = useState(true);
+  const [chatMaximized, setChatMaximized] = useState(false);
   const [threadSearch, setThreadSearch] = useState("");
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -261,6 +264,19 @@ export function ChatPage({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activeChatThreadId, chatMessages.length, chatSending, chatWorking]);
+  useEffect(() => {
+    if (!chatMaximized) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const restoreFromEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setChatMaximized(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", restoreFromEscape);
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.removeEventListener("keydown", restoreFromEscape);
+    };
+  }, [chatMaximized]);
   const teachingPanelVisible = chatTeachingMode;
   const selectTeachingRunFromMessage = (run: ChatTeachingRunSummary) => {
     if (!chatTeachingMode) return;
@@ -488,8 +504,33 @@ export function ChatPage({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5 md:h-full md:min-h-0 md:overflow-hidden">
-        <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <div
+        id="agent-chat-window"
+        className={`flex min-w-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5 md:min-h-0 md:overflow-hidden ${
+          chatMaximized ? "chat-window-maximized" : "md:h-full"
+        }`}
+      >
+        <div
+          className="mb-4 flex shrink-0 cursor-default select-none flex-wrap items-center justify-between gap-3"
+          onDoubleClick={(event) => {
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest("button, input, label, select, textarea, a, [role='button']")
+            ) {
+              return;
+            }
+            setChatMaximized((maximized) => !maximized);
+          }}
+          title={
+            chatMaximized
+              ? t("双击标题栏恢复聊天窗口", "Double-click the title bar to restore the chat window")
+              : t(
+                  "双击标题栏占满浏览器窗口",
+                  "Double-click the title bar to fill the browser window",
+                )
+          }
+        >
           <div className="min-w-0">
             <p className="text-xs text-white/45">Agent</p>
             <h3 className="truncate text-base font-semibold" title={activeThread?.title}>
@@ -507,7 +548,37 @@ export function ChatPage({
           </label>
           <button
             type="button"
-            onClick={() => void onClearMessages()}
+            onClick={(event) => {
+              event.stopPropagation();
+              setChatMaximized((maximized) => !maximized);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10"
+            title={
+              chatMaximized
+                ? t("恢复聊天窗口（也可按 Esc）", "Restore chat window (or press Esc)")
+                : t("占满浏览器窗口", "Fill browser window")
+            }
+            aria-label={
+              chatMaximized
+                ? t("恢复聊天窗口", "Restore chat window")
+                : t("占满浏览器窗口", "Fill browser window")
+            }
+            aria-pressed={chatMaximized}
+            aria-controls="agent-chat-window"
+          >
+            {chatMaximized ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+            {chatMaximized ? t("恢复", "Restore") : t("全屏", "Full screen")}
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onClearMessages();
+            }}
             className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
           >
             {t("清空记录", "Clear")}
@@ -517,7 +588,7 @@ export function ChatPage({
 
       <div
         ref={messageListRef}
-        className="min-h-80 flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 md:min-h-0"
+        className="agent-chat-message-list min-h-80 flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 md:min-h-0"
       >
         {chatMessages.map((message) => {
           const messageTeachingRun = teachingRunByMessage.get(message.id) ?? null;

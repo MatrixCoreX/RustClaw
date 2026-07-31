@@ -48,6 +48,13 @@ pub(super) fn image_screenshot_summary_schema() -> &'static Value {
     })
 }
 
+pub(super) fn image_text_extraction_schema() -> &'static Value {
+    IMAGE_TEXT_EXTRACTION_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(IMAGE_TEXT_EXTRACTION_SCHEMA_RAW)
+            .expect("image_text_extraction schema must be valid JSON")
+    })
+}
+
 pub(super) fn schema_requires_field(schema: &Value, name: &str) -> bool {
     schema
         .get("required")
@@ -189,6 +196,10 @@ pub(super) fn parse_structured_narrative_action_output(
             image_screenshot_summary_schema(),
             "image screenshot summary output",
         ),
+        "extract_text" => (
+            image_text_extraction_schema(),
+            "image text extraction output",
+        ),
         _ => return None,
     };
     let candidate = parse_schema_validated_json_object(raw, schema, label).ok()?;
@@ -202,6 +213,10 @@ pub(super) fn parse_structured_narrative_action_output(
         "screenshot_summary" => serde_json::from_value::<ImageScreenshotSummaryOut>(candidate)
             .ok()
             .map(StructuredNarrativeActionOutput::ScreenshotSummary),
+        "extract_text" => serde_json::from_value::<ImageTextExtractionOut>(candidate)
+            .ok()
+            .filter(|output| !output.pages.is_empty())
+            .map(StructuredNarrativeActionOutput::ExtractText),
         _ => None,
     }
 }
@@ -214,6 +229,19 @@ pub(super) fn render_structured_narrative_action_output(
         StructuredNarrativeActionOutput::Describe(out) => out.summary.trim().to_string(),
         StructuredNarrativeActionOutput::Compare(out) => out.summary.trim().to_string(),
         StructuredNarrativeActionOutput::ScreenshotSummary(out) => out.purpose.trim().to_string(),
+        StructuredNarrativeActionOutput::ExtractText(out) => {
+            if out.pages.len() == 1 {
+                return out.pages[0].text.trim().to_string();
+            }
+            out.pages
+                .iter()
+                .enumerate()
+                .map(|(index, page)| {
+                    format!("===== Image {} =====\n{}", index + 1, page.text.trim())
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
     }
 }
 
@@ -562,6 +590,12 @@ pub(super) fn action_instruction(
                 )
             }
         }
+        "extract_text" => load_prompt_fragment(
+            workspace_root,
+            prompt_vendor,
+            "prompts/image_vision_action_extract_text.md",
+            DEFAULT_IMAGE_VISION_ACTION_EXTRACT_TEXT_TEMPLATE,
+        ),
         _ => load_prompt_fragment(
             workspace_root,
             prompt_vendor,
@@ -624,6 +658,8 @@ const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_action_extract_with_schema.md");
 const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_action_extract_default.md");
+const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_TEXT_TEMPLATE: &str =
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_extract_text.md");
 const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_action_fallback.md");
 const DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
@@ -636,11 +672,14 @@ const IMAGE_COMPARE_SCHEMA_RAW: &str =
     include_str!("../../../../prompts/schemas/image_vision_compare.schema.json");
 const IMAGE_SCREENSHOT_SUMMARY_SCHEMA_RAW: &str =
     include_str!("../../../../prompts/schemas/image_vision_screenshot_summary.schema.json");
+const IMAGE_TEXT_EXTRACTION_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/image_vision_text_extraction.schema.json");
 
 static LANGUAGE_INFER_SCHEMA: OnceLock<Value> = OnceLock::new();
 static IMAGE_DESCRIBE_SCHEMA: OnceLock<Value> = OnceLock::new();
 static IMAGE_COMPARE_SCHEMA: OnceLock<Value> = OnceLock::new();
 static IMAGE_SCREENSHOT_SUMMARY_SCHEMA: OnceLock<Value> = OnceLock::new();
+static IMAGE_TEXT_EXTRACTION_SCHEMA: OnceLock<Value> = OnceLock::new();
 
 impl StructuredNarrativeActionOutput {
     pub(super) fn to_json_value(&self) -> Value {
@@ -652,6 +691,9 @@ impl StructuredNarrativeActionOutput {
                 serde_json::to_value(out).unwrap_or(Value::Null)
             }
             StructuredNarrativeActionOutput::ScreenshotSummary(out) => {
+                serde_json::to_value(out).unwrap_or(Value::Null)
+            }
+            StructuredNarrativeActionOutput::ExtractText(out) => {
                 serde_json::to_value(out).unwrap_or(Value::Null)
             }
         }

@@ -987,7 +987,14 @@ fn handle_text_message_to_clawd(
                     continue;
                 }
                 TaskStatus::Succeeded => {
-                    for to_send in lark_task_success_messages(task, &config) {
+                    let delivery_messages =
+                        claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
+                            &task.task_id.to_string(),
+                            task.result_json.as_ref(),
+                            &workspace_root,
+                            lark_task_success_messages(task, &config),
+                        );
+                    for to_send in delivery_messages {
                         if let Err(e) = send_lark_answer(
                             &config,
                             &client,
@@ -1521,17 +1528,50 @@ async fn send_lark_answer(
                     claw_core::channel_media_limits::FEISHU_LARK_FILE_MAX_BYTES,
                 )?;
                 if size <= claw_core::channel_media_limits::FEISHU_LARK_IMAGE_MAX_BYTES {
-                    let key = upload_lark_image(config, client, token_cache, &path).await?;
-                    send_lark_media_key(
-                        config,
-                        client,
-                        token_cache,
-                        receive_id,
-                        "image",
-                        "image_key",
-                        &key,
-                    )
-                    .await?;
+                    match upload_lark_image(config, client, token_cache, &path).await {
+                        Ok(key) => {
+                            send_lark_media_key(
+                                config,
+                                client,
+                                token_cache,
+                                receive_id,
+                                "image",
+                                "image_key",
+                                &key,
+                            )
+                            .await?;
+                        }
+                        Err(image_error) => {
+                            warn!(
+                                "larkd: image upload failed; falling back to file path={} err={}",
+                                path.display(),
+                                image_error
+                            );
+                            let key = upload_lark_file(
+                                config,
+                                client,
+                                token_cache,
+                                &path,
+                                "stream",
+                            )
+                            .await
+                            .map_err(|file_error| {
+                                format!(
+                                    "image upload failed: {image_error}; file fallback failed: {file_error}"
+                                )
+                            })?;
+                            send_lark_media_key(
+                                config,
+                                client,
+                                token_cache,
+                                receive_id,
+                                "file",
+                                "file_key",
+                                &key,
+                            )
+                            .await?;
+                        }
+                    }
                 } else {
                     let key =
                         upload_lark_file(config, client, token_cache, &path, "stream").await?;

@@ -25,6 +25,7 @@ mod media_artifact_plan;
 mod mutation_ledger;
 pub(crate) use mutation_ledger::{
     load_task_mutation_reconciliation_directive, safe_mutation_outcome_projection,
+    settle_verified_not_applied_mutation,
 };
 pub(crate) mod observed_output;
 mod parallel_read_batch;

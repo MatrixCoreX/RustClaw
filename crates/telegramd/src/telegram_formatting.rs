@@ -161,9 +161,15 @@ pub(super) async fn send_text_or_image(
             )
             .map_err(anyhow::Error::msg)?;
             if size <= claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES {
-                bot.send_photo(chat_id, InputFile::file(path))
-                    .await
-                    .context("send image file failed")?;
+                if let Err(err) = bot.send_photo(chat_id, InputFile::file(path.clone())).await {
+                    warn!(
+                        "send_photo failed for {}: {}; falling back to document",
+                        path, err
+                    );
+                    bot.send_document(chat_id, InputFile::file(path))
+                        .await
+                        .context("fallback send image as document failed")?;
+                }
             } else {
                 bot.send_document(chat_id, InputFile::file(path))
                     .await
@@ -1504,6 +1510,22 @@ pub(super) fn strip_delivery_tokens_for_tts(answer: &str) -> String {
     )
     .trim()
     .to_string()
+}
+
+pub(super) fn delivery_tokens_only(answer: &str) -> String {
+    const PREFIXES: &[&str] = &[
+        "IMAGE_FILE:",
+        "VIDEO_FILE:",
+        "FILE:",
+        "VOICE_FILE:",
+        "MUSIC_FILE:",
+    ];
+    answer
+        .lines()
+        .map(str::trim)
+        .filter(|line| PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(super) fn normalize_path_token(token: &str) -> &str {

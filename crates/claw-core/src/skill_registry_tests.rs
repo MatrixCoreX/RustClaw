@@ -148,6 +148,38 @@ output_kind = "image"
 }
 
 #[test]
+fn registry_exposes_optional_per_skill_concurrency_limit() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "serial_media"
+max_concurrency = 1
+
+[[skills]]
+name = "ordinary"
+"#,
+    )
+    .expect("registry");
+
+    assert_eq!(registry.max_concurrency("serial_media"), Some(1));
+    assert_eq!(registry.max_concurrency("ordinary"), None);
+}
+
+#[test]
+fn registry_rejects_zero_per_skill_concurrency_limit() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "invalid"
+max_concurrency = 0
+"#,
+    )
+    .expect_err("zero concurrency must be rejected");
+
+    assert!(error.contains("max_concurrency must be in 1..=1024"));
+}
+
+#[test]
 fn planner_visible_defaults_true_and_can_hide_runtime_backing_tools() {
     let toml = r#"
 [[skills]]

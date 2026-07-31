@@ -13,6 +13,9 @@ use url::Url;
 const SKILL_NAME: &str = "browser_web";
 const MAX_URL_BYTES: usize = 4_096;
 const MAX_DOMAIN_FILTERS: usize = 32;
+const MAX_MODEL_OBSERVATION_ITEMS: usize = 10;
+const MODEL_OBSERVATION_CONTENT_CHARS: usize = 15_000;
+const MAX_MODEL_OBSERVATION_ITEM_CHARS: usize = 8_000;
 const SYNTHETIC_DNS_PROBE_HOST: &str = "example.com";
 
 #[derive(Debug, Deserialize)]
@@ -288,8 +291,76 @@ fn browser_web_success_extra(text: &str) -> Option<Value> {
         object
             .entry("truncated".to_string())
             .or_insert_with(|| json!(truncated));
+        let model_observation = browser_web_model_observation(object, &items);
+        object
+            .entry("model_observation".to_string())
+            .or_insert(model_observation);
     }
     Some(value)
+}
+
+fn browser_web_model_observation(
+    output: &serde_json::Map<String, Value>,
+    items: &[Value],
+) -> Value {
+    let selected_items = items.len().min(MAX_MODEL_OBSERVATION_ITEMS);
+    let per_item_chars = MODEL_OBSERVATION_CONTENT_CHARS
+        .checked_div(selected_items.max(1))
+        .unwrap_or(MODEL_OBSERVATION_CONTENT_CHARS)
+        .min(MAX_MODEL_OBSERVATION_ITEM_CHARS);
+    let mut content_truncated = items.len() > selected_items;
+    let items = items
+        .iter()
+        .take(selected_items)
+        .map(|item| {
+            let content = item
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| item.get("content_excerpt").and_then(Value::as_str))
+                .unwrap_or_default();
+            let (content_excerpt, truncated) =
+                bounded_model_observation_text(content, per_item_chars);
+            content_truncated |= truncated;
+            json!({
+                "url": item.get("url"),
+                "final_url": item.get("final_url"),
+                "canonical_url": item.get("canonical_url"),
+                "title": item.get("title"),
+                "source": item.get("source"),
+                "published_at": item.get("published_at"),
+                "author": item.get("author"),
+                "fetch_method": item.get("fetch_method"),
+                "response_status": item.get("response_status"),
+                "content_excerpt": content_excerpt,
+                "content_sha256": item.get("content_sha256"),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "summary": output.get("summary"),
+        "status": output.get("status"),
+        "success_count": output.get("success_count"),
+        "failure_count": output.get("failure_count"),
+        "citations": output.get("citations"),
+        "items": items,
+        "truncated": content_truncated,
+        "trust": {
+            "classification": "untrusted_web_content",
+            "instructions_executable": false,
+        },
+    })
+}
+
+fn bounded_model_observation_text(text: &str, max_chars: usize) -> (String, bool) {
+    let mut chars = text.chars();
+    let excerpt = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_none() {
+        (excerpt, false)
+    } else {
+        (format!("{excerpt}...(truncated)"), true)
+    }
 }
 
 fn parse_open_extract_args(

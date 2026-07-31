@@ -205,7 +205,7 @@ fn structured_error_proves_not_applied(structured: &StructuredSkillError) -> boo
     extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
         && matches!(
             extra.get("failure_phase").and_then(Value::as_str),
-            Some("pre_dispatch" | "provider_rejected")
+            Some("pre_dispatch" | "provider_rejected" | "execution_no_effect")
         )
 }
 
@@ -1740,7 +1740,38 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         "skill_timeout_resolved"
     );
 
-    let _permit = state
+    // Acquire the skill-specific permit before the global permit. A queued
+    // resource-heavy skill must not occupy one of the global execution slots
+    // while it waits, and the runner process is not spawned until both permits
+    // have been acquired.
+    let _skill_concurrency_permit =
+        if let Some(limit) = state.skill_max_concurrency_for_dispatch(&skill_name) {
+            let semaphore = state
+                .skill_rt
+                .skill_concurrency_gates
+                .semaphore(&skill_name, limit);
+            tracing::info!(
+                task_id = task.task_id,
+                skill = skill_name,
+                max_concurrency = limit,
+                available_permits = semaphore.available_permits(),
+                "skill_concurrency_queue_waiting"
+            );
+            let permit = semaphore.acquire_owned().await.map_err(|err| {
+                format!("skill concurrency semaphore closed for {skill_name}: {err}")
+            })?;
+            tracing::info!(
+                task_id = task.task_id,
+                skill = skill_name,
+                max_concurrency = limit,
+                "skill_concurrency_queue_acquired"
+            );
+            Some(permit)
+        } else {
+            None
+        };
+
+    let _global_skill_permit = state
         .skill_rt
         .skill_semaphore
         .clone()

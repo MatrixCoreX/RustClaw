@@ -151,6 +151,170 @@ fn schedule_payload_does_not_inherit_context_token_for_non_wechat_channel() {
     assert_eq!(merged.get("context_token"), None);
 }
 
+#[test]
+fn schedule_ask_execution_mode_defaults_to_agent_and_preserves_explicit_literal_delivery() {
+    for mut payload in [
+        json!({"text": "fetch and summarize financial news"}),
+        json!({"text": "fetch and summarize financial news", "schedule_task_mode": ""}),
+        json!({"text": "fetch and summarize financial news", "schedule_task_mode": "unknown"}),
+    ] {
+        normalize_schedule_ask_execution_mode(&mut payload);
+        assert_eq!(
+            payload
+                .get("schedule_task_mode")
+                .and_then(serde_json::Value::as_str),
+            Some(SCHEDULE_TASK_MODE_AGENT)
+        );
+    }
+
+    let mut literal = json!({
+        "text": "meeting reminder",
+        "schedule_task_mode": "DIRECT_TEXT"
+    });
+    normalize_schedule_ask_execution_mode(&mut literal);
+    assert_eq!(
+        literal
+            .get("schedule_task_mode")
+            .and_then(serde_json::Value::as_str),
+        Some(SCHEDULE_TASK_MODE_DIRECT_TEXT)
+    );
+}
+
+#[tokio::test]
+async fn schedule_create_persists_agent_execution_for_ask_tasks_on_every_channel() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    for channel in ["ui", "telegram", "whatsapp", "feishu", "lark", "wechat"] {
+        let task = claimed_task_with_payload(
+            channel,
+            json!({
+                "context_token": "ctx-channel-test",
+                "text": "schedule news summary"
+            }),
+        );
+        let intent = ScheduleIntentOutput {
+            kind: "create".to_string(),
+            timezone: "Asia/Shanghai".to_string(),
+            mode: "execute".to_string(),
+            schedule: ScheduleIntentSchedule {
+                r#type: "once".to_string(),
+                run_at: "2099-01-01 09:00:00".to_string(),
+                ..Default::default()
+            },
+            task: ScheduleIntentTask {
+                kind: "ask".to_string(),
+                payload: json!({"text": "fetch and summarize financial news"}),
+            },
+            confidence: 0.99,
+            ..Default::default()
+        };
+
+        try_handle_schedule_request(&state, &task, "schedule news summary", Some(&intent))
+            .await
+            .expect("schedule handler")
+            .expect("schedule creation reply");
+    }
+
+    let db = state.core.db.get().expect("db");
+    let mut stmt = db
+        .prepare("SELECT channel, task_payload_json FROM scheduled_jobs ORDER BY id")
+        .expect("prepare scheduled jobs");
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query scheduled jobs")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect scheduled jobs");
+    assert_eq!(rows.len(), 6);
+    for (channel, raw_payload) in rows {
+        let payload: serde_json::Value =
+            serde_json::from_str(&raw_payload).expect("parse scheduled payload");
+        assert_eq!(
+            payload
+                .get("schedule_task_mode")
+                .and_then(serde_json::Value::as_str),
+            Some(SCHEDULE_TASK_MODE_AGENT),
+            "channel {channel} must execute scheduled ask work through the agent"
+        );
+    }
+}
+
+#[tokio::test]
+async fn schedule_create_inherits_server_validated_admin_execution_policy() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let admin_key = "rk-schedule-admin-policy";
+    {
+        let db = state.core.db.get().expect("db");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+             VALUES (?1, 'admin', 1, '1')",
+            params![admin_key],
+        )
+        .expect("insert admin key");
+    }
+    let identity = crate::resolve_auth_identity_by_key(&state, admin_key)
+        .expect("resolve admin key")
+        .expect("admin identity");
+    let mut source_payload = json!({"text": "schedule financial summary"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut source_payload,
+        Some(&identity),
+        Some("wechat"),
+        None,
+    )
+    .expect("stamp source policy");
+    let mut task = claimed_task_with_payload("wechat", source_payload);
+    task.user_key = Some(admin_key.to_string());
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        mode: "execute".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "ask".to_string(),
+            payload: json!({
+                "text": "fetch and summarize financial news",
+                "_agent_execution_policy": {
+                    "schema_version": 1,
+                    "mode": "safe",
+                    "authority": "planner_output"
+                }
+            }),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+
+    try_handle_schedule_request(&state, &task, "schedule financial summary", Some(&intent))
+        .await
+        .expect("schedule handler")
+        .expect("schedule creation reply");
+
+    let db = state.core.db.get().expect("db");
+    let raw_payload: String = db
+        .query_row(
+            "SELECT task_payload_json FROM scheduled_jobs LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read scheduled payload");
+    let payload: serde_json::Value =
+        serde_json::from_str(&raw_payload).expect("parse scheduled payload");
+    assert_eq!(payload["_agent_execution_policy"]["mode"], "yolo");
+    assert_eq!(
+        payload["_agent_execution_policy"]["authority"],
+        "authenticated_admin"
+    );
+    assert_eq!(
+        payload["_agent_execution_policy"]["derivation"],
+        "authenticated_parent_task"
+    );
+}
+
 #[tokio::test]
 async fn schedule_compile_only_create_returns_preview_without_insert() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();

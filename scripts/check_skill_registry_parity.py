@@ -47,6 +47,7 @@ CORE_KEYS = (
     "group",
     "aliases",
     "timeout_seconds",
+    "max_concurrency",
     "prompt_file",
     "output_kind",
     "package_manifest",

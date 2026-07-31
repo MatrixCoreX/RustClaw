@@ -268,9 +268,19 @@ async fn deliver_voice_answers(
     answers: &[String],
 ) {
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, chat_id.0));
+    let mut media_delivered_for_voice_mode = false;
     if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
         for answer in answers {
             let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
+        }
+    } else if matches!(mode, VoiceReplyMode::Voice) {
+        for answer in answers {
+            let delivery_tokens = delivery_tokens_only(answer);
+            if delivery_tokens.is_empty() {
+                continue;
+            }
+            let _ = send_success_message_for_telegram(bot, state, chat_id, &delivery_tokens).await;
+            media_delivered_for_voice_mode = true;
         }
     }
     if !matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
@@ -279,7 +289,7 @@ async fn deliver_voice_answers(
 
     let tts_input = strip_delivery_tokens_for_tts(&answers.join("\n\n"));
     if tts_input.is_empty() {
-        if matches!(mode, VoiceReplyMode::Voice) {
+        if matches!(mode, VoiceReplyMode::Voice) && !media_delivered_for_voice_mode {
             for answer in answers {
                 let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
             }
@@ -294,9 +304,7 @@ async fn deliver_voice_answers(
         submit_task_only(state, user_id, chat_id.0, TaskKind::RunSkill, payload).await
     else {
         if matches!(mode, VoiceReplyMode::Voice) {
-            for answer in answers {
-                let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
-            }
+            let _ = send_telegram_text(bot, chat_id, &tts_input).await;
         }
         return;
     };
@@ -316,16 +324,19 @@ async fn deliver_voice_answers(
         Err(err) => {
             warn!("telegram voice reply synthesis failed: {err}");
             if matches!(mode, VoiceReplyMode::Voice) {
-                for answer in answers {
-                    let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
-                }
+                let _ = send_telegram_text(bot, chat_id, &tts_input).await;
             }
         }
     }
 }
 
 pub(super) fn task_success_messages(state: &BotState, task: &TaskQueryResponse) -> Vec<String> {
-    task_success_messages_from_offset(state, task, 0)
+    claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
+        &task.task_id.to_string(),
+        task.result_json.as_ref(),
+        &state.workspace_root,
+        task_success_messages_from_offset(state, task, 0),
+    )
 }
 
 pub(super) async fn send_success_message_for_telegram(

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -11,6 +11,7 @@ use regex::Regex;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 mod prompting;
 mod providers;
 
@@ -197,11 +198,25 @@ struct ImageScreenshotSummaryOut {
     uncertainties: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageTextPageOut {
+    text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageTextExtractionOut {
+    #[serde(default)]
+    pages: Vec<ImageTextPageOut>,
+    #[serde(default)]
+    uncertainties: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 enum StructuredNarrativeActionOutput {
     Describe(ImageDescribeOut),
     Compare(ImageCompareOut),
     ScreenshotSummary(ImageScreenshotSummaryOut),
+    ExtractText(ImageTextExtractionOut),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -358,6 +373,15 @@ fn execute(
                     timeout_seconds,
                 );
                 let text = strip_think_blocks(&text).trim().to_string();
+                if action == "extract_text"
+                    && !image_text_output_has_visible_text(structured.as_ref(), &text)
+                {
+                    attempt_errors.push(format!(
+                        "{}: multimodal model returned no visible text",
+                        vendor_name(vendor)
+                    ));
+                    continue;
+                }
                 let mut extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
@@ -368,6 +392,15 @@ fn execute(
                 });
                 if let Some(structured) = structured {
                     extra["structured"] = structured.to_json_value();
+                }
+                if action == "extract_text" {
+                    extra["recognition"] = json!({
+                        "source": "multimodal_model",
+                        "provider": vendor_name(vendor),
+                        "model": model,
+                        "model_kind": model_kind,
+                    });
+                    attach_text_artifact(runner_context, obj, &text, &mut extra)?;
                 }
                 return Ok((text, extra));
             }
@@ -381,6 +414,18 @@ fn execute(
         "all providers failed: {}",
         attempt_errors.join("; ")
     ))
+}
+
+fn image_text_output_has_visible_text(
+    structured: Option<&StructuredNarrativeActionOutput>,
+    rendered_text: &str,
+) -> bool {
+    match structured {
+        Some(StructuredNarrativeActionOutput::ExtractText(output)) => {
+            output.pages.iter().any(|page| !page.text.trim().is_empty())
+        }
+        _ => !rendered_text.trim().is_empty(),
+    }
 }
 
 fn select_model_override<'a>(
@@ -434,9 +479,103 @@ fn parse_action(obj: &Map<String, Value>) -> Result<String, String> {
         .to_ascii_lowercase();
     match action.as_str() {
         "analyze" => Ok("describe".to_string()),
-        "describe" | "extract" | "compare" | "screenshot_summary" => Ok(action),
-        _ => Err("unsupported action; use describe|extract|compare|screenshot_summary".to_string()),
+        "describe" | "extract" | "extract_text" | "compare" | "screenshot_summary" => Ok(action),
+        _ => Err(
+            "unsupported action; use describe|extract|extract_text|compare|screenshot_summary"
+                .to_string(),
+        ),
     }
+}
+
+fn bool_arg(obj: &Map<String, Value>, name: &str, default: bool) -> Result<bool, String> {
+    match obj.get(name) {
+        None => Ok(default),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(format!("{name} must be boolean")),
+    }
+}
+
+fn text_output_name(obj: &Map<String, Value>) -> Result<String, String> {
+    let requested = obj
+        .get("output_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("image_text_ai.txt");
+    let path = Path::new(requested);
+    if requested.len() > 180
+        || requested.chars().any(char::is_control)
+        || path.file_name().and_then(|value| value.to_str()) != Some(requested)
+        || !requested.to_ascii_lowercase().ends_with(".txt")
+    {
+        return Err("output_name must be a plain .txt filename".to_string());
+    }
+    Ok(requested.to_string())
+}
+
+fn text_artifact_output_directory(runner_context: Option<&Value>) -> Result<PathBuf, String> {
+    let raw = runner_context
+        .and_then(Value::as_object)
+        .and_then(|context| context.get("artifact_output_directory"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "runtime artifact output directory is unavailable".to_string())?;
+    let directory = PathBuf::from(raw);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("create text artifact directory failed: {error}"))?;
+    Ok(directory)
+}
+
+fn attach_text_artifact(
+    runner_context: Option<&Value>,
+    obj: &Map<String, Value>,
+    text: &str,
+    extra: &mut Value,
+) -> Result<(), String> {
+    let save_text_file = bool_arg(obj, "save_text_file", true)?;
+    let deliver_to_user = bool_arg(obj, "deliver_to_user", true)?;
+    extra["delivery"] = json!({
+        "intent": if save_text_file && deliver_to_user {
+            "artifact"
+        } else if save_text_file {
+            "save_only"
+        } else {
+            "inline"
+        },
+        "deliver_to_user": save_text_file && deliver_to_user,
+    });
+    if !save_text_file {
+        return Ok(());
+    }
+
+    let output_directory = text_artifact_output_directory(runner_context)?;
+    let output_name = text_output_name(obj)?;
+    let output_path = output_directory.join(&output_name);
+    let mut bytes = text.as_bytes().to_vec();
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    fs::write(&output_path, &bytes)
+        .map_err(|error| format!("write extracted text artifact failed: {error}"))?;
+    let artifact = json!({
+        "path": output_path,
+        "filename": output_name,
+        "kind": "text",
+        "mime_type": "text/plain; charset=utf-8",
+        "size_bytes": bytes.len(),
+        "sha256": format!("{:x}", Sha256::digest(&bytes)),
+        "recognition_source": "multimodal_model",
+    });
+    extra["output_directory"] = json!(output_directory);
+    if deliver_to_user {
+        extra["output_path"] = artifact["path"].clone();
+        extra["artifacts"] = json!([artifact]);
+    } else {
+        extra["artifacts"] = json!([]);
+        extra["saved_files"] = json!([artifact]);
+    }
+    Ok(())
 }
 
 fn parse_images(
@@ -827,15 +966,6 @@ fn split_image_data(raw: &str) -> (String, String) {
         return (mime, data);
     }
     ("image/png".to_string(), t.to_string())
-}
-
-fn strip_base64_data_url(raw: &str) -> &str {
-    let t = raw.trim();
-    if let Some((_, data)) = t.split_once(',') {
-        data
-    } else {
-        t
-    }
 }
 
 fn trim_trailing_slash(v: &str) -> String {

@@ -47,24 +47,6 @@ fn split_data_url() {
 }
 
 #[test]
-fn strip_base64_data_url_returns_payload_only() {
-    assert_eq!(
-        strip_base64_data_url("data:image/png;base64,abc123"),
-        "abc123"
-    );
-    assert_eq!(strip_base64_data_url(" raw123 "), "raw123");
-}
-
-#[test]
-fn text_base64_image_marker_is_language_neutral() {
-    let mut content = String::from("inspect");
-    append_text_base64_image(&mut content, 1, "abc123");
-
-    assert!(content.contains("[image_base64:abc123]"));
-    assert!(!content.contains("图片"));
-}
-
-#[test]
 fn parse_action_normalizes_analyze_alias_to_describe() {
     let mut obj = Map::new();
     obj.insert("action".to_string(), Value::String("analyze".to_string()));
@@ -73,15 +55,14 @@ fn parse_action_normalizes_analyze_alias_to_describe() {
 }
 
 #[test]
-fn minimax_mcp_api_host_strips_openai_compat_suffix() {
-    assert_eq!(
-        minimax_mcp_api_host("https://api.minimaxi.com/v1"),
-        "https://api.minimaxi.com"
+fn parse_action_accepts_extract_text() {
+    let mut obj = Map::new();
+    obj.insert(
+        "action".to_string(),
+        Value::String("extract_text".to_string()),
     );
-    assert_eq!(
-        minimax_mcp_api_host("https://api.minimaxi.com"),
-        "https://api.minimaxi.com"
-    );
+
+    assert_eq!(parse_action(&obj).as_deref(), Ok("extract_text"));
 }
 
 #[test]
@@ -350,4 +331,80 @@ fn render_structured_narrative_action_output_keeps_model_primary_text() {
     });
     let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"));
     assert_eq!(rendered, "设置页面");
+}
+
+#[test]
+fn extract_text_renders_pages_in_input_order() {
+    let raw = r#"{
+        "pages":[{"text":"第一页文字"},{"text":"Second page"}],
+        "uncertainties":[]
+    }"#;
+    let parsed =
+        parse_structured_narrative_action_output("extract_text", raw).expect("extract text parse");
+    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"));
+
+    assert_eq!(
+        rendered,
+        "===== Image 1 =====\n第一页文字\n\n===== Image 2 =====\nSecond page"
+    );
+}
+
+#[test]
+fn extract_text_rejects_structured_output_without_visible_text() {
+    let output = StructuredNarrativeActionOutput::ExtractText(ImageTextExtractionOut {
+        pages: vec![ImageTextPageOut {
+            text: "   ".to_string(),
+        }],
+        uncertainties: vec!["blurred".to_string()],
+    });
+
+    assert!(!image_text_output_has_visible_text(Some(&output), ""));
+    assert!(image_text_output_has_visible_text(None, "fallback text"));
+}
+
+#[test]
+fn extract_text_writes_delivery_artifact_by_default() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let context = json!({"artifact_output_directory": directory.path()});
+    let args = Map::new();
+    let mut extra = json!({});
+
+    attach_text_artifact(Some(&context), &args, "识别结果", &mut extra)
+        .expect("write text artifact");
+
+    assert_eq!(extra["delivery"]["deliver_to_user"], true);
+    assert_eq!(extra["artifacts"][0]["filename"], "image_text_ai.txt");
+    assert_eq!(
+        extra["artifacts"][0]["recognition_source"],
+        "multimodal_model"
+    );
+    let path = PathBuf::from(
+        extra["artifacts"][0]["path"]
+            .as_str()
+            .expect("artifact path"),
+    );
+    assert_eq!(
+        fs::read_to_string(path).expect("artifact text"),
+        "识别结果\n"
+    );
+}
+
+#[test]
+fn extract_text_can_save_without_delivery() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let context = json!({"artifact_output_directory": directory.path()});
+    let mut args = Map::new();
+    args.insert("deliver_to_user".to_string(), Value::Bool(false));
+    args.insert(
+        "output_name".to_string(),
+        Value::String("note-text.txt".to_string()),
+    );
+    let mut extra = json!({});
+
+    attach_text_artifact(Some(&context), &args, "saved", &mut extra).expect("save text artifact");
+
+    assert_eq!(extra["delivery"]["deliver_to_user"], false);
+    assert_eq!(extra["artifacts"], json!([]));
+    assert!(extra.get("output_path").is_none());
+    assert_eq!(extra["saved_files"][0]["filename"], "note-text.txt");
 }

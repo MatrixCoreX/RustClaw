@@ -100,6 +100,7 @@ class AdapterTest(unittest.TestCase):
             1,
             "no downloadable media was exposed by the public page",
             [],
+            not_applied=True,
         )
 
         self.assertEqual(failure.error_code, "media_not_found")
@@ -108,6 +109,54 @@ class AdapterTest(unittest.TestCase):
             failure.details["diagnostics"],
             "no downloadable media was exposed by the public page",
         )
+        self.assertEqual(failure.details["failure_phase"], "execution_no_effect")
+        self.assertFalse(failure.details["side_effect_applied"])
+
+    def test_failed_tool_rolls_back_partial_output_and_proves_no_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "partial.mp4").write_bytes(b"partial")
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    "",
+                    "no downloadable media was exposed by the public page",
+                )
+
+            request = {
+                "request_id": "download-failure-rollback",
+                "args": {
+                    "action": "download",
+                    "share": "https://example.test/missing",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with (
+                mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run),
+                self.assertRaises(self.skill.SkillFailure) as raised,
+            ):
+                self.skill.respond(request)
+
+            self.assertEqual(list(artifacts.rglob("*")), [])
+
+        failure = raised.exception
+        self.assertEqual(failure.error_code, "media_not_found")
+        self.assertEqual(failure.details["failure_phase"], "execution_no_effect")
+        self.assertFalse(failure.details["side_effect_applied"])
+        self.assertEqual(failure.details["artifacts"], [])
 
     def test_local_input_outside_workspace_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -127,6 +176,58 @@ class AdapterTest(unittest.TestCase):
                 self.skill._input_path(request, str(outside))
 
         self.assertEqual(raised.exception.error_code, "permission_denied")
+
+    def test_ocr_uses_distinct_default_name_and_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            image = workspace / "page.jpg"
+            image.write_bytes(b"image")
+
+            def fake_run(command, **kwargs):
+                output = Path(command[command.index("--output") + 1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text("识别结果\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "ocr-1",
+                "args": {
+                    "action": "ocr",
+                    "input_paths": [str(image)],
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run) as runner:
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["artifacts"][0]["filename"], "image_text_ocr.txt")
+        self.assertEqual(
+            response["extra"]["artifacts"][0]["recognition_source"],
+            "local_ocr",
+        )
+        self.assertEqual(
+            response["extra"]["recognition"],
+            {"source": "local_ocr", "engine": "tesseract"},
+        )
+        self.assertEqual(
+            response["extra"]["delivery"],
+            {"intent": "artifact", "deliver_to_user": True},
+        )
+        command = runner.call_args.args[0]
+        self.assertEqual(
+            Path(command[command.index("--output") + 1]).name,
+            "image_text_ocr.txt",
+        )
 
     def test_download_returns_new_files_as_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -279,6 +380,8 @@ class JsonlProtocolTest(unittest.TestCase):
             },
         )
         self.assertEqual(response["extra"]["error_code"], "unsupported_action")
+        self.assertEqual(response["extra"]["failure_phase"], "pre_dispatch")
+        self.assertFalse(response["extra"]["side_effect_applied"])
         self.assertNotIn("error_kind", response["extra"])
         self.assertNotIn("code", response["extra"])
 
