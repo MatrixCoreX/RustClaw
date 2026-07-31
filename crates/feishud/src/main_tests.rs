@@ -1,8 +1,10 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, handle_incoming_feishu_text,
     install_tls_crypto_provider, is_unbound_allowed_command, parse_im_text_from_event_body,
-    send_feishu_answer, AppState, FeishuConfig, FeishuSection,
+    send_feishu_answer, AppState, FeishuConfig, FeishuSection, FEISHU_BIND_REQUIRED_FALLBACK,
+    FEISHU_I18N_BIND_REQUIRED_KEY,
 };
+use crate::config_helpers::feishu_t;
 use crate::media_helpers::feishu_media_agent_context;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -26,6 +28,28 @@ fn tls_crypto_provider_installation_is_idempotent() {
 fn unbound_plain_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command("hello"));
     assert_eq!(extract_bind_key_candidate("hello", false), None);
+}
+
+#[test]
+fn missing_feishu_i18n_uses_safe_localized_fallback() {
+    let config = FeishuConfig {
+        feishu: FeishuSection {
+            language: "zh-CN".to_string(),
+            i18n_path: "/tmp/agent-runtime-no-such-feishud.zh-CN.toml".to_string(),
+            ..FeishuSection::default()
+        },
+    };
+
+    let text = feishu_t(
+        &config,
+        FEISHU_I18N_BIND_REQUIRED_KEY,
+        FEISHU_BIND_REQUIRED_FALLBACK,
+    );
+    assert_eq!(
+        text,
+        claw_core::channel_i18n::safe_generic_text_for_locale("zh-CN")
+    );
+    assert!(!text.contains("message_key="));
 }
 
 #[test]

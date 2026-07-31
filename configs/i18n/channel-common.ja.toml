@@ -1,0 +1,4 @@
+locale = "ja"
+
+[dict]
+"common.safe_generic_error" = "リクエストを完了できませんでした。しばらくしてからもう一度お試しください。"

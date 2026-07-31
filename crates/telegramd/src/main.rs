@@ -24,6 +24,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context};
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
+use claw_core::channel_i18n::safe_generic_text_for_path;
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, GatewayInstanceRuntimeStatus,
@@ -82,6 +83,7 @@ struct PendingResumeContext {
 #[derive(Debug, Clone)]
 struct TextCatalog {
     current: HashMap<String, String>,
+    safe_fallback: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,23 +119,24 @@ impl TextCatalog {
                 current.insert(k.to_string(), text.to_string());
             }
         }
-        Ok(Self { current })
+        Ok(Self {
+            current,
+            safe_fallback: safe_generic_text_for_path(path),
+        })
     }
 
-    fn fallback() -> Self {
-        let mut current = HashMap::new();
-        current.insert(
-            "common.unknown_error".to_string(),
-            "Unknown error".to_string(),
-        );
-        Self { current }
+    fn fallback(path: &str) -> Self {
+        Self {
+            current: HashMap::new(),
+            safe_fallback: safe_generic_text_for_path(path),
+        }
     }
 
     fn t(&self, key: &str) -> String {
         self.current
             .get(key)
             .cloned()
-            .unwrap_or_else(|| key.to_string())
+            .unwrap_or_else(|| self.safe_fallback.clone())
     }
 
     fn t_with(&self, key: &str, vars: &[(&str, &str)]) -> String {
@@ -212,7 +215,7 @@ fn build_bot_state(
                 "load i18n file failed: bot_name={} path={} err={}",
                 bot_config.name, i18n_path, err
             );
-            Arc::new(TextCatalog::fallback())
+            Arc::new(TextCatalog::fallback(&i18n_path))
         }
     };
 

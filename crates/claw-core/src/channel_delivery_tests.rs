@@ -1,0 +1,159 @@
+use super::*;
+use crate::channel_ingress::ChannelReplyTarget;
+
+fn delivery() -> ChannelDeliveryEnvelope {
+    ChannelDeliveryEnvelope {
+        schema_version: CHANNEL_DELIVERY_SCHEMA_VERSION,
+        delivery_id: "delivery:task-1:final".to_string(),
+        task_id: Some("task-1".to_string()),
+        source: ChannelDeliverySource::BackgroundCompletion,
+        channel: ChannelKind::Wechat,
+        adapter: "wechat_ilink".to_string(),
+        reply_target: ChannelReplyTarget::user("peer-1"),
+        locale: "zh-CN".to_string(),
+        conversation_window: ChannelConversationWindow {
+            state: ChannelConversationWindowState::Open,
+            expires_at_ts: Some(200),
+            context_token: Some("context-1".to_string()),
+        },
+        idempotency_key: "wechat:peer-1:task-1:final".to_string(),
+        text_segments: vec![ChannelTextSegment {
+            text: "result".to_string(),
+            format: ChannelTextFormat::Plain,
+        }],
+        artifacts: vec![ChannelArtifactRef {
+            artifact_ref: "artifact:task-1:image-1".to_string(),
+            kind: ChannelArtifactKind::Image,
+            mime_type: Some("image/png".to_string()),
+            display_name: Some("image.png".to_string()),
+            size: Some(10),
+        }],
+        previews: vec![ChannelArtifactPreview {
+            artifact_ref: "artifact:task-1:image-1".to_string(),
+            preview_artifact_ref: "artifact:task-1:image-1-preview".to_string(),
+            mime_type: Some("image/jpeg".to_string()),
+        }],
+        notice: None,
+    }
+}
+
+fn receipt(status: ChannelDeliveryStatus, retryable: bool) -> ChannelDeliveryReceipt {
+    ChannelDeliveryReceipt {
+        schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
+        delivery_id: "delivery:task-1:final".to_string(),
+        idempotency_key: "wechat:peer-1:task-1:final".to_string(),
+        channel: ChannelKind::Wechat,
+        adapter: "wechat_ilink".to_string(),
+        status,
+        provider_message_ids: Vec::new(),
+        parts: Vec::new(),
+        error_code: None,
+        diagnostic_id: None,
+        retryable,
+        updated_at_ts: 100,
+    }
+}
+
+#[test]
+fn delivery_envelope_covers_all_shared_sources_and_payload_shapes() {
+    for source in [
+        ChannelDeliverySource::ImmediateDaemon,
+        ChannelDeliverySource::BackgroundCompletion,
+        ChannelDeliverySource::ScheduledTask,
+        ChannelDeliverySource::ProactiveNotice,
+    ] {
+        let mut value = delivery();
+        value.source = source;
+        value.validate().expect("valid delivery envelope");
+        let encoded = serde_json::to_string(&value).expect("encode delivery");
+        let decoded: ChannelDeliveryEnvelope =
+            serde_json::from_str(&encoded).expect("decode delivery");
+        assert_eq!(decoded, value);
+    }
+}
+
+#[test]
+fn delivery_requires_payload_and_preview_parent() {
+    let mut empty = delivery();
+    empty.text_segments.clear();
+    empty.artifacts.clear();
+    empty.previews.clear();
+    assert_eq!(
+        empty.validate(),
+        Err(ChannelDeliveryValidationError::EmptyDelivery)
+    );
+
+    let mut orphan = delivery();
+    orphan.previews[0].artifact_ref = "artifact:task-1:missing".to_string();
+    assert_eq!(
+        orphan.validate(),
+        Err(ChannelDeliveryValidationError::InvalidPreview)
+    );
+}
+
+#[test]
+fn receipt_states_separate_accepted_delivered_failed_and_partial() {
+    let accepted = receipt(ChannelDeliveryStatus::Accepted, false);
+    accepted.validate().expect("accepted receipt");
+
+    let mut delivered = receipt(ChannelDeliveryStatus::Delivered, false);
+    delivered
+        .provider_message_ids
+        .push("provider-1".to_string());
+    delivered.validate().expect("delivered receipt");
+
+    let mut failed = receipt(ChannelDeliveryStatus::Failed, true);
+    failed.error_code = Some("provider.rate_limited".to_string());
+    failed.diagnostic_id = Some("diag:1".to_string());
+    failed.validate().expect("failed receipt");
+
+    let mut partial = receipt(ChannelDeliveryStatus::Partial, true);
+    partial.error_code = Some("provider.partial_failure".to_string());
+    partial.diagnostic_id = Some("diag:2".to_string());
+    partial.parts = vec![
+        ChannelDeliveryPartReceipt {
+            part_index: 0,
+            status: ChannelDeliveryStatus::Delivered,
+            provider_message_id: Some("provider-1".to_string()),
+            error_code: None,
+        },
+        ChannelDeliveryPartReceipt {
+            part_index: 1,
+            status: ChannelDeliveryStatus::Failed,
+            provider_message_id: None,
+            error_code: Some("provider.upload_failed".to_string()),
+        },
+    ];
+    partial.validate().expect("partial receipt");
+}
+
+#[test]
+fn retry_decision_queries_receipt_before_resending() {
+    assert_eq!(
+        delivery_retry_decision(None),
+        ChannelDeliveryRetryDecision::SendNew
+    );
+
+    let accepted = receipt(ChannelDeliveryStatus::Accepted, false);
+    assert_eq!(
+        delivery_retry_decision(Some(&accepted)),
+        ChannelDeliveryRetryDecision::QueryProviderReceipt
+    );
+
+    let mut delivered = receipt(ChannelDeliveryStatus::Delivered, false);
+    delivered
+        .provider_message_ids
+        .push("provider-1".to_string());
+    assert_eq!(
+        delivery_retry_decision(Some(&delivered)),
+        ChannelDeliveryRetryDecision::AlreadyDelivered
+    );
+
+    let mut retryable_partial = receipt(ChannelDeliveryStatus::Partial, true);
+    retryable_partial.error_code = Some("provider.partial_failure".to_string());
+    retryable_partial.diagnostic_id = Some("diag:2".to_string());
+    assert_eq!(
+        delivery_retry_decision(Some(&retryable_partial)),
+        ChannelDeliveryRetryDecision::RetryFailedParts
+    );
+}
