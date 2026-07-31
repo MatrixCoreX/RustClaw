@@ -18,6 +18,67 @@ import {
 import type { TaskQueryResponse } from "../types/api.ts";
 import {PRODUCT_DISPLAY_NAME} from "./product-identity.ts";
 
+test("renders audited skill progress keys without displaying arbitrary params", () => {
+  const view = buildTaskTraceEventView(
+    {
+      seq: 9,
+      event_type: "skill_progress",
+      payload: {
+        skill_name: "media_download",
+        frame: {
+          kind: "progress",
+          detail_key: "media_download.precheck.starting",
+          params: { unsafe_display_text: "do not render me" },
+          current: 0,
+          total: 1,
+        },
+      },
+    },
+    "zh",
+  );
+
+  assert.equal(view.eventType, "skill_progress");
+  assert.equal(view.title, "media_download 正在处理");
+  assert.ok(view.detail.includes("正在检查媒体任务所需条件"));
+  assert.ok(view.detail.includes("0/1"));
+  assert.equal(JSON.stringify(view).includes("do not render me"), false);
+});
+
+test("restores the latest skill progress event from the task query projection", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-progress",
+    status: "running",
+    result_json: null,
+    error_text: null,
+    skill_progress: {
+      schema_version: 1,
+      seq: 7,
+      task_id: "task-progress",
+      event_type: "skill_progress",
+      event_kind: "skill_progress",
+      payload: {
+        schema_version: 1,
+        source: "skill_progress",
+        data_only: true,
+        skill_name: "kb",
+        frame: {
+          schema_version: 1,
+          record_type: "skill_progress",
+          request_id: "task-progress",
+          sequence: 1,
+          kind: "progress",
+          detail_key: "kb.operation.starting",
+          params: {},
+        },
+      },
+    },
+  };
+
+  const events = taskTraceEvents(result);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event_type, "skill_progress");
+});
+
 test("appends progressive model events into the live task trace", () => {
   const first = appendLiveTaskEvent(null, "task-live", {
     schema_version: 1,

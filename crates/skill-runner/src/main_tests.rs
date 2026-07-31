@@ -108,19 +108,16 @@ async fn run_child_skill_times_out_and_kills_child() {
 
 #[tokio::test]
 async fn run_child_skill_reports_nonzero_exit() {
-    let Some(child) = ["/bin/false", "/usr/bin/false"]
+    let Some(child) = ["/bin/sh", "/usr/bin/sh"]
         .into_iter()
         .find(|path| Path::new(path).is_file())
     else {
-        eprintln!("skipping nonzero-exit assertion: no false executable found");
+        eprintln!("skipping nonzero-exit assertion: no shell executable found");
         return;
     };
-    let result = run_child_skill(
-        &ChildLaunch::legacy(child),
-        "ignored",
-        Duration::from_secs(2),
-    )
-    .await;
+    let mut launch = ChildLaunch::legacy(child);
+    launch.args = vec!["-c".to_string(), "read _; exit 2".to_string()];
+    let result = run_child_skill(&launch, "ignored", Duration::from_secs(2)).await;
     assert!(
         matches!(result, Err(ref e) if e.error_code == "child_nonzero_exit" && e.exit_code.is_some_and(|code| code != 0)),
         "expected a nonzero child exit, got {result:?}"
@@ -167,6 +164,96 @@ async fn run_child_skill_returns_stdout_record() {
     .await
     .expect("cat should echo stdin");
     assert_eq!(result, b"hello-from-stdin\n");
+}
+
+#[tokio::test]
+async fn framed_child_forwards_machine_progress_and_preserves_the_final_response() {
+    let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+    let (progress_tx, mut progress_rx) = mpsc::channel(8);
+    let progress = r#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":1,"kind":"progress","detail_key":"media.download.fetching","params":{"item":1},"current":1,"total":2}"#;
+    let final_response = r#"{"request_id":"r1","status":"ok","text":"done","error_text":null}"#;
+    let body = format!("{progress}\n{final_response}\n");
+    let write = tokio::spawn(async move {
+        writer
+            .write_all(body.as_bytes())
+            .await
+            .expect("write fixture");
+    });
+
+    let execution = read_framed_child_output(reader, "r1", Some(progress_tx))
+        .await
+        .expect("framed output");
+    write.await.expect("writer task");
+
+    assert_eq!(
+        execution.final_output,
+        format!("{final_response}\n").as_bytes()
+    );
+    assert_eq!(execution.progress_diagnostics.accepted, 1);
+    assert_eq!(progress_rx.try_recv().expect("forwarded frame"), progress);
+}
+
+#[tokio::test]
+async fn framed_child_rejects_missing_final_wrong_request_overrate_and_oversized_frames() {
+    let valid = |sequence| {
+        format!(
+            "{{\"schema_version\":1,\"record_type\":\"skill_progress\",\"request_id\":\"r1\",\"sequence\":{sequence},\"kind\":\"heartbeat\",\"detail_key\":\"skill.fixture.working\",\"params\":{{}}}}"
+        )
+    };
+    let wrong_request = r#"{"schema_version":1,"record_type":"skill_progress","request_id":"other","sequence":1,"kind":"heartbeat","detail_key":"skill.fixture.working","params":{}}"#;
+    let oversized = "x".repeat(skill_sdk::MAX_PROGRESS_FRAME_LINE_BYTES + 1);
+    let final_response = r#"{"request_id":"r1","status":"ok","text":"done","error_text":null}"#;
+    let mut records = vec![wrong_request.to_string()];
+    records.extend((1..=9).map(valid));
+    records.push(oversized);
+    records.push(final_response.to_string());
+    let body = format!("{}\n", records.join("\n"));
+    let (mut writer, reader) = tokio::io::duplex(body.len() + 1);
+    let (progress_tx, mut progress_rx) = mpsc::channel(16);
+    let write = tokio::spawn(async move {
+        writer
+            .write_all(body.as_bytes())
+            .await
+            .expect("write fixture");
+    });
+
+    let execution = read_framed_child_output(reader, "r1", Some(progress_tx))
+        .await
+        .expect("final response remains authoritative");
+    write.await.expect("writer task");
+    assert_eq!(execution.progress_diagnostics.accepted, 8);
+    assert_eq!(
+        execution.progress_diagnostics.dropped_request_id_mismatch,
+        1
+    );
+    assert_eq!(execution.progress_diagnostics.dropped_rate_limited, 1);
+    assert_eq!(execution.progress_diagnostics.dropped_oversized, 1);
+    let mut forwarded = 0;
+    while progress_rx.try_recv().is_ok() {
+        forwarded += 1;
+    }
+    assert_eq!(forwarded, 8);
+
+    let only_frame = format!("{}\n", valid(1));
+    let (mut writer, reader) = tokio::io::duplex(4096);
+    let write = tokio::spawn(async move {
+        writer
+            .write_all(only_frame.as_bytes())
+            .await
+            .expect("write fixture");
+    });
+    let failure = read_framed_child_output(reader, "r1", None)
+        .await
+        .expect_err("a final response is mandatory");
+    write.await.expect("writer task");
+    assert_eq!(failure.error_code, "child_final_response_missing");
+    assert_eq!(
+        failure
+            .progress_diagnostics
+            .expect("machine diagnostics")
+            .accepted,
+        1
+    );
 }
 
 #[tokio::test]

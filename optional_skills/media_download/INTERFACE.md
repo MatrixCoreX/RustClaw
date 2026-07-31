@@ -9,6 +9,13 @@
 - Never read system-browser cookies. The skill supports public content only and does not bypass DRM, private-content access, paywalls, or platform authorization.
 - This document teaches usage only. Host admission and policy grants remain authoritative.
 
+## Progress Contract
+
+The manifest opts into versioned progress frames. A valid request emits a machine-only
+`media_download.precheck.starting` progress record before the final response, with
+`params.action` identifying the requested action. The host owns localization and display;
+this frame is only progress/stall evidence and never changes the final result.
+
 ## Planner Selection Notes
 
 - “帮我下载这条抖音/快手/小红书/TikTok/YouTube 视频” -> `download`

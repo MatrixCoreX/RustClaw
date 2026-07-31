@@ -305,10 +305,36 @@ export function buildTaskGoalView(
 
 export function taskTraceEvents(result: TaskQueryResponse): Record<string, unknown>[] {
   const value = getPathValue(taskTraceRoot(result), ["event_stream"]);
-  if (!Array.isArray(value)) return [];
-  return value.filter(
+  const events = Array.isArray(value) ? value.filter(
     (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item),
-  );
+  ) : [];
+  const projected = asRecord(result.skill_progress);
+  const projectedPayload = asRecord(projected?.payload);
+  if (
+    projected
+    && projected.event_type === "skill_progress"
+    && projectedPayload?.schema_version === 1
+    && projectedPayload.source === "skill_progress"
+    && projectedPayload.data_only === true
+    && asRecord(projectedPayload.frame)?.record_type === "skill_progress"
+  ) {
+    const projectedSeq =
+      typeof projected.seq === "number" && Number.isSafeInteger(projected.seq)
+        ? projected.seq
+        : null;
+    const exists = events.some(
+      (event) =>
+        projectedSeq !== null
+        && typeof event.seq === "number"
+        && event.seq === projectedSeq,
+    );
+    if (!exists) events.push(projected);
+  }
+  return events.sort((left, right) => {
+    const leftSeq = typeof left.seq === "number" ? left.seq : Number.MAX_SAFE_INTEGER;
+    const rightSeq = typeof right.seq === "number" ? right.seq : Number.MAX_SAFE_INTEGER;
+    return leftSeq - rightSeq;
+  });
 }
 
 function parseTaskPlanSnapshot(value: unknown): TaskPlanView | null {
@@ -862,6 +888,48 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
         : tLocal("工具已经返回结果。", "The tool returned a result."),
       tone,
       meta,
+    };
+  }
+
+  if (eventType === "skill_progress") {
+    const frame =
+      payload?.frame && typeof payload.frame === "object" && !Array.isArray(payload.frame)
+        ? payload.frame as Record<string, unknown>
+        : null;
+    const skill = field("skill_name");
+    const detailKey =
+      frame && typeof frame.detail_key === "string" ? frame.detail_key.trim() : "";
+    const current =
+      frame && typeof frame.current === "number" && Number.isSafeInteger(frame.current)
+        ? frame.current
+        : null;
+    const total =
+      frame && typeof frame.total === "number" && Number.isSafeInteger(frame.total)
+        ? frame.total
+        : null;
+    const knownDetail =
+      detailKey === "media_download.precheck.starting"
+        ? tLocal("正在检查媒体任务所需条件。", "Checking the media task requirements.")
+        : detailKey === "kb.operation.starting"
+          ? tLocal("正在准备知识库操作。", "Preparing the knowledge-base operation.")
+          : detailKey === "package_manager.operation.starting"
+            ? tLocal("正在准备软件包操作。", "Preparing the package operation.")
+            : tLocal("技能仍在正常处理。", "The skill is still working.");
+    const measured =
+      current !== null && total !== null
+        ? tLocal(`进度 ${current}/${total}。`, `Progress ${current}/${total}.`)
+        : "";
+    return {
+      eventType,
+      title: skill
+        ? tLocal(`${skill} 正在处理`, `${skill} is working`)
+        : tLocal("技能正在处理", "Skill in progress"),
+      detail: [knownDetail, measured].filter(Boolean).join(" "),
+      tone: "running",
+      meta: [
+        ...meta,
+        ...(detailKey ? [`detail_key=${detailKey}`] : []),
+      ].slice(0, 8),
     };
   }
 

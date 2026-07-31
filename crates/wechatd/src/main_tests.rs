@@ -1,7 +1,7 @@
 use super::{
     build_login_status_response, extract_bind_key_candidate, extract_text_message,
-    is_unbound_allowed_command, qr_render_content, qr_svg_data_url, task_success_messages,
-    wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
+    is_unbound_allowed_command, qr_render_content, qr_svg_data_url, skill_progress_message,
+    task_success_messages, wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
     workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
     TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WeixinMessage,
 };
@@ -301,12 +301,53 @@ fn wechat_task_success_fallback_uses_i18n() {
         execution_state: None,
         goal: None,
         task_plan: None,
+        skill_progress: None,
         result_json: None,
         error_text: None,
         lifecycle: None,
     };
 
     assert_eq!(task_success_messages(&task, &en), vec!["Done.".to_string()]);
+}
+
+#[test]
+fn wechat_skill_progress_uses_the_shared_task_event_and_local_copy() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let zh = test_wechat_section(
+        "zh-CN",
+        root.join("configs/i18n/wechatd.zh-CN.toml")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let task = TaskQueryResponse {
+        task_id: Default::default(),
+        status: TaskStatus::Running,
+        execution_state: None,
+        goal: None,
+        task_plan: None,
+        skill_progress: Some(serde_json::json!({
+            "seq": 9,
+            "event_type": "skill_progress",
+            "payload": {
+                "schema_version": 1,
+                "source": "skill_progress",
+                "data_only": true,
+                "frame": {
+                    "record_type": "skill_progress",
+                    "detail_key": "media_download.precheck.starting",
+                    "params": {"unsafe_display_text": "must not render"}
+                }
+            }
+        })),
+        result_json: None,
+        error_text: None,
+        lifecycle: None,
+    };
+
+    let (seq, message) = skill_progress_message(&task, &zh).expect("progress message");
+    assert_eq!(seq, 9);
+    assert_eq!(message, "正在检查媒体任务所需条件…");
+    assert!(!message.contains("must not render"));
 }
 
 #[test]

@@ -63,3 +63,24 @@ test("ignores a replayed event sequence", () => {
 
   assert.equal(replayed.llmCallCount, 1);
 });
+
+test("uses the shared skill progress event without exposing frame params", () => {
+  const activity = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 6,
+    task_id: "task-1",
+    event_kind: "skill_progress",
+    event_type: "skill_progress",
+    payload: {
+      skill_name: "media_download",
+      frame: {
+        detail_key: "media_download.precheck.starting",
+        params: { unsafe_display_text: "do not render me" },
+      },
+    },
+  });
+
+  assert.equal(activity.stage, "running_tool");
+  assert.equal(activity.activeName, "media_download");
+  assert.equal(JSON.stringify(activity).includes("do not render me"), false);
+});

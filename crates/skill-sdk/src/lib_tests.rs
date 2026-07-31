@@ -7,7 +7,10 @@ use tempfile::tempdir;
 
 use crate::manifest::{BuildAdapter, LauncherKind, PackageManifest, SandboxProfile};
 use crate::platform::HostPlatform;
-use crate::protocol::{validate_response_line, ProtocolStatus};
+use crate::protocol::{
+    validate_progress_frame_line, validate_protocol_output, validate_response_line, ProtocolStatus,
+    SkillProgressKind,
+};
 use crate::receipt::{
     digest_file, ArtifactReceipt, InstallReceipt, InstallReceiptStore, LaunchProgramScope,
     ProtocolSmokeReceipt, ReceiptLaunch, INSTALL_RECEIPT_SCHEMA_VERSION,
@@ -212,6 +215,101 @@ fn protocol_reads_legacy_error_kind_but_serializes_error_code() {
     let serialized = serde_json::to_value(response).expect("serialize response");
     assert_eq!(serialized["error_code"], "execution_failed");
     assert!(serialized.get("error_kind").is_none());
+}
+
+#[test]
+fn progress_frame_contract_is_strict_machine_only_and_request_scoped() {
+    let valid = br#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":1,"kind":"progress","detail_key":"media.download.fetching","params":{"item":2},"current":2,"total":4}"#;
+    let frame = validate_progress_frame_line(valid, "r1").expect("valid progress frame");
+    assert_eq!(frame.kind, SkillProgressKind::Progress);
+    assert_eq!(frame.current, Some(2));
+
+    let wrong_request = valid
+        .windows(17)
+        .position(|window| window == b"\"request_id\":\"r1\"")
+        .map(|position| {
+            let mut value = valid.to_vec();
+            value[position..position + 17].copy_from_slice(b"\"request_id\":\"r2\"");
+            value
+        })
+        .expect("request id token");
+    assert_eq!(
+        validate_progress_frame_line(&wrong_request, "r1")
+            .expect_err("wrong request rejected")
+            .code,
+        "progress_frame_request_id_mismatch"
+    );
+
+    let prose = br#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":1,"kind":"heartbeat","detail_key":"still working","params":{}}"#;
+    assert_eq!(
+        validate_progress_frame_line(prose, "r1")
+            .expect_err("display prose rejected")
+            .code,
+        "progress_frame_detail_key_invalid"
+    );
+
+    let oversized = vec![b'x'; crate::protocol::MAX_PROGRESS_FRAME_LINE_BYTES + 1];
+    assert_eq!(
+        validate_progress_frame_line(&oversized, "r1")
+            .expect_err("oversized frame rejected")
+            .code,
+        "progress_frame_oversized"
+    );
+
+    let artifact = br#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":2,"kind":"artifact_reference","detail_key":"skill.fixture.artifact_ready","params":{},"reference":{"reference_id":"artifact-1","media_type":"application/json"}}"#;
+    assert_eq!(
+        validate_progress_frame_line(artifact, "r1")
+            .expect("artifact reference")
+            .kind,
+        SkillProgressKind::ArtifactReference
+    );
+    let missing_reference = br#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":2,"kind":"log_reference","detail_key":"skill.fixture.log_ready","params":{}}"#;
+    assert_eq!(
+        validate_progress_frame_line(missing_reference, "r1")
+            .expect_err("reference metadata required")
+            .code,
+        "progress_frame_reference_missing"
+    );
+}
+
+#[test]
+fn progress_frames_are_manifest_opt_in_and_legacy_manifests_stay_unchanged() {
+    let legacy = PackageManifest::from_toml_str(manifest_source()).expect("legacy manifest");
+    assert!(!legacy.run.progress_frames);
+    let encoded = legacy.to_toml_string().expect("serialize legacy manifest");
+    assert!(!encoded.contains("progress_frames"));
+
+    let opted_in = manifest_source().replace(
+        "timeout_seconds = 30",
+        "timeout_seconds = 30\nprogress_frames = true",
+    );
+    let manifest = PackageManifest::from_toml_str(&opted_in).expect("opted-in process manifest");
+    assert!(manifest.run.progress_frames);
+}
+
+#[test]
+fn protocol_smoke_accepts_declared_frames_and_still_requires_a_final_response() {
+    let frame = r#"{"schema_version":1,"record_type":"skill_progress","request_id":"r1","sequence":1,"kind":"heartbeat","detail_key":"skill.fixture.working","params":{}}"#;
+    let final_response = r#"{"request_id":"r1","status":"ok","text":"done","error_text":null}"#;
+    let output = format!("{frame}\n{final_response}\n");
+    assert_eq!(
+        validate_protocol_output(output.as_bytes(), "r1", true)
+            .expect("declared frame stream")
+            .status,
+        ProtocolStatus::Ok
+    );
+    assert_eq!(
+        validate_protocol_output(output.as_bytes(), "r1", false)
+            .expect_err("undeclared frame rejected")
+            .code,
+        "protocol_multiple_stdout_records"
+    );
+    assert_eq!(
+        validate_protocol_output(format!("{frame}\n").as_bytes(), "r1", true)
+            .expect_err("final response required")
+            .code,
+        "protocol_final_response_missing"
+    );
 }
 
 #[test]

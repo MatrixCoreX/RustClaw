@@ -72,8 +72,12 @@ This file is for all agents working in this repository. The goal is to standardi
    Before execution, `CapabilityResolver` / `PlanVerifier` handles capability resolution, visibility, required arguments, risk/effect, confirmation, and validation checks; do not add per-skill or fixed-phrase selection branches to the `clawd` main flow for one natural-language case.
 5. `call_skill` 通过 `execution_adapters::run_skill()` -> `run_skill_with_runner()`。
    `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.
-6. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。
-   `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.
+6. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN 传一行请求 JSON；默认 STDOUT
+   只返回一行最终 JSON，显式声明 `run.progress_frames=true` 的技能可在最终结果前返回零到多条
+   版本化机器进度帧。
+   `run_skill_with_runner()` launches `skill-runner` with one request JSON line on STDIN.
+   STDOUT defaults to one final JSON line; a skill that explicitly declares
+   `run.progress_frames=true` may emit zero or more versioned machine progress records before it.
 7. capability step 开始时必须固定 registry generation、技能版本、receipt digest 与 policy digest；`clawd` 把这些期望值传给 `skill-runner`，runner 只解析该精确版本并回报实际 digest。不得再次按 current pointer 选择版本，也不得根据技能名、扩展名或 `target/release` 路径猜测入口。
    At capability-step start, pin the registry generation, skill version, receipt digest, and policy digest. `clawd` passes those expected values to `skill-runner`, which resolves only that exact version and reports the actual digest. It must not select a version again through a current pointer or guess an entrypoint from a skill name, extension, or `target/release` path.
 8. Cargo、Python、Node、Go、预编译和类型化 HTTP 技能都遵循同一 JSONL 协议与结构化结果合同，再由 `clawd` 汇总为任务结果。
@@ -81,8 +85,13 @@ This file is for all agents working in this repository. The goal is to standardi
 
 ## 2) Skill Process Protocol (Required) / 技能进程协议（必须遵守）
 
-技能二进制是“单行 JSON stdin -> 单行 JSON stdout”模式。
-Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
+技能二进制接收单行 JSON stdin，并必须以单行最终 JSON stdout 收尾。未声明进度帧的技能仍是
+“单行 JSON stdin -> 单行 JSON stdout”；声明 `run.progress_frames=true` 后，可在最终结果前输出
+零到多条 `skill_progress` JSONL 记录。
+Skill binaries receive one JSON request line on stdin and must terminate each invocation with one
+final JSON response line on stdout. Undeclared skills retain the strict one-line-in/one-line-out
+contract. With `run.progress_frames=true`, zero or more `skill_progress` JSONL records may precede
+the final response.
 
 - 输入（来自 `skill-runner`）最小字段 / Minimum input fields (from `skill-runner`):
   - `request_id: string`
@@ -96,6 +105,14 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
   - `text: string`
   - `error_text: string|null`
   - 可选 / optional: `buttons`, `extra`
+
+- 进度帧（仅显式声明后允许）必须符合
+  `docs/schemas/agent-jsonl-v1-progress-frame.schema.json`，使用 `detail_key + params`，
+  不得携带任意用户可见文案；帧只提供进度/stall 证据，不参与成功、重试、路由或最终答案判断。
+  Opt-in progress records must conform to
+  `docs/schemas/agent-jsonl-v1-progress-frame.schema.json`, use `detail_key + params`, and contain
+  no arbitrary user-visible prose. They are progress/stall evidence only and never determine
+  success, retry, routing, or the final answer.
 
 要求 / Requirements:
 

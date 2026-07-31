@@ -17,6 +17,7 @@
     "environment_allowlist": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
     "remote_endpoint": { "type": ["string", "null"], "pattern": "^https://" },
     "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+    "progress_frames": { "type": "boolean", "default": false },
     "sandbox_profile": { "enum": ["required", "read_only", "workspace_write", "networked"] },
     "runtime_network": { "type": "boolean" },
     "install_root": { "type": "string" },

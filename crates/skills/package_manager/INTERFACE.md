@@ -8,6 +8,10 @@
 - It supports direct manager-specific install and smart auto-detection install.
 - Detection is platform-aware: macOS prefers Homebrew first, while Linux prefers the native distro managers before Homebrew fallback. When `detect.path` points at a project directory, project markers such as `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `Cargo.toml`, or `Cargo.lock` take precedence. Successful responses include `extra.platform`, `extra.available`, `extra.version_present`, and optional `extra.version`; `detect` also includes `extra.candidate_order`, and project detection includes `extra.manager_scope="project"` plus `extra.marker`.
 
+The package opts into versioned progress frames. A valid action emits a machine-only
+`package_manager.operation.starting` record before the final response. Localization and
+display belong to the host; this record is progress/stall evidence only.
+
 ## Actions
 - `detect`
 - `install`

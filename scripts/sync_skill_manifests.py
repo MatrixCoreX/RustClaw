@@ -238,6 +238,9 @@ def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -
     environment_allowlist = runtime_environment_allowlist(skill, entry)
     sandbox = sandbox_profile(entry)
     request = capability_request_projection(skill, entry, timeout)
+    progress_frames = (
+        "\nprogress_frames = true" if entry.get("progress_frames") is True else ""
+    )
     return f"""{MARKER}
 schema_version = 2
 
@@ -270,7 +273,7 @@ entrypoint = {json.dumps('runtime/bin/' + skill.binary)}
 working_directory = "."
 timeout_seconds = {timeout}
 environment_allowlist = {json.dumps(environment_allowlist)}
-smoke_args = {{}}
+smoke_args = {{}}{progress_frames}
 
 [security]
 capability_policy_source = "registry"

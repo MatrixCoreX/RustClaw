@@ -59,7 +59,8 @@
         "working_directory": { "$ref": "#/$defs/relativePath" },
         "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
         "environment_allowlist": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
-        "smoke_args": { "type": "object", "default": {} }
+        "smoke_args": { "type": "object", "default": {} },
+        "progress_frames": { "type": "boolean", "default": false }
       }
     },
     "security": {

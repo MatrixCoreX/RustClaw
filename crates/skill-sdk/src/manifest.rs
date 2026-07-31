@@ -193,6 +193,11 @@ pub struct RunSpec {
     pub environment_allowlist: Vec<String>,
     #[serde(default = "empty_object")]
     pub smoke_args: serde_json::Value,
+    /// Opts this package into versioned, machine-only progress records before
+    /// its final protocol response. Missing means the legacy one-result-line
+    /// contract.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub progress_frames: bool,
 }
 
 fn working_directory_root() -> String {
@@ -205,6 +210,10 @@ fn default_timeout_seconds() -> u64 {
 
 fn empty_object() -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::new())
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,6 +444,12 @@ impl PackageManifest {
             return Err(SkillSdkError::new(
                 "manifest_smoke_args_invalid",
                 "run.smoke_args must be an object",
+            ));
+        }
+        if self.run.progress_frames && self.run.launcher == LauncherKind::HttpJson {
+            return Err(SkillSdkError::new(
+                "manifest_progress_frames_transport_unsupported",
+                "run.progress_frames requires a process launcher",
             ));
         }
         if self.security.inherit_credentials {

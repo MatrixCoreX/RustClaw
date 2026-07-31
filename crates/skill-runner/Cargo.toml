@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 skill-sdk = { package = "agent-skill-sdk", path = "../skill-sdk" }
 reqwest.workspace = true
+futures-util = "0.3"
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "macros",
@@ -18,6 +19,7 @@ tokio = { workspace = true, features = [
     "io-std",
     "time",
 ] }
+tokio-util = { workspace = true, features = ["codec"] }
 
 [dev-dependencies]
 tempfile = "3"

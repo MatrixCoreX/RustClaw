@@ -324,10 +324,25 @@ class JsonlProtocolTest(unittest.TestCase):
             check=False,
         )
         lines = completed.stdout.splitlines()
-        self.assertEqual(len(lines), 1, completed.stdout)
-        return completed, json.loads(lines[0])
+        action = request.get("args", {}).get("action")
+        progress_actions = {
+            "capabilities",
+            "download",
+            "resolve",
+            "transcribe",
+            "ocr",
+            "prepare_x",
+        }
+        expected_lines = 2 if action in progress_actions else 1
+        self.assertEqual(len(lines), expected_lines, completed.stdout)
+        if expected_lines == 2:
+            progress = json.loads(lines[0])
+            self.assertEqual(progress["record_type"], "skill_progress")
+            self.assertEqual(progress["request_id"], request["request_id"])
+            self.assertEqual(progress["detail_key"], "media_download.precheck.starting")
+        return completed, json.loads(lines[-1])
 
-    def test_emits_exactly_one_json_line(self) -> None:
+    def test_emits_progress_before_exactly_one_final_json_line(self) -> None:
         completed, response = self.run_protocol(
             {
                 "request_id": "protocol-1",

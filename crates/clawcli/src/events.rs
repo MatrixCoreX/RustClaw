@@ -631,6 +631,25 @@ pub(crate) fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine
             }),
         );
     }
+    if event_type == "skill_progress" {
+        for (key, pointer) in [
+            ("skill_name", "/skill_name"),
+            ("skill_version", "/skill_version"),
+            ("progress_kind", "/frame/kind"),
+            ("detail_key", "/frame/detail_key"),
+            ("progress_sequence", "/frame/sequence"),
+            ("progress_current", "/frame/current"),
+            ("progress_total", "/frame/total"),
+            ("reference_id", "/frame/reference/reference_id"),
+        ] {
+            push_scalar_token(
+                &mut parts,
+                &mut fields,
+                key,
+                payload.and_then(|value| value.pointer(pointer)),
+            );
+        }
+    }
     push_scalar_token(
         &mut parts,
         &mut fields,

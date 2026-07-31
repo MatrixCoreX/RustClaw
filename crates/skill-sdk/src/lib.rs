@@ -50,8 +50,11 @@ pub use operation::{
 pub use path_policy::{ExpectedPathKind, PathAuthority, SkillPathPolicy};
 pub use platform::HostPlatform;
 pub use protocol::{
-    validate_response_line, ProtocolRequest, ProtocolResponse, ProtocolStatus,
-    MAX_PROTOCOL_LINE_BYTES,
+    validate_progress_frame_line, validate_protocol_output, validate_response_line,
+    ProtocolRequest, ProtocolResponse, ProtocolStatus, SkillProgressFrame, SkillProgressKind,
+    SkillProgressReference, MAX_PROGRESS_FRAMES_PER_INVOCATION, MAX_PROGRESS_FRAMES_PER_SECOND,
+    MAX_PROGRESS_FRAME_LINE_BYTES, MAX_PROGRESS_FRAME_PARAMS, MAX_PROTOCOL_LINE_BYTES,
+    SKILL_PROGRESS_FRAME_RECORD_TYPE, SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
 };
 pub use receipt::{
     digest_file, ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,

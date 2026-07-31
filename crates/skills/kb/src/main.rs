@@ -2,8 +2,8 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use skill_sdk::SkillPathPolicy;
-use std::collections::{HashMap, HashSet};
+use skill_sdk::{SkillPathPolicy, SkillProgressFrame, SkillProgressKind};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
@@ -156,7 +156,10 @@ fn main() -> Result<()> {
         let line = line?;
         let parsed: Result<SkillRequest, _> = serde_json::from_str(&line);
         let response = match parsed {
-            Ok(req) => execute_request(req),
+            Ok(req) => {
+                emit_start_progress(&mut stdout, &req)?;
+                execute_request(req)
+            }
             Err(err) => SkillResponse {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -168,6 +171,45 @@ fn main() -> Result<()> {
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
         stdout.flush()?;
     }
+    Ok(())
+}
+
+fn emit_start_progress(stdout: &mut impl Write, request: &SkillRequest) -> Result<()> {
+    let action = request
+        .args
+        .get("action")
+        .and_then(Value::as_str)
+        .filter(|action| {
+            matches!(
+                *action,
+                "ingest"
+                    | "search"
+                    | "list_namespaces"
+                    | "list_documents"
+                    | "remove_documents"
+                    | "delete_namespace"
+                    | "reindex"
+                    | "resume_ingest"
+                    | "ingest_job_status"
+                    | "cancel_ingest"
+                    | "stats"
+            )
+        })
+        .unwrap_or("unknown");
+    let frame = SkillProgressFrame {
+        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
+        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
+        request_id: request.request_id.clone(),
+        sequence: 1,
+        kind: SkillProgressKind::Progress,
+        detail_key: "kb.operation.starting".to_string(),
+        params: BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
+        current: Some(0),
+        total: Some(1),
+        reference: None,
+    };
+    writeln!(stdout, "{}", frame.to_line()?)?;
+    stdout.flush()?;
     Ok(())
 }
 

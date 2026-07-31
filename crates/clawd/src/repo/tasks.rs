@@ -1871,6 +1871,7 @@ pub(crate) fn get_task_query_record(
                     execution_state: Some(execution_state),
                     goal,
                     task_plan: None,
+                    skill_progress: None,
                     result_json,
                     error_text,
                     lifecycle: Some(lifecycle),
@@ -1893,6 +1894,8 @@ pub(crate) fn get_task_query_record(
                         error.detail.as_deref().unwrap_or_default()
                     )
                 })?;
+        task.skill_progress =
+            crate::task_event_transport::latest_skill_progress_event(state, &task_id.to_string())?;
     }
 
     Ok(row)

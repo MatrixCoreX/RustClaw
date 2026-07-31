@@ -980,3 +980,50 @@ fn task_plan_event_compact_output_uses_the_shared_machine_snapshot() {
     );
     assert!(line.line.contains("render_owner=ui_cli_channel_projection"));
 }
+
+#[test]
+fn skill_progress_event_compact_output_uses_the_shared_machine_frame() {
+    let event = json!({
+        "seq": 13,
+        "event_type": "skill_progress",
+        "payload": {
+            "schema_version": 1,
+            "source": "skill_progress",
+            "data_only": true,
+            "render_owner": "ui_cli_channel_projection",
+            "skill_name": "media_download",
+            "skill_version": "0.1.0",
+            "frame": {
+                "schema_version": 1,
+                "record_type": "skill_progress",
+                "request_id": "task-1",
+                "sequence": 2,
+                "kind": "progress",
+                "detail_key": "media_download.fetching",
+                "params": {},
+                "current": 1,
+                "total": 3
+            }
+        }
+    });
+
+    let line = task_event_line(&event).expect("skill progress event");
+
+    assert_eq!(line.event_type, "skill_progress");
+    assert_eq!(
+        line.fields.get("skill_name").map(String::as_str),
+        Some("media_download")
+    );
+    assert_eq!(
+        line.fields.get("detail_key").map(String::as_str),
+        Some("media_download.fetching")
+    );
+    assert_eq!(
+        line.fields.get("progress_current").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        line.fields.get("progress_total").map(String::as_str),
+        Some("3")
+    );
+}
