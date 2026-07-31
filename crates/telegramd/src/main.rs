@@ -7,6 +7,7 @@ mod telegram_buttons;
 mod telegram_formatting;
 mod telegram_media_delivery;
 mod telegram_provider_failure;
+mod telegram_update_transport;
 
 use binding_voice::*;
 use commands::*;
@@ -16,6 +17,7 @@ use task_delivery::*;
 use telegram_formatting::*;
 use telegram_media_delivery::*;
 use telegram_provider_failure::*;
+use telegram_update_transport::*;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -58,6 +60,10 @@ struct BotState {
     client: Client,
     poll_interval_ms: u64,
     task_wait_seconds: u64,
+    update_mode: String,
+    webhook_listen: String,
+    webhook_public_url: String,
+    webhook_secret_env: String,
     language: String,
     bot_token: String,
     image_inbox_dir: String,
@@ -276,6 +282,10 @@ fn build_bot_state(
         client,
         poll_interval_ms: config.worker.poll_interval_ms,
         task_wait_seconds: bot_config.task_delivery_timeout_seconds.max(1),
+        update_mode: config.telegram.update_mode.clone(),
+        webhook_listen: config.telegram.webhook_listen.clone(),
+        webhook_public_url: config.telegram.webhook_public_url.clone(),
+        webhook_secret_env: config.telegram.webhook_secret_env.clone(),
         language: bot_config.language.clone(),
         bot_token: bot_config.bot_token.clone(),
         image_inbox_dir: config.telegram.image_inbox_dir.clone(),
@@ -496,6 +506,13 @@ async fn write_runtime_statuses(
 async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
     let bot = Bot::new(state.bot_token.clone());
     write_runtime_statuses(&state, false, "starting", Some(unix_ts() as i64), None).await;
+    let update_transport = resolve_telegram_update_transport(
+        &state.update_mode,
+        &state.webhook_listen,
+        &state.webhook_public_url,
+        &state.webhook_secret_env,
+        &|name| std::env::var(name).ok(),
+    )?;
     let mut startup_error: Option<String> = None;
     if let Err(err) = register_telegram_commands_and_menu(
         &state.bot_token,
@@ -572,11 +589,44 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback_query));
 
-    Dispatcher::builder(bot, handler)
+    let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
         .dependencies(dptree::deps![state.clone()])
-        .build()
-        .dispatch()
-        .await;
+        .build();
+    match update_transport {
+        TelegramUpdateTransport::Polling => {
+            bot.delete_webhook()
+                .send()
+                .await
+                .map_err(|error| anyhow!(telegram_request_error("delete_webhook", &error)))?;
+            let listener = teloxide::update_listeners::polling_default(bot).await;
+            dispatcher
+                .dispatch_with_listener(
+                    listener,
+                    teloxide::error_handlers::LoggingErrorHandler::with_custom_text(
+                        "telegram_polling_listener_error",
+                    ),
+                )
+                .await;
+        }
+        TelegramUpdateTransport::Webhook(webhook) => {
+            let options = teloxide::update_listeners::webhooks::Options::new(
+                webhook.listen,
+                webhook.public_url,
+            )
+            .secret_token(webhook.secret_token);
+            let listener = teloxide::update_listeners::webhooks::axum(bot, options)
+                .await
+                .map_err(|error| anyhow!(telegram_request_error("set_webhook", &error)))?;
+            dispatcher
+                .dispatch_with_listener(
+                    listener,
+                    teloxide::error_handlers::LoggingErrorHandler::with_custom_text(
+                        "telegram_webhook_listener_error",
+                    ),
+                )
+                .await;
+        }
+    }
 
     heartbeat_task.abort();
     write_runtime_statuses(
@@ -802,3 +852,6 @@ mod runtime_tests;
 #[cfg(test)]
 #[path = "main_telegram_text_payload_tests.rs"]
 mod telegram_text_payload_tests;
+#[cfg(test)]
+#[path = "telegram_update_transport_tests.rs"]
+mod telegram_update_transport_tests;

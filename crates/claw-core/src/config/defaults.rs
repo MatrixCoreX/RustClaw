@@ -377,6 +377,18 @@ pub(super) fn default_telegram_language() -> String {
     "zh-CN".to_string()
 }
 
+pub(super) fn default_telegram_update_mode() -> String {
+    "polling".to_string()
+}
+
+pub(super) fn default_telegram_webhook_listen() -> String {
+    "127.0.0.1:8090".to_string()
+}
+
+pub(super) fn default_telegram_webhook_secret_env() -> String {
+    "TELEGRAM_WEBHOOK_SECRET".to_string()
+}
+
 pub(super) fn default_telegram_image_inbox_dir() -> String {
     "data/telegramd/image".to_string()
 }

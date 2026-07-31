@@ -90,6 +90,10 @@ busy_timeout_ms = 2000
 
     assert!(cfg.telegram.bot_token.is_empty());
     assert_eq!(cfg.telegram.agent_id, "main");
+    assert_eq!(cfg.telegram.update_mode, "polling");
+    assert_eq!(cfg.telegram.webhook_listen, "127.0.0.1:8090");
+    assert!(cfg.telegram.webhook_public_url.is_empty());
+    assert_eq!(cfg.telegram.webhook_secret_env, "TELEGRAM_WEBHOOK_SECRET");
     assert!(cfg.telegram_runtime_bots().is_empty());
 
     fs::remove_dir_all(dir).expect("remove temp config dir");
