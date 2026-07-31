@@ -61,6 +61,82 @@ pub fn lark_file_max_bytes() -> u64 {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalMediaPreflightFailure {
+    Unreadable,
+    NotRegularFile,
+    Empty,
+    TooLarge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalMediaPreflightError {
+    pub failure: LocalMediaPreflightFailure,
+    pub actual_bytes: Option<u64>,
+    pub max_bytes: u64,
+    diagnostic: Option<String>,
+}
+
+impl LocalMediaPreflightError {
+    pub fn error_code(&self) -> &'static str {
+        match self.failure {
+            LocalMediaPreflightFailure::Unreadable => "channel_media_unreadable",
+            LocalMediaPreflightFailure::NotRegularFile => "channel_media_not_regular_file",
+            LocalMediaPreflightFailure::Empty => "channel_media_empty",
+            LocalMediaPreflightFailure::TooLarge => "channel_media_too_large",
+        }
+    }
+
+    pub fn message_key(&self) -> &'static str {
+        match self.failure {
+            LocalMediaPreflightFailure::Unreadable => "channel.media.preflight.unreadable",
+            LocalMediaPreflightFailure::NotRegularFile => {
+                "channel.media.preflight.not_regular_file"
+            }
+            LocalMediaPreflightFailure::Empty => "channel.media.preflight.empty",
+            LocalMediaPreflightFailure::TooLarge => "channel.media.preflight.too_large",
+        }
+    }
+}
+
+pub fn preflight_local_media_file(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<u64, LocalMediaPreflightError> {
+    let metadata = std::fs::metadata(path).map_err(|error| LocalMediaPreflightError {
+        failure: LocalMediaPreflightFailure::Unreadable,
+        actual_bytes: None,
+        max_bytes,
+        diagnostic: Some(error.to_string()),
+    })?;
+    if !metadata.is_file() {
+        return Err(LocalMediaPreflightError {
+            failure: LocalMediaPreflightFailure::NotRegularFile,
+            actual_bytes: None,
+            max_bytes,
+            diagnostic: None,
+        });
+    }
+    let actual_bytes = metadata.len();
+    if actual_bytes == 0 {
+        return Err(LocalMediaPreflightError {
+            failure: LocalMediaPreflightFailure::Empty,
+            actual_bytes: Some(actual_bytes),
+            max_bytes,
+            diagnostic: None,
+        });
+    }
+    if actual_bytes > max_bytes {
+        return Err(LocalMediaPreflightError {
+            failure: LocalMediaPreflightFailure::TooLarge,
+            actual_bytes: Some(actual_bytes),
+            max_bytes,
+            diagnostic: None,
+        });
+    }
+    Ok(actual_bytes)
+}
+
 pub fn wechat_image_max_bytes() -> u64 {
     required_channel_media_max_bytes(
         ChannelAdapterKind::WechatIlink,
@@ -162,29 +238,28 @@ pub fn validate_local_media_file(
     media_kind: &str,
     max_bytes: u64,
 ) -> Result<u64, String> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|err| format!("{channel} {media_kind}文件无法读取：{err}"))?;
-    if !metadata.is_file() {
-        return Err(format!(
-            "{channel} {media_kind}投送失败：{} 不是普通文件",
-            path.display()
-        ));
+    match preflight_local_media_file(path, max_bytes) {
+        Ok(actual_bytes) => Ok(actual_bytes),
+        Err(error) => match error.failure {
+            LocalMediaPreflightFailure::Unreadable => Err(format!(
+                "{channel} {media_kind}文件无法读取：{}",
+                error.diagnostic.as_deref().unwrap_or(error.error_code())
+            )),
+            LocalMediaPreflightFailure::NotRegularFile => Err(format!(
+                "{channel} {media_kind}投送失败：{} 不是普通文件",
+                path.display()
+            )),
+            LocalMediaPreflightFailure::Empty => Err(format!(
+                "{channel} {media_kind}投送失败：{} 是空文件",
+                path.display()
+            )),
+            LocalMediaPreflightFailure::TooLarge => Err(format!(
+                "{channel} {media_kind}过大：{:.2} MiB，平台上限为 {:.0} MiB。请压缩后重试，或改为在 UI 中下载原文件。",
+                error.actual_bytes.unwrap_or_default() as f64 / MIB as f64,
+                max_bytes as f64 / MIB as f64
+            )),
+        },
     }
-    let actual_bytes = metadata.len();
-    if actual_bytes == 0 {
-        return Err(format!(
-            "{channel} {media_kind}投送失败：{} 是空文件",
-            path.display()
-        ));
-    }
-    if actual_bytes > max_bytes {
-        return Err(format!(
-            "{channel} {media_kind}过大：{:.2} MiB，平台上限为 {:.0} MiB。请压缩后重试，或改为在 UI 中下载原文件。",
-            actual_bytes as f64 / MIB as f64,
-            max_bytes as f64 / MIB as f64
-        ));
-    }
-    Ok(actual_bytes)
 }
 
 #[cfg(test)]

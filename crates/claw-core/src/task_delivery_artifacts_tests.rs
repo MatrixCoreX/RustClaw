@@ -191,3 +191,22 @@ fn unavailable_structured_artifact_keeps_legacy_delivery_message() {
     assert_eq!(messages, original);
     fs::remove_dir_all(workspace).ok();
 }
+
+#[test]
+fn ui_fallback_only_accepts_files_in_managed_delivery_tree() {
+    let workspace = temp_workspace("task_delivery_fallback");
+    let managed =
+        write_delivery_artifact(&workspace, "task-5", "artifact-5", "report.bin", b"managed");
+    let unmanaged = workspace.join("outside.bin");
+    fs::write(&unmanaged, b"unmanaged").expect("write unmanaged file");
+
+    assert!(is_managed_task_delivery_artifact_path(&workspace, &managed));
+    assert!(!is_managed_task_delivery_artifact_path(
+        &workspace, &unmanaged
+    ));
+    assert!(!is_managed_task_delivery_artifact_path(
+        &workspace,
+        &workspace.join("missing.bin")
+    ));
+    fs::remove_dir_all(workspace).ok();
+}

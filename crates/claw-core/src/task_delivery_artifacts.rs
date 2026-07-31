@@ -156,6 +156,28 @@ pub fn canonical_task_artifact_ref(task_id: &str, artifact_id: &str) -> Option<S
     Some(format!("artifact:task/{task_id}/{artifact_id}"))
 }
 
+/// Returns true only for an existing regular file inside the runtime-managed
+/// immutable task delivery tree. Channel adapters use this to decide whether
+/// a failed native upload can safely point users to the Web task-detail copy.
+pub fn is_managed_task_delivery_artifact_path(workspace_root: &Path, path: &Path) -> bool {
+    let Ok(canonical_path) = path.canonicalize() else {
+        return false;
+    };
+    if !canonical_path.is_file() {
+        return false;
+    }
+    crate::workspace_state::known_workspace_state_roots(workspace_root)
+        .into_iter()
+        .filter_map(|state_root| {
+            state_root
+                .join("artifacts")
+                .join("delivery")
+                .canonicalize()
+                .ok()
+        })
+        .any(|delivery_root| canonical_path.starts_with(delivery_root))
+}
+
 fn validated_task_artifact_path(
     workspace_root: &Path,
     task_id: &str,
