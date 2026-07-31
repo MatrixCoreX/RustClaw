@@ -34,6 +34,25 @@ fn payload() -> Value {
 }
 
 #[test]
+fn provider_failure_contract_propagates_machine_fields_without_response_body() {
+    let provider_error =
+        claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+            "telegram_bot",
+            "send_text",
+            429,
+            r#"{"error":{"code":"rate_limit","message":"private provider prose"}}"#,
+        );
+    let encoded = provider_error.to_string();
+    let (error_code, message_key, diagnostic_id, retryable) = delivery_failure_fields(&encoded);
+
+    assert_eq!(error_code, "channel.provider.rate_limited");
+    assert_eq!(message_key, "channel.error.provider_rate_limited");
+    assert_eq!(diagnostic_id, provider_error.diagnostic_id);
+    assert!(retryable);
+    assert!(!encoded.contains("private provider prose"));
+}
+
+#[test]
 fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
     let state = AppState::test_default_with_fixture_provider();
     let payload = payload();
@@ -66,18 +85,34 @@ async fn failed_dispatch_records_one_terminal_receipt_and_deduplicates_replay() 
     assert_eq!(first.status, ChannelDeliveryServiceStatus::Failed);
     assert!(!first.accepted());
     assert!(!first.delivered());
-    assert!(first.error_text.is_some());
+    assert_eq!(first.error_code.as_deref(), Some("channel.delivery.failed"));
+    assert_eq!(
+        first.message_key.as_deref(),
+        Some("channel.error.delivery_failed")
+    );
+    assert!(!first.retryable);
     let first_receipt = first.receipt.expect("failed receipt");
     assert_eq!(
         first_receipt.error_code.as_deref(),
-        Some("channel.send_failed")
+        Some("channel.delivery.failed")
+    );
+    assert_eq!(
+        first_receipt.message_key.as_deref(),
+        Some("channel.error.delivery_failed")
     );
 
     let second = deliver_task_envelope(&state, &task, &payload, &envelope)
         .await
         .expect("deduplicated delivery result");
     assert_eq!(second.status, ChannelDeliveryServiceStatus::Failed);
-    assert!(second.error_text.is_none());
+    assert_eq!(
+        second.error_code.as_deref(),
+        Some("channel.delivery.failed")
+    );
+    assert_eq!(
+        second.message_key.as_deref(),
+        Some("channel.error.delivery_failed")
+    );
     assert_eq!(second.receipt, Some(first_receipt));
 
     let db = state.core.db.get().expect("db connection");

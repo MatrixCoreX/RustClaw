@@ -2,3 +2,10 @@ locale = "zh-CN"
 
 [dict]
 "common.safe_generic_error" = "暂时无法完成这个请求，请稍后重试。"
+"channel.error.delivery_failed" = "消息暂时未能送达，请稍后重试。"
+"channel.error.provider_authentication" = "这个渠道需要重新连接后才能继续发送消息。"
+"channel.error.provider_permission_denied" = "这个渠道目前没有发送该消息的权限。"
+"channel.error.provider_rate_limited" = "渠道当前较忙，请稍后再试。"
+"channel.error.provider_payload_rejected" = "渠道无法接收这条消息或附件。"
+"channel.error.provider_unavailable" = "渠道服务暂时不可用，请稍后重试。"
+"channel.error.provider_invalid_response" = "渠道返回了异常响应，请稍后重试。"

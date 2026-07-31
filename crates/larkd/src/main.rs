@@ -36,6 +36,25 @@ mod config_helpers;
 
 use config_helpers::*;
 
+fn lark_provider_http_error(operation: &str, status: u16, response_body: &str) -> String {
+    claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+        "lark_open_platform",
+        operation,
+        status,
+        response_body,
+    )
+    .to_string()
+}
+
+fn lark_provider_invalid_response(operation: &str, diagnostic_material: &str) -> String {
+    claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+        "lark_open_platform",
+        operation,
+        diagnostic_material,
+    )
+    .to_string()
+}
+
 #[derive(Clone)]
 struct AppState {
     config: LarkConfig,
@@ -329,7 +348,10 @@ async fn resolve_lark_identity(
         .await
         .map_err(|e| format!("resolve response parse failed: {}", e))?;
     if !status.is_success() || !body.ok {
-        return Err(body.error.unwrap_or_else(|| "resolve failed".to_string()));
+        return Err(lark_provider_invalid_response(
+            "resolve_identity",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        ));
     }
     Ok(body.data.and_then(|d| d.identity))
 }
@@ -404,7 +426,10 @@ async fn detect_pending_lark_bind(
         .await
         .map_err(|err| format!("detect response parse failed: {err}"))?;
     if !status.is_success() || !body.ok {
-        return Err(body.error.unwrap_or_else(|| "detect failed".to_string()));
+        return Err(lark_provider_invalid_response(
+            "detect_binding",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        ));
     }
     Ok(body
         .data
@@ -845,10 +870,18 @@ fn handle_text_message_to_clawd(
         if !submit_resp.status().is_success() {
             let status = submit_resp.status();
             let resp_body = submit_resp.text().await.unwrap_or_default();
+            let error = lark_provider_http_error("submit_task", status.as_u16(), &resp_body);
+            let decoded = claw_core::channel_provider_error::ChannelProviderError::decode(&error);
             warn!(
-                "larkd: task submit failed status={} body_len={}",
-                status,
-                resp_body.len()
+                "larkd: task submit failed error_code={} diagnostic_id={}",
+                decoded
+                    .as_ref()
+                    .map(|value| value.error_code.as_str())
+                    .unwrap_or("channel.provider.unknown"),
+                decoded
+                    .as_ref()
+                    .map(|value| value.diagnostic_id.as_str())
+                    .unwrap_or("none")
             );
             return;
         }
@@ -921,19 +954,21 @@ fn handle_text_message_to_clawd(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body_preview = resp.text().await.unwrap_or_default();
-                if body_preview.len() > 200 {
-                    debug!(
-                        "larkd: poll http error task_id={} status={} body_len={}",
-                        task_id,
-                        status,
-                        body_preview.len()
-                    );
-                } else {
-                    debug!(
-                        "larkd: poll http error task_id={} status={} body={}",
-                        task_id, status, body_preview
-                    );
-                }
+                let error = lark_provider_http_error("query_task", status.as_u16(), &body_preview);
+                let decoded =
+                    claw_core::channel_provider_error::ChannelProviderError::decode(&error);
+                debug!(
+                    "larkd: poll http error task_id={} error_code={} diagnostic_id={}",
+                    task_id,
+                    decoded
+                        .as_ref()
+                        .map(|value| value.error_code.as_str())
+                        .unwrap_or("channel.provider.unknown"),
+                    decoded
+                        .as_ref()
+                        .map(|value| value.diagnostic_id.as_str())
+                        .unwrap_or("none")
+                );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     if !timeout_logged {
                         warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
@@ -974,14 +1009,28 @@ fn handle_text_message_to_clawd(
                 }
             };
             let Some(ref task) = body.data else {
-                let err_msg = body.error.as_deref().unwrap_or("no data");
+                let error = lark_provider_invalid_response(
+                    "query_task",
+                    body.error.as_deref().unwrap_or("missing_data"),
+                );
+                let decoded =
+                    claw_core::channel_provider_error::ChannelProviderError::decode(&error);
                 debug!(
-                    "larkd: poll no data task_id={} ok={} error={}",
-                    task_id, body.ok, err_msg
+                    "larkd: poll no data task_id={} ok={} error_code={} diagnostic_id={}",
+                    task_id,
+                    body.ok,
+                    decoded
+                        .as_ref()
+                        .map(|value| value.error_code.as_str())
+                        .unwrap_or("channel.provider.invalid_response"),
+                    decoded
+                        .as_ref()
+                        .map(|value| value.diagnostic_id.as_str())
+                        .unwrap_or("none")
                 );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     if !timeout_logged {
-                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
+                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data diagnostic_id={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, decoded.as_ref().map(|value| value.diagnostic_id.as_str()).unwrap_or("none"));
                         let _ = send_lark_text(
                             &config,
                             &client,
@@ -1274,10 +1323,10 @@ async fn download_lark_message_resource(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "download status={} body_len={}",
-            status,
-            text.len()
+        return Err(lark_provider_http_error(
+            "download_media",
+            status.as_u16(),
+            &text,
         ));
     }
     resp.bytes()
@@ -1318,7 +1367,11 @@ async fn get_tenant_access_token(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("token request status={} body={}", status, text));
+        return Err(lark_provider_http_error(
+            "auth_token",
+            status.as_u16(),
+            &text,
+        ));
     }
     #[derive(Deserialize)]
     struct TokenResp {
@@ -1370,10 +1423,10 @@ async fn send_lark_text(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "lark send status={} body_len={}",
-            status,
-            body.len()
+        return Err(lark_provider_http_error(
+            "send_text",
+            status.as_u16(),
+            &body,
         ));
     }
     info!(
@@ -1424,7 +1477,13 @@ async fn upload_lark_image(
         .await
         .map_err(|e| format!("upload outbound image failed: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("upload outbound image status={}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(lark_provider_http_error(
+            "upload_media",
+            status.as_u16(),
+            &body,
+        ));
     }
     let body: Value = resp
         .json()
@@ -1478,7 +1537,13 @@ async fn upload_lark_file(
         .await
         .map_err(|e| format!("upload outbound file failed: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("upload outbound file status={}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(lark_provider_http_error(
+            "upload_media",
+            status.as_u16(),
+            &body,
+        ));
     }
     let body: Value = resp
         .json()
@@ -1521,7 +1586,13 @@ async fn send_lark_media_key(
         .await
         .map_err(|e| format!("send outbound media failed: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("send outbound media status={}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(lark_provider_http_error(
+            "send_media",
+            status.as_u16(),
+            &body,
+        ));
     }
     Ok(())
 }

@@ -44,7 +44,15 @@ pub(super) async fn fetch_qrcode(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("fetch QR code status={status} body={body}"));
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "fetch_qr",
+                status.as_u16(),
+                &body,
+            )
+            .to_string(),
+        );
     }
     response
         .json()
@@ -67,7 +75,15 @@ pub(super) async fn poll_qr_status(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("poll QR status={status} body={body}"));
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "poll_qr",
+                status.as_u16(),
+                &body,
+            )
+            .to_string(),
+        );
     }
     response
         .json()
@@ -118,7 +134,15 @@ pub(super) async fn get_updates(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!("wechat request status={status} body={body}"));
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "poll_events",
+                status.as_u16(),
+                &body,
+            )
+            .to_string(),
+        );
     }
     serde_json::from_str(&body).map_err(|e| format!("getupdates decode failed: {e}"))
 }

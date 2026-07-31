@@ -65,10 +65,15 @@ pub async fn fetch_cdn_bytes(client: &Client, url: &str, label: &str) -> Result<
     if !res.status().is_success() {
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
-        return Err(format!(
-            "{label}: cdn download status={} body={}",
-            status, body
-        ));
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "download_media",
+                status.as_u16(),
+                &body,
+            )
+            .to_string(),
+        );
     }
     res.bytes()
         .await
@@ -89,12 +94,16 @@ pub async fn download_remote_media_to_temp(
         .await
         .map_err(|e| format!("remote media download failed: fetch {e}"))?;
     if !res.status().is_success() {
-        return Err(format!(
-            "remote media download failed: {} {} url={}",
-            res.status(),
-            res.status().canonical_reason().unwrap_or(""),
-            url
-        ));
+        let status = res.status();
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "download_remote_media",
+                status.as_u16(),
+                "",
+            )
+            .to_string(),
+        );
     }
     let content_type = res
         .headers()
@@ -267,7 +276,7 @@ async fn upload_cdn_ciphertext(
         };
         let status = res.status();
         if status.is_client_error() {
-            let msg = match res
+            let provider_body = match res
                 .headers()
                 .get("x-error-message")
                 .and_then(|v| v.to_str().ok())
@@ -275,7 +284,15 @@ async fn upload_cdn_ciphertext(
                 Some(s) if !s.is_empty() => s.to_string(),
                 _ => res.text().await.unwrap_or_default(),
             };
-            return Err(format!("{label} client error {status}: {msg}"));
+            return Err(
+                claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                    "wechat_ilink",
+                    "upload_media",
+                    status.as_u16(),
+                    &provider_body,
+                )
+                .to_string(),
+            );
         }
         if !status.is_success() {
             last_err = format!("{label} attempt {attempt} status={status}");

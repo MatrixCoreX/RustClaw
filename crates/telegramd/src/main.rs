@@ -97,6 +97,30 @@ const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
 const TELEGRAM_API_RETRY_BASE_SECONDS: u64 = 5;
 const TELEGRAM_API_RETRY_MAX_SECONDS: u64 = 60;
 
+fn telegram_provider_http_error(
+    operation: &str,
+    status: reqwest::StatusCode,
+    response_body: &str,
+) -> claw_core::channel_provider_error::ChannelProviderError {
+    claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+        "telegram_bot",
+        operation,
+        status.as_u16(),
+        response_body,
+    )
+}
+
+fn telegram_provider_invalid_response(
+    operation: &str,
+    diagnostic_material: &str,
+) -> claw_core::channel_provider_error::ChannelProviderError {
+    claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+        "telegram_bot",
+        operation,
+        diagnostic_material,
+    )
+}
+
 fn unix_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -647,7 +671,11 @@ async fn register_telegram_commands_and_menu(
         .await
         .context("read setMyCommands response failed")?;
     if !cmd_status.is_success() {
-        return Err(anyhow!("setMyCommands http {}: {}", cmd_status, cmd_body));
+        return Err(anyhow!(telegram_provider_http_error(
+            "set_commands",
+            cmd_status,
+            &cmd_body,
+        )));
     }
     let cmd_json: JsonValue =
         serde_json::from_str(&cmd_body).unwrap_or_else(|_| json!({"ok": false}));
@@ -656,7 +684,10 @@ async fn register_telegram_commands_and_menu(
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        return Err(anyhow!("setMyCommands returned not ok: {}", cmd_body));
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "set_commands",
+            &cmd_body,
+        )));
     }
 
     let menu_payload = json!({
@@ -676,11 +707,11 @@ async fn register_telegram_commands_and_menu(
         .await
         .context("read setChatMenuButton response failed")?;
     if !menu_status.is_success() {
-        return Err(anyhow!(
-            "setChatMenuButton http {}: {}",
+        return Err(anyhow!(telegram_provider_http_error(
+            "set_menu_button",
             menu_status,
-            menu_body
-        ));
+            &menu_body,
+        )));
     }
     let menu_json: JsonValue =
         serde_json::from_str(&menu_body).unwrap_or_else(|_| json!({"ok": false}));
@@ -689,7 +720,10 @@ async fn register_telegram_commands_and_menu(
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        return Err(anyhow!("setChatMenuButton returned not ok: {}", menu_body));
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "set_menu_button",
+            &menu_body,
+        )));
     }
 
     Ok(())

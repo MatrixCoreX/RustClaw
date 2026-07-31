@@ -52,7 +52,9 @@ pub(crate) struct ScheduleNotifyOutcome {
     pub(crate) delivery_status: String,
     pub(crate) delivery_id: Option<String>,
     pub(crate) diagnostic_id: Option<String>,
-    pub(crate) error_text: Option<String>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) message_key: Option<String>,
+    pub(crate) retryable: bool,
 }
 
 fn runtime_channel_label(channel: crate::RuntimeChannel) -> &'static str {
@@ -94,21 +96,20 @@ pub(crate) fn schedule_notify_observation(outcome: &ScheduleNotifyOutcome) -> Va
     if !outcome.accepted {
         if let Some(obj) = value.as_object_mut() {
             let error_code = match outcome.delivery_status.as_str() {
-                "in_progress" => "channel_delivery_in_progress",
-                "query_required" => "channel_delivery_receipt_query_required",
-                _ => "channel_send_failed",
-            };
+                "in_progress" => Some("channel_delivery_in_progress"),
+                "query_required" => Some("channel_delivery_receipt_query_required"),
+                _ => outcome.error_code.as_deref(),
+            }
+            .unwrap_or("channel_send_failed");
             obj.insert("error_code".to_string(), json!(error_code));
+            if let Some(message_key) = outcome.message_key.as_deref() {
+                obj.insert("message_key".to_string(), json!(message_key));
+            }
+            obj.insert("retryable".to_string(), json!(outcome.retryable));
             if !pending {
                 obj.insert(
                     "failure_attribution".to_string(),
                     json!(crate::evidence_policy::FailureAttribution::DeliveryError.as_str()),
-                );
-            }
-            if let Some(error_text) = outcome.error_text.as_deref() {
-                obj.insert(
-                    "error_text".to_string(),
-                    json!(crate::truncate_for_log(error_text)),
                 );
             }
         }
@@ -421,10 +422,12 @@ pub(crate) async fn maybe_notify_schedule_result(
     };
     let result = match delivery_result {
         Ok(result) => result,
-        Err(err) => crate::delivery_service::ChannelDeliveryServiceResult {
+        Err(_err) => crate::delivery_service::ChannelDeliveryServiceResult {
             status: crate::delivery_service::ChannelDeliveryServiceStatus::Failed,
             receipt: None,
-            error_text: Some(err.to_string()),
+            error_code: Some("channel.delivery.internal".to_string()),
+            message_key: Some("channel.error.delivery_failed".to_string()),
+            retryable: false,
         },
     };
     let accepted = result.accepted();
@@ -440,14 +443,15 @@ pub(crate) async fn maybe_notify_schedule_result(
         .and_then(|receipt| receipt.diagnostic_id.clone());
     let error_code = match result.status {
         crate::delivery_service::ChannelDeliveryServiceStatus::InProgress => {
-            Some("channel_delivery_in_progress")
+            Some("channel_delivery_in_progress".to_string())
         }
         crate::delivery_service::ChannelDeliveryServiceStatus::QueryRequired => {
-            Some("channel_delivery_receipt_query_required")
+            Some("channel_delivery_receipt_query_required".to_string())
         }
-        crate::delivery_service::ChannelDeliveryServiceStatus::Failed => {
-            Some("channel_send_failed")
-        }
+        crate::delivery_service::ChannelDeliveryServiceStatus::Failed => result
+            .error_code
+            .clone()
+            .or_else(|| Some("channel_send_failed".to_string())),
         _ => None,
     };
     if accepted {
@@ -457,12 +461,13 @@ pub(crate) async fn maybe_notify_schedule_result(
         );
     } else {
         warn!(
-            "schedule notify not accepted: task_id={} channel={} runtime_channel={:?} delivery_status={} err={}",
+            "schedule notify not accepted: task_id={} channel={} runtime_channel={:?} delivery_status={} error_code={} retryable={}",
             task.task_id,
             channel_str,
             runtime_ch,
             delivery_status,
-            result.error_text.as_deref().unwrap_or("none")
+            error_code.as_deref().unwrap_or("none"),
+            result.retryable
         );
     }
     let mut notification = json!({
@@ -478,8 +483,14 @@ pub(crate) async fn maybe_notify_schedule_result(
         if let Some(diagnostic_id) = diagnostic_id.as_deref() {
             obj.insert("diagnostic_id".to_string(), json!(diagnostic_id));
         }
-        if let Some(error_code) = error_code {
+        if let Some(error_code) = error_code.as_deref() {
             obj.insert("error_code".to_string(), json!(error_code));
+        }
+        if let Some(message_key) = result.message_key.as_deref() {
+            obj.insert("message_key".to_string(), json!(message_key));
+        }
+        if !accepted {
+            obj.insert("retryable".to_string(), json!(result.retryable));
         }
     }
     record_schedule_run_history(state, task, payload, job_id, success, &notification);
@@ -493,7 +504,9 @@ pub(crate) async fn maybe_notify_schedule_result(
         delivery_status,
         delivery_id,
         diagnostic_id,
-        error_text: result.error_text,
+        error_code: result.error_code,
+        message_key: result.message_key,
+        retryable: result.retryable,
     })
 }
 

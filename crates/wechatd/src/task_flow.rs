@@ -398,10 +398,17 @@ pub(super) async fn submit_wechat_task_with_payload(
         }
     };
     if !submit_resp.status().is_success() {
+        let status = submit_resp.status();
+        let body = submit_resp.text().await.unwrap_or_default();
+        let error = claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+            "wechat_ilink",
+            "submit_task",
+            status.as_u16(),
+            &body,
+        );
         warn!(
-            "wechatd: task submit failed status={} body={}",
-            submit_resp.status(),
-            submit_resp.text().await.unwrap_or_default()
+            "wechatd: task submit failed error_code={} diagnostic_id={}",
+            error.error_code, error.diagnostic_id
         );
         return;
     }

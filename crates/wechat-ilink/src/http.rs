@@ -75,7 +75,16 @@ pub async fn post_ilink_json<T: Serialize>(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!("wechat ilink status={status} body={body}"));
+        let operation = endpoint.rsplit('/').next().unwrap_or("request");
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                operation,
+                status.as_u16(),
+                &body,
+            )
+            .to_string(),
+        );
     }
     serde_json::from_str(&body).map_err(|e| format!("wechat ilink response parse failed: {e}"))
 }

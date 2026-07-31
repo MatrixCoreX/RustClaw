@@ -11,6 +11,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
+use claw_core::channel_provider_error::{ChannelProviderError, ChannelProviderTransportKind};
 use claw_core::wechat_reply_media::{
     extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
     WechatOutboundMedia, WechatOutboundSource,
@@ -70,6 +71,52 @@ const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
 const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/outbound-temp";
+
+fn provider_http_error(
+    source_adapter: &str,
+    operation: &str,
+    status: reqwest::StatusCode,
+    response_body: &str,
+) -> String {
+    ChannelProviderError::from_http_response(
+        source_adapter,
+        operation,
+        status.as_u16(),
+        response_body,
+    )
+    .to_string()
+}
+
+fn provider_transport_error(
+    source_adapter: &str,
+    operation: &str,
+    error: &reqwest::Error,
+) -> String {
+    let kind = if error.is_timeout() {
+        ChannelProviderTransportKind::Timeout
+    } else if error.is_connect() {
+        ChannelProviderTransportKind::Connect
+    } else if error.is_request() {
+        ChannelProviderTransportKind::Request
+    } else if error.is_body() {
+        ChannelProviderTransportKind::Body
+    } else if error.is_decode() {
+        ChannelProviderTransportKind::Decode
+    } else {
+        ChannelProviderTransportKind::Unknown
+    };
+    ChannelProviderError::from_transport(source_adapter, operation, kind, &error.to_string())
+        .to_string()
+}
+
+fn provider_invalid_response(
+    source_adapter: &str,
+    operation: &str,
+    diagnostic_material: &str,
+) -> String {
+    ChannelProviderError::invalid_response(source_adapter, operation, diagnostic_material)
+        .to_string()
+}
 
 fn default_wechat_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
@@ -170,11 +217,16 @@ pub(crate) async fn send_telegram_message(
             }))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| provider_transport_error("telegram_bot", "send_text", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("status={status} body={body}"));
+            return Err(provider_http_error(
+                "telegram_bot",
+                "send_text",
+                status,
+                &body,
+            ));
         }
     }
     for item in &media {
@@ -243,12 +295,15 @@ pub(crate) async fn send_telegram_message(
             .multipart(form)
             .send()
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(|error| provider_transport_error("telegram_bot", "send_media", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "Telegram {label}投送失败：status={status} body={body}"
+            return Err(provider_http_error(
+                "telegram_bot",
+                "send_media",
+                status,
+                &body,
             ));
         }
     }
@@ -326,11 +381,16 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             }))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| provider_transport_error("whatsapp_cloud", "send_text", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("status={status} body={body}"));
+            return Err(provider_http_error(
+                "whatsapp_cloud",
+                "send_text",
+                status,
+                &body,
+            ));
         }
     }
     for item in &media {
@@ -384,22 +444,26 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             .multipart(form)
             .send()
             .await
-            .map_err(|err| format!("WhatsApp Cloud {label}上传失败：{err}"))?;
+            .map_err(|error| provider_transport_error("whatsapp_cloud", "upload_media", &error))?;
         if !upload_resp.status().is_success() {
             let status = upload_resp.status();
             let body = upload_resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "WhatsApp Cloud {label}上传失败：status={status} body={body}"
+            return Err(provider_http_error(
+                "whatsapp_cloud",
+                "upload_media",
+                status,
+                &body,
             ));
         }
-        let upload_body: serde_json::Value = upload_resp
-            .json()
-            .await
-            .map_err(|err| format!("decode WhatsApp Cloud media response failed: {err}"))?;
+        let upload_body: serde_json::Value = upload_resp.json().await.map_err(|error| {
+            provider_invalid_response("whatsapp_cloud", "upload_media", &error.to_string())
+        })?;
         let media_id = upload_body
             .get("id")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "WhatsApp Cloud media response missing id".to_string())?;
+            .ok_or_else(|| {
+                provider_invalid_response("whatsapp_cloud", "upload_media", "missing_id")
+            })?;
         let mut body = json!({
             "messaging_product": "whatsapp",
             "to": to,
@@ -418,12 +482,15 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             .json(&body)
             .send()
             .await
-            .map_err(|err| format!("WhatsApp Cloud {label}发送失败：{err}"))?;
+            .map_err(|error| provider_transport_error("whatsapp_cloud", "send_media", &error))?;
         if !send_resp.status().is_success() {
             let status = send_resp.status();
             let body = send_resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "WhatsApp Cloud {label}发送失败：status={status} body={body}"
+            return Err(provider_http_error(
+                "whatsapp_cloud",
+                "send_media",
+                status,
+                &body,
             ));
         }
     }
@@ -481,11 +548,16 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             }))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| provider_transport_error("whatsapp_web", "send_text", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("wa-web bridge status={status} body={body}"));
+            return Err(provider_http_error(
+                "whatsapp_web",
+                "send_text",
+                status,
+                &body,
+            ));
         }
     }
     Ok(())
@@ -592,11 +664,16 @@ pub(crate) async fn send_wechat_text_message(
             }))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| provider_transport_error("wechat_ilink", "send_text", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("wechat send status={status} body={body}"));
+            return Err(provider_http_error(
+                "wechat_ilink",
+                "send_text",
+                status,
+                &body,
+            ));
         }
     }
     let timeout_ms: u64 = 30_000;
@@ -768,6 +845,7 @@ fn load_wechat_session(workspace_root: &Path) -> Option<PersistedWechatSession> 
 
 async fn get_tenant_access_token(
     client: &reqwest::Client,
+    source_adapter: &str,
     api_base: &str,
     app_id: &str,
     app_secret: &str,
@@ -780,19 +858,26 @@ async fn get_tenant_access_token(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| provider_transport_error(source_adapter, "auth_token", &error))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("token request status={status} body={text}"));
+        return Err(provider_http_error(
+            source_adapter,
+            "auth_token",
+            status,
+            &text,
+        ));
     }
     #[derive(serde::Deserialize)]
     struct TokenResp {
         tenant_access_token: Option<String>,
     }
-    let data: TokenResp = resp.json().await.map_err(|e| e.to_string())?;
+    let data: TokenResp = resp.json().await.map_err(|error| {
+        provider_invalid_response(source_adapter, "auth_token", &error.to_string())
+    })?;
     data.tenant_access_token
-        .ok_or_else(|| "token response missing tenant_access_token".to_string())
+        .ok_or_else(|| provider_invalid_response(source_adapter, "auth_token", "missing_token"))
 }
 
 pub(crate) async fn send_feishu_text_message(
@@ -859,8 +944,15 @@ async fn send_feishu_lark_answer(
         capability_adapter,
         claw_core::channel_capabilities::ChannelCapabilityKind::SendFile,
     );
-    let token =
-        get_tenant_access_token(&state.core.http_client, api_base_url, app_id, app_secret).await?;
+    let source_adapter = capability_adapter.as_str();
+    let token = get_tenant_access_token(
+        &state.core.http_client,
+        source_adapter,
+        api_base_url,
+        app_id,
+        app_secret,
+    )
+    .await?;
     let base = api_base_url.trim_end_matches('/');
     let message_url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
     let media = extract_wechat_outbound_media(answer, &state.skill_rt.workspace_root);
@@ -893,12 +985,15 @@ async fn send_feishu_lark_answer(
             }))
             .send()
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(|error| provider_transport_error(source_adapter, "send_text", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let response_body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "{channel_label} 文本发送失败：status={status} body={response_body}"
+            return Err(provider_http_error(
+                source_adapter,
+                "send_text",
+                status,
+                &response_body,
             ));
         }
     }
@@ -994,23 +1089,27 @@ async fn send_feishu_lark_answer(
             .multipart(form)
             .send()
             .await
-            .map_err(|err| format!("{channel_label} {label}上传失败：{err}"))?;
+            .map_err(|error| provider_transport_error(source_adapter, "upload_media", &error))?;
         if !upload_resp.status().is_success() {
             let status = upload_resp.status();
             let body = upload_resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "{channel_label} {label}上传失败：status={status} body={body}"
+            return Err(provider_http_error(
+                source_adapter,
+                "upload_media",
+                status,
+                &body,
             ));
         }
-        let upload_body: serde_json::Value = upload_resp
-            .json()
-            .await
-            .map_err(|err| format!("decode {channel_label} media response failed: {err}"))?;
+        let upload_body: serde_json::Value = upload_resp.json().await.map_err(|error| {
+            provider_invalid_response(source_adapter, "upload_media", &error.to_string())
+        })?;
         let pointer = format!("/data/{key_name}");
         let media_key = upload_body
             .pointer(&pointer)
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("{channel_label} media response missing {key_name}"))?;
+            .ok_or_else(|| {
+                provider_invalid_response(source_adapter, "upload_media", "missing_media_key")
+            })?;
         let content = match key_name {
             "image_key" => json!({ "image_key": media_key }),
             "file_key" => json!({ "file_key": media_key }),
@@ -1028,12 +1127,15 @@ async fn send_feishu_lark_answer(
             }))
             .send()
             .await
-            .map_err(|err| format!("{channel_label} {label}发送失败：{err}"))?;
+            .map_err(|error| provider_transport_error(source_adapter, "send_media", &error))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "{channel_label} {label}发送失败：status={status} body={body}"
+            return Err(provider_http_error(
+                source_adapter,
+                "send_media",
+                status,
+                &body,
             ));
         }
     }

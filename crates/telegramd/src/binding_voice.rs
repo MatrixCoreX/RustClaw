@@ -132,10 +132,10 @@ pub(super) async fn resolve_telegram_identity(
     let status = resp.status();
     let body: ApiResponse<ResolveChannelBindingResponse> = resp.json().await?;
     if !status.is_success() || !body.ok {
-        return Err(anyhow!(
-            "resolve telegram identity failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
-        ));
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "resolve_identity",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        )));
     }
     Ok(body.data.and_then(|v| v.identity))
 }
@@ -161,10 +161,10 @@ pub(super) async fn bind_telegram_identity(
         if status.as_u16() == 401 {
             return Ok(None);
         }
-        return Err(anyhow!(
-            "bind telegram identity failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
-        ));
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "bind_identity",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        )));
     }
     if !body.ok {
         return Ok(None);

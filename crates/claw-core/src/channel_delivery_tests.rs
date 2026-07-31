@@ -48,6 +48,7 @@ fn receipt(status: ChannelDeliveryStatus, retryable: bool) -> ChannelDeliveryRec
         provider_message_ids: Vec::new(),
         parts: Vec::new(),
         error_code: None,
+        message_key: None,
         diagnostic_id: None,
         retryable,
         updated_at_ts: 100,
@@ -104,11 +105,13 @@ fn receipt_states_separate_accepted_delivered_failed_and_partial() {
 
     let mut failed = receipt(ChannelDeliveryStatus::Failed, true);
     failed.error_code = Some("provider.rate_limited".to_string());
+    failed.message_key = Some("channel.error.provider_rate_limited".to_string());
     failed.diagnostic_id = Some("diag:1".to_string());
     failed.validate().expect("failed receipt");
 
     let mut partial = receipt(ChannelDeliveryStatus::Partial, true);
     partial.error_code = Some("provider.partial_failure".to_string());
+    partial.message_key = Some("channel.error.provider_unavailable".to_string());
     partial.diagnostic_id = Some("diag:2".to_string());
     partial.parts = vec![
         ChannelDeliveryPartReceipt {
@@ -151,6 +154,7 @@ fn retry_decision_queries_receipt_before_resending() {
 
     let mut retryable_partial = receipt(ChannelDeliveryStatus::Partial, true);
     retryable_partial.error_code = Some("provider.partial_failure".to_string());
+    retryable_partial.message_key = Some("channel.error.provider_unavailable".to_string());
     retryable_partial.diagnostic_id = Some("diag:2".to_string());
     assert_eq!(
         delivery_retry_decision(Some(&retryable_partial)),

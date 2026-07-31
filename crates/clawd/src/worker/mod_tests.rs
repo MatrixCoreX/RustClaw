@@ -1763,7 +1763,9 @@ fn schedule_notify_observation_marks_delivery_failure() {
         delivery_status: "failed".to_string(),
         delivery_id: Some("delivery:task-1:schedule-terminal".to_string()),
         diagnostic_id: Some("delivery:diag-1".to_string()),
-        error_text: Some("telegram bot token is empty".to_string()),
+        error_code: Some("channel.delivery.failed".to_string()),
+        message_key: Some("channel.error.delivery_failed".to_string()),
+        retryable: false,
     });
 
     assert_eq!(
@@ -1784,8 +1786,16 @@ fn schedule_notify_observation_marks_delivery_failure() {
         observation
             .get("error_code")
             .and_then(|value| value.as_str()),
-        Some("channel_send_failed")
+        Some("channel.delivery.failed")
     );
+    assert_eq!(
+        observation
+            .get("message_key")
+            .and_then(|value| value.as_str()),
+        Some("channel.error.delivery_failed")
+    );
+    assert_eq!(observation.get("retryable"), Some(&json!(false)));
+    assert!(observation.get("error_text").is_none());
     assert_eq!(
         observation
             .get("failure_attribution")
@@ -1814,7 +1824,9 @@ fn schedule_notify_observation_keeps_accepted_distinct_from_delivered() {
         delivery_status: "accepted".to_string(),
         delivery_id: Some("delivery:task-accepted:schedule-terminal".to_string()),
         diagnostic_id: None,
-        error_text: None,
+        error_code: None,
+        message_key: None,
+        retryable: false,
     });
 
     assert_eq!(observation.get("status"), Some(&json!("ok")));
@@ -1836,7 +1848,9 @@ fn schedule_notify_observation_marks_ambiguous_dispatch_as_pending() {
         delivery_status: "query_required".to_string(),
         delivery_id: None,
         diagnostic_id: None,
-        error_text: None,
+        error_code: None,
+        message_key: None,
+        retryable: false,
     });
 
     assert_eq!(observation.get("status"), Some(&json!("pending")));
