@@ -978,6 +978,31 @@ fn real_registry_resolves_inline_and_persistent_subagent_capabilities() {
 }
 
 #[test]
+fn real_registry_resolves_revisioned_task_plan_capabilities() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "task.plan_update",
+        json!({
+            "plan_revision": 3,
+            "updates": [{"step_id":"verify","status":"in_progress"}]
+        }),
+    );
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("task plan capability must resolve to a host tool");
+    };
+    assert_eq!(tool, "task_plan");
+    assert_eq!(args["action"], "update_steps");
+    assert_eq!(args["plan_revision"], 3);
+    assert_eq!(args["updates"][0]["step_id"], "verify");
+    assert_eq!(record.source, "registry");
+    assert_eq!(
+        record.canonical_capability_ref.as_deref(),
+        Some("task.plan_update")
+    );
+}
+
+#[test]
 fn filesystem_write_text_capability_normalizes_write_mode_alias() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

@@ -159,6 +159,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
             compacted_history_context: "### COMPACTED_HISTORY_CONTEXT\n{}".to_string(),
             image_context: None,
         }),
+        task_plan_snapshot: None,
         compaction_records: Vec::new(),
     };
     let mut chat = String::new();

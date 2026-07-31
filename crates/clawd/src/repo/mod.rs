@@ -13,6 +13,7 @@ pub(crate) mod task_approval;
 pub(crate) mod task_checkpoint_action;
 pub(crate) mod task_goal;
 pub(crate) mod task_mutation_ledger;
+pub(crate) mod task_plan;
 pub(crate) mod task_resume_execution;
 pub(crate) mod tasks;
 
@@ -62,6 +63,7 @@ pub(crate) use task_mutation_ledger::{
     start_task_mutation_attempt, BeginTaskMutationOutcome, ReconcileTaskMutationOutcome,
     TaskMutationClaimRejected, TaskMutationLease, TaskMutationReconciliation, TaskMutationRecord,
 };
+pub(crate) use task_plan::{read_task_plan, set_task_plan, update_task_plan_steps};
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{
     claim_dispatched_paused_checkpoint_resume_execution_internal,

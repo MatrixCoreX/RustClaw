@@ -30,6 +30,7 @@ fn source_bundle_fixture() -> crate::task_context_builder::TaskContextBundle {
             compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
+        task_plan_snapshot: None,
         compaction_records: Vec::new(),
     }
 }

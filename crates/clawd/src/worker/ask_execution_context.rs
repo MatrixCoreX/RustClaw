@@ -41,6 +41,16 @@ pub(super) async fn prepare_ask_execution_context(
         );
     }
     let mut initial_task_observations = Vec::new();
+    if let Some(task_plan_snapshot) = context_bundle.task_plan_snapshot.as_ref() {
+        initial_task_observations.push(json!({
+            "schema_version": 1,
+            "source": crate::repo::task_plan::TASK_PLAN_SOURCE,
+            "observation_kind": "task_plan_snapshot",
+            "data_only": true,
+            "instruction_authority": "none",
+            "snapshot": task_plan_snapshot,
+        }));
+    }
     let provider_context_window_tokens = state
         .task_llm_providers(task)
         .iter()

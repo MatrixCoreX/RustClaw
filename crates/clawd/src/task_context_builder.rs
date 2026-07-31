@@ -50,6 +50,9 @@ pub(crate) struct TaskContextBundle {
     pub(crate) raw_sources: TaskContextRawSources,
     pub(crate) planner_view: PlannerContextView,
     pub(crate) execution_view: Option<ExecutionContextView>,
+    /// Machine-only snapshot. It is never concatenated into user/history
+    /// prompt text; the worker projects it as a structured observation.
+    pub(crate) task_plan_snapshot: Option<Value>,
     pub(crate) context_source_task_ids: Vec<String>,
     pub(crate) compaction_records: Vec<Value>,
 }
@@ -622,6 +625,14 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         raw_sources: TaskContextRawSources::default(),
         planner_view,
         execution_view: Some(execution_view),
+        task_plan_snapshot: crate::repo::read_task_plan(state, &task.task_id, "context_snapshot")
+            .ok()
+            .filter(|snapshot| {
+                snapshot
+                    .get("plan_revision")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|revision| revision > 0)
+            }),
         context_source_task_ids,
         compaction_records: Vec::new(),
     }

@@ -178,6 +178,59 @@ fn inline_subagent_capability_verifies_as_read_only_internal_tool() {
 }
 
 #[test]
+fn task_plan_update_verifies_without_user_confirmation() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "task.plan_update",
+        json!({
+            "plan_revision": 2,
+            "updates": [{"step_id":"implement","status":"completed"}]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert_eq!(result.approved_steps[0].action_type, "call_tool");
+    assert_eq!(result.approved_steps[0].skill, "task_plan");
+    let task_plan_mapping = state
+        .get_skills_registry()
+        .expect("skills registry")
+        .planner_capabilities("task_plan")
+        .iter()
+        .find(|mapping| mapping.name == "task.plan_update")
+        .cloned()
+        .expect("task plan update mapping");
+    assert_eq!(
+        task_plan_mapping.effect.map(|effect| effect.as_token()),
+        Some("validate")
+    );
+    assert_eq!(
+        result.capability_resolutions[0]
+            .record
+            .canonical_capability_ref
+            .as_deref(),
+        Some("task.plan_update")
+    );
+}
+
+#[test]
 fn inline_subagent_capability_rejects_missing_context_evidence() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

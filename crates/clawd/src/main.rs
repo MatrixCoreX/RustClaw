@@ -464,6 +464,7 @@ async fn run() -> anyhow::Result<()> {
         ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
         repo::child_task_graph::ensure_child_task_graph_schema(&db)?;
+        repo::task_plan::ensure_task_plan_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
         if config.memory.hybrid_recall_enabled
             && (config.memory.reindex_on_startup

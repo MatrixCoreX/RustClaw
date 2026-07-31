@@ -18,6 +18,8 @@ mod builtin_read_file;
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
 mod builtin_schedule;
+#[path = "builtin_task_plan.rs"]
+mod builtin_task_plan;
 #[path = "builtin_workspace_mutation.rs"]
 mod builtin_workspace_mutation;
 #[path = "builtin_workspace_patch.rs"]
@@ -998,6 +1000,19 @@ pub(crate) async fn execute_builtin_skill_with_task(
             } else {
                 execute_workspace_patch(state, task, map)
             }
+        }
+        crate::repo::task_plan::TASK_PLAN_SOURCE => {
+            let task = task.ok_or_else(|| {
+                builtin_error(
+                    crate::repo::task_plan::TASK_PLAN_SOURCE,
+                    "task_plan_context_required",
+                    "task_plan_context_required",
+                    None,
+                    None,
+                    None,
+                )
+            })?;
+            builtin_task_plan::execute_task_plan(state, task, map)
         }
         _ => Err(format!("unknown skill: {skill_name}")),
     }
