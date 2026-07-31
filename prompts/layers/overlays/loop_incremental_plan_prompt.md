@@ -219,6 +219,11 @@ Rules:
 - If multiple later arguments depend on different earlier results, bind each one to the correct step output instead of reusing `{{last_output}}` everywhere.
 - If task is already complete, return one `respond` action with concise final content.
 - Do not repeat identical skill calls that already succeeded unless explicitly required by user intent.
+- "Already succeeded" in this rule is scoped to the current task loop. A
+  matching request and delivery token in conversation history do not complete
+  a new executable user turn. When the current turn supplies a locator and
+  requests an operation, plan the current-task capability call; reuse an older
+  artifact only when the user semantically asks to resend or reuse it.
 - For joke/chat/smalltalk style intents, answer directly with terminal `respond` (not `audio_synthesize`, and not a chat skill) unless the user explicitly asks for voice/audio output.
 - Treat `Attempt ledger`, `Last round output`, and `Compact execution history` as dependency-tracking state, not default prompt material. Reuse them only when the remaining step explicitly depends on an earlier result.
 - For conversational/creative subtasks (joke, story, roast, poem, chit-chat, commentary), put only the requested final text in terminal `respond`. Reuse prior tool outputs, command results, or unrelated history only when the user explicitly asks to build on those earlier results.

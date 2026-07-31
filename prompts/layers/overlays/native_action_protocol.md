@@ -133,6 +133,14 @@ Protocol rules:
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
+- A successful observation means a capability result produced inside the
+  current task loop. Conversation history, recent assistant replies, and
+  delivery tokens from an earlier task are context only; they do not prove
+  that a fresh executable request has completed. When the current user turn
+  supplies a locator and asks to download, inspect, analyze, transform, or
+  generate from it, execute the matching capability in the current task.
+  Re-deliver an earlier artifact only when the user semantically asks to resend
+  or reuse that earlier result.
 - A directory listing proves entry names and listed metadata, not the current
   contents of those files. You may give a clearly generic or approximate
   type-level description from a name or extension, but observe file content

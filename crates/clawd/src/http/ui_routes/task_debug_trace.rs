@@ -427,7 +427,7 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["selected_provider"], "minimax");
         assert_eq!(trace["selected_model"], "MiniMax-M3");
         assert_eq!(trace["observed_providers"][0], "minimax");
-        assert_eq!(trace["entries"][0]["schema_version"], 1);
+        assert_eq!(trace["entries"][0]["schema_version"], 2);
         assert_eq!(trace["entries"][0]["models"], json!(["MiniMax-M3"]));
         assert!(trace["entries"][0]
             .as_object()
@@ -443,7 +443,7 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["entries"][0]["supports_audio_transcription"], false);
         assert_eq!(trace["entries"][0]["active_text_provider"], true);
         assert_eq!(trace["entries"][0]["credential_state"], "configured_inline");
-        assert_eq!(trace["readiness"]["schema_version"], 1);
+        assert_eq!(trace["readiness"]["schema_version"], 2);
         assert_eq!(trace["readiness"]["selected_provider"], "minimax");
         assert_eq!(trace["readiness"]["selected_model"], "MiniMax-M3");
         assert_eq!(trace["readiness"]["selected_entry_status"], "found");

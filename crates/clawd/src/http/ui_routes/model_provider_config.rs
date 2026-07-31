@@ -155,6 +155,7 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    let available_models = read_section_model_cache(table, &vendor);
 
     let item = ModelConfigItem {
         vendor,
@@ -167,7 +168,7 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         capability_family: None,
         input_modalities: Vec::new(),
         output_modalities: Vec::new(),
-        available_models: read_section_model_cache(table),
+        available_models,
         context_window_tokens: read_context_window_tokens(table),
         async_job_supported: None,
         shared_quota_group: None,
@@ -183,8 +184,11 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
     model_item_with_capability_metadata(item, section)
 }
 
-fn read_section_model_cache(table: &toml::map::Map<String, toml::Value>) -> Vec<String> {
-    let mut models = table
+fn read_section_model_cache(
+    table: &toml::map::Map<String, toml::Value>,
+    vendor: &str,
+) -> Vec<String> {
+    let generic_models = table
         .get("models")
         .and_then(toml::Value::as_array)
         .into_iter()
@@ -194,6 +198,25 @@ fn read_section_model_cache(table: &toml::map::Map<String, toml::Value>) -> Vec<
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
+    let vendor_models = if vendor.trim().is_empty() {
+        Vec::new()
+    } else {
+        table
+            .get(&format!("{}_models", vendor.trim()))
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(toml::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let mut models = if vendor_models.is_empty() {
+        generic_models
+    } else {
+        vendor_models
+    };
     models.sort();
     models.dedup();
     models

@@ -91,15 +91,25 @@ timeout_seconds = 180
         root.join("configs/image.toml"),
         r#"
 [image_vision]
+default_vendor = "minimax"
+default_model = "MiniMax-M3"
 minimax_models = ["MiniMax-M3"]
 qwen_models = ["qwen-vl-max"]
 
 [image_generation]
+default_vendor = "minimax"
+default_model = "image-01"
 minimax_models = ["image-01"]
 qwen_models = ["wanx2.1-t2i-turbo"]
 
 [image_edit]
+default_vendor = "minimax"
+default_model = "image-01"
 minimax_models = ["image-01"]
+
+[image_generation.providers.minimax]
+base_url = "https://api.minimaxi.com/v1"
+model = "image-01"
 "#,
     )
     .expect("write image");
@@ -107,10 +117,19 @@ minimax_models = ["image-01"]
         root.join("configs/audio.toml"),
         r#"
 [audio_transcribe]
+default_vendor = "custom"
+default_model = "local-whisper"
+custom_models = ["local-whisper"]
 qwen_models = ["qwen3-asr-flash"]
 minimax_models = []
 
+[audio_transcribe.providers.custom]
+base_url = "http://127.0.0.1:8178/v1"
+model = "local-whisper"
+
 [audio_synthesize]
+default_vendor = "minimax"
+default_model = "speech-2.8-turbo"
 minimax_models = ["speech-2.8-turbo"]
 qwen_models = ["qwen3-tts-flash"]
 "#,
@@ -120,6 +139,8 @@ qwen_models = ["qwen3-tts-flash"]
         root.join("configs/video.toml"),
         r#"
 [video_generation]
+default_vendor = "minimax"
+default_model = "MiniMax-Hailuo-2.3"
 minimax_models = ["MiniMax-Hailuo-2.3"]
 "#,
     )
@@ -128,6 +149,8 @@ minimax_models = ["MiniMax-Hailuo-2.3"]
         root.join("configs/music.toml"),
         r#"
 [music_generation]
+default_vendor = "minimax"
+default_model = "music-2.6"
 minimax_models = ["music-2.6"]
 "#,
     )
@@ -143,7 +166,7 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     let minimax = catalog
         .entries
         .iter()
-        .find(|entry| entry.provider == "minimax")
+        .find(|entry| entry.provider == "minimax" && entry.model == "MiniMax-M3")
         .expect("minimax entry");
 
     assert_eq!(catalog.selected_provider, "minimax");
@@ -157,18 +180,50 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     assert!(minimax.supports_image_input);
     assert!(minimax.supports_video_input);
     assert!(!minimax.supports_audio_input);
+    assert!(minimax.supports_image_understanding);
     assert!(!minimax.supports_audio_transcription);
-    assert!(minimax.supports_image_generation);
-    assert!(minimax.supports_audio_generation);
-    assert!(minimax.supports_video_generation);
-    assert!(minimax.supports_music_generation);
-    assert!(minimax.async_required);
+    assert!(!minimax.supports_image_generation);
+    assert!(!minimax.supports_image_edit);
+    assert!(!minimax.supports_audio_generation);
+    assert!(!minimax.supports_video_generation);
+    assert!(!minimax.supports_music_generation);
+    assert!(!minimax.async_required);
     assert_eq!(minimax.credential_state, "configured_inline");
     assert_eq!(minimax.context_window_tokens, Some(1_000_000));
     assert_eq!(
         minimax.base_url_kind,
         "minimax_official_openai_compat".to_string()
     );
+}
+
+#[test]
+fn catalog_emits_distinct_entries_for_independent_multimodal_models() {
+    let root = temp_workspace_root();
+    write_fixture(&root);
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let find = |provider: &str, model: &str| {
+        catalog
+            .entries
+            .iter()
+            .find(|entry| entry.provider == provider && entry.model == model)
+            .unwrap_or_else(|| panic!("missing {provider}:{model}"))
+    };
+    let image = find("minimax", "image-01");
+    let speech = find("minimax", "speech-2.8-turbo");
+    let video = find("minimax", "MiniMax-Hailuo-2.3");
+    let music = find("minimax", "music-2.6");
+    let whisper = find("custom", "local-whisper");
+
+    assert!(image.supports_image_generation);
+    assert!(image.supports_image_edit);
+    assert!(!image.supports_text);
+    assert!(speech.supports_audio_generation);
+    assert!(video.supports_video_generation);
+    assert!(music.supports_music_generation);
+    assert!(whisper.supports_audio_transcription);
+    assert_eq!(whisper.credential_state, "not_required_local");
+    assert_eq!(whisper.base_url_kind, "local_loopback");
 }
 
 #[test]

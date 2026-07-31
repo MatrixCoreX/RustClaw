@@ -5,10 +5,10 @@
 
 ## Capability Summary
 - `image_vision` analyzes one or more images for description, extraction, visible-text transcription, comparison, and screenshot summaries.
-- For an explicit visible-text recognition request, `extract_text` is the preferred Agent capability because the multimodal model can use layout and visual context. It writes a UTF-8 `.txt` task artifact and delivers that file by default. Local Tesseract OCR is a fallback when this capability is unavailable or fails, or when the user explicitly requests offline processing.
+- For an explicit visible-text recognition request, `extract_text` is the preferred Agent capability because the independently configured image-understanding model can use layout and visual context. It writes a UTF-8 `.txt` task artifact and delivers that file by default. Local Tesseract OCR is a fallback when this capability is disabled, not configured, unavailable, or fails, or when the user explicitly requests offline processing.
 - Ordinary image/media download requests must not trigger `extract_text`; without an explicit conversion request, only the original images/videos are downloaded and returned.
 - It never mutates source images and writes generated text only to the runtime-provided task artifact directory.
-- MiniMax's configured OpenAI-compatible text endpoint is not treated as a vision endpoint. The skill never embeds image Base64 in ordinary text; it proceeds to another configured vision-capable provider instead.
+- MiniMax M3 image understanding uses its configured OpenAI-compatible chat endpoint with structured image content parts. The skill sends local image bytes as a typed data URL, never as an untyped text marker.
 - It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
 - **Output language is owned by this skill end-to-end.** The host (`clawd`) does **not** rewrite `image_vision` result text after the skill returns.
 
@@ -43,11 +43,11 @@
 - Do not use local OCR merely because the image originated from a media-download skill; capability selection follows the requested output, not the producing skill name.
 
 ## Config Entry Points
-- Default vision provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`.
-- The configured default may still be `minimax` for general text use, but its text-only compatible endpoint is skipped for image input. `image_vision` then tries configured vision-capable vendors and reports a structured failure when none succeeds, allowing the Agent to use local OCR.
-- Recommended shared key: `configs/config.toml` -> `[llm.minimax].api_key`, or environment `MINIMAX_API_KEY`.
-- Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.minimax].api_key`, or environment `IMAGE_VISION_MINIMAX_API_KEY`.
-- MiniMax compatible chat is never sent textual Base64 image markers because that endpoint does not support image input.
+- Independent image-understanding provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`. This selection is independent from the main `[llm]` provider/model.
+- The default `minimax` provider uses `MiniMax-M3` through OpenAI-compatible multimodal chat. If it is unavailable or fails, `image_vision` reports an execution failure so the Agent can use local OCR; it does not silently switch to the main text model.
+- Recommended shared credential for the same provider: `configs/config.toml` -> `[llm.minimax].api_key`, or environment `MINIMAX_API_KEY`.
+- Optional dedicated image-understanding connection/credential: `configs/image.toml` -> `[image_vision.providers.minimax]`, or environment `IMAGE_VISION_MINIMAX_API_KEY`.
+- MiniMax compatible chat receives images only as typed `image_url` content parts; Base64 is never interpolated into ordinary prompt text.
 
 ### Language behavior (skill-side only)
 1. **Host vs skill (target language):**
@@ -74,7 +74,7 @@
 - Unsupported action.
 - Invalid image source/path/URL/base64 decode failures.
 - Missing runtime artifact directory or an invalid `output_name` for `extract_text`.
-- No configured multimodal provider returned visible text. This is an execution failure and permits planner fallback to `media_download.ocr`; no empty text artifact is created.
+- No configured image-understanding provider returned visible text. This is an execution failure and permits planner fallback to `media_download.ocr`; no empty text artifact is created.
 
 ## Request/Response Examples
 ### Example 1

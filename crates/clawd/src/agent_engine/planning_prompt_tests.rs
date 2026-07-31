@@ -120,6 +120,33 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
 }
 
 #[test]
+fn planner_prompts_do_not_treat_historical_delivery_as_current_execution() {
+    let prompt_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers");
+    let native = std::fs::read_to_string(
+        prompt_root
+            .join("overlays")
+            .join("native_action_protocol.md"),
+    )
+    .expect("read native action protocol");
+    let common = std::fs::read_to_string(prompt_root.join("base/execution/common_rules.md"))
+        .expect("read shared execution rules");
+    let incremental = std::fs::read_to_string(
+        prompt_root
+            .join("overlays")
+            .join("loop_incremental_plan_prompt.md"),
+    )
+    .expect("read incremental planner prompt");
+    let native = native.split_whitespace().collect::<Vec<_>>().join(" ");
+    let incremental = incremental.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(native.contains("produced inside the current task loop"));
+    assert!(native.contains("delivery tokens from an earlier task are context only"));
+    assert!(common.contains("not current-task execution evidence"));
+    assert!(incremental.contains("scoped to the current task loop"));
+    assert!(incremental.contains("do not complete a new executable user turn"));
+}
+
+#[test]
 fn planner_overlays_select_subagents_through_capabilities_only() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -325,11 +324,7 @@ fn execute(
 
     let requested_vendor = obj.get("vendor").and_then(|v| v.as_str());
     let requested_model = obj.get("model").and_then(|v| v.as_str());
-    let vendors = vendor_order(
-        requested_vendor,
-        cfg.image_vision.default_vendor.as_deref(),
-        cfg.llm.selected_vendor.as_deref(),
-    );
+    let vendors = vendor_order(requested_vendor, cfg.image_vision.default_vendor.as_deref());
     if vendors.is_empty() {
         return Err("no vendor configured".to_string());
     }
@@ -428,35 +423,6 @@ fn image_text_output_has_visible_text(
     }
 }
 
-fn select_model_override<'a>(
-    cfg: &'a ImageSkillConfig,
-    vendor: VendorKind,
-    requested_model: Option<&'a str>,
-) -> Option<&'a str> {
-    if let Some(v) = requested_model.map(str::trim).filter(|v| !v.is_empty()) {
-        return Some(v);
-    }
-    if let Some(v) = first_model_from_list(vendor_models(cfg, vendor)) {
-        return Some(v);
-    }
-    if cfg.default_vendor.as_deref().and_then(parse_vendor) == Some(vendor) {
-        if let Some(v) = cfg
-            .default_model
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            return Some(v);
-        }
-        return first_model_from_list(cfg.models.as_ref());
-    }
-    None
-}
-
-fn first_model_from_list(models: Option<&Vec<String>>) -> Option<&str> {
-    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
-}
-
 fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
     match vendor {
         VendorKind::OpenAI => cfg.openai_models.as_ref(),
@@ -468,6 +434,35 @@ fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'
         VendorKind::MiniMax => cfg.minimax_models.as_ref(),
         VendorKind::Mimo => cfg.mimo_models.as_ref(),
     }
+}
+
+fn select_model_override<'a>(
+    cfg: &'a ImageSkillConfig,
+    vendor: VendorKind,
+    requested_model: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(v) = requested_model.map(str::trim).filter(|v| !v.is_empty()) {
+        return Some(v);
+    }
+    if cfg.default_vendor.as_deref().and_then(parse_vendor) == Some(vendor) {
+        if let Some(v) = cfg
+            .default_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            return Some(v);
+        }
+        if let Some(v) = first_model_from_list(vendor_models(cfg, vendor)) {
+            return Some(v);
+        }
+        return first_model_from_list(cfg.models.as_ref());
+    }
+    first_model_from_list(vendor_models(cfg, vendor))
+}
+
+fn first_model_from_list(models: Option<&Vec<String>>) -> Option<&str> {
+    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
 fn parse_action(obj: &Map<String, Value>) -> Result<String, String> {
@@ -600,6 +595,9 @@ fn parse_one_image(v: &Value, workspace_root: &Path) -> Result<ImageSource, Stri
     let obj = v
         .as_object()
         .ok_or_else(|| "image entry must be string or object".to_string())?;
+    if let Some(source) = parse_text_wrapped_path(obj, workspace_root)? {
+        return Ok(source);
+    }
     if let Some(s) = obj.get("path").and_then(|v| v.as_str()) {
         let p = to_workspace_path(workspace_root, s)?;
         return Ok(ImageSource::Path(p));
@@ -614,6 +612,35 @@ fn parse_one_image(v: &Value, workspace_root: &Path) -> Result<ImageSource, Stri
         return Ok(ImageSource::Base64(s.to_string()));
     }
     Err("image object requires path|url|base64".to_string())
+}
+
+fn parse_text_wrapped_path(
+    obj: &Map<String, Value>,
+    workspace_root: &Path,
+) -> Result<Option<ImageSource>, String> {
+    let Some(encoded) = (obj.len() == 1)
+        .then(|| obj.get("$text").and_then(Value::as_str))
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    if encoded.len() > 8192 {
+        return Err("image text wrapper is too large".to_string());
+    }
+    let decoded = serde_json::from_str::<Value>(encoded)
+        .map_err(|_| "image text wrapper must contain a JSON path object".to_string())?;
+    let decoded = decoded
+        .as_object()
+        .filter(|decoded| decoded.len() == 1)
+        .ok_or_else(|| "image text wrapper must contain only path".to_string())?;
+    let path = decoded
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "image text wrapper must contain only path".to_string())?;
+    Ok(Some(ImageSource::Path(to_workspace_path(
+        workspace_root,
+        path,
+    )?)))
 }
 
 fn parse_image_from_str(s: &str, workspace_root: &Path) -> Result<ImageSource, String> {
@@ -782,38 +809,11 @@ fn runtime_allows_external_paths() -> bool {
     std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1")
 }
 
-fn vendor_order(
-    requested: Option<&str>,
-    section_default: Option<&str>,
-    selected_vendor: Option<&str>,
-) -> Vec<VendorKind> {
+fn vendor_order(requested: Option<&str>, section_default: Option<&str>) -> Vec<VendorKind> {
     if let Some(req) = requested.and_then(parse_vendor) {
         return vec![req];
     }
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for name in [section_default, selected_vendor].into_iter().flatten() {
-        if let Some(v) = parse_vendor(name) {
-            if seen.insert(v) {
-                out.push(v);
-            }
-        }
-    }
-    for v in [
-        VendorKind::OpenAI,
-        VendorKind::Google,
-        VendorKind::Anthropic,
-        VendorKind::Grok,
-        VendorKind::DeepSeek,
-        VendorKind::Qwen,
-        VendorKind::MiniMax,
-        VendorKind::Mimo,
-    ] {
-        if seen.insert(v) {
-            out.push(v);
-        }
-    }
-    out
+    section_default.and_then(parse_vendor).into_iter().collect()
 }
 
 fn parse_vendor(name: &str) -> Option<VendorKind> {

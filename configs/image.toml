@@ -11,8 +11,13 @@ local_auto_upload_enabled = true
 max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
-minimax_models = ["image-01"]
+minimax_models = [
+    "image-01",
+    "image-01-live",
+]
 models = [
+    "image-01",
+    "image-01-live",
     "qwen-image-edit-max",
     "wan2.6-image",
     "wanx2.1-imageedit",
@@ -57,8 +62,13 @@ local_fallback_enabled = false
 max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
-minimax_models = ["image-01"]
+minimax_models = [
+    "image-01",
+    "image-01-live",
+]
 models = [
+    "image-01",
+    "image-01-live",
     "wan2.6-image",
     "wanx2.1-t2i-turbo",
 ]
@@ -99,9 +109,6 @@ mimo_models = [
 ]
 minimax_models = [
     "MiniMax-M3",
-    "MiniMax-M2.7",
-    "MiniMax-M2.7-highspeed",
-    "MiniMax-M2.5",
 ]
 models = [
     "MiniMax-M3",

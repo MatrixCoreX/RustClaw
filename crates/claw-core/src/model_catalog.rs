@@ -45,6 +45,7 @@ pub struct ModelCatalogEntry {
     pub supports_image_understanding: bool,
     pub supports_audio_transcription: bool,
     pub supports_image_generation: bool,
+    pub supports_image_edit: bool,
     pub supports_audio_generation: bool,
     pub supports_video_generation: bool,
     pub supports_music_generation: bool,
@@ -52,6 +53,8 @@ pub struct ModelCatalogEntry {
     pub dry_run_supported: bool,
     pub active_text_provider: bool,
     pub config_source: Vec<String>,
+    #[serde(default)]
+    pub capability_source: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,17 +104,21 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
                 continue;
             };
             if table.get("model").and_then(toml::Value::as_str).is_some() {
-                provider_tables.insert(provider.trim().to_string(), table);
+                let model = string_field(table, "model");
+                if !model.is_empty() {
+                    provider_tables.insert((provider.trim().to_string(), model), table.clone());
+                }
             }
         }
     }
+    collect_module_targets(inputs, &mut provider_tables);
 
     let entries = provider_tables
         .into_iter()
-        .map(|(provider, table)| {
+        .map(|((provider, _), table)| {
             catalog_entry(
                 &provider,
-                table,
+                &table,
                 inputs,
                 &selected_provider,
                 &selected_model,
@@ -120,10 +127,63 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
         .collect();
 
     ModelCatalog {
-        schema_version: 1,
+        schema_version: 2,
         selected_provider,
         selected_model,
         entries,
+    }
+}
+
+fn collect_module_targets(
+    inputs: &CatalogInputs,
+    targets: &mut BTreeMap<(String, String), toml::map::Map<String, toml::Value>>,
+) {
+    for (config, section_name) in [
+        (&inputs.image, "image_edit"),
+        (&inputs.image, "image_generation"),
+        (&inputs.image, "image_vision"),
+        (&inputs.audio, "audio_synthesize"),
+        (&inputs.audio, "audio_transcribe"),
+        (&inputs.video, "video_generation"),
+        (&inputs.music, "music_generation"),
+    ] {
+        let Some(section) = section(config, section_name) else {
+            continue;
+        };
+        let provider = string_field(section, "default_vendor");
+        let model = string_field(section, "default_model");
+        if provider.is_empty() || model.is_empty() {
+            continue;
+        }
+        let mut target = inputs
+            .config
+            .get("llm")
+            .and_then(toml::Value::as_table)
+            .and_then(|llm| llm.get(&provider))
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(provider_table) = section
+            .get("providers")
+            .and_then(toml::Value::as_table)
+            .and_then(|providers| providers.get(&provider))
+            .and_then(toml::Value::as_table)
+        {
+            for (key, value) in provider_table {
+                if !value.as_str().is_some_and(|value| value.trim().is_empty()) {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        target.insert("model".to_string(), toml::Value::String(model.clone()));
+        let models = provider_models(Some(section), &provider);
+        if !models.is_empty() {
+            target.insert(
+                "models".to_string(),
+                toml::Value::Array(models.into_iter().map(toml::Value::String).collect()),
+            );
+        }
+        targets.insert((provider, model), target);
     }
 }
 
@@ -149,29 +209,47 @@ fn catalog_entry(
     let music_generation_models =
         provider_models(section(&inputs.music, "music_generation"), provider);
 
-    let input_modalities =
-        configured_modalities(llm_table, "input_modalities").unwrap_or_else(|| {
-            fallback_input_modalities(&model, &image_vision_models, &audio_transcribe_models)
-        });
-    let output_modalities = configured_modalities(llm_table, "output_modalities")
-        .unwrap_or_else(|| vec!["text".to_string()]);
+    let text_table = inputs
+        .config
+        .get("llm")
+        .and_then(toml::Value::as_table)
+        .and_then(|llm| llm.get(provider))
+        .and_then(toml::Value::as_table);
+    let supports_text = text_table.is_some_and(|table| {
+        string_field(table, "model") == model
+            || contains_model(&string_list_field(table, "models"), &model)
+    });
+    let supports_image_understanding = contains_model(&image_vision_models, &model);
+    let supports_audio_transcription = contains_model(&audio_transcribe_models, &model);
+    let supports_image_generation = contains_model(&image_generation_models, &model);
+    let supports_image_edit = contains_model(&image_edit_models, &model);
+    let supports_audio_generation = contains_model(&audio_synthesize_models, &model);
+    let supports_video_generation = contains_model(&video_generation_models, &model);
+    let supports_music_generation = contains_model(&music_generation_models, &model);
+    let (input_modalities, output_modalities) = model_modalities(
+        provider,
+        &model,
+        text_table,
+        supports_text,
+        supports_image_understanding,
+        supports_audio_transcription,
+        supports_image_generation,
+        supports_image_edit,
+        supports_audio_generation,
+        supports_video_generation,
+        supports_music_generation,
+    );
     let supports_image_input = has_modality(&input_modalities, "image");
     let supports_video_input = has_modality(&input_modalities, "video");
     let supports_audio_input = has_modality(&input_modalities, "audio");
-    let supports_image_understanding = !image_vision_models.is_empty();
-    let supports_audio_transcription = !audio_transcribe_models.is_empty();
-    let supports_image_generation =
-        !image_generation_models.is_empty() || !image_edit_models.is_empty();
-    let supports_audio_generation = !audio_synthesize_models.is_empty();
-    let supports_video_generation = !video_generation_models.is_empty();
-    let supports_music_generation = !music_generation_models.is_empty();
     let async_required = supports_image_generation
+        || supports_image_edit
         || supports_audio_generation
         || supports_video_generation
         || supports_music_generation;
 
     ModelCatalogEntry {
-        schema_version: 1,
+        schema_version: 2,
         provider: provider.to_string(),
         model: model.clone(),
         models,
@@ -182,13 +260,14 @@ fn catalog_entry(
         credential_state: credential_state(llm_table, provider, &inputs.env_values),
         input_modalities,
         output_modalities,
-        supports_text: true,
+        supports_text,
         supports_image_input,
         supports_video_input,
         supports_audio_input,
         supports_image_understanding,
         supports_audio_transcription,
         supports_image_generation,
+        supports_image_edit,
         supports_audio_generation,
         supports_video_generation,
         supports_music_generation,
@@ -203,7 +282,122 @@ fn catalog_entry(
             "configs/music.toml".to_string(),
             format!("prompts/layers/vendor_patches/{provider}"),
         ],
+        capability_source: capability_sources(provider, &model),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_modalities(
+    provider: &str,
+    model: &str,
+    text_table: Option<&toml::map::Map<String, toml::Value>>,
+    supports_text: bool,
+    supports_image_understanding: bool,
+    supports_audio_transcription: bool,
+    supports_image_generation: bool,
+    supports_image_edit: bool,
+    supports_audio_generation: bool,
+    supports_video_generation: bool,
+    supports_music_generation: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut input = Vec::new();
+    let mut output = Vec::new();
+    if supports_text {
+        push_unique(&mut input, "text");
+        push_unique(&mut output, "text");
+        let is_active_table_model =
+            text_table.is_some_and(|table| string_field(table, "model") == model);
+        if is_active_table_model {
+            for modality in text_table
+                .and_then(|table| configured_modalities(table, "input_modalities"))
+                .unwrap_or_default()
+            {
+                push_unique(&mut input, &modality);
+            }
+            for modality in text_table
+                .and_then(|table| configured_modalities(table, "output_modalities"))
+                .unwrap_or_default()
+            {
+                push_unique(&mut output, &modality);
+            }
+        }
+    }
+    if provider == "minimax" && model == "MiniMax-M3" {
+        for modality in ["text", "image", "video"] {
+            push_unique(&mut input, modality);
+        }
+        push_unique(&mut output, "text");
+    }
+    if supports_image_understanding {
+        push_unique(&mut input, "image");
+        push_unique(&mut input, "text");
+        push_unique(&mut output, "text");
+    }
+    if supports_audio_transcription {
+        push_unique(&mut input, "audio");
+        push_unique(&mut output, "text");
+    }
+    if supports_image_generation {
+        push_unique(&mut input, "text");
+        push_unique(&mut output, "image");
+    }
+    if supports_image_edit {
+        push_unique(&mut input, "text");
+        push_unique(&mut input, "image");
+        push_unique(&mut output, "image");
+    }
+    if supports_audio_generation {
+        push_unique(&mut input, "text");
+        push_unique(&mut output, "audio");
+    }
+    if supports_video_generation {
+        push_unique(&mut input, "text");
+        push_unique(&mut input, "image");
+        push_unique(&mut output, "video");
+    }
+    if supports_music_generation {
+        push_unique(&mut input, "text");
+        if model.contains("cover") {
+            push_unique(&mut input, "audio");
+        }
+        push_unique(&mut output, "audio");
+        push_unique(&mut output, "music");
+    }
+    (input, output)
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|current| current == value) {
+        values.push(value.to_string());
+    }
+}
+
+fn capability_sources(provider: &str, model: &str) -> Vec<String> {
+    let source = match (provider, model) {
+        ("minimax", "MiniMax-M3") => {
+            Some("https://platform.minimaxi.com/docs/guides/text-generation")
+        }
+        ("minimax", model) if model.starts_with("image-") => {
+            Some("https://platform.minimaxi.com/docs/guides/image-generation")
+        }
+        ("minimax", model) if model.starts_with("speech-") => {
+            Some("https://platform.minimaxi.com/docs/api-reference/api-overview")
+        }
+        ("minimax", "MiniMax-H3") => {
+            Some("https://platform.minimaxi.com/docs/guides/video-generation")
+        }
+        ("minimax", model) if model.starts_with("MiniMax-Hailuo-") => {
+            Some("https://platform.minimaxi.com/docs/api-reference/api-overview")
+        }
+        ("minimax", model) if model.starts_with("music-") => {
+            Some("https://platform.minimaxi.com/docs/guides/music-generation")
+        }
+        ("custom", "local-whisper") => Some("https://github.com/ggerganov/whisper.cpp"),
+        _ => None,
+    };
+    source
+        .map(|source| vec![source.to_string()])
+        .unwrap_or_else(|| vec!["runtime_config".to_string()])
 }
 
 fn read_required_toml(path: &Path) -> Result<toml::Value, ModelCatalogError> {
@@ -275,21 +469,6 @@ fn configured_modalities(
     (!values.is_empty()).then_some(values)
 }
 
-fn fallback_input_modalities(
-    model: &str,
-    image_vision_models: &[String],
-    audio_transcribe_models: &[String],
-) -> Vec<String> {
-    let mut modalities = vec!["text".to_string()];
-    if contains_model(image_vision_models, model) {
-        modalities.push("image".to_string());
-    }
-    if contains_model(audio_transcribe_models, model) {
-        modalities.push("audio".to_string());
-    }
-    modalities
-}
-
 fn has_modality(modalities: &[String], target: &str) -> bool {
     modalities.iter().any(|value| value == target)
 }
@@ -337,6 +516,13 @@ fn credential_state(
     provider: &str,
     env_values: &BTreeMap<String, String>,
 ) -> String {
+    let base_url = string_field(table, "base_url");
+    if base_url.starts_with("http://127.0.0.1")
+        || base_url.starts_with("http://localhost")
+        || base_url.starts_with("http://[::1]")
+    {
+        return "not_required_local".to_string();
+    }
     if !string_field(table, "api_key").is_empty() {
         return "configured_inline".to_string();
     }
@@ -438,6 +624,11 @@ fn api_style_token(raw: Option<&str>) -> String {
 fn base_url_kind(base_url: &str) -> String {
     let token = if base_url.contains("api.minimaxi.com") {
         "minimax_official_openai_compat"
+    } else if base_url.starts_with("http://127.0.0.1")
+        || base_url.starts_with("http://localhost")
+        || base_url.starts_with("http://[::1]")
+    {
+        "local_loopback"
     } else if base_url.contains("xiaomimimo.com") {
         "mimo_token_plan_openai_compat"
     } else if base_url.contains("dashscope.aliyuncs.com/compatible-mode") {

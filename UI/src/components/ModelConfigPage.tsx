@@ -38,6 +38,10 @@ export interface ModelConfigPageProps {
   multimodalConfigSaving: boolean;
   multimodalConfigError: string | null;
   multimodalConfigSaveMessage: string | null;
+  multimodalSkillEnabled: Record<string, boolean>;
+  multimodalSkillSwitchSaving: MultimodalKey | null;
+  multimodalSkillSwitchMessage: string | null;
+  canManageMultimodalSkills: boolean;
   hasUnsavedMultimodalChanges: boolean;
   onApplyLlmVendorDraft: (value: string) => void;
   onLlmDraftModelChange: (value: string) => void;
@@ -51,6 +55,7 @@ export interface ModelConfigPageProps {
   onFetchMultimodalConfig: () => unknown | Promise<unknown>;
   onSaveMultimodalConfig: () => unknown | Promise<unknown>;
   onMultimodalDraftChange: (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => void;
+  onMultimodalSkillEnabledChange: (key: MultimodalKey, enabled: boolean) => unknown | Promise<unknown>;
   renderMultimodalModelMeta: (key: MultimodalKey) => ReactNode;
 }
 
@@ -83,6 +88,10 @@ export function ModelConfigPage({
   multimodalConfigSaving,
   multimodalConfigError,
   multimodalConfigSaveMessage,
+  multimodalSkillEnabled,
+  multimodalSkillSwitchSaving,
+  multimodalSkillSwitchMessage,
+  canManageMultimodalSkills,
   hasUnsavedMultimodalChanges,
   onApplyLlmVendorDraft,
   onLlmDraftModelChange,
@@ -96,6 +105,7 @@ export function ModelConfigPage({
   onFetchMultimodalConfig,
   onSaveMultimodalConfig,
   onMultimodalDraftChange,
+  onMultimodalSkillEnabledChange,
   renderMultimodalModelMeta,
 }: ModelConfigPageProps) {
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
@@ -435,6 +445,9 @@ export function ModelConfigPage({
               {multimodalConfigSaveMessage ? (
                 <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{multimodalConfigSaveMessage}</p>
               ) : null}
+              {multimodalSkillSwitchMessage ? (
+                <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{multimodalSkillSwitchMessage}</p>
+              ) : null}
               {hasUnsavedMultimodalChanges ? (
                 <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
                   {t("你有未保存的多模态配置变更。", "You have unsaved multimodal config changes.")}
@@ -450,13 +463,21 @@ export function ModelConfigPage({
                   { key: "image_vision", label: t("图像理解", "Image Vision") },
                 ]}
                 draft={multimodalDraft}
+                enabledByKey={multimodalSkillEnabled}
+                switchSavingKey={multimodalSkillSwitchSaving}
+                canManageSkills={canManageMultimodalSkills}
                 labels={{
                   vendor: t("厂商", "Vendor"),
                   model: t("模型", "Model"),
                   apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
                   apiKey: "API Key",
+                  enabled: t("已开启", "Enabled"),
+                  disabled: t("已关闭", "Disabled"),
+                  switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
+                  switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
                 }}
                 onDraftChange={onMultimodalDraftChange}
+                onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
                 renderMeta={renderMultimodalModelMeta}
               />
 
@@ -471,13 +492,21 @@ export function ModelConfigPage({
                   { key: "audio_transcribe", label: t("语音转写", "Audio STT") },
                 ]}
                 draft={multimodalDraft}
+                enabledByKey={multimodalSkillEnabled}
+                switchSavingKey={multimodalSkillSwitchSaving}
+                canManageSkills={canManageMultimodalSkills}
                 labels={{
                   vendor: t("厂商", "Vendor"),
                   model: t("模型", "Model"),
                   apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
                   apiKey: "API Key",
+                  enabled: t("已开启", "Enabled"),
+                  disabled: t("已关闭", "Disabled"),
+                  switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
+                  switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
                 }}
                 onDraftChange={onMultimodalDraftChange}
+                onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
                 renderMeta={renderMultimodalModelMeta}
               />
 
@@ -486,13 +515,21 @@ export function ModelConfigPage({
                 description={t("视频生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/video.toml）。", "Configure vendor, model, base URL and API key for video generation. Saved to configs/video.toml.")}
                 entries={[{ key: "video_generation", label: t("视频生成", "Video Generate") }]}
                 draft={multimodalDraft}
+                enabledByKey={multimodalSkillEnabled}
+                switchSavingKey={multimodalSkillSwitchSaving}
+                canManageSkills={canManageMultimodalSkills}
                 labels={{
                   vendor: t("厂商", "Vendor"),
                   model: t("模型", "Model"),
                   apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
                   apiKey: "API Key",
+                  enabled: t("已开启", "Enabled"),
+                  disabled: t("已关闭", "Disabled"),
+                  switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
+                  switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
                 }}
                 onDraftChange={onMultimodalDraftChange}
+                onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
                 renderMeta={renderMultimodalModelMeta}
               />
 
@@ -501,13 +538,21 @@ export function ModelConfigPage({
                 description={t("音乐生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/music.toml）。", "Configure vendor, model, base URL and API key for music generation. Saved to configs/music.toml.")}
                 entries={[{ key: "music_generation", label: t("音乐生成", "Music Generate") }]}
                 draft={multimodalDraft}
+                enabledByKey={multimodalSkillEnabled}
+                switchSavingKey={multimodalSkillSwitchSaving}
+                canManageSkills={canManageMultimodalSkills}
                 labels={{
                   vendor: t("厂商", "Vendor"),
                   model: t("模型", "Model"),
                   apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
                   apiKey: "API Key",
+                  enabled: t("已开启", "Enabled"),
+                  disabled: t("已关闭", "Disabled"),
+                  switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
+                  switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
                 }}
                 onDraftChange={onMultimodalDraftChange}
+                onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
                 renderMeta={renderMultimodalModelMeta}
               />
             </div>

@@ -439,6 +439,9 @@ export default function App() {
     multimodalDraft,
     multimodalConfigSaving,
     multimodalConfigSaveMessage,
+    multimodalSkillEnabled,
+    multimodalSkillSwitchSaving,
+    multimodalSkillSwitchMessage,
     modelsAdvancedOpen,
     modelCatalogData,
     modelCatalogLoading,
@@ -460,6 +463,7 @@ export default function App() {
     fetchMultimodalConfig,
     fetchModelCatalog,
     saveMultimodalConfig,
+    setMultimodalSkillEnabledNow,
     setMultimodalDraftKey,
     applyLlmVendorDraft,
     clearLlmConfigError,
@@ -1833,6 +1837,10 @@ export default function App() {
               multimodalConfigSaving={multimodalConfigSaving}
               multimodalConfigError={multimodalConfigError}
               multimodalConfigSaveMessage={multimodalConfigSaveMessage}
+              multimodalSkillEnabled={multimodalSkillEnabled}
+              multimodalSkillSwitchSaving={multimodalSkillSwitchSaving}
+              multimodalSkillSwitchMessage={multimodalSkillSwitchMessage}
+              canManageMultimodalSkills={isAdminIdentity}
               hasUnsavedMultimodalChanges={hasUnsavedMultimodalChanges}
               onApplyLlmVendorDraft={applyLlmVendorDraft}
               onLlmDraftModelChange={setLlmDraftModel}
@@ -1846,6 +1854,7 @@ export default function App() {
               onFetchMultimodalConfig={fetchMultimodalConfig}
               onSaveMultimodalConfig={saveMultimodalConfig}
               onMultimodalDraftChange={setMultimodalDraftKey}
+              onMultimodalSkillEnabledChange={setMultimodalSkillEnabledNow}
               renderMultimodalModelMeta={renderMultimodalModelMeta}
             />
           ) : null}
