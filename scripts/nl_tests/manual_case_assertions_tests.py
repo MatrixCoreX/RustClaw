@@ -139,7 +139,12 @@ def write_result(root: Path, name: str, value: dict) -> Path:
     return path
 
 
-def row_for(path: Path, tags: str, expect: str = "contains:machine") -> dict:
+def row_for(
+    path: Path,
+    tags: str,
+    expect: str = "contains:machine",
+    harness_evidence_path: Path | None = None,
+) -> dict:
     return build_summary_row(
         source_line=1,
         case_name="fixture",
@@ -152,6 +157,7 @@ def row_for(path: Path, tags: str, expect: str = "contains:machine") -> dict:
         ended_at=12,
         expectation_spec=expect,
         mode="ask",
+        harness_evidence_path=str(harness_evidence_path or ""),
     )
 
 
@@ -289,6 +295,50 @@ def main() -> int:
             "failed",
         )
         assert allowed_failure["assertion"] == "pass"
+
+        failed_with_error_text = result_with_steps([capability_step()])
+        failed_with_error_text["data"]["status"] = "failed"
+        failed_with_error_text["data"]["error_text"] = "local_process_runtime_timeout"
+        timeout_result = write_result(root, "timeout-result.json", failed_with_error_text)
+        timeout_row = build_summary_row(
+            source_line=1,
+            case_name="timeout",
+            tags="requires_tool_call=true;allow_terminal_failure",
+            prompt="fixture",
+            task_id="task-timeout",
+            final_json_path=str(timeout_result),
+            effective_status="failed",
+            started_at=10,
+            ended_at=12,
+            expectation_spec="contains:local_process_runtime_timeout",
+            mode="ask",
+        )
+        assert timeout_row["assertion"] == "pass"
+
+        health_evidence = write_result(
+            root,
+            "health-evidence.json",
+            {
+                "status": "pass",
+                "health_ok": True,
+                "task_status": "running",
+                "checkpoint_id": "checkpoint-1",
+                "async_job_id": "local_process:job-1",
+                "elapsed_ms": 10,
+            },
+        )
+        health_row = row_for(
+            capability,
+            "requires_tool_call=true;concurrent_health_probe=true",
+            harness_evidence_path=health_evidence,
+        )
+        assert health_row["assertion"] == "pass"
+        assert health_row["harness_evidence"]["async_job_id"] == "local_process:job-1"
+        missing_health_row = row_for(
+            capability,
+            "requires_tool_call=true;concurrent_health_probe=true",
+        )
+        assert missing_health_row["assertion"] == "fail"
 
         allowed_success = row_for_status(
             direct,

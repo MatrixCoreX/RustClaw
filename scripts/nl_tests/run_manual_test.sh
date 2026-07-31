@@ -616,6 +616,7 @@ poll_until_terminal() {
   local task_id="$1"
   local out_file="$2"
   local llm_offset_file="${3:-}"
+  local health_probe_file="${4:-}"
   local waited=0
   local last_status=""
 
@@ -634,6 +635,19 @@ poll_until_terminal() {
       return 1
     fi
     rm -f "$err_file"
+    if [[ -n "$health_probe_file" && ! -f "$health_probe_file" ]]; then
+      local probe_rc=0
+      APP_USER_KEY="$USER_KEY_VALUE" \
+        python3 "${SCRIPT_DIR}/concurrent_health_probe.py" \
+          --task-json "$out_file" \
+          --output "$health_probe_file" \
+          --base-url "$BASE_URL_VALUE" || probe_rc=$?
+      if [[ "$probe_rc" -eq 0 ]]; then
+        echo "  [health_probe] passed during active async checkpoint"
+      elif [[ "$probe_rc" -ne 3 ]]; then
+        echo "  [health_probe] failed during active async checkpoint"
+      fi
+    fi
     if [[ -n "$llm_offset_file" ]]; then
       print_new_llm_trace "$task_id" "$llm_offset_file"
     fi
@@ -670,10 +684,11 @@ append_summary_jsonl() {
   local ended_at="${9:-0}"
   local expect_substr="${10:-}"
   local mode="${11:-ask}"
+  local harness_evidence_json="${12:-}"
   python3 "${SCRIPT_DIR}/manual_case_assertions.py" \
     "$source_line" "$case_name" "$tags" "$prompt" "$task_id" \
     "$final_json" "$effective_status" "$started_at" "$ended_at" \
-    "$expect_substr" "$mode" \
+    "$expect_substr" "$mode" "$harness_evidence_json" \
     >> "$SUMMARY_JSONL"
 }
 
@@ -719,7 +734,7 @@ run_one_case() {
   local chat_id="$7"
   local confirm_reply="${8:-}"
   local safe_name case_dir submit_file final_file meta_file task_id raw rc llm_offset_file
-  local started_at ended_at mode submit_payload skill_args
+  local started_at ended_at mode submit_payload skill_args health_probe_file
 
   CURRENT_SOURCE_LINE="$source_line"
   safe_name="$(sanitize_name "$case_name")"
@@ -733,6 +748,12 @@ run_one_case() {
   started_at="$(date +%s)"
 
   mode="ask"
+  health_probe_file=""
+  case ",${tags//;/,}," in
+    *",concurrent_health_probe=true,"*)
+      health_probe_file="${case_dir}/health_probe.json"
+      ;;
+  esac
 
   echo
   if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
@@ -787,7 +808,8 @@ run_one_case() {
     # internally re-enables `set -e`, so a plain `set +e ... set -e`
     # wrapper would not work — that's why we use `if ! ...`.)
     local poll_failed=0
-    if ! poll_until_terminal "$task_id" "$final_file" "$llm_offset_file"; then
+    if ! poll_until_terminal \
+      "$task_id" "$final_file" "$llm_offset_file" "$health_probe_file"; then
       poll_failed=1
     fi
     if (( poll_failed != 0 )); then
@@ -880,7 +902,10 @@ run_one_case() {
   printf 'ordinal=%s\nsource_line=%s\ncase_name=%s\ntags=%s\nmode=%s\nchat_id=%s\ntask_id=%s\nprompt=%s\nconfirm=%s\nexpect=%s\nstarted_at=%s\nended_at=%s\n' \
     "$ordinal" "$source_line" "$case_name" "$tags" "$mode" "$CHAT_ID" "$task_id" "$prompt" "$confirm_reply" "$expect_substr" "$started_at" "$ended_at" > "$meta_file"
 
-  append_summary_jsonl "$source_line" "$case_name" "$tags" "$prompt" "$task_id" "$final_file" "$effective_status" "$started_at" "$ended_at" "$expect_substr" "$mode"
+  append_summary_jsonl \
+    "$source_line" "$case_name" "$tags" "$prompt" "$task_id" "$final_file" \
+    "$effective_status" "$started_at" "$ended_at" "$expect_substr" "$mode" \
+    "$health_probe_file"
 
   # A3: 维护连续坏 case 计数（用于 --fail-fast）
   local final_status assertion_status

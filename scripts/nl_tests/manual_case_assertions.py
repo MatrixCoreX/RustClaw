@@ -450,6 +450,7 @@ def structural_assertions(
     tags: str,
     text: str,
     result: dict[str, Any],
+    harness_evidence: dict[str, Any],
 ) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
     calls = actual_call_steps(result)
@@ -536,6 +537,31 @@ def structural_assertions(
             }
         )
 
+    if boolean_tag(tags, "concurrent_health_probe") is True:
+        health_ok = harness_evidence.get("health_ok") is True
+        task_status = str(harness_evidence.get("task_status") or "")
+        checkpoint_id = str(harness_evidence.get("checkpoint_id") or "")
+        async_job_id = str(harness_evidence.get("async_job_id") or "")
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "concurrent_health_probe",
+                "expected": True,
+                "health_ok": health_ok,
+                "task_status": task_status,
+                "checkpoint_id": checkpoint_id,
+                "async_job_id": async_job_id,
+                "elapsed_ms": harness_evidence.get("elapsed_ms"),
+                "ok": (
+                    harness_evidence.get("status") == "pass"
+                    and health_ok
+                    and task_status == "running"
+                    and bool(checkpoint_id)
+                    and bool(async_job_id)
+                ),
+            }
+        )
+
     required_final_fields = token_tags(tags, "final_field")
     for required_field in required_final_fields:
         details.append(
@@ -583,9 +609,10 @@ def evaluate_expectations(
     final_status: str,
     text: str,
     result: dict[str, Any],
+    harness_evidence: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
     spec_text = (spec_text or "").strip()
-    details = structural_assertions(tags, text, result)
+    details = structural_assertions(tags, text, result, harness_evidence)
     has_assertions = bool(spec_text or details)
     if not has_assertions:
         return "-", []
@@ -684,6 +711,7 @@ def build_summary_row(
     ended_at: int,
     expectation_spec: str,
     mode: str,
+    harness_evidence_path: str = "",
 ) -> dict[str, Any]:
     path = Path(final_json_path) if final_json_path else None
     if path is not None and path.is_file():
@@ -693,14 +721,30 @@ def build_summary_row(
     data = obj.get("data") or {}
     result = data.get("result_json") or {}
     text = str(result.get("text") or "")
+    messages = result.get("messages")
+    visible_parts = [text, str(data.get("error_text") or "")]
+    if isinstance(messages, list):
+        visible_parts.extend(
+            str(item.get("text") or "")
+            for item in messages
+            if isinstance(item, dict)
+        )
+    observable_text = "\n".join(part for part in visible_parts if part)
+    evidence_path = Path(harness_evidence_path) if harness_evidence_path else None
+    harness_evidence: dict[str, Any] = {}
+    if evidence_path is not None and evidence_path.is_file():
+        loaded_evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        if isinstance(loaded_evidence, dict):
+            harness_evidence = loaded_evidence
     final_status = effective_status.strip() or str(data.get("status") or "")
     assertion, assertion_details = evaluate_expectations(
         expectation_spec,
         tags,
         obj,
         final_status,
-        text,
+        observable_text,
         result,
+        harness_evidence,
     )
 
     return {
@@ -712,8 +756,9 @@ def build_summary_row(
         "task_id": task_id,
         "status": final_status,
         "text": text or None,
-        "messages": result.get("messages"),
+        "messages": messages,
         "error_text": data.get("error_text"),
+        "harness_evidence": harness_evidence or None,
         "started_at": started_at,
         "ended_at": ended_at,
         "wall_seconds": max(0, ended_at - started_at) if ended_at and started_at else None,
@@ -725,10 +770,11 @@ def build_summary_row(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 12:
+    if len(argv) not in {12, 13}:
         print(
             "usage: manual_case_assertions.py SOURCE_LINE CASE_NAME TAGS PROMPT "
-            "TASK_ID FINAL_JSON STATUS STARTED_AT ENDED_AT EXPECT MODE",
+            "TASK_ID FINAL_JSON STATUS STARTED_AT ENDED_AT EXPECT MODE "
+            "[HARNESS_EVIDENCE_JSON]",
             file=sys.stderr,
         )
         return 2
@@ -744,6 +790,7 @@ def main(argv: list[str]) -> int:
         ended_at=int(argv[9] or 0),
         expectation_spec=argv[10],
         mode=argv[11],
+        harness_evidence_path=argv[12] if len(argv) == 13 else "",
     )
     print(json.dumps(row, ensure_ascii=False))
     return 0
