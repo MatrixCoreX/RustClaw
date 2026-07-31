@@ -74,6 +74,45 @@ fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
 }
 
 #[test]
+fn daemon_content_projections_have_stable_distinct_idempotency_keys() {
+    let state = AppState::test_default_with_fixture_provider();
+    let payload = payload();
+    let task = task(&payload);
+    let mut keys = Vec::new();
+    for content in [
+        ChannelTaskDeliveryContent::Full,
+        ChannelTaskDeliveryContent::TextOnly,
+        ChannelTaskDeliveryContent::MediaOnly,
+    ] {
+        let first = build_daemon_delivery_envelope(
+            &state,
+            &task,
+            &payload,
+            "result",
+            ChannelDeliverySource::ImmediateDaemon,
+            content,
+            None,
+        )
+        .expect("build daemon envelope");
+        let second = build_daemon_delivery_envelope(
+            &state,
+            &task,
+            &payload,
+            "result",
+            ChannelDeliverySource::BackgroundCompletion,
+            content,
+            None,
+        )
+        .expect("build replay envelope");
+        assert_eq!(first.idempotency_key, second.idempotency_key);
+        keys.push(first.idempotency_key);
+    }
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(keys[0], keys[2]);
+    assert_ne!(keys[1], keys[2]);
+}
+
+#[test]
 fn feishu_and_lark_receipts_use_distinct_provider_namespaces() {
     let state = AppState::test_default_with_fixture_provider();
     let mut feishu_payload = payload();

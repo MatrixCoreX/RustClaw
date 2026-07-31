@@ -3,9 +3,6 @@ use super::{
     WA_I18N_BIND_REQUIRED_KEY,
 };
 use claw_core::channel_commands::ChannelCommandCatalog;
-use claw_core::channel_delivery_tokens::{
-    legacy_delivery_tokens, strip_legacy_local_delivery_lines, LegacyDeliveryKind,
-};
 use claw_core::channel_i18n::text_from_path;
 use std::path::Path;
 
@@ -35,39 +32,6 @@ fn whatsapp_cloud_media_specs_reject_unsupported_formats_and_oversize_files() {
             .starts_with("whatsapp_cloud_video_format_unsupported:")
     );
     std::fs::remove_dir_all(root).expect("remove media limit dir");
-}
-
-#[test]
-fn outbound_media_tokens_preserve_text_and_extract_image_and_video() {
-    let root = std::env::temp_dir().join(format!(
-        "whatsapp-outbound-media-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).expect("create fixture dir");
-    let image = root.join("image.jpg");
-    let video = root.join("video.mp4");
-    std::fs::write(&image, b"image").expect("write image fixture");
-    std::fs::write(&video, b"video").expect("write video fixture");
-    let answer = format!(
-        "download complete\nIMAGE_FILE:{}\nVIDEO_FILE:{}",
-        image.display(),
-        video.display()
-    );
-
-    assert_eq!(
-        strip_legacy_local_delivery_lines(&answer),
-        "download complete"
-    );
-    let tokens = legacy_delivery_tokens(&answer);
-    assert_eq!(tokens[0].kind, LegacyDeliveryKind::Image);
-    assert_eq!(tokens[0].reference, image.to_string_lossy());
-    assert_eq!(tokens[1].kind, LegacyDeliveryKind::Video);
-    assert_eq!(tokens[1].reference, video.to_string_lossy());
-    std::fs::remove_dir_all(root).expect("remove fixture dir");
 }
 
 fn default_catalog() -> ChannelCommandCatalog {

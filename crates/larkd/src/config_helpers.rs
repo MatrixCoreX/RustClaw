@@ -25,10 +25,6 @@ pub(super) fn default_task_delivery_timeout() -> u64 {
     600
 }
 
-pub(super) fn default_text_chunk_chars() -> usize {
-    4000
-}
-
 pub(super) fn default_lark_language() -> String {
     "en-US".to_string()
 }

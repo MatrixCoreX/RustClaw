@@ -604,42 +604,6 @@ async function queryTask(taskId, identity) {
   return parsed.data;
 }
 
-function taskSuccessMessages(task) {
-  const messages = task.result_json?.messages;
-  if (Array.isArray(messages)) {
-    const out = messages
-      .filter((v) => typeof v === "string")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
-    if (out.length > 0) return out;
-  }
-  const fallback = String(task.result_json?.text || "").trim();
-  if (fallback) return [fallback];
-  return taskSuccessArtifacts(task).length > 0 ? [] : ["done"];
-}
-
-function taskSuccessArtifacts(task) {
-  const artifacts = task?.result_json?.artifacts;
-  if (!Array.isArray(artifacts)) return [];
-  return artifacts.filter((artifact) => {
-    return (
-      artifact &&
-      typeof artifact === "object" &&
-      typeof artifact.download_url === "string" &&
-      artifact.download_url.trim().length > 0
-    );
-  });
-}
-
-function taskArtifactDeliveryEnabled(task) {
-  const results = task?.result_json?.task_journal?.trace?.capability_results;
-  if (!Array.isArray(results)) return true;
-  const flags = results
-    .map((result) => result?.data?.extra?.delivery?.deliver_to_user)
-    .filter((value) => typeof value === "boolean");
-  return flags.length === 0 || flags.some(Boolean);
-}
-
 async function pollTaskResult(taskId, waitSeconds, identity) {
   const pollMs = 500;
   const rounds = Math.max(1, Math.floor((waitSeconds * 1000) / pollMs));
@@ -649,157 +613,27 @@ async function pollTaskResult(taskId, waitSeconds, identity) {
       await new Promise((r) => setTimeout(r, pollMs));
       continue;
     }
-    if (task.status === "succeeded") {
-      return task;
-    }
-    throw new Error(task.error_text || `task status=${task.status}`);
+    return task;
   }
   throw new Error("task_result_wait_timeout");
 }
 
-function outboundLimitForArtifact(artifact) {
-  const kind = String(artifact?.kind || "").toLowerCase();
-  const mime = String(artifact?.mime_type || "").toLowerCase();
-  if (kind === "image" || mime.startsWith("image/")) return cfg.maxOutboundImageBytes;
-  if (kind === "video" || mime.startsWith("video/")) return cfg.maxOutboundVideoBytes;
-  if (kind === "audio" || mime.startsWith("audio/")) return cfg.maxOutboundAudioBytes;
-  return cfg.maxOutboundFileBytes;
-}
-
-function taskArtifactDownloadUrl(taskId, artifact) {
-  const raw = String(artifact?.download_url || "").trim();
-  if (!raw.startsWith("/")) {
-    throw new Error("WhatsApp Web 附件投送失败：任务附件地址无效");
-  }
-  const base = new URL(cfg.clawdBaseUrl);
-  const resolved = new URL(raw, base);
-  const expectedPrefix = `/v1/tasks/${encodeURIComponent(String(taskId))}/artifacts/`;
-  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(expectedPrefix)) {
-    throw new Error("WhatsApp Web 附件投送失败：任务附件地址不属于当前任务");
-  }
-  return resolved.toString();
-}
-
-function safeArtifactFilename(artifact) {
-  const raw = path.basename(String(artifact?.filename || "attachment.bin").trim());
-  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "");
-  return safe || "attachment.bin";
-}
-
-async function materializeTaskArtifact(taskId, artifact, identity) {
-  const maxBytes = outboundLimitForArtifact(artifact);
-  const declaredBytes = Number(artifact?.size_bytes || 0);
-  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
-    validateOutboundFileSize(declaredBytes, String(artifact?.kind || "文件"), maxBytes);
-  }
+async function requestTaskDelivery(taskId, identity, background = false) {
   const userKey = String(identity?.user_key || "").trim();
-  if (!userKey) throw new Error("WhatsApp Web 附件投送失败：缺少已绑定的访问凭据");
-  const response = await fetch(taskArtifactDownloadUrl(taskId, artifact), {
-    headers: { "x-agent-key": userKey },
+  if (!userKey) throw new Error("channel_task_delivery_bound_key_missing");
+  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks/${taskId}/delivery`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-agent-key": userKey },
+    body: JSON.stringify({
+      schema_version: 1,
+      source: background ? "background_completion" : "immediate_daemon",
+    }),
   });
-  if (!response.ok) {
-    throw new Error(`WhatsApp Web 附件读取失败（HTTP ${response.status}）`);
+  const body = await resp.json();
+  if (!resp.ok || !body.ok || !body.data?.accepted) {
+    throw new Error(body.data?.error_code || body.error || "channel_task_delivery_not_accepted");
   }
-  const contentLength = Number(response.headers?.get?.("content-length") || 0);
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    validateOutboundFileSize(contentLength, String(artifact?.kind || "文件"), maxBytes);
-  }
-  const body = Buffer.from(await response.arrayBuffer());
-  validateOutboundFileSize(body.length, String(artifact?.kind || "文件"), maxBytes);
-  const artifactId = String(artifact?.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9._-]/g, "_");
-  const outputPath = path.join(
-    cfg.artifactOutboxDir,
-    String(taskId).replace(/[^a-zA-Z0-9._-]/g, "_"),
-    artifactId,
-    safeArtifactFilename(artifact)
-  );
-  ensureParentDir(outputPath);
-  fs.writeFileSync(outputPath, body);
-  return outputPath;
-}
-
-function validateOutboundFileSize(size, mediaLabel, maxBytes) {
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：附件为空`);
-  }
-  if (Number.isFinite(maxBytes) && maxBytes > 0 && size > maxBytes) {
-    const actualMiB = (size / 1024 / 1024).toFixed(2);
-    const maxMiB = (maxBytes / 1024 / 1024).toFixed(0);
-    throw new Error(
-      `WhatsApp Web ${mediaLabel}过大：${actualMiB} MiB，本地安全上限为 ${maxMiB} MiB。请压缩后重试，或改为在 UI 中下载原文件。`
-    );
-  }
-  return size;
-}
-
-async function sendTaskArtifact(jid, taskId, artifact, identity) {
-  const localPath = await materializeTaskArtifact(taskId, artifact, identity);
-  const kind = String(artifact?.kind || "").toLowerCase();
-  const mime = String(artifact?.mime_type || "application/octet-stream").toLowerCase();
-  try {
-    validateOutboundFile(localPath, kind || "文件", outboundLimitForArtifact(artifact));
-    if (kind === "image" || mime.startsWith("image/")) {
-      await sendWaMessage(jid, { image: { url: localPath }, mimetype: mime });
-    } else if (kind === "video" || mime.startsWith("video/")) {
-      await sendWaMessage(jid, { video: { url: localPath }, mimetype: mime });
-    } else if (kind === "audio" || mime.startsWith("audio/")) {
-      await sendWaMessage(jid, { audio: { url: localPath }, mimetype: mime, ptt: false });
-    } else {
-      await sendWaMessage(jid, {
-        document: { url: localPath },
-        fileName: safeArtifactFilename(artifact),
-        mimetype: mime,
-      });
-    }
-  } finally {
-    fs.rmSync(localPath, { force: true });
-  }
-}
-
-function stripStructuredArtifactTokens(message, artifacts) {
-  const deliveredNames = new Set(artifacts.map(safeArtifactFilename));
-  return String(message || "")
-    .split(/\r?\n/)
-    .filter((line) => {
-      const trimmed = line.trim();
-      for (const prefix of ["IMAGE_FILE:", "VIDEO_FILE:", "FILE:", "VOICE_FILE:"]) {
-        if (!trimmed.startsWith(prefix)) continue;
-        const rawPath = trimmed
-          .slice(prefix.length)
-          .trim()
-          .replace(/^['"`]+|['"`]+$/g, "");
-        const normalized = path
-          .basename(rawPath)
-          .replace(/[^a-zA-Z0-9._-]/g, "_")
-          .replace(/^\.+/, "");
-        return !deliveredNames.has(normalized);
-      }
-      return true;
-    })
-    .join("\n")
-    .trim();
-}
-
-async function sendTaskResult(jid, taskId, task, identity) {
-  const messages = taskSuccessMessages(task);
-  const artifacts = taskArtifactDeliveryEnabled(task) ? taskSuccessArtifacts(task) : [];
-  for (const artifact of artifacts) {
-    await sendTaskArtifact(jid, taskId, artifact, identity);
-  }
-  for (const answer of messages) {
-    const remaining = stripStructuredArtifactTokens(answer, artifacts);
-    if (remaining) await sendAnswer(jid, remaining);
-  }
-}
-
-function extractTokenPaths(answer, prefix) {
-  return answer
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith(prefix))
-    .map((line) => line.slice(prefix.length).trim().replace(/^['"`]+|['"`]+$/g, ""))
-    .filter((p) => p.length > 0)
-    .map((p) => (path.isAbsolute(p) ? p : path.resolve(cfg.workspaceRoot, p)));
+  return body.data;
 }
 
 function validateOutboundFile(filePath, mediaLabel, maxBytes) {
@@ -825,64 +659,42 @@ function validateOutboundFile(filePath, mediaLabel, maxBytes) {
   return stat.size;
 }
 
-function stripTokens(answer) {
-  return answer
-    .split(/\r?\n/)
-    .filter((line) => {
-      const t = line.trimStart();
-      return !(
-        t.startsWith("IMAGE_FILE:") ||
-        t.startsWith("VIDEO_FILE:") ||
-        t.startsWith("FILE:") ||
-        t.startsWith("VOICE_FILE:")
-      );
-    })
-    .join("\n")
-    .trim();
-}
-
-async function sendAnswer(jid, answer) {
-  const text = stripTokens(answer);
-  const imagePaths = extractTokenPaths(answer, "IMAGE_FILE:");
-  const videoPaths = extractTokenPaths(answer, "VIDEO_FILE:");
-  const filePaths = extractTokenPaths(answer, "FILE:");
-  const voicePaths = extractTokenPaths(answer, "VOICE_FILE:");
-
+async function sendStructuredResult(jid, text, media) {
+  const messageIds = [];
+  const recordMessage = (sent) => {
+    const messageId = String(sent?.key?.id || "").trim();
+    if (messageId) messageIds.push(messageId);
+  };
   if (text) {
-    await sendWaMessage(jid, { text });
+    recordMessage(await sendWaMessage(jid, { text }));
   }
-  for (const p of imagePaths) {
-    validateOutboundFile(p, "图片", cfg.maxOutboundImageBytes);
-    await sendWaMessage(jid, { image: { url: p } });
+  for (const item of media) {
+    const kind = String(item?.kind || "").trim();
+    const filePath = String(item?.path || "").trim();
+    if (kind === "image") {
+      validateOutboundFile(filePath, "图片", cfg.maxOutboundImageBytes);
+      recordMessage(await sendWaMessage(jid, { image: { url: filePath } }));
+    } else if (kind === "video") {
+      validateOutboundFile(filePath, "视频", cfg.maxOutboundVideoBytes);
+      recordMessage(await sendWaMessage(jid, { video: { url: filePath } }));
+    } else if (kind === "file") {
+      validateOutboundFile(filePath, "文件", cfg.maxOutboundFileBytes);
+      recordMessage(await sendWaMessage(jid, {
+        document: { url: filePath },
+        fileName: path.basename(filePath),
+      }));
+    } else if (kind === "audio") {
+      validateOutboundFile(filePath, "音频", cfg.maxOutboundAudioBytes);
+      recordMessage(await sendWaMessage(jid, {
+        audio: { url: filePath },
+        ptt: true,
+        mimetype: "audio/ogg; codecs=opus",
+      }));
+    } else {
+      throw new Error("structured_result_media_kind_invalid");
+    }
   }
-  for (const p of videoPaths) {
-    validateOutboundFile(p, "视频", cfg.maxOutboundVideoBytes);
-    await sendWaMessage(jid, { video: { url: p } });
-  }
-  for (const p of filePaths) {
-    validateOutboundFile(p, "文件", cfg.maxOutboundFileBytes);
-    await sendWaMessage(jid, {
-      document: { url: p },
-      fileName: path.basename(p),
-    });
-  }
-  for (const p of voicePaths) {
-    validateOutboundFile(p, "音频", cfg.maxOutboundAudioBytes);
-    await sendWaMessage(jid, {
-      audio: { url: p },
-      ptt: true,
-      mimetype: "audio/ogg; codecs=opus",
-    });
-  }
-  if (
-    !text &&
-    imagePaths.length === 0 &&
-    videoPaths.length === 0 &&
-    filePaths.length === 0 &&
-    voicePaths.length === 0
-  ) {
-    await sendWaMessage(jid, { text: answer });
-  }
+  return messageIds;
 }
 
 async function runTaskFlow(
@@ -912,28 +724,36 @@ async function runExistingTaskFlow(
   quickWait = cfg.quickResultWaitSeconds
 ) {
   try {
-    const task = await pollTaskResult(taskId, quickWait, identity);
-    await sendTaskResult(jid, taskId, task, identity);
+    await pollTaskResult(taskId, quickWait, identity);
+    await requestTaskDelivery(taskId, identity, false);
   } catch (err) {
     if (String(err.message || err) === "task_result_wait_timeout") {
       setTimeout(async () => {
         try {
-          const task = await pollTaskResult(taskId, 600, identity);
-          await sendTaskResult(jid, taskId, task, identity);
-        } catch (e) {
+          await pollTaskResult(taskId, 600, identity);
+          await requestTaskDelivery(taskId, identity, true);
+        } catch {
+          console.error("background task delivery failed", {
+            error_code: "channel_task_delivery_failed",
+          });
           await sendWaMessage(jid, {
-            text: tr("whatsapp_web.msg.process_failed", "Processing failed: {error}", {
-              error: String(e.message || e),
-            }),
+            text: tr(
+              "whatsapp_web.msg.process_failed_safe",
+              ""
+            ),
           });
         }
       }, 200);
       return;
     }
+    console.error("task delivery failed", {
+      error_code: "channel_task_delivery_failed",
+    });
     await sendWaMessage(jid, {
-      text: tr("whatsapp_web.msg.process_failed", "Processing failed: {error}", {
-        error: String(err.message || err),
-      }),
+      text: tr(
+        "whatsapp_web.msg.process_failed_safe",
+        ""
+      ),
     });
   }
 }
@@ -1284,6 +1104,33 @@ function startHttpServer() {
     }
   });
 
+  app.post("/v1/send-result", async (req, res) => {
+    try {
+      const schemaVersion = Number(req.body?.schema_version || 0);
+      const to = String(req.body?.to || "").trim();
+      const text = String(req.body?.text || "").trim();
+      const media = Array.isArray(req.body?.media) ? req.body.media : [];
+      const deliverySource = normalizeDeliverySource(req.body?.delivery_source);
+      if (schemaVersion !== 1 || !to || (!text && media.length === 0)) {
+        return res.status(400).json(adapterError("invalid_request", "send_result", "invalid_structured_result"));
+      }
+      if (!deliverySourceAllowed(deliverySource, cfg.allowProactiveSend)) {
+        return res
+          .status(403)
+          .json(adapterError("proactive_send_disabled", "send_result", deliverySource));
+      }
+      if (!sock) {
+        return res.status(503).json(adapterError("socket_not_ready", "send_result", "socket_not_ready", true));
+      }
+      const messageIds = await sendStructuredResult(to, text, media);
+      return res.json({ ok: true, message_ids: messageIds });
+    } catch (err) {
+      const material = String(err?.message || err);
+      log.error({ diagnostic_id: adapterDiagnosticId("send_result", material) }, "wa-web result send failed");
+      return res.status(500).json(adapterError("adapter_send_failed", "send_result", material, true));
+    }
+  });
+
   app.post("/v1/logout", async (_req, res) => {
     try {
       if (sock) {
@@ -1352,7 +1199,6 @@ module.exports = {
   buildSubmitTaskBody,
   canonicalUserJid,
   extractBindKeyCandidate,
-  extractTokenPaths,
   extractTextContent,
   isGroupJid,
   isLoopbackHost,
@@ -1367,15 +1213,7 @@ module.exports = {
   resolveIdentity,
   stableUserId,
   submitTask,
-  stripTokens,
-  stripStructuredArtifactTokens,
-  taskArtifactDeliveryEnabled,
-  taskArtifactDownloadUrl,
-  taskSuccessArtifacts,
-  taskSuccessMessages,
   updateLoginState,
-  materializeTaskArtifact,
   validateOutboundFile,
-  validateOutboundFileSize,
   shouldProcessUpsertMessage,
 };

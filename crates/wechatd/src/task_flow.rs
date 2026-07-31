@@ -1,13 +1,11 @@
 use super::*;
 
-const WECHAT_TASK_DONE_FALLBACK_TEXT_KEY: &str = "wechat.msg.task_done_fallback_text";
 const WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "wechat.msg.task_failed_fallback_error";
 const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout_retry_later";
 const WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY: &str = "wechat.msg.skill_progress_media_precheck";
 const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
 const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
 const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
-const WECHAT_AUDIO_FILE_FALLBACK_KEY: &str = "wechat.msg.audio_sent_as_file";
 
 #[derive(Clone)]
 pub(super) struct WechatAccountSnapshot {
@@ -87,38 +85,6 @@ pub(super) async fn pin_inbound_task_context(
         typing_ticket: (!typing_ticket.trim().is_empty()).then_some(typing_ticket),
         run_id: wechat_ilink::new_wechat_client_id("run"),
     })
-}
-
-pub(super) fn task_success_messages(
-    task: &TaskQueryResponse,
-    config: &WechatSection,
-) -> Vec<String> {
-    if let Some(messages) = task
-        .result_json
-        .as_ref()
-        .and_then(|v| v.get("messages"))
-        .and_then(|v| v.as_array())
-    {
-        let parts: Vec<String> = messages
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        if !parts.is_empty() {
-            return parts;
-        }
-    }
-    vec![task
-        .result_json
-        .as_ref()
-        .and_then(|v| v.get("text"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| wechat_t(config, WECHAT_TASK_DONE_FALLBACK_TEXT_KEY))]
 }
 
 pub(super) fn skill_progress_message(
@@ -268,173 +234,6 @@ pub(super) async fn send_generating_message_state(
     )
     .await
     .map(|_| ())
-}
-
-pub(super) async fn deliver_wechat_clawd_reply(
-    state: &State,
-    context: &PinnedWechatTaskContext,
-    reply_text: &str,
-) {
-    let from_user_id = context.scope.peer_id();
-    let context_token = context.context_token.as_str();
-    let token = context.account.token.as_str();
-    let base_url = context.account.base_url.as_str();
-    let timeout_ms = state.config.request_timeout_seconds.max(1) * 1_000;
-    let cdn = state.config.cdn_base_url.trim();
-    let auth = wechat_ilink_auth(&state.config);
-    let media = extract_wechat_outbound_media(reply_text, &state.workspace_root);
-    let stripped = markdown_to_plain_text(&strip_wechat_delivery_lines(reply_text));
-    let no_outbound_media = media.is_empty();
-    if !stripped.trim().is_empty() {
-        if let Err(err) = send_text_message(
-            &state.client,
-            &state.config,
-            base_url,
-            token,
-            from_user_id,
-            Some(context_token),
-            Some(&context.run_id),
-            stripped.trim(),
-        )
-        .await
-        {
-            warn!("wechatd: send reply text failed err={}", err);
-        }
-    }
-    let mut media_error_notified = false;
-    for media in &media {
-        let file_path = match materialize_wechat_outbound_media(state, media).await {
-            Ok(path) => path,
-            Err(err) => {
-                warn!(
-                    "wechatd: prepare reply media {:?} kind={:?} err={}",
-                    media, media.kind, err
-                );
-                if !media_error_notified {
-                    send_wechat_error_notice(
-                        state,
-                        base_url,
-                        token,
-                        from_user_id,
-                        context_token,
-                        Some(&context.run_id),
-                        &err,
-                    )
-                    .await;
-                    media_error_notified = true;
-                }
-                continue;
-            }
-        };
-        let res = match media.kind {
-            WechatOutboundKind::Image => {
-                send_weixin_image_from_file(
-                    &state.client,
-                    base_url,
-                    token,
-                    auth,
-                    cdn,
-                    from_user_id,
-                    Some(context_token),
-                    Some(&context.run_id),
-                    &file_path,
-                    WECHATD_CHANNEL_VERSION,
-                    timeout_ms,
-                )
-                .await
-            }
-            WechatOutboundKind::Video => {
-                send_weixin_video_from_file(
-                    &state.client,
-                    base_url,
-                    token,
-                    auth,
-                    cdn,
-                    from_user_id,
-                    Some(context_token),
-                    Some(&context.run_id),
-                    &file_path,
-                    WECHATD_CHANNEL_VERSION,
-                    timeout_ms,
-                )
-                .await
-            }
-            WechatOutboundKind::Audio | WechatOutboundKind::File => {
-                if media.kind == WechatOutboundKind::Audio {
-                    let fallback_notice = wechat_t(&state.config, WECHAT_AUDIO_FILE_FALLBACK_KEY);
-                    if let Err(err) = send_text_message(
-                        &state.client,
-                        &state.config,
-                        base_url,
-                        token,
-                        from_user_id,
-                        Some(context_token),
-                        Some(&context.run_id),
-                        &fallback_notice,
-                    )
-                    .await
-                    {
-                        warn!("wechatd: send audio fallback notice failed err={}", err);
-                    }
-                }
-                let fname = file_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("file");
-                send_weixin_file_from_file(
-                    &state.client,
-                    base_url,
-                    token,
-                    auth,
-                    cdn,
-                    from_user_id,
-                    Some(context_token),
-                    Some(&context.run_id),
-                    &file_path,
-                    fname,
-                    WECHATD_CHANNEL_VERSION,
-                    timeout_ms,
-                )
-                .await
-            }
-        };
-        if let Err(err) = res {
-            warn!(
-                "wechatd: send reply media {:?} kind={:?} err={}",
-                file_path, media.kind, err
-            );
-            if !media_error_notified {
-                send_wechat_error_notice(
-                    state,
-                    base_url,
-                    token,
-                    from_user_id,
-                    context_token,
-                    Some(&context.run_id),
-                    &err,
-                )
-                .await;
-                media_error_notified = true;
-            }
-        }
-    }
-    if stripped.trim().is_empty() && no_outbound_media && !reply_text.trim().is_empty() {
-        let fallback_text = markdown_to_plain_text(reply_text);
-        if let Err(err) = send_text_message(
-            &state.client,
-            &state.config,
-            base_url,
-            token,
-            from_user_id,
-            Some(context_token),
-            Some(&context.run_id),
-            &fallback_text,
-        )
-        .await
-        {
-            warn!("wechatd: send reply fallback text failed err={}", err);
-        }
-    }
 }
 
 async fn finish_typing_heartbeat(heartbeat: &mut Option<WechatTypingHeartbeat>) {
@@ -743,34 +542,63 @@ pub(super) async fn submit_wechat_task_with_payload(
                 tokio::time::sleep(poll_interval).await;
                 continue;
             }
-            TaskStatus::Succeeded => {
-                debug_assert_eq!(
-                    wechat_task_terminal_kind(TaskStatus::Succeeded),
-                    Some(WechatTaskTerminalKind::Succeeded)
-                );
-                finish_typing_heartbeat(&mut typing_heartbeat).await;
-                let reply_messages =
-                    claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
-                        &task.task_id.to_string(),
-                        task.result_json.as_ref(),
-                        &state.workspace_root,
-                        task_success_messages(&task, &state.config),
-                    );
-                for reply_text in reply_messages {
-                    deliver_wechat_clawd_reply(&state, &context, &reply_text).await;
-                }
-                break;
-            }
-            terminal_status @ (TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout) => {
+            terminal_status @ (TaskStatus::Succeeded
+            | TaskStatus::Failed
+            | TaskStatus::Canceled
+            | TaskStatus::Timeout) => {
                 debug_assert!(wechat_task_terminal_kind(terminal_status).is_some());
                 finish_typing_heartbeat(&mut typing_heartbeat).await;
-                let error_text = task.error_text.unwrap_or_else(|| {
-                    wechat_t(&state.config, WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY)
-                });
-                deliver_pinned_terminal_text(&state, &context, &error_text).await;
+                request_unified_terminal_delivery(
+                    &state,
+                    &task_id,
+                    user_key.as_deref(),
+                    timeout_notice_sent,
+                )
+                .await;
                 break;
             }
         }
+    }
+}
+
+async fn request_unified_terminal_delivery(
+    state: &State,
+    task_id: &str,
+    user_key: Option<&str>,
+    background: bool,
+) {
+    let Some(user_key) = user_key.map(str::trim).filter(|value| !value.is_empty()) else {
+        warn!("wechatd: terminal delivery missing bound key task_id={task_id}");
+        return;
+    };
+    let source = if background {
+        claw_core::channel_delivery::ChannelDeliverySource::BackgroundCompletion
+    } else {
+        claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
+    };
+    match claw_core::channel_delivery_client::request_task_delivery(
+        &state.client,
+        &state.config.clawd_base_url,
+        task_id,
+        user_key,
+        source,
+    )
+    .await
+    {
+        Ok(result) if result.accepted => info!(
+            "wechatd: unified terminal delivery accepted task_id={} status={:?}",
+            task_id, result.status
+        ),
+        Ok(result) => warn!(
+            "wechatd: unified terminal delivery not accepted task_id={} status={:?} error_code={}",
+            task_id,
+            result.status,
+            result.error_code.as_deref().unwrap_or("none")
+        ),
+        Err(error) => warn!(
+            "wechatd: unified terminal delivery request failed task_id={} error={}",
+            task_id, error
+        ),
     }
 }
 

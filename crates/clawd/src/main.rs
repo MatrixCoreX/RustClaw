@@ -674,6 +674,15 @@ async fn run() -> anyhow::Result<()> {
         .find(|token| !token.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| config.telegram.bot_token.clone());
+    let telegram_bot_tokens = Arc::new(
+        telegram_runtime_bots
+            .iter()
+            .filter_map(|bot| {
+                let token = bot.bot_token.trim();
+                (!token.is_empty()).then(|| (bot.name.clone(), token.to_string()))
+            })
+            .collect::<HashMap<_, _>>(),
+    );
     let telegram_configured_bot_names = Arc::new(
         telegram_runtime_bots
             .iter()
@@ -885,6 +894,7 @@ async fn run() -> anyhow::Result<()> {
         metrics: crate::TaskMetricsRegistry::default(),
         channels: ChannelConfig {
             telegram_bot_token,
+            telegram_bot_tokens,
             telegram_configured_bot_names,
             whatsapp_cloud_enabled,
             whatsapp_api_base,
@@ -982,6 +992,10 @@ async fn run() -> anyhow::Result<()> {
             delete(http::conversation_history::archive_conversation),
         )
         .route("/tasks/:task_id", get(get_task))
+        .route(
+            "/tasks/:task_id/delivery",
+            post(http::task_delivery::deliver_task_result),
+        )
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/automation-runs", post(list_automation_runs))
         .route("/tasks/cancel", post(cancel_tasks))

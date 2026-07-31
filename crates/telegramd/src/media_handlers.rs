@@ -265,6 +265,7 @@ pub(super) async fn store_pending_telegram_attachment(
         payload: json!({
             "text": prompt.trim(),
             "source": "telegram",
+            "telegram_bot_name": state.bot_name.clone(),
             "attachments": [{
                 "kind": kind,
                 "path": rel_path,

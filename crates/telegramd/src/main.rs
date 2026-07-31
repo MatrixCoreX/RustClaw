@@ -3,9 +3,7 @@ mod commands;
 mod media_handlers;
 mod message_handler;
 mod task_delivery;
-mod telegram_buttons;
-mod telegram_formatting;
-mod telegram_media_delivery;
+mod task_delivery_format;
 mod telegram_provider_failure;
 mod telegram_update_transport;
 
@@ -14,21 +12,18 @@ use commands::*;
 use media_handlers::*;
 use message_handler::*;
 use task_delivery::*;
-use telegram_formatting::*;
-use telegram_media_delivery::*;
+use task_delivery_format::*;
 use telegram_provider_failure::*;
 use telegram_update_transport::*;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
-use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::channel_i18n::safe_generic_text_for_path;
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
@@ -42,14 +37,10 @@ use claw_core::types::{
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatAction, InputFile, MediaKind, MessageKind, ParseMode};
+use teloxide::types::{CallbackQuery, ChatAction, MediaKind, MessageKind};
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
-
-use crate::telegram_buttons::{
-    build_url_button_markup, extract_url_buttons_from_text, UrlButtonSpec,
-};
 
 #[derive(Clone)]
 struct BotState {
@@ -75,7 +66,6 @@ struct BotState {
     voice_reply_mode: String,
     voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     max_audio_input_bytes: usize,
-    ephemeral_image_saved_seconds: u64,
     pending_resume_by_chat: Arc<Mutex<HashMap<i64, PendingResumeContext>>>,
     pending_key_bind_by_chat: Arc<Mutex<HashSet<i64>>>,
     bound_identity_by_chat: Arc<Mutex<HashMap<i64, AuthIdentity>>>,
@@ -297,7 +287,6 @@ fn build_bot_state(
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
         voice_reply_mode_by_chat: Arc::new(Mutex::new(load_voice_reply_mode_by_chat(config))),
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
-        ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
         pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
         pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
         bound_identity_by_chat: Arc::new(Mutex::new(HashMap::new())),
@@ -851,9 +840,6 @@ mod bind_gate_tests;
 #[cfg(test)]
 #[path = "main_runtime_tests.rs"]
 mod runtime_tests;
-#[cfg(test)]
-#[path = "main_telegram_text_payload_tests.rs"]
-mod telegram_text_payload_tests;
 #[cfg(test)]
 #[path = "telegram_update_transport_tests.rs"]
 mod telegram_update_transport_tests;

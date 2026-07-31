@@ -127,6 +127,14 @@ pub fn strip_legacy_local_delivery_lines(text: &str) -> String {
     })
 }
 
+pub fn legacy_delivery_lines(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| parse_legacy_delivery_line_ref(line).is_some())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn legacy_local_delivery_lines(text: &str) -> String {
     text.lines()
         .map(str::trim)

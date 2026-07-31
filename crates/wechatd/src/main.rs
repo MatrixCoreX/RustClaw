@@ -37,25 +37,18 @@ use claw_core::types::{
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
-use claw_core::wechat_reply_media::{
-    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
-    WechatOutboundMedia, WechatOutboundSource,
-};
 use config_cache::WeixinConfigManager;
 use config_section::{wechat_t, wechat_t_with, AppConfig, WechatSection};
 use qrcodegen::{QrCode, QrCodeEcc};
-use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
-use wechat_ilink::http::IlinkAuth;
 use wechat_ilink::{
-    download_decrypted_media, download_remote_media_to_temp, parse_aes_key_base64,
-    parse_aes_key_hex_or_base64_media, send_weixin_file_from_file, send_weixin_image_from_file,
-    send_weixin_video_from_file, WechatConversationScope, WechatMessageItem,
-    WechatSendMessageRequest, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
+    download_decrypted_media, parse_aes_key_base64, parse_aes_key_hex_or_base64_media,
+    WechatConversationScope, WechatMessageItem, WechatSendMessageRequest, TYPING_STATUS_CANCEL,
+    TYPING_STATUS_TYPING,
 };
 
 const SESSION_EXPIRED_ERRCODE: i64 = -14;
@@ -65,7 +58,6 @@ const BACKOFF_DELAY_MS: u64 = 30_000;
 const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechatd/media/outbound-temp";
 
 fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key)
@@ -84,13 +76,6 @@ fn apply_wechat_env_overrides(config: &mut AppConfig) {
     apply_string_env(&mut config.wechat.bot_token, "WECHAT_BOT_TOKEN");
     apply_string_env(&mut config.wechat.wechat_uin_base64, "WECHAT_UIN_BASE64");
     apply_string_env(&mut config.wechat.sk_route_tag, "WECHAT_SK_ROUTE_TAG");
-}
-
-fn wechat_ilink_auth(sec: &WechatSection) -> IlinkAuth<'_> {
-    IlinkAuth {
-        sk_route_tag: sec.sk_route_tag.as_str(),
-        wechat_uin_base64: sec.wechat_uin_base64.as_str(),
-    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -1,11 +1,11 @@
 use super::{
     build_login_status_response, context_token_store_key, extract_bind_key_candidate,
     extract_text_message, is_unbound_allowed_command, qr_render_content, qr_svg_data_url,
-    skill_progress_message, task_success_messages, wechat_media_agent_context,
-    wechat_runtime_status_file_path, wechat_t, wechat_task_terminal_kind,
-    workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
-    TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WechatTaskTerminalKind,
-    WechatTypingHeartbeat, WeixinMessage, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
+    skill_progress_message, wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
+    wechat_task_terminal_kind, workspace_root_from_config_path, ActiveLogin, MessageItem,
+    QRCodeResponse, TaskQueryResponse, TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus,
+    WechatSection, WechatTaskTerminalKind, WechatTypingHeartbeat, WeixinMessage,
+    TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
 };
 use axum::body::Bytes;
 use axum::extract::State as AxumState;
@@ -294,30 +294,6 @@ fn wechat_i18n_binding_keys_are_locale_specific_with_safe_fallback() {
         claw_core::channel_i18n::safe_generic_text_for_locale("en-US")
     );
     assert!(!fallback.contains("wechat.msg.bind_success"));
-}
-
-#[test]
-fn wechat_task_success_fallback_uses_i18n() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let en = test_wechat_section(
-        "en-US",
-        root.join("configs/i18n/wechatd.en-US.toml")
-            .to_string_lossy()
-            .to_string(),
-    );
-    let task = TaskQueryResponse {
-        task_id: Default::default(),
-        status: TaskStatus::Succeeded,
-        execution_state: None,
-        goal: None,
-        task_plan: None,
-        skill_progress: None,
-        result_json: None,
-        error_text: None,
-        lifecycle: None,
-    };
-
-    assert_eq!(task_success_messages(&task, &en), vec!["Done.".to_string()]);
 }
 
 #[test]

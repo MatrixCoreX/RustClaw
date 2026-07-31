@@ -7,6 +7,8 @@ use crate::types::ChannelKind;
 
 pub const CHANNEL_DELIVERY_SCHEMA_VERSION: u16 = 1;
 pub const CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION: u16 = 1;
+pub const CHANNEL_TASK_DELIVERY_REQUEST_SCHEMA_VERSION: u16 = 1;
+pub const CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -15,6 +17,88 @@ pub enum ChannelDeliverySource {
     BackgroundCompletion,
     ScheduledTask,
     ProactiveNotice,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelTaskDeliveryContent {
+    #[default]
+    Full,
+    TextOnly,
+    MediaOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelTaskDeliveryRequest {
+    pub schema_version: u16,
+    pub source: ChannelDeliverySource,
+    #[serde(default)]
+    pub content: ChannelTaskDeliveryContent,
+}
+
+impl ChannelTaskDeliveryRequest {
+    pub fn daemon(source: ChannelDeliverySource) -> Self {
+        Self::daemon_with_content(source, ChannelTaskDeliveryContent::Full)
+    }
+
+    pub fn daemon_with_content(
+        source: ChannelDeliverySource,
+        content: ChannelTaskDeliveryContent,
+    ) -> Self {
+        Self {
+            schema_version: CHANNEL_TASK_DELIVERY_REQUEST_SCHEMA_VERSION,
+            source,
+            content,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ChannelTaskDeliveryRequestValidationError> {
+        if self.schema_version != CHANNEL_TASK_DELIVERY_REQUEST_SCHEMA_VERSION {
+            return Err(ChannelTaskDeliveryRequestValidationError::UnsupportedSchemaVersion);
+        }
+        if !matches!(
+            self.source,
+            ChannelDeliverySource::ImmediateDaemon | ChannelDeliverySource::BackgroundCompletion
+        ) {
+            return Err(ChannelTaskDeliveryRequestValidationError::InvalidSource);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelTaskDeliveryStatus {
+    Accepted,
+    Delivered,
+    Read,
+    Failed,
+    InProgress,
+    QueryRequired,
+    NotRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelTaskDeliveryResponse {
+    pub schema_version: u16,
+    pub status: ChannelTaskDeliveryStatus,
+    pub accepted: bool,
+    pub delivered: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<ChannelDeliveryReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_key: Option<String>,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ChannelTaskDeliveryRequestValidationError {
+    #[error("channel_task_delivery_request_schema_version_unsupported")]
+    UnsupportedSchemaVersion,
+    #[error("channel_task_delivery_request_source_invalid")]
+    InvalidSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

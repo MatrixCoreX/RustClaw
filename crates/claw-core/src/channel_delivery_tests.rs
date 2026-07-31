@@ -75,6 +75,24 @@ fn delivery_envelope_covers_all_shared_sources_and_payload_shapes() {
 }
 
 #[test]
+fn task_delivery_request_defaults_to_full_content_and_restricts_daemon_sources() {
+    let decoded: ChannelTaskDeliveryRequest = serde_json::from_value(serde_json::json!({
+        "schema_version": CHANNEL_TASK_DELIVERY_REQUEST_SCHEMA_VERSION,
+        "source": "immediate_daemon"
+    }))
+    .expect("decode request");
+    assert_eq!(decoded.content, ChannelTaskDeliveryContent::Full);
+    decoded.validate().expect("valid daemon request");
+
+    let media_only = ChannelTaskDeliveryRequest::daemon_with_content(
+        ChannelDeliverySource::BackgroundCompletion,
+        ChannelTaskDeliveryContent::MediaOnly,
+    );
+    media_only.validate().expect("valid media projection");
+    assert_eq!(media_only.content, ChannelTaskDeliveryContent::MediaOnly);
+}
+
+#[test]
 fn delivery_requires_payload_and_preview_parent() {
     let mut empty = delivery();
     empty.text_segments.clear();

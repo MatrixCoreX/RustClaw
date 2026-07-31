@@ -101,6 +101,7 @@ pub(crate) struct SkillViewsBinding {
 #[derive(Clone, Default)]
 pub(crate) struct ChannelConfig {
     pub(crate) telegram_bot_token: String,
+    pub(crate) telegram_bot_tokens: Arc<HashMap<String, String>>,
     pub(crate) telegram_configured_bot_names: Arc<Vec<String>>,
     pub(crate) whatsapp_cloud_enabled: bool,
     pub(crate) whatsapp_api_base: String,

@@ -13,6 +13,7 @@ pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
 pub(crate) mod task_checkpoint_action;
+mod task_delivery;
 pub(crate) mod task_goal;
 pub(crate) mod task_mutation_ledger;
 pub(crate) mod task_plan;
@@ -70,6 +71,7 @@ pub(crate) use task_approval::{
 pub(crate) use task_checkpoint_action::{
     load_task_checkpoint_action, upsert_task_checkpoint_action, TaskCheckpointAction,
 };
+pub(crate) use task_delivery::{get_task_delivery_record, TaskDeliveryRecord};
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_mutation_ledger::{
     begin_task_mutation, commit_task_mutation, mark_task_mutation_uncertain,

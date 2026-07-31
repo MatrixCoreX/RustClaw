@@ -4,7 +4,7 @@
 //! API 与长连接均使用国际版端点（默认 open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,11 +15,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::channel_open_platform::{
-    chunk_open_platform_text, open_platform_contract, plan_open_platform_media,
-    preflight_open_platform_media, process_open_platform_rate_limiter,
-    validate_open_platform_content, OpenPlatformContentError, OpenPlatformMessageType,
-    OpenPlatformOutboundMediaKind, OpenPlatformRegion, OpenPlatformTokenCache,
-    OpenPlatformUploadEndpoint,
+    open_platform_contract, process_open_platform_rate_limiter, validate_open_platform_content,
+    OpenPlatformContentError, OpenPlatformMessageType, OpenPlatformRegion, OpenPlatformTokenCache,
 };
 use claw_core::channel_provider_error::ChannelProviderTransportKind;
 use claw_core::types::{
@@ -28,11 +25,6 @@ use claw_core::types::{
     PendingChannelRequestStoreRequest, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
     SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus,
 };
-use claw_core::wechat_reply_media::{
-    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
-    WechatOutboundSource,
-};
-use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -91,6 +83,7 @@ fn lark_transport_error(
     .to_string()
 }
 
+#[cfg(test)]
 fn lark_delivery_error_text(config: &LarkConfig, error_text: &str) -> String {
     let message_key = claw_core::channel_provider_error::ChannelProviderError::decode(error_text)
         .map(|error| error.message_key);
@@ -155,8 +148,6 @@ struct LarkSection {
     /// 任务投递软超时阈值（秒）；超过后提示“仍在执行”，并继续轮询
     #[serde(default = "default_task_delivery_timeout")]
     task_delivery_timeout_seconds: u64,
-    #[serde(default = "default_text_chunk_chars")]
-    text_chunk_chars: usize,
     #[serde(default = "default_lark_language")]
     language: String,
     #[serde(default = "default_lark_i18n_path")]
@@ -384,9 +375,6 @@ const LARK_I18N_BIND_REQUEST_FAILED_KEY: &str = "lark.msg.bind_request_failed";
 const LARK_I18N_MEDIA_DOWNLOAD_FAILED_KEY: &str = "lark.msg.media_download_failed";
 const LARK_I18N_MEDIA_FILE_TOO_LARGE_KEY: &str = "lark.msg.media_file_too_large";
 const LARK_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "lark.msg.request_timeout_retry_later";
-const LARK_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "lark.msg.task_done_fallback_text";
-const LARK_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "lark.msg.task_failed_fallback_error";
-const LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "lark.msg.process_failed_with_error";
 
 const LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str =
     "message_key=lark.msg.identity_check_unavailable";
@@ -400,11 +388,6 @@ const LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "message_key=lark.msg.media_do
 const LARK_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "message_key=lark.msg.media_file_too_large";
 const LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
     "message_key=lark.msg.request_timeout_retry_later task_id={task_id}";
-const LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "message_key=lark.msg.task_done_fallback_text";
-const LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str =
-    "message_key=lark.msg.task_failed_fallback_error";
-const LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str =
-    "message_key=lark.msg.process_failed_with_error error={error}";
 
 fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
     state
@@ -821,41 +804,6 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
     debug!("larkd: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
-fn lark_task_success_messages(task: &TaskQueryResponse, config: &LarkConfig) -> Vec<String> {
-    if let Some(messages) = task
-        .result_json
-        .as_ref()
-        .and_then(|v| v.get("messages"))
-        .and_then(|v| v.as_array())
-    {
-        let parts: Vec<String> = messages
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        if !parts.is_empty() {
-            return parts;
-        }
-    }
-    vec![task
-        .result_json
-        .as_ref()
-        .and_then(|v| v.get("text"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            lark_t(
-                config,
-                LARK_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
-                LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK,
-            )
-        })]
-}
-
 /// 提交任务并 spawn 轮询与回发。
 fn handle_text_message_to_clawd(
     state: AppState,
@@ -903,8 +851,6 @@ fn handle_text_message_to_clawd(
     let token_cache = state.token_cache.clone();
     let poll_interval = Duration::from_millis(1500);
     let delivery_timeout_secs = state.config.lark.task_delivery_timeout_seconds;
-    let chunk_chars = state.config.lark.text_chunk_chars.max(100);
-    let workspace_root = state.workspace_root.clone();
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
@@ -1120,78 +1066,67 @@ fn handle_text_message_to_clawd(
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
-                TaskStatus::Succeeded => {
-                    let delivery_messages =
-                        claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
-                            &task.task_id.to_string(),
-                            task.result_json.as_ref(),
-                            &workspace_root,
-                            lark_task_success_messages(task, &config),
-                        );
-                    for to_send in delivery_messages {
-                        if let Err(e) = send_lark_answer(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &workspace_root,
-                            &chat_id_delivery,
-                            &to_send,
-                            chunk_chars,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "larkd: send success payload failed task_id={} err={}",
-                                task_id, e
-                            );
-                            let localized_error = lark_delivery_error_text(&config, &e);
-                            let error_msg = lark_t_with(
-                                &config,
-                                LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
-                                &[("error", &localized_error)],
-                                LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
-                            );
-                            let _ = send_lark_text(
-                                &config,
-                                &client,
-                                &token_cache,
-                                &chat_id_delivery,
-                                &error_msg,
-                            )
-                            .await;
-                        }
-                    }
-                    info!(
-                        "larkd: task delivery success task_id={} (result sent)",
-                        task_id
-                    );
-                    break;
-                }
-                TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                    let detail = task.error_text.clone().unwrap_or_else(|| {
-                        lark_t(
-                            &config,
-                            LARK_I18N_TASK_FAILED_FALLBACK_ERROR_KEY,
-                            LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK,
-                        )
-                    });
-                    let msg = lark_t_with(
-                        &config,
-                        LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
-                        &[("error", &detail)],
-                        LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
-                    );
-                    let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, &msg)
-                        .await;
-                    info!(
-                        "larkd: task delivery failure task_id={} status={:?}",
-                        task_id, task.status
-                    );
+                TaskStatus::Succeeded
+                | TaskStatus::Failed
+                | TaskStatus::Canceled
+                | TaskStatus::Timeout => {
+                    request_unified_terminal_delivery(
+                        "larkd",
+                        &client,
+                        &clawd_base,
+                        &task_id,
+                        user_key_poll.as_deref(),
+                        timeout_logged,
+                    )
+                    .await;
                     break;
                 }
             }
         }
     });
+}
+
+async fn request_unified_terminal_delivery(
+    daemon: &str,
+    client: &Client,
+    clawd_base: &str,
+    task_id: &str,
+    user_key: Option<&str>,
+    background: bool,
+) {
+    let Some(user_key) = user_key.map(str::trim).filter(|value| !value.is_empty()) else {
+        warn!(
+            "{}: terminal delivery missing bound key task_id={}",
+            daemon, task_id
+        );
+        return;
+    };
+    let source = if background {
+        claw_core::channel_delivery::ChannelDeliverySource::BackgroundCompletion
+    } else {
+        claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
+    };
+    match claw_core::channel_delivery_client::request_task_delivery(
+        client, clawd_base, task_id, user_key, source,
+    )
+    .await
+    {
+        Ok(result) if result.accepted => info!(
+            "{}: unified terminal delivery accepted task_id={} status={:?}",
+            daemon, task_id, result.status
+        ),
+        Ok(result) => warn!(
+            "{}: unified terminal delivery not accepted task_id={} status={:?} error_code={}",
+            daemon,
+            task_id,
+            result.status,
+            result.error_code.as_deref().unwrap_or("none")
+        ),
+        Err(error) => warn!(
+            "{}: unified terminal delivery request failed task_id={} error={}",
+            daemon, task_id, error
+        ),
+    }
 }
 
 const LARK_TIMESTAMP_TOLERANCE_SECS: u64 = 300;
@@ -1478,286 +1413,6 @@ async fn send_lark_text(
         text.len()
     );
     Ok(message_id)
-}
-
-async fn upload_lark_image(
-    config: &LarkConfig,
-    client: &Client,
-    token_cache: &OpenPlatformTokenCache,
-    path: &Path,
-) -> Result<String, String> {
-    preflight_open_platform_media(
-        OpenPlatformRegion::Lark,
-        "upload_image",
-        path,
-        claw_core::channel_media_limits::lark_image_max_bytes(),
-    )
-    .map_err(|error| error.to_string())?;
-    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
-    let bytes = tokio::fs::read(path).await.map_err(|error| {
-        lark_transport_error(
-            "upload_image",
-            ChannelProviderTransportKind::Body,
-            &error.to_string(),
-        )
-    })?;
-    let filename = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("image.jpg")
-        .to_string();
-    let image = Part::bytes(bytes)
-        .file_name(filename)
-        .mime_str("application/octet-stream")
-        .map_err(|_| {
-            lark_provider_invalid_response("upload_image", "multipart_image_prepare_failed")
-        })?;
-    let form = Form::new()
-        .text("image_type", "message")
-        .part("image", image);
-    let url = format!(
-        "{}/open-apis/im/v1/images",
-        config.lark.api_base_url.trim_end_matches('/')
-    );
-    let resp = client
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|error| {
-            lark_transport_error(
-                "upload_image",
-                ChannelProviderTransportKind::Request,
-                &error.to_string(),
-            )
-        })?;
-    let status = resp.status().as_u16();
-    let response_body = resp.text().await.unwrap_or_default();
-    let body = claw_core::channel_open_platform::decode_open_platform_response(
-        OpenPlatformRegion::Lark,
-        "upload_media",
-        status,
-        &response_body,
-    )
-    .map_err(|error| error.to_string())?;
-    body.pointer("/data/image_key")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| lark_provider_invalid_response("upload_image", "response_image_key_missing"))
-}
-
-async fn upload_lark_file(
-    config: &LarkConfig,
-    client: &Client,
-    token_cache: &OpenPlatformTokenCache,
-    path: &Path,
-    file_type: &str,
-) -> Result<String, String> {
-    preflight_open_platform_media(
-        OpenPlatformRegion::Lark,
-        "upload_file",
-        path,
-        claw_core::channel_media_limits::lark_file_max_bytes(),
-    )
-    .map_err(|error| error.to_string())?;
-    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
-    let bytes = tokio::fs::read(path).await.map_err(|error| {
-        lark_transport_error(
-            "upload_file",
-            ChannelProviderTransportKind::Body,
-            &error.to_string(),
-        )
-    })?;
-    let filename = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("file.bin")
-        .to_string();
-    let file = Part::bytes(bytes)
-        .file_name(filename.clone())
-        .mime_str("application/octet-stream")
-        .map_err(|_| {
-            lark_provider_invalid_response("upload_file", "multipart_file_prepare_failed")
-        })?;
-    let form = Form::new()
-        .text("file_type", file_type.to_string())
-        .text("file_name", filename)
-        .part("file", file);
-    let url = format!(
-        "{}/open-apis/im/v1/files",
-        config.lark.api_base_url.trim_end_matches('/')
-    );
-    let resp = client
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|error| {
-            lark_transport_error(
-                "upload_file",
-                ChannelProviderTransportKind::Request,
-                &error.to_string(),
-            )
-        })?;
-    let status = resp.status().as_u16();
-    let response_body = resp.text().await.unwrap_or_default();
-    let body = claw_core::channel_open_platform::decode_open_platform_response(
-        OpenPlatformRegion::Lark,
-        "upload_media",
-        status,
-        &response_body,
-    )
-    .map_err(|error| error.to_string())?;
-    body.pointer("/data/file_key")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| lark_provider_invalid_response("upload_file", "response_file_key_missing"))
-}
-
-async fn send_lark_media_key(
-    config: &LarkConfig,
-    client: &Client,
-    token_cache: &OpenPlatformTokenCache,
-    receive_id: &str,
-    msg_type: &str,
-    key_name: &str,
-    key: &str,
-) -> Result<String, String> {
-    let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
-    let content = match key_name {
-        "image_key" => json!({ "image_key": key }),
-        "file_key" => json!({ "file_key": key }),
-        _ => {
-            return Err(lark_provider_invalid_response(
-                "send_media",
-                "unsupported_media_key",
-            ))
-        }
-    }
-    .to_string();
-    let message_type = OpenPlatformMessageType::from_provider_token(msg_type)
-        .ok_or_else(|| lark_provider_invalid_response("send_media", "unsupported_msg_type"))?;
-    validate_open_platform_content(message_type, &content)
-        .map_err(|error| lark_content_error("send_media", error))?;
-    let url = format!(
-        "{}/open-apis/im/v1/messages?receive_id_type=chat_id",
-        config.lark.api_base_url.trim_end_matches('/')
-    );
-    process_open_platform_rate_limiter()
-        .acquire(OpenPlatformRegion::Lark, receive_id)
-        .await;
-    let resp = client
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&json!({
-            "receive_id": receive_id,
-            "msg_type": msg_type,
-            "content": content
-        }))
-        .send()
-        .await
-        .map_err(|error| {
-            lark_transport_error(
-                "send_media",
-                ChannelProviderTransportKind::Request,
-                &error.to_string(),
-            )
-        })?;
-    let status = resp.status().as_u16();
-    let response_body = resp.text().await.unwrap_or_default();
-    claw_core::channel_open_platform::open_platform_message_id(
-        OpenPlatformRegion::Lark,
-        "send_media",
-        status,
-        &response_body,
-    )
-    .map_err(|error| error.to_string())
-}
-
-async fn send_lark_answer(
-    config: &LarkConfig,
-    client: &Client,
-    token_cache: &OpenPlatformTokenCache,
-    workspace_root: &Path,
-    receive_id: &str,
-    answer: &str,
-    chunk_chars: usize,
-) -> Result<(), String> {
-    let media = extract_wechat_outbound_media(answer, workspace_root);
-    let stripped = strip_wechat_delivery_lines(answer);
-    let text = if stripped.trim().is_empty() && media.is_empty() && !answer.trim().is_empty() {
-        answer
-    } else {
-        stripped.as_str()
-    };
-    for chunk in chunk_open_platform_text(text, chunk_chars)
-        .map_err(|error| lark_content_error("send_text", error))?
-    {
-        send_lark_text(config, client, token_cache, receive_id, &chunk).await?;
-    }
-    for item in media {
-        let WechatOutboundSource::LocalPath(path) = item.source else {
-            return Err(lark_provider_invalid_response(
-                "send_media",
-                "remote_media_not_materialized",
-            ));
-        };
-        let actual_bytes = preflight_open_platform_media(
-            OpenPlatformRegion::Lark,
-            "send_media",
-            &path,
-            claw_core::channel_media_limits::lark_file_max_bytes(),
-        )
-        .map_err(|error| error.to_string())?;
-        let media_kind = match item.kind {
-            WechatOutboundKind::Image => OpenPlatformOutboundMediaKind::Image,
-            WechatOutboundKind::Video => OpenPlatformOutboundMediaKind::Video,
-            WechatOutboundKind::Audio => OpenPlatformOutboundMediaKind::Audio,
-            WechatOutboundKind::File => OpenPlatformOutboundMediaKind::File,
-        };
-        let mut plan =
-            plan_open_platform_media(OpenPlatformRegion::Lark, media_kind, &path, actual_bytes);
-        let key = if plan.upload_endpoint == OpenPlatformUploadEndpoint::Image {
-            match upload_lark_image(config, client, token_cache, &path).await {
-                Ok(key) => key,
-                Err(image_error) => {
-                    let diagnostic_id =
-                        claw_core::channel_provider_error::ChannelProviderError::decode(
-                            &image_error,
-                        )
-                        .map(|error| error.diagnostic_id)
-                        .unwrap_or_else(|| "invalid_provider_error".to_string());
-                    warn!(
-                        "larkd: image upload fallback diagnostic_id={}",
-                        diagnostic_id
-                    );
-                    plan = plan_open_platform_media(
-                        OpenPlatformRegion::Lark,
-                        OpenPlatformOutboundMediaKind::Image,
-                        &path,
-                        claw_core::channel_media_limits::lark_image_max_bytes() + 1,
-                    );
-                    upload_lark_file(config, client, token_cache, &path, plan.form_file_type)
-                        .await?
-                }
-            }
-        } else {
-            upload_lark_file(config, client, token_cache, &path, plan.form_file_type).await?
-        };
-        send_lark_media_key(
-            config,
-            client,
-            token_cache,
-            receive_id,
-            plan.message_type.as_str(),
-            plan.key_name,
-            &key,
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 /// 长连接模式：使用 open-lark 连国际版 Lark 收事件，base_url 来自配置。
