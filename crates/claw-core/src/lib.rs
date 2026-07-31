@@ -4,6 +4,7 @@ pub mod capability_result;
 pub mod channel_chunk;
 pub mod channel_commands;
 pub mod channel_i18n;
+pub mod channel_ingress;
 pub mod channel_media_limits;
 pub mod config;
 pub mod hard_rules;

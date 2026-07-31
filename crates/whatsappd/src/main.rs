@@ -60,6 +60,7 @@ struct AppState {
     clawd_base_url: String,
     workspace_root: PathBuf,
     i18n_path: String,
+    language: String,
     command_catalog: Arc<ChannelCommandCatalog>,
     client: Client,
     api_base: String,
@@ -181,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         clawd_base_url,
         workspace_root: workspace_root.clone(),
         i18n_path,
+        language: config.whatsapp.language.clone(),
         command_catalog: Arc::new(ChannelCommandCatalog::load_or_default(
             &workspace_root.join("configs/channel_commands.toml"),
         )),
@@ -535,12 +537,20 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                     .as_ref()
                     .map(|command| command.tail.as_str())
                     .unwrap_or_default();
-                handle_run_command(state, &msg.from, user_id, chat_id, command_tail).await?;
+                handle_run_command(state, &msg.from, user_id, chat_id, &msg.id, command_tail)
+                    .await?;
             } else {
                 let payload = json!({ "text": text.trim() });
-                let task_id =
-                    submit_task_only(state, user_id, chat_id, &msg.from, TaskKind::Ask, payload)
-                        .await?;
+                let task_id = submit_task_only(
+                    state,
+                    user_id,
+                    chat_id,
+                    &msg.from,
+                    Some(&msg.id),
+                    TaskKind::Ask,
+                    payload,
+                )
+                .await?;
                 let delivered = try_deliver_quick_result(state, &msg.from, &task_id, None).await?;
                 if !delivered {
                     spawn_task_result_delivery(state.clone(), msg.from.clone(), task_id, None);
@@ -549,12 +559,12 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
         }
         "image" => {
             if let Some(media) = msg.image {
-                handle_image_message(state, &msg.from, user_id, chat_id, &media).await?;
+                handle_image_message(state, &msg.from, user_id, chat_id, &msg.id, &media).await?;
             }
         }
         "audio" => {
             if let Some(media) = msg.audio {
-                handle_audio_message(state, &msg.from, user_id, chat_id, &media).await?;
+                handle_audio_message(state, &msg.from, user_id, chat_id, &msg.id, &media).await?;
             }
         }
         "document" => {
@@ -566,7 +576,8 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                     .to_ascii_lowercase()
                     .starts_with("image/")
                 {
-                    handle_image_message(state, &msg.from, user_id, chat_id, &media).await?;
+                    handle_image_message(state, &msg.from, user_id, chat_id, &msg.id, &media)
+                        .await?;
                 }
             }
         }
@@ -580,6 +591,7 @@ async fn handle_run_command(
     wa_id: &str,
     user_id: i64,
     chat_id: i64,
+    message_id: &str,
     command_tail: &str,
 ) -> anyhow::Result<()> {
     let rest = command_tail.trim();
@@ -600,8 +612,16 @@ async fn handle_run_command(
         "skill_name": skill_name,
         "args": args
     });
-    let task_id =
-        submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
+    let task_id = submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        wa_id,
+        Some(message_id),
+        TaskKind::RunSkill,
+        payload,
+    )
+    .await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
     if !delivered {
         spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
@@ -614,6 +634,7 @@ async fn handle_image_message(
     wa_id: &str,
     user_id: i64,
     chat_id: i64,
+    message_id: &str,
     media: &WaMedia,
 ) -> anyhow::Result<()> {
     if media.id.trim().is_empty() {
@@ -637,8 +658,16 @@ async fn handle_image_message(
             "detail_level": "normal"
         }
     });
-    let task_id =
-        submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
+    let task_id = submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        wa_id,
+        Some(message_id),
+        TaskKind::RunSkill,
+        payload,
+    )
+    .await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
     if !delivered {
         spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
@@ -651,6 +680,7 @@ async fn handle_audio_message(
     wa_id: &str,
     user_id: i64,
     chat_id: i64,
+    message_id: &str,
     media: &WaMedia,
 ) -> anyhow::Result<()> {
     if media.id.trim().is_empty() {
@@ -677,6 +707,7 @@ async fn handle_audio_message(
         user_id,
         chat_id,
         wa_id,
+        Some(message_id),
         TaskKind::RunSkill,
         transcribe_payload,
     )
@@ -760,6 +791,7 @@ async fn submit_task_only(
     user_id: i64,
     chat_id: i64,
     wa_id: &str,
+    message_id: Option<&str>,
     kind: TaskKind,
     payload: Value,
 ) -> anyhow::Result<String> {
@@ -782,6 +814,21 @@ async fn submit_task_only(
         channel: Some(ChannelKind::Whatsapp),
         external_user_id: Some(wa_id.to_string()),
         external_chat_id: Some(wa_id.to_string()),
+        ingress: Some({
+            let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+                ChannelKind::Whatsapp,
+                "whatsapp_cloud",
+            )
+            .with_external_ids(wa_id.to_string(), wa_id.to_string())
+            .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
+                wa_id.to_string(),
+            ))
+            .with_locale(state.language.clone());
+            if let Some(message_id) = message_id {
+                ingress = ingress.with_message_id(message_id);
+            }
+            ingress
+        }),
         kind,
         payload,
     };

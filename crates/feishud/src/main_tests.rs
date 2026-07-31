@@ -1,7 +1,7 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, handle_incoming_feishu_text,
-    install_tls_crypto_provider, is_unbound_allowed_command, send_feishu_answer, AppState,
-    FeishuConfig, FeishuSection,
+    install_tls_crypto_provider, is_unbound_allowed_command, parse_im_text_from_event_body,
+    send_feishu_answer, AppState, FeishuConfig, FeishuSection,
 };
 use crate::media_helpers::feishu_media_agent_context;
 use axum::body::Bytes;
@@ -94,6 +94,28 @@ fn extract_pending_bind_token_from_start_or_plain_text() {
         Some("pb-test-token")
     );
     assert_eq!(extract_pending_bind_token_candidate("/start"), None);
+}
+
+#[test]
+fn text_event_keeps_platform_message_id() {
+    let event = json!({
+        "header": {"event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {"sender_id": {"open_id": "open-1"}},
+            "message": {
+                "message_id": "message-1",
+                "message_type": "text",
+                "chat_id": "chat-1",
+                "content": "{\"text\":\"hello\"}"
+            }
+        }
+    });
+
+    let parsed = parse_im_text_from_event_body(&event).expect("parse feishu text event");
+    assert_eq!(parsed.0, "open-1");
+    assert_eq!(parsed.1, "chat-1");
+    assert_eq!(parsed.2, "message-1");
+    assert_eq!(parsed.3, "hello");
 }
 
 #[test]
@@ -357,6 +379,7 @@ async fn feishu_pending_bind_requires_explicit_token() {
         state,
         "ou_test_pending_bind".to_string(),
         "oc_test_pending_bind".to_string(),
+        "om_test_pending_bind".to_string(),
         "/start pb-test-token".to_string(),
     )
     .await;

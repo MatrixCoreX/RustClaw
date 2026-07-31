@@ -309,7 +309,7 @@ async fn deliver_voice_answers(
         "args": {"text": tts_input, "response_format": "opus"}
     });
     let Ok(task_id) =
-        submit_task_only(state, user_id, chat_id.0, TaskKind::RunSkill, payload).await
+        submit_task_only(state, user_id, chat_id.0, None, TaskKind::RunSkill, payload).await
     else {
         if matches!(mode, VoiceReplyMode::Voice) {
             let _ = send_telegram_text(bot, chat_id, &tts_input).await;
@@ -658,6 +658,7 @@ pub(super) async fn submit_task_only(
     state: &BotState,
     user_id: i64,
     chat_id: i64,
+    message_id: Option<String>,
     kind: TaskKind,
     payload: serde_json::Value,
 ) -> anyhow::Result<String> {
@@ -686,6 +687,21 @@ pub(super) async fn submit_task_only(
         channel: Some(ChannelKind::Telegram),
         external_user_id: Some(user_id.to_string()),
         external_chat_id: Some(chat_id.to_string()),
+        ingress: Some({
+            let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+                ChannelKind::Telegram,
+                "telegram_bot",
+            )
+            .with_external_ids(user_id.to_string(), chat_id.to_string())
+            .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
+                chat_id.to_string(),
+            ))
+            .with_locale(state.language.clone());
+            if let Some(message_id) = message_id {
+                ingress = ingress.with_message_id(message_id);
+            }
+            ingress
+        }),
         kind: kind.clone(),
         payload,
     };

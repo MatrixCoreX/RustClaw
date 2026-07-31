@@ -293,7 +293,7 @@ pub(super) fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<(
              channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
              external_user_id TEXT,
              external_chat_id TEXT,
-             message_id    INTEGER,
+             message_id    TEXT,
              user_key      TEXT,
              kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
              payload_json  TEXT NOT NULL,

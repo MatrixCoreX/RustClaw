@@ -217,7 +217,16 @@ pub(super) async fn maybe_handle_resume_continuation(
         "resume_user_text": prompt,
         "resume_context": pending.resume_context,
     });
-    match submit_task_only(state, user_id, chat_id, TaskKind::Ask, payload).await {
+    match submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        Some(msg.id.0.to_string()),
+        TaskKind::Ask,
+        payload,
+    )
+    .await
+    {
         Ok(task_id) => {
             spawn_task_result_delivery(
                 bot.clone(),

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
     external_user_id TEXT,
     external_chat_id TEXT,
-    message_id    INTEGER,
+    message_id    TEXT,
     kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
     payload_json  TEXT NOT NULL,
     status        TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'timeout')),

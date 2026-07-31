@@ -202,6 +202,7 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         &state,
         user_id,
         msg.chat.id.0,
+        Some(msg.id.0.to_string()),
         TaskKind::Ask,
         json!({ "text": prompt }),
     )
