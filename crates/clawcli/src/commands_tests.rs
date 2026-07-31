@@ -760,6 +760,16 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
                 "resume_wait_seconds": 0,
                 "next_action_kind": "resume_checkpoint"
             },
+            "task_plan": {
+                "schema_version": 1,
+                "source": "task_plan",
+                "data_only": true,
+                "plan_revision": 2,
+                "steps": [
+                    {"step_id": "inspect", "title": "Inspect", "status": "completed"},
+                    {"step_id": "verify", "title": "Verify", "status": "in_progress"}
+                ]
+            },
             "result_json": {
                 "changed_files": ["src/lib.rs"],
                 "task_journal": {
@@ -806,6 +816,14 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
     assert_eq!(
         snapshot["selected_progress"]["next_action_kind"],
         "resume_checkpoint"
+    );
+    assert_eq!(
+        snapshot["selected_progress"]["task_plan"]["plan_revision"],
+        2
+    );
+    assert_eq!(
+        snapshot["selected_progress"]["task_plan"]["steps"][1]["step_id"],
+        "verify"
     );
     assert_eq!(snapshot["selected_summary"]["llm"]["llm_call_count"], 2);
     assert_eq!(
@@ -898,6 +916,17 @@ fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
                 "goal_id": "goal-lines",
                 "goal_status": "in_progress"
             },
+            "task_plan": {
+                "schema_version": 1,
+                "source": "task_plan",
+                "data_only": true,
+                "plan_revision": 5,
+                "steps": [
+                    {"step_id": "inspect", "title": "Inspect", "status": "completed"},
+                    {"step_id": "implement", "title": "Implement", "status": "in_progress"},
+                    {"step_id": "verify", "title": "Verify", "status": "pending"}
+                ]
+            },
             "result_json": {
                 "changed_files": ["src/lib.rs"],
                 "task_checkpoint": {
@@ -947,6 +976,10 @@ fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
     assert!(lines.contains(&"tui_selected_poll_ref: poll-lines".to_string()));
     assert!(lines.contains(&"tui_selected_lease_owner: worker-lines".to_string()));
     assert!(lines.contains(&"tui_selected_heartbeat_at: 1781800000".to_string()));
+    assert!(lines.contains(&"tui_selected_plan_revision: 5".to_string()));
+    assert!(lines.contains(&"tui_selected_plan_completed_count: 1".to_string()));
+    assert!(lines.contains(&"tui_selected_plan_step_count: 3".to_string()));
+    assert!(lines.contains(&"tui_selected_plan_in_progress_step_id: implement".to_string()));
     assert!(lines.contains(&"tui_selected_llm_call_count: 3".to_string()));
     assert!(lines.contains(&"tui_selected_changed_file_count: 1".to_string()));
     assert!(lines.contains(&"tui_selected_verification_command_count: 1".to_string()));

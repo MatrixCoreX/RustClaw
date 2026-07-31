@@ -89,9 +89,12 @@ pub(crate) fn run_watch(
             output::print_json_pretty(&task.raw_data);
         } else {
             let snapshot = format!(
-                "{}|{}",
+                "{}|{}|{}",
                 task.status,
-                task.lifecycle_summary_tokens().join(" ")
+                task.lifecycle_summary_tokens().join(" "),
+                task.task_plan_snapshot()
+                    .map(|plan| plan.plan_revision.to_string())
+                    .unwrap_or_default()
             );
             if snapshot != last_snapshot {
                 output::print_task_status(&task, false, &event_filters);
@@ -117,6 +120,10 @@ pub(crate) fn run_watch(
 
 pub(super) fn watch_progress_json(task: &task::TaskStatusView) -> serde_json::Value {
     let lifecycle = task.lifecycle();
+    let task_plan = task
+        .task_plan_snapshot()
+        .map(|plan| plan.raw)
+        .unwrap_or(serde_json::Value::Null);
     json!({
         "execution_state": task.execution_state(),
         "lifecycle_state": task.lifecycle_state(),
@@ -144,6 +151,7 @@ pub(super) fn watch_progress_json(task: &task::TaskStatusView) -> serde_json::Va
         "claim_attempt": lifecycle_field(lifecycle, "claim_attempt"),
         "attempt_id": lifecycle_field(lifecycle, "attempt_id"),
         "claimed_at": lifecycle_field(lifecycle, "claimed_at"),
+        "task_plan": task_plan,
     })
 }
 

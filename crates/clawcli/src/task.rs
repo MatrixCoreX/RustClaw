@@ -31,6 +31,22 @@ pub(crate) struct TaskStatusView {
     pub(crate) events: Vec<TaskEventLine>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskPlanStepView {
+    pub(crate) step_id: String,
+    pub(crate) title: String,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskPlanSnapshotView {
+    pub(crate) plan_revision: u64,
+    pub(crate) steps: Vec<TaskPlanStepView>,
+    pub(crate) completed_count: usize,
+    pub(crate) in_progress_step_id: Option<String>,
+    pub(crate) raw: Value,
+}
+
 #[derive(Default)]
 pub(crate) struct TaskResumeRequest<'a> {
     pub(crate) checkpoint_id: Option<&'a str>,
@@ -177,6 +193,76 @@ impl TaskStatusView {
         }
         tokens
     }
+
+    pub(crate) fn task_plan_snapshot(&self) -> Option<TaskPlanSnapshotView> {
+        parse_task_plan_snapshot(self.raw_data.get("task_plan")?)
+    }
+}
+
+fn parse_task_plan_snapshot(value: &Value) -> Option<TaskPlanSnapshotView> {
+    if value.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || value.get("source").and_then(Value::as_str) != Some("task_plan")
+        || value.get("data_only").and_then(Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+    let plan_revision = value
+        .get("plan_revision")
+        .and_then(Value::as_u64)
+        .filter(|revision| *revision > 0)?;
+    let raw_steps = value
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| !steps.is_empty() && steps.len() <= 64)?;
+    let mut step_ids = std::collections::HashSet::new();
+    let mut steps = Vec::with_capacity(raw_steps.len());
+    let mut completed_count = 0usize;
+    let mut in_progress_step_id = None;
+    for raw_step in raw_steps {
+        let step_id = raw_step
+            .get("step_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|step_id| !step_id.is_empty())?;
+        let title = raw_step
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty() && !title.chars().any(char::is_control))?;
+        let status = raw_step
+            .get("status")
+            .and_then(Value::as_str)
+            .filter(|status| {
+                matches!(
+                    *status,
+                    "pending" | "in_progress" | "completed" | "cancelled"
+                )
+            })?;
+        if !step_ids.insert(step_id) {
+            return None;
+        }
+        if status == "completed" {
+            completed_count = completed_count.saturating_add(1);
+        }
+        if status == "in_progress" {
+            if in_progress_step_id.is_some() {
+                return None;
+            }
+            in_progress_step_id = Some(step_id.to_string());
+        }
+        steps.push(TaskPlanStepView {
+            step_id: step_id.to_string(),
+            title: title.to_string(),
+            status: status.to_string(),
+        });
+    }
+    Some(TaskPlanSnapshotView {
+        plan_revision,
+        steps,
+        completed_count,
+        in_progress_step_id,
+        raw: value.clone(),
+    })
 }
 
 fn push_value_token(parts: &mut Vec<String>, key: &str, value: Option<&Value>) {
