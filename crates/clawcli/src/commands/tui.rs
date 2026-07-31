@@ -248,6 +248,23 @@ pub(super) fn tui_selected_task_lines(task: &task::TaskStatusView) -> Vec<String
         &progress,
         "/last_heartbeat_ts",
     );
+    if let Some(plan) = task.task_plan_snapshot() {
+        lines.push(format!(
+            "tui_selected_plan_revision: {}",
+            plan.plan_revision
+        ));
+        lines.push(format!(
+            "tui_selected_plan_completed_count: {}",
+            plan.completed_count
+        ));
+        lines.push(format!(
+            "tui_selected_plan_step_count: {}",
+            plan.steps.len()
+        ));
+        if let Some(step_id) = plan.in_progress_step_id {
+            lines.push(format!("tui_selected_plan_in_progress_step_id: {step_id}"));
+        }
+    }
     push_tui_machine_line(
         &mut lines,
         "tui_selected_llm_call_count",

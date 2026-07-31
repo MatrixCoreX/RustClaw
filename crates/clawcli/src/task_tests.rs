@@ -324,3 +324,39 @@ fn capability_task_payload_uses_the_verified_machine_entrypoint() {
     assert_eq!(payload["args"]["paths"][0], "src/lib.rs");
     assert!(payload.get("text").is_none());
 }
+
+#[test]
+fn task_plan_snapshot_accepts_only_the_data_only_machine_contract() {
+    let mut view = TaskStatusView {
+        task_id: "task-plan-cli".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "task_plan": {
+                "schema_version": 1,
+                "source": "task_plan",
+                "status": "ok",
+                "data_only": true,
+                "render_owner": "ui_cli_channel_projection",
+                "plan_revision": 4,
+                "steps": [
+                    {"step_id": "inspect", "title": "Inspect state", "status": "completed"},
+                    {"step_id": "implement", "title": "Implement change", "status": "in_progress"},
+                    {"step_id": "verify", "title": "Verify result", "status": "pending"}
+                ]
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let plan = view.task_plan_snapshot().expect("valid task plan");
+    assert_eq!(plan.plan_revision, 4);
+    assert_eq!(plan.completed_count, 1);
+    assert_eq!(plan.in_progress_step_id.as_deref(), Some("implement"));
+    assert_eq!(plan.steps[2].title, "Verify result");
+    assert_eq!(plan.raw["data_only"], true);
+
+    view.raw_data["task_plan"]["data_only"] = serde_json::json!(false);
+    assert!(view.task_plan_snapshot().is_none());
+}

@@ -155,3 +155,40 @@ fn task_status_lines_derive_wait_tokens_from_machine_state() {
         .iter()
         .any(|line| line.starts_with("lifecycle: ") && line.contains("resume_due=true")));
 }
+
+#[test]
+fn task_status_lines_render_the_revisioned_plan_without_raw_json() {
+    let task = TaskStatusView {
+        task_id: "task-cli-plan".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "running",
+            "task_plan": {
+                "schema_version": 1,
+                "source": "task_plan",
+                "data_only": true,
+                "plan_revision": 2,
+                "steps": [
+                    {"step_id": "inspect", "title": "Inspect state", "status": "completed"},
+                    {"step_id": "implement", "title": "Implement change", "status": "in_progress"}
+                ]
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let lines = task_status_lines(&task, false, &EventFilters::default());
+
+    assert!(lines
+        .contains(&"task_plan: revision=2 completed=1 total=2 in_progress=implement".to_string()));
+    assert!(lines.contains(
+        &"task_plan_step: index=1 step_id=inspect status=completed title=Inspect state".to_string()
+    ));
+    assert!(lines.contains(
+        &"task_plan_step: index=2 step_id=implement status=in_progress title=Implement change"
+            .to_string()
+    ));
+    assert!(!lines.iter().any(|line| line.contains('{')));
+}

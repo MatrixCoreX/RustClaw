@@ -937,3 +937,46 @@ fn event_filters_reject_mismatched_machine_fields() {
     );
     assert!(!filters.matches(&event));
 }
+
+#[test]
+fn task_plan_event_compact_output_uses_the_shared_machine_snapshot() {
+    let event = json!({
+        "seq": 12,
+        "event_type": "task_plan_updated",
+        "event_kind": "task_plan_updated",
+        "payload": {
+            "schema_version": 1,
+            "source": "task_plan",
+            "data_only": true,
+            "render_owner": "ui_cli_channel_projection",
+            "plan_revision": 3,
+            "steps": [
+                {"step_id": "inspect", "title": "Inspect", "status": "completed"},
+                {"step_id": "verify", "title": "Verify", "status": "in_progress"},
+                {"step_id": "finish", "title": "Finish", "status": "pending"}
+            ]
+        }
+    });
+
+    let line = task_event_line(&event).expect("task plan event");
+
+    assert_eq!(line.event_type, "task_plan_updated");
+    assert_eq!(
+        line.fields.get("plan_revision").map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        line.fields.get("data_only").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(line.fields.get("step_count").map(String::as_str), Some("3"));
+    assert_eq!(
+        line.fields.get("completed_step_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        line.fields.get("in_progress_step_id").map(String::as_str),
+        Some("verify")
+    );
+    assert!(line.line.contains("render_owner=ui_cli_channel_projection"));
+}

@@ -582,12 +582,53 @@ pub(crate) fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine
         "worker_id",
         "lease_owner",
         "lease_expires_at",
+        "plan_revision",
+        "data_only",
+        "render_owner",
     ] {
         push_scalar_token(
             &mut parts,
             &mut fields,
             key,
             payload.and_then(|value| value.get(key)),
+        );
+    }
+    if event_type == "task_plan_updated" {
+        let steps = payload
+            .and_then(|value| value.get("steps"))
+            .and_then(serde_json::Value::as_array);
+        push_derived_token(
+            &mut parts,
+            &mut fields,
+            "step_count",
+            steps.map(|steps| steps.len().to_string()),
+        );
+        push_derived_token(
+            &mut parts,
+            &mut fields,
+            "completed_step_count",
+            steps.map(|steps| {
+                steps
+                    .iter()
+                    .filter(|step| {
+                        step.get("status").and_then(serde_json::Value::as_str) == Some("completed")
+                    })
+                    .count()
+                    .to_string()
+            }),
+        );
+        push_derived_token(
+            &mut parts,
+            &mut fields,
+            "in_progress_step_id",
+            steps.and_then(|steps| {
+                steps.iter().find_map(|step| {
+                    (step.get("status").and_then(serde_json::Value::as_str) == Some("in_progress"))
+                        .then(|| step.get("step_id").and_then(serde_json::Value::as_str))
+                        .flatten()
+                        .map(str::to_string)
+                })
+            }),
         );
     }
     push_scalar_token(
@@ -677,6 +718,22 @@ fn push_scalar_token(
     if token.is_empty() {
         return;
     }
+    fields.insert(key.to_string(), token.clone());
+    parts.push(format!("{key}={token}"));
+}
+
+fn push_derived_token(
+    parts: &mut Vec<String>,
+    fields: &mut BTreeMap<String, String>,
+    key: &str,
+    value: Option<String>,
+) {
+    let Some(token) = value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
     fields.insert(key.to_string(), token.clone());
     parts.push(format!("{key}={token}"));
 }

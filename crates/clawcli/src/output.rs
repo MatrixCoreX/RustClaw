@@ -63,6 +63,27 @@ fn task_status_lines_with_result(
     if let Some(budget) = task_budget_status_line(task) {
         lines.push(budget);
     }
+    if let Some(plan) = task.task_plan_snapshot() {
+        let mut summary = format!(
+            "task_plan: revision={} completed={} total={}",
+            plan.plan_revision,
+            plan.completed_count,
+            plan.steps.len()
+        );
+        if let Some(step_id) = plan.in_progress_step_id.as_deref() {
+            summary.push_str(&format!(" in_progress={step_id}"));
+        }
+        lines.push(summary);
+        for (index, step) in plan.steps.iter().enumerate() {
+            lines.push(format!(
+                "task_plan_step: index={} step_id={} status={} title={}",
+                index + 1,
+                step.step_id,
+                step.status,
+                step.title
+            ));
+        }
+    }
     let lifecycle_tokens = task.lifecycle_summary_tokens();
     if !lifecycle_tokens.is_empty() {
         lines.push(format!("lifecycle: {}", lifecycle_tokens.join(" ")));
