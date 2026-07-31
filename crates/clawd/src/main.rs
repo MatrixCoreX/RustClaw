@@ -113,6 +113,7 @@ mod ui_attachments;
 mod verifier;
 mod virtual_tools;
 mod visible_text;
+mod whatsapp_cloud_events;
 mod worker;
 
 pub(crate) use app_helpers::{
@@ -687,10 +688,34 @@ async fn run() -> anyhow::Result<()> {
     } else {
         config.whatsapp_cloud.access_token.clone()
     };
+    let whatsapp_app_secret = if config.whatsapp_cloud.app_secret.trim().is_empty() {
+        config.whatsapp.app_secret.clone()
+    } else {
+        config.whatsapp_cloud.app_secret.clone()
+    };
     let whatsapp_phone_number_id = if config.whatsapp_cloud.phone_number_id.trim().is_empty() {
         config.whatsapp.phone_number_id.clone()
     } else {
         config.whatsapp_cloud.phone_number_id.clone()
+    };
+    let (whatsapp_out_of_window_template_name, whatsapp_out_of_window_template_language) = if config
+        .whatsapp_cloud
+        .out_of_window_template_name
+        .trim()
+        .is_empty()
+    {
+        (
+            config.whatsapp.out_of_window_template_name.clone(),
+            config.whatsapp.out_of_window_template_language.clone(),
+        )
+    } else {
+        (
+            config.whatsapp_cloud.out_of_window_template_name.clone(),
+            config
+                .whatsapp_cloud
+                .out_of_window_template_language
+                .clone(),
+        )
     };
 
     // Phase 4: 统一 skill 视图重建（启动与 reload 复用）
@@ -861,7 +886,10 @@ async fn run() -> anyhow::Result<()> {
             whatsapp_cloud_enabled,
             whatsapp_api_base,
             whatsapp_access_token,
+            whatsapp_app_secret,
             whatsapp_phone_number_id,
+            whatsapp_out_of_window_template_name,
+            whatsapp_out_of_window_template_language,
             whatsapp_web_enabled: config.whatsapp_web.enabled,
             whatsapp_web_bridge_base_url: config.whatsapp_web.bridge_base_url.clone(),
             future_adapters_enabled: Arc::new(
@@ -976,6 +1004,14 @@ async fn run() -> anyhow::Result<()> {
         .route("/admin/mcp/servers", get(list_mcp_servers))
         .route("/admin/mcp/tools", get(list_mcp_tools))
         .route("/admin/mcp/servers/:server_id/test", post(test_mcp_server))
+        .route(
+            "/internal/channel-events/whatsapp-cloud",
+            post(whatsapp_cloud_events::handle_whatsapp_cloud_events),
+        )
+        .route(
+            "/internal/channel-events/whatsapp-cloud/accepted",
+            post(whatsapp_cloud_events::handle_whatsapp_cloud_accepted),
+        )
         .with_state(state.clone());
 
     let app = Router::new().nest("/v1", api).layer(api_cors_layer());
@@ -1263,6 +1299,19 @@ async fn submit_task(
         normalized_external_chat_id.as_deref(),
         &req.payload,
     );
+    let whatsapp_cloud_inbound = (channel == ChannelKind::Whatsapp
+        && ingress.adapter == "whatsapp_cloud")
+        .then(|| {
+            Some((
+                ingress
+                    .external_user_id
+                    .as_deref()
+                    .or(ingress.external_chat_id.as_deref())?
+                    .to_string(),
+                ingress.received_at_ts?,
+            ))
+        })
+        .flatten();
     let message_id = ingress.message_id.clone();
     let payload = build_submit_task_payload(
         req.payload,
@@ -1295,6 +1344,21 @@ async fn submit_task(
     if let Err(err) = write_result {
         error!("Insert task failed: {}", err);
         return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+    }
+    if let Some((external_user_id, received_at_ts)) = whatsapp_cloud_inbound {
+        if let Err(err) = repo::record_whatsapp_cloud_inbound(
+            &state.core.db,
+            &state.channels.whatsapp_phone_number_id,
+            &external_user_id,
+            received_at_ts,
+        ) {
+            warn!(
+                event = "whatsapp_cloud_window_record_failed",
+                task_id = %task_id,
+                diagnostic = %err,
+                "whatsapp_cloud_inbound_window_record_failed"
+            );
+        }
     }
 
     let _ = insert_audit_log(

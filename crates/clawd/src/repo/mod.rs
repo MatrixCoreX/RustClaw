@@ -38,7 +38,9 @@ pub(crate) use auth::{
 pub(crate) use channel_delivery_receipt::{
     claim_channel_delivery_dispatch, complete_channel_delivery_dispatch,
     ensure_channel_delivery_receipt_schema, record_channel_delivery_receipt,
-    ClaimChannelDeliveryDispatchOutcome,
+    record_whatsapp_cloud_inbound, record_whatsapp_cloud_provider_status,
+    whatsapp_cloud_conversation_window, ClaimChannelDeliveryDispatchOutcome,
+    RecordWhatsappProviderStatusOutcome,
 };
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;
 #[cfg(test)]

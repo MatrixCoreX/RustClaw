@@ -238,6 +238,8 @@ pub struct ChannelDeliveryReceipt {
     pub message_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_error_code: Option<String>,
     pub retryable: bool,
     pub updated_at_ts: u64,
 }
@@ -295,12 +297,23 @@ impl ChannelDeliveryReceipt {
                         byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':')
                     })
             })
+            || self.provider_error_code.as_deref().is_some_and(|value| {
+                value.is_empty()
+                    || value.len() > 128
+                    || !value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')
+                    })
+            })
         {
             return Err(ChannelDeliveryValidationError::InvalidReceiptError);
         }
         match self.status {
             ChannelDeliveryStatus::Accepted => {
-                if self.error_code.is_some() || self.message_key.is_some() || self.retryable {
+                if self.error_code.is_some()
+                    || self.message_key.is_some()
+                    || self.provider_error_code.is_some()
+                    || self.retryable
+                {
                     return Err(ChannelDeliveryValidationError::InvalidReceiptState);
                 }
             }
@@ -308,6 +321,7 @@ impl ChannelDeliveryReceipt {
                 if self.provider_message_ids.is_empty()
                     || self.error_code.is_some()
                     || self.message_key.is_some()
+                    || self.provider_error_code.is_some()
                     || self.retryable
                 {
                     return Err(ChannelDeliveryValidationError::InvalidReceiptState);

@@ -116,6 +116,27 @@ pub(crate) fn build_scheduled_delivery_envelope(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let conversation_window = if channel == ChannelKind::Whatsapp && adapter == "whatsapp_cloud" {
+        let external_user_id = external_user_id
+            .or(external_chat_id)
+            .ok_or_else(|| anyhow!("whatsapp_cloud_conversation_identity_missing"))?;
+        crate::repo::whatsapp_cloud_conversation_window(
+            &state.core.db,
+            &state.channels.whatsapp_phone_number_id,
+            external_user_id,
+            crate::now_ts_u64(),
+        )?
+    } else {
+        ChannelConversationWindow {
+            state: if context_token.is_some() {
+                ChannelConversationWindowState::Open
+            } else {
+                ChannelConversationWindowState::Unknown
+            },
+            expires_at_ts: None,
+            context_token,
+        }
+    };
     let delivery_id = format!("delivery:{}:schedule-terminal", task.task_id);
     let base_idempotency_key = format!("{}:schedule-terminal", task.task_id);
     let idempotency_key = match channel {
@@ -136,15 +157,7 @@ pub(crate) fn build_scheduled_delivery_envelope(
         adapter,
         reply_target,
         locale,
-        conversation_window: ChannelConversationWindow {
-            state: if context_token.is_some() {
-                ChannelConversationWindowState::Open
-            } else {
-                ChannelConversationWindowState::Unknown
-            },
-            expires_at_ts: None,
-            context_token,
-        },
+        conversation_window,
         idempotency_key,
         text_segments: vec![ChannelTextSegment {
             text: text.to_string(),
@@ -205,12 +218,19 @@ pub(crate) async fn deliver_task_envelope(
         .map(|segment| segment.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let send_result = crate::worker::send_task_channel_message(state, task, payload, &text).await;
+    let send_result = crate::worker::send_task_channel_message(
+        state,
+        task,
+        payload,
+        &text,
+        &envelope.conversation_window,
+    )
+    .await;
     let now = crate::now_ts_u64();
     let receipt = match send_result {
         Ok(outcome) => accepted_delivery_receipt(envelope, outcome, now),
         Err(error_text) => {
-            let (error_code, message_key, diagnostic_id, retryable) =
+            let (error_code, message_key, diagnostic_id, provider_error_code, retryable) =
                 delivery_failure_fields(&error_text);
             warn!(
                 event = "channel_delivery_failure",
@@ -234,6 +254,7 @@ pub(crate) async fn deliver_task_envelope(
                 error_code: Some(error_code),
                 message_key: Some(message_key),
                 diagnostic_id: Some(diagnostic_id),
+                provider_error_code,
                 retryable,
                 updated_at_ts: now,
             }
@@ -276,12 +297,13 @@ fn accepted_delivery_receipt(
         error_code: None,
         message_key: None,
         diagnostic_id: None,
+        provider_error_code: None,
         retryable: false,
         updated_at_ts: now,
     }
 }
 
-fn delivery_failure_fields(error_text: &str) -> (String, String, String, bool) {
+fn delivery_failure_fields(error_text: &str) -> (String, String, String, Option<String>, bool) {
     let provider_error = ChannelProviderError::decode(error_text);
     let error_code = provider_error
         .as_ref()
@@ -296,7 +318,14 @@ fn delivery_failure_fields(error_text: &str) -> (String, String, String, bool) {
         .map(|error| error.diagnostic_id.clone())
         .unwrap_or_else(|| format!("delivery:{}", Uuid::new_v4().simple()));
     let retryable = provider_error.as_ref().is_some_and(|error| error.retryable);
-    (error_code, message_key, diagnostic_id, retryable)
+    let provider_error_code = provider_error.and_then(|error| error.provider_error_code);
+    (
+        error_code,
+        message_key,
+        diagnostic_id,
+        provider_error_code,
+        retryable,
+    )
 }
 
 fn result_from_existing_receipt(receipt: ChannelDeliveryReceipt) -> ChannelDeliveryServiceResult {

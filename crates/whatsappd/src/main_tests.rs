@@ -32,7 +32,7 @@ fn whatsapp_cloud_media_specs_reject_unsupported_formats_and_oversize_files() {
     assert!(
         whatsapp_cloud_upload_spec(Path::new("clip.webm"), WhatsappCloudMediaKind::Video)
             .unwrap_err()
-            .contains("H.264")
+            .starts_with("whatsapp_cloud_video_format_unsupported:")
     );
     std::fs::remove_dir_all(root).expect("remove media limit dir");
 }

@@ -46,3 +46,34 @@ fn typed_preflight_exposes_machine_failures_without_localized_prose() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn whatsapp_video_probe_requires_h264_and_aac_or_no_audio() {
+    let compatible = MediaProbe {
+        streams: vec![
+            MediaProbeStream {
+                codec_type: "video".to_string(),
+                codec_name: "h264".to_string(),
+            },
+            MediaProbeStream {
+                codec_type: "audio".to_string(),
+                codec_name: "aac".to_string(),
+            },
+        ],
+    };
+    assert!(video_probe_is_compatible(&compatible));
+
+    let incompatible = MediaProbe {
+        streams: vec![
+            MediaProbeStream {
+                codec_type: "video".to_string(),
+                codec_name: "vp9".to_string(),
+            },
+            MediaProbeStream {
+                codec_type: "audio".to_string(),
+                codec_name: "opus".to_string(),
+            },
+        ],
+    };
+    assert!(!video_probe_is_compatible(&incompatible));
+}

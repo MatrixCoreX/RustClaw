@@ -134,6 +134,7 @@ pub(crate) async fn send_task_channel_message(
     task: &crate::ClaimedTask,
     payload: &Value,
     text: &str,
+    conversation_window: &claw_core::channel_delivery::ChannelConversationWindow,
 ) -> Result<crate::channel_send::ChannelSendOutcome, String> {
     match runtime_channel_from_payload(state, payload) {
         crate::RuntimeChannel::Telegram => {
@@ -154,9 +155,13 @@ pub(crate) async fn send_task_channel_message(
                         .map(|_| crate::channel_send::ChannelSendOutcome::default())
                 }
                 crate::WhatsappDeliveryRoute::Cloud => {
-                    crate::channel_send::send_whatsapp_cloud_text_message(state, &to, text)
-                        .await
-                        .map(|_| crate::channel_send::ChannelSendOutcome::default())
+                    crate::channel_send::send_whatsapp_cloud_text_message(
+                        state,
+                        &to,
+                        text,
+                        conversation_window,
+                    )
+                    .await
                 }
             }
         }

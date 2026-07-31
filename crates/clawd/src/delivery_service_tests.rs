@@ -43,11 +43,13 @@ fn provider_failure_contract_propagates_machine_fields_without_response_body() {
             r#"{"error":{"code":"rate_limit","message":"private provider prose"}}"#,
         );
     let encoded = provider_error.to_string();
-    let (error_code, message_key, diagnostic_id, retryable) = delivery_failure_fields(&encoded);
+    let (error_code, message_key, diagnostic_id, provider_error_code, retryable) =
+        delivery_failure_fields(&encoded);
 
     assert_eq!(error_code, "channel.provider.rate_limited");
     assert_eq!(message_key, "channel.error.provider_rate_limited");
     assert_eq!(diagnostic_id, provider_error.diagnostic_id);
+    assert_eq!(provider_error_code.as_deref(), Some("rate_limit"));
     assert!(retryable);
     assert!(!encoded.contains("private provider prose"));
 }

@@ -305,6 +305,10 @@ pub(super) fn default_whatsapp_api_base() -> String {
     "https://graph.facebook.com".to_string()
 }
 
+pub(super) fn default_whatsapp_template_language() -> String {
+    "en_US".to_string()
+}
+
 pub(super) fn default_whatsapp_webhook_listen() -> String {
     "127.0.0.1:8091".to_string()
 }

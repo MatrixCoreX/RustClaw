@@ -1,6 +1,11 @@
 use anyhow::{anyhow, Context};
 use claw_core::channel_delivery::{
-    ChannelDeliveryEnvelope, ChannelDeliveryReceipt, ChannelDeliveryStatus,
+    ChannelConversationWindow, ChannelConversationWindowState, ChannelDeliveryEnvelope,
+    ChannelDeliveryReceipt, ChannelDeliveryStatus,
+};
+use claw_core::channel_whatsapp_cloud::{
+    customer_service_window_expires_at, customer_service_window_is_open,
+    WhatsappDeliveryEventStatus,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -51,6 +56,38 @@ CREATE TABLE IF NOT EXISTS channel_delivery_dispatch_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_channel_delivery_dispatch_claims_state_lease
     ON channel_delivery_dispatch_claims(state, lease_expires_at_ts);
+
+CREATE TABLE IF NOT EXISTS channel_delivery_provider_messages (
+    provider_message_id TEXT PRIMARY KEY,
+    idempotency_key     TEXT NOT NULL,
+    status              TEXT NOT NULL CHECK (status IN ('accepted', 'delivered', 'read', 'failed')),
+    event_at_ts         INTEGER NOT NULL,
+    provider_error_code TEXT,
+    diagnostic_id       TEXT,
+    updated_at_ts       INTEGER NOT NULL,
+    FOREIGN KEY (idempotency_key) REFERENCES channel_delivery_receipts(idempotency_key) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_channel_delivery_provider_messages_key
+    ON channel_delivery_provider_messages(idempotency_key, status);
+
+CREATE TABLE IF NOT EXISTS whatsapp_cloud_conversation_windows (
+    phone_number_id    TEXT NOT NULL,
+    external_user_id  TEXT NOT NULL,
+    last_inbound_at_ts INTEGER NOT NULL,
+    expires_at_ts      INTEGER NOT NULL,
+    updated_at_ts      INTEGER NOT NULL,
+    PRIMARY KEY (phone_number_id, external_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_cloud_conversation_windows_expiry
+    ON whatsapp_cloud_conversation_windows(expires_at_ts);
+
+CREATE TABLE IF NOT EXISTS whatsapp_cloud_pending_provider_statuses (
+    provider_message_id TEXT PRIMARY KEY,
+    status              TEXT NOT NULL CHECK (status IN ('accepted', 'delivered', 'read', 'failed')),
+    event_at_ts         INTEGER NOT NULL,
+    provider_error_code TEXT,
+    updated_at_ts       INTEGER NOT NULL
+);
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +105,13 @@ pub(crate) enum ClaimChannelDeliveryDispatchOutcome {
     QueryRequired,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordWhatsappProviderStatusOutcome {
+    Updated,
+    Unchanged,
+    UnknownMessage,
+}
+
 pub(crate) fn ensure_channel_delivery_receipt_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(INIT_CHANNEL_DELIVERY_RECEIPT_SQL)?;
     Ok(())
@@ -81,7 +125,83 @@ pub(crate) fn record_channel_delivery_receipt(
         .get()
         .context("channel_delivery_receipt_db_pool_failed")?;
     ensure_channel_delivery_receipt_schema(&db)?;
-    record_channel_delivery_receipt_in_db(&db, receipt)
+    let outcome = record_channel_delivery_receipt_in_db(&db, receipt)?;
+    replay_pending_whatsapp_statuses(&db, &receipt.provider_message_ids)?;
+    Ok(outcome)
+}
+
+pub(crate) fn record_whatsapp_cloud_inbound(
+    pool: &DbPool,
+    phone_number_id: &str,
+    external_user_id: &str,
+    received_at_ts: u64,
+) -> anyhow::Result<()> {
+    let phone_number_id = required_provider_identity(phone_number_id)?;
+    let external_user_id = required_provider_identity(external_user_id)?;
+    if received_at_ts == 0 {
+        return Err(anyhow!("whatsapp_cloud_inbound_timestamp_invalid"));
+    }
+    let expires_at_ts = customer_service_window_expires_at(received_at_ts);
+    let received_at_ts = i64::try_from(received_at_ts)
+        .map_err(|_| anyhow!("whatsapp_cloud_inbound_timestamp_out_of_range"))?;
+    let expires_at_ts = i64::try_from(expires_at_ts)
+        .map_err(|_| anyhow!("whatsapp_cloud_window_expiry_out_of_range"))?;
+    let db = pool.get().context("whatsapp_cloud_window_db_pool_failed")?;
+    ensure_channel_delivery_receipt_schema(&db)?;
+    db.execute(
+        "INSERT INTO whatsapp_cloud_conversation_windows (
+             phone_number_id, external_user_id, last_inbound_at_ts, expires_at_ts, updated_at_ts
+         ) VALUES (?1, ?2, ?3, ?4, ?3)
+         ON CONFLICT(phone_number_id, external_user_id) DO UPDATE SET
+             last_inbound_at_ts = excluded.last_inbound_at_ts,
+             expires_at_ts = excluded.expires_at_ts,
+             updated_at_ts = excluded.updated_at_ts
+         WHERE excluded.last_inbound_at_ts > whatsapp_cloud_conversation_windows.last_inbound_at_ts",
+        params![phone_number_id, external_user_id, received_at_ts, expires_at_ts],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn whatsapp_cloud_conversation_window(
+    pool: &DbPool,
+    phone_number_id: &str,
+    external_user_id: &str,
+    now_ts: u64,
+) -> anyhow::Result<ChannelConversationWindow> {
+    let phone_number_id = required_provider_identity(phone_number_id)?;
+    let external_user_id = required_provider_identity(external_user_id)?;
+    let db = pool.get().context("whatsapp_cloud_window_db_pool_failed")?;
+    ensure_channel_delivery_receipt_schema(&db)?;
+    let stored = db
+        .query_row(
+            "SELECT last_inbound_at_ts, expires_at_ts
+             FROM whatsapp_cloud_conversation_windows
+             WHERE phone_number_id = ?1 AND external_user_id = ?2
+             LIMIT 1",
+            params![phone_number_id, external_user_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    let Some((last_inbound_at_ts, expires_at_ts)) = stored else {
+        return Ok(ChannelConversationWindow {
+            state: ChannelConversationWindowState::Unknown,
+            expires_at_ts: None,
+            context_token: None,
+        });
+    };
+    let last_inbound_at_ts = u64::try_from(last_inbound_at_ts)
+        .map_err(|_| anyhow!("whatsapp_cloud_window_timestamp_invalid"))?;
+    let expires_at_ts = u64::try_from(expires_at_ts)
+        .map_err(|_| anyhow!("whatsapp_cloud_window_expiry_invalid"))?;
+    Ok(ChannelConversationWindow {
+        state: if customer_service_window_is_open(last_inbound_at_ts, now_ts) {
+            ChannelConversationWindowState::Open
+        } else {
+            ChannelConversationWindowState::Closed
+        },
+        expires_at_ts: Some(expires_at_ts),
+        context_token: None,
+    })
 }
 
 pub(crate) fn claim_channel_delivery_dispatch(
@@ -155,6 +275,12 @@ fn record_channel_delivery_receipt_in_db(
         .optional()?;
     let outcome = if let Some((existing_json, existing_digest)) = existing {
         if existing_digest == receipt_digest {
+            sync_provider_message_ids(
+                &tx,
+                idempotency_key,
+                updated_at_ts,
+                &receipt.provider_message_ids,
+            )?;
             tx.commit()?;
             return Ok(RecordChannelDeliveryReceiptOutcome::Unchanged);
         }
@@ -208,8 +334,314 @@ fn record_channel_delivery_receipt_in_db(
             updated_at_ts,
         ],
     )?;
+    sync_provider_message_ids(
+        &tx,
+        idempotency_key,
+        updated_at_ts,
+        &receipt.provider_message_ids,
+    )?;
     tx.commit()?;
     Ok(outcome)
+}
+
+fn sync_provider_message_ids(
+    db: &Connection,
+    idempotency_key: &str,
+    updated_at_ts: i64,
+    provider_message_ids: &[String],
+) -> anyhow::Result<()> {
+    for provider_message_id in provider_message_ids {
+        let provider_message_id = required_provider_identity(provider_message_id)?;
+        let existing_key = db
+            .query_row(
+                "SELECT idempotency_key
+                 FROM channel_delivery_provider_messages
+                 WHERE provider_message_id = ?1
+                 LIMIT 1",
+                params![provider_message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_key
+            .as_deref()
+            .is_some_and(|existing| existing != idempotency_key)
+        {
+            return Err(anyhow!(
+                "channel_delivery_provider_message_identity_conflict"
+            ));
+        }
+        db.execute(
+            "INSERT OR IGNORE INTO channel_delivery_provider_messages (
+                 provider_message_id, idempotency_key, status, event_at_ts,
+                 provider_error_code, diagnostic_id, updated_at_ts
+             ) VALUES (?1, ?2, 'accepted', ?3, NULL, NULL, ?3)",
+            params![provider_message_id, idempotency_key, updated_at_ts],
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn record_whatsapp_cloud_provider_status(
+    pool: &DbPool,
+    provider_message_id: &str,
+    status: WhatsappDeliveryEventStatus,
+    event_at_ts: u64,
+    provider_error_code: Option<&str>,
+) -> anyhow::Result<RecordWhatsappProviderStatusOutcome> {
+    let provider_message_id = required_provider_identity(provider_message_id)?;
+    if event_at_ts == 0 {
+        return Err(anyhow!("whatsapp_cloud_status_timestamp_invalid"));
+    }
+    let db = pool
+        .get()
+        .context("channel_delivery_receipt_db_pool_failed")?;
+    ensure_channel_delivery_receipt_schema(&db)?;
+    record_whatsapp_cloud_provider_status_in_db(
+        &db,
+        provider_message_id,
+        status,
+        event_at_ts,
+        provider_error_code,
+        true,
+    )
+}
+
+fn record_whatsapp_cloud_provider_status_in_db(
+    db: &Connection,
+    provider_message_id: &str,
+    status: WhatsappDeliveryEventStatus,
+    event_at_ts: u64,
+    provider_error_code: Option<&str>,
+    store_if_unknown: bool,
+) -> anyhow::Result<RecordWhatsappProviderStatusOutcome> {
+    let provider_message_id = required_provider_identity(provider_message_id)?;
+    let stored = db
+        .query_row(
+            "SELECT idempotency_key, status, event_at_ts
+             FROM channel_delivery_provider_messages
+             WHERE provider_message_id = ?1
+             LIMIT 1",
+            params![provider_message_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((idempotency_key, existing_status, existing_event_at_ts)) = stored else {
+        if store_if_unknown {
+            let event_at_ts_i64 = i64::try_from(event_at_ts)
+                .map_err(|_| anyhow!("whatsapp_cloud_status_timestamp_out_of_range"))?;
+            db.execute(
+                "INSERT INTO whatsapp_cloud_pending_provider_statuses (
+                     provider_message_id, status, event_at_ts, provider_error_code, updated_at_ts
+                 ) VALUES (?1, ?2, ?3, ?4, ?3)
+                 ON CONFLICT(provider_message_id) DO UPDATE SET
+                     status = excluded.status,
+                     event_at_ts = excluded.event_at_ts,
+                     provider_error_code = excluded.provider_error_code,
+                     updated_at_ts = excluded.updated_at_ts
+                 WHERE excluded.event_at_ts >= whatsapp_cloud_pending_provider_statuses.event_at_ts",
+                params![
+                    provider_message_id,
+                    status.as_str(),
+                    event_at_ts_i64,
+                    provider_error_code,
+                ],
+            )?;
+        }
+        return Ok(RecordWhatsappProviderStatusOutcome::UnknownMessage);
+    };
+    let existing = provider_event_status(&existing_status)?;
+    let incoming_event_at_ts = i64::try_from(event_at_ts)
+        .map_err(|_| anyhow!("whatsapp_cloud_status_timestamp_out_of_range"))?;
+    if provider_status_is_regression(existing, status)
+        || (incoming_event_at_ts < existing_event_at_ts && existing != status)
+    {
+        return Ok(RecordWhatsappProviderStatusOutcome::Unchanged);
+    }
+    let provider_error = (status == WhatsappDeliveryEventStatus::Failed).then(|| {
+        claw_core::channel_provider_error::ChannelProviderError::from_machine_failure(
+            "whatsapp_cloud",
+            "delivery_status",
+            claw_core::channel_provider_error::ChannelProviderFailureClass::PayloadRejected,
+            None,
+            provider_error_code,
+            None,
+            &format!("{provider_message_id}:{event_at_ts}"),
+        )
+    });
+    db.execute(
+        "UPDATE channel_delivery_provider_messages
+         SET status = ?2, event_at_ts = MAX(event_at_ts, ?3),
+             provider_error_code = ?4, diagnostic_id = ?5, updated_at_ts = ?3
+         WHERE provider_message_id = ?1",
+        params![
+            provider_message_id,
+            status.as_str(),
+            incoming_event_at_ts,
+            provider_error
+                .as_ref()
+                .and_then(|error| error.provider_error_code.as_deref()),
+            provider_error
+                .as_ref()
+                .map(|error| error.diagnostic_id.as_str()),
+        ],
+    )?;
+    let current_receipt = load_channel_delivery_receipt_from_db(&db, &idempotency_key)?
+        .ok_or_else(|| anyhow!("channel_delivery_provider_receipt_missing"))?;
+    let aggregate = aggregate_provider_statuses(&db, &idempotency_key)?;
+    let mut next = current_receipt.clone();
+    next.status = aggregate.status;
+    next.updated_at_ts = current_receipt.updated_at_ts.max(event_at_ts);
+    next.error_code = aggregate.error_code;
+    next.message_key = aggregate.message_key;
+    next.diagnostic_id = aggregate.diagnostic_id;
+    next.provider_error_code = aggregate.provider_error_code;
+    next.retryable = false;
+    if next == current_receipt {
+        return Ok(RecordWhatsappProviderStatusOutcome::Unchanged);
+    }
+    record_channel_delivery_receipt_in_db(&db, &next)?;
+    Ok(RecordWhatsappProviderStatusOutcome::Updated)
+}
+
+fn replay_pending_whatsapp_statuses(
+    db: &Connection,
+    provider_message_ids: &[String],
+) -> anyhow::Result<()> {
+    for provider_message_id in provider_message_ids {
+        let pending = db
+            .query_row(
+                "SELECT status, event_at_ts, provider_error_code
+                 FROM whatsapp_cloud_pending_provider_statuses
+                 WHERE provider_message_id = ?1
+                 LIMIT 1",
+                params![provider_message_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((status, event_at_ts, provider_error_code)) = pending else {
+            continue;
+        };
+        let event_at_ts = u64::try_from(event_at_ts)
+            .map_err(|_| anyhow!("whatsapp_cloud_status_timestamp_invalid"))?;
+        record_whatsapp_cloud_provider_status_in_db(
+            db,
+            provider_message_id,
+            provider_event_status(&status)?,
+            event_at_ts,
+            provider_error_code.as_deref(),
+            false,
+        )?;
+        db.execute(
+            "DELETE FROM whatsapp_cloud_pending_provider_statuses
+             WHERE provider_message_id = ?1",
+            params![provider_message_id],
+        )?;
+    }
+    Ok(())
+}
+
+struct ProviderStatusAggregate {
+    status: ChannelDeliveryStatus,
+    error_code: Option<String>,
+    message_key: Option<String>,
+    diagnostic_id: Option<String>,
+    provider_error_code: Option<String>,
+}
+
+fn aggregate_provider_statuses(
+    db: &Connection,
+    idempotency_key: &str,
+) -> anyhow::Result<ProviderStatusAggregate> {
+    let mut statement = db.prepare(
+        "SELECT status, provider_error_code, diagnostic_id
+         FROM channel_delivery_provider_messages
+         WHERE idempotency_key = ?1
+         ORDER BY provider_message_id ASC",
+    )?;
+    let rows = statement
+        .query_map(params![idempotency_key], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if rows.is_empty() {
+        return Err(anyhow!("channel_delivery_provider_messages_missing"));
+    }
+    if let Some((_, provider_error_code, diagnostic_id)) =
+        rows.iter().find(|(status, _, _)| status == "failed")
+    {
+        return Ok(ProviderStatusAggregate {
+            status: ChannelDeliveryStatus::Failed,
+            error_code: Some("channel.provider.payload_rejected".to_string()),
+            message_key: Some("channel.error.provider_payload_rejected".to_string()),
+            diagnostic_id: diagnostic_id.clone(),
+            provider_error_code: provider_error_code.clone(),
+        });
+    }
+    let all_read = rows.iter().all(|(status, _, _)| status == "read");
+    let all_delivered = rows
+        .iter()
+        .all(|(status, _, _)| matches!(status.as_str(), "delivered" | "read"));
+    Ok(ProviderStatusAggregate {
+        status: if all_read {
+            ChannelDeliveryStatus::Read
+        } else if all_delivered {
+            ChannelDeliveryStatus::Delivered
+        } else {
+            ChannelDeliveryStatus::Accepted
+        },
+        error_code: None,
+        message_key: None,
+        diagnostic_id: None,
+        provider_error_code: None,
+    })
+}
+
+fn provider_event_status(value: &str) -> anyhow::Result<WhatsappDeliveryEventStatus> {
+    match value {
+        "accepted" => Ok(WhatsappDeliveryEventStatus::Accepted),
+        "delivered" => Ok(WhatsappDeliveryEventStatus::Delivered),
+        "read" => Ok(WhatsappDeliveryEventStatus::Read),
+        "failed" => Ok(WhatsappDeliveryEventStatus::Failed),
+        _ => Err(anyhow!("channel_delivery_provider_status_invalid")),
+    }
+}
+
+fn provider_status_is_regression(
+    existing: WhatsappDeliveryEventStatus,
+    incoming: WhatsappDeliveryEventStatus,
+) -> bool {
+    if existing == WhatsappDeliveryEventStatus::Failed {
+        return incoming != WhatsappDeliveryEventStatus::Failed;
+    }
+    if incoming == WhatsappDeliveryEventStatus::Failed {
+        return false;
+    }
+    provider_status_rank(incoming) < provider_status_rank(existing)
+}
+
+fn provider_status_rank(status: WhatsappDeliveryEventStatus) -> u8 {
+    match status {
+        WhatsappDeliveryEventStatus::Accepted => 0,
+        WhatsappDeliveryEventStatus::Delivered => 1,
+        WhatsappDeliveryEventStatus::Read => 2,
+        WhatsappDeliveryEventStatus::Failed => 3,
+    }
 }
 
 fn claim_channel_delivery_dispatch_in_db(
@@ -436,6 +868,19 @@ fn required_idempotency_key(value: &str) -> anyhow::Result<&str> {
         })
     {
         return Err(anyhow!("channel_delivery_idempotency_key_invalid"));
+    }
+    Ok(value)
+}
+
+fn required_provider_identity(value: &str) -> anyhow::Result<&str> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 512
+        || value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(anyhow!("channel_delivery_provider_identity_invalid"));
     }
     Ok(value)
 }

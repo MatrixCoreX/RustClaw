@@ -329,6 +329,10 @@ pub struct WhatsappConfig {
     pub verify_token: String,
     #[serde(default)]
     pub phone_number_id: String,
+    #[serde(default)]
+    pub out_of_window_template_name: String,
+    #[serde(default = "default_whatsapp_template_language")]
+    pub out_of_window_template_language: String,
     #[serde(default = "default_whatsapp_webhook_listen")]
     pub webhook_listen: String,
     #[serde(default = "default_whatsapp_webhook_path")]
@@ -367,6 +371,10 @@ pub struct WhatsappCloudConfig {
     pub verify_token: String,
     #[serde(default)]
     pub phone_number_id: String,
+    #[serde(default)]
+    pub out_of_window_template_name: String,
+    #[serde(default = "default_whatsapp_template_language")]
+    pub out_of_window_template_language: String,
     #[serde(default = "default_whatsapp_webhook_listen")]
     pub webhook_listen: String,
     #[serde(default = "default_whatsapp_webhook_path")]
@@ -396,6 +404,8 @@ impl Default for WhatsappCloudConfig {
             app_secret: String::new(),
             verify_token: String::new(),
             phone_number_id: String::new(),
+            out_of_window_template_name: String::new(),
+            out_of_window_template_language: default_whatsapp_template_language(),
             webhook_listen: default_whatsapp_webhook_listen(),
             webhook_path: default_whatsapp_webhook_path(),
             admins: Vec::new(),
@@ -418,6 +428,8 @@ impl Default for WhatsappConfig {
             app_secret: String::new(),
             verify_token: String::new(),
             phone_number_id: String::new(),
+            out_of_window_template_name: String::new(),
+            out_of_window_template_language: default_whatsapp_template_language(),
             webhook_listen: default_whatsapp_webhook_listen(),
             webhook_path: default_whatsapp_webhook_path(),
             admins: Vec::new(),

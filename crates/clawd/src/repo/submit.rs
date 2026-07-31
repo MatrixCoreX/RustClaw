@@ -514,6 +514,9 @@ pub(crate) fn build_channel_ingress_snapshot(
         .and_then(|ingress| ingress.message_id.as_deref())
         .and_then(non_empty_machine_value)
         .or_else(|| payload_machine_scalar(payload, "message_id"));
+    let received_at_ts = requested
+        .and_then(|ingress| ingress.received_at_ts)
+        .or_else(|| payload.get("received_at_ts").and_then(Value::as_u64));
     let locale = requested
         .and_then(|ingress| ingress.locale.as_deref())
         .and_then(non_empty_machine_value)
@@ -537,6 +540,7 @@ pub(crate) fn build_channel_ingress_snapshot(
         external_user_id: external_user_id.map(ToString::to_string),
         external_chat_id: external_chat_id.map(ToString::to_string),
         message_id,
+        received_at_ts,
         reply_target,
         locale,
         attachments: ingress_attachments(payload),
