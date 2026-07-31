@@ -175,6 +175,59 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
         || waiting_task_allows_repeated_observation(loop_state, effect)
         || registry_allows_repeated_idempotent_action(state, action)
+        || completed_terminal_termination_allows_replay(state, loop_state, action)
+}
+
+fn completed_terminal_termination_allows_replay(
+    state: &AppState,
+    loop_state: &LoopState,
+    action: &AgentAction,
+) -> bool {
+    let (skill_name, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::CallCapability { .. } => {
+            let resolved =
+                crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+            if matches!(resolved, AgentAction::CallCapability { .. }) {
+                return false;
+            }
+            return completed_terminal_termination_allows_replay(state, loop_state, &resolved);
+        }
+        AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return false,
+    };
+    if state.resolve_canonical_skill_name(skill_name) != "run_cmd"
+        || args.get("action").and_then(Value::as_str) != Some("terminal_terminate")
+    {
+        return false;
+    }
+
+    let successful_outputs = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && step.skill == "run_cmd")
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+        .collect::<Vec<_>>();
+    let observed_termination = successful_outputs.iter().any(|output| {
+        output.get("action").and_then(Value::as_str) == Some("terminal_terminate")
+            && output.get("status").and_then(Value::as_str) == Some("ok")
+            && output
+                .pointer("/data/termination_requested")
+                .and_then(Value::as_bool)
+                .is_some()
+    });
+    let mut session_ids = successful_outputs
+        .iter()
+        .filter_map(|output| output.get("session_id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|session_id| !session_id.is_empty())
+        .collect::<Vec<_>>();
+    session_ids.sort_unstable();
+    session_ids.dedup();
+    observed_termination && session_ids.len() == 1
 }
 
 fn registry_allows_repeated_idempotent_action(state: &AppState, action: &AgentAction) -> bool {

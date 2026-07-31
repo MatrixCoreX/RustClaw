@@ -1,6 +1,6 @@
 use super::{
     normalize_registry_argument_aliases, resolve_arg_string, resolve_arg_value,
-    rewrite_args_with_auto_locator_path,
+    rewrite_args_with_auto_locator_path, rewrite_terminal_session_id_from_observation,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{agent_engine::LoopState, IntentOutputContract, OutputLocatorKind};
@@ -119,6 +119,73 @@ fn resolve_arg_string_replaces_steps_output_listing_entry_path_reference() {
         resolve_arg_string("{{steps.1.outputs.entries[0].path}}", &loop_state),
         "document/note.md"
     );
+}
+
+#[test]
+fn terminal_continuation_binds_single_observed_session_id() {
+    let mut loop_state = LoopState::new();
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "run_cmd",
+        r#"{"schema_version":1,"session_id":"56530167-a5ae-4dce-ae87-8a0dfa4b94b4","status":"running"}"#,
+    ));
+    let mut args = json!({
+        "action": "terminal_poll",
+        "session_id": "56530167-a5ae-4dce-a87e-ae87-8a0dfa4b94b4"
+    });
+
+    assert!(rewrite_terminal_session_id_from_observation(
+        "run_cmd",
+        &mut args,
+        &loop_state
+    ));
+    assert_eq!(args["session_id"], "56530167-a5ae-4dce-ae87-8a0dfa4b94b4");
+}
+
+#[test]
+fn terminal_continuation_preserves_an_exact_observed_session_id() {
+    let mut loop_state = LoopState::new();
+    for session_id in ["session-a", "session-b"] {
+        loop_state.executed_step_results.push(ok_step(
+            session_id,
+            "run_cmd",
+            &json!({"schema_version": 1, "session_id": session_id}).to_string(),
+        ));
+    }
+    let mut args = json!({
+        "action": "terminal_terminate",
+        "session_id": "session-a"
+    });
+
+    assert!(!rewrite_terminal_session_id_from_observation(
+        "run_cmd",
+        &mut args,
+        &loop_state
+    ));
+    assert_eq!(args["session_id"], "session-a");
+}
+
+#[test]
+fn terminal_continuation_does_not_guess_between_multiple_sessions() {
+    let mut loop_state = LoopState::new();
+    for session_id in ["session-a", "session-b"] {
+        loop_state.executed_step_results.push(ok_step(
+            session_id,
+            "run_cmd",
+            &json!({"schema_version": 1, "session_id": session_id}).to_string(),
+        ));
+    }
+    let mut args = json!({
+        "action": "terminal_poll",
+        "session_id": "mistyped-session"
+    });
+
+    assert!(!rewrite_terminal_session_id_from_observation(
+        "run_cmd",
+        &mut args,
+        &loop_state
+    ));
+    assert_eq!(args["session_id"], "mistyped-session");
 }
 
 #[test]

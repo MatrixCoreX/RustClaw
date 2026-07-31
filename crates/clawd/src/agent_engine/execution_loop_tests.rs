@@ -1,8 +1,8 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
-    check_repeat_action_guard, finalize_execute_round_outcome,
-    prior_structured_observation_satisfies_read_only_action,
+    check_repeat_action_guard, completed_terminal_termination_allows_replay,
+    finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
     registry_allows_repeated_idempotent_action, safe_command_preview,
     successful_structured_observation_satisfies_selector,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
@@ -58,6 +58,22 @@ fn task_fixture(id: &str) -> crate::ClaimedTask {
         external_chat_id: None,
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
+    }
+}
+
+fn successful_step(
+    step_id: &str,
+    skill: &str,
+    output: &str,
+) -> crate::executor::StepExecutionResult {
+    crate::executor::StepExecutionResult {
+        step_id: step_id.to_string(),
+        skill: skill.to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(output.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
     }
 }
 
@@ -738,6 +754,53 @@ fn registry_idempotency_does_not_override_once_per_task() {
     };
 
     assert!(!registry_allows_repeated_idempotent_action(&state, &action));
+}
+
+#[test]
+fn repeat_guard_allows_observed_terminal_termination_replay() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-repeat-terminal-terminate");
+    let mut loop_state = super::LoopState::new();
+    loop_state.executed_step_results.push(successful_step(
+        "step_1",
+        "run_cmd",
+        r#"{"schema_version":1,"session_id":"session-1","status":"running"}"#,
+    ));
+    loop_state.executed_step_results.push(successful_step(
+        "step_2",
+        "run_cmd",
+        r#"{"schema_version":1,"action":"terminal_terminate","status":"ok","data":{"termination_requested":true}}"#,
+    ));
+    let action = crate::AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({
+            "action": "terminal_terminate",
+            "session_id": "session-1"
+        }),
+    };
+    let policy = test_policy(true);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert!(completed_terminal_termination_allows_replay(
+        &state,
+        &loop_state,
+        &action
+    ));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            3,
+        ),
+        None
+    );
 }
 
 #[test]
