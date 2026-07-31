@@ -460,6 +460,7 @@ async fn feishu_pending_bind_requires_explicit_token() {
         "oc_test_pending_bind".to_string(),
         "om_test_pending_bind".to_string(),
         "/start pb-test-token".to_string(),
+        false,
     )
     .await;
 

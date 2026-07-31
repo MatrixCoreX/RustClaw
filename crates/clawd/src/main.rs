@@ -172,20 +172,23 @@ pub(crate) use repo::{
     check_submit_task_access, check_submit_task_limits, check_task_view_access, create_auth_key,
     create_pending_channel_bind_session, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, factory_reset_auth_state,
-    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    finalize_pending_channel_bind_session, find_task_by_idempotency_key,
+    finish_pending_channel_resume, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
     hydrate_submit_task_from_ingress, insert_audit_log, insert_submitted_task, is_user_allowed,
     list_active_tasks_for_user_internal, list_active_tasks_internal,
     list_all_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
     mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
-    maybe_find_submit_task_dedup, normalize_user_key, reset_channel_binding_state_for_user_key,
+    maybe_find_submit_task_dedup, normalize_user_key, pending_channel_resume_candidate,
+    request_attachment_paths, reset_channel_binding_state_for_user_key,
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
-    stable_i64_from_key, submit_task_audit_detail, task_count_by_status,
-    task_count_by_status_for_user, task_kind_name, update_auth_key_by_id, update_task_timeout,
-    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
-    FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
-    SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
+    stable_i64_from_key, store_pending_channel_request, submit_task_audit_detail,
+    task_count_by_status, task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
+    update_task_timeout, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
+    verify_webd_password_login, FactoryResetDbResult, PendingChannelBindSession,
+    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskAdminTarget,
+    TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 #[cfg(test)]
@@ -1134,6 +1137,18 @@ async fn submit_task(
     if let Err(error) = hydrate_submit_task_from_ingress(&mut req) {
         return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error);
     }
+    if let Some(idempotency_key) = req.idempotency_key.take() {
+        let idempotency_key = idempotency_key.trim();
+        if idempotency_key.chars().count() > 512 {
+            return api_err::<SubmitTaskResponse>(
+                StatusCode::BAD_REQUEST,
+                "idempotency_key_too_long",
+            );
+        }
+        if !idempotency_key.is_empty() {
+            req.idempotency_key = Some(idempotency_key.to_string());
+        }
+    }
     let submit_ctx = match resolve_submit_task_context(&state, &req, DEFAULT_AGENT_ID) {
         Ok(ctx) => ctx,
         Err(SubmitTaskContextError::AuthLookup(err)) => {
@@ -1274,6 +1289,30 @@ async fn submit_task(
             task_id: existing_id,
         });
     }
+    match find_task_by_idempotency_key(
+        &state,
+        req.idempotency_key.as_deref(),
+        effective_user_id,
+        channel,
+    ) {
+        Ok(Some(existing_id)) => {
+            info!(
+                "task_submit idempotency_reuse task_id={} user_id={} chat_id={}",
+                existing_id, effective_user_id, effective_chat_id
+            );
+            return api_ok(SubmitTaskResponse {
+                task_id: existing_id,
+            });
+        }
+        Ok(None) => {}
+        Err(error) => {
+            error!("task idempotency lookup failed: {error}");
+            return api_err::<SubmitTaskResponse>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_idempotency_lookup_failed",
+            );
+        }
+    }
 
     let task_id = Uuid::new_v4();
     let call_id = task_id.to_string();
@@ -1338,13 +1377,25 @@ async fn submit_task(
         normalized_external_user_id.as_deref(),
         normalized_external_chat_id.as_deref(),
         message_id.as_deref(),
+        req.idempotency_key.as_deref(),
         kind,
         &payload_text,
     );
 
-    if let Err(err) = write_result {
-        error!("Insert task failed: {}", err);
-        return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+    let (persisted_task_id, inserted) = match write_result {
+        Ok(result) => result,
+        Err(err) => {
+            error!("Insert task failed: {}", err);
+            return api_err::<SubmitTaskResponse>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error",
+            );
+        }
+    };
+    if !inserted {
+        return api_ok(SubmitTaskResponse {
+            task_id: persisted_task_id,
+        });
     }
     if let Some((external_user_id, received_at_ts)) = whatsapp_cloud_inbound {
         if let Err(err) = repo::record_whatsapp_cloud_inbound(

@@ -180,6 +180,123 @@ pub(super) async fn handle_video_message(
     .await
 }
 
+pub(super) async fn store_pending_telegram_attachment(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+    platform_user_id: i64,
+    prompt: &str,
+) -> anyhow::Result<bool> {
+    let attachment = extract_image_attachment(msg)
+        .map(|(file_id, ext)| ("image", file_id, normalize_image_ext(&ext), false))
+        .or_else(|| {
+            extract_audio_attachment(msg)
+                .map(|(file_id, ext)| ("audio", file_id, normalize_audio_ext(&ext), true))
+        })
+        .or_else(|| {
+            extract_video_attachment(msg)
+                .map(|(file_id, ext)| ("video", file_id, normalize_video_ext(&ext), false))
+        })
+        .or_else(|| {
+            extract_file_attachment(msg)
+                .map(|(file_id, ext)| ("file", file_id, normalize_file_ext(&ext), false))
+        });
+    let Some((kind, file_id, normalized_ext, _voice_reply)) = attachment else {
+        return Ok(false);
+    };
+    let inbox_dir = match kind {
+        "image" => &state.image_inbox_dir,
+        "audio" => &state.audio_inbox_dir,
+        "video" => &state.video_inbox_dir,
+        _ => &state.file_inbox_dir,
+    };
+    let rel_path = build_telegram_inbox_rel_path(
+        inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        platform_user_id,
+        unix_ts(),
+        &normalized_ext,
+    );
+    let abs_path = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(&rel_path);
+    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    let size = tokio::fs::metadata(&abs_path)
+        .await
+        .ok()
+        .map(|meta| meta.len());
+    if kind == "audio" && size.is_some_and(|value| value > state.max_audio_input_bytes as u64) {
+        return Err(anyhow!("pending_attachment_too_large"));
+    }
+    let mime_type = attachment_mime_type(kind, &normalized_ext);
+    let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+        ChannelKind::Telegram,
+        "telegram_bot",
+    )
+    .with_external_ids(platform_user_id.to_string(), msg.chat.id.0.to_string())
+    .with_message_id(msg.id.0.to_string())
+    .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
+        msg.chat.id.0.to_string(),
+    ))
+    .with_locale(state.language.clone());
+    ingress
+        .attachments
+        .push(claw_core::channel_ingress::ChannelIngressAttachment {
+            kind: kind.to_string(),
+            path: rel_path.clone(),
+            mime_type: Some(mime_type.clone()),
+            size,
+        });
+    let idempotency_key = format!(
+        "pending:telegram:{}:{}:{}",
+        state.bot_name, msg.chat.id.0, msg.id.0
+    );
+    let request = SubmitTaskRequest {
+        user_id: Some(platform_user_id),
+        chat_id: Some(msg.chat.id.0),
+        user_key: None,
+        channel: Some(ChannelKind::Telegram),
+        external_user_id: Some(platform_user_id.to_string()),
+        external_chat_id: Some(msg.chat.id.0.to_string()),
+        ingress: Some(ingress),
+        idempotency_key: Some(idempotency_key.clone()),
+        kind: TaskKind::Ask,
+        payload: json!({
+            "text": prompt.trim(),
+            "source": "telegram",
+            "attachments": [{
+                "kind": kind,
+                "path": rel_path,
+                "mime_type": mime_type,
+                "size": size,
+            }]
+        }),
+    };
+    let response = state
+        .client
+        .post(format!(
+            "{}/v1/auth/channel/pending-request",
+            state.clawd_base_url
+        ))
+        .json(&PendingChannelRequestStoreRequest {
+            idempotency_key,
+            expires_in_seconds: None,
+            request,
+        })
+        .send()
+        .await?;
+    let status = response.status();
+    let body: ApiResponse<PendingChannelRequestStatus> = response.json().await?;
+    if !status.is_success() || !body.ok {
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "store_pending_attachment",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        )));
+    }
+    Ok(true)
+}
+
 async fn submit_attachment_ask(
     bot: &Bot,
     msg: &Message,

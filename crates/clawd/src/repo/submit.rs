@@ -118,6 +118,39 @@ pub(crate) fn maybe_find_submit_task_dedup(
     Some((existing_id, text.to_string()))
 }
 
+pub(crate) fn find_task_by_idempotency_key(
+    state: &AppState,
+    idempotency_key: Option<&str>,
+    user_id: i64,
+    channel: ChannelKind,
+) -> anyhow::Result<Option<Uuid>> {
+    let Some(idempotency_key) = idempotency_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+    let task_id = db
+        .query_row(
+            "SELECT task_id FROM tasks
+             WHERE idempotency_key = ?1 AND user_id = ?2 AND channel = ?3
+             LIMIT 1",
+            params![idempotency_key, user_id, channel_kind_name(channel)],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    task_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(Into::into)
+}
+
 pub(crate) fn submit_task_audit_detail(
     call_id: &str,
     task_id: &Uuid,
@@ -603,9 +636,10 @@ pub(crate) fn insert_submitted_task(
     external_user_id: Option<&str>,
     external_chat_id: Option<&str>,
     message_id: Option<&str>,
+    idempotency_key: Option<&str>,
     kind: &str,
     payload_text: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<(Uuid, bool)> {
     let now = now_ts();
     let db = state
         .core
@@ -613,9 +647,10 @@ pub(crate) fn insert_submitted_task(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
-    db.execute(
-        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', NULL, NULL, ?11, ?11)",
+    let inserted = db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, idempotency_key, kind, payload_json, status, result_json, error_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', NULL, NULL, ?12, ?12)
+         ON CONFLICT(idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",
         params![
             task_id.to_string(),
             user_id,
@@ -625,12 +660,33 @@ pub(crate) fn insert_submitted_task(
             external_user_id,
             external_chat_id,
             message_id,
+            idempotency_key.map(str::trim).filter(|value| !value.is_empty()),
             kind,
             payload_text,
             now
         ],
     )?;
-    Ok(())
+    if inserted == 1 {
+        return Ok((*task_id, true));
+    }
+    if let Some(idempotency_key) = idempotency_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let existing = db
+            .query_row(
+                "SELECT task_id FROM tasks
+                 WHERE idempotency_key = ?1 AND user_id = ?2 AND channel = ?3
+                 LIMIT 1",
+                params![idempotency_key, user_id, channel_kind_name(channel)],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            return Ok((Uuid::parse_str(&existing)?, false));
+        }
+    }
+    anyhow::bail!("task_insert_conflict")
 }
 
 #[cfg(test)]

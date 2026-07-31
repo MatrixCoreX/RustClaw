@@ -840,6 +840,8 @@ async fn detect_channel_bind_session(
                 data: Some(DetectFeishuBindSessionResponse {
                     matched: false,
                     session: None,
+                    identity: None,
+                    pending_resume: None,
                 }),
                 error: None,
             }),
@@ -882,6 +884,8 @@ async fn detect_channel_bind_session(
                 data: Some(DetectFeishuBindSessionResponse {
                     matched: false,
                     session: None,
+                    identity: None,
+                    pending_resume: None,
                 }),
                 error: None,
             }),
@@ -912,6 +916,8 @@ async fn detect_channel_bind_session(
                 data: Some(DetectFeishuBindSessionResponse {
                     matched: false,
                     session: Some(channel_bind_session_response(&state, platform, session)),
+                    identity: None,
+                    pending_resume: None,
                 }),
                 error: None,
             }),
@@ -960,13 +966,40 @@ async fn detect_channel_bind_session(
         }
     };
 
+    let resume_user_key = session.user_key.clone();
+    let session_response = channel_bind_session_response(&state, platform, session);
+    drop(db);
+    let identity = resolve_auth_identity_by_key(&state, &resume_user_key)
+        .ok()
+        .flatten();
+    let pending_resume = match identity.as_ref() {
+        Some(identity) => resume_pending_channel_request_after_bind(
+            &state,
+            platform.channel(),
+            Some(external_user_id),
+            Some(external_chat_id),
+            &identity,
+        )
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                "pending request resume after {} session bind failed: {error}",
+                platform.channel()
+            );
+            None
+        }),
+        _ => None,
+    };
+
     (
         StatusCode::OK,
         Json(ApiResponse {
             ok: true,
             data: Some(DetectFeishuBindSessionResponse {
                 matched: true,
-                session: Some(channel_bind_session_response(&state, platform, session)),
+                session: Some(session_response),
+                identity,
+                pending_resume,
             }),
             error: None,
         }),
@@ -1472,25 +1505,178 @@ async fn resolve_channel_binding(
     }
 }
 
+async fn store_pending_channel_request_handler(
+    State(state): State<AppState>,
+    Json(req): Json<PendingChannelRequestStoreRequest>,
+) -> (StatusCode, Json<ApiResponse<PendingChannelRequestStatus>>) {
+    match store_pending_channel_request(&state, &req) {
+        Ok(status) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(status),
+                error: None,
+            }),
+        ),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(error.to_string()),
+            }),
+        ),
+    }
+}
+
+fn pending_attachment_revalidation_error(
+    state: &AppState,
+    request: &claw_core::types::SubmitTaskRequest,
+) -> Option<&'static str> {
+    let Ok(workspace_root) = std::fs::canonicalize(&state.skill_rt.workspace_root) else {
+        return Some("pending_request_attachment_invalid");
+    };
+    for raw_path in request_attachment_paths(request) {
+        let trimmed = raw_path.trim();
+        if trimmed.is_empty() {
+            return Some("pending_request_attachment_missing");
+        }
+        let path = std::path::Path::new(trimmed);
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            state.skill_rt.workspace_root.join(path)
+        };
+        let Ok(canonical) = std::fs::canonicalize(candidate) else {
+            return Some("pending_request_attachment_missing");
+        };
+        if !canonical.starts_with(&workspace_root) || !canonical.is_file() {
+            return Some("pending_request_attachment_invalid");
+        }
+    }
+    if let Some(ingress) = request.ingress.as_ref() {
+        for attachment in &ingress.attachments {
+            let Some(expected_size) = attachment.size else {
+                continue;
+            };
+            let path = std::path::Path::new(attachment.path.trim());
+            let candidate = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                state.skill_rt.workspace_root.join(path)
+            };
+            let Ok(actual_size) = std::fs::metadata(candidate).map(|metadata| metadata.len()) else {
+                return Some("pending_request_attachment_missing");
+            };
+            if actual_size != expected_size {
+                return Some("pending_request_attachment_changed");
+            }
+        }
+    }
+    None
+}
+
+async fn resume_pending_channel_request_after_bind(
+    state: &AppState,
+    binding_channel: &str,
+    external_user_id: Option<&str>,
+    external_chat_id: Option<&str>,
+    identity: &AuthIdentity,
+) -> anyhow::Result<Option<PendingChannelRequestStatus>> {
+    let Some(candidate) = pending_channel_resume_candidate(
+        state,
+        binding_channel,
+        external_user_id,
+        external_chat_id,
+    )? else {
+        return Ok(None);
+    };
+    let Some(mut request) = candidate.request else {
+        return Ok(Some(candidate.status));
+    };
+    if let Some(error_code) = pending_attachment_revalidation_error(state, &request) {
+        return finish_pending_channel_resume(
+            state,
+            candidate.status.pending_request_id,
+            None,
+            Some(error_code),
+        )
+        .map(Some);
+    }
+    request.user_id = Some(identity.user_id);
+    request.chat_id = Some(identity.chat_id);
+    request.user_key = Some(identity.user_key.clone());
+    let (status, Json(response)) = crate::submit_task(
+        State(state.clone()),
+        HeaderMap::new(),
+        Json(request),
+    )
+    .await;
+    if status.is_success() && response.ok {
+        let task_id = response.data.map(|data: SubmitTaskResponse| data.task_id);
+        return finish_pending_channel_resume(
+            state,
+            candidate.status.pending_request_id,
+            task_id,
+            task_id.is_none().then_some("pending_request_submit_missing_task"),
+        )
+        .map(Some);
+    }
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        return finish_pending_channel_resume(
+            state,
+            candidate.status.pending_request_id,
+            None,
+            Some("pending_request_permission_changed"),
+        )
+        .map(Some);
+    }
+    let mut retryable = candidate.status;
+    retryable.error_code = Some("pending_request_resume_retryable".to_string());
+    Ok(Some(retryable))
+}
+
 async fn bind_channel_key(
     State(state): State<AppState>,
     Json(req): Json<BindChannelKeyRequest>,
-) -> (StatusCode, Json<ApiResponse<AuthIdentity>>) {
+) -> (StatusCode, Json<ApiResponse<BindChannelKeyResponse>>) {
+    let binding_channel = scoped_channel_name(req.channel, req.telegram_bot_name.as_deref());
     match bind_channel_identity(
         &state,
-        &scoped_channel_name(req.channel, req.telegram_bot_name.as_deref()),
+        &binding_channel,
         req.external_user_id.as_deref(),
         req.external_chat_id.as_deref(),
         &req.user_key,
     ) {
-        Ok(Some(identity)) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(identity),
-                error: None,
-            }),
-        ),
+        Ok(Some(identity)) => match resume_pending_channel_request_after_bind(
+            &state,
+            &binding_channel,
+            req.external_user_id.as_deref(),
+            req.external_chat_id.as_deref(),
+            &identity,
+        )
+        .await
+        {
+            Ok(pending_resume) => (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(BindChannelKeyResponse {
+                        identity,
+                        pending_resume,
+                    }),
+                    error: None,
+                }),
+            ),
+            Err(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("pending channel resume failed: {error}")),
+                }),
+            ),
+        },
         Ok(None) => ui_auth_code_error("auth_key_invalid"),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1502,3 +1688,7 @@ async fn bind_channel_key(
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "auth_feishu_bind_tests.rs"]
+mod pending_request_tests;

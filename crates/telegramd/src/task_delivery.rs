@@ -682,11 +682,14 @@ pub(super) async fn submit_task_only(
                 chat_id.to_string(),
             ))
             .with_locale(state.language.clone());
-            if let Some(message_id) = message_id {
+            if let Some(message_id) = message_id.as_deref() {
                 ingress = ingress.with_message_id(message_id);
             }
             ingress
         }),
+        idempotency_key: message_id
+            .as_deref()
+            .map(|value| format!("telegram:{}:{value}", state.bot_name)),
         kind: kind.clone(),
         payload,
     };

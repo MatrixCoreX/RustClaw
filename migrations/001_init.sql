@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     external_user_id TEXT,
     external_chat_id TEXT,
     message_id    TEXT,
+    idempotency_key TEXT,
     kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
     payload_json  TEXT NOT NULL,
     status        TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'timeout')),
@@ -28,6 +29,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     claim_attempt INTEGER NOT NULL DEFAULT 0,
     claimed_at    INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
+ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS conversation_metadata (
     owner_user_key TEXT NOT NULL,

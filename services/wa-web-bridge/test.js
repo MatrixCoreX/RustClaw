@@ -225,7 +225,8 @@ const body = buildSubmitTaskBody(
   "group@g.us",
   "ask",
   { text: "hello" },
-  { user_key: "rk-admin", user_id: 42, role: "admin" }
+  { user_key: "rk-admin", user_id: 42, role: "admin" },
+  "message-1"
 );
 assert.strictEqual(body.user_id, 42);
 assert.strictEqual(body.user_key, "rk-admin");
@@ -234,6 +235,9 @@ assert.strictEqual(body.external_user_id, "user@s.whatsapp.net");
 assert.strictEqual(body.external_chat_id, "group@g.us");
 assert.strictEqual(body.payload.adapter, "whatsapp_web");
 assert.strictEqual(body.payload.text, "hello");
+assert.strictEqual(body.ingress.adapter, "whatsapp_web");
+assert.strictEqual(body.ingress.message_id, "message-1");
+assert.strictEqual(body.idempotency_key, "whatsapp_web:message-1");
 assert.throws(
   () => buildSubmitTaskBody("user", "chat", "ask", { text: "x" }, null),
   /bound user key is required/
@@ -254,7 +258,13 @@ assert.throws(
       return {
         ok: true,
         status: 200,
-        json: async () => ({ ok: true, data: { user_key: "rk-admin", user_id: 42 } }),
+        json: async () => ({
+          ok: true,
+          data: {
+            identity: { user_key: "rk-admin", user_id: 42 },
+            pending_resume: null,
+          },
+        }),
       };
     }
     if (String(url).endsWith("/v1/tasks")) {
@@ -274,13 +284,14 @@ assert.throws(
   const identity = await resolveIdentity("user@s.whatsapp.net", "group@g.us");
   assert.strictEqual(identity.user_key, "rk-admin");
   const bound = await bindIdentity("user@s.whatsapp.net", "group@g.us", "rk-admin");
-  assert.strictEqual(bound.user_id, 42);
+  assert.strictEqual(bound.identity.user_id, 42);
   const taskId = await submitTask(
     "user@s.whatsapp.net",
     "group@g.us",
     "ask",
     { text: "hello" },
-    identity
+    identity,
+    "message-2"
   );
   assert.strictEqual(taskId, "task-1");
   await queryTask(taskId, identity);

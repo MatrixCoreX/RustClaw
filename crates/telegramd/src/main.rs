@@ -33,9 +33,11 @@ use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::channel_i18n::safe_generic_text_for_path;
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, GatewayInstanceRuntimeStatus,
-    HealthResponse, ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
-    SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
+    GatewayInstanceRuntimeStatus, HealthResponse, PendingChannelRequestStatus,
+    PendingChannelRequestStoreRequest, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
+    SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus,
+    TelegramBotRuntimeStatus,
 };
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};

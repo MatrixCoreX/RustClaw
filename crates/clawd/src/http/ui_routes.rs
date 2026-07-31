@@ -24,26 +24,27 @@ use super::super::{
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, factory_reset_auth_state, feishud_process_stats,
-    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    finalize_pending_channel_bind_session, finish_pending_channel_resume, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds,
-    oldest_running_task_age_seconds_for_user, reload_skill_views,
-    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, task_count_by_status, task_count_by_status_for_user,
-    telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login, wa_webd_process_stats,
-    webd_process_stats, wechatd_process_stats, whatsappd_process_stats, ApiResponse, AppState,
-    FactoryResetDbResult, HealthResponse, LlmProviderRuntime, LocalInteractionContext,
-    PendingChannelBindSession,
+    oldest_running_task_age_seconds_for_user, pending_channel_resume_candidate, reload_skill_views,
+    request_attachment_paths, reset_channel_binding_state_for_user_key,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, store_pending_channel_request,
+    task_count_by_status, task_count_by_status_for_user, telegramd_process_stats,
+    update_auth_key_by_id, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
+    verify_webd_password_login, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
+    whatsappd_process_stats, ApiResponse, AppState, FactoryResetDbResult, HealthResponse,
+    LlmProviderRuntime, LocalInteractionContext, PendingChannelBindSession,
 };
 use crate::ClaimedTask;
 use claw_core::types::{
-    AuthIdentity, BindChannelKeyRequest, DetectFeishuBindSessionRequest,
+    AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, DetectFeishuBindSessionRequest,
     DetectFeishuBindSessionResponse, ExchangeCredentialStatus, FeishuBindSessionStatusResponse,
-    GatewayInstanceRuntimeStatus, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
-    StartFeishuBindSessionRequest, TelegramBotRuntimeStatus, UiKeyVerifyRequest,
+    GatewayInstanceRuntimeStatus, PendingChannelRequestStatus, PendingChannelRequestStoreRequest,
+    ResolveChannelBindingRequest, ResolveChannelBindingResponse, StartFeishuBindSessionRequest,
+    SubmitTaskResponse, TelegramBotRuntimeStatus, UiKeyVerifyRequest,
     UpsertExchangeCredentialRequest,
 };
 use claw_core::{
@@ -165,6 +166,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/auth/me", get(auth_me))
         .route("/auth/channel/resolve", post(resolve_channel_binding))
         .route("/auth/channel/bind", post(bind_channel_key))
+        .route(
+            "/auth/channel/pending-request",
+            post(store_pending_channel_request_handler),
+        )
         .route(
             "/auth/channel-binds/feishu/detect",
             post(detect_feishu_bind_session_handler),
