@@ -321,6 +321,55 @@ fn task_message_id_migration_preserves_rows_indexes_and_foreign_keys() {
 }
 
 #[test]
+fn legacy_task_schema_runs_base_init_before_idempotency_upgrade() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+             task_id TEXT PRIMARY KEY,
+             user_id INTEGER NOT NULL,
+             chat_id INTEGER NOT NULL,
+             channel TEXT NOT NULL,
+             message_id TEXT,
+             kind TEXT NOT NULL,
+             payload_json TEXT NOT NULL,
+             status TEXT NOT NULL,
+             result_json TEXT,
+             error_text TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );",
+    )
+    .expect("create legacy tasks table");
+
+    db.execute_batch(crate::INIT_SQL)
+        .expect("base init remains compatible with an existing tasks table");
+    crate::ensure_schedule_schema(&db).expect("upgrade schedule schema");
+    crate::ensure_memory_schema(&db).expect("upgrade memory schema");
+    crate::ensure_channel_schema(&db).expect("upgrade channel schema");
+    crate::ensure_task_lease_schema(&db).expect("upgrade task lease schema");
+    ensure_key_auth_schema(&db).expect("install task idempotency upgrade");
+
+    let idempotency_column_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'idempotency_key'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("idempotency column count");
+    let idempotency_index_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_tasks_idempotency_key'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("idempotency index count");
+
+    assert_eq!(idempotency_column_count, 1);
+    assert_eq!(idempotency_index_count, 1);
+}
+
+#[test]
 fn get_auth_key_value_by_id_returns_full_key() {
     let db = Connection::open_in_memory().expect("open sqlite");
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
