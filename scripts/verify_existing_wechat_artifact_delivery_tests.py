@@ -44,6 +44,54 @@ class ExistingWechatArtifactVerificationTest(unittest.TestCase):
             [valid],
         )
 
+    def test_execution_trace_requires_pinned_generation_and_receipts(self) -> None:
+        binding = {
+            "admission_receipt_digest": "a" * 64,
+            "base_registry_digest": "b" * 64,
+            "manifest_digest": "c" * 64,
+            "overlay_generation_digest": "d" * 64,
+            "policy_digest": "e" * 64,
+            "receipt_digest": "f" * 64,
+            "registry_generation": 45,
+            "registry_generation_digest": "1" * 64,
+            "skill_name": "media_download",
+            "version": "0.1.0",
+        }
+        result = {
+            "task_journal": {
+                "trace": {
+                    "rounds": [
+                        {"first_action_capability_ref": "load_capability_groups"},
+                        {"first_action_capability_ref": "media_download.download"},
+                        {"first_action_capability_ref": "respond"},
+                    ],
+                    "capability_results": [
+                        {
+                            "capability": "media_download.download",
+                            "action": "download",
+                            "status": "ok",
+                            "data": {
+                                "extra": {
+                                    "artifacts": [{"id": "artifact-1"}],
+                                    "execution_binding": binding,
+                                }
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+
+        summary = self.verifier.execution_trace_summary(json.dumps(result))
+
+        self.assertEqual(
+            summary["planner_actions"],
+            ["load_capability_groups", "media_download.download", "respond"],
+        )
+        self.assertEqual(summary["execution_binding"], binding)
+        del binding["receipt_digest"]
+        self.assertIsNone(self.verifier.execution_trace_summary(json.dumps(result)))
+
     def test_logged_delivery_requires_upload_without_later_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "photo.webp"
