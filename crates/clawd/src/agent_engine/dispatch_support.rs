@@ -7,9 +7,10 @@ use super::{
     encode_progress_i18n, execute_prepared_skill_action, normalize_registry_argument_aliases,
     normalize_skill_arg_aliases, register_step_output, resolve_arg_string, resolve_arg_value,
     rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
-    rewrite_tool_path_with_written_aliases, ActionLoopDecision, AgentLoopGuardPolicy,
-    AgentRunContext, AppState, ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome,
-    WriteFileEffectivePath, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    rewrite_terminal_session_id_from_observation, rewrite_tool_path_with_written_aliases,
+    ActionLoopDecision, AgentLoopGuardPolicy, AgentRunContext, AppState, ClaimedTask, LoopState,
+    RespondActionOutcome, SkillActionOutcome, WriteFileEffectivePath,
+    PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 use crate::{AgentAction, OutputResponseShape};
 
@@ -549,6 +550,20 @@ pub(super) async fn handle_call_tool_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
+    if rewrite_terminal_session_id_from_observation(
+        &normalized_skill,
+        &mut resolved_args,
+        loop_state,
+    ) {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=terminal_session_binding skill={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
     let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
@@ -709,6 +724,20 @@ pub(super) async fn handle_call_skill_action(
     if rewrite_args_with_auto_locator_path(&normalized_skill, &mut resolved_args, loop_state) {
         info!(
             "executor_args_rewrite task_id={} round={} step={} type=auto_locator skill={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
+    if rewrite_terminal_session_id_from_observation(
+        &normalized_skill,
+        &mut resolved_args,
+        loop_state,
+    ) {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=terminal_session_binding skill={} args={}",
             task.task_id,
             loop_state.round_no,
             step_in_round,

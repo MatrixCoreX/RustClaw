@@ -67,6 +67,61 @@ pub(super) fn rewrite_tool_path_with_written_aliases(
     obj.insert("path".to_string(), Value::String(effective.clone()));
 }
 
+pub(super) fn rewrite_terminal_session_id_from_observation(
+    tool: &str,
+    args: &mut Value,
+    loop_state: &LoopState,
+) -> bool {
+    if tool != "run_cmd" {
+        return false;
+    }
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(
+        action,
+        "terminal_write"
+            | "terminal_poll"
+            | "terminal_resize"
+            | "terminal_signal"
+            | "terminal_terminate"
+    ) {
+        return false;
+    }
+
+    let mut observed_ids = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && step.skill == "run_cmd")
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+        .filter_map(|output| {
+            output
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|session_id| !session_id.is_empty())
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    observed_ids.sort();
+    observed_ids.dedup();
+
+    let [observed_id] = observed_ids.as_slice() else {
+        return false;
+    };
+    if obj.get("session_id").and_then(Value::as_str).map(str::trim) == Some(observed_id.as_str()) {
+        return false;
+    }
+    obj.insert("session_id".to_string(), Value::String(observed_id.clone()));
+    true
+}
+
 fn broad_current_workspace_auto_locator(loop_state: &LoopState) -> bool {
     let Some(contract) = loop_state.output_contract.as_ref() else {
         return false;
