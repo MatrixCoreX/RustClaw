@@ -3,9 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
+from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import signal
@@ -32,10 +36,233 @@ LOG_DIR = Path(
     )
 )
 TERMINAL = {"succeeded", "failed", "timeout", "canceled"}
+CASE_IDS = (
+    "heartbeat_70s_crosses_poll_windows",
+    "concurrent_health_while_long_command_runs",
+    "silent_35s_survives_5s_poll_and_idle_hint",
+    "explicit_5s_deadline_stops_90s_command",
+    "cancel_is_idempotent_and_removes_process_group",
+)
+SENSITIVE_ENV_MARKERS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "COOKIE", "AUTHORIZATION")
 
 
 class RegressionFailure(RuntimeError):
     pass
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run deterministic long-running command lifecycle cases against an isolated clawd.",
+    )
+    parser.add_argument(
+        "--list-cases",
+        action="store_true",
+        help="List deterministic case identifiers without building or starting clawd.",
+    )
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="Use the selected existing clawd binary without building it first.",
+    )
+    parser.add_argument(
+        "--binary",
+        type=Path,
+        default=CLAWD_BIN,
+        help=f"clawd binary to execute (default: {CLAWD_BIN}).",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=LOG_DIR,
+        help=f"evidence directory (default: {LOG_DIR}).",
+    )
+    return parser.parse_args(argv)
+
+
+def configure_from_args(args: argparse.Namespace) -> None:
+    global AUTO_BUILD, CLAWD_BIN, LOG_DIR
+    CLAWD_BIN = args.binary.expanduser().resolve()
+    LOG_DIR = args.log_dir.expanduser().resolve()
+    if args.no_build:
+        AUTO_BUILD = False
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def command_stdout(command: list[str]) -> str | None:
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output = completed.stdout.strip()
+    return output if completed.returncode == 0 and output else None
+
+
+def repo_path_ref(path: Path) -> str:
+    return os.path.relpath(path.resolve(), ROOT)
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_tree(path: Path) -> str | None:
+    if not path.is_dir():
+        return None
+    digest = hashlib.sha256()
+    files = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
+    for candidate in files:
+        digest.update(candidate.relative_to(path).as_posix().encode())
+        digest.update(b"\0")
+        file_digest = sha256_file(candidate)
+        if file_digest is not None:
+            digest.update(file_digest.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def worktree_summary() -> dict[str, Any]:
+    raw = command_stdout(["git", "status", "--porcelain", "--untracked-files=all"]) or ""
+    changes = [line for line in raw.splitlines() if line.strip()]
+    return {
+        "status": "clean" if not changes else "dirty",
+        "changed_path_count": len(changes),
+    }
+
+
+def evidence_paths() -> list[str]:
+    paths: list[str] = []
+    for candidate in sorted(LOG_DIR.rglob("*")):
+        if candidate.is_file():
+            paths.append(candidate.relative_to(LOG_DIR).as_posix())
+    if "summary.json" not in paths:
+        paths.append("summary.json")
+    return sorted(paths)
+
+
+def sensitive_values(admin_key: str | None) -> list[str]:
+    values = [admin_key] if admin_key else []
+    for name, value in os.environ.items():
+        if value and len(value) >= 12 and any(marker in name.upper() for marker in SENSITIVE_ENV_MARKERS):
+            values.append(value)
+    return sorted({value for value in values if value}, key=len, reverse=True)
+
+
+def redact_text(text: str, values: list[str]) -> str:
+    redacted = text
+    for value in values:
+        redacted = redacted.replace(value, "[REDACTED]")
+    return redacted
+
+
+def scan_evidence(values: list[str]) -> list[dict[str, str]]:
+    sys.path.insert(0, str(ROOT / "scripts" / "nl_tests"))
+    from secret_scan import SECRET_VALUE_PATTERNS, secret_scan_findings
+
+    findings: list[dict[str, str]] = []
+    for path in sorted(LOG_DIR.rglob("*")):
+        if not path.is_file() or path.name == "summary.json":
+            continue
+        relative = path.relative_to(LOG_DIR).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if any(value in text for value in values):
+            findings.append({"path": relative, "kind": "known_secret_value"})
+        if path.suffix == ".json":
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            if payload is not None and secret_scan_findings(payload):
+                findings.append({"path": relative, "kind": "structured_secret_contract"})
+        for kind, pattern in SECRET_VALUE_PATTERNS:
+            if pattern.search(text):
+                findings.append({"path": relative, "kind": f"secret_like_value:{kind}"})
+                break
+    return findings
+
+
+def finalize_summary(
+    summary: dict[str, Any],
+    started_at: str,
+    admin_key: str | None,
+) -> bool:
+    values = sensitive_values(admin_key)
+    findings = scan_evidence(values)
+    if findings:
+        summary["status"] = "fail"
+        summary["error_code"] = "evidence_secret_scan_failed"
+        summary["secret_scan_findings"] = findings
+    cases = summary.get("cases") if isinstance(summary.get("cases"), dict) else {}
+    passed = sum(
+        1
+        for result in cases.values()
+        if isinstance(result, dict) and result.get("status") == "pass"
+    )
+    failed = len(cases) - passed
+    summary.update(
+        {
+            "schema_version": 1,
+            "source_commit": command_stdout(["git", "rev-parse", "HEAD"]),
+            "source_commit_pushed": (
+                command_stdout(["git", "rev-parse", "HEAD"])
+                == command_stdout(["git", "rev-parse", "origin/main"])
+            ),
+            "worktree": worktree_summary(),
+            "platform": platform.system().lower(),
+            "arch": platform.machine().lower(),
+            "binary": {
+                "path": repo_path_ref(CLAWD_BIN),
+                "sha256": sha256_file(CLAWD_BIN),
+            },
+            "ui": {
+                "path": "UI/dist",
+                "tree_sha256": sha256_tree(ROOT / "UI" / "dist"),
+            },
+            "case_counts": {
+                "total": len(cases),
+                "passed": passed,
+                "failed": failed,
+            },
+            "started_at": started_at,
+            "finished_at": utc_now(),
+            "build_strategy": {
+                "auto_build": AUTO_BUILD,
+                "cargo_environment": (
+                    "scripts/shell_compat.sh:configure_cargo_build_environment"
+                    if AUTO_BUILD
+                    else "existing_binary"
+                ),
+            },
+            "evidence_root": repo_path_ref(LOG_DIR),
+            "evidence_relative_paths": evidence_paths(),
+            "redaction": {
+                "status": "fail" if findings else "pass",
+                "admin_key_recorded": False,
+                "provider_credentials_recorded": False,
+                "cookies_recorded": False,
+                "command_secrets_allowed": False,
+                "scanner": "scripts/nl_tests/secret_scan.py",
+            },
+        }
+    )
+    if isinstance(summary.get("error"), str):
+        summary["error"] = redact_text(summary["error"], values)
+    write_json(LOG_DIR / "summary.json", summary)
+    return not findings
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -486,20 +713,31 @@ def ensure_binary() -> None:
         raise RegressionFailure(f"clawd binary missing or not executable: {CLAWD_BIN}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.list_cases:
+        for case_id in CASE_IDS:
+            print(case_id)
+        return 0
+    configure_from_args(args)
+    started_at = utc_now()
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_binary()
-    workspace = prepare_workspace()
+    workspace: Path | None = None
     server: Server | None = None
+    exit_code = 1
     summary: dict[str, Any] = {
         "status": "fail",
         "submission_mode": "natural_language" if SUBMIT_VIA_NL else "direct_run_skill",
         "cases": {},
-        "log_dir": str(LOG_DIR),
     }
     try:
+        ensure_binary()
+        workspace = prepare_workspace()
         server = Server(workspace)
-        print(f"[INFO] isolated clawd={server.base_url} log_dir={LOG_DIR}", flush=True)
+        print(
+            f"[INFO] isolated clawd={server.base_url} evidence_root={repo_path_ref(LOG_DIR)}",
+            flush=True,
+        )
 
         heartbeat_case = "heartbeat_70s_crosses_poll_windows"
         heartbeat_task_id = submit_command(
@@ -555,24 +793,26 @@ def main() -> int:
         print("[PASS] cancel and repeated cancel", flush=True)
 
         summary["status"] = "pass"
-        write_json(LOG_DIR / "summary.json", summary)
-        print(json.dumps(summary, ensure_ascii=False), flush=True)
-        return 0
+        exit_code = 0
     except Exception as error:
         summary["error"] = str(error)
-        write_json(LOG_DIR / "summary.json", summary)
         print(f"[FAIL] {error}", file=sys.stderr, flush=True)
-        return 1
     finally:
         if server is not None:
             server.close()
-        model_log = workspace / "logs/model_io.log"
-        if model_log.is_file():
-            shutil.copy2(model_log, LOG_DIR / "model_io.log")
-        if os.environ.get("KEEP_WORKSPACE", "0") == "1":
-            print(f"[INFO] retained isolated workspace: {workspace}", flush=True)
-        else:
-            shutil.rmtree(workspace)
+        if workspace is not None:
+            model_log = workspace / "logs/model_io.log"
+            if model_log.is_file():
+                shutil.copy2(model_log, LOG_DIR / "model_io.log")
+            if os.environ.get("KEEP_WORKSPACE", "0") == "1":
+                print(f"[INFO] retained isolated workspace: {workspace}", flush=True)
+            else:
+                shutil.rmtree(workspace)
+        admin_key = server.key if server is not None else None
+        if not finalize_summary(summary, started_at, admin_key):
+            exit_code = 1
+    print(json.dumps(summary, ensure_ascii=False), flush=True)
+    return exit_code
 
 
 if __name__ == "__main__":
