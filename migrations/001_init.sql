@@ -30,9 +30,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     claimed_at    INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
-ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS conversation_metadata (
     owner_user_key TEXT NOT NULL,
     owner_user_id  INTEGER NOT NULL,

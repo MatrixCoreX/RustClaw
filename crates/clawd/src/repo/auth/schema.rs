@@ -453,6 +453,36 @@ pub(super) fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<(
     );
     crate::ensure_column_exists(
         db,
+        "tasks",
+        "idempotency_key",
+        "ALTER TABLE tasks ADD COLUMN idempotency_key TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "lease_owner",
+        "ALTER TABLE tasks ADD COLUMN lease_owner TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "lease_expires_at",
+        "ALTER TABLE tasks ADD COLUMN lease_expires_at INTEGER NOT NULL DEFAULT 0",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "claim_attempt",
+        "ALTER TABLE tasks ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "claimed_at",
+        "ALTER TABLE tasks ADD COLUMN claimed_at INTEGER NOT NULL DEFAULT 0",
+    )?;
+    crate::ensure_column_exists(
+        db,
         "scheduled_jobs",
         "isolation_profile",
         "ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
@@ -486,6 +516,7 @@ pub(super) fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<(
              external_user_id TEXT,
              external_chat_id TEXT,
              message_id    TEXT,
+             idempotency_key TEXT,
              user_key      TEXT,
              kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
              payload_json  TEXT NOT NULL,
@@ -493,20 +524,28 @@ pub(super) fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<(
              result_json   TEXT,
              error_text    TEXT,
              created_at    TEXT NOT NULL,
-             updated_at    TEXT NOT NULL
+             updated_at    TEXT NOT NULL,
+             lease_owner   TEXT,
+             lease_expires_at INTEGER NOT NULL DEFAULT 0,
+             claim_attempt INTEGER NOT NULL DEFAULT 0,
+             claimed_at    INTEGER NOT NULL DEFAULT 0
          );
          INSERT INTO tasks (
-             task_id, user_id, chat_id, channel, external_user_id, external_chat_id, message_id, user_key,
-             kind, payload_json, status, result_json, error_text, created_at, updated_at
+             task_id, user_id, chat_id, channel, external_user_id, external_chat_id, message_id,
+             idempotency_key, user_key, kind, payload_json, status, result_json, error_text,
+             created_at, updated_at, lease_owner, lease_expires_at, claim_attempt, claimed_at
          )
          SELECT
-             task_id, user_id, chat_id, channel, external_user_id, external_chat_id, message_id, user_key,
-             kind, payload_json, status, result_json, error_text, created_at, updated_at
+             task_id, user_id, chat_id, channel, external_user_id, external_chat_id, message_id,
+             idempotency_key, user_key, kind, payload_json, status, result_json, error_text,
+             created_at, updated_at, lease_owner, lease_expires_at, claim_attempt, claimed_at
          FROM tasks_old;
          DROP TABLE tasks_old;
          CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at);
          CREATE INDEX IF NOT EXISTS idx_tasks_user_id_created_at ON tasks(user_id, created_at);
          CREATE INDEX IF NOT EXISTS idx_tasks_user_key_created_at ON tasks(user_key, created_at);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
+             ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
          ALTER TABLE scheduled_jobs RENAME TO scheduled_jobs_old;
          CREATE TABLE scheduled_jobs (
              id                INTEGER PRIMARY KEY AUTOINCREMENT,
