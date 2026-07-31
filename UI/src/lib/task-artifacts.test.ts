@@ -11,8 +11,9 @@ import type { TaskArtifact, TaskQueryResponse } from "../types/api";
 
 function artifact(overrides: Partial<TaskArtifact> = {}): TaskArtifact {
   return {
-    schema_version: 1,
+    schema_version: 2,
     id: "artifact-1",
+    artifact_ref: "artifact:task/task-1/artifact-1",
     filename: "report.pdf",
     kind: "pdf",
     mime_type: "application/pdf",
@@ -47,6 +48,22 @@ test("rejects external, traversal, malformed, and duplicate artifact records", (
     [artifact()],
   );
   assert.equal(safeArtifactUrl("//example.com/v1/tasks/a/artifacts/b/content"), false);
+});
+
+test("normalizes legacy artifacts and rejects mismatched canonical references", () => {
+  const legacy = { ...artifact(), schema_version: 1 as const };
+  delete (legacy as Partial<TaskArtifact>).artifact_ref;
+  assert.deepEqual(normalizeTaskArtifacts([legacy]), [artifact()]);
+  assert.deepEqual(
+    normalizeTaskArtifacts([artifact({ artifact_ref: "artifact:task/other/artifact-1" })]),
+    [],
+  );
+  assert.deepEqual(
+    normalizeTaskArtifacts([
+      artifact({ download_url: "/v1/tasks/task-1/artifacts/%ZZ/content" }),
+    ]),
+    [],
+  );
 });
 
 test("allows only server-approved inline preview media", () => {

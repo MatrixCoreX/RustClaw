@@ -11,13 +11,16 @@ use serde_json::Value;
 
 use crate::wechat_reply_media::strip_wechat_delivery_lines;
 
-const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
+const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const MAX_TASK_ARTIFACTS: usize = 32;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct TaskDeliveryArtifactManifest {
     schema_version: u32,
     id: String,
+    #[serde(default)]
+    artifact_ref: String,
     filename: String,
     kind: String,
     mime_type: String,
@@ -131,13 +134,26 @@ fn task_artifact_manifests(
 }
 
 fn valid_manifest(task_id: &str, manifest: &TaskDeliveryArtifactManifest) -> bool {
-    manifest.schema_version == TASK_ARTIFACT_SCHEMA_VERSION
+    let expected_ref = canonical_task_artifact_ref(task_id, &manifest.id);
+    matches!(
+        manifest.schema_version,
+        TASK_ARTIFACT_SCHEMA_VERSION | LEGACY_TASK_ARTIFACT_SCHEMA_VERSION
+    ) && (expected_ref.as_deref() == Some(manifest.artifact_ref.as_str())
+        || (manifest.schema_version == LEGACY_TASK_ARTIFACT_SCHEMA_VERSION
+            && manifest.artifact_ref.is_empty()))
         && machine_component(&manifest.id).is_some()
         && !manifest.filename.trim().is_empty()
         && safe_filename(&manifest.filename) == manifest.filename
         && manifest.sha256.len() == 64
         && manifest.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
         && manifest.download_url == format!("/v1/tasks/{task_id}/artifacts/{}/content", manifest.id)
+}
+
+/// Canonical, channel-neutral address for an immutable task artifact.
+pub fn canonical_task_artifact_ref(task_id: &str, artifact_id: &str) -> Option<String> {
+    let task_id = machine_component(task_id)?;
+    let artifact_id = machine_component(artifact_id)?;
+    Some(format!("artifact:task/{task_id}/{artifact_id}"))
 }
 
 fn validated_task_artifact_path(

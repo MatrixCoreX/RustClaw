@@ -87,6 +87,7 @@ async fn video_poster_rejects_non_video_artifacts_before_running_ffmpeg() {
     let manifest = TaskArtifactManifest {
         schema_version: 1,
         id: "artifact-1".to_string(),
+        artifact_ref: String::new(),
         filename: "report.txt".to_string(),
         kind: "file".to_string(),
         mime_type: "text/plain".to_string(),
@@ -104,6 +105,7 @@ async fn browser_video_rejects_non_video_artifacts_before_running_ffmpeg() {
     let manifest = TaskArtifactManifest {
         schema_version: 1,
         id: "artifact-1".to_string(),
+        artifact_ref: String::new(),
         filename: "report.txt".to_string(),
         kind: "file".to_string(),
         mime_type: "text/plain".to_string(),
@@ -130,6 +132,7 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     let manifest = TaskArtifactManifest {
         schema_version: 1,
         id: "artifact-1".to_string(),
+        artifact_ref: String::new(),
         filename: "report.txt".to_string(),
         kind: "file".to_string(),
         mime_type: "text/plain; charset=utf-8".to_string(),

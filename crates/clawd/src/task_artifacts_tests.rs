@@ -57,6 +57,11 @@ fn materializes_structured_capability_output_into_task_delivery_storage() {
     assert_eq!(value["text"], "done");
     assert_eq!(manifests[0].filename, "月报.pdf");
     assert_eq!(manifests[0].kind, "pdf");
+    assert_eq!(manifests[0].schema_version, TASK_ARTIFACT_SCHEMA_VERSION);
+    assert_eq!(
+        manifests[0].artifact_ref,
+        format!("artifact:task/task-123/{}", manifests[0].id)
+    );
     assert!(manifests[0].preview_url.is_some());
     let delivered = delivery_artifact_path(
         workspace.path(),
@@ -65,6 +70,34 @@ fn materializes_structured_capability_output_into_task_delivery_storage() {
         &manifests[0].filename,
     );
     assert_eq!(fs::read(delivered).unwrap(), b"pdf-fixture");
+}
+
+#[test]
+fn legacy_manifest_is_normalized_only_by_the_central_decoder() {
+    let value = json!({
+        "artifacts": [{
+            "schema_version": 1,
+            "id": "artifact-legacy",
+            "filename": "legacy.txt",
+            "kind": "file",
+            "mime_type": "text/plain",
+            "size_bytes": 6,
+            "sha256": "a".repeat(64),
+            "download_url": "/v1/tasks/task-legacy/artifacts/artifact-legacy/content"
+        }]
+    });
+
+    let manifests = manifests_from_result(Some(&value));
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(
+        manifests[0].artifact_ref,
+        "artifact:task/task-legacy/artifact-legacy"
+    );
+
+    let mut mismatched = value;
+    mismatched["artifacts"][0]["schema_version"] = json!(2);
+    mismatched["artifacts"][0]["artifact_ref"] = json!("artifact:task/other/artifact-legacy");
+    assert!(manifests_from_result(Some(&mismatched)).is_empty());
 }
 
 #[test]
@@ -96,6 +129,7 @@ fn delivery_lookup_rejects_manifest_filename_traversal() {
     let manifest = TaskArtifactManifest {
         schema_version: 1,
         id: "artifact-1".to_string(),
+        artifact_ref: String::new(),
         filename: "../../secret".to_string(),
         kind: "file".to_string(),
         mime_type: "application/octet-stream".to_string(),
