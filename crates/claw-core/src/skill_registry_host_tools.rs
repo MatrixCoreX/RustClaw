@@ -1,28 +1,75 @@
 use super::{SkillKind, SkillsRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostToolDescriptor {
-    pub name: &'static str,
+pub enum HostToolAdapterKind {
+    /// Dispatched by clawd's in-process builtin adapter.
+    InProcessBuiltin,
+    /// Registry-visible compatibility facade rewritten to a canonical runtime
+    /// capability before execution.
+    VirtualFacade,
+    /// Executed inside the generic agent loop instead of the builtin adapter.
+    AgentLoopInternal,
 }
 
-/// Frozen catalog of in-process host adapters. Runtime dispatch still uses the
-/// registry; this catalog only validates that every compiled host adapter has
-/// one correctly typed registry entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostToolDescriptor {
+    pub name: &'static str,
+    pub adapter_kind: HostToolAdapterKind,
+}
+
+/// Frozen catalog of host-owned tools. Runtime dispatch still uses the
+/// registry; this catalog validates that every compiled host tool has one
+/// correctly typed registry entry and records which host execution surface
+/// owns it.
 pub const HOST_TOOL_DESCRIPTORS: &[HostToolDescriptor] = &[
-    HostToolDescriptor { name: "run_cmd" },
-    HostToolDescriptor { name: "code_index" },
-    HostToolDescriptor { name: "fs_basic" },
+    HostToolDescriptor {
+        name: "run_cmd",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "code_index",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "fs_basic",
+        adapter_kind: HostToolAdapterKind::VirtualFacade,
+    },
     HostToolDescriptor {
         name: "config_basic",
+        adapter_kind: HostToolAdapterKind::VirtualFacade,
     },
-    HostToolDescriptor { name: "read_file" },
-    HostToolDescriptor { name: "write_file" },
-    HostToolDescriptor { name: "list_dir" },
-    HostToolDescriptor { name: "make_dir" },
+    HostToolDescriptor {
+        name: "read_file",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "write_file",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "list_dir",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "make_dir",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
     HostToolDescriptor {
         name: "remove_file",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
     },
-    HostToolDescriptor { name: "schedule" },
+    HostToolDescriptor {
+        name: "schedule",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "workspace_patch",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
+        name: "subagent",
+        adapter_kind: HostToolAdapterKind::AgentLoopInternal,
+    },
 ];
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
