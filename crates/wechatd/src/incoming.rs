@@ -10,28 +10,28 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     else {
         return;
     };
-    if let Some(token) = msg
-        .context_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        remember_context_token(&state, &from_user_id, token).await;
-    }
-    let prefetched_typing_ticket =
-        resolve_typing_ticket_for_peer(&state, &from_user_id, msg.context_token.as_deref()).await;
+    let Some(task_context) =
+        pin_inbound_task_context(&state, &from_user_id, msg.context_token.as_deref()).await
+    else {
+        warn!("wechatd: inbound message skipped because task context could not be pinned");
+        return;
+    };
     // Cover CDN download / decrypt / transcode latency before the clawd task heartbeat starts.
     let _media_typing_guard = if extract_text_message(&msg).is_none() {
-        start_typing_heartbeat_for_peer(&state, &from_user_id, prefetched_typing_ticket.as_deref())
-            .await
+        start_typing_heartbeat_for_peer(&state, &task_context).await
     } else {
         None
     };
 
     if extract_text_message(&msg).is_none() {
-        let Some(identity) =
-            ensure_bound_before_task(&state, &from_user_id, msg.context_token.as_deref(), None)
-                .await
+        let Some(identity) = ensure_bound_before_task(
+            &state,
+            &task_context.scope,
+            &from_user_id,
+            Some(&task_context.context_token),
+            None,
+        )
+        .await
         else {
             return;
         };
@@ -67,8 +67,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     .await;
                     return spawn_inbound_skill_flow(
                         state,
-                        from_user_id,
-                        msg,
+                        task_context.clone(),
                         "image_vision",
                         json!({
                             "action": "describe",
@@ -76,7 +75,6 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                             "detail_level": "normal"
                         }),
                         bound_user_key.clone(),
-                        prefetched_typing_ticket.clone(),
                     )
                     .await;
                 }
@@ -117,11 +115,9 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     let hint = wechat_media_agent_context("video", &rel, None);
                     return spawn_inbound_ask_flow(
                         state,
-                        from_user_id,
-                        msg,
+                        task_context.clone(),
                         hint,
                         bound_user_key.clone(),
-                        prefetched_typing_ticket.clone(),
                     )
                     .await;
                 }
@@ -162,8 +158,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     if inbox_rel_suits_doc_parse(&rel) {
                         return spawn_inbound_skill_flow(
                             state,
-                            from_user_id,
-                            msg,
+                            task_context.clone(),
                             "doc_parse",
                             json!({
                                 "action": "parse_doc",
@@ -173,18 +168,15 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                                 "table_mode": "basic"
                             }),
                             bound_user_key.clone(),
-                            prefetched_typing_ticket.clone(),
                         )
                         .await;
                     }
                     let hint = wechat_media_agent_context("file", &rel, Some(&safe_name));
                     return spawn_inbound_ask_flow(
                         state,
-                        from_user_id,
-                        msg,
+                        task_context.clone(),
                         hint,
                         bound_user_key.clone(),
-                        prefetched_typing_ticket.clone(),
                     )
                     .await;
                 }
@@ -240,12 +232,10 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     .await;
                     return spawn_inbound_skill_flow(
                         state,
-                        from_user_id,
-                        msg,
+                        task_context.clone(),
                         "audio_transcribe",
                         json!({ "audio": { "path": rel } }),
                         bound_user_key.clone(),
-                        prefetched_typing_ticket.clone(),
                     )
                     .await;
                 }
@@ -283,8 +273,9 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
 
     let Some(identity) = ensure_bound_before_task(
         &state,
+        &task_context.scope,
         &from_user_id,
-        msg.context_token.as_deref(),
+        Some(&task_context.context_token),
         Some(text.as_str()),
     )
     .await
@@ -293,10 +284,8 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     };
     tokio::spawn(submit_wechat_task_and_reply(
         state,
-        from_user_id,
+        task_context,
         text,
-        msg.context_token,
         Some(identity.user_key),
-        prefetched_typing_ticket,
     ));
 }

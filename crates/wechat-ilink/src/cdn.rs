@@ -10,21 +10,17 @@ use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::json;
 use tracing::{info, warn};
 
+use crate::contract::{
+    new_wechat_client_id, WechatCdnMedia, WechatMessageItem, WechatSendMessageRequest,
+    UPLOAD_MEDIA_TYPE_FILE, UPLOAD_MEDIA_TYPE_IMAGE, UPLOAD_MEDIA_TYPE_VIDEO,
+};
 use crate::crypto::{aes_ecb_padded_size, decrypt_aes_128_ecb, encrypt_aes_128_ecb};
 use crate::http::{post_ilink_json, BaseInfo, IlinkAuth};
 
 const DEFAULT_API_TIMEOUT_MS: u64 = 15_000;
 const CDN_UPLOAD_MAX_RETRIES: u32 = 3;
-
-/// `getuploadurl` / `UploadMediaType` (proto), same as OpenClaw `api/types.ts`.
-pub const UPLOAD_MEDIA_TYPE_IMAGE: i64 = 1;
-pub const UPLOAD_MEDIA_TYPE_VIDEO: i64 = 2;
-pub const UPLOAD_MEDIA_TYPE_FILE: i64 = 3;
-#[allow(dead_code)]
-pub const UPLOAD_MEDIA_TYPE_VOICE: i64 = 4;
 
 pub fn build_cdn_download_url(encrypted_query_param: &str, cdn_base_url: &str) -> String {
     let base = cdn_base_url.trim_end_matches('/');
@@ -156,6 +152,8 @@ pub struct GetUploadUrlResp {
     #[serde(default)]
     #[allow(dead_code)]
     pub thumb_upload_param: Option<String>,
+    #[serde(default)]
+    pub upload_full_url: Option<String>,
 }
 
 pub async fn ilink_get_upload_url(
@@ -229,13 +227,26 @@ pub async fn upload_plaintext_to_cdn(
         },
     };
     let up = ilink_get_upload_url(client, ilink_base_url, token, auth, &req).await?;
+    let upload_full_url = up
+        .upload_full_url
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let upload_param = up
         .upload_param
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| "getuploadurl: missing upload_param".to_string())?;
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if upload_full_url.is_none() && upload_param.is_none() {
+        return Err("getuploadurl: missing upload_full_url/upload_param".to_string());
+    }
 
     let ciphertext = encrypt_aes_128_ecb(plaintext, &aeskey_bytes)?;
-    let cdn_url = build_cdn_upload_url(cdn_base_url.trim_end_matches('/'), &upload_param, &filekey);
+    let cdn_url = upload_full_url.unwrap_or_else(|| {
+        build_cdn_upload_url(
+            cdn_base_url.trim_end_matches('/'),
+            upload_param.as_deref().unwrap_or_default(),
+            &filekey,
+        )
+    });
     let download_encrypted_query_param =
         upload_cdn_ciphertext(client, &cdn_url, &ciphertext, true, "cdn upload")
             .await?
@@ -383,32 +394,21 @@ fn ts_ms() -> u64 {
         .unwrap_or(0)
 }
 
-const MSG_TYPE_BOT: i64 = 2;
-const MSG_STATE_FINISH: i64 = 2;
-const ITEM_IMAGE: i64 = 2;
-const ITEM_FILE: i64 = 4;
-const ITEM_VIDEO: i64 = 5;
-
 async fn post_sendmessage(
     client: &Client,
     ilink_base_url: &str,
     token: &str,
     auth: IlinkAuth<'_>,
-    msg_obj: serde_json::Value,
-    channel_version: &str,
+    body: &WechatSendMessageRequest,
     timeout_ms: u64,
 ) -> Result<(), String> {
-    let body = json!({
-        "msg": msg_obj,
-        "base_info": { "channel_version": channel_version },
-    });
     post_ilink_json(
         client,
         ilink_base_url,
         token,
         auth,
         "ilink/bot/sendmessage",
-        &body,
+        body,
         timeout_ms.max(15_000),
     )
     .await?;
@@ -423,6 +423,7 @@ pub async fn send_weixin_image_from_file(
     cdn_base_url: &str,
     to_user_id: &str,
     context_token: Option<&str>,
+    run_id: Option<&str>,
     file_path: &Path,
     channel_version: &str,
     timeout_ms: u64,
@@ -455,38 +456,17 @@ pub async fn send_weixin_image_from_file(
         uploaded.ciphertext_size
     );
     let aes_b64 = media_aes_key_b64_from_hex(&uploaded.aeskey_hex)?;
-    let ts = ts_ms();
-    let mut msg_obj = json!({
-        "from_user_id": "",
-        "to_user_id": to_user_id,
-        "client_id": format!("agent-img-{ts}"),
-        "message_type": MSG_TYPE_BOT,
-        "message_state": MSG_STATE_FINISH,
-        "item_list": [{
-            "type": ITEM_IMAGE,
-            "image_item": {
-                "media": {
-                    "encrypt_query_param": uploaded.download_encrypted_query_param,
-                    "aes_key": aes_b64,
-                    "encrypt_type": 1_i64
-                },
-                "mid_size": uploaded.ciphertext_size as i64
-            }
-        }]
-    });
-    if let Some(ct) = context_token.map(str::trim).filter(|s| !s.is_empty()) {
-        msg_obj["context_token"] = json!(ct);
-    }
-    post_sendmessage(
-        client,
-        ilink_base_url,
-        token,
-        auth,
-        msg_obj,
+    let media = WechatCdnMedia::encrypted(uploaded.download_encrypted_query_param, aes_b64)?;
+    let item = WechatMessageItem::image(media, uploaded.ciphertext_size)?;
+    let body = WechatSendMessageRequest::finish(
+        to_user_id,
+        context_token.unwrap_or_default(),
+        new_wechat_client_id("image"),
+        run_id.map(str::to_string),
+        item,
         channel_version,
-        timeout_ms,
-    )
-    .await
+    )?;
+    post_sendmessage(client, ilink_base_url, token, auth, &body, timeout_ms).await
 }
 
 pub async fn send_weixin_video_from_file(
@@ -497,6 +477,7 @@ pub async fn send_weixin_video_from_file(
     cdn_base_url: &str,
     to_user_id: &str,
     context_token: Option<&str>,
+    run_id: Option<&str>,
     file_path: &Path,
     channel_version: &str,
     timeout_ms: u64,
@@ -505,7 +486,7 @@ pub async fn send_weixin_video_from_file(
         file_path,
         "微信",
         "视频",
-        claw_core::channel_media_limits::wechat_file_max_bytes(),
+        claw_core::channel_media_limits::wechat_video_max_bytes(),
     )?;
     let plaintext = tokio::fs::read(file_path)
         .await
@@ -523,38 +504,17 @@ pub async fn send_weixin_video_from_file(
     )
     .await?;
     let aes_b64 = media_aes_key_b64_from_hex(&uploaded.aeskey_hex)?;
-    let ts = ts_ms();
-    let mut msg_obj = json!({
-        "from_user_id": "",
-        "to_user_id": to_user_id,
-        "client_id": format!("agent-vid-{ts}"),
-        "message_type": MSG_TYPE_BOT,
-        "message_state": MSG_STATE_FINISH,
-        "item_list": [{
-            "type": ITEM_VIDEO,
-            "video_item": {
-                "media": {
-                    "encrypt_query_param": uploaded.download_encrypted_query_param,
-                    "aes_key": aes_b64,
-                    "encrypt_type": 1_i64
-                },
-                "video_size": uploaded.ciphertext_size as i64
-            }
-        }]
-    });
-    if let Some(ct) = context_token.map(str::trim).filter(|s| !s.is_empty()) {
-        msg_obj["context_token"] = json!(ct);
-    }
-    post_sendmessage(
-        client,
-        ilink_base_url,
-        token,
-        auth,
-        msg_obj,
+    let media = WechatCdnMedia::encrypted(uploaded.download_encrypted_query_param, aes_b64)?;
+    let item = WechatMessageItem::video(media, uploaded.ciphertext_size)?;
+    let body = WechatSendMessageRequest::finish(
+        to_user_id,
+        context_token.unwrap_or_default(),
+        new_wechat_client_id("video"),
+        run_id.map(str::to_string),
+        item,
         channel_version,
-        timeout_ms,
-    )
-    .await
+    )?;
+    post_sendmessage(client, ilink_base_url, token, auth, &body, timeout_ms).await
 }
 
 pub async fn send_weixin_file_from_file(
@@ -565,6 +525,7 @@ pub async fn send_weixin_file_from_file(
     cdn_base_url: &str,
     to_user_id: &str,
     context_token: Option<&str>,
+    run_id: Option<&str>,
     file_path: &Path,
     attachment_display_name: &str,
     channel_version: &str,
@@ -592,39 +553,17 @@ pub async fn send_weixin_file_from_file(
     )
     .await?;
     let aes_b64 = media_aes_key_b64_from_hex(&uploaded.aeskey_hex)?;
-    let ts = ts_ms();
-    let mut msg_obj = json!({
-        "from_user_id": "",
-        "to_user_id": to_user_id,
-        "client_id": format!("agent-file-{ts}"),
-        "message_type": MSG_TYPE_BOT,
-        "message_state": MSG_STATE_FINISH,
-        "item_list": [{
-            "type": ITEM_FILE,
-            "file_item": {
-                "media": {
-                    "encrypt_query_param": uploaded.download_encrypted_query_param,
-                    "aes_key": aes_b64,
-                    "encrypt_type": 1_i64
-                },
-                "file_name": attachment_display_name,
-                "len": format!("{}", uploaded.plaintext_size)
-            }
-        }]
-    });
-    if let Some(ct) = context_token.map(str::trim).filter(|s| !s.is_empty()) {
-        msg_obj["context_token"] = json!(ct);
-    }
-    post_sendmessage(
-        client,
-        ilink_base_url,
-        token,
-        auth,
-        msg_obj,
+    let media = WechatCdnMedia::encrypted(uploaded.download_encrypted_query_param, aes_b64)?;
+    let item = WechatMessageItem::file(media, attachment_display_name, uploaded.plaintext_size)?;
+    let body = WechatSendMessageRequest::finish(
+        to_user_id,
+        context_token.unwrap_or_default(),
+        new_wechat_client_id("file"),
+        run_id.map(str::to_string),
+        item,
         channel_version,
-        timeout_ms,
-    )
-    .await
+    )?;
+    post_sendmessage(client, ilink_base_url, token, auth, &body, timeout_ms).await
 }
 
 #[cfg(test)]

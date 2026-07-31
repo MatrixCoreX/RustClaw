@@ -92,7 +92,21 @@ pub async fn post_json<T: Serialize>(
             .to_string(),
         );
     }
-    serde_json::from_str(&body).map_err(|e| format!("wechat response parse failed: {e}"))
+    let value: Value = serde_json::from_str(&body).map_err(|error| {
+        claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+            "wechat_ilink",
+            endpoint.rsplit('/').next().unwrap_or("request"),
+            &error.to_string(),
+        )
+        .to_string()
+    })?;
+    if let Some(error) = wechat_ilink::decode_ilink_provider_failure(
+        endpoint.rsplit('/').next().unwrap_or("request"),
+        &value,
+    ) {
+        return Err(error.to_string());
+    }
+    Ok(value)
 }
 
 #[derive(Serialize)]

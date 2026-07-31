@@ -11,6 +11,30 @@ fn external_chat_id_from_payload(payload: &Value) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn ingress_reply_target_from_payload(payload: &Value) -> Option<String> {
+    payload
+        .pointer("/channel_ingress/reply_target/external_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn ingress_context_token_from_payload(payload: &Value) -> Option<&str> {
+    payload
+        .pointer("/channel_ingress/context_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            payload
+                .get("context_token")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+}
+
 pub(crate) fn runtime_channel_from_payload(
     state: &AppState,
     payload: &Value,
@@ -137,14 +161,12 @@ pub(crate) async fn send_task_channel_message(
             }
         }
         crate::RuntimeChannel::Wechat => {
-            let to_user_id = task_external_chat_id(task)
+            let to_user_id = ingress_reply_target_from_payload(payload)
+                .or_else(|| task.external_user_id.clone())
+                .or_else(|| task_external_chat_id(task))
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
-            let context_token = payload
-                .get("context_token")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|v| !v.is_empty());
+            let context_token = ingress_context_token_from_payload(payload);
             crate::channel_send::send_wechat_text_message(state, &to_user_id, context_token, text)
                 .await
                 .map(|_| crate::channel_send::ChannelSendOutcome::default())
@@ -194,6 +216,27 @@ mod tests {
         assert_eq!(
             resolve_whatsapp_delivery_route(&state, &json!({})),
             crate::WhatsappDeliveryRoute::WebBridge
+        );
+    }
+
+    #[test]
+    fn wechat_delivery_uses_raw_reply_target_not_scoped_conversation_id() {
+        let payload = json!({
+            "context_token": "stale-token",
+            "external_chat_id": "wechat-scope-v1:opaque",
+            "channel_ingress": {
+                "context_token": "pinned-token",
+                "reply_target": {"kind": "user", "external_id": "raw-peer"}
+            }
+        });
+
+        assert_eq!(
+            ingress_reply_target_from_payload(&payload).as_deref(),
+            Some("raw-peer")
+        );
+        assert_eq!(
+            ingress_context_token_from_payload(&payload),
+            Some("pinned-token")
         );
     }
 }

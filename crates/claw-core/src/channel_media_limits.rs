@@ -151,6 +151,13 @@ pub fn wechat_file_max_bytes() -> u64 {
     )
 }
 
+pub fn wechat_video_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::WechatIlink,
+        ChannelCapabilityKind::SendVideo,
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WhatsappCloudMediaKind {
     Image,

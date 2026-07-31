@@ -108,6 +108,7 @@ pub(super) async fn send_text_message(
     token: &str,
     to_user_id: &str,
     context_token: Option<&str>,
+    run_id: Option<&str>,
     text: &str,
 ) -> Result<(), String> {
     let Some(context_token) = normalized_context_token(context_token) else {
@@ -123,27 +124,19 @@ pub(super) async fn send_text_message(
     );
     let chunk_count = chunks.len();
     for (index, chunk) in chunks.into_iter().enumerate() {
-        let body = SendMessageReq {
-            msg: OutboundMessage {
-                from_user_id: String::new(),
-                to_user_id: to_user_id.to_string(),
-                client_id: format!("wechatd-{}", current_ts_ms()),
-                message_type: 2,
-                message_state: 2,
-                item_list: vec![OutboundMessageItem {
-                    r#type: 1,
-                    text_item: OutboundTextItem {
-                        text: if chunk_count > 1 {
-                            format!("（{}/{}）\n{}", index + 1, chunk_count, chunk)
-                        } else {
-                            chunk
-                        },
-                    },
-                }],
-                context_token: Some(context_token.to_string()),
-            },
-            base_info: ilink::base_info(),
+        let text = if chunk_count > 1 {
+            format!("（{}/{}）\n{}", index + 1, chunk_count, chunk)
+        } else {
+            chunk
         };
+        let body = WechatSendMessageRequest::finish(
+            to_user_id,
+            context_token,
+            wechat_ilink::new_wechat_client_id("text"),
+            run_id.map(str::to_string),
+            WechatMessageItem::text(text)?,
+            WECHATD_CHANNEL_VERSION,
+        )?;
         let _ = ilink::post_json(
             client,
             config,
@@ -182,6 +175,7 @@ pub(super) async fn send_wechat_error_notice(
     token: &str,
     to_user_id: &str,
     context_token: &str,
+    run_id: Option<&str>,
     err: &str,
 ) {
     let notice = if err.contains("remote media download failed") || err.contains("fetch") {
@@ -205,6 +199,7 @@ pub(super) async fn send_wechat_error_notice(
         token,
         to_user_id,
         Some(context_token),
+        run_id,
         &notice,
     )
     .await
@@ -241,6 +236,7 @@ pub(super) async fn send_text_reply_via_session(
         &token,
         to_user_id,
         Some(context_token.as_str()),
+        None,
         text,
     )
     .await;
