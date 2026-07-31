@@ -122,8 +122,31 @@ fn missing_process_requires_a_durable_grace_observation() {
     ));
     assert!(process_loss_is_stable(
         root.path(),
+        ProcessIdentityState::Missing,
+        105,
+        5,
+    ));
+}
+
+#[test]
+fn identity_mismatch_waits_for_a_terminal_record_grace_window() {
+    let root = TempDirGuard::new("identity_mismatch_grace");
+    assert!(!process_loss_is_stable(
+        root.path(),
         ProcessIdentityState::IdentityMismatch,
         100,
+        5,
+    ));
+    assert!(!process_loss_is_stable(
+        root.path(),
+        ProcessIdentityState::IdentityMismatch,
+        104,
+        5,
+    ));
+    assert!(process_loss_is_stable(
+        root.path(),
+        ProcessIdentityState::IdentityMismatch,
+        105,
         5,
     ));
 }

@@ -147,7 +147,10 @@ fn process_group_exists(process_group_id: u32) -> Option<bool> {
 /// Requires a durable second observation before treating a vanished process as
 /// lost. A short-lived command can exit immediately before its wrapper commits
 /// the terminal `exit_code` record, so the first missing observation is only a
-/// pending terminal-record state. An identity mismatch is immediately stable.
+/// pending terminal-record state. An identity mismatch gets the same bounded
+/// observation grace because an exiting wrapper can briefly appear as a zombie
+/// without its original command line. This grace never authorizes signalling:
+/// cancellation still refuses to target an identity mismatch.
 pub(crate) fn process_loss_is_stable(
     job_dir: &Path,
     identity_state: ProcessIdentityState,
@@ -156,8 +159,7 @@ pub(crate) fn process_loss_is_stable(
 ) -> bool {
     let marker = job_dir.join("process_missing_observed_at");
     match identity_state {
-        ProcessIdentityState::IdentityMismatch => true,
-        ProcessIdentityState::Missing => {
+        ProcessIdentityState::Missing | ProcessIdentityState::IdentityMismatch => {
             let Some(first_observed_at) = read_i64(job_dir, "process_missing_observed_at") else {
                 let _ = write_atomic(&marker, &now_ts.to_string());
                 return false;

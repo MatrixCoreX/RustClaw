@@ -326,6 +326,43 @@ fn async_poll_requires_a_second_missing_process_observation_before_failure() {
 }
 
 #[test]
+fn async_poll_identity_mismatch_allows_terminal_record_grace() {
+    let workspace = TempDirGuard::new("async_poll_identity_mismatch_grace");
+    let job_dir = workspace.root_job_dir("identity-mismatch-job");
+    std::fs::write(job_dir.join("run.sh"), "#!/usr/bin/env bash\nexit 0\n")
+        .expect("write identity script");
+    std::fs::write(job_dir.join("pid"), std::process::id().to_string())
+        .expect("write mismatched live pid");
+    std::fs::write(job_dir.join("started_at"), "1000").expect("write started at");
+    std::fs::write(job_dir.join("retention_seconds"), "600").expect("write retention");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:identity-mismatch-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let first = super::execute_async_poll_dispatch_result(&claimed, 1_010, 30)
+        .expect("identity mismatch receives terminal-record grace");
+    assert_eq!(first["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(
+        first["process_observation"]["process_identity_state"],
+        "identity_mismatch"
+    );
+    assert_eq!(first["process_observation"]["process_loss_stable"], false);
+
+    std::fs::write(job_dir.join("finished_at"), "1011").expect("write finished at");
+    std::fs::write(job_dir.join("exit_code"), "0").expect("write exit code");
+    let terminal = super::execute_async_poll_dispatch_result(&claimed, 1_011, 30)
+        .expect("terminal record wins during identity grace");
+    assert_eq!(terminal["executor_result_status"], "async_poll_completed");
+    assert_eq!(terminal["final_result_json"]["exit_code"], 0);
+}
+
+#[test]
 fn async_poll_missing_pid_metadata_is_a_stable_machine_failure() {
     let workspace = TempDirGuard::new("async_poll_missing_pid");
     let job_dir = workspace.root_job_dir("missing-pid-job");
