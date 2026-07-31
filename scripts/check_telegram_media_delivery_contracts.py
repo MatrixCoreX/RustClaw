@@ -28,6 +28,8 @@ REQUIRED_TOKENS_BY_PATH = {
         "telegram.msg.delivery_media_failed_ui_fallback",
         "telegram.msg.delivery_media_failed_retry",
         "deliver_missing_telegram_media_path",
+        "telegram_request_error(\"send_media\"",
+        "telegram_request_error(\"send_document\"",
     ),
     "crates/telegramd/src/telegram_formatting.rs": (
         "deliver_missing_telegram_media_path",

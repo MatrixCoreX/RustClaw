@@ -198,21 +198,7 @@ pub(crate) async fn deliver_task_envelope(
     let send_result = crate::worker::send_task_channel_message(state, task, payload, &text).await;
     let now = crate::now_ts_u64();
     let receipt = match send_result {
-        Ok(()) => ChannelDeliveryReceipt {
-            schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
-            delivery_id: envelope.delivery_id.clone(),
-            idempotency_key: envelope.idempotency_key.clone(),
-            channel: envelope.channel,
-            adapter: envelope.adapter.clone(),
-            status: ChannelDeliveryStatus::Accepted,
-            provider_message_ids: Vec::new(),
-            parts: Vec::new(),
-            error_code: None,
-            message_key: None,
-            diagnostic_id: None,
-            retryable: false,
-            updated_at_ts: now,
-        },
+        Ok(outcome) => accepted_delivery_receipt(envelope, outcome, now),
         Err(error_text) => {
             let (error_code, message_key, diagnostic_id, retryable) =
                 delivery_failure_fields(&error_text);
@@ -261,6 +247,28 @@ pub(crate) async fn deliver_task_envelope(
         retryable: receipt.retryable,
         receipt: Some(receipt),
     })
+}
+
+fn accepted_delivery_receipt(
+    envelope: &ChannelDeliveryEnvelope,
+    outcome: crate::channel_send::ChannelSendOutcome,
+    now: u64,
+) -> ChannelDeliveryReceipt {
+    ChannelDeliveryReceipt {
+        schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
+        delivery_id: envelope.delivery_id.clone(),
+        idempotency_key: envelope.idempotency_key.clone(),
+        channel: envelope.channel,
+        adapter: envelope.adapter.clone(),
+        status: ChannelDeliveryStatus::Accepted,
+        provider_message_ids: outcome.provider_message_ids,
+        parts: Vec::new(),
+        error_code: None,
+        message_key: None,
+        diagnostic_id: None,
+        retryable: false,
+        updated_at_ts: now,
+    }
 }
 
 fn delivery_failure_fields(error_text: &str) -> (String, String, String, bool) {

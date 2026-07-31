@@ -22,7 +22,7 @@ class CatalogSpec:
 
 
 CATALOG_SPECS = (
-    CatalogSpec("channel-common", ("en-US", "zh-CN", "ja", "ko"), 8),
+    CatalogSpec("channel-common", ("en-US", "zh-CN", "ja", "ko"), 10),
     CatalogSpec("telegramd", ("en-US", "zh-CN"), 77),
     CatalogSpec("wechatd", ("en-US", "zh-CN"), 28),
     CatalogSpec("feishud", ("en-US", "zh-CN"), 12),

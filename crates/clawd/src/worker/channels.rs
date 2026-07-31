@@ -110,7 +110,7 @@ pub(crate) async fn send_task_channel_message(
     task: &crate::ClaimedTask,
     payload: &Value,
     text: &str,
-) -> Result<(), String> {
+) -> Result<crate::channel_send::ChannelSendOutcome, String> {
     match runtime_channel_from_payload(state, payload) {
         crate::RuntimeChannel::Telegram => {
             let target_chat_id = task_external_chat_id(task)
@@ -127,9 +127,12 @@ pub(crate) async fn send_task_channel_message(
                 crate::WhatsappDeliveryRoute::WebBridge => {
                     crate::channel_send::send_whatsapp_web_bridge_text_message(state, &to, text)
                         .await
+                        .map(|_| crate::channel_send::ChannelSendOutcome::default())
                 }
                 crate::WhatsappDeliveryRoute::Cloud => {
-                    crate::channel_send::send_whatsapp_cloud_text_message(state, &to, text).await
+                    crate::channel_send::send_whatsapp_cloud_text_message(state, &to, text)
+                        .await
+                        .map(|_| crate::channel_send::ChannelSendOutcome::default())
                 }
             }
         }
@@ -144,18 +147,23 @@ pub(crate) async fn send_task_channel_message(
                 .filter(|v| !v.is_empty());
             crate::channel_send::send_wechat_text_message(state, &to_user_id, context_token, text)
                 .await
+                .map(|_| crate::channel_send::ChannelSendOutcome::default())
         }
         crate::RuntimeChannel::Feishu => {
             let receive_id = task_external_chat_id(task)
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for feishu task".to_string())?;
-            crate::channel_send::send_feishu_text_message(state, &receive_id, text).await
+            crate::channel_send::send_feishu_text_message(state, &receive_id, text)
+                .await
+                .map(|_| crate::channel_send::ChannelSendOutcome::default())
         }
         crate::RuntimeChannel::Lark => {
             let receive_id = task_external_chat_id(task)
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
-            crate::channel_send::send_lark_text_message(state, &receive_id, text).await
+            crate::channel_send::send_lark_text_message(state, &receive_id, text)
+                .await
+                .map(|_| crate::channel_send::ChannelSendOutcome::default())
         }
     }
 }

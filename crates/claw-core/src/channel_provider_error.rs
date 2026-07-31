@@ -16,6 +16,8 @@ pub const CHANNEL_PROVIDER_ERROR_PREFIX: &str = "__CHANNEL_PROVIDER_ERROR_V1__:"
 pub enum ChannelProviderFailureClass {
     Authentication,
     PermissionDenied,
+    RecipientBlocked,
+    TargetNotFound,
     RateLimited,
     PayloadRejected,
     ProviderUnavailable,
@@ -29,6 +31,8 @@ impl ChannelProviderFailureClass {
         match self {
             Self::Authentication => "authentication",
             Self::PermissionDenied => "permission_denied",
+            Self::RecipientBlocked => "recipient_blocked",
+            Self::TargetNotFound => "target_not_found",
             Self::RateLimited => "rate_limited",
             Self::PayloadRejected => "payload_rejected",
             Self::ProviderUnavailable => "provider_unavailable",
@@ -42,6 +46,8 @@ impl ChannelProviderFailureClass {
         match self {
             Self::Authentication => "channel.provider.authentication",
             Self::PermissionDenied => "channel.provider.permission_denied",
+            Self::RecipientBlocked => "channel.provider.recipient_blocked",
+            Self::TargetNotFound => "channel.provider.target_not_found",
             Self::RateLimited => "channel.provider.rate_limited",
             Self::PayloadRejected => "channel.provider.payload_rejected",
             Self::ProviderUnavailable => "channel.provider.unavailable",
@@ -55,6 +61,8 @@ impl ChannelProviderFailureClass {
         match self {
             Self::Authentication => "channel.error.provider_authentication",
             Self::PermissionDenied => "channel.error.provider_permission_denied",
+            Self::RecipientBlocked => "channel.error.provider_recipient_blocked",
+            Self::TargetNotFound => "channel.error.provider_target_not_found",
             Self::RateLimited => "channel.error.provider_rate_limited",
             Self::PayloadRejected => "channel.error.provider_payload_rejected",
             Self::ProviderUnavailable | Self::Transport | Self::Unknown => {
@@ -107,6 +115,8 @@ pub struct ChannelProviderError {
     pub status_code: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
     pub retryable: bool,
     pub diagnostic_id: String,
 }
@@ -120,6 +130,8 @@ impl ChannelProviderError {
     ) -> Self {
         let failure_class = classify_http_status(status_code);
         let provider_error_code = extract_provider_error_code(response_body);
+        let retry_after_seconds = extract_retry_after_seconds(response_body)
+            .filter(|_| failure_class == ChannelProviderFailureClass::RateLimited);
         let diagnostic_id = diagnostic_id(
             source_adapter,
             operation,
@@ -132,6 +144,7 @@ impl ChannelProviderError {
             failure_class,
             Some(status_code),
             provider_error_code,
+            retry_after_seconds,
             diagnostic_id,
         );
         log_redacted_provider_failure(&error, Some(response_body), None);
@@ -154,6 +167,7 @@ impl ChannelProviderError {
             source_adapter,
             operation,
             ChannelProviderFailureClass::Transport,
+            None,
             None,
             None,
             diagnostic_id,
@@ -179,6 +193,7 @@ impl ChannelProviderError {
             ChannelProviderFailureClass::InvalidResponse,
             None,
             None,
+            None,
             diagnostic_id,
         );
         log_redacted_provider_failure(&error, None, Some("invalid_response"));
@@ -189,6 +204,40 @@ impl ChannelProviderError {
         let encoded = value.trim().strip_prefix(CHANNEL_PROVIDER_ERROR_PREFIX)?;
         let decoded: Self = serde_json::from_str(encoded).ok()?;
         decoded.is_valid().then_some(decoded)
+    }
+
+    pub fn from_machine_failure(
+        source_adapter: &str,
+        operation: &str,
+        failure_class: ChannelProviderFailureClass,
+        status_code: Option<u16>,
+        provider_error_code: Option<&str>,
+        retry_after_seconds: Option<u64>,
+        diagnostic_material: &str,
+    ) -> Self {
+        let provider_error_code = provider_error_code
+            .filter(|value| is_provider_code(value))
+            .map(str::to_string);
+        let retry_after_seconds = retry_after_seconds
+            .filter(|seconds| *seconds > 0 && *seconds <= 86_400)
+            .filter(|_| failure_class == ChannelProviderFailureClass::RateLimited);
+        let diagnostic_id = diagnostic_id(
+            source_adapter,
+            operation,
+            status_code,
+            diagnostic_material.as_bytes(),
+        );
+        let error = Self::new(
+            source_adapter,
+            operation,
+            failure_class,
+            status_code,
+            provider_error_code,
+            retry_after_seconds,
+            diagnostic_id,
+        );
+        log_redacted_provider_failure(&error, None, Some("typed_machine_failure"));
+        error
     }
 
     pub fn is_valid(&self) -> bool {
@@ -203,6 +252,11 @@ impl ChannelProviderError {
                 .provider_error_code
                 .as_deref()
                 .is_none_or(is_provider_code)
+            && self.retry_after_seconds.is_none_or(|seconds| {
+                self.failure_class == ChannelProviderFailureClass::RateLimited
+                    && seconds > 0
+                    && seconds <= 86_400
+            })
     }
 
     fn new(
@@ -211,6 +265,7 @@ impl ChannelProviderError {
         failure_class: ChannelProviderFailureClass,
         status_code: Option<u16>,
         provider_error_code: Option<String>,
+        retry_after_seconds: Option<u64>,
         diagnostic_id: String,
     ) -> Self {
         Self {
@@ -222,6 +277,7 @@ impl ChannelProviderError {
             message_key: failure_class.message_key().to_string(),
             status_code,
             provider_error_code,
+            retry_after_seconds,
             retryable: failure_class.retryable(),
             diagnostic_id,
         }

@@ -310,7 +310,9 @@ pub(super) async fn send_telegram_text(
         } else {
             req
         };
-        return Ok(req.await?);
+        return Ok(req
+            .await
+            .map_err(|error| anyhow!(telegram_request_error("send_text", &error)))?);
     }
     let n = chunks.len();
     info!(
@@ -336,7 +338,9 @@ pub(super) async fn send_telegram_text(
         } else {
             req
         };
-        let msg = req.await?;
+        let msg = req
+            .await
+            .map_err(|error| anyhow!(telegram_request_error("send_text", &error)))?;
         last = Some(msg);
     }
     Ok(last.expect("chunks non-empty"))
@@ -366,7 +370,9 @@ pub(super) async fn send_telegram_text_with_url_buttons(
         } else {
             req
         };
-        return Ok(req.await?);
+        return Ok(req
+            .await
+            .map_err(|error| anyhow!(telegram_request_error("send_text", &error)))?);
     }
     let n = chunks.len();
     let mut last = None;
@@ -384,7 +390,9 @@ pub(super) async fn send_telegram_text_with_url_buttons(
         } else {
             req
         };
-        let msg = req.await?;
+        let msg = req
+            .await
+            .map_err(|error| anyhow!(telegram_request_error("send_text", &error)))?;
         last = Some(msg);
     }
     Ok(last.expect("chunks non-empty"))

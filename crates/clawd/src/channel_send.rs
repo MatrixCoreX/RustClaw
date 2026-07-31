@@ -72,6 +72,11 @@ const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
 const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/outbound-temp";
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ChannelSendOutcome {
+    pub(crate) provider_message_ids: Vec<String>,
+}
+
 fn provider_http_error(
     source_adapter: &str,
     operation: &str,
@@ -167,7 +172,7 @@ pub(crate) async fn send_telegram_message(
     state: &AppState,
     chat_id: i64,
     text: &str,
-) -> Result<(), String> {
+) -> Result<ChannelSendOutcome, String> {
     let token = state.channels.telegram_bot_token.trim();
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
@@ -185,6 +190,7 @@ pub(crate) async fn send_telegram_message(
         TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
+    let mut provider_message_ids = Vec::new();
     if n > 1 {
         info!(
             "send_chunks channel=telegram chat_id={} original_len={} chunk_count={}",
@@ -218,16 +224,20 @@ pub(crate) async fn send_telegram_message(
             .send()
             .await
             .map_err(|error| provider_transport_error("telegram_bot", "send_text", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        let status = resp.status();
+        let response_body = resp
+            .text()
+            .await
+            .map_err(|error| provider_transport_error("telegram_bot", "send_text", &error))?;
+        if !status.is_success() {
             return Err(provider_http_error(
                 "telegram_bot",
                 "send_text",
                 status,
-                &body,
+                &response_body,
             ));
         }
+        provider_message_ids.push(telegram_message_id("send_text", &response_body)?);
     }
     for item in &media {
         let path = materialize_channel_outbound_media(state, item, "telegram").await?;
@@ -296,18 +306,42 @@ pub(crate) async fn send_telegram_message(
             .send()
             .await
             .map_err(|error| provider_transport_error("telegram_bot", "send_media", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        let status = resp.status();
+        let response_body = resp
+            .text()
+            .await
+            .map_err(|error| provider_transport_error("telegram_bot", "send_media", &error))?;
+        if !status.is_success() {
             return Err(provider_http_error(
                 "telegram_bot",
                 "send_media",
                 status,
-                &body,
+                &response_body,
             ));
         }
+        provider_message_ids.push(telegram_message_id("send_media", &response_body)?);
     }
-    Ok(())
+    Ok(ChannelSendOutcome {
+        provider_message_ids,
+    })
+}
+
+fn telegram_message_id(operation: &str, response_body: &str) -> Result<String, String> {
+    let value = serde_json::from_str::<serde_json::Value>(response_body)
+        .map_err(|_| provider_invalid_response("telegram_bot", operation, response_body))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(provider_invalid_response(
+            "telegram_bot",
+            operation,
+            response_body,
+        ));
+    }
+    let message_id = value
+        .pointer("/result/message_id")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|message_id| *message_id > 0)
+        .ok_or_else(|| provider_invalid_response("telegram_bot", operation, response_body))?;
+    Ok(message_id.to_string())
 }
 
 pub(crate) async fn send_whatsapp_cloud_text_message(
@@ -496,6 +530,10 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "channel_send_tests.rs"]
+mod tests;
 
 pub(crate) async fn send_whatsapp_web_bridge_text_message(
     state: &AppState,
