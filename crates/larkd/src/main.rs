@@ -14,6 +14,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::channel_open_platform::{
+    chunk_open_platform_text, open_platform_contract, plan_open_platform_media,
+    preflight_open_platform_media, process_open_platform_rate_limiter,
+    validate_open_platform_content, OpenPlatformContentError, OpenPlatformMessageType,
+    OpenPlatformOutboundMediaKind, OpenPlatformRegion, OpenPlatformTokenCache,
+    OpenPlatformUploadEndpoint,
+};
+use claw_core::channel_provider_error::ChannelProviderTransportKind;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DetectFeishuBindSessionRequest,
     DetectFeishuBindSessionResponse, FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
@@ -29,7 +37,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 mod config_helpers;
@@ -37,8 +44,8 @@ mod config_helpers;
 use config_helpers::*;
 
 fn lark_provider_http_error(operation: &str, status: u16, response_body: &str) -> String {
-    claw_core::channel_provider_error::ChannelProviderError::from_http_response(
-        "lark_open_platform",
+    claw_core::channel_open_platform::open_platform_provider_error(
+        OpenPlatformRegion::Lark,
         operation,
         status,
         response_body,
@@ -48,19 +55,57 @@ fn lark_provider_http_error(operation: &str, status: u16, response_body: &str) -
 
 fn lark_provider_invalid_response(operation: &str, diagnostic_material: &str) -> String {
     claw_core::channel_provider_error::ChannelProviderError::invalid_response(
-        "lark_open_platform",
+        open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
         operation,
         diagnostic_material,
     )
     .to_string()
 }
 
+fn lark_content_error(operation: &str, error: OpenPlatformContentError) -> String {
+    claw_core::channel_provider_error::ChannelProviderError::from_machine_failure(
+        open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
+        operation,
+        claw_core::channel_provider_error::ChannelProviderFailureClass::PayloadRejected,
+        None,
+        Some(error.error_code()),
+        None,
+        &format!("{}:{}", error.actual_bytes, error.max_bytes),
+    )
+    .to_string()
+}
+
+fn lark_transport_error(
+    operation: &str,
+    kind: ChannelProviderTransportKind,
+    diagnostic_material: &str,
+) -> String {
+    claw_core::channel_provider_error::ChannelProviderError::from_transport(
+        open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
+        operation,
+        kind,
+        diagnostic_material,
+    )
+    .to_string()
+}
+
+fn lark_delivery_error_text(config: &LarkConfig, error_text: &str) -> String {
+    let message_key = claw_core::channel_provider_error::ChannelProviderError::decode(error_text)
+        .map(|error| error.message_key);
+    match message_key {
+        Some(message_key) => {
+            claw_core::channel_i18n::common_text_for_locale(&config.lark.language, &message_key)
+        }
+        None => claw_core::channel_i18n::safe_generic_text_for_locale(&config.lark.language),
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     config: LarkConfig,
     client: Client,
-    /// tenant_access_token 缓存 (token, expires_at_secs)
-    token_cache: Arc<RwLock<Option<(String, u64)>>>,
+    /// Region/API/app-scoped tenant_access_token cache.
+    token_cache: Arc<OpenPlatformTokenCache>,
     /// 工作区根目录（用于解析相对落盘路径）
     workspace_root: PathBuf,
     /// 未绑定用户等待 key 回填状态（按 chat_id）
@@ -835,7 +880,7 @@ fn handle_text_message_to_clawd(
         ingress: Some(
             claw_core::channel_ingress::ChannelIngressEnvelope::new(
                 ChannelKind::Lark,
-                "lark_open_platform",
+                open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
             )
             .with_external_ids(open_id.clone(), chat_id.clone())
             .with_message_id(message_id)
@@ -1089,10 +1134,11 @@ fn handle_text_message_to_clawd(
                                 "larkd: send success payload failed task_id={} err={}",
                                 task_id, e
                             );
+                            let localized_error = lark_delivery_error_text(&config, &e);
                             let error_msg = lark_t_with(
                                 &config,
                                 LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
-                                &[("error", &e)],
+                                &[("error", &localized_error)],
                                 LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
                             );
                             let _ = send_lark_text(
@@ -1277,27 +1323,6 @@ async fn callback_handler(
     Json(json!({})).into_response()
 }
 
-fn chunk_text_utf8(s: &str, max_chars: usize) -> Vec<String> {
-    if s.is_empty() {
-        return Vec::new();
-    }
-    if s.chars().count() <= max_chars {
-        return vec![s.to_string()];
-    }
-    let mut out = Vec::new();
-    let mut current = String::new();
-    for c in s.chars() {
-        if current.chars().count() >= max_chars {
-            out.push(std::mem::take(&mut current));
-        }
-        current.push(c);
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    out
-}
-
 /// 下载消息内资源（图片 / 文件 / 音视频均走此接口，`type` 为 `image` 或 `file`）。
 async fn download_lark_message_resource(
     client: &Client,
@@ -1338,121 +1363,134 @@ async fn download_lark_message_resource(
 async fn get_tenant_access_token(
     config: &LarkSection,
     client: &Client,
-    cache: &RwLock<Option<(String, u64)>>,
+    cache: &OpenPlatformTokenCache,
 ) -> Result<String, String> {
     let now_secs = std::time::SystemTime::UNIX_EPOCH
         .elapsed()
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    {
-        let guard = cache.read().await;
-        if let Some((ref token, exp)) = *guard {
-            if exp > now_secs + 60 {
-                return Ok(token.clone());
+    cache
+        .token_or_refresh(now_secs, || async {
+            let base = config.api_base_url.trim_end_matches('/');
+            let url = format!("{}/open-apis/auth/v3/tenant_access_token/internal", base);
+            let body = json!({
+                "app_id": config.app_id,
+                "app_secret": config.app_secret
+            });
+            let resp = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|error| {
+                    lark_transport_error(
+                        "auth_token",
+                        ChannelProviderTransportKind::Request,
+                        &error.to_string(),
+                    )
+                })?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(lark_provider_http_error(
+                    "auth_token",
+                    status.as_u16(),
+                    &text,
+                ));
             }
-        }
-    }
-    let base = config.api_base_url.trim_end_matches('/');
-    let url = format!("{}/open-apis/auth/v3/tenant_access_token/internal", base);
-    let body = json!({
-        "app_id": config.app_id,
-        "app_secret": config.app_secret
-    });
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
+            #[derive(Deserialize)]
+            struct TokenResp {
+                tenant_access_token: Option<String>,
+                expire: Option<u64>,
+            }
+            let data: TokenResp = resp.json().await.map_err(|_| {
+                lark_provider_invalid_response("auth_token", "token_response_json_invalid")
+            })?;
+            let token = data.tenant_access_token.ok_or_else(|| {
+                lark_provider_invalid_response("auth_token", "tenant_access_token_missing")
+            })?;
+            let expire = data.expire.unwrap_or(7200);
+            info!(
+                "larkd: tenant_access_token refreshed expires_in={} base={}",
+                expire, base
+            );
+            Ok((token, expire))
+        })
         .await
-        .map_err(|e| format!("token request failed: {}", e))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(lark_provider_http_error(
-            "auth_token",
-            status.as_u16(),
-            &text,
-        ));
-    }
-    #[derive(Deserialize)]
-    struct TokenResp {
-        tenant_access_token: Option<String>,
-        expire: Option<u64>,
-    }
-    let data: TokenResp = resp
-        .json()
-        .await
-        .map_err(|e| format!("token parse failed: {}", e))?;
-    let token = data
-        .tenant_access_token
-        .ok_or_else(|| "token response missing tenant_access_token".to_string())?;
-    let expire = data.expire.unwrap_or(7200);
-    let expires_at = now_secs + expire;
-    {
-        let mut guard = cache.write().await;
-        *guard = Some((token.clone(), expires_at));
-    }
-    info!(
-        "larkd: tenant_access_token refreshed expires_in={} base={}",
-        expire, base
-    );
-    Ok(token)
 }
 
 async fn send_lark_text(
     config: &LarkConfig,
     client: &Client,
-    token_cache: &RwLock<Option<(String, u64)>>,
+    token_cache: &OpenPlatformTokenCache,
     receive_id: &str,
     text: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
     let base = config.lark.api_base_url.trim_end_matches('/');
     let url = format!("{}/open-apis/im/v1/messages?receive_id_type=chat_id", base);
+    let content = json!({ "text": text }).to_string();
+    validate_open_platform_content(OpenPlatformMessageType::Text, &content)
+        .map_err(|error| lark_content_error("send_text", error))?;
     let body = json!({
         "receive_id": receive_id,
         "msg_type": "text",
-        "content": json!({ "text": text }).to_string()
+        "content": content
     });
+    process_open_platform_rate_limiter()
+        .acquire(OpenPlatformRegion::Lark, receive_id)
+        .await;
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("send request failed: {}", e))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(lark_provider_http_error(
-            "send_text",
-            status.as_u16(),
-            &body,
-        ));
-    }
+        .map_err(|error| {
+            lark_transport_error(
+                "send_text",
+                ChannelProviderTransportKind::Request,
+                &error.to_string(),
+            )
+        })?;
+    let status = resp.status().as_u16();
+    let response_body = resp.text().await.unwrap_or_default();
+    let message_id = claw_core::channel_open_platform::open_platform_message_id(
+        OpenPlatformRegion::Lark,
+        "send_text",
+        status,
+        &response_body,
+    )
+    .map_err(|error| error.to_string())?;
     info!(
         "larkd: send success receive_id={} text_len={}",
         receive_id,
         text.len()
     );
-    Ok(())
+    Ok(message_id)
 }
 
 async fn upload_lark_image(
     config: &LarkConfig,
     client: &Client,
-    token_cache: &RwLock<Option<(String, u64)>>,
+    token_cache: &OpenPlatformTokenCache,
     path: &Path,
 ) -> Result<String, String> {
-    claw_core::channel_media_limits::validate_local_media_file(
+    preflight_open_platform_media(
+        OpenPlatformRegion::Lark,
+        "upload_image",
         path,
-        "Lark",
-        "图片",
         claw_core::channel_media_limits::lark_image_max_bytes(),
-    )?;
+    )
+    .map_err(|error| error.to_string())?;
     let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|e| format!("read outbound image failed: {e}"))?;
+    let bytes = tokio::fs::read(path).await.map_err(|error| {
+        lark_transport_error(
+            "upload_image",
+            ChannelProviderTransportKind::Body,
+            &error.to_string(),
+        )
+    })?;
     let filename = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -1461,7 +1499,9 @@ async fn upload_lark_image(
     let image = Part::bytes(bytes)
         .file_name(filename)
         .mime_str("application/octet-stream")
-        .map_err(|e| format!("prepare outbound image failed: {e}"))?;
+        .map_err(|_| {
+            lark_provider_invalid_response("upload_image", "multipart_image_prepare_failed")
+        })?;
     let form = Form::new()
         .text("image_type", "message")
         .part("image", image);
@@ -1475,43 +1515,50 @@ async fn upload_lark_image(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("upload outbound image failed: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(lark_provider_http_error(
-            "upload_media",
-            status.as_u16(),
-            &body,
-        ));
-    }
-    let body: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("decode outbound image response failed: {e}"))?;
+        .map_err(|error| {
+            lark_transport_error(
+                "upload_image",
+                ChannelProviderTransportKind::Request,
+                &error.to_string(),
+            )
+        })?;
+    let status = resp.status().as_u16();
+    let response_body = resp.text().await.unwrap_or_default();
+    let body = claw_core::channel_open_platform::decode_open_platform_response(
+        OpenPlatformRegion::Lark,
+        "upload_media",
+        status,
+        &response_body,
+    )
+    .map_err(|error| error.to_string())?;
     body.pointer("/data/image_key")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| "upload outbound image response missing image_key".to_string())
+        .ok_or_else(|| lark_provider_invalid_response("upload_image", "response_image_key_missing"))
 }
 
 async fn upload_lark_file(
     config: &LarkConfig,
     client: &Client,
-    token_cache: &RwLock<Option<(String, u64)>>,
+    token_cache: &OpenPlatformTokenCache,
     path: &Path,
     file_type: &str,
 ) -> Result<String, String> {
-    claw_core::channel_media_limits::validate_local_media_file(
+    preflight_open_platform_media(
+        OpenPlatformRegion::Lark,
+        "upload_file",
         path,
-        "Lark",
-        "文件",
         claw_core::channel_media_limits::lark_file_max_bytes(),
-    )?;
+    )
+    .map_err(|error| error.to_string())?;
     let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|e| format!("read outbound file failed: {e}"))?;
+    let bytes = tokio::fs::read(path).await.map_err(|error| {
+        lark_transport_error(
+            "upload_file",
+            ChannelProviderTransportKind::Body,
+            &error.to_string(),
+        )
+    })?;
     let filename = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -1520,7 +1567,9 @@ async fn upload_lark_file(
     let file = Part::bytes(bytes)
         .file_name(filename.clone())
         .mime_str("application/octet-stream")
-        .map_err(|e| format!("prepare outbound file failed: {e}"))?;
+        .map_err(|_| {
+            lark_provider_invalid_response("upload_file", "multipart_file_prepare_failed")
+        })?;
     let form = Form::new()
         .text("file_type", file_type.to_string())
         .text("file_name", filename)
@@ -1535,72 +1584,92 @@ async fn upload_lark_file(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("upload outbound file failed: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(lark_provider_http_error(
-            "upload_media",
-            status.as_u16(),
-            &body,
-        ));
-    }
-    let body: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("decode outbound file response failed: {e}"))?;
+        .map_err(|error| {
+            lark_transport_error(
+                "upload_file",
+                ChannelProviderTransportKind::Request,
+                &error.to_string(),
+            )
+        })?;
+    let status = resp.status().as_u16();
+    let response_body = resp.text().await.unwrap_or_default();
+    let body = claw_core::channel_open_platform::decode_open_platform_response(
+        OpenPlatformRegion::Lark,
+        "upload_media",
+        status,
+        &response_body,
+    )
+    .map_err(|error| error.to_string())?;
     body.pointer("/data/file_key")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| "upload outbound file response missing file_key".to_string())
+        .ok_or_else(|| lark_provider_invalid_response("upload_file", "response_file_key_missing"))
 }
 
 async fn send_lark_media_key(
     config: &LarkConfig,
     client: &Client,
-    token_cache: &RwLock<Option<(String, u64)>>,
+    token_cache: &OpenPlatformTokenCache,
     receive_id: &str,
     msg_type: &str,
     key_name: &str,
     key: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let token = get_tenant_access_token(&config.lark, client, token_cache).await?;
     let content = match key_name {
         "image_key" => json!({ "image_key": key }),
         "file_key" => json!({ "file_key": key }),
-        _ => return Err("unsupported outbound media key".to_string()),
-    };
+        _ => {
+            return Err(lark_provider_invalid_response(
+                "send_media",
+                "unsupported_media_key",
+            ))
+        }
+    }
+    .to_string();
+    let message_type = OpenPlatformMessageType::from_provider_token(msg_type)
+        .ok_or_else(|| lark_provider_invalid_response("send_media", "unsupported_msg_type"))?;
+    validate_open_platform_content(message_type, &content)
+        .map_err(|error| lark_content_error("send_media", error))?;
     let url = format!(
         "{}/open-apis/im/v1/messages?receive_id_type=chat_id",
         config.lark.api_base_url.trim_end_matches('/')
     );
+    process_open_platform_rate_limiter()
+        .acquire(OpenPlatformRegion::Lark, receive_id)
+        .await;
     let resp = client
         .post(url)
         .header("Authorization", format!("Bearer {token}"))
         .json(&json!({
             "receive_id": receive_id,
             "msg_type": msg_type,
-            "content": content.to_string()
+            "content": content
         }))
         .send()
         .await
-        .map_err(|e| format!("send outbound media failed: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(lark_provider_http_error(
-            "send_media",
-            status.as_u16(),
-            &body,
-        ));
-    }
-    Ok(())
+        .map_err(|error| {
+            lark_transport_error(
+                "send_media",
+                ChannelProviderTransportKind::Request,
+                &error.to_string(),
+            )
+        })?;
+    let status = resp.status().as_u16();
+    let response_body = resp.text().await.unwrap_or_default();
+    claw_core::channel_open_platform::open_platform_message_id(
+        OpenPlatformRegion::Lark,
+        "send_media",
+        status,
+        &response_body,
+    )
+    .map_err(|error| error.to_string())
 }
 
 async fn send_lark_answer(
     config: &LarkConfig,
     client: &Client,
-    token_cache: &RwLock<Option<(String, u64)>>,
+    token_cache: &OpenPlatformTokenCache,
     workspace_root: &Path,
     receive_id: &str,
     answer: &str,
@@ -1613,122 +1682,91 @@ async fn send_lark_answer(
     } else {
         stripped.as_str()
     };
-    for chunk in chunk_text_utf8(text, chunk_chars) {
+    for chunk in chunk_open_platform_text(text, chunk_chars)
+        .map_err(|error| lark_content_error("send_text", error))?
+    {
         send_lark_text(config, client, token_cache, receive_id, &chunk).await?;
     }
     for item in media {
         let WechatOutboundSource::LocalPath(path) = item.source else {
-            return Err("remote outbound media requires a local artifact".to_string());
+            return Err(lark_provider_invalid_response(
+                "send_media",
+                "remote_media_not_materialized",
+            ));
         };
-        match item.kind {
-            WechatOutboundKind::Image => {
-                let size = claw_core::channel_media_limits::validate_local_media_file(
-                    &path,
-                    "Lark",
-                    "图片",
-                    claw_core::channel_media_limits::lark_file_max_bytes(),
-                )?;
-                if size <= claw_core::channel_media_limits::lark_image_max_bytes() {
-                    match upload_lark_image(config, client, token_cache, &path).await {
-                        Ok(key) => {
-                            send_lark_media_key(
-                                config,
-                                client,
-                                token_cache,
-                                receive_id,
-                                "image",
-                                "image_key",
-                                &key,
-                            )
-                            .await?;
-                        }
-                        Err(image_error) => {
-                            warn!(
-                                "larkd: image upload failed; falling back to file path={} err={}",
-                                path.display(),
-                                image_error
-                            );
-                            let key = upload_lark_file(
-                                config,
-                                client,
-                                token_cache,
-                                &path,
-                                "stream",
-                            )
-                            .await
-                            .map_err(|file_error| {
-                                format!(
-                                    "image upload failed: {image_error}; file fallback failed: {file_error}"
-                                )
-                            })?;
-                            send_lark_media_key(
-                                config,
-                                client,
-                                token_cache,
-                                receive_id,
-                                "file",
-                                "file_key",
-                                &key,
-                            )
-                            .await?;
-                        }
-                    }
-                } else {
-                    let key =
-                        upload_lark_file(config, client, token_cache, &path, "stream").await?;
-                    send_lark_media_key(
-                        config,
-                        client,
-                        token_cache,
-                        receive_id,
-                        "file",
-                        "file_key",
-                        &key,
-                    )
-                    .await?;
+        let actual_bytes = preflight_open_platform_media(
+            OpenPlatformRegion::Lark,
+            "send_media",
+            &path,
+            claw_core::channel_media_limits::lark_file_max_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+        let media_kind = match item.kind {
+            WechatOutboundKind::Image => OpenPlatformOutboundMediaKind::Image,
+            WechatOutboundKind::Video => OpenPlatformOutboundMediaKind::Video,
+            WechatOutboundKind::Audio => OpenPlatformOutboundMediaKind::Audio,
+            WechatOutboundKind::File => OpenPlatformOutboundMediaKind::File,
+        };
+        let mut plan =
+            plan_open_platform_media(OpenPlatformRegion::Lark, media_kind, &path, actual_bytes);
+        let key = if plan.upload_endpoint == OpenPlatformUploadEndpoint::Image {
+            match upload_lark_image(config, client, token_cache, &path).await {
+                Ok(key) => key,
+                Err(image_error) => {
+                    let diagnostic_id =
+                        claw_core::channel_provider_error::ChannelProviderError::decode(
+                            &image_error,
+                        )
+                        .map(|error| error.diagnostic_id)
+                        .unwrap_or_else(|| "invalid_provider_error".to_string());
+                    warn!(
+                        "larkd: image upload fallback diagnostic_id={}",
+                        diagnostic_id
+                    );
+                    plan = plan_open_platform_media(
+                        OpenPlatformRegion::Lark,
+                        OpenPlatformOutboundMediaKind::Image,
+                        &path,
+                        claw_core::channel_media_limits::lark_image_max_bytes() + 1,
+                    );
+                    upload_lark_file(config, client, token_cache, &path, plan.form_file_type)
+                        .await?
                 }
             }
-            WechatOutboundKind::Video => {
-                let is_mp4 = path
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("mp4"));
-                let file_type = if is_mp4 { "mp4" } else { "stream" };
-                let key = upload_lark_file(config, client, token_cache, &path, file_type).await?;
-                send_lark_media_key(
-                    config,
-                    client,
-                    token_cache,
-                    receive_id,
-                    if is_mp4 { "media" } else { "file" },
-                    "file_key",
-                    &key,
-                )
-                .await?;
-            }
-            WechatOutboundKind::Audio | WechatOutboundKind::File => {
-                let key = upload_lark_file(config, client, token_cache, &path, "stream").await?;
-                send_lark_media_key(
-                    config,
-                    client,
-                    token_cache,
-                    receive_id,
-                    "file",
-                    "file_key",
-                    &key,
-                )
-                .await?;
-            }
-        }
+        } else {
+            upload_lark_file(config, client, token_cache, &path, plan.form_file_type).await?
+        };
+        send_lark_media_key(
+            config,
+            client,
+            token_cache,
+            receive_id,
+            plan.message_type.as_str(),
+            plan.key_name,
+            &key,
+        )
+        .await?;
     }
     Ok(())
 }
 
 /// 长连接模式：使用 open-lark 连国际版 Lark 收事件，base_url 来自配置。
+fn build_lark_long_connection_config(
+    section: &LarkSection,
+) -> Arc<open_lark::core::config::Config> {
+    Arc::new(
+        open_lark::core::config::Config::builder()
+            .app_id(&section.app_id)
+            .app_secret(&section.app_secret)
+            .base_url(section.api_base_url.trim_end_matches('/'))
+            .app_type(open_lark::core::constants::AppType::SelfBuild)
+            .enable_token_cache(true)
+            .build(),
+    )
+}
+
 async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
     use open_lark::client::ws_client::LarkWsClient;
-    use open_lark::core::config::Config as LarkConfigSdk;
-    use open_lark::core::constants::AppType;
     use open_lark::event::dispatcher::EventDispatcherHandler;
 
     let app_id = state.config.lark.app_id.clone();
@@ -1743,15 +1781,7 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
         anyhow::bail!("larkd long_connection mode requires app_id and app_secret");
     }
 
-    let lark_config: std::sync::Arc<LarkConfigSdk> = std::sync::Arc::new(
-        LarkConfigSdk::builder()
-            .app_id(&app_id)
-            .app_secret(&app_secret)
-            .app_type(AppType::SelfBuild)
-            .enable_token_cache(true)
-            .base_url(&api_base_url)
-            .build(),
-    );
+    let lark_config = build_lark_long_connection_config(&state.config.lark);
 
     let state_arc = Arc::new(state);
     let mut backoff_secs = 5u64;
@@ -1860,7 +1890,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         config: config.clone(),
         client: client.clone(),
-        token_cache: Arc::new(RwLock::new(None)),
+        token_cache: Arc::new(OpenPlatformTokenCache::default()),
         workspace_root,
         pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
     };

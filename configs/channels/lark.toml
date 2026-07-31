@@ -37,5 +37,5 @@ encrypt_key = ""
 request_timeout_seconds = 30
 # 任务投递软超时阈值（秒）：达到后会提示“任务仍在执行，完成后回复”，并继续轮询，不会中断投递
 task_delivery_timeout_seconds = 600
-# 长文本分段发送时每段最大字符数（按 UTF-8 安全截断）
+# 长文本分段的可读性软上限（字符）；发送前仍按平台字节上限预检和二次切分
 text_chunk_chars = 4000

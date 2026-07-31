@@ -11,6 +11,13 @@ use tracing::info;
 use uuid::Uuid;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
+use claw_core::channel_open_platform::{
+    chunk_open_platform_text, open_platform_contract, plan_open_platform_media,
+    preflight_open_platform_media, process_open_platform_rate_limiter,
+    process_open_platform_token_cache, validate_open_platform_content, OpenPlatformContentError,
+    OpenPlatformMediaPlan, OpenPlatformMessageType, OpenPlatformOutboundMediaKind,
+    OpenPlatformRegion, OpenPlatformUploadEndpoint,
+};
 use claw_core::channel_provider_error::{ChannelProviderError, ChannelProviderTransportKind};
 use claw_core::wechat_reply_media::{
     extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
@@ -83,6 +90,18 @@ fn provider_http_error(
     status: reqwest::StatusCode,
     response_body: &str,
 ) -> String {
+    let open_platform_region = [OpenPlatformRegion::Feishu, OpenPlatformRegion::Lark]
+        .into_iter()
+        .find(|region| open_platform_contract(*region).source_adapter == source_adapter);
+    if let Some(region) = open_platform_region {
+        return claw_core::channel_open_platform::open_platform_provider_error(
+            region,
+            operation,
+            status.as_u16(),
+            response_body,
+        )
+        .to_string();
+    }
     ChannelProviderError::from_http_response(
         source_adapter,
         operation,
@@ -121,6 +140,23 @@ fn provider_invalid_response(
 ) -> String {
     ChannelProviderError::invalid_response(source_adapter, operation, diagnostic_material)
         .to_string()
+}
+
+fn provider_content_error(
+    source_adapter: &str,
+    operation: &str,
+    error: OpenPlatformContentError,
+) -> String {
+    ChannelProviderError::from_machine_failure(
+        source_adapter,
+        operation,
+        claw_core::channel_provider_error::ChannelProviderFailureClass::PayloadRejected,
+        None,
+        Some(error.error_code()),
+        None,
+        &format!("{}:{}", error.actual_bytes, error.max_bytes),
+    )
+    .to_string()
 }
 
 fn default_wechat_cdn_base_url() -> String {
@@ -888,41 +924,119 @@ async fn get_tenant_access_token(
     app_id: &str,
     app_secret: &str,
 ) -> Result<String, String> {
+    let region = [OpenPlatformRegion::Feishu, OpenPlatformRegion::Lark]
+        .into_iter()
+        .find(|region| open_platform_contract(*region).source_adapter == source_adapter)
+        .ok_or_else(|| "channel_open_platform_adapter_invalid".to_string())?;
     let base = api_base.trim_end_matches('/');
-    let url = format!("{base}/open-apis/auth/v3/tenant_access_token/internal");
-    let body = json!({ "app_id": app_id, "app_secret": app_secret });
-    let resp = client
-        .post(&url)
-        .json(&body)
+    let cache = process_open_platform_token_cache(region, base, app_id);
+    let now_secs = std::time::SystemTime::UNIX_EPOCH
+        .elapsed()
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    cache
+        .token_or_refresh(now_secs, || async {
+            let url = format!("{base}/open-apis/auth/v3/tenant_access_token/internal");
+            let body = json!({ "app_id": app_id, "app_secret": app_secret });
+            let resp = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|error| provider_transport_error(source_adapter, "auth_token", &error))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(provider_http_error(
+                    source_adapter,
+                    "auth_token",
+                    status,
+                    &text,
+                ));
+            }
+            #[derive(serde::Deserialize)]
+            struct TokenResp {
+                tenant_access_token: Option<String>,
+                expire: Option<u64>,
+            }
+            let data: TokenResp = resp.json().await.map_err(|error| {
+                provider_invalid_response(source_adapter, "auth_token", &error.to_string())
+            })?;
+            let token = data.tenant_access_token.ok_or_else(|| {
+                provider_invalid_response(source_adapter, "auth_token", "missing_token")
+            })?;
+            Ok((token, data.expire.unwrap_or(7200)))
+        })
+        .await
+}
+
+async fn upload_open_platform_media(
+    client: &reqwest::Client,
+    source_adapter: &str,
+    base: &str,
+    token: &str,
+    path: &Path,
+    plan: OpenPlatformMediaPlan,
+) -> Result<String, String> {
+    let bytes = tokio::fs::read(path).await.map_err(|error| {
+        provider_invalid_response(source_adapter, "upload_media", &error.to_string())
+    })?;
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file.bin")
+        .to_string();
+    let part = Part::bytes(bytes).file_name(filename.clone());
+    let (upload_url, form) = match plan.upload_endpoint {
+        OpenPlatformUploadEndpoint::Image => (
+            format!("{base}/open-apis/im/v1/images"),
+            Form::new()
+                .text("image_type", plan.form_file_type.to_string())
+                .part("image", part),
+        ),
+        OpenPlatformUploadEndpoint::File => (
+            format!("{base}/open-apis/im/v1/files"),
+            Form::new()
+                .text("file_type", plan.form_file_type.to_string())
+                .text("file_name", filename)
+                .part("file", part),
+        ),
+    };
+    let upload_resp = client
+        .post(upload_url)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
         .send()
         .await
-        .map_err(|error| provider_transport_error(source_adapter, "auth_token", &error))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(provider_http_error(
-            source_adapter,
-            "auth_token",
-            status,
-            &text,
-        ));
-    }
-    #[derive(serde::Deserialize)]
-    struct TokenResp {
-        tenant_access_token: Option<String>,
-    }
-    let data: TokenResp = resp.json().await.map_err(|error| {
-        provider_invalid_response(source_adapter, "auth_token", &error.to_string())
-    })?;
-    data.tenant_access_token
-        .ok_or_else(|| provider_invalid_response(source_adapter, "auth_token", "missing_token"))
+        .map_err(|error| provider_transport_error(source_adapter, "upload_media", &error))?;
+    let status = upload_resp.status().as_u16();
+    let response_body = upload_resp.text().await.unwrap_or_default();
+    let region = [OpenPlatformRegion::Feishu, OpenPlatformRegion::Lark]
+        .into_iter()
+        .find(|region| open_platform_contract(*region).source_adapter == source_adapter)
+        .ok_or_else(|| "channel_open_platform_adapter_invalid".to_string())?;
+    let upload_body = claw_core::channel_open_platform::decode_open_platform_response(
+        region,
+        "upload_media",
+        status,
+        &response_body,
+    )
+    .map_err(|error| error.to_string())?;
+    let pointer = format!("/data/{}", plan.key_name);
+    upload_body
+        .pointer(&pointer)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            provider_invalid_response(source_adapter, "upload_media", "missing_media_key")
+        })
 }
 
 pub(crate) async fn send_feishu_text_message(
     state: &AppState,
     receive_id: &str,
     text: &str,
-) -> Result<(), String> {
+) -> Result<ChannelSendOutcome, String> {
     let config = state.channels.feishu_send_config.as_ref().ok_or_else(|| {
         "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string()
     })?;
@@ -930,7 +1044,6 @@ pub(crate) async fn send_feishu_text_message(
         state,
         "feishu",
         claw_core::channel_capabilities::ChannelAdapterKind::FeishuOpenPlatform,
-        "飞书",
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
@@ -944,7 +1057,7 @@ pub(crate) async fn send_lark_text_message(
     state: &AppState,
     receive_id: &str,
     text: &str,
-) -> Result<(), String> {
+) -> Result<ChannelSendOutcome, String> {
     let config = state.channels.lark_send_config.as_ref().ok_or_else(|| {
         "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string()
     })?;
@@ -952,7 +1065,6 @@ pub(crate) async fn send_lark_text_message(
         state,
         "lark",
         claw_core::channel_capabilities::ChannelAdapterKind::LarkOpenPlatform,
-        "Lark",
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
@@ -967,13 +1079,12 @@ async fn send_feishu_lark_answer(
     state: &AppState,
     channel_tag: &str,
     capability_adapter: claw_core::channel_capabilities::ChannelAdapterKind,
-    channel_label: &str,
     api_base_url: &str,
     app_id: &str,
     app_secret: &str,
     receive_id: &str,
     answer: &str,
-) -> Result<(), String> {
+) -> Result<ChannelSendOutcome, String> {
     let image_max_bytes = claw_core::channel_media_limits::required_channel_media_max_bytes(
         capability_adapter,
         claw_core::channel_capabilities::ChannelCapabilityKind::SendImage,
@@ -982,7 +1093,17 @@ async fn send_feishu_lark_answer(
         capability_adapter,
         claw_core::channel_capabilities::ChannelCapabilityKind::SendFile,
     );
-    let source_adapter = capability_adapter.as_str();
+    let region = match capability_adapter {
+        claw_core::channel_capabilities::ChannelAdapterKind::FeishuOpenPlatform => {
+            OpenPlatformRegion::Feishu
+        }
+        claw_core::channel_capabilities::ChannelAdapterKind::LarkOpenPlatform => {
+            OpenPlatformRegion::Lark
+        }
+        _ => return Err("channel_open_platform_adapter_invalid".to_string()),
+    };
+    let source_adapter = open_platform_contract(region).source_adapter;
+    let mut outcome = ChannelSendOutcome::default();
     let token = get_tenant_access_token(
         &state.core.http_client,
         source_adapter,
@@ -1000,10 +1121,11 @@ async fn send_feishu_lark_answer(
     } else {
         stripped.as_str()
     };
-    let chunks = chunk_text_for_channel(
+    let chunks = chunk_open_platform_text(
         send_text,
         FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
-    );
+    )
+    .map_err(|error| provider_content_error(source_adapter, "send_text", error))?;
     let n = chunks.len();
     for (index, chunk) in chunks.into_iter().enumerate() {
         let body = if n > 1 {
@@ -1011,6 +1133,12 @@ async fn send_feishu_lark_answer(
         } else {
             chunk
         };
+        let content = json!({ "text": body }).to_string();
+        validate_open_platform_content(OpenPlatformMessageType::Text, &content)
+            .map_err(|error| provider_content_error(source_adapter, "send_text", error))?;
+        process_open_platform_rate_limiter()
+            .acquire(region, receive_id)
+            .await;
         let resp = state
             .core
             .http_client
@@ -1019,140 +1147,91 @@ async fn send_feishu_lark_answer(
             .json(&json!({
                 "receive_id": receive_id,
                 "msg_type": "text",
-                "content": json!({ "text": body }).to_string()
+                "content": content
             }))
             .send()
             .await
             .map_err(|error| provider_transport_error(source_adapter, "send_text", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let response_body = resp.text().await.unwrap_or_default();
-            return Err(provider_http_error(
-                source_adapter,
-                "send_text",
-                status,
-                &response_body,
-            ));
-        }
+        let status = resp.status().as_u16();
+        let response_body = resp.text().await.unwrap_or_default();
+        let message_id = claw_core::channel_open_platform::open_platform_message_id(
+            region,
+            "send_text",
+            status,
+            &response_body,
+        )
+        .map_err(|error| error.to_string())?;
+        outcome.provider_message_ids.push(message_id);
     }
 
     for item in &media {
         let path = materialize_channel_outbound_media(state, item, channel_tag).await?;
-        let (upload_url, field_name, file_type, msg_type, key_name, max_bytes, label) =
-            match item.kind {
-                WechatOutboundKind::Image => {
-                    let size = claw_core::channel_media_limits::validate_local_media_file(
-                        &path,
-                        channel_label,
-                        "图片",
-                        file_max_bytes,
-                    )?;
-                    if size <= image_max_bytes {
-                        (
-                            format!("{base}/open-apis/im/v1/images"),
-                            "image",
-                            "message",
-                            "image",
-                            "image_key",
-                            image_max_bytes,
-                            "图片",
-                        )
-                    } else {
-                        (
-                            format!("{base}/open-apis/im/v1/files"),
-                            "file",
-                            "stream",
-                            "file",
-                            "file_key",
-                            file_max_bytes,
-                            "文件",
-                        )
-                    }
-                }
-                WechatOutboundKind::Video => {
-                    let is_mp4 = path
-                        .extension()
-                        .and_then(|value| value.to_str())
-                        .is_some_and(|value| value.eq_ignore_ascii_case("mp4"));
-                    (
-                        format!("{base}/open-apis/im/v1/files"),
-                        "file",
-                        if is_mp4 { "mp4" } else { "stream" },
-                        if is_mp4 { "media" } else { "file" },
-                        "file_key",
-                        file_max_bytes,
-                        "视频",
-                    )
-                }
-                WechatOutboundKind::Audio | WechatOutboundKind::File => (
-                    format!("{base}/open-apis/im/v1/files"),
-                    "file",
-                    "stream",
-                    "file",
-                    "file_key",
-                    file_max_bytes,
-                    "文件",
-                ),
-            };
-        claw_core::channel_media_limits::validate_local_media_file(
-            &path,
-            channel_label,
-            label,
-            max_bytes,
-        )?;
-        let bytes = tokio::fs::read(&path)
-            .await
-            .map_err(|err| format!("read {channel_label} outbound media failed: {err}"))?;
-        let filename = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("file.bin")
-            .to_string();
-        let part = Part::bytes(bytes).file_name(filename.clone());
-        let form = if matches!(field_name, "image") {
-            Form::new()
-                .text("image_type", file_type.to_string())
-                .part(field_name, part)
-        } else {
-            Form::new()
-                .text("file_type", file_type.to_string())
-                .text("file_name", filename)
-                .part(field_name, part)
+        let actual_bytes =
+            preflight_open_platform_media(region, "send_media", &path, file_max_bytes)
+                .map_err(|error| error.to_string())?;
+        let media_kind = match item.kind {
+            WechatOutboundKind::Image => OpenPlatformOutboundMediaKind::Image,
+            WechatOutboundKind::Video => OpenPlatformOutboundMediaKind::Video,
+            WechatOutboundKind::Audio => OpenPlatformOutboundMediaKind::Audio,
+            WechatOutboundKind::File => OpenPlatformOutboundMediaKind::File,
         };
-        let upload_resp = state
-            .core
-            .http_client
-            .post(upload_url)
-            .header("Authorization", format!("Bearer {token}"))
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|error| provider_transport_error(source_adapter, "upload_media", &error))?;
-        if !upload_resp.status().is_success() {
-            let status = upload_resp.status();
-            let body = upload_resp.text().await.unwrap_or_default();
-            return Err(provider_http_error(
-                source_adapter,
-                "upload_media",
-                status,
-                &body,
-            ));
-        }
-        let upload_body: serde_json::Value = upload_resp.json().await.map_err(|error| {
-            provider_invalid_response(source_adapter, "upload_media", &error.to_string())
-        })?;
-        let pointer = format!("/data/{key_name}");
-        let media_key = upload_body
-            .pointer(&pointer)
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                provider_invalid_response(source_adapter, "upload_media", "missing_media_key")
-            })?;
-        let content = match key_name {
+        let mut plan = plan_open_platform_media(region, media_kind, &path, actual_bytes);
+        let media_key = match upload_open_platform_media(
+            &state.core.http_client,
+            source_adapter,
+            base,
+            &token,
+            &path,
+            plan,
+        )
+        .await
+        {
+            Ok(key) => key,
+            Err(image_error) if plan.upload_endpoint == OpenPlatformUploadEndpoint::Image => {
+                let diagnostic_id = ChannelProviderError::decode(&image_error)
+                    .map(|error| error.diagnostic_id)
+                    .unwrap_or_else(|| "invalid_provider_error".to_string());
+                tracing::warn!(
+                    "channel open platform image fallback adapter={} diagnostic_id={}",
+                    source_adapter,
+                    diagnostic_id
+                );
+                plan = plan_open_platform_media(
+                    region,
+                    OpenPlatformOutboundMediaKind::Image,
+                    &path,
+                    image_max_bytes + 1,
+                );
+                upload_open_platform_media(
+                    &state.core.http_client,
+                    source_adapter,
+                    base,
+                    &token,
+                    &path,
+                    plan,
+                )
+                .await?
+            }
+            Err(error) => return Err(error),
+        };
+        let content = match plan.key_name {
             "image_key" => json!({ "image_key": media_key }),
             "file_key" => json!({ "file_key": media_key }),
-            _ => return Err(format!("unsupported {channel_label} media key: {key_name}")),
-        };
+            _ => {
+                return Err(provider_invalid_response(
+                    source_adapter,
+                    "send_media",
+                    "unsupported_media_key",
+                ))
+            }
+        }
+        .to_string();
+        let message_type = plan.message_type;
+        validate_open_platform_content(message_type, &content)
+            .map_err(|error| provider_content_error(source_adapter, "send_media", error))?;
+        process_open_platform_rate_limiter()
+            .acquire(region, receive_id)
+            .await;
         let resp = state
             .core
             .http_client
@@ -1160,22 +1239,22 @@ async fn send_feishu_lark_answer(
             .header("Authorization", format!("Bearer {token}"))
             .json(&json!({
                 "receive_id": receive_id,
-                "msg_type": msg_type,
-                "content": content.to_string()
+                "msg_type": message_type.as_str(),
+                "content": content
             }))
             .send()
             .await
             .map_err(|error| provider_transport_error(source_adapter, "send_media", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(provider_http_error(
-                source_adapter,
-                "send_media",
-                status,
-                &body,
-            ));
-        }
+        let status = resp.status().as_u16();
+        let response_body = resp.text().await.unwrap_or_default();
+        let message_id = claw_core::channel_open_platform::open_platform_message_id(
+            region,
+            "send_media",
+            status,
+            &response_body,
+        )
+        .map_err(|error| error.to_string())?;
+        outcome.provider_message_ids.push(message_id);
     }
-    Ok(())
+    Ok(outcome)
 }

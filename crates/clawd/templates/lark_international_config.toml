@@ -19,4 +19,5 @@ verification_token = ""
 encrypt_key = ""
 request_timeout_seconds = 30
 task_delivery_timeout_seconds = 600
+# Readability soft limit in characters; provider byte limits are enforced before sending.
 text_chunk_chars = 4000
