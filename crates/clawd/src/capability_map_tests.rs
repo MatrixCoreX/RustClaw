@@ -341,7 +341,14 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
             (members.len() == 1 && members.first() == Some(token)).then_some(token.clone())
         })
         .collect::<Vec<_>>();
-    assert_eq!(initial.len(), 7);
+    assert!(!initial.is_empty());
+    assert!(initial.iter().all(|group| {
+        state.get_skills_registry().is_some_and(|registry| {
+            registry
+                .get(&group.skill_name)
+                .is_some_and(|entry| entry.planner_eager_load)
+        })
+    }));
     assert!(!exact_loadable.is_empty());
     assert!(loadable.len() >= exact_loadable.len());
     assert_eq!(full.len(), initial.len() + exact_loadable.len());

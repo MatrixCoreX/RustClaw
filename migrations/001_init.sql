@@ -276,6 +276,50 @@ CREATE TABLE IF NOT EXISTS task_mutation_ledger (
 CREATE INDEX IF NOT EXISTS idx_task_mutation_ledger_updated
     ON task_mutation_ledger(updated_at);
 
+CREATE TABLE IF NOT EXISTS channel_delivery_receipts (
+    idempotency_key TEXT PRIMARY KEY,
+    delivery_id     TEXT NOT NULL,
+    channel         TEXT NOT NULL,
+    adapter         TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('accepted', 'delivered', 'read', 'failed', 'partial')),
+    receipt_json    TEXT NOT NULL,
+    receipt_digest  TEXT NOT NULL,
+    created_at_ts   INTEGER NOT NULL,
+    updated_at_ts   INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_delivery_receipts_delivery_id
+    ON channel_delivery_receipts(delivery_id);
+CREATE INDEX IF NOT EXISTS idx_channel_delivery_receipts_status_updated
+    ON channel_delivery_receipts(status, updated_at_ts);
+
+CREATE TABLE IF NOT EXISTS channel_delivery_receipt_events (
+    event_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    idempotency_key TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('accepted', 'delivered', 'read', 'failed', 'partial')),
+    receipt_json    TEXT NOT NULL,
+    receipt_digest  TEXT NOT NULL,
+    recorded_at_ts  INTEGER NOT NULL,
+    UNIQUE (idempotency_key, receipt_digest),
+    FOREIGN KEY (idempotency_key) REFERENCES channel_delivery_receipts(idempotency_key) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_channel_delivery_receipt_events_key_event
+    ON channel_delivery_receipt_events(idempotency_key, event_id);
+
+CREATE TABLE IF NOT EXISTS channel_delivery_dispatch_claims (
+    idempotency_key TEXT PRIMARY KEY,
+    delivery_id     TEXT NOT NULL,
+    channel         TEXT NOT NULL,
+    adapter         TEXT NOT NULL,
+    state           TEXT NOT NULL CHECK (state IN ('dispatching', 'receipt_recorded', 'query_required')),
+    lease_token     TEXT,
+    lease_expires_at_ts INTEGER NOT NULL DEFAULT 0,
+    attempt_count   INTEGER NOT NULL DEFAULT 0,
+    created_at_ts   INTEGER NOT NULL,
+    updated_at_ts   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_delivery_dispatch_claims_state_lease
+    ON channel_delivery_dispatch_claims(state, lease_expires_at_ts);
+
 CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
     task_id              TEXT NOT NULL,
     checkpoint_id        TEXT NOT NULL,
