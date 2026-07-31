@@ -190,15 +190,24 @@ fn successful_action_result_boundary_is_not_model_finished() {
 
 #[test]
 fn capability_scope_load_round_is_not_model_finished() {
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("capability_groups_loaded".to_string()),
-        next_goal_hint: None,
-        no_progress: false,
-    };
+    for signal in [
+        "capability_groups_loaded",
+        "capability_catalog_searched",
+        "capability_contracts_expanded",
+    ] {
+        let outcome = RoundOutcome {
+            executed_actions: 1,
+            had_error: false,
+            stop_signal: Some(signal.to_string()),
+            next_goal_hint: None,
+            no_progress: false,
+        };
 
-    assert!(!round_model_finished(Some(&outcome)));
+        assert!(
+            !round_model_finished(Some(&outcome)),
+            "{signal} must continue into the next planner round"
+        );
+    }
 }
 
 #[test]

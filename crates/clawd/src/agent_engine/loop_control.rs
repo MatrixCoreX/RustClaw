@@ -785,6 +785,8 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
             "action_observation_boundary"
                 | "action_result_continue_round"
                 | "recoverable_failure_continue_round"
+                | "capability_catalog_searched"
+                | "capability_contracts_expanded"
                 | "capability_groups_loaded"
                 | "mcp_capabilities_loaded"
                 | "replan_from_verifier_signal"
