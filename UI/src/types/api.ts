@@ -1222,8 +1222,7 @@ export interface ChatMessage {
   bodyResult?: ConversationBodyDescriptor | null;
 }
 
-export interface TaskArtifact {
-  schema_version: 1;
+interface TaskArtifactFields {
   id: string;
   filename: string;
   kind: string;
@@ -1233,6 +1232,16 @@ export interface TaskArtifact {
   download_url: string;
   preview_url?: string | null;
 }
+
+export type TaskArtifact =
+  | (TaskArtifactFields & {
+      schema_version: 1;
+      artifact_ref?: string;
+    })
+  | (TaskArtifactFields & {
+      schema_version: 2;
+      artifact_ref: string;
+    });
 
 export type BrowserFileWithPath = File & {
   webkitRelativePath?: string;

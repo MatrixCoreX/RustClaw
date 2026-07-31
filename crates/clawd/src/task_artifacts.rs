@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub(crate) const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
+const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const MAX_TASK_ARTIFACTS: usize = 32;
 const DEFAULT_MAX_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -16,6 +17,8 @@ const DEFAULT_MAX_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub(crate) struct TaskArtifactManifest {
     pub(crate) schema_version: u32,
     pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) artifact_ref: String,
     pub(crate) filename: String,
     pub(crate) kind: String,
     pub(crate) mime_type: String,
@@ -95,6 +98,11 @@ pub(crate) fn materialize_task_result_artifacts(
         let base_url = format!("/v1/tasks/{task_id}/artifacts/{artifact_id}/content");
         manifests.push(TaskArtifactManifest {
             schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
+            artifact_ref: claw_core::task_delivery_artifacts::canonical_task_artifact_ref(
+                task_id,
+                &artifact_id,
+            )
+            .ok_or_else(|| anyhow::anyhow!("artifact_ref_invalid"))?,
             id: artifact_id,
             filename,
             kind: artifact_kind(&mime_type).to_string(),
@@ -125,8 +133,7 @@ pub(crate) fn manifests_from_result(result: Option<&Value>) -> Vec<TaskArtifactM
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|value| serde_json::from_value::<TaskArtifactManifest>(value.clone()).ok())
-        .filter(valid_manifest)
+        .filter_map(|value| decode_task_artifact_manifest(value.clone()))
         .take(MAX_TASK_ARTIFACTS)
         .collect()
 }
@@ -413,13 +420,43 @@ fn sha256_file(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn decode_task_artifact_manifest(value: Value) -> Option<TaskArtifactManifest> {
+    let mut manifest = serde_json::from_value::<TaskArtifactManifest>(value).ok()?;
+    if manifest.schema_version == LEGACY_TASK_ARTIFACT_SCHEMA_VERSION
+        && manifest.artifact_ref.is_empty()
+    {
+        manifest.artifact_ref = claw_core::task_delivery_artifacts::canonical_task_artifact_ref(
+            manifest
+                .download_url
+                .strip_prefix("/v1/tasks/")?
+                .split_once("/artifacts/")?
+                .0,
+            &manifest.id,
+        )?;
+    }
+    valid_manifest(&manifest).then_some(manifest)
+}
+
 fn valid_manifest(manifest: &TaskArtifactManifest) -> bool {
-    manifest.schema_version == TASK_ARTIFACT_SCHEMA_VERSION
+    let expected_ref = manifest_task_id(manifest).and_then(|task_id| {
+        claw_core::task_delivery_artifacts::canonical_task_artifact_ref(task_id, &manifest.id)
+    });
+    matches!(
+        manifest.schema_version,
+        TASK_ARTIFACT_SCHEMA_VERSION | LEGACY_TASK_ARTIFACT_SCHEMA_VERSION
+    ) && expected_ref.as_deref() == Some(manifest.artifact_ref.as_str())
         && machine_id(&manifest.id).is_some()
         && !manifest.filename.trim().is_empty()
         && manifest.download_url.starts_with("/v1/tasks/")
         && manifest.download_url.ends_with("/content")
         && manifest.sha256.len() == 64
+}
+
+fn manifest_task_id(manifest: &TaskArtifactManifest) -> Option<&str> {
+    let path = manifest.download_url.strip_prefix("/v1/tasks/")?;
+    let (task_id, suffix) = path.split_once("/artifacts/")?;
+    (suffix == format!("{}/content", manifest.id) && machine_id(task_id).is_some())
+        .then_some(task_id)
 }
 
 fn max_artifact_bytes() -> u64 {

@@ -68,6 +68,16 @@ fn write_delivery_artifact(
 }
 
 #[test]
+fn canonical_artifact_reference_is_stable_and_rejects_unsafe_components() {
+    assert_eq!(
+        canonical_task_artifact_ref("task-1", "artifact-1").as_deref(),
+        Some("artifact:task/task-1/artifact-1")
+    );
+    assert!(canonical_task_artifact_ref("../task", "artifact-1").is_none());
+    assert!(canonical_task_artifact_ref("task-1", "artifact/1").is_none());
+}
+
+#[test]
 fn structured_image_replaces_legacy_token_and_keeps_caption() {
     let workspace = temp_workspace("task_delivery_image");
     let task_id = "task-1";

@@ -17,8 +17,9 @@ export function normalizeTaskArtifacts(value: unknown): TaskArtifact[] {
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Partial<TaskArtifact>;
+    const artifactRef = canonicalArtifactRef(record.download_url, record.id);
     if (
-      record.schema_version !== 1 ||
+      (record.schema_version !== 1 && record.schema_version !== 2) ||
       typeof record.id !== "string" ||
       !MACHINE_ID.test(record.id) ||
       typeof record.filename !== "string" ||
@@ -31,15 +32,17 @@ export function normalizeTaskArtifacts(value: unknown): TaskArtifact[] {
       record.size_bytes < 0 ||
       typeof record.sha256 !== "string" ||
       !SHA256.test(record.sha256) ||
-      !safeArtifactUrl(record.download_url)
+      !artifactRef ||
+      (record.schema_version === 2 && record.artifact_ref !== artifactRef)
     ) {
       continue;
     }
     if (seen.has(record.id)) continue;
     seen.add(record.id);
     artifacts.push({
-      schema_version: 1,
+      schema_version: 2,
       id: record.id,
+      artifact_ref: artifactRef,
       filename: record.filename.trim(),
       kind: record.kind,
       mime_type: record.mime_type,
@@ -50,6 +53,22 @@ export function normalizeTaskArtifacts(value: unknown): TaskArtifact[] {
     });
   }
   return artifacts.slice(0, 32);
+}
+
+function canonicalArtifactRef(downloadUrl: unknown, artifactId: unknown): string | null {
+  if (!safeArtifactUrl(downloadUrl) || typeof artifactId !== "string") return null;
+  const matched = /^\/v1\/tasks\/([A-Za-z0-9-]+)\/artifacts\/([^/]+)\/content$/.exec(
+    new URL(downloadUrl, "http://agent.invalid").pathname,
+  );
+  if (!matched) return null;
+  let decodedId: string;
+  try {
+    decodedId = decodeURIComponent(matched[2]);
+  } catch {
+    return null;
+  }
+  if (decodedId !== artifactId) return null;
+  return `artifact:task/${matched[1]}/${artifactId}`;
 }
 
 export function artifactPreviewKind(artifact: TaskArtifact): TaskArtifactPreviewKind {
