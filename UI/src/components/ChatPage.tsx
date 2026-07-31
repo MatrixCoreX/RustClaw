@@ -64,6 +64,7 @@ type TranslateSlash = (text: string) => string;
 
 interface ChatThreadSummary {
   id: string;
+  agentId: string;
   title: string;
   preview: string;
   updatedAt: number;
@@ -97,6 +98,9 @@ export interface ChatPageProps {
   chatMessages: ChatMessage[];
   chatThreads: ChatThreadSummary[];
   activeChatThreadId: string;
+  availableAgents: Array<{ id: string; name: string }>;
+  activeChatAgentId: string;
+  activeChatCanChangeAgent: boolean;
   chatInput: string;
   chatAttachments: ChatAttachment[];
   chatTeachingMode: boolean;
@@ -124,6 +128,7 @@ export interface ChatPageProps {
   onSelectChatTeachingRun: (runId: string) => void;
   onCreateNewChatThread: () => void;
   onSelectChatThread: (threadId: string) => void;
+  onActiveChatAgentChange: (agentId: string) => void;
   onRenameChatThread: (threadId: string, title: string) => Promise<boolean>;
   onDeleteChatThread: (threadId: string) => void | Promise<boolean>;
   onLoadEarlierConversationHistory: () => void | Promise<unknown>;
@@ -148,6 +153,9 @@ export function ChatPage({
   chatMessages,
   chatThreads,
   activeChatThreadId,
+  availableAgents,
+  activeChatAgentId,
+  activeChatCanChangeAgent,
   chatInput,
   chatAttachments,
   chatTeachingMode,
@@ -175,6 +183,7 @@ export function ChatPage({
   onSelectChatTeachingRun,
   onCreateNewChatThread,
   onSelectChatThread,
+  onActiveChatAgentChange,
   onRenameChatThread,
   onDeleteChatThread,
   onLoadEarlierConversationHistory,
@@ -445,6 +454,11 @@ export function ChatPage({
                         {chatStatusLabel(thread.taskStatus, t)}
                       </span>
                     ) : null}
+                    {availableAgents.length > 1 ? (
+                      <span className="rounded-full border border-white/10 px-1.5 py-0.5">
+                        {availableAgents.find((agent) => agent.id === thread.agentId)?.name ?? thread.agentId}
+                      </span>
+                    ) : null}
                     {thread.teachingMode ? (
                       <span className="rounded-full border border-white/10 px-1.5 py-0.5">
                         {t("教学", "Teach")}
@@ -538,6 +552,31 @@ export function ChatPage({
             </h3>
           </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
+          {availableAgents.length > 1 ? (
+            <label
+              className="inline-flex items-center gap-2 text-white/75"
+              title={
+                activeChatCanChangeAgent
+                  ? t("为这个新任务选择 Agent", "Choose an Agent for this new task")
+                  : t("已有消息后不能切换；请新建任务", "Create a new task to switch Agents")
+              }
+            >
+              <span>{t("使用", "Use")}</span>
+              <select
+                value={activeChatAgentId}
+                disabled={!activeChatCanChangeAgent}
+                onChange={(event) => onActiveChatAgentChange(event.target.value)}
+                className="rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs text-white outline-none disabled:cursor-not-allowed disabled:opacity-55"
+                aria-label={t("选择 Agent", "Choose Agent")}
+              >
+                {availableAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="inline-flex items-center gap-2 text-white/80">
             <input
               type="checkbox"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$HOME/runtime_env_filled.sh}"
+RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}}"
 CONFIG_PATH="${APP_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 PID_FILE="${ROOT_DIR}/.pids/clawd.pid"
 LOG_FILE="${APP_CLAWD_LOG_FILE:-${ROOT_DIR}/logs/clawd.run.log}"

@@ -307,7 +307,7 @@ selected_vendor = "minimax"
 selected_model = "MiniMax-M3"
 
 [llm.minimax]
-api_key = ""
+api_key = "legacy-config-key"
 base_url = "https://api.minimaxi.com/v1"
 model = "MiniMax-M3"
 "#,
@@ -351,6 +351,22 @@ model = "mimo-v2.5-pro"
         });
 
     assert_eq!(api_key, "mimo-key");
+}
+
+#[test]
+fn effective_saved_llm_key_ignores_legacy_config_value_without_environment() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm.minimax]
+api_key = "legacy-config-key"
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+"#,
+    )
+    .expect("parse");
+    let (_, api_key, _) = saved_llm_vendor_runtime_fields_with_env(&parsed, "minimax", |_| None);
+
+    assert!(api_key.is_empty());
 }
 
 #[test]
@@ -448,7 +464,48 @@ model = "MiniMax-M3"
         minimax.get("api_key").and_then(|value| value.as_str()),
         Some("")
     );
+    assert_eq!(
+        minimax
+            .get("api_key_source")
+            .and_then(|value| value.as_str()),
+        Some("environment")
+    );
+    assert_eq!(
+        minimax
+            .get("api_key_env_names")
+            .and_then(|value| value.as_array())
+            .and_then(|values| values.first())
+            .and_then(|value| value.as_str()),
+        Some("MINIMAX_API_KEY")
+    );
     assert!(!minimax.to_string().contains("environment-secret"));
+}
+
+#[test]
+fn collect_llm_vendor_info_does_not_treat_toml_key_as_configured() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm.minimax]
+api_key = "legacy-config-secret"
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+"#,
+    )
+    .expect("parse");
+
+    let vendors = collect_llm_vendor_info_with_env(&parsed, |_| None);
+    let minimax = vendors
+        .iter()
+        .find(|vendor| vendor.get("name").and_then(|value| value.as_str()) == Some("minimax"))
+        .expect("minimax vendor");
+
+    assert_eq!(
+        minimax
+            .get("api_key_configured")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert!(!minimax.to_string().contains("legacy-config-secret"));
 }
 
 #[test]
@@ -528,7 +585,7 @@ selected_vendor = "minimax"
 selected_model = "MiniMax-M3"
 
 [llm.minimax]
-api_key = ""
+api_key = "legacy-config-key"
 base_url = "https://api.minimaxi.com/v1"
 model = "MiniMax-M3"
 models = [
@@ -580,11 +637,12 @@ timeout_seconds = 180
         minimax.get("model").and_then(|v| v.as_str()),
         Some("MiniMax-M4")
     );
+    assert_eq!(minimax.get("api_key").and_then(|v| v.as_str()), Some(""));
     assert_eq!(models, vec!["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M4"]);
 }
 
 #[tokio::test]
-async fn test_llm_config_allows_future_model_before_pool_update() {
+async fn test_llm_config_rejects_inline_api_key() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs")).expect("configs dir");
     std::fs::write(
@@ -619,15 +677,11 @@ models = ["MiniMax-M3", "MiniMax-M2.7"]
     )
     .await;
 
-    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!body.ok);
-    assert!(
-        !body
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("model is not in the configured pool"),
-        "future model should reach connectivity testing instead of pool validation"
+    assert_eq!(
+        body.error.as_deref(),
+        Some("vendor_api_key_must_use_environment")
     );
 }
 

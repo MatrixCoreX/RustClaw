@@ -79,6 +79,7 @@ pub(crate) struct ConversationBodyPage {
 pub(crate) struct ConversationHistoryTurn {
     pub(crate) schema_version: u32,
     pub(crate) conversation_id: String,
+    pub(crate) agent_id: Option<String>,
     pub(crate) external_chat_id: Option<String>,
     pub(crate) conversation_title: Option<String>,
     pub(crate) task_id: String,
@@ -489,6 +490,10 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
     Some(ConversationHistoryTurn {
         schema_version: 1,
         conversation_id,
+        agent_id: payload
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .and_then(bounded_machine_ref),
         external_chat_id: row
             .external_chat_id
             .map(|value| bounded_text(value.trim(), 256))

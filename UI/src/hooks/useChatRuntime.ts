@@ -63,6 +63,7 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 export interface ChatThreadSummary {
   id: string;
+  agentId: string;
   title: string;
   preview: string;
   updatedAt: number;
@@ -107,6 +108,7 @@ export interface ChatTeachingRunRecord {
 
 export interface ChatThreadRecord {
   id: string;
+  agentId: string;
   title: string;
   messages: ChatMessage[];
   input: string;
@@ -138,6 +140,8 @@ export interface UseChatRuntimeParams {
   conversationHistoryScope: string;
   interactionExternalUserId: string;
   interactionExternalChatId: string;
+  availableAgents?: Array<{ id: string; name: string }>;
+  defaultAgentId?: string;
   fetchTaskById: (id: string) => Promise<TaskQueryResponse>;
   onTaskSubmitted: (taskId: string) => void;
   onTaskResult: (taskId: string, result: TaskQueryResponse) => void;
@@ -154,18 +158,20 @@ export function useChatRuntime({
   conversationHistoryScope,
   interactionExternalUserId,
   interactionExternalChatId,
+  availableAgents = [],
+  defaultAgentId = "main",
   fetchTaskById,
   onTaskSubmitted,
   onTaskResult,
 }: UseChatRuntimeParams) {
   const { confirm: showConfirm } = useUiDialog();
   const [chatThreadState, setChatThreadState] = useState<ChatThreadState>(() =>
-    emptyChatThreadState(t),
+    emptyChatThreadState(t, defaultAgentId),
   );
   const activeChatThread =
     chatThreadState.threads.find((thread) => thread.id === chatThreadState.activeThreadId) ??
     chatThreadState.threads[0] ??
-    createChatThread(t);
+    createChatThread(t, defaultAgentId);
   const chatMessages = activeChatThread.messages;
   const chatInput = activeChatThread.input;
   const chatTeachingMode = activeChatThread.teachingMode;
@@ -182,6 +188,10 @@ export function useChatRuntime({
       : (activeChatThread.teachingLlmDebugError ?? null);
   const chatTeachingRuns = buildChatTeachingRunSummaries(activeChatThread);
   const activeChatTeachingRunId = activeTeachingRun?.id ?? null;
+  const activeChatAgentId = activeChatThread.agentId;
+  const activeChatCanChangeAgent =
+    !threadHasServerHistory(activeChatThread) &&
+    activeChatThread.messages.every((message) => message.role === "system");
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
@@ -250,18 +260,39 @@ export function useChatRuntime({
   }, [chatThreadState, conversationHistoryScope]);
 
   useEffect(() => {
+    if (availableAgents.length === 0) return;
+    const known = new Set(availableAgents.map((agent) => agent.id));
+    const fallbackAgentId = known.has(defaultAgentId)
+      ? defaultAgentId
+      : availableAgents[0]?.id ?? "main";
+    if (chatThreadState.threads.every((thread) => known.has(thread.agentId))) return;
+    setChatThreadState((current) => ({
+      ...current,
+      threads: current.threads.map((thread) =>
+        known.has(thread.agentId) ? thread : { ...thread, agentId: fallbackAgentId },
+      ),
+    }));
+    setChatError(
+      t(
+        "原任务使用的 Agent 已不存在，已切换到主 Agent。",
+        "The Agent used by this task no longer exists, so it was switched to the main Agent.",
+      ),
+    );
+  }, [availableAgents, chatThreadState.threads, defaultAgentId, t]);
+
+  useEffect(() => {
     const scope = conversationHistoryScope.trim();
     if (!scope) {
       if (conversationHistoryScopeRef.current) {
         conversationHistoryScopeRef.current = "";
-        setChatThreadState(emptyChatThreadState(t));
+        setChatThreadState(emptyChatThreadState(t, defaultAgentId));
         setChatHistoryCursor(null);
       }
       return;
     }
     if (conversationHistoryScopeRef.current !== scope) {
       conversationHistoryScopeRef.current = scope;
-      setChatThreadState(loadChatThreadState(t, scope));
+      setChatThreadState(loadChatThreadState(t, scope, defaultAgentId));
       setChatHistoryCursor(null);
     }
     let cancelled = false;
@@ -273,7 +304,12 @@ export function useChatRuntime({
         if (cancelled) return;
         const restored = projectConversationHistory([page], t);
         setChatThreadState((current) =>
-          mergeServerConversationHistory(retainLocalDraftsForPagedRestore(current), restored, t),
+          mergeServerConversationHistory(
+            retainLocalDraftsForPagedRestore(current),
+            restored,
+            t,
+            defaultAgentId,
+          ),
         );
         setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       } catch (error) {
@@ -293,7 +329,7 @@ export function useChatRuntime({
     return () => {
       cancelled = true;
     };
-  }, [conversationHistoryScope, lang]);
+  }, [conversationHistoryScope, lang, defaultAgentId]);
 
   useEffect(() => {
     if (!conversationHistoryScope.trim()) return;
@@ -318,7 +354,9 @@ export function useChatRuntime({
     try {
       const page = await fetchConversationHistoryPage(apiFetchRef.current, cursor);
       const restored = projectConversationHistory([page], t);
-      setChatThreadState((current) => mergeServerConversationHistory(current, restored, t));
+      setChatThreadState((current) =>
+        mergeServerConversationHistory(current, restored, t, defaultAgentId),
+      );
       setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       setChatError(null);
     } catch (error) {
@@ -466,7 +504,7 @@ export function useChatRuntime({
   };
 
   const createNewChatThread = () => {
-    const nextThread = createChatThread(t);
+    const nextThread = createChatThread(t, defaultAgentId);
     setChatThreadState((prev) => ({
       activeThreadId: nextThread.id,
       threads: [nextThread, ...prev.threads],
@@ -481,13 +519,13 @@ export function useChatRuntime({
   const removeChatThreadLocally = (threadId: string) => {
     setChatThreadState((prev) => {
       if (prev.threads.length <= 1) {
-        const replacement = createChatThread(t);
+        const replacement = createChatThread(t, defaultAgentId);
         return { activeThreadId: replacement.id, threads: [replacement] };
       }
       const remaining = prev.threads.filter((thread) => thread.id !== threadId);
       const activeThreadId =
         prev.activeThreadId === threadId
-          ? remaining[0]?.id ?? createChatThread(t).id
+          ? remaining[0]?.id ?? createChatThread(t, defaultAgentId).id
           : prev.activeThreadId;
       return { activeThreadId, threads: remaining };
     });
@@ -495,6 +533,21 @@ export function useChatRuntime({
     chatAttachmentsValueRef.current = [];
     setChatAttachments([]);
     setChatTeachingLlmDebugLoading(false);
+  };
+
+  const setActiveChatAgentId = (agentId: string) => {
+    if (!availableAgents.some((agent) => agent.id === agentId)) return;
+    if (!activeChatCanChangeAgent) {
+      setChatError(
+        t(
+          "已有消息的任务不能切换 Agent，请新建任务后再选择。",
+          "An existing task cannot switch Agents. Create a new task, then choose one.",
+        ),
+      );
+      return;
+    }
+    updateActiveChatThread((thread) => ({ ...thread, agentId, updatedAt: Date.now() }));
+    setChatError(null);
   };
 
   const archiveChatThreadOnServer = async (thread: ChatThreadRecord) => {
@@ -617,7 +670,7 @@ export function useChatRuntime({
     }
     try {
       await archiveChatThreadOnServer(thread);
-      const replacement = createChatThread(t);
+      const replacement = createChatThread(t, defaultAgentId);
       setChatThreadState((prev) => ({
         activeThreadId: replacement.id,
         threads: prev.threads.map((item) =>
@@ -1125,6 +1178,7 @@ export function useChatRuntime({
         payload: {
           text: requestText,
           conversation_id: threadAtSubmit.id,
+          agent_id: threadAtSubmit.agentId,
           ...(audioOnly ? { source: "voice" } : {}),
           ...(adapterName ? { adapter: adapterName } : {}),
           ...(attached.length > 0
@@ -1344,6 +1398,8 @@ export function useChatRuntime({
     chatTeachingLlmDebugError,
     chatTeachingRuns,
     activeChatTeachingRunId,
+    activeChatAgentId,
+    activeChatCanChangeAgent,
     chatSending,
     chatWorking,
     chatActivity,
@@ -1374,6 +1430,7 @@ export function useChatRuntime({
     activeChatThreadId: chatThreadState.activeThreadId,
     createNewChatThread,
     selectChatThread,
+    setActiveChatAgentId,
     renameChatThread,
     deleteChatThread,
     loadEarlierConversationHistory,
@@ -1388,13 +1445,17 @@ function threadHasServerHistory(thread: ChatThreadRecord): boolean {
   );
 }
 
-function emptyChatThreadState(t: Translate): ChatThreadState {
-  const fallback = createChatThread(t);
+function emptyChatThreadState(t: Translate, defaultAgentId = "main"): ChatThreadState {
+  const fallback = createChatThread(t, defaultAgentId);
   return { activeThreadId: fallback.id, threads: [fallback] };
 }
 
-export function loadChatThreadState(t: Translate, scope: string): ChatThreadState {
-  const fallback = emptyChatThreadState(t);
+export function loadChatThreadState(
+  t: Translate,
+  scope: string,
+  defaultAgentId = "main",
+): ChatThreadState {
+  const fallback = emptyChatThreadState(t, defaultAgentId);
   if (typeof window === "undefined") {
     return fallback;
   }
@@ -1407,7 +1468,7 @@ export function loadChatThreadState(t: Translate, scope: string): ChatThreadStat
     const parsed = JSON.parse(raw) as Partial<ChatThreadState>;
     const threads = Array.isArray(parsed.threads)
       ? parsed.threads
-          .map((thread) => normalizeStoredChatThread(thread, t))
+          .map((thread) => normalizeStoredChatThread(thread, t, defaultAgentId))
           .filter((thread): thread is ChatThreadRecord => Boolean(thread))
       : [];
     if (threads.length === 0) {
@@ -1453,6 +1514,7 @@ export function mergeServerConversationHistory(
   current: ChatThreadState,
   restored: ServerChatThreadProjection[],
   t: Translate,
+  defaultAgentId = "main",
 ): ChatThreadState {
   const existingById = new Map(current.threads.map((thread) => [thread.id, thread]));
   const serverThreads = restored.map((thread) => {
@@ -1489,6 +1551,7 @@ export function mergeServerConversationHistory(
         : latestRun?.id ?? null;
     return {
       id: thread.id,
+      agentId: thread.agentId || existing?.agentId || defaultAgentId,
       title: thread.title || t("未命名任务", "Untitled task"),
       messages,
       input: existing?.input ?? "",
@@ -1514,7 +1577,7 @@ export function mergeServerConversationHistory(
     (left, right) => right.updatedAt - left.updatedAt,
   );
   if (threads.length === 0) {
-    const fallback = createChatThread(t);
+    const fallback = createChatThread(t, defaultAgentId);
     return { activeThreadId: fallback.id, threads: [fallback] };
   }
   const activeThreadId = threads.some((thread) => thread.id === current.activeThreadId)
@@ -1549,7 +1612,11 @@ function threadIsPristineWelcome(thread: ChatThreadRecord): boolean {
   );
 }
 
-function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord | null {
+function normalizeStoredChatThread(
+  raw: unknown,
+  t: Translate,
+  defaultAgentId = "main",
+): ChatThreadRecord | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<ChatThreadRecord>;
   if (typeof record.id !== "string" || !record.id.trim()) return null;
@@ -1561,6 +1628,10 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
     : [];
   return {
     id: record.id,
+    agentId:
+      typeof record.agentId === "string" && record.agentId.trim()
+        ? record.agentId.trim()
+        : defaultAgentId,
     title:
       typeof record.title === "string" && record.title.trim()
         ? record.title.trim()
@@ -1764,10 +1835,11 @@ function normalizeStoredConversationBodyDescriptor(
   return raw;
 }
 
-function createChatThread(t: Translate): ChatThreadRecord {
+function createChatThread(t: Translate, agentId = "main"): ChatThreadRecord {
   const now = Date.now();
   return {
     id: `chat-thread-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    agentId,
     title: t("新任务", "New task"),
     messages: [welcomeChatMessage(t)],
     input: "",
@@ -1818,6 +1890,7 @@ function buildChatThreadSummaries(
       const taskResult = latestRun?.taskResult ?? thread.teachingTaskResult ?? null;
       return {
         id: thread.id,
+        agentId: thread.agentId,
         title: thread.title,
         preview: threadPreview(thread, t),
         updatedAt: thread.updatedAt,

@@ -857,13 +857,39 @@ pub(crate) async fn finalize_ask_result(
                 .await?;
             } else {
                 journal.record_final_status(non_failure_final_status(semantic_clarify));
+                let presentation = if semantic_clarify {
+                    crate::persona_style::PersonaStyleResult {
+                        text: answer_text.clone(),
+                        messages: answer_messages.clone(),
+                        applied: false,
+                        reason: "clarify_bypass",
+                    }
+                } else {
+                    crate::persona_style::PersonaStyleRenderer::render(
+                        state,
+                        task,
+                        prompt,
+                        route_result,
+                        crate::persona_style::CanonicalUserResult {
+                            text: answer_text.clone(),
+                            messages: answer_messages.clone(),
+                        },
+                    )
+                };
+                if !presentation.applied {
+                    tracing::debug!(
+                        task_id = %task.task_id,
+                        reason = presentation.reason,
+                        "persona_style_render_bypass"
+                    );
+                }
                 finalize_ask_success(
                     state,
                     task,
                     payload,
                     prompt,
-                    &answer_text,
-                    &answer_messages,
+                    &presentation.text,
+                    &presentation.messages,
                     answer.is_llm_reply,
                     false,
                     "",
@@ -878,15 +904,15 @@ pub(crate) async fn finalize_ask_result(
                     route_result,
                     turn_analysis,
                     resolved_prompt_for_execution,
-                    &answer_text,
-                    &answer_messages,
+                    &presentation.text,
+                    &presentation.messages,
                     semantic_clarify,
                     fuzzy_locator_suggestions,
                     &journal,
                     clarify_fallback_source,
                 );
                 if semantic_clarify {
-                    insert_unfinished_goal_memory(state, task, prompt, &answer_text);
+                    insert_unfinished_goal_memory(state, task, prompt, &presentation.text);
                 }
             }
             // §3.1: Finalizing → Completed（成功路径，含 success / failure / resume_failure / clarify

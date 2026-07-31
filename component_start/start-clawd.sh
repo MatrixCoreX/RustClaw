@@ -155,69 +155,11 @@ ACTIVE_VENDOR="${CHOSEN_VENDOR:-$CURRENT_VENDOR}"
 ACTIVE_MODEL="${CHOSEN_MODEL:-$CURRENT_MODEL}"
 
 if [[ -n "${ACTIVE_VENDOR}" ]]; then
-  CURRENT_API_KEY="$(
-APP_ACTIVE_VENDOR="${ACTIVE_VENDOR}" python3 - <<'PY'
-import os
-import tomllib
-from pathlib import Path
-
-vendor = os.environ.get("APP_ACTIVE_VENDOR", "")
-cfg = tomllib.loads(Path(os.environ["APP_CONFIG_PATH"]).read_text(encoding="utf-8"))
-llm = cfg.get("llm", {})
-section = llm.get(vendor, {})
-if isinstance(section, dict):
-    print(str(section.get("api_key", "") or ""))
-else:
-    print("")
-PY
-  )"
   ENV_API_KEY="$(component_vendor_api_key_from_env "$ACTIVE_VENDOR")"
-
-  if [[ ( -z "${CURRENT_API_KEY}" || "${CURRENT_API_KEY}" == REPLACE_ME* ) && -z "${ENV_API_KEY}" ]]; then
-    if [[ ! -t 0 || ! -t 1 || "${APP_MODEL_SELECT:-1}" == "0" ]]; then
-      echo "The api_key for current vendor (${ACTIVE_VENDOR}) is missing from config and environment. Interactive input is required before startup." # zh: 当前厂商(${ACTIVE_VENDOR})的配置和环境变量中都缺少 api_key，必须交互填写后才能启动。
-      exit 1
-    fi
-
-    while true; do
-      read -r -s -p "Enter ${ACTIVE_VENDOR} api_key: " INPUT_API_KEY # zh: 请输入 ${ACTIVE_VENDOR} 的 api_key:
-      echo
-      if [[ -n "${INPUT_API_KEY}" && "${INPUT_API_KEY}" != REPLACE_ME* ]]; then
-        break
-      fi
-      echo "api_key cannot be empty and cannot be a REPLACE_ME placeholder." # zh: api_key 不能为空，且不能是 REPLACE_ME 占位值。
-    done
-
-    export APP_INPUT_API_KEY="${INPUT_API_KEY}"
-    export APP_ACTIVE_VENDOR="${ACTIVE_VENDOR}"
-    python3 - <<'PY'
-import os
-import re
-from pathlib import Path
-
-vendor = os.environ.get("APP_ACTIVE_VENDOR", "")
-api_key = os.environ.get("APP_INPUT_API_KEY", "")
-if not vendor or not api_key:
-    raise SystemExit(0)
-
-cfg_path = Path(os.environ["APP_CONFIG_PATH"])
-text = cfg_path.read_text(encoding="utf-8")
-
-section_pat = rf"(?ms)^(\[llm\.{re.escape(vendor)}\]\n)(.*?)(?=^\[|\Z)"
-m = re.search(section_pat, text)
-if not m:
-    text = text.rstrip() + f'\n\n[llm.{vendor}]\napi_key = "{api_key}"\n'
-else:
-    body = m.group(2)
-    if re.search(r'(?m)^api_key\s*=\s*".*?"\s*$', body):
-        body = re.sub(r'(?m)^api_key\s*=\s*".*?"\s*$', f'api_key = "{api_key}"', body, count=1)
-    else:
-        body = f'api_key = "{api_key}"\n' + body
-    text = text[:m.start()] + m.group(1) + body + text[m.end():]
-
-cfg_path.write_text(text, encoding="utf-8")
-PY
-    echo "Wrote ${ACTIVE_VENDOR} api_key into config file." # zh: 已写入 ${ACTIVE_VENDOR} 的 api_key 到配置文件。
+  if [[ -z "${ENV_API_KEY}" ]]; then
+    echo "The API key for the current vendor (${ACTIVE_VENDOR}) is missing from the runtime environment." >&2
+    echo "Set the vendor API-key environment variable in ${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}, then start the service again." >&2
+    exit 1
   fi
 fi
 

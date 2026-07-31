@@ -19,6 +19,26 @@ fn llm_vendor_supports_api_format(vendor_name: &str) -> bool {
     )
 }
 
+fn llm_vendor_api_key_from_env_with<F>(vendor_name: &str, env_value: &F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut resolved = String::new();
+    for name in claw_core::config::llm_vendor_api_key_env_names(vendor_name) {
+        if let Some(value) = env_value(name)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && !value.starts_with("REPLACE_ME"))
+        {
+            resolved = value;
+        }
+    }
+    resolved
+}
+
+fn llm_vendor_api_key_from_env(vendor_name: &str) -> String {
+    llm_vendor_api_key_from_env_with(vendor_name, &|name| std::env::var(name).ok())
+}
+
 fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
     collect_llm_vendor_info_with_env(value, |name| std::env::var(name).ok())
 }
@@ -47,27 +67,8 @@ where
             .unwrap_or("")
             .trim()
             .to_string();
-        let config_api_key_configured = vendor
-            .get("api_key")
-            .and_then(|v| v.as_str())
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        let env_api_key_configured = claw_core::config::llm_vendor_api_key_env_names(vendor_name)
-            .iter()
-            .any(|name| env_value(name).is_some_and(|value| !value.trim().is_empty()));
-        let api_key_configured = config_api_key_configured || env_api_key_configured;
-        let api_key_masked = vendor
-            .get("api_key")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(mask_secret);
-        let api_key = vendor
-            .get("api_key")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .unwrap_or("")
-            .to_string();
+        let api_key_configured =
+            !llm_vendor_api_key_from_env_with(vendor_name, &env_value).is_empty();
         let api_format = if llm_vendor_supports_api_format(vendor_name) {
             normalize_llm_api_format(vendor.get("api_format").and_then(|v| v.as_str()))
         } else {
@@ -94,9 +95,11 @@ where
             "models": models,
             "base_url": base_url,
             "api_format": api_format,
-            "api_key": api_key,
+            "api_key": "",
             "api_key_configured": api_key_configured,
-            "api_key_masked": api_key_masked
+            "api_key_masked": null,
+            "api_key_source": "environment",
+            "api_key_env_names": claw_core::config::llm_vendor_api_key_env_names(vendor_name)
         }));
     }
     vendors
@@ -148,20 +151,7 @@ where
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    let mut api_key = vendor
-        .and_then(|v| v.get("api_key"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("")
-        .to_string();
-    for env_name in claw_core::config::llm_vendor_api_key_env_names(selected_vendor) {
-        if let Some(value) = env_value(env_name)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-        {
-            api_key = value;
-        }
-    }
+    let api_key = llm_vendor_api_key_from_env_with(selected_vendor, &env_value);
     let provider_type = if llm_vendor_supports_api_format(selected_vendor) {
         normalize_llm_api_format(
             vendor
@@ -718,6 +708,20 @@ async fn update_llm_config(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
+    if req
+        .vendor_api_key
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("vendor_api_key_must_use_environment".to_string()),
+            }),
+        );
+    }
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
     let selected_model = req.selected_model.trim().to_string();
     if selected_vendor.is_empty() {
@@ -826,12 +830,11 @@ async fn update_llm_config(
         &allowed_models,
         &selected_model,
     );
-    let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let updated_api_key = upsert_string_key_in_section(
         &updated_vendor_models,
         &format!("llm.{selected_vendor}"),
         "api_key",
-        &format!("api_key = {:?}", vendor_api_key),
+        "api_key = \"\"",
     );
     let final_updated = if llm_vendor_supports_api_format(&selected_vendor) {
         let vendor_api_format = normalize_llm_api_format(req.vendor_api_format.as_deref());
@@ -881,6 +884,20 @@ async fn test_llm_config(
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
+    }
+    if req
+        .vendor_api_key
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("vendor_api_key_must_use_environment".to_string()),
+            }),
+        );
     }
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
     let selected_model = req.selected_model.trim().to_string();
@@ -946,12 +963,22 @@ async fn test_llm_config(
             }),
         );
     }
-    let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
+    let vendor_api_key = llm_vendor_api_key_from_env(&selected_vendor);
+    if vendor_api_key.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("llm_api_key_environment_missing".to_string()),
+            }),
+        );
+    }
     let provider = match build_llm_test_runtime(
         &selected_vendor,
         &selected_model,
         vendor_base_url,
-        vendor_api_key,
+        &vendor_api_key,
         req.vendor_api_format.as_deref(),
     ) {
         Ok(provider) => provider,

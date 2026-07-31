@@ -49,6 +49,7 @@ export interface ServerTeachingRunProjection {
 
 export interface ServerChatThreadProjection {
   id: string;
+  agentId?: string;
   externalChatId: string;
   title: string;
   messages: ChatMessage[];
@@ -304,6 +305,7 @@ function projectThread(
   const latest = turns[turns.length - 1];
   return {
     id: conversationId,
+    agentId: [...turns].reverse().find((turn) => turn.agent_id?.trim())?.agent_id?.trim(),
     externalChatId:
       [...turns].reverse().find((turn) => turn.external_chat_id?.trim())?.external_chat_id ??
       `ui-${conversationId}`,

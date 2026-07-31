@@ -64,29 +64,6 @@ test("requires a configured saved vendor when no runtime provider is active", ()
   );
 });
 
-test("marks api key edits as unsaved for the current vendor", () => {
-  assert.equal(
-    hasUnsavedLlmDraftChanges({
-      selectedVendor: "minimax",
-      selectedModel: "MiniMax-M3",
-      vendors: [
-        {
-          name: "minimax",
-          base_url: "https://api.minimaxi.com/v1",
-          api_key: "old-key",
-          api_format: "openai_compat",
-        },
-      ],
-      draftVendor: "minimax",
-      draftModel: "MiniMax-M3",
-      draftBaseUrl: "https://api.minimaxi.com/v1",
-      draftApiKey: "new-key",
-      draftApiFormat: "openai_compat",
-    }),
-    true,
-  );
-});
-
 test("marks base url edits as unsaved for the current vendor", () => {
   assert.equal(
     hasUnsavedLlmDraftChanges({
@@ -96,14 +73,12 @@ test("marks base url edits as unsaved for the current vendor", () => {
         {
           name: "minimax",
           base_url: "https://api.minimaxi.com/v1",
-          api_key: "same-key",
           api_format: "openai_compat",
         },
       ],
       draftVendor: "minimax",
       draftModel: "MiniMax-M3",
       draftBaseUrl: "https://proxy.example/minimax/v1",
-      draftApiKey: "same-key",
       draftApiFormat: "openai_compat",
     }),
     true,
@@ -119,14 +94,12 @@ test("does not mark unchanged drafts as unsaved", () => {
         {
           name: "minimax",
           base_url: "https://api.minimaxi.com/v1",
-          api_key: "same-key",
           api_format: "openai_compat",
         },
       ],
       draftVendor: "minimax",
       draftModel: "MiniMax-M3",
       draftBaseUrl: "https://api.minimaxi.com/v1",
-      draftApiKey: "same-key",
       draftApiFormat: "openai_compat",
     }),
     false,
@@ -142,14 +115,12 @@ test("marks minimax api format edits as unsaved", () => {
         {
           name: "minimax",
           base_url: "https://api.minimaxi.com/v1",
-          api_key: "same-key",
           api_format: "openai_compat",
         },
       ],
       draftVendor: "minimax",
       draftModel: "MiniMax-M3",
       draftBaseUrl: "https://api.minimaxi.com/v1",
-      draftApiKey: "same-key",
       draftApiFormat: "anthropic_claude",
     }),
     true,
@@ -165,14 +136,12 @@ test("marks mimo api format edits as unsaved", () => {
         {
           name: "mimo",
           base_url: "https://token-plan-cn.xiaomimimo.com/v1",
-          api_key: "same-key",
           api_format: "openai_compat",
         },
       ],
       draftVendor: "mimo",
       draftModel: "mimo-v2.5-pro",
       draftBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
-      draftApiKey: "same-key",
       draftApiFormat: "anthropic_claude",
     }),
     true,

@@ -47,7 +47,6 @@ export function useModelConfigRuntime({
   const [llmConfigSaving, setLlmConfigSaving] = useState(false);
   const [llmConfigSaveMessage, setLlmConfigSaveMessage] = useState<string | null>(null);
   const [llmDraftBaseUrl, setLlmDraftBaseUrl] = useState("");
-  const [llmDraftApiKey, setLlmDraftApiKey] = useState("");
   const [llmDraftApiFormat, setLlmDraftApiFormat] = useState("openai_compat");
   const [llmTestLoading, setLlmTestLoading] = useState(false);
   const [llmTestMessage, setLlmTestMessage] = useState<string | null>(null);
@@ -86,12 +85,11 @@ export function useModelConfigRuntime({
             draftVendor: llmDraftVendor,
             draftModel: llmDraftModel,
             draftBaseUrl: llmDraftBaseUrl,
-            draftApiKey: llmDraftApiKey,
             draftApiFormat: llmDraftApiFormat,
           }
         : null,
     );
-  }, [llmConfigData, llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+  }, [llmConfigData, llmDraftApiFormat, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
 
   const llmRestartPending = useMemo(() => {
     if (!llmConfigData) return false;
@@ -124,7 +122,7 @@ export function useModelConfigRuntime({
   useEffect(() => {
     setLlmTestMessage(null);
     setLlmTestError(null);
-  }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+  }, [llmDraftApiFormat, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
 
   const fetchLlmConfig = async () => {
     setLlmConfigLoading(true);
@@ -140,7 +138,6 @@ export function useModelConfigRuntime({
       setLlmDraftModel(body.data.selected_model || "");
       const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
       setLlmDraftBaseUrl(selectedVendor?.base_url || "");
-      setLlmDraftApiKey(selectedVendor?.api_key || "");
       setLlmDraftApiFormat(llmVendorSupportsApiFormat(selectedVendor?.name) ? (selectedVendor?.api_format || "openai_compat") : "");
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -163,7 +160,6 @@ export function useModelConfigRuntime({
           selected_vendor: llmDraftVendor,
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
-          vendor_api_key: llmDraftApiKey.trim(),
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
         }),
       });
@@ -211,7 +207,6 @@ export function useModelConfigRuntime({
           selected_vendor: llmDraftVendor,
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
-          vendor_api_key: llmDraftApiKey.trim(),
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
         }),
       });
@@ -353,14 +348,12 @@ export function useModelConfigRuntime({
     if (!vendorInfo) {
       setLlmDraftModel("");
       setLlmDraftBaseUrl("");
-      setLlmDraftApiKey("");
       setLlmDraftApiFormat("");
       return;
     }
     const nextModel = vendorInfo.default_model || vendorInfo.models[0] || "";
     setLlmDraftModel(nextModel);
     setLlmDraftBaseUrl(vendorInfo.base_url || "");
-    setLlmDraftApiKey(vendorInfo.api_key || "");
     setLlmDraftApiFormat(llmVendorSupportsApiFormat(vendorInfo.name) ? (vendorInfo.api_format || "openai_compat") : "");
   };
 
@@ -375,7 +368,6 @@ export function useModelConfigRuntime({
     llmConfigSaving,
     llmConfigSaveMessage,
     llmDraftBaseUrl,
-    llmDraftApiKey,
     llmDraftApiFormat,
     llmTestLoading,
     llmTestMessage,
@@ -402,7 +394,6 @@ export function useModelConfigRuntime({
     hasUnsavedMultimodalChanges,
     setLlmDraftModel,
     setLlmDraftBaseUrl,
-    setLlmDraftApiKey,
     setLlmDraftApiFormat,
     setModelsAdvancedOpen,
     fetchLlmConfig,

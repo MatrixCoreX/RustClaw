@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod defaults;
 mod runtime;
@@ -9,6 +9,31 @@ use defaults::*;
 
 pub const CLAWD_INTERNAL_LISTEN: &str = "127.0.0.1:8787";
 pub const CLAWD_INTERNAL_BASE_URL: &str = "http://127.0.0.1:8787";
+pub const AGENT_PERSONA_PROFILES: &[&str] = &[
+    "inherit",
+    "executor",
+    "companion",
+    "expert",
+    "teacher",
+    "advisor",
+    "reviewer",
+    "custom",
+];
+
+pub fn normalize_agent_persona_profile(profile: &str) -> (&'static str, bool) {
+    let normalized = profile.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "inherit" => ("inherit", true),
+        "executor" => ("executor", true),
+        "companion" => ("companion", true),
+        "expert" => ("expert", true),
+        "teacher" => ("teacher", true),
+        "advisor" => ("advisor", true),
+        "reviewer" => ("reviewer", true),
+        "custom" => ("custom", true),
+        _ => ("inherit", false),
+    }
+}
 
 pub fn llm_vendor_api_key_env_names(vendor: &str) -> &'static [&'static str] {
     match vendor.trim().to_ascii_lowercase().as_str() {
@@ -188,7 +213,7 @@ pub struct ResolvedTelegramBotConfig {
     pub task_delivery_timeout_seconds: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentConfig {
     #[serde(default = "default_agent_id")]
     pub id: String,
@@ -196,7 +221,17 @@ pub struct AgentConfig {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// Canonical persona selection. `inherit` resolves through the global
+    /// persona profile when a runtime snapshot is built.
+    #[serde(default = "default_agent_persona_profile")]
+    pub persona_profile: String,
+    /// Canonical custom style fragment. It is metadata for the final
+    /// presentation renderer and must never be injected into planning.
     #[serde(default)]
+    pub persona_fragment: String,
+    /// Legacy compatibility only. New writes use `persona_profile` and
+    /// `persona_fragment` in configs/agents.toml.
+    #[serde(default, skip_serializing)]
     pub persona_prompt: String,
     #[serde(default)]
     pub preferred_vendor: Option<String>,
@@ -212,12 +247,18 @@ impl Default for AgentConfig {
             id: default_agent_id(),
             name: "Main".to_string(),
             description: String::new(),
+            persona_profile: default_agent_persona_profile(),
+            persona_fragment: String::new(),
             persona_prompt: String::new(),
             preferred_vendor: None,
             preferred_model: None,
             allowed_skills: Vec::new(),
         }
     }
+}
+
+fn default_agent_persona_profile() -> String {
+    "inherit".to_string()
 }
 
 impl Default for TelegramConfig {

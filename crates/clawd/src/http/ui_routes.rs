@@ -174,6 +174,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_crypto_credentials).post(upsert_crypto_credentials),
         )
         .route("/health", get(health))
+        .route(
+            "/agents/config",
+            get(get_agents_config).post(update_agents_config),
+        )
         .route("/system/host-summary", get(host_system_summary))
         .route("/system/dependencies", get(host_dependencies))
         .route(
@@ -410,9 +414,14 @@ struct NniDeviceActionRequest {
 }
 
 include!("ui_routes/config_helpers.rs");
+include!("ui_routes/agent_config.rs");
 include!("ui_routes/host_system.rs");
 include!("ui_routes/host_dependencies.rs");
 include!("ui_routes/nni_internal_llm.rs");
+
+#[cfg(test)]
+#[path = "ui_routes/agent_config_tests.rs"]
+mod agent_config_unit_tests;
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
