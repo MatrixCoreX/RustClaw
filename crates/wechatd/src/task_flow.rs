@@ -7,6 +7,87 @@ const WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY: &str = "wechat.msg.skill_progres
 const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
 const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
 const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
+const WECHAT_AUDIO_FILE_FALLBACK_KEY: &str = "wechat.msg.audio_sent_as_file";
+
+#[derive(Clone)]
+pub(super) struct WechatAccountSnapshot {
+    pub(super) account_id: String,
+    pub(super) base_url: String,
+    pub(super) token: String,
+}
+
+#[derive(Clone)]
+pub(super) struct PinnedWechatTaskContext {
+    pub(super) account: WechatAccountSnapshot,
+    pub(super) scope: WechatConversationScope,
+    pub(super) context_token: String,
+    pub(super) typing_ticket: Option<String>,
+    pub(super) run_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WechatTaskTerminalKind {
+    Succeeded,
+    Failed,
+    Canceled,
+    Timeout,
+}
+
+pub(super) fn wechat_task_terminal_kind(status: TaskStatus) -> Option<WechatTaskTerminalKind> {
+    match status {
+        TaskStatus::Queued | TaskStatus::Running => None,
+        TaskStatus::Succeeded => Some(WechatTaskTerminalKind::Succeeded),
+        TaskStatus::Failed => Some(WechatTaskTerminalKind::Failed),
+        TaskStatus::Canceled => Some(WechatTaskTerminalKind::Canceled),
+        TaskStatus::Timeout => Some(WechatTaskTerminalKind::Timeout),
+    }
+}
+
+pub(super) async fn pin_inbound_task_context(
+    state: &State,
+    peer_id: &str,
+    inbound_context_token: Option<&str>,
+) -> Option<PinnedWechatTaskContext> {
+    // The provider issues this token per inbound message. A task must never
+    // borrow a later or older token from the cache when the inbound token is
+    // absent.
+    let context_token = normalized_context_token(inbound_context_token)?.to_string();
+    let account = {
+        let session = state.session.read().await;
+        WechatAccountSnapshot {
+            account_id: session_account_id(session.as_ref()),
+            base_url: session_base_url(&state.config, session.as_ref()),
+            token: session_token(&state.config, session.as_ref())?,
+        }
+    };
+    let scope = WechatConversationScope::wechat_ilink(&account.account_id, peer_id).ok()?;
+    state
+        .context_tokens
+        .write()
+        .await
+        .insert(scope.storage_key(), context_token.clone());
+    let typing_ticket = {
+        let mut manager = state.config_cache.lock().await;
+        manager
+            .typing_ticket_for_user(
+                &state.client,
+                &state.config,
+                &account.base_url,
+                &account.token,
+                &scope,
+                peer_id,
+                Some(&context_token),
+            )
+            .await
+    };
+    Some(PinnedWechatTaskContext {
+        account,
+        scope,
+        context_token,
+        typing_ticket: (!typing_ticket.trim().is_empty()).then_some(typing_ticket),
+        run_id: wechat_ilink::new_wechat_client_id("run"),
+    })
+}
 
 pub(super) fn task_success_messages(
     task: &TaskQueryResponse,
@@ -67,10 +148,11 @@ pub(super) fn skill_progress_message(
 /// Refresh `ilink/bot/sendtyping` while clawd runs (`keepaliveIntervalMs` ≈ 5s in OpenClaw weixin).
 pub(super) struct WechatTypingHeartbeat {
     stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    join_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl WechatTypingHeartbeat {
-    fn start(
+    pub(super) fn start(
         client: Client,
         section: WechatSection,
         base_url: String,
@@ -80,7 +162,7 @@ impl WechatTypingHeartbeat {
         interval: Duration,
     ) -> Self {
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             loop {
                 let _ = ilink::send_typing_once(
                     &client,
@@ -89,7 +171,7 @@ impl WechatTypingHeartbeat {
                     &token,
                     &to_user_id,
                     &typing_ticket,
-                    1,
+                    TYPING_STATUS_TYPING,
                 )
                 .await;
                 tokio::select! {
@@ -102,7 +184,7 @@ impl WechatTypingHeartbeat {
                             &token,
                             &to_user_id,
                             &typing_ticket,
-                            2,
+                            TYPING_STATUS_CANCEL,
                         )
                         .await;
                         break;
@@ -112,12 +194,26 @@ impl WechatTypingHeartbeat {
         });
         Self {
             stop_tx: Some(stop_tx),
+            join_handle: Some(join_handle),
         }
     }
 
     fn stop(&mut self) {
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
+        }
+    }
+
+    pub(super) async fn finish(&mut self) {
+        self.stop();
+        let Some(mut handle) = self.join_handle.take() else {
+            return;
+        };
+        if tokio::time::timeout(Duration::from_secs(10), &mut handle)
+            .await
+            .is_err()
+        {
+            handle.abort();
         }
     }
 }
@@ -130,77 +226,59 @@ impl Drop for WechatTypingHeartbeat {
 
 pub(super) async fn start_typing_heartbeat_for_peer(
     state: &State,
-    from_user_id: &str,
-    typing_ticket: Option<&str>,
+    context: &PinnedWechatTaskContext,
 ) -> Option<WechatTypingHeartbeat> {
-    let ticket = typing_ticket
+    let ticket = context
+        .typing_ticket
+        .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())?
         .to_string();
-    let session_guard = state.session.read().await;
-    let token = session_token(&state.config, session_guard.as_ref())?;
-    let base_url = session_base_url(&state.config, session_guard.as_ref());
-    drop(session_guard);
     let interval = Duration::from_secs(state.config.typing_refresh_interval_secs.max(1));
     Some(WechatTypingHeartbeat::start(
         state.client.clone(),
         state.config.clone(),
-        base_url,
-        token.clone(),
-        from_user_id.to_string(),
+        context.account.base_url.clone(),
+        context.account.token.clone(),
+        context.scope.peer_id().to_string(),
         ticket,
         interval,
     ))
 }
 
-pub(super) async fn resolve_typing_ticket_for_peer(
+pub(super) async fn send_generating_message_state(
     state: &State,
-    from_user_id: &str,
-    context_token: Option<&str>,
-) -> Option<String> {
-    let context_token = resolve_delivery_context_token(state, from_user_id, context_token).await;
-    let session_guard = state.session.read().await;
-    let token = session_token(&state.config, session_guard.as_ref())?;
-    let base_url = session_base_url(&state.config, session_guard.as_ref());
-    drop(session_guard);
-    let mut mgr = state.config_cache.lock().await;
-    let ticket = mgr
-        .typing_ticket_for_user(
-            &state.client,
-            &state.config,
-            &base_url,
-            &token,
-            from_user_id,
-            context_token.as_deref(),
-        )
-        .await;
-    let t = ticket.trim();
-    if t.is_empty() {
-        None
-    } else {
-        Some(ticket)
-    }
+    context: &PinnedWechatTaskContext,
+) -> Result<(), String> {
+    let body = WechatSendMessageRequest::generating(
+        context.scope.peer_id(),
+        &context.context_token,
+        wechat_ilink::new_wechat_client_id("generating"),
+        context.run_id.clone(),
+        WECHATD_CHANNEL_VERSION,
+    )?;
+    ilink::post_json(
+        &state.client,
+        &state.config,
+        &context.account.base_url,
+        &context.account.token,
+        "ilink/bot/sendmessage",
+        &body,
+        state.config.request_timeout_seconds.max(1) * 1_000,
+    )
+    .await
+    .map(|_| ())
 }
 
 pub(super) async fn deliver_wechat_clawd_reply(
     state: &State,
-    from_user_id: &str,
-    context_token: Option<&str>,
+    context: &PinnedWechatTaskContext,
     reply_text: &str,
 ) {
-    let session_guard = state.session.read().await;
-    let Some(token) = session_token(&state.config, session_guard.as_ref()) else {
-        warn!("wechatd: deliver reply skipped (no session token)");
-        return;
-    };
-    let base_url = session_base_url(&state.config, session_guard.as_ref());
-    drop(session_guard);
-    let Some(context_token) =
-        resolve_delivery_context_token(state, from_user_id, context_token).await
-    else {
-        warn!("wechatd: deliver reply skipped (missing context_token)");
-        return;
-    };
+    let from_user_id = context.scope.peer_id();
+    let context_token = context.context_token.as_str();
+    let token = context.account.token.as_str();
+    let base_url = context.account.base_url.as_str();
     let timeout_ms = state.config.request_timeout_seconds.max(1) * 1_000;
     let cdn = state.config.cdn_base_url.trim();
     let auth = wechat_ilink_auth(&state.config);
@@ -211,10 +289,11 @@ pub(super) async fn deliver_wechat_clawd_reply(
         if let Err(err) = send_text_message(
             &state.client,
             &state.config,
-            &base_url,
-            &token,
+            base_url,
+            token,
             from_user_id,
-            Some(context_token.as_str()),
+            Some(context_token),
+            Some(&context.run_id),
             stripped.trim(),
         )
         .await
@@ -234,10 +313,11 @@ pub(super) async fn deliver_wechat_clawd_reply(
                 if !media_error_notified {
                     send_wechat_error_notice(
                         state,
-                        &base_url,
-                        &token,
+                        base_url,
+                        token,
                         from_user_id,
-                        context_token.as_str(),
+                        context_token,
+                        Some(&context.run_id),
                         &err,
                     )
                     .await;
@@ -250,12 +330,13 @@ pub(super) async fn deliver_wechat_clawd_reply(
             WechatOutboundKind::Image => {
                 send_weixin_image_from_file(
                     &state.client,
-                    &base_url,
-                    &token,
+                    base_url,
+                    token,
                     auth,
                     cdn,
                     from_user_id,
-                    Some(context_token.as_str()),
+                    Some(context_token),
+                    Some(&context.run_id),
                     &file_path,
                     WECHATD_CHANNEL_VERSION,
                     timeout_ms,
@@ -265,12 +346,13 @@ pub(super) async fn deliver_wechat_clawd_reply(
             WechatOutboundKind::Video => {
                 send_weixin_video_from_file(
                     &state.client,
-                    &base_url,
-                    &token,
+                    base_url,
+                    token,
                     auth,
                     cdn,
                     from_user_id,
-                    Some(context_token.as_str()),
+                    Some(context_token),
+                    Some(&context.run_id),
                     &file_path,
                     WECHATD_CHANNEL_VERSION,
                     timeout_ms,
@@ -278,18 +360,36 @@ pub(super) async fn deliver_wechat_clawd_reply(
                 .await
             }
             WechatOutboundKind::Audio | WechatOutboundKind::File => {
+                if media.kind == WechatOutboundKind::Audio {
+                    let fallback_notice = wechat_t(&state.config, WECHAT_AUDIO_FILE_FALLBACK_KEY);
+                    if let Err(err) = send_text_message(
+                        &state.client,
+                        &state.config,
+                        base_url,
+                        token,
+                        from_user_id,
+                        Some(context_token),
+                        Some(&context.run_id),
+                        &fallback_notice,
+                    )
+                    .await
+                    {
+                        warn!("wechatd: send audio fallback notice failed err={}", err);
+                    }
+                }
                 let fname = file_path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("file");
                 send_weixin_file_from_file(
                     &state.client,
-                    &base_url,
-                    &token,
+                    base_url,
+                    token,
                     auth,
                     cdn,
                     from_user_id,
-                    Some(context_token.as_str()),
+                    Some(context_token),
+                    Some(&context.run_id),
                     &file_path,
                     fname,
                     WECHATD_CHANNEL_VERSION,
@@ -306,10 +406,11 @@ pub(super) async fn deliver_wechat_clawd_reply(
             if !media_error_notified {
                 send_wechat_error_notice(
                     state,
-                    &base_url,
-                    &token,
+                    base_url,
+                    token,
                     from_user_id,
-                    context_token.as_str(),
+                    context_token,
+                    Some(&context.run_id),
                     &err,
                 )
                 .await;
@@ -322,10 +423,11 @@ pub(super) async fn deliver_wechat_clawd_reply(
         if let Err(err) = send_text_message(
             &state.client,
             &state.config,
-            &base_url,
-            &token,
+            base_url,
+            token,
             from_user_id,
-            Some(context_token.as_str()),
+            Some(context_token),
+            Some(&context.run_id),
             &fallback_text,
         )
         .await
@@ -335,51 +437,132 @@ pub(super) async fn deliver_wechat_clawd_reply(
     }
 }
 
+async fn finish_typing_heartbeat(heartbeat: &mut Option<WechatTypingHeartbeat>) {
+    if let Some(heartbeat) = heartbeat.as_mut() {
+        heartbeat.finish().await;
+    }
+    *heartbeat = None;
+}
+
+async fn deliver_pinned_terminal_text(
+    state: &State,
+    context: &PinnedWechatTaskContext,
+    text: &str,
+) {
+    if let Err(error) = send_text_message(
+        &state.client,
+        &state.config,
+        &context.account.base_url,
+        &context.account.token,
+        context.scope.peer_id(),
+        Some(&context.context_token),
+        Some(&context.run_id),
+        text,
+    )
+    .await
+    {
+        warn!("wechatd: terminal text delivery failed err={}", error);
+    }
+}
+
+async fn deliver_pinned_progress_text(
+    state: &State,
+    context: &PinnedWechatTaskContext,
+    text: &str,
+) {
+    let body = match WechatSendMessageRequest::generating_with_item(
+        context.scope.peer_id(),
+        &context.context_token,
+        wechat_ilink::new_wechat_client_id("progress"),
+        context.run_id.clone(),
+        match WechatMessageItem::text(text) {
+            Ok(item) => item,
+            Err(error) => {
+                warn!("wechatd: progress item rejected err={}", error);
+                return;
+            }
+        },
+        WECHATD_CHANNEL_VERSION,
+    ) {
+        Ok(body) => body,
+        Err(error) => {
+            warn!("wechatd: progress envelope rejected err={}", error);
+            return;
+        }
+    };
+    if let Err(error) = ilink::post_json(
+        &state.client,
+        &state.config,
+        &context.account.base_url,
+        &context.account.token,
+        "ilink/bot/sendmessage",
+        &body,
+        state.config.request_timeout_seconds.max(1) * 1_000,
+    )
+    .await
+    {
+        warn!("wechatd: progress delivery failed err={}", error);
+    }
+}
+
+async fn finalize_submit_failure(
+    state: &State,
+    context: &PinnedWechatTaskContext,
+    heartbeat: &mut Option<WechatTypingHeartbeat>,
+) {
+    finish_typing_heartbeat(heartbeat).await;
+    let text = wechat_t(&state.config, WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY);
+    deliver_pinned_terminal_text(state, context, &text).await;
+}
+
 pub(super) async fn submit_wechat_task_with_payload(
     state: State,
-    from_user_id: String,
-    context_token: Option<String>,
+    context: PinnedWechatTaskContext,
     user_key: Option<String>,
-    typing_ticket: Option<String>,
     kind: TaskKind,
     mut payload: Value,
 ) {
+    let from_user_id = context.scope.peer_id().to_string();
+    let context_token = context.context_token.clone();
+    let scoped_chat_id = context.scope.storage_key();
     if let Some(obj) = payload.as_object_mut() {
         obj.entry("channel")
             .or_insert(Value::String("wechat".to_string()));
-        if let Some(ref ct) = context_token {
-            let t = ct.trim();
-            if !t.is_empty() {
-                obj.entry("context_token")
-                    .or_insert(Value::String(ct.clone()));
-            }
-        }
+        obj.insert(
+            "context_token".to_string(),
+            Value::String(context_token.clone()),
+        );
+        obj.insert(
+            "channel_account_id".to_string(),
+            Value::String(context.account.account_id.clone()),
+        );
     }
     let submit_req = SubmitTaskRequest {
         user_id: Some(stable_i64_from_string(&from_user_id)),
-        chat_id: Some(stable_i64_from_string(&from_user_id)),
+        chat_id: Some(stable_i64_from_string(&scoped_chat_id)),
         user_key: user_key.clone(),
         channel: Some(ChannelKind::Wechat),
         external_user_id: Some(from_user_id.clone()),
-        external_chat_id: Some(from_user_id.clone()),
+        external_chat_id: Some(scoped_chat_id.clone()),
         ingress: Some({
-            let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+            claw_core::channel_ingress::ChannelIngressEnvelope::new(
                 ChannelKind::Wechat,
                 "wechat_ilink",
             )
-            .with_external_ids(from_user_id.clone(), from_user_id.clone())
+            .with_external_ids(from_user_id.clone(), scoped_chat_id)
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
                 from_user_id.clone(),
             ))
-            .with_locale(state.config.language.clone());
-            if let Some(context_token) = context_token.as_deref() {
-                ingress = ingress.with_context_token(context_token);
-            }
-            ingress
+            .with_locale(state.config.language.clone())
+            .with_context_token(context_token.clone())
         }),
         kind,
         payload,
     };
+    let mut typing_heartbeat = start_typing_heartbeat_for_peer(&state, &context).await;
+    if let Err(error) = send_generating_message_state(&state, &context).await {
+        warn!("wechatd: generating state delivery failed err={}", error);
+    }
     let submit_url = format!(
         "{}/v1/tasks",
         state.config.clawd_base_url.trim_end_matches('/')
@@ -394,6 +577,7 @@ pub(super) async fn submit_wechat_task_with_payload(
         Ok(resp) => resp,
         Err(err) => {
             warn!("wechatd: task submit failed err={}", err);
+            finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
             return;
         }
     };
@@ -410,17 +594,20 @@ pub(super) async fn submit_wechat_task_with_payload(
             "wechatd: task submit failed error_code={} diagnostic_id={}",
             error.error_code, error.diagnostic_id
         );
+        finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
         return;
     }
     let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
         Ok(body) => body,
         Err(err) => {
             warn!("wechatd: task submit parse failed err={}", err);
+            finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
             return;
         }
     };
     let Some(task_data) = submit_body.data else {
         warn!("wechatd: task submit missing task_id");
+        finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
         return;
     };
     let task_id = task_data.task_id.to_string();
@@ -435,28 +622,6 @@ pub(super) async fn submit_wechat_task_with_payload(
     let mut timeout_notice_sent = false;
     let mut last_skill_progress_seq = 0_u64;
     let mut last_seen_status: Option<TaskStatus> = None;
-    let (poll_token, poll_base) = {
-        let g = state.session.read().await;
-        (
-            session_token(&state.config, g.as_ref()),
-            session_base_url(&state.config, g.as_ref()),
-        )
-    };
-    let interval = Duration::from_secs(state.config.typing_refresh_interval_secs.max(1));
-    let _typing_guard = match (&typing_ticket, &poll_token) {
-        (Some(ticket), Some(tok)) if !ticket.trim().is_empty() => {
-            Some(WechatTypingHeartbeat::start(
-                state.client.clone(),
-                state.config.clone(),
-                poll_base,
-                tok.clone(),
-                from_user_id.clone(),
-                ticket.clone(),
-                interval,
-            ))
-        }
-        _ => None,
-    };
     loop {
         let url = format!(
             "{}/v1/tasks/{}",
@@ -483,13 +648,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                             last_seen_status,
                             err
                         );
-                        send_text_reply_via_session(
-                            &state,
-                            &from_user_id,
-                            context_token.as_deref(),
-                            &running_notice_text,
-                        )
-                        .await;
+                        deliver_pinned_progress_text(&state, &context, &running_notice_text).await;
                         timeout_notice_sent = true;
                     }
                 }
@@ -508,13 +667,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                         last_seen_status,
                         resp.status()
                     );
-                    send_text_reply_via_session(
-                        &state,
-                        &from_user_id,
-                        context_token.as_deref(),
-                        &running_notice_text,
-                    )
-                    .await;
+                    deliver_pinned_progress_text(&state, &context, &running_notice_text).await;
                     timeout_notice_sent = true;
                 }
             }
@@ -534,13 +687,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                             delivery_timeout_secs,
                             last_seen_status
                         );
-                        send_text_reply_via_session(
-                            &state,
-                            &from_user_id,
-                            context_token.as_deref(),
-                            &running_notice_text,
-                        )
-                        .await;
+                        deliver_pinned_progress_text(&state, &context, &running_notice_text).await;
                         timeout_notice_sent = true;
                     }
                 }
@@ -558,13 +705,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                         delivery_timeout_secs,
                         last_seen_status
                     );
-                    send_text_reply_via_session(
-                        &state,
-                        &from_user_id,
-                        context_token.as_deref(),
-                        &running_notice_text,
-                    )
-                    .await;
+                    deliver_pinned_progress_text(&state, &context, &running_notice_text).await;
                     timeout_notice_sent = true;
                 }
             }
@@ -576,13 +717,7 @@ pub(super) async fn submit_wechat_task_with_payload(
             TaskStatus::Queued | TaskStatus::Running => {
                 if let Some((seq, message)) = skill_progress_message(&task, &state.config) {
                     if seq > last_skill_progress_seq {
-                        send_text_reply_via_session(
-                            &state,
-                            &from_user_id,
-                            context_token.as_deref(),
-                            &message,
-                        )
-                        .await;
+                        deliver_pinned_progress_text(&state, &context, &message).await;
                         last_skill_progress_seq = seq;
                     }
                 }
@@ -595,13 +730,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                             delivery_timeout_secs,
                             last_seen_status
                         );
-                        send_text_reply_via_session(
-                            &state,
-                            &from_user_id,
-                            context_token.as_deref(),
-                            &running_notice_text,
-                        )
-                        .await;
+                        deliver_pinned_progress_text(&state, &context, &running_notice_text).await;
                         timeout_notice_sent = true;
                     }
                 }
@@ -609,6 +738,11 @@ pub(super) async fn submit_wechat_task_with_payload(
                 continue;
             }
             TaskStatus::Succeeded => {
+                debug_assert_eq!(
+                    wechat_task_terminal_kind(TaskStatus::Succeeded),
+                    Some(WechatTaskTerminalKind::Succeeded)
+                );
+                finish_typing_heartbeat(&mut typing_heartbeat).await;
                 let reply_messages =
                     claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
                         &task.task_id.to_string(),
@@ -617,27 +751,17 @@ pub(super) async fn submit_wechat_task_with_payload(
                         task_success_messages(&task, &state.config),
                     );
                 for reply_text in reply_messages {
-                    deliver_wechat_clawd_reply(
-                        &state,
-                        &from_user_id,
-                        context_token.as_deref(),
-                        &reply_text,
-                    )
-                    .await;
+                    deliver_wechat_clawd_reply(&state, &context, &reply_text).await;
                 }
                 break;
             }
-            TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
+            terminal_status @ (TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout) => {
+                debug_assert!(wechat_task_terminal_kind(terminal_status).is_some());
+                finish_typing_heartbeat(&mut typing_heartbeat).await;
                 let error_text = task.error_text.unwrap_or_else(|| {
                     wechat_t(&state.config, WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY)
                 });
-                send_text_reply_via_session(
-                    &state,
-                    &from_user_id,
-                    context_token.as_deref(),
-                    &error_text,
-                )
-                .await;
+                deliver_pinned_terminal_text(&state, &context, &error_text).await;
                 break;
             }
         }
@@ -646,35 +770,22 @@ pub(super) async fn submit_wechat_task_with_payload(
 
 pub(super) async fn submit_wechat_task_and_reply(
     state: State,
-    from_user_id: String,
+    context: PinnedWechatTaskContext,
     text: String,
-    context_token: Option<String>,
     user_key: Option<String>,
-    typing_ticket: Option<String>,
 ) {
     let payload = json!({
         "text": text,
         "channel": "wechat",
-        "context_token": context_token.clone(),
+        "context_token": context.context_token.clone(),
     });
-    submit_wechat_task_with_payload(
-        state,
-        from_user_id,
-        context_token,
-        user_key,
-        typing_ticket,
-        TaskKind::Ask,
-        payload,
-    )
-    .await;
+    submit_wechat_task_with_payload(state, context, user_key, TaskKind::Ask, payload).await;
 }
 
 pub(super) async fn submit_wechat_run_skill_and_reply(
     state: State,
-    from_user_id: String,
-    context_token: Option<String>,
+    context: PinnedWechatTaskContext,
     user_key: Option<String>,
-    typing_ticket: Option<String>,
     skill_name: &'static str,
     args: Value,
 ) {
@@ -682,53 +793,34 @@ pub(super) async fn submit_wechat_run_skill_and_reply(
         "skill_name": skill_name,
         "args": args,
     });
-    submit_wechat_task_with_payload(
-        state,
-        from_user_id,
-        context_token,
-        user_key,
-        typing_ticket,
-        TaskKind::RunSkill,
-        payload,
-    )
-    .await;
+    submit_wechat_task_with_payload(state, context, user_key, TaskKind::RunSkill, payload).await;
 }
 
 pub(super) async fn spawn_inbound_ask_flow(
     state: State,
-    from_user_id: String,
-    msg: WeixinMessage,
+    context: PinnedWechatTaskContext,
     ask_text: String,
     user_key: String,
-    prefetched_typing_ticket: Option<String>,
 ) {
-    let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
     tokio::spawn(submit_wechat_task_and_reply(
         state,
-        from_user_id,
+        context,
         ask_text,
-        msg.context_token,
         Some(user_key),
-        typing_ticket,
     ));
 }
 
 pub(super) async fn spawn_inbound_skill_flow(
     state: State,
-    from_user_id: String,
-    msg: WeixinMessage,
+    context: PinnedWechatTaskContext,
     skill_name: &'static str,
     args: Value,
     user_key: String,
-    prefetched_typing_ticket: Option<String>,
 ) {
-    let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
     tokio::spawn(submit_wechat_run_skill_and_reply(
         state,
-        from_user_id,
-        msg.context_token,
+        context,
         Some(user_key),
-        typing_ticket,
         skill_name,
         args,
     ));

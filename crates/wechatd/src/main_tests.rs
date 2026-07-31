@@ -1,12 +1,20 @@
 use super::{
-    build_login_status_response, extract_bind_key_candidate, extract_text_message,
-    is_unbound_allowed_command, qr_render_content, qr_svg_data_url, skill_progress_message,
-    task_success_messages, wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
+    build_login_status_response, context_token_store_key, extract_bind_key_candidate,
+    extract_text_message, is_unbound_allowed_command, qr_render_content, qr_svg_data_url,
+    skill_progress_message, task_success_messages, wechat_media_agent_context,
+    wechat_runtime_status_file_path, wechat_t, wechat_task_terminal_kind,
     workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
-    TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WeixinMessage,
+    TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WechatTaskTerminalKind,
+    WechatTypingHeartbeat, WeixinMessage, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
 };
+use axum::body::Bytes;
+use axum::extract::State as AxumState;
+use axum::routing::post;
+use axum::{Json, Router};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[test]
 fn workspace_root_comes_from_channel_config_path() {
@@ -373,4 +381,93 @@ fn wechat_media_agent_context_uses_machine_fields() {
         "data/wechatd/file/user/123_report.pdf"
     );
     assert_eq!(value["file_name"], "report.pdf");
+}
+
+#[test]
+fn task_terminal_mapping_covers_success_failure_cancel_and_timeout() {
+    assert_eq!(
+        wechat_task_terminal_kind(TaskStatus::Succeeded),
+        Some(WechatTaskTerminalKind::Succeeded)
+    );
+    assert_eq!(
+        wechat_task_terminal_kind(TaskStatus::Failed),
+        Some(WechatTaskTerminalKind::Failed)
+    );
+    assert_eq!(
+        wechat_task_terminal_kind(TaskStatus::Canceled),
+        Some(WechatTaskTerminalKind::Canceled)
+    );
+    assert_eq!(
+        wechat_task_terminal_kind(TaskStatus::Timeout),
+        Some(WechatTaskTerminalKind::Timeout)
+    );
+    assert_eq!(wechat_task_terminal_kind(TaskStatus::Queued), None);
+    assert_eq!(wechat_task_terminal_kind(TaskStatus::Running), None);
+}
+
+#[test]
+fn context_token_cache_key_is_account_channel_peer_scoped() {
+    assert_ne!(
+        context_token_store_key("account-a", "peer"),
+        context_token_store_key("account-b", "peer")
+    );
+    assert_ne!(
+        context_token_store_key("account", "peer-a"),
+        context_token_store_key("account", "peer-b")
+    );
+}
+
+#[derive(Clone, Default)]
+struct TypingCapture {
+    statuses: Arc<Mutex<Vec<i64>>>,
+}
+
+async fn capture_typing(AxumState(capture): AxumState<TypingCapture>, body: Bytes) -> Json<Value> {
+    let value: Value = serde_json::from_slice(&body).expect("typing body");
+    capture
+        .statuses
+        .lock()
+        .expect("typing statuses")
+        .push(value["status"].as_i64().expect("typing status"));
+    Json(serde_json::json!({"ret": 0}))
+}
+
+#[tokio::test]
+async fn typing_heartbeat_finish_waits_for_exactly_one_cancel() {
+    let capture = TypingCapture::default();
+    let router = Router::new()
+        .route("/ilink/bot/sendtyping", post(capture_typing))
+        .with_state(capture.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind typing server");
+    let base_url = format!("http://{}", listener.local_addr().expect("typing addr"));
+    tokio::spawn(async move {
+        axum::serve(listener, router)
+            .await
+            .expect("serve typing capture");
+    });
+
+    let config = test_wechat_section("en-US", String::new());
+    let mut heartbeat = WechatTypingHeartbeat::start(
+        reqwest::Client::new(),
+        config,
+        base_url,
+        "test-token".to_string(),
+        "peer".to_string(),
+        "ticket".to_string(),
+        Duration::from_secs(60),
+    );
+    heartbeat.finish().await;
+
+    let statuses = capture.statuses.lock().expect("typing statuses").clone();
+    assert_eq!(statuses.first(), Some(&TYPING_STATUS_TYPING));
+    assert_eq!(statuses.last(), Some(&TYPING_STATUS_CANCEL));
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == TYPING_STATUS_CANCEL)
+            .count(),
+        1
+    );
 }

@@ -25,6 +25,7 @@ const FEISHU_MESSAGE_DOCS: &str =
 const LARK_FILE_DOCS: &str = "https://open.larksuite.com/document/server-docs/im-v1/file/create";
 const LARK_MESSAGE_DOCS: &str =
     "https://open.larksuite.com/document/server-docs/im-v1/message/create";
+const WECHAT_ILINK_DOCS: &str = "https://github.com/Tencent/openclaw-weixin#backend-api-protocol";
 const LOCAL_MEDIA_POLICY: &str = "policy:channel-media-safety-v1";
 const LOCAL_UI_POLICY: &str = "policy:web-ui-delivery-v1";
 const WHATSAPP_WEB_EVIDENCE: &str = "evidence:whatsapp-web-bridge-smoke-v1";
@@ -263,8 +264,8 @@ static CHANNEL_CAPABILITY_CATALOG: &[ChannelCapabilityRecord] = &[
         None,
         None,
         &[],
-        ChannelCapabilitySourceKind::LocalSafetyPolicy,
-        LOCAL_MEDIA_POLICY,
+        ChannelCapabilitySourceKind::OfficialContract,
+        WECHAT_ILINK_DOCS,
     ),
     capability(
         ChannelKind::Wechat,

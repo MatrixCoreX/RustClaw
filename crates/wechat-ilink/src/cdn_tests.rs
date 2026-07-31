@@ -13,7 +13,9 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-use super::{send_weixin_image_from_file, B64};
+use super::{
+    send_weixin_file_from_file, send_weixin_image_from_file, send_weixin_video_from_file, B64,
+};
 use crate::http::IlinkAuth;
 
 #[derive(Clone, Default)]
@@ -21,6 +23,7 @@ struct TestState {
     getuploadurl_body: Arc<Mutex<Option<Value>>>,
     sendmessage_body: Arc<Mutex<Option<Value>>>,
     upload_queries: Arc<Mutex<Vec<String>>>,
+    upload_full_url: Arc<Mutex<Option<String>>>,
 }
 
 async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> impl IntoResponse {
@@ -29,9 +32,15 @@ async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> imp
         .getuploadurl_body
         .lock()
         .expect("getuploadurl body lock") = Some(parsed);
+    let upload_full_url = state
+        .upload_full_url
+        .lock()
+        .expect("upload full URL lock")
+        .clone();
     Json(json!({
         "upload_param": "upload-token",
-        "thumb_upload_param": "thumb-upload-token"
+        "thumb_upload_param": "thumb-upload-token",
+        "upload_full_url": upload_full_url,
     }))
 }
 
@@ -40,7 +49,7 @@ async fn handle_upload(State(state): State<TestState>, uri: Uri) -> impl IntoRes
         .upload_queries
         .lock()
         .expect("upload queries lock")
-        .push(uri.query().unwrap_or_default().to_string());
+        .push(uri.to_string());
     let (legacy_param, query_param) = if uri
         .query()
         .unwrap_or_default()
@@ -84,6 +93,7 @@ async fn spawn_test_server() -> (SocketAddr, TestState) {
     let app = Router::new()
         .route("/ilink/bot/getuploadurl", post(handle_getuploadurl))
         .route("/upload", post(handle_upload))
+        .route("/upload-full", post(handle_upload))
         .route("/ilink/bot/sendmessage", post(handle_sendmessage))
         .with_state(state.clone());
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -96,11 +106,19 @@ async fn spawn_test_server() -> (SocketAddr, TestState) {
     (addr, state)
 }
 
+fn unique_temp_file(label: &str, extension: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "wechat-ilink-{label}-{}-{}.{}",
+        std::process::id(),
+        rand::random::<u64>(),
+        extension
+    ))
+}
+
 #[tokio::test]
 async fn send_weixin_image_matches_openclaw_weixin_message_shape() {
     let (addr, state) = spawn_test_server().await;
-    let temp_dir = std::env::temp_dir();
-    let file_path = temp_dir.join(format!("wechat-ilink-test-{}.png", std::process::id()));
+    let file_path = unique_temp_file("image", "png");
     tokio::fs::write(&file_path, b"fake-png-content")
         .await
         .expect("write temp image");
@@ -119,6 +137,7 @@ async fn send_weixin_image_matches_openclaw_weixin_message_shape() {
         &cdn_base,
         "wechat-user",
         Some("ctx-token"),
+        None,
         PathBuf::from(&file_path).as_path(),
         "test-channel",
         30_000,
@@ -193,4 +212,136 @@ async fn send_weixin_image_matches_openclaw_weixin_message_shape() {
         .any(|q| q.contains("thumb-upload-token")));
 
     let _ = tokio::fs::remove_file(&file_path).await;
+}
+
+#[tokio::test]
+async fn video_and_file_use_distinct_official_upload_and_item_types() {
+    let (addr, state) = spawn_test_server().await;
+    let client = Client::new();
+    let base = format!("http://{addr}");
+    let video_path = unique_temp_file("video", "mp4");
+    tokio::fs::write(&video_path, b"fake-video")
+        .await
+        .expect("write video");
+    send_weixin_video_from_file(
+        &client,
+        &base,
+        "bot-token",
+        IlinkAuth {
+            sk_route_tag: "",
+            wechat_uin_base64: "",
+        },
+        &base,
+        "wechat-user",
+        Some("ctx-token"),
+        Some("run-video"),
+        &video_path,
+        "test-channel",
+        30_000,
+    )
+    .await
+    .expect("send video");
+    let video_upload = state
+        .getuploadurl_body
+        .lock()
+        .expect("video upload body")
+        .clone()
+        .expect("captured video upload");
+    let video_message = state
+        .sendmessage_body
+        .lock()
+        .expect("video message body")
+        .clone()
+        .expect("captured video message");
+    assert_eq!(video_upload["media_type"], 2);
+    assert_eq!(video_message["msg"]["item_list"][0]["type"], 5);
+    assert_eq!(video_message["msg"]["run_id"], "run-video");
+    assert!(
+        video_message["msg"]["item_list"][0]["video_item"]["video_size"]
+            .as_i64()
+            .is_some_and(|size| size > 0)
+    );
+
+    let file_path = unique_temp_file("file", "pdf");
+    tokio::fs::write(&file_path, b"fake-document")
+        .await
+        .expect("write file");
+    send_weixin_file_from_file(
+        &client,
+        &base,
+        "bot-token",
+        IlinkAuth {
+            sk_route_tag: "",
+            wechat_uin_base64: "",
+        },
+        &base,
+        "wechat-user",
+        Some("ctx-token"),
+        Some("run-file"),
+        &file_path,
+        "report.pdf",
+        "test-channel",
+        30_000,
+    )
+    .await
+    .expect("send file");
+    let file_upload = state
+        .getuploadurl_body
+        .lock()
+        .expect("file upload body")
+        .clone()
+        .expect("captured file upload");
+    let file_message = state
+        .sendmessage_body
+        .lock()
+        .expect("file message body")
+        .clone()
+        .expect("captured file message");
+    assert_eq!(file_upload["media_type"], 3);
+    assert_eq!(file_message["msg"]["item_list"][0]["type"], 4);
+    assert_eq!(
+        file_message["msg"]["item_list"][0]["file_item"]["file_name"],
+        "report.pdf"
+    );
+    assert_eq!(
+        file_message["msg"]["item_list"][0]["file_item"]["len"],
+        "13"
+    );
+
+    let _ = tokio::fs::remove_file(video_path).await;
+    let _ = tokio::fs::remove_file(file_path).await;
+}
+
+#[tokio::test]
+async fn provider_upload_full_url_takes_precedence_over_legacy_url_construction() {
+    let (addr, state) = spawn_test_server().await;
+    *state.upload_full_url.lock().expect("set upload full URL") =
+        Some(format!("http://{addr}/upload-full"));
+    let path = unique_temp_file("full-url", "png");
+    tokio::fs::write(&path, b"fake-png")
+        .await
+        .expect("write image");
+
+    send_weixin_image_from_file(
+        &Client::new(),
+        &format!("http://{addr}"),
+        "bot-token",
+        IlinkAuth {
+            sk_route_tag: "",
+            wechat_uin_base64: "",
+        },
+        &format!("http://{addr}"),
+        "wechat-user",
+        Some("ctx-token"),
+        None,
+        &path,
+        "test-channel",
+        30_000,
+    )
+    .await
+    .expect("send image through full URL");
+
+    let uploads = state.upload_queries.lock().expect("upload paths").clone();
+    assert_eq!(uploads, vec!["/upload-full".to_string()]);
+    let _ = tokio::fs::remove_file(path).await;
 }

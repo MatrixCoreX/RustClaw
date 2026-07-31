@@ -8,6 +8,7 @@ use tracing::debug;
 
 use crate::config_section::WechatSection;
 use crate::ilink;
+use wechat_ilink::WechatConversationScope;
 
 const CONFIG_CACHE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 const CONFIG_CACHE_INITIAL_RETRY_MS: u64 = 2_000;
@@ -53,11 +54,13 @@ impl WeixinConfigManager {
         section: &WechatSection,
         base_url: &str,
         token: &str,
+        scope: &WechatConversationScope,
         user_id: &str,
         context_token: Option<&str>,
     ) -> String {
+        let cache_key = scope.storage_key();
         let now = Instant::now();
-        let should_fetch = match self.cache.get(user_id) {
+        let should_fetch = match self.cache.get(&cache_key) {
             None => true,
             Some(e) => now >= e.next_fetch_at,
         };
@@ -69,13 +72,13 @@ impl WeixinConfigManager {
                 Ok(Some(ticket)) => {
                     // ret == 0 from upstream; ticket may be empty (no typing support).
                     self.cache.insert(
-                        user_id.to_string(),
+                        cache_key.clone(),
                         CacheEntry {
                             config: CachedWeixinConfig {
                                 typing_ticket: ticket,
                             },
                             next_fetch_at: now
-                                + Duration::from_millis(cache_ttl_jitter_ms(user_id)),
+                                + Duration::from_millis(cache_ttl_jitter_ms(&cache_key)),
                             retry_delay_ms: CONFIG_CACHE_INITIAL_RETRY_MS,
                         },
                     );
@@ -103,7 +106,7 @@ impl WeixinConfigManager {
             }
 
             if !fetch_ok {
-                let entry = self.cache.get_mut(user_id);
+                let entry = self.cache.get_mut(&cache_key);
                 let now = Instant::now();
                 match entry {
                     Some(e) => {
@@ -113,7 +116,7 @@ impl WeixinConfigManager {
                     }
                     None => {
                         self.cache.insert(
-                            user_id.to_string(),
+                            cache_key.clone(),
                             CacheEntry {
                                 config: CachedWeixinConfig::default(),
                                 next_fetch_at: now
@@ -127,7 +130,7 @@ impl WeixinConfigManager {
         }
 
         self.cache
-            .get(user_id)
+            .get(&cache_key)
             .map(|e| e.config.typing_ticket.clone())
             .unwrap_or_default()
     }

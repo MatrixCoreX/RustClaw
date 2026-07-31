@@ -106,6 +106,34 @@ fn every_active_adapter_has_an_explicit_text_contract() {
 }
 
 #[test]
+fn wechat_wire_contract_is_official_but_unknown_size_limits_are_local_policy() {
+    let text = channel_capability(
+        ChannelAdapterKind::WechatIlink,
+        ChannelCapabilityKind::SendText,
+    )
+    .expect("wechat text contract");
+    assert_eq!(
+        text.source_kind,
+        ChannelCapabilitySourceKind::OfficialContract
+    );
+    assert!(text.source_ref.contains("Tencent/openclaw-weixin"));
+
+    for capability in [
+        ChannelCapabilityKind::SendImage,
+        ChannelCapabilityKind::SendVideo,
+        ChannelCapabilityKind::SendFile,
+    ] {
+        let media = channel_capability(ChannelAdapterKind::WechatIlink, capability)
+            .expect("wechat media policy");
+        assert_eq!(
+            media.source_kind,
+            ChannelCapabilitySourceKind::LocalSafetyPolicy
+        );
+        assert!(media.source_ref.starts_with("policy:"));
+    }
+}
+
+#[test]
 fn whatsapp_upload_specs_are_constrained_by_the_catalog_contract() {
     use std::path::Path;
 

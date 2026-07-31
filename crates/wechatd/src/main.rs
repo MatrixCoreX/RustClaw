@@ -53,7 +53,8 @@ use wechat_ilink::http::IlinkAuth;
 use wechat_ilink::{
     download_decrypted_media, download_remote_media_to_temp, parse_aes_key_base64,
     parse_aes_key_hex_or_base64_media, send_weixin_file_from_file, send_weixin_image_from_file,
-    send_weixin_video_from_file,
+    send_weixin_video_from_file, WechatConversationScope, WechatMessageItem,
+    WechatSendMessageRequest, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
 };
 
 const SESSION_EXPIRED_ERRCODE: i64 = -14;
@@ -299,35 +300,6 @@ struct VoiceItem {
     text: Option<String>,
     #[serde(default)]
     media: Option<CdnMedia>,
-}
-
-#[derive(Serialize)]
-struct SendMessageReq {
-    msg: OutboundMessage,
-    base_info: ilink::BaseInfo,
-}
-
-#[derive(Serialize)]
-struct OutboundMessage {
-    from_user_id: String,
-    to_user_id: String,
-    client_id: String,
-    message_type: i64,
-    message_state: i64,
-    item_list: Vec<OutboundMessageItem>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context_token: Option<String>,
-}
-
-#[derive(Serialize)]
-struct OutboundMessageItem {
-    r#type: i64,
-    text_item: OutboundTextItem,
-}
-
-#[derive(Serialize)]
-struct OutboundTextItem {
-    text: String,
 }
 
 #[derive(Deserialize)]

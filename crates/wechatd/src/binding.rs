@@ -29,25 +29,34 @@ pub(super) fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> 
         })
 }
 
-pub(super) async fn should_expect_key_reply(state: &State, external_user_id: &str) -> bool {
+pub(super) async fn should_expect_key_reply(
+    state: &State,
+    scope: &WechatConversationScope,
+) -> bool {
     state
         .pending_key_bind_by_user
         .read()
         .await
-        .contains(external_user_id)
+        .contains(&scope.storage_key())
 }
 
-pub(super) async fn set_expect_key_reply(state: &State, external_user_id: &str, enabled: bool) {
+pub(super) async fn set_expect_key_reply(
+    state: &State,
+    scope: &WechatConversationScope,
+    enabled: bool,
+) {
+    let key = scope.storage_key();
     let mut guard = state.pending_key_bind_by_user.write().await;
     if enabled {
-        guard.insert(external_user_id.to_string());
+        guard.insert(key);
     } else {
-        guard.remove(external_user_id);
+        guard.remove(&key);
     }
 }
 
 pub(super) async fn ensure_bound_before_task(
     state: &State,
+    scope: &WechatConversationScope,
     from_user_id: &str,
     context_token: Option<&str>,
     text_for_binding: Option<&str>,
@@ -56,7 +65,7 @@ pub(super) async fn ensure_bound_before_task(
         &state.client,
         &state.config.clawd_base_url,
         from_user_id,
-        from_user_id,
+        &scope.storage_key(),
     )
     .await
     {
@@ -66,43 +75,58 @@ pub(super) async fn ensure_bound_before_task(
             return None;
         }
     };
+    let identity = if identity.is_some() {
+        identity
+    } else {
+        // Read-only compatibility for bindings created before account-scoped
+        // conversation IDs. New writes always use the scoped key.
+        resolve_wechat_identity(
+            &state.client,
+            &state.config.clawd_base_url,
+            from_user_id,
+            from_user_id,
+        )
+        .await
+        .ok()
+        .flatten()
+    };
     if let Some(identity) = identity {
-        set_expect_key_reply(state, from_user_id, false).await;
+        set_expect_key_reply(state, scope, false).await;
         return Some(identity);
     }
 
     if let Some(text) = text_for_binding {
         let trimmed = text.trim();
         if is_unbound_allowed_command(trimmed) {
-            set_expect_key_reply(state, from_user_id, true).await;
+            set_expect_key_reply(state, scope, true).await;
             let reply = wechat_t(&state.config, WECHAT_BIND_HELP_KEY);
             send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
             return None;
         }
-        let expect_key_reply = should_expect_key_reply(state, from_user_id).await;
+        let expect_key_reply = should_expect_key_reply(state, scope).await;
         if let Some(candidate) = extract_bind_key_candidate(trimmed, expect_key_reply) {
             match bind_wechat_identity(
                 &state.client,
                 &state.config.clawd_base_url,
                 from_user_id,
-                from_user_id,
+                &scope.storage_key(),
                 &candidate,
             )
             .await
             {
                 Ok(Some(_)) => {
-                    set_expect_key_reply(state, from_user_id, false).await;
+                    set_expect_key_reply(state, scope, false).await;
                     let reply = wechat_t(&state.config, WECHAT_BIND_SUCCESS_KEY);
                     send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
                 Ok(None) => {
-                    set_expect_key_reply(state, from_user_id, true).await;
+                    set_expect_key_reply(state, scope, true).await;
                     let reply = wechat_t(&state.config, WECHAT_BIND_INVALID_KEY);
                     send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
                 Err(err) => {
                     warn!("wechatd: bind request failed err={}", err);
-                    set_expect_key_reply(state, from_user_id, true).await;
+                    set_expect_key_reply(state, scope, true).await;
                     let reply = wechat_t(&state.config, WECHAT_BIND_REQUEST_FAILED_KEY);
                     send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
@@ -111,7 +135,7 @@ pub(super) async fn ensure_bound_before_task(
         }
     }
 
-    set_expect_key_reply(state, from_user_id, true).await;
+    set_expect_key_reply(state, scope, true).await;
     let reply = wechat_t(&state.config, WECHAT_BIND_REQUIRED_FOR_CHAT_KEY);
     send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
     None

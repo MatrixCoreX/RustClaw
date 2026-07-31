@@ -152,7 +152,9 @@ pub(super) fn normalized_context_token(context_token: Option<&str>) -> Option<&s
 }
 
 pub(super) fn context_token_store_key(account_id: &str, user_id: &str) -> String {
-    format!("{account_id}:{user_id}")
+    WechatConversationScope::wechat_ilink(account_id, user_id)
+        .map(|scope| scope.storage_key())
+        .unwrap_or_default()
 }
 
 pub(super) fn session_account_id(session: Option<&PersistedSession>) -> String {
