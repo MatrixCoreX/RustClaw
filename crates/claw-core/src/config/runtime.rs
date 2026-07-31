@@ -20,6 +20,10 @@ impl AppConfig {
                 config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false),
             )
             .add_source(config::File::from(base_dir.join("channels/webd.toml")).required(false))
+            // Agent definitions have one canonical write target. Keeping this
+            // source last lets it replace legacy channel-embedded `[[agents]]`
+            // while preserving read compatibility when agents.toml is absent.
+            .add_source(config::File::from(base_dir.join("agents.toml")).required(false))
             .build()?;
         let mut app: AppConfig = cfg.try_deserialize()?;
 
@@ -182,6 +186,27 @@ impl AppConfig {
             if !seen.insert(preferred_id.clone()) {
                 continue;
             }
+            let legacy_persona = agent.persona_prompt.trim();
+            let persona_fragment = if agent.persona_fragment.trim().is_empty() {
+                legacy_persona.to_string()
+            } else {
+                agent.persona_fragment.trim().to_string()
+            };
+            let requested_profile = if !legacy_persona.is_empty() {
+                "custom"
+            } else {
+                agent.persona_profile.trim()
+            };
+            let (persona_profile, profile_known) =
+                normalize_agent_persona_profile(requested_profile);
+            if !profile_known && !requested_profile.is_empty() {
+                tracing::warn!(
+                    agent_id = %preferred_id,
+                    requested_profile = %requested_profile,
+                    fallback_profile = "inherit",
+                    "unknown agent persona profile; using safe fallback"
+                );
+            }
             agents.push(AgentConfig {
                 id: preferred_id.clone(),
                 name: if agent.name.trim().is_empty() {
@@ -194,7 +219,9 @@ impl AppConfig {
                     agent.name.trim().to_string()
                 },
                 description: agent.description.trim().to_string(),
-                persona_prompt: agent.persona_prompt.trim().to_string(),
+                persona_profile: persona_profile.to_string(),
+                persona_fragment,
+                persona_prompt: String::new(),
                 preferred_vendor: agent
                     .preferred_vendor
                     .as_deref()
@@ -245,16 +272,32 @@ fn apply_string_env(target: &mut String, key: &str) {
     }
 }
 
-fn apply_llm_vendor_api_key_env(target: &mut Option<LlmVendorConfig>, key: &str) {
-    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
-        cfg.api_key = value;
+pub(super) fn apply_llm_vendor_api_key_envs_with<F>(
+    target: &mut Option<LlmVendorConfig>,
+    vendor: &str,
+    env_value: F,
+) where
+    F: Fn(&str) -> Option<String>,
+{
+    // Text-model credentials are runtime secrets. Ignore legacy TOML values so
+    // a copied configuration cannot silently carry a working credential.
+    if let Some(cfg) = target.as_mut() {
+        cfg.api_key.clear();
+    }
+    for key in super::llm_vendor_api_key_env_names(vendor) {
+        if let (Some(value), Some(cfg)) = (
+            env_value(key)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty() && !value.starts_with("REPLACE_ME")),
+            target.as_mut(),
+        ) {
+            cfg.api_key = value;
+        }
     }
 }
 
 fn apply_llm_vendor_api_key_envs(target: &mut Option<LlmVendorConfig>, vendor: &str) {
-    for key in super::llm_vendor_api_key_env_names(vendor) {
-        apply_llm_vendor_api_key_env(target, key);
-    }
+    apply_llm_vendor_api_key_envs_with(target, vendor, env_non_empty);
 }
 
 fn apply_env_overrides(app: &mut AppConfig) {

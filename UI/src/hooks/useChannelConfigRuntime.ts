@@ -155,7 +155,6 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bots: normalizedBots,
-          agents: telegramConfigDraft.agents ?? [],
         }),
       });
       const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;

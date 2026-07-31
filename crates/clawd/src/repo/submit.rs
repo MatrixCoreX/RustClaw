@@ -406,6 +406,7 @@ pub(crate) fn build_submit_task_payload(
     normalized_external_chat_id: Option<&str>,
     effective_user_key: Option<&str>,
     effective_agent_id: &str,
+    agent_runtime_snapshot: Option<Value>,
     call_id: &str,
 ) -> Value {
     if let Some(obj) = payload.as_object_mut() {
@@ -427,6 +428,9 @@ pub(crate) fn build_submit_task_payload(
             "agent_id".to_string(),
             Value::String(effective_agent_id.to_string()),
         );
+        if let Some(snapshot) = agent_runtime_snapshot {
+            obj.insert("agent_runtime_snapshot".to_string(), snapshot);
+        }
         obj.insert("call_id".to_string(), Value::String(call_id.to_string()));
     }
     payload

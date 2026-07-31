@@ -1,4 +1,5 @@
-use super::{llm_vendor_api_key_env_names, AppConfig, SkillsConfig, ToolsConfig};
+use super::runtime::apply_llm_vendor_api_key_envs_with;
+use super::{llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, SkillsConfig, ToolsConfig};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
@@ -28,6 +29,43 @@ fn llm_vendor_api_key_env_names_are_shared_by_runtime_and_ui_status() {
 }
 
 #[test]
+fn llm_api_key_from_toml_is_not_runtime_authority() {
+    let mut provider = Some(
+        toml::from_str::<LlmVendorConfig>(
+            r#"
+base_url = "https://api.minimaxi.com/v1"
+api_key = "legacy-config-secret"
+model = "MiniMax-M3"
+"#,
+        )
+        .expect("parse vendor config"),
+    );
+    apply_llm_vendor_api_key_envs_with(&mut provider, "minimax", |_| None);
+    assert!(provider
+        .as_ref()
+        .expect("minimax config")
+        .api_key
+        .is_empty());
+
+    apply_llm_vendor_api_key_envs_with(&mut provider, "minimax", |_| {
+        Some("REPLACE_ME_MINIMAX_API_KEY".to_string())
+    });
+    assert!(provider
+        .as_ref()
+        .expect("minimax config")
+        .api_key
+        .is_empty());
+
+    apply_llm_vendor_api_key_envs_with(&mut provider, "minimax", |name| {
+        (name == "MINIMAX_API_KEY").then(|| " environment-secret ".to_string())
+    });
+    assert_eq!(
+        provider.expect("minimax config").api_key,
+        "environment-secret"
+    );
+}
+
+#[test]
 fn app_config_load_allows_missing_telegram_split_config() {
     let dir = unique_temp_config_dir("missing-telegram");
     fs::create_dir_all(&dir).expect("create temp config dir");
@@ -53,6 +91,105 @@ busy_timeout_ms = 2000
     assert!(cfg.telegram.bot_token.is_empty());
     assert_eq!(cfg.telegram.agent_id, "main");
     assert!(cfg.telegram_runtime_bots().is_empty());
+
+    fs::remove_dir_all(dir).expect("remove temp config dir");
+}
+
+#[test]
+fn agents_toml_is_the_canonical_agent_source() {
+    let dir = unique_temp_config_dir("canonical-agents");
+    fs::create_dir_all(dir.join("channels")).expect("create temp config dir");
+    let config_path = dir.join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[server]
+request_timeout_seconds = 30
+
+[database]
+sqlite_path = "data/test.db"
+busy_timeout_ms = 2000
+
+[worker]
+"#,
+    )
+    .expect("write base config");
+    fs::write(
+        dir.join("channels/telegram.toml"),
+        r#"
+[[agents]]
+id = "legacy"
+name = "Legacy"
+"#,
+    )
+    .expect("write legacy channel agents");
+    fs::write(
+        dir.join("agents.toml"),
+        r#"
+schema_version = 1
+
+[[agents]]
+id = "main"
+name = "Primary"
+persona_profile = "teacher"
+"#,
+    )
+    .expect("write canonical agents");
+
+    let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
+        .expect("canonical agents config should load");
+    let agents = cfg.normalized_agents();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].id, "main");
+    assert_eq!(agents[0].name, "Primary");
+    assert_eq!(agents[0].persona_profile, "teacher");
+
+    fs::remove_dir_all(dir).expect("remove temp config dir");
+}
+
+#[test]
+fn legacy_persona_prompt_maps_to_custom_and_unknown_profile_falls_back() {
+    let dir = unique_temp_config_dir("agent-persona-compat");
+    fs::create_dir_all(&dir).expect("create temp config dir");
+    let config_path = dir.join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[server]
+request_timeout_seconds = 30
+
+[database]
+sqlite_path = "data/test.db"
+busy_timeout_ms = 2000
+
+[worker]
+
+[[agents]]
+id = "legacy"
+persona_prompt = "语气温和"
+
+[[agents]]
+id = "unknown"
+persona_profile = "not-a-profile"
+"#,
+    )
+    .expect("write compatibility config");
+
+    let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
+        .expect("legacy agent config should load");
+    let agents = cfg.normalized_agents();
+    let legacy = agents
+        .iter()
+        .find(|agent| agent.id == "legacy")
+        .expect("legacy agent");
+    assert_eq!(legacy.persona_profile, "custom");
+    assert_eq!(legacy.persona_fragment, "语气温和");
+    assert!(legacy.persona_prompt.is_empty());
+    let unknown = agents
+        .iter()
+        .find(|agent| agent.id == "unknown")
+        .expect("unknown agent");
+    assert_eq!(unknown.persona_profile, "inherit");
 
     fs::remove_dir_all(dir).expect("remove temp config dir");
 }

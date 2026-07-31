@@ -17,6 +17,7 @@ const t = (zh: string, _en: string) => zh;
 function thread(id: string, status: "queued" | "running" | "succeeded"): ChatThreadRecord {
   return {
     id,
+    agentId: "main",
     title: id,
     messages: [{ id: `u-${id}`, role: "user", text: id, ts: 1 }],
     input: id === "draft" ? "尚未发送的内容" : "",
@@ -174,6 +175,7 @@ test("paged restore drops completed cache copies but preserves drafts and pendin
 test("refresh restore selects newest server history instead of an empty welcome thread", () => {
   const pristineWelcome: ChatThreadRecord = {
     id: "empty-refresh-thread",
+    agentId: "main",
     title: "新任务",
     messages: [
       {

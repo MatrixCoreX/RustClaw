@@ -271,6 +271,7 @@ fn insert_turn(state: &AppState, fixture: TurnFixture<'_>) {
             fixture.user_key,
             json!({
                 "conversation_id": fixture.conversation_id,
+                "agent_id": "main",
                 "text": fixture.text,
                 "attachments": [
                     {"kind": "image", "path": "data/task-inputs/image.png"},
@@ -321,6 +322,7 @@ fn owner_history_is_bounded_structured_and_cursor_paged() {
     assert!(first.truncated);
     assert_eq!(first.turns.len(), 1);
     assert_eq!(first.turns[0].task_id, second_id.to_string());
+    assert_eq!(first.turns[0].agent_id.as_deref(), Some("main"));
     assert_eq!(first.turns[0].attachment_count, 2);
     assert_eq!(first.turns[0].attachment_kinds, ["file", "image"]);
     assert_eq!(first.content_sha256.len(), 64);

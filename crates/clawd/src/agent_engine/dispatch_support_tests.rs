@@ -140,7 +140,8 @@ fn test_state_with_registry_excluding(disabled: &[&str]) -> AppState {
         .collect::<HashSet<_>>();
     AppState {
         core: crate::CoreServices {
-            agents_by_id: Arc::new(agents_by_id),
+            agents_by_id: Arc::new(std::sync::RwLock::new(Arc::new(agents_by_id))),
+            agent_runtime_leases: Arc::new(std::sync::RwLock::new(HashMap::new())),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
                 binding: Default::default(),
                 registry: Some(Arc::new(registry)),

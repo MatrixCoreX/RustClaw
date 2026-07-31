@@ -46,31 +46,46 @@ async fn update_telegram_config(
     headers: HeaderMap,
     Json(req): Json<UpdateTelegramConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<TelegramConfigResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
-    }
-
-    let normalized_agents = match normalize_agent_items(&req.agents) {
-        Ok(items) => items,
-        Err(err) => {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
             return (
-                StatusCode::BAD_REQUEST,
+                status,
                 Json(ApiResponse {
-                    ok: false,
+                    ok: resp.ok,
                     data: None,
-                    error: Some(err.to_string()),
+                    error: resp.error,
                 }),
             );
         }
     };
-    let known_agent_ids = normalized_agents
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("admin_required".to_string()),
+            }),
+        );
+    }
+
+    let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let existing_config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
+        Ok(config) => config,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read telegram config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let current_agents = agents_from_config(&existing_config);
+    let known_agent_ids = current_agents
         .iter()
         .map(|agent| agent.id.clone())
         .collect::<std::collections::HashSet<_>>();
@@ -87,20 +102,13 @@ async fn update_telegram_config(
             );
         }
     };
-    let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
-    let existing_config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
-        Ok(config) => config,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read telegram config failed: {err}")),
-                }),
-            );
-        }
-    };
+    if !req.agents.is_empty() {
+        tracing::info!(
+            legacy_agent_count = req.agents.len(),
+            result = "ignored_use_agents_config_api",
+            "telegram_config_legacy_agent_write"
+        );
+    }
     let existing_bot_tokens = telegram_bot_tokens_from_config(&existing_config);
     let effective_bots = normalized
         .iter()
@@ -265,52 +273,9 @@ async fn update_telegram_config(
         toml::Value::Boolean(primary_bot_token_enabled),
     );
     if let Some(root_table) = value.as_table_mut() {
-        root_table.insert(
-            "agents".to_string(),
-            toml::Value::Array(
-                normalized_agents
-                    .iter()
-                    .map(|agent| {
-                        let mut table = toml::map::Map::new();
-                        table.insert("id".to_string(), toml::Value::String(agent.id.clone()));
-                        table.insert("name".to_string(), toml::Value::String(agent.name.clone()));
-                        if !agent.description.trim().is_empty() {
-                            table.insert(
-                                "description".to_string(),
-                                toml::Value::String(agent.description.clone()),
-                            );
-                        }
-                        table.insert(
-                            "persona_prompt".to_string(),
-                            toml::Value::String(agent.persona_prompt.clone()),
-                        );
-                        if let Some(vendor) = agent.preferred_vendor.as_ref() {
-                            table.insert(
-                                "preferred_vendor".to_string(),
-                                toml::Value::String(vendor.clone()),
-                            );
-                        }
-                        if let Some(model) = agent.preferred_model.as_ref() {
-                            table.insert(
-                                "preferred_model".to_string(),
-                                toml::Value::String(model.clone()),
-                            );
-                        }
-                        table.insert(
-                            "allowed_skills".to_string(),
-                            toml::Value::Array(
-                                agent
-                                    .allowed_skills
-                                    .iter()
-                                    .map(|skill| toml::Value::String(skill.clone()))
-                                    .collect(),
-                            ),
-                        );
-                        toml::Value::Table(table)
-                    })
-                    .collect(),
-            ),
-        );
+        // Agent definitions are read from configs/agents.toml. Remove any
+        // legacy copy instead of creating a second write authority here.
+        root_table.remove("agents");
     }
 
     let output = match toml::to_string_pretty(&value) {
@@ -348,7 +313,7 @@ async fn update_telegram_config(
             data: Some(TelegramConfigResponse {
                 config_path: "configs/channels/telegram.toml".to_string(),
                 bots: telegram_bots_from_config(&existing_config),
-                agents: normalized_agents,
+                agents: current_agents,
                 restart_required: true,
             }),
             error: None,

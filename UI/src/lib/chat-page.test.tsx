@@ -17,6 +17,7 @@ function props(): ComponentProps<typeof ChatPage> {
     chatThreads: [
       {
         id: "chat-thread-one",
+        agentId: "main",
         title: "自定义任务",
         preview: "检查任务名称操作",
         updatedAt: 1,
@@ -28,6 +29,9 @@ function props(): ComponentProps<typeof ChatPage> {
       },
     ],
     activeChatThreadId: "chat-thread-one",
+    availableAgents: [{ id: "main", name: "Main" }],
+    activeChatAgentId: "main",
+    activeChatCanChangeAgent: true,
     chatInput: "",
     chatAttachments: [],
     chatTeachingMode: false,
@@ -55,6 +59,7 @@ function props(): ComponentProps<typeof ChatPage> {
     onSelectChatTeachingRun: () => {},
     onCreateNewChatThread: () => {},
     onSelectChatThread: () => {},
+    onActiveChatAgentChange: () => {},
     onRenameChatThread: async () => true,
     onDeleteChatThread: async () => true,
     onLoadEarlierConversationHistory: () => {},

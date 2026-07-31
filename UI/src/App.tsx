@@ -67,6 +67,7 @@ import {
 import { useWechatRuntime } from "./hooks/useWechatRuntime";
 import { useChannelBindRuntime, useFeishuBindRuntime } from "./hooks/useFeishuBindRuntime";
 import { useChatRuntime } from "./hooks/useChatRuntime";
+import { useAgentConfigRuntime } from "./hooks/useAgentConfigRuntime";
 import { useTaskRuntime } from "./hooks/useTaskRuntime";
 import { useSystemRuntime } from "./hooks/useSystemRuntime";
 import { useConsoleProjections } from "./hooks/useConsoleProjections";
@@ -261,6 +262,22 @@ export default function App() {
   const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
   const {
+    agentConfig,
+    agentConfigLoading,
+    agentConfigSaving,
+    agentConfigError,
+    agentConfigMessage,
+    fetchAgentConfig,
+    saveAgentPersona,
+  } = useAgentConfigRuntime({ apiFetch, t, enabled: uiAuthReady });
+  const availableAgents = useMemo(
+    () => (agentConfig?.agents ?? []).map((agent) => ({ id: agent.id, name: agent.name })),
+    [agentConfig?.agents],
+  );
+  const defaultAgentId = availableAgents.some((agent) => agent.id === "main")
+    ? "main"
+    : availableAgents[0]?.id ?? "main";
+  const {
     nniStatus,
     nniStatusLoading,
     nniStatusError,
@@ -428,7 +445,6 @@ export default function App() {
     llmConfigSaving,
     llmConfigSaveMessage,
     llmDraftBaseUrl,
-    llmDraftApiKey,
     llmDraftApiFormat,
     llmTestLoading,
     llmTestMessage,
@@ -454,7 +470,6 @@ export default function App() {
     hasUnsavedMultimodalChanges,
     setLlmDraftModel,
     setLlmDraftBaseUrl,
-    setLlmDraftApiKey,
     setLlmDraftApiFormat,
     setModelsAdvancedOpen,
     fetchLlmConfig,
@@ -676,6 +691,8 @@ export default function App() {
     chatTeachingLlmDebugError,
     chatTeachingRuns,
     activeChatTeachingRunId,
+    activeChatAgentId,
+    activeChatCanChangeAgent,
     chatSending,
     chatWorking,
     chatActivity,
@@ -693,6 +710,7 @@ export default function App() {
     selectChatTeachingRun,
     createNewChatThread,
     selectChatThread,
+    setActiveChatAgentId,
     renameChatThread,
     deleteChatThread,
     loadEarlierConversationHistory,
@@ -719,6 +737,8 @@ export default function App() {
     conversationHistoryScope: activeConversationHistoryScope,
     interactionExternalUserId,
     interactionExternalChatId,
+    availableAgents,
+    defaultAgentId,
     fetchTaskById,
     onTaskSubmitted: markTaskSubmitted,
     onTaskResult: recordTaskResult,
@@ -1545,6 +1565,11 @@ export default function App() {
               isOnline={isOnline}
               queueLength={health?.queue_length ?? 0}
               runningOldestAgeLabel={formatDuration(health?.running_oldest_age_seconds)}
+              agentConfig={agentConfig}
+              agentConfigLoading={agentConfigLoading}
+              agentConfigSaving={agentConfigSaving}
+              agentConfigError={agentConfigError}
+              agentConfigMessage={agentConfigMessage}
               onSetCurrentPage={setCurrentPage}
               onFetchWorkspaceUpdateStatus={() => fetchWorkspaceUpdateStatus(false)}
               onFetchNginxStatus={() => fetchNginxStatus(false)}
@@ -1558,6 +1583,8 @@ export default function App() {
               onFetchHostSystemSummary={fetchHostSystemSummary}
               onFetchHostDependencies={() => fetchHostDependencies(false)}
               onInstallHostDependency={installHostDependency}
+              onFetchAgentConfig={fetchAgentConfig}
+              onSaveAgentPersona={saveAgentPersona}
               workspaceUpdateStepLabel={workspaceUpdateStepLabel}
               workspaceUpdateStatusLabel={workspaceUpdateStatusLabel}
               workspaceUpdateTimeLabel={workspaceUpdateTimeLabel}
@@ -1572,6 +1599,9 @@ export default function App() {
               chatMessages={chatMessages}
               chatThreads={chatThreads}
               activeChatThreadId={activeChatThreadId}
+              availableAgents={availableAgents}
+              activeChatAgentId={activeChatAgentId}
+              activeChatCanChangeAgent={activeChatCanChangeAgent}
               chatInput={chatInput}
               chatAttachments={chatAttachments}
               chatTeachingMode={chatTeachingMode}
@@ -1599,6 +1629,7 @@ export default function App() {
               onSelectChatTeachingRun={selectChatTeachingRun}
               onCreateNewChatThread={createNewChatThread}
               onSelectChatThread={selectChatThread}
+              onActiveChatAgentChange={setActiveChatAgentId}
               onRenameChatThread={renameChatThread}
               onDeleteChatThread={deleteChatThread}
               onLoadEarlierConversationHistory={loadEarlierConversationHistory}
@@ -1821,7 +1852,6 @@ export default function App() {
               llmDraftModel={llmDraftModel}
               llmDraftBaseUrl={llmDraftBaseUrl}
               llmDraftApiFormat={llmDraftApiFormat}
-              llmDraftApiKey={llmDraftApiKey}
               llmConfigError={llmConfigError}
               llmConfigSaveMessage={llmConfigSaveMessage}
               llmTestMessage={llmTestMessage}
@@ -1846,7 +1876,6 @@ export default function App() {
               onLlmDraftModelChange={setLlmDraftModel}
               onLlmDraftBaseUrlChange={setLlmDraftBaseUrl}
               onLlmDraftApiFormatChange={setLlmDraftApiFormat}
-              onLlmDraftApiKeyChange={setLlmDraftApiKey}
               onTestLlmConfig={testLlmConfig}
               onSaveLlmConfig={saveLlmConfig}
               onToggleModelsAdvanced={() => setModelsAdvancedOpen((open) => !open)}

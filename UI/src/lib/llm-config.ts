@@ -1,7 +1,6 @@
 export interface LlmVendorSnapshot {
   name: string;
   base_url: string;
-  api_key?: string;
   api_format?: string;
 }
 
@@ -12,7 +11,6 @@ export interface LlmDirtyStateInput {
   draftVendor: string;
   draftModel: string;
   draftBaseUrl: string;
-  draftApiKey: string;
   draftApiFormat: string;
 }
 
@@ -69,7 +67,6 @@ export function hasUnsavedLlmDraftChanges(input: LlmDirtyStateInput | null | und
     input.draftVendor.trim() !== input.selectedVendor.trim() ||
     input.draftModel.trim() !== input.selectedModel.trim() ||
     input.draftBaseUrl.trim() !== (savedVendor?.base_url || "").trim() ||
-    input.draftApiKey !== (savedVendor?.api_key || "") ||
     (shouldCompareApiFormat &&
       normalizeLlmApiFormat(input.draftApiFormat) !== normalizeLlmApiFormat(savedVendor?.api_format))
   );

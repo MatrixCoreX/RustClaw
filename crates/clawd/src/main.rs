@@ -71,6 +71,7 @@ mod output_contract_verifier;
 mod output_paths;
 #[cfg(test)]
 mod package_commands;
+mod persona_style;
 mod pipeline_types;
 mod policy_decision;
 mod process_sandbox;
@@ -185,15 +186,17 @@ pub(crate) use repo::{
     TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
+#[cfg(test)]
+pub(crate) use runtime::AgentRuntimeConfig;
 pub(crate) use runtime::{
     assemble_skill_views_snapshot, build_skill_views_with_overlay, llm_model_kind, llm_vendor_name,
-    load_skill_admission_snapshot, log_ask_transition, reload_skill_views, AgentAction,
-    AgentRuntimeConfig, AppState, AskReply, AskState, AskStateRegistry, AskTransition,
-    ChannelConfig, ClaimedTask, CommandIntentRuntime, CoreServices, LlmCallSequenceEntry,
-    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
-    PolicyConfig, RateLimiter, ReloadContext, RuntimeChannel, ScheduleIntentOutput,
-    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskCostBlocker,
-    TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
+    load_skill_admission_snapshot, log_ask_transition, reload_skill_views, AgentAction, AppState,
+    AskReply, AskState, AskStateRegistry, AskTransition, ChannelConfig, ClaimedTask,
+    CommandIntentRuntime, CoreServices, LlmCallSequenceEntry, LlmPromptBucket, LlmProviderRuntime,
+    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
+    RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillRuntime,
+    SkillViewsSnapshot, TaskCostBlocker, TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy,
+    WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::canonical_skill_name;
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -652,24 +655,11 @@ async fn run() -> anyhow::Result<()> {
     let active_provider_type = llm_providers
         .first()
         .map(|p| p.config.provider_type.clone());
-    let normalized_agents = config.normalized_agents();
-    let mut agents_by_id = HashMap::new();
-    for agent in &normalized_agents {
-        let override_providers =
-            if agent.preferred_vendor.is_some() || agent.preferred_model.is_some() {
-                llm_gateway::build_providers_for_selection(
-                    &config,
-                    agent.preferred_vendor.as_deref(),
-                    agent.preferred_model.as_deref(),
-                )
-            } else {
-                Vec::new()
-            };
-        agents_by_id.insert(
-            agent.id.clone(),
-            AgentRuntimeConfig::from_config(agent, override_providers),
-        );
-    }
+    let agents_by_id = runtime::provider_runtime::build_agent_runtime_snapshot(&config);
+    let agent_runtime_leases = agents_by_id
+        .values()
+        .map(|agent| (agent.runtime_digest.clone(), agent.clone()))
+        .collect();
 
     let telegram_runtime_bots = config.telegram_runtime_bots();
     let telegram_bot_token = telegram_runtime_bots
@@ -804,7 +794,8 @@ async fn run() -> anyhow::Result<()> {
             audit_db: audit_db_pool,
             skill_storage,
             llm_providers,
-            agents_by_id: Arc::new(agents_by_id),
+            agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
+            agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
@@ -1265,6 +1256,7 @@ async fn submit_task(
         normalized_external_chat_id.as_deref(),
         effective_user_key.as_deref(),
         &effective_agent_id,
+        state.agent_task_snapshot(&effective_agent_id),
         &call_id,
     );
     let payload_text = payload.to_string();

@@ -13,7 +13,9 @@ mod policy_tests;
 pub(crate) use ask_state::{log_ask_transition, AskState, AskTransition};
 pub(crate) use llm_cost::LlmCostBudgetSnapshot;
 pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolicy};
-pub(crate) use provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};
+#[cfg(test)]
+pub(crate) use provider_runtime::AgentRuntimeConfig;
+pub(crate) use provider_runtime::LlmProviderRuntime;
 pub(crate) use state::{
     assemble_skill_views_snapshot, build_skill_views_with_overlay, load_skill_admission_snapshot,
     reload_skill_views, AppState, AskStateRegistry, ChannelConfig, ClaimedTask, CoreServices,

@@ -1,0 +1,25 @@
+schema_version = 1
+
+[profiles.companion]
+zh_cn = "和你一起看："
+en = "Let's look at this together:"
+
+[profiles.expert]
+zh_cn = "专业说明："
+en = "Professional note:"
+
+[profiles.teacher]
+zh_cn = "一步步说明："
+en = "Step by step:"
+
+[profiles.advisor]
+zh_cn = "给你的建议："
+en = "Suggested approach:"
+
+[profiles.reviewer]
+zh_cn = "审慎复核："
+en = "Careful review:"
+
+[profiles.custom]
+zh_cn = "按你选择的语气来说："
+en = "In your chosen tone:"

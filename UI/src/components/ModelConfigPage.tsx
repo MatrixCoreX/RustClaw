@@ -22,7 +22,6 @@ export interface ModelConfigPageProps {
   llmDraftModel: string;
   llmDraftBaseUrl: string;
   llmDraftApiFormat: string;
-  llmDraftApiKey: string;
   llmConfigError: string | null;
   llmConfigSaveMessage: string | null;
   llmTestMessage: string | null;
@@ -47,7 +46,6 @@ export interface ModelConfigPageProps {
   onLlmDraftModelChange: (value: string) => void;
   onLlmDraftBaseUrlChange: (value: string) => void;
   onLlmDraftApiFormatChange: (value: string) => void;
-  onLlmDraftApiKeyChange: (value: string) => void;
   onTestLlmConfig: () => unknown | Promise<unknown>;
   onSaveLlmConfig: () => unknown | Promise<unknown>;
   onToggleModelsAdvanced: () => void;
@@ -72,7 +70,6 @@ export function ModelConfigPage({
   llmDraftModel,
   llmDraftBaseUrl,
   llmDraftApiFormat,
-  llmDraftApiKey,
   llmConfigError,
   llmConfigSaveMessage,
   llmTestMessage,
@@ -97,7 +94,6 @@ export function ModelConfigPage({
   onLlmDraftModelChange,
   onLlmDraftBaseUrlChange,
   onLlmDraftApiFormatChange,
-  onLlmDraftApiKeyChange,
   onTestLlmConfig,
   onSaveLlmConfig,
   onToggleModelsAdvanced,
@@ -109,6 +105,28 @@ export function ModelConfigPage({
   renderMultimodalModelMeta,
 }: ModelConfigPageProps) {
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
+  const credentialEnvNames = selectedLlmVendorInfo?.api_key_env_names ?? [];
+  const credentialStatus = (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
+        <span className={selectedLlmVendorInfo?.api_key_configured ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
+          {selectedLlmVendorInfo?.api_key_configured
+            ? t("已从环境变量加载", "Loaded from environment")
+            : t("环境变量尚未配置", "Environment variable not configured")}
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-white/55">
+        {t(
+          "密钥不会保存到模型配置或浏览器中。请在服务运行环境中设置后重启服务。",
+          "The key is never stored in model settings or the browser. Set it in the service environment, then restart the service.",
+        )}
+      </p>
+      {credentialEnvNames.length > 0 ? (
+        <code className="mt-2 block break-all text-xs text-white/70">{credentialEnvNames.join(" / ")}</code>
+      ) : null}
+    </div>
+  );
 
   return (
     <section className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
@@ -120,8 +138,8 @@ export function ModelConfigPage({
           </h3>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
             {t(
-              "这里只处理 {product_name} 的主大模型。第一次使用时，先选厂商、模型、接口地址和 API Key，保存后如果提示需要重启，就再重启一次。",
-              "This section only handles {product_name}'s main LLM. For first-time setup, choose the vendor, model, endpoint, and API key. After saving, restart if the page tells you to.",
+              "这里只处理 {product_name} 的主大模型。先在服务环境中设置厂商密钥，再选择厂商、模型和接口地址；保存后如果提示需要重启，就再重启一次。",
+              "This section only handles {product_name}'s main LLM. Set the vendor key in the service environment first, then choose the vendor, model, and endpoint. Restart after saving if prompted.",
             )}
           </p>
         </div>
@@ -233,36 +251,12 @@ export function ModelConfigPage({
                 </select>
               </label>
             ) : (
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
-                <input
-                  type="text"
-                  className="theme-input"
-                  value={llmDraftApiKey}
-                  onChange={(event) => onLlmDraftApiKeyChange(event.target.value)}
-                  placeholder="sk-..."
-                  autoComplete="off"
-                  disabled={!selectedLlmVendorInfo}
-                />
-              </label>
+              credentialStatus
             )}
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            {supportsApiFormat ? (
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
-                <input
-                  type="text"
-                  className="theme-input"
-                  value={llmDraftApiKey}
-                  onChange={(event) => onLlmDraftApiKeyChange(event.target.value)}
-                  placeholder="sk-..."
-                  autoComplete="off"
-                  disabled={!selectedLlmVendorInfo}
-                />
-              </label>
-            ) : null}
+            {supportsApiFormat ? credentialStatus : null}
 
             {supportsApiFormat ? <div /> : null}
           </div>

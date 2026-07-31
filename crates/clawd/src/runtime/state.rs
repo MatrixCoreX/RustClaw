@@ -140,7 +140,8 @@ pub(crate) struct CoreServices {
     /// Isolated pools and path resolver for state owned by individual skills.
     pub(crate) skill_storage: Arc<crate::skill_storage::SkillStorageRuntime>,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
-    pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
+    pub(crate) agents_by_id: Arc<RwLock<Arc<HashMap<String, AgentRuntimeConfig>>>>,
+    pub(crate) agent_runtime_leases: Arc<RwLock<HashMap<String, AgentRuntimeConfig>>>,
     pub(crate) http_client: Client,
     pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     pub(crate) active_provider_type: Option<String>,
@@ -154,12 +155,17 @@ impl CoreServices {
             crate::DEFAULT_AGENT_ID.to_string(),
             AgentRuntimeConfig::from_config(&claw_core::config::AgentConfig::default(), Vec::new()),
         )]);
+        let agent_runtime_leases = agents_by_id
+            .values()
+            .map(|agent| (agent.runtime_digest.clone(), agent.clone()))
+            .collect();
         Self {
             db: crate::db_init::test_pool(),
             audit_db: crate::db_init::test_audit_pool(),
             skill_storage: Arc::new(crate::skill_storage::SkillStorageRuntime::test_default()),
             llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
+            agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
+            agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
                 binding: Default::default(),
@@ -1573,14 +1579,53 @@ impl AppState {
     }
 
     pub(crate) fn normalize_known_agent_id(&self, agent_id: Option<&str>) -> Option<String> {
+        let snapshot = self.agent_runtime_snapshot();
         agent_id
             .map(str::trim)
             .filter(|id| !id.is_empty())
-            .and_then(|id| self.core.agents_by_id.get(id).map(|_| id.to_string()))
+            .and_then(|id| snapshot.get(id).map(|_| id.to_string()))
+    }
+
+    pub(crate) fn agent_runtime_snapshot(&self) -> Arc<HashMap<String, AgentRuntimeConfig>> {
+        self.core
+            .agents_by_id
+            .read()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_else(|_| Arc::new(HashMap::new()))
+    }
+
+    pub(crate) fn replace_agent_runtime_snapshot(
+        &self,
+        snapshot: HashMap<String, AgentRuntimeConfig>,
+    ) -> Result<(), &'static str> {
+        {
+            let mut leases = self
+                .core
+                .agent_runtime_leases
+                .write()
+                .map_err(|_| "agent_runtime_lease_lock_poisoned")?;
+            for agent in snapshot.values() {
+                leases.insert(agent.runtime_digest.clone(), agent.clone());
+            }
+        }
+        self.core
+            .agents_by_id
+            .write()
+            .map(|mut current| *current = Arc::new(snapshot))
+            .map_err(|_| "agent_runtime_snapshot_lock_poisoned")
     }
 
     pub(crate) fn task_agent_id(&self, task: &ClaimedTask) -> String {
         if let Some(payload) = crate::task_payload_value(task) {
+            if let Some(agent_id) = payload
+                .get("agent_runtime_snapshot")
+                .and_then(|snapshot| snapshot.get("agent_id"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                return agent_id.to_string();
+            }
             if let Some(agent_id) =
                 self.normalize_known_agent_id(payload.get("agent_id").and_then(|v| v.as_str()))
             {
@@ -1590,18 +1635,46 @@ impl AppState {
         crate::DEFAULT_AGENT_ID.to_string()
     }
 
-    fn task_agent(&self, task: &ClaimedTask) -> AgentRuntimeConfig {
+    pub(crate) fn task_agent(&self, task: &ClaimedTask) -> AgentRuntimeConfig {
+        if let Some(payload) = crate::task_payload_value(task) {
+            if let Some(task_snapshot) = payload.get("agent_runtime_snapshot") {
+                if let Some(runtime_digest) = task_snapshot
+                    .get("runtime_digest")
+                    .and_then(|value| value.as_str())
+                {
+                    if let Some(agent) = self
+                        .core
+                        .agent_runtime_leases
+                        .read()
+                        .ok()
+                        .and_then(|leases| leases.get(runtime_digest).cloned())
+                    {
+                        return agent;
+                    }
+                }
+                if let Some(agent) = AgentRuntimeConfig::from_task_snapshot(task_snapshot) {
+                    return agent;
+                }
+            }
+        }
         let agent_id = self.task_agent_id(task);
-        self.core
-            .agents_by_id
+        let snapshot = self.agent_runtime_snapshot();
+        snapshot
             .get(&agent_id)
             .cloned()
-            .or_else(|| self.core.agents_by_id.get(crate::DEFAULT_AGENT_ID).cloned())
-            .unwrap_or_else(|| AgentRuntimeConfig {
-                restrict_skills: false,
-                allowed_skills: Arc::new(HashSet::new()),
-                llm_providers: Vec::new(),
+            .or_else(|| snapshot.get(crate::DEFAULT_AGENT_ID).cloned())
+            .unwrap_or_else(|| {
+                AgentRuntimeConfig::from_config(
+                    &claw_core::config::AgentConfig::default(),
+                    Vec::new(),
+                )
             })
+    }
+
+    pub(crate) fn agent_task_snapshot(&self, agent_id: &str) -> Option<Value> {
+        self.agent_runtime_snapshot()
+            .get(agent_id)
+            .map(AgentRuntimeConfig::task_snapshot_json)
     }
 
     pub(crate) fn agent_runtime_identity_label(&self) -> &'static str {

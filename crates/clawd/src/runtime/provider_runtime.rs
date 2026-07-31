@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use claw_core::config::AgentConfig;
 use claw_core::model_turn::{ProviderModelCapabilities, ProviderModelDescriptor};
 use reqwest::Client;
+use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
 #[derive(Debug, Clone)]
@@ -145,6 +146,14 @@ impl LlmProviderRuntime {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentRuntimeConfig {
+    pub(crate) id: String,
+    pub(crate) configured_persona_profile: String,
+    pub(crate) persona_profile: String,
+    pub(crate) persona_fragment: String,
+    pub(crate) persona_digest: String,
+    pub(crate) runtime_digest: String,
+    pub(crate) preferred_vendor: Option<String>,
+    pub(crate) preferred_model: Option<String>,
     pub(crate) restrict_skills: bool,
     pub(crate) allowed_skills: Arc<HashSet<String>>,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
@@ -155,12 +164,64 @@ impl AgentRuntimeConfig {
         config: &AgentConfig,
         llm_providers: Vec<Arc<LlmProviderRuntime>>,
     ) -> Self {
+        Self::from_config_with_persona(config, llm_providers, "executor")
+    }
+
+    pub(crate) fn from_config_with_persona(
+        config: &AgentConfig,
+        llm_providers: Vec<Arc<LlmProviderRuntime>>,
+        global_persona_profile: &str,
+    ) -> Self {
         let allowed_skills = config
             .allowed_skills
             .iter()
             .map(|skill| crate::canonical_skill_name(skill).to_string())
             .collect::<HashSet<_>>();
+        let (configured_profile, _) =
+            claw_core::config::normalize_agent_persona_profile(&config.persona_profile);
+        let (global_profile, global_profile_known) =
+            claw_core::config::normalize_agent_persona_profile(global_persona_profile);
+        let effective_profile = if configured_profile == "inherit" {
+            if global_profile_known && global_profile != "inherit" {
+                global_profile
+            } else {
+                "executor"
+            }
+        } else {
+            configured_profile
+        };
+        let persona_fragment = if effective_profile == "custom" {
+            config.persona_fragment.trim().to_string()
+        } else {
+            String::new()
+        };
+        let digest_input = format!(
+            "agent-persona-v1\n{}\n{}\n{}",
+            config.id.trim(),
+            effective_profile,
+            persona_fragment
+        );
+        let persona_digest = format!("{:x}", Sha256::digest(digest_input.as_bytes()));
+        let mut allowed_skill_names = allowed_skills.iter().cloned().collect::<Vec<_>>();
+        allowed_skill_names.sort();
+        let runtime_digest_input = format!(
+            "agent-runtime-v1\n{}\n{}\n{}\n{}\n{}",
+            config.id.trim(),
+            persona_digest,
+            config.preferred_vendor.as_deref().unwrap_or_default(),
+            config.preferred_model.as_deref().unwrap_or_default(),
+            allowed_skill_names.join("\n")
+        );
+        let runtime_digest = format!("{:x}", Sha256::digest(runtime_digest_input.as_bytes()));
         Self {
+            id: config.id.trim().to_string(),
+            configured_persona_profile: configured_profile.to_string(),
+            persona_profile: effective_profile.to_string(),
+            persona_fragment,
+            persona_digest,
+            runtime_digest,
+            preferred_vendor: config.preferred_vendor.clone(),
+            preferred_model: config.preferred_model.clone(),
             restrict_skills: !allowed_skills.is_empty(),
             allowed_skills: Arc::new(allowed_skills),
             llm_providers,
@@ -170,7 +231,122 @@ impl AgentRuntimeConfig {
     pub(crate) fn allows_skill(&self, canonical_skill: &str) -> bool {
         !self.restrict_skills || self.allowed_skills.contains(canonical_skill)
     }
+
+    pub(crate) fn task_snapshot_json(&self) -> serde_json::Value {
+        let mut allowed_skills = self.allowed_skills.iter().cloned().collect::<Vec<_>>();
+        allowed_skills.sort();
+        serde_json::json!({
+            "schema_version": 1,
+            "agent_id": self.id,
+            "configured_persona_profile": self.configured_persona_profile,
+            "persona_profile": self.persona_profile,
+            "persona_fragment": self.persona_fragment,
+            "persona_digest": self.persona_digest,
+            "runtime_digest": self.runtime_digest,
+            "preferred_vendor": self.preferred_vendor,
+            "preferred_model": self.preferred_model,
+            "restrict_skills": self.restrict_skills,
+            "allowed_skills": allowed_skills,
+        })
+    }
+
+    pub(crate) fn from_task_snapshot(value: &serde_json::Value) -> Option<Self> {
+        let object = value.as_object()?;
+        if object
+            .get("schema_version")
+            .and_then(|value| value.as_u64())
+            != Some(1)
+        {
+            return None;
+        }
+        let id = object.get("agent_id")?.as_str()?.trim().to_string();
+        let persona_profile = object.get("persona_profile")?.as_str()?.trim().to_string();
+        let persona_digest = object.get("persona_digest")?.as_str()?.trim().to_string();
+        let runtime_digest = object.get("runtime_digest")?.as_str()?.trim().to_string();
+        if id.is_empty()
+            || persona_profile.is_empty()
+            || persona_digest.is_empty()
+            || runtime_digest.is_empty()
+        {
+            return None;
+        }
+        let allowed_skills = object
+            .get("allowed_skills")
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str())
+            .map(crate::canonical_skill_name)
+            .map(ToString::to_string)
+            .collect::<HashSet<_>>();
+        Some(Self {
+            id,
+            configured_persona_profile: object
+                .get("configured_persona_profile")
+                .and_then(|value| value.as_str())
+                .unwrap_or("inherit")
+                .trim()
+                .to_string(),
+            persona_profile,
+            persona_fragment: object
+                .get("persona_fragment")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            persona_digest,
+            runtime_digest,
+            preferred_vendor: object
+                .get("preferred_vendor")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+            preferred_model: object
+                .get("preferred_model")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+            restrict_skills: object
+                .get("restrict_skills")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(!allowed_skills.is_empty()),
+            allowed_skills: Arc::new(allowed_skills),
+            llm_providers: Vec::new(),
+        })
+    }
 }
+
+pub(crate) fn build_agent_runtime_snapshot(
+    config: &claw_core::config::AppConfig,
+) -> HashMap<String, AgentRuntimeConfig> {
+    let mut agents_by_id = HashMap::new();
+    for agent in config.normalized_agents() {
+        let override_providers =
+            if agent.preferred_vendor.is_some() || agent.preferred_model.is_some() {
+                crate::llm_gateway::build_providers_for_selection(
+                    config,
+                    agent.preferred_vendor.as_deref(),
+                    agent.preferred_model.as_deref(),
+                )
+            } else {
+                Vec::new()
+            };
+        agents_by_id.insert(
+            agent.id.clone(),
+            AgentRuntimeConfig::from_config_with_persona(
+                &agent,
+                override_providers,
+                &config.persona.profile,
+            ),
+        );
+    }
+    agents_by_id
+}
+
+#[cfg(test)]
+#[path = "provider_runtime_tests.rs"]
+mod agent_runtime_config_tests;
 
 #[cfg(test)]
 #[path = "state_llm_provider_runtime_tests.rs"]

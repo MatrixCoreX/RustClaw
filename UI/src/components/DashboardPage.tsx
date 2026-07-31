@@ -28,7 +28,9 @@ import {
 import { useUiDialog } from "./UiDialogProvider";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import { SystemDependenciesPanel } from "./SystemDependenciesPanel";
+import { AgentPersonaCard } from "./AgentPersonaCard";
 import type {
+  AgentConfigResponse,
   ConsolePage,
   DashboardCommunicationRow,
   HostSystemSummary,
@@ -100,6 +102,11 @@ export interface DashboardPageProps {
   isOnline: boolean;
   queueLength: number;
   runningOldestAgeLabel: string;
+  agentConfig: AgentConfigResponse | null;
+  agentConfigLoading: boolean;
+  agentConfigSaving: boolean;
+  agentConfigError: string | null;
+  agentConfigMessage: string | null;
   onSetCurrentPage: (page: ConsolePage) => void;
   onFetchWorkspaceUpdateStatus: () => unknown | Promise<unknown>;
   onFetchNginxStatus: () => unknown | Promise<unknown>;
@@ -116,6 +123,8 @@ export interface DashboardPageProps {
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
   onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
+  onFetchAgentConfig: () => unknown | Promise<unknown>;
+  onSaveAgentPersona: (agentId: string, profile: string, customPersona: string) => Promise<boolean>;
   workspaceUpdateStepLabel: (step?: string) => string;
   workspaceUpdateStatusLabel: (status?: string) => string;
   workspaceUpdateTimeLabel: (ts?: number | null) => string;
@@ -168,6 +177,11 @@ export function DashboardPage({
   isOnline,
   queueLength,
   runningOldestAgeLabel,
+  agentConfig,
+  agentConfigLoading,
+  agentConfigSaving,
+  agentConfigError,
+  agentConfigMessage,
   onSetCurrentPage,
   onFetchWorkspaceUpdateStatus,
   onFetchNginxStatus,
@@ -181,6 +195,8 @@ export function DashboardPage({
   onFetchHostSystemSummary,
   onFetchHostDependencies,
   onInstallHostDependency,
+  onFetchAgentConfig,
+  onSaveAgentPersona,
   workspaceUpdateStepLabel,
   workspaceUpdateStatusLabel,
   workspaceUpdateTimeLabel,
@@ -202,6 +218,18 @@ export function DashboardPage({
 
   return (
     <>
+      <AgentPersonaCard
+        t={t}
+        config={agentConfig}
+        loading={agentConfigLoading}
+        saving={agentConfigSaving}
+        error={agentConfigError}
+        message={agentConfigMessage}
+        onRefresh={onFetchAgentConfig}
+        onSave={onSaveAgentPersona}
+        onOpenChat={() => onSetCurrentPage("chat")}
+      />
+
       {showOnboarding ? (
         <section className="theme-panel setup-hero p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">

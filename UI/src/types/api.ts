@@ -65,6 +65,7 @@ export interface TaskQueryResponse {
 export interface ConversationHistoryTurn {
   schema_version: number;
   conversation_id: string;
+  agent_id?: string | null;
   external_chat_id?: string | null;
   conversation_title?: string | null;
   task_id: string;
@@ -80,6 +81,39 @@ export interface ConversationHistoryTurn {
   artifacts?: TaskArtifact[];
   created_at: number;
   updated_at: number;
+}
+
+export interface AgentPersonaPreset {
+  id: string;
+  name_key: string;
+  description_key: string;
+}
+
+export interface AgentConfigView {
+  id: string;
+  name: string;
+  description: string;
+  saved_profile: string;
+  effective_profile: string;
+  custom_persona: string;
+  preferred_vendor?: string | null;
+  preferred_model?: string | null;
+  allowed_skills: string[];
+  runtime_applied: boolean;
+}
+
+export interface AgentConfigResponse {
+  schema_version: number;
+  config_path: string;
+  editable: boolean;
+  applies_to: "new_tasks";
+  notice_key: string;
+  agents: AgentConfigView[];
+  preset_catalog: AgentPersonaPreset[];
+  constraints: {
+    custom_persona_max_chars: number;
+    allowed_control_characters: string[];
+  };
 }
 
 export interface ConversationBodyContinuation {
@@ -729,10 +763,11 @@ export interface LlmVendorOption {
   default_model: string;
   models: string[];
   base_url: string;
-  api_key?: string;
   api_format?: string;
   api_key_configured: boolean;
   api_key_masked?: string | null;
+  api_key_source?: "environment";
+  api_key_env_names?: string[];
 }
 
 export interface LlmRuntimeInfo {

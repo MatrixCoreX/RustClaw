@@ -24,7 +24,6 @@ use std::time::Duration;
 use tokio::sync::{oneshot, Semaphore};
 
 static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
-
 #[tokio::test]
 async fn queued_skill_waits_before_global_slot_and_unrelated_skill_continues() {
     let gates = Arc::new(crate::runtime::state::SkillConcurrencyGates::default());
@@ -158,13 +157,12 @@ impl Drop for TempDirGuard {
 }
 
 fn test_state(locale: &str) -> AppState {
-    let agents_by_id = HashMap::from([(
-        DEFAULT_AGENT_ID.to_string(),
-        AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
-    )]);
+    let agent = AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new());
+    let agents_by_id = HashMap::from([(DEFAULT_AGENT_ID.to_string(), agent)]);
     AppState {
         core: crate::CoreServices {
-            agents_by_id: Arc::new(agents_by_id),
+            agents_by_id: Arc::new(std::sync::RwLock::new(Arc::new(agents_by_id))),
+            agent_runtime_leases: Arc::new(std::sync::RwLock::new(HashMap::new())),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
                 binding: Default::default(),
                 registry: None,
