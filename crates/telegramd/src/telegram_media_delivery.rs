@@ -179,20 +179,32 @@ pub(super) async fn deliver_telegram_media_path(
         TelegramUploadMethod::Voice => bot.send_voice(chat_id, input()).await.map(|_| ()),
         TelegramUploadMethod::Audio => bot.send_audio(chat_id, input()).await.map(|_| ()),
     };
-    if primary_result.is_ok() {
-        return Ok(());
-    }
+    let primary_error = match primary_result {
+        Ok(()) => return Ok(()),
+        Err(error) => telegram_request_error("send_media", &error),
+    };
     warn!(
         error_code = "telegram_media_native_upload_failed",
+        provider_failure_class = primary_error.failure_class.as_str(),
+        diagnostic_id = %primary_error.diagnostic_id,
         chat_id = chat_id.0,
         filename = %telegram_media_filename(path),
         upload_method = ?method,
         "Telegram native media upload failed"
     );
 
-    if method != TelegramUploadMethod::Document && bot.send_document(chat_id, input()).await.is_ok()
-    {
-        return Ok(());
+    if method != TelegramUploadMethod::Document {
+        match bot.send_document(chat_id, input()).await {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                let fallback_error = telegram_request_error("send_document", &error);
+                warn!(
+                    provider_failure_class = fallback_error.failure_class.as_str(),
+                    diagnostic_id = %fallback_error.diagnostic_id,
+                    "Telegram document fallback failed"
+                );
+            }
+        }
     }
 
     let text =

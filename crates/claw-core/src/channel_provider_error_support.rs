@@ -28,6 +28,14 @@ pub(super) fn extract_provider_error_code(response_body: &str) -> Option<String>
     .find_map(|pointer| scalar_provider_code(value.pointer(pointer)?))
 }
 
+pub(super) fn extract_retry_after_seconds(response_body: &str) -> Option<u64> {
+    let value: Value = serde_json::from_str(response_body).ok()?;
+    let seconds = value
+        .pointer("/parameters/retry_after")
+        .and_then(Value::as_u64)?;
+    (seconds > 0 && seconds <= 86_400).then_some(seconds)
+}
+
 fn scalar_provider_code(value: &Value) -> Option<String> {
     let value = match value {
         Value::String(value) => value.clone(),
@@ -112,6 +120,7 @@ pub(super) fn log_redacted_provider_failure(
         message_key = %error.message_key,
         status_code = error.status_code.unwrap_or_default(),
         provider_error_code = error.provider_error_code.as_deref().unwrap_or("none"),
+        retry_after_seconds = error.retry_after_seconds.unwrap_or_default(),
         retryable = error.retryable,
         diagnostic_id = %error.diagnostic_id,
         transport_kind = transport_kind.unwrap_or("none"),

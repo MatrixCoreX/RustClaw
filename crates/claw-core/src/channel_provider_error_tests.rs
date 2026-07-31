@@ -98,3 +98,64 @@ fn decoder_rejects_tampered_machine_contracts() {
 
     assert_eq!(ChannelProviderError::decode(&encoded), None);
 }
+
+#[test]
+fn typed_recipient_and_target_failures_have_distinct_machine_contracts() {
+    let blocked = ChannelProviderError::from_machine_failure(
+        "telegram_bot",
+        "send_text",
+        ChannelProviderFailureClass::RecipientBlocked,
+        Some(403),
+        Some("bot_blocked"),
+        None,
+        "typed:bot_blocked",
+    );
+    let missing = ChannelProviderError::from_machine_failure(
+        "telegram_bot",
+        "send_text",
+        ChannelProviderFailureClass::TargetNotFound,
+        Some(400),
+        Some("chat_not_found"),
+        None,
+        "typed:chat_not_found",
+    );
+
+    assert_eq!(blocked.error_code, "channel.provider.recipient_blocked");
+    assert_eq!(
+        blocked.message_key,
+        "channel.error.provider_recipient_blocked"
+    );
+    assert_eq!(missing.error_code, "channel.provider.target_not_found");
+    assert_eq!(
+        missing.message_key,
+        "channel.error.provider_target_not_found"
+    );
+    assert!(blocked.is_valid());
+    assert!(missing.is_valid());
+}
+
+#[test]
+fn telegram_retry_after_is_bounded_and_machine_readable() {
+    let error = ChannelProviderError::from_http_response(
+        "telegram_bot",
+        "send_text",
+        429,
+        r#"{"ok":false,"error_code":429,"parameters":{"retry_after":17}}"#,
+    );
+    assert_eq!(error.retry_after_seconds, Some(17));
+    assert_eq!(error.provider_error_code.as_deref(), Some("429"));
+    assert!(error.retryable);
+    assert_eq!(
+        ChannelProviderError::decode(&error.to_string()),
+        Some(error)
+    );
+
+    let non_rate_limit = ChannelProviderError::from_http_response(
+        "telegram_bot",
+        "send_text",
+        403,
+        r#"{"parameters":{"retry_after":17}}"#,
+    );
+    assert_eq!(non_rate_limit.retry_after_seconds, None);
+    assert!(non_rate_limit.is_valid());
+}

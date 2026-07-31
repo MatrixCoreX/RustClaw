@@ -71,6 +71,28 @@ fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
     assert_eq!(first.source, ChannelDeliverySource::ScheduledTask);
 }
 
+#[test]
+fn accepted_receipt_keeps_provider_ids_under_the_stable_idempotency_key() {
+    let state = AppState::test_default_with_fixture_provider();
+    let payload = payload();
+    let task = task(&payload);
+    let envelope = build_scheduled_delivery_envelope(&state, &task, &payload, "result")
+        .expect("build envelope");
+    let receipt = accepted_delivery_receipt(
+        &envelope,
+        crate::channel_send::ChannelSendOutcome {
+            provider_message_ids: vec!["101".to_string(), "102".to_string()],
+        },
+        123,
+    );
+
+    assert_eq!(receipt.idempotency_key, envelope.idempotency_key);
+    assert_eq!(receipt.delivery_id, envelope.delivery_id);
+    assert_eq!(receipt.provider_message_ids, vec!["101", "102"]);
+    assert_eq!(receipt.status, ChannelDeliveryStatus::Accepted);
+    receipt.validate().expect("valid receipt");
+}
+
 #[tokio::test]
 async fn failed_dispatch_records_one_terminal_receipt_and_deduplicates_replay() {
     let state = AppState::test_default_with_fixture_provider();

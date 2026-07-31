@@ -93,12 +93,53 @@ def check_shared_contract(root: Path) -> list[str]:
         "CHANNEL_PROVIDER_ERROR_SCHEMA_VERSION",
         "ChannelProviderError",
         "from_http_response",
+        "from_machine_failure",
         "provider_error_code",
+        "retry_after_seconds",
+        "RecipientBlocked",
+        "TargetNotFound",
         "message_key",
         "retryable",
         "diagnostic_id",
     )
     return [f"shared_contract_field_missing:{value}" for value in required if value not in text]
+
+
+def check_telegram_contract(root: Path) -> list[str]:
+    required_by_path = {
+        "crates/telegramd/src/telegram_provider_failure.rs": (
+            "RequestError::RetryAfter",
+            "ApiError::BotBlocked",
+            "ApiError::ChatNotFound",
+            "ApiError::NotEnoughRightsToPostMessages",
+            "ChannelProviderFailureClass::RecipientBlocked",
+            "ChannelProviderFailureClass::TargetNotFound",
+        ),
+        "crates/telegramd/src/telegram_formatting.rs": (
+            "telegram_request_error(\"send_text\"",
+        ),
+        "crates/clawd/src/channel_send.rs": (
+            "telegram_message_id",
+            "provider_message_ids.push",
+        ),
+        "crates/clawd/src/delivery_service.rs": (
+            "outcome.provider_message_ids",
+            "claim_channel_delivery_dispatch",
+        ),
+    }
+    findings: list[str] = []
+    for relative, required in required_by_path.items():
+        path = root / relative
+        if not path.is_file():
+            findings.append(f"telegram_contract_file_missing:{relative}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        findings.extend(
+            f"telegram_contract_token_missing:{relative}:{token}"
+            for token in required
+            if token not in text
+        )
+    return findings
 
 
 def run_self_test() -> int:
@@ -139,6 +180,7 @@ def main() -> int:
 
     findings = scan(REPO_ROOT)
     contract_findings = check_shared_contract(REPO_ROOT)
+    contract_findings.extend(check_telegram_contract(REPO_ROOT))
     if findings or contract_findings:
         print("CHANNEL_PROVIDER_ERROR_CONTRACT_CHECK failed")
         for finding in findings:
