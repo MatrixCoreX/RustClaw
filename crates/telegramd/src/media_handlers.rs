@@ -205,7 +205,16 @@ async fn submit_attachment_ask(
             "size": size,
         }]
     });
-    match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::Ask, payload).await {
+    match submit_task_only(
+        state,
+        user_id,
+        msg.chat.id.0,
+        Some(msg.id.0.to_string()),
+        TaskKind::Ask,
+        payload,
+    )
+    .await
+    {
         Ok(task_id) if voice_reply => spawn_voice_task_result_delivery(
             bot.clone(),
             state.clone(),

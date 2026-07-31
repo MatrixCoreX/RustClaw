@@ -1,5 +1,9 @@
 use std::hash::{Hash, Hasher};
 
+use claw_core::channel_ingress::{
+    default_adapter_for_channel, default_reply_target, ChannelIngressAttachment,
+    ChannelIngressEnvelope, CHANNEL_INGRESS_SCHEMA_VERSION,
+};
 use claw_core::types::{AuthIdentity, ChannelKind, SubmitTaskRequest};
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
@@ -40,6 +44,57 @@ pub(crate) enum SubmitTaskLimitError {
     RateLimited(String),
     QueueCount(anyhow::Error),
     QueueFull,
+}
+
+pub(crate) fn hydrate_submit_task_from_ingress(
+    req: &mut SubmitTaskRequest,
+) -> Result<(), &'static str> {
+    let Some(ingress) = req.ingress.as_ref() else {
+        return Ok(());
+    };
+    if ingress.schema_version != CHANNEL_INGRESS_SCHEMA_VERSION {
+        return Err("channel_ingress_schema_unsupported");
+    }
+    if ingress.adapter.trim().is_empty() {
+        return Err("channel_ingress_adapter_required");
+    }
+    if req
+        .channel
+        .is_some_and(|channel| channel != ingress.channel)
+    {
+        return Err("channel_ingress_channel_conflict");
+    }
+    merge_external_id(
+        &mut req.external_user_id,
+        ingress.external_user_id.as_deref(),
+        "channel_ingress_external_user_conflict",
+    )?;
+    merge_external_id(
+        &mut req.external_chat_id,
+        ingress.external_chat_id.as_deref(),
+        "channel_ingress_external_chat_conflict",
+    )?;
+    req.channel = Some(ingress.channel);
+    Ok(())
+}
+
+fn merge_external_id(
+    target: &mut Option<String>,
+    incoming: Option<&str>,
+    conflict_error: &'static str,
+) -> Result<(), &'static str> {
+    let current = target
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let incoming = incoming.map(str::trim).filter(|value| !value.is_empty());
+    if current.is_some() && incoming.is_some() && current != incoming {
+        return Err(conflict_error);
+    }
+    if current.is_none() {
+        *target = incoming.map(ToString::to_string);
+    }
+    Ok(())
 }
 
 pub(crate) fn maybe_find_submit_task_dedup(
@@ -401,6 +456,7 @@ pub(crate) fn task_kind_name(kind: &claw_core::types::TaskKind) -> &'static str 
 
 pub(crate) fn build_submit_task_payload(
     mut payload: Value,
+    ingress: ChannelIngressEnvelope,
     channel: ChannelKind,
     normalized_external_user_id: Option<&str>,
     normalized_external_chat_id: Option<&str>,
@@ -414,6 +470,10 @@ pub(crate) fn build_submit_task_payload(
         obj.insert(
             "channel".to_string(),
             Value::String(channel_str.to_string()),
+        );
+        obj.insert(
+            "channel_ingress".to_string(),
+            serde_json::to_value(ingress).unwrap_or_default(),
         );
         if let Some(v) = normalized_external_user_id {
             obj.insert("external_user_id".to_string(), Value::String(v.to_string()));
@@ -436,6 +496,99 @@ pub(crate) fn build_submit_task_payload(
     payload
 }
 
+pub(crate) fn build_channel_ingress_snapshot(
+    requested: Option<&ChannelIngressEnvelope>,
+    channel: ChannelKind,
+    bound_user_id: i64,
+    conversation_chat_id: i64,
+    external_user_id: Option<&str>,
+    external_chat_id: Option<&str>,
+    payload: &Value,
+) -> ChannelIngressEnvelope {
+    let adapter = requested
+        .map(|ingress| ingress.adapter.as_str())
+        .or_else(|| payload.get("adapter").and_then(Value::as_str))
+        .and_then(non_empty_machine_value)
+        .unwrap_or_else(|| default_adapter_for_channel(channel).to_string());
+    let message_id = requested
+        .and_then(|ingress| ingress.message_id.as_deref())
+        .and_then(non_empty_machine_value)
+        .or_else(|| payload_machine_scalar(payload, "message_id"));
+    let locale = requested
+        .and_then(|ingress| ingress.locale.as_deref())
+        .and_then(non_empty_machine_value)
+        .or_else(|| payload_machine_scalar(payload, "locale"));
+    let context_token = requested
+        .and_then(|ingress| ingress.context_token.as_deref())
+        .and_then(non_empty_machine_value)
+        .or_else(|| payload_machine_scalar(payload, "context_token"));
+    let reply_target = requested
+        .and_then(|ingress| ingress.reply_target.as_ref())
+        .filter(|target| !target.external_id.trim().is_empty())
+        .cloned()
+        .or_else(|| default_reply_target(channel, external_user_id, external_chat_id));
+
+    ChannelIngressEnvelope {
+        schema_version: CHANNEL_INGRESS_SCHEMA_VERSION,
+        channel,
+        adapter,
+        bound_user_id: Some(bound_user_id),
+        conversation_chat_id: Some(conversation_chat_id),
+        external_user_id: external_user_id.map(ToString::to_string),
+        external_chat_id: external_chat_id.map(ToString::to_string),
+        message_id,
+        reply_target,
+        locale,
+        attachments: ingress_attachments(payload),
+        context_token,
+    }
+}
+
+fn ingress_attachments(payload: &Value) -> Vec<ChannelIngressAttachment> {
+    payload
+        .get("attachments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|attachment| {
+            let path = attachment
+                .get("path")
+                .and_then(Value::as_str)
+                .and_then(non_empty_machine_value)?;
+            Some(ChannelIngressAttachment {
+                kind: attachment
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .and_then(non_empty_machine_value)
+                    .unwrap_or_else(|| "file".to_string()),
+                path,
+                mime_type: attachment
+                    .get("mime_type")
+                    .and_then(Value::as_str)
+                    .and_then(non_empty_machine_value),
+                size: attachment.get("size").and_then(Value::as_u64),
+            })
+        })
+        .collect()
+}
+
+fn payload_machine_scalar(payload: &Value, field: &str) -> Option<String> {
+    let value = payload.get(field)?;
+    match value {
+        Value::String(value) => non_empty_machine_value(value),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn non_empty_machine_value(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.chars().take(1_024).collect())
+}
+
 pub(crate) fn insert_submitted_task(
     state: &AppState,
     task_id: &Uuid,
@@ -445,6 +598,7 @@ pub(crate) fn insert_submitted_task(
     channel: ChannelKind,
     external_user_id: Option<&str>,
     external_chat_id: Option<&str>,
+    message_id: Option<&str>,
     kind: &str,
     payload_text: &str,
 ) -> anyhow::Result<()> {
@@ -457,7 +611,7 @@ pub(crate) fn insert_submitted_task(
 
     db.execute(
         "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued', NULL, NULL, ?10, ?10)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', NULL, NULL, ?11, ?11)",
         params![
             task_id.to_string(),
             user_id,
@@ -466,6 +620,7 @@ pub(crate) fn insert_submitted_task(
             channel_kind_name(channel),
             external_user_id,
             external_chat_id,
+            message_id,
             kind,
             payload_text,
             now
@@ -473,3 +628,7 @@ pub(crate) fn insert_submitted_task(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "submit_ingress_tests.rs"]
+mod ingress_tests;

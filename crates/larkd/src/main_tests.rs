@@ -1,7 +1,7 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, install_tls_crypto_provider,
-    is_unbound_allowed_command, lark_media_agent_context, send_lark_answer, LarkConfig,
-    LarkSection,
+    is_unbound_allowed_command, lark_media_agent_context, parse_im_text_from_event_body,
+    send_lark_answer, LarkConfig, LarkSection,
 };
 use axum::body::Bytes;
 use axum::extract::State;
@@ -26,6 +26,28 @@ fn tls_crypto_provider_installation_is_idempotent() {
 fn unbound_plain_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command("hello"));
     assert_eq!(extract_bind_key_candidate("hello", false), None);
+}
+
+#[test]
+fn text_event_keeps_platform_message_id() {
+    let event = json!({
+        "header": {"event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {"sender_id": {"open_id": "open-1"}},
+            "message": {
+                "message_id": "message-1",
+                "message_type": "text",
+                "chat_id": "chat-1",
+                "content": "{\"text\":\"hello\"}"
+            }
+        }
+    });
+
+    let parsed = parse_im_text_from_event_body(&event).expect("parse lark text event");
+    assert_eq!(parsed.0, "open-1");
+    assert_eq!(parsed.1, "chat-1");
+    assert_eq!(parsed.2, "message-1");
+    assert_eq!(parsed.3, "hello");
 }
 
 #[test]

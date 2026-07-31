@@ -17,7 +17,7 @@ pub enum TaskKind {
     Admin,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelKind {
     Telegram,
@@ -43,6 +43,8 @@ pub struct SubmitTaskRequest {
     pub external_user_id: Option<String>,
     #[serde(default)]
     pub external_chat_id: Option<String>,
+    #[serde(default)]
+    pub ingress: Option<crate::channel_ingress::ChannelIngressEnvelope>,
     pub kind: TaskKind,
     pub payload: Value,
 }

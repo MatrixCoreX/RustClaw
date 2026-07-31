@@ -362,6 +362,21 @@ pub(super) async fn submit_wechat_task_with_payload(
         channel: Some(ChannelKind::Wechat),
         external_user_id: Some(from_user_id.clone()),
         external_chat_id: Some(from_user_id.clone()),
+        ingress: Some({
+            let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+                ChannelKind::Wechat,
+                "wechat_ilink",
+            )
+            .with_external_ids(from_user_id.clone(), from_user_id.clone())
+            .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
+                from_user_id.clone(),
+            ))
+            .with_locale(state.config.language.clone());
+            if let Some(context_token) = context_token.as_deref() {
+                ingress = ingress.with_context_token(context_token);
+            }
+            ingress
+        }),
         kind,
         payload,
     };

@@ -38,8 +38,9 @@ pub(crate) use child_task_control::retry_child_task_with_revised_goal;
 #[cfg(test)]
 pub(crate) use crypto_storage::credential_context_for_user_key as crypto_credential_context_for_user_key;
 pub(crate) use submit::{
-    build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
-    check_submit_task_limits, insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,
+    build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
+    check_submit_task_access, check_submit_task_limits, hydrate_submit_task_from_ingress,
+    insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,
     resolve_submit_task_context, stable_i64_from_key, submit_task_audit_detail,
     task_count_by_status, task_count_by_status_for_user, task_kind_name, SubmitTaskAccessError,
     SubmitTaskContextError, SubmitTaskLimitError,

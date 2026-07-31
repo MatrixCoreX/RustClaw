@@ -165,25 +165,25 @@ use providers::{
 };
 pub(crate) use repo::{
     attach_pending_channel_bind_session_install_flow, bind_channel_identity,
-    build_conversation_chat_id, build_submit_task_payload, cancel_one_task_for_user_chat,
-    cancel_task_by_id, cancel_tasks_for_user_chat, check_submit_task_access,
-    check_submit_task_limits, check_task_view_access, create_auth_key,
+    build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
+    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
+    check_submit_task_access, check_submit_task_limits, check_task_view_access, create_auth_key,
     create_pending_channel_bind_session, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
-    insert_audit_log, insert_submitted_task, is_user_allowed, list_active_tasks_for_user_internal,
-    list_active_tasks_internal, list_all_active_tasks_internal, list_auth_keys,
-    mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
-    mark_pending_channel_bind_session_failed, maybe_find_submit_task_dedup, normalize_user_key,
-    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
-    submit_task_audit_detail, task_count_by_status, task_count_by_status_for_user, task_kind_name,
-    update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login, FactoryResetDbResult,
-    PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
-    TaskAdminTarget, TaskViewerAccessError,
+    hydrate_submit_task_from_ingress, insert_audit_log, insert_submitted_task, is_user_allowed,
+    list_active_tasks_for_user_internal, list_active_tasks_internal,
+    list_all_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
+    mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
+    maybe_find_submit_task_dedup, normalize_user_key, reset_channel_binding_state_for_user_key,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
+    stable_i64_from_key, submit_task_audit_detail, task_count_by_status,
+    task_count_by_status_for_user, task_kind_name, update_auth_key_by_id, update_task_timeout,
+    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
+    FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
+    SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 #[cfg(test)]
@@ -1092,6 +1092,9 @@ async fn submit_task(
             .filter(|v| !v.is_empty())
             .map(|v| v.to_string());
     }
+    if let Err(error) = hydrate_submit_task_from_ingress(&mut req) {
+        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error);
+    }
     let submit_ctx = match resolve_submit_task_context(&state, &req, DEFAULT_AGENT_ID) {
         Ok(ctx) => ctx,
         Err(SubmitTaskContextError::AuthLookup(err)) => {
@@ -1249,8 +1252,19 @@ async fn submit_task(
         return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, err);
     }
     let kind = task_kind_name(&req.kind);
+    let ingress = build_channel_ingress_snapshot(
+        req.ingress.as_ref(),
+        channel,
+        effective_user_id,
+        effective_chat_id,
+        normalized_external_user_id.as_deref(),
+        normalized_external_chat_id.as_deref(),
+        &req.payload,
+    );
+    let message_id = ingress.message_id.clone();
     let payload = build_submit_task_payload(
         req.payload,
+        ingress,
         channel,
         normalized_external_user_id.as_deref(),
         normalized_external_chat_id.as_deref(),
@@ -1271,6 +1285,7 @@ async fn submit_task(
         channel,
         normalized_external_user_id.as_deref(),
         normalized_external_chat_id.as_deref(),
+        message_id.as_deref(),
         kind,
         &payload_text,
     );

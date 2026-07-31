@@ -133,3 +133,22 @@ channels = ["telegram", "whatsapp"]
     assert!(catalog.match_command("/start/docs", "telegram").is_none());
     assert!(catalog.match_command("/run logs", "telegram").is_some());
 }
+
+#[test]
+fn command_examples_inside_ordinary_text_do_not_enter_the_control_plane() {
+    let catalog = ChannelCommandCatalog::from_toml_str(SAMPLE).expect("parse catalog");
+
+    for ordinary_text in [
+        "Example: /start",
+        "please type /start",
+        "> /start",
+        "```text\n/start\n```",
+        "first read this\n/start",
+    ] {
+        assert!(
+            catalog.match_command(ordinary_text, "telegram").is_none(),
+            "ordinary text unexpectedly matched as a command: {ordinary_text:?}"
+        );
+    }
+    assert!(catalog.match_command("/start", "telegram").is_some());
+}

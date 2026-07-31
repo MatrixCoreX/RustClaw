@@ -192,9 +192,9 @@ fn feishu_id_to_i64(s: &str) -> i64 {
 }
 
 /// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
-/// 返回 (open_id, chat_id, text)；若非该事件或非文本或缺少 chat_id 则返回 None。
-fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String)> {
-    let (open_id, chat_id, _mid, message_type, content) = parse_im_receive_v1(body)?;
+/// 返回 (open_id, chat_id, message_id, text)；若非该事件或非文本或缺少 chat_id 则返回 None。
+fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String, String)> {
+    let (open_id, chat_id, message_id, message_type, content) = parse_im_receive_v1(body)?;
     if message_type != "text" {
         return None;
     }
@@ -206,7 +206,7 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
     if text.is_empty() {
         return None;
     }
-    Some((open_id, chat_id, text.to_string()))
+    Some((open_id, chat_id, message_id, text.to_string()))
 }
 
 /// 解析绑定：调用 clawd /v1/auth/channel/resolve，返回已绑定身份（若有）。
@@ -403,6 +403,7 @@ async fn handle_incoming_feishu_text(
     state: AppState,
     open_id: String,
     chat_id: String,
+    message_id: String,
     text: String,
 ) {
     let base = state.config.feishu.clawd_base_url.clone();
@@ -434,7 +435,14 @@ async fn handle_incoming_feishu_text(
             "feishud: binding resolve result bound=true external_chat_id={}",
             chat_id
         );
-        handle_text_message_to_clawd(state, open_id, chat_id, text, Some(ident.user_key));
+        handle_text_message_to_clawd(
+            state,
+            open_id,
+            chat_id,
+            message_id,
+            text,
+            Some(ident.user_key),
+        );
         return;
     }
 
@@ -650,13 +658,22 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
     }
 
     let hint = feishu_media_agent_context(&ctx.message_type, &rel);
-    handle_text_message_to_clawd(state, ctx.open_id, ctx.chat_id, hint, Some(ident.user_key));
+    handle_text_message_to_clawd(
+        state,
+        ctx.open_id,
+        ctx.chat_id,
+        ctx.message_id,
+        hint,
+        Some(ident.user_key),
+    );
 }
 
 /// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
 fn dispatch_im_incoming_event(state: AppState, body: Value) {
-    if let Some((open_id, chat_id, text)) = parse_im_text_from_event_body(&body) {
-        tokio::spawn(handle_incoming_feishu_text(state, open_id, chat_id, text));
+    if let Some((open_id, chat_id, message_id, text)) = parse_im_text_from_event_body(&body) {
+        tokio::spawn(handle_incoming_feishu_text(
+            state, open_id, chat_id, message_id, text,
+        ));
         return;
     }
     if let Some(ctx) = parse_im_media_from_event_body(&body) {
@@ -708,6 +725,7 @@ fn handle_text_message_to_clawd(
     state: AppState,
     open_id: String,
     chat_id: String,
+    message_id: String,
     text: String,
     user_key: Option<String>,
 ) {
@@ -725,6 +743,18 @@ fn handle_text_message_to_clawd(
         channel: Some(ChannelKind::Feishu),
         external_user_id: Some(open_id.clone()),
         external_chat_id: Some(chat_id.clone()),
+        ingress: Some(
+            claw_core::channel_ingress::ChannelIngressEnvelope::new(
+                ChannelKind::Feishu,
+                "feishu_open_platform",
+            )
+            .with_external_ids(open_id.clone(), chat_id.clone())
+            .with_message_id(message_id)
+            .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
+                chat_id.clone(),
+            ))
+            .with_locale(state.config.feishu.language.clone()),
+        ),
         kind: TaskKind::Ask,
         payload: json!({ "text": text }),
     };
