@@ -86,6 +86,17 @@ def token_tags(tags: str, name: str) -> list[str]:
     )
 
 
+def counted_capability_tags(tags: str, name: str) -> list[tuple[str, int]]:
+    return [
+        (capability, int(count))
+        for capability, count in re.findall(
+            rf"(?:^|[,;])\s*{re.escape(name)}:([a-z0-9_.-]+)=(\d+)\s*(?=$|[,;])",
+            tags,
+            flags=re.IGNORECASE,
+        )
+    ]
+
+
 def task_journal(result: dict[str, Any]) -> dict[str, Any]:
     journal = result.get("task_journal")
     return journal if isinstance(journal, dict) else {}
@@ -505,6 +516,30 @@ def structural_assertions(
             }
         )
 
+    for required_capability, minimum_count in counted_capability_tags(
+        tags,
+        "min_successful_capability_calls",
+    ):
+        matched_steps = [
+            step
+            for step in successful_calls
+            if required_capability
+            in {
+                str(step.get("requested_capability") or ""),
+                str(step.get("resolved_capability") or ""),
+            }
+        ]
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "min_successful_capability_calls",
+                "expected_capability": required_capability,
+                "expected_minimum": minimum_count,
+                "actual_successful_count": len(matched_steps),
+                "ok": len(matched_steps) >= minimum_count,
+            }
+        )
+
     requires_dry_run_evidence = has_tag(tags, "dry_run") and requires_tool_call is True
     if requires_dry_run_evidence:
         dry_run_calls = [step for step in calls if step_has_structured_dry_run(step)]
@@ -651,6 +686,25 @@ def evaluate_expectations(
             details.append(
                 {
                     "kind": "json_eq",
+                    "pointer": pointer,
+                    "expected": expected,
+                    "actual": actual_text,
+                    "ok": ok,
+                }
+            )
+        elif raw.startswith("result_text_json_eq:"):
+            expr = raw[len("result_text_json_eq:") :]
+            pointer, sep, expected = expr.partition("=")
+            try:
+                decoded_result_text = json.loads(str(result.get("text") or ""))
+            except json.JSONDecodeError:
+                decoded_result_text = {}
+            actual = json_pointer_get(decoded_result_text, pointer)
+            actual_text = value_to_compare_text(actual)
+            ok = bool(sep) and actual_text == expected
+            details.append(
+                {
+                    "kind": "result_text_json_eq",
                     "pointer": pointer,
                     "expected": expected,
                     "actual": actual_text,
