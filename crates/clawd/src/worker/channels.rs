@@ -143,7 +143,18 @@ pub(crate) async fn send_task_channel_message(
                 .or_else(|| external_chat_id_from_payload(payload))
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(task.chat_id);
-            crate::channel_send::send_telegram_message(state, target_chat_id, text).await
+            let bot_name = payload
+                .get("telegram_bot_name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            crate::channel_send::send_telegram_message_for_bot(
+                state,
+                bot_name,
+                target_chat_id,
+                text,
+            )
+            .await
         }
         crate::RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)

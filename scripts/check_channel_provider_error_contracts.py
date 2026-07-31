@@ -117,12 +117,10 @@ def check_telegram_contract(root: Path) -> list[str]:
             "ChannelProviderFailureClass::RecipientBlocked",
             "ChannelProviderFailureClass::TargetNotFound",
         ),
-        "crates/telegramd/src/telegram_formatting.rs": (
-            "telegram_request_error(\"send_text\"",
-        ),
         "crates/clawd/src/channel_send.rs": (
             "telegram_message_id",
             "provider_message_ids.push",
+            "provider_transport_error(\"telegram_bot\", \"send_text\"",
         ),
         "crates/clawd/src/delivery_service.rs": (
             "outcome.provider_message_ids",

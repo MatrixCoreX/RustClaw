@@ -664,6 +664,7 @@ name = "claw-core"
 version = "0.1.8"
 dependencies = [
  "config",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",

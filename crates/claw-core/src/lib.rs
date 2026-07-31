@@ -5,6 +5,7 @@ pub mod channel_capabilities;
 pub mod channel_chunk;
 pub mod channel_commands;
 pub mod channel_delivery;
+pub mod channel_delivery_client;
 pub mod channel_delivery_tokens;
 pub mod channel_i18n;
 pub mod channel_ingress;

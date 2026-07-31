@@ -1,6 +1,7 @@
 //! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge, Feishu, Lark).
 //! Used when clawd delivers task results directly to a channel (e.g. schedule_triggered notify).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use reqwest::multipart::{Form, Part};
@@ -215,12 +216,31 @@ async fn materialize_channel_outbound_media(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn send_telegram_message(
     state: &AppState,
     chat_id: i64,
     text: &str,
 ) -> Result<ChannelSendOutcome, String> {
-    let token = state.channels.telegram_bot_token.trim();
+    send_telegram_message_for_bot(state, None, chat_id, text).await
+}
+
+pub(crate) async fn send_telegram_message_for_bot(
+    state: &AppState,
+    bot_name: Option<&str>,
+    chat_id: i64,
+    text: &str,
+) -> Result<ChannelSendOutcome, String> {
+    let requested_bot = bot_name.map(str::trim).filter(|value| !value.is_empty());
+    let token = match requested_bot {
+        Some(name) => state
+            .channels
+            .telegram_bot_tokens
+            .get(name)
+            .map(String::as_str)
+            .ok_or_else(|| "telegram_bot_instance_not_configured".to_string())?,
+        None => state.channels.telegram_bot_token.trim(),
+    };
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
     }
@@ -231,9 +251,10 @@ pub(crate) async fn send_telegram_message(
     } else {
         stripped.as_str()
     };
+    let (send_text, url_buttons) = extract_telegram_url_buttons(send_text);
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
     let chunks = chunk_text_for_channel(
-        send_text,
+        &send_text,
         TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
@@ -247,7 +268,7 @@ pub(crate) async fn send_telegram_message(
         );
     }
     for (i, chunk) in chunks.into_iter().enumerate() {
-        let body = if n > 1 {
+        let body_text = if n > 1 {
             format!("（{}/{}）\n{}", i + 1, n, chunk)
         } else {
             chunk
@@ -260,14 +281,23 @@ pub(crate) async fn send_telegram_message(
                 n
             );
         }
+        let mut request_body = json!({
+            "chat_id": chat_id,
+            "text": body_text
+        });
+        if i + 1 == n && !url_buttons.is_empty() {
+            request_body["reply_markup"] = json!({
+                "inline_keyboard": url_buttons
+                    .iter()
+                    .map(|(label, url)| vec![json!({"text": label, "url": url})])
+                    .collect::<Vec<_>>()
+            });
+        }
         let resp = state
             .core
             .http_client
             .post(&url)
-            .json(&json!({
-                "chat_id": chat_id,
-                "text": body
-            }))
+            .json(&request_body)
             .send()
             .await
             .map_err(|error| provider_transport_error("telegram_bot", "send_text", &error))?;
@@ -293,7 +323,7 @@ pub(crate) async fn send_telegram_message(
                 let size = claw_core::channel_media_limits::validate_local_media_file(
                     &path,
                     "Telegram",
-                    "图片",
+                    "image",
                     claw_core::channel_media_limits::telegram_file_max_bytes(),
                 )?;
                 if size <= claw_core::channel_media_limits::telegram_image_max_bytes() {
@@ -301,14 +331,14 @@ pub(crate) async fn send_telegram_message(
                         "sendPhoto",
                         "photo",
                         claw_core::channel_media_limits::telegram_image_max_bytes(),
-                        "图片",
+                        "image",
                     )
                 } else {
                     (
                         "sendDocument",
                         "document",
                         claw_core::channel_media_limits::telegram_file_max_bytes(),
-                        "文件",
+                        "file",
                     )
                 }
             }
@@ -316,19 +346,19 @@ pub(crate) async fn send_telegram_message(
                 "sendVideo",
                 "video",
                 claw_core::channel_media_limits::telegram_file_max_bytes(),
-                "视频",
+                "video",
             ),
             WechatOutboundKind::Audio => (
                 "sendAudio",
                 "audio",
                 claw_core::channel_media_limits::telegram_file_max_bytes(),
-                "音频",
+                "audio",
             ),
             WechatOutboundKind::File => (
                 "sendDocument",
                 "document",
                 claw_core::channel_media_limits::telegram_file_max_bytes(),
-                "文件",
+                "file",
             ),
         };
         claw_core::channel_media_limits::validate_local_media_file(
@@ -371,6 +401,40 @@ pub(crate) async fn send_telegram_message(
     Ok(ChannelSendOutcome {
         provider_message_ids,
     })
+}
+
+fn extract_telegram_url_buttons(text: &str) -> (String, Vec<(String, String)>) {
+    let mut kept_lines = Vec::new();
+    let mut buttons = Vec::new();
+    let mut seen_labels = HashMap::<String, usize>::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let Some(body) = trimmed.strip_prefix("BUTTON:").map(str::trim) else {
+            kept_lines.push(line.to_string());
+            continue;
+        };
+        let Some((label, url)) = body
+            .split_once('：')
+            .or_else(|| body.split_once(':'))
+            .map(|(label, url)| (label.trim(), url.trim()))
+        else {
+            kept_lines.push(line.to_string());
+            continue;
+        };
+        if label.is_empty() || !(url.starts_with("https://") || url.starts_with("http://")) {
+            kept_lines.push(line.to_string());
+            continue;
+        }
+        let count = seen_labels.entry(label.to_string()).or_default();
+        *count += 1;
+        let unique_label = if *count == 1 {
+            label.to_string()
+        } else {
+            format!("{label} {count}")
+        };
+        buttons.push((unique_label, url.to_string()));
+    }
+    (kept_lines.join("\n").trim().to_string(), buttons)
 }
 
 fn telegram_message_id(operation: &str, response_body: &str) -> Result<String, String> {
@@ -702,6 +766,9 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
     if base.is_empty() {
         return Err("whatsapp_web.bridge_base_url is empty".to_string());
     }
+    if !extract_wechat_outbound_media(text, &state.skill_rt.workspace_root).is_empty() {
+        return send_whatsapp_web_bridge_result(state, base, to, text, delivery_source).await;
+    }
     let url = format!("{base}/v1/send-text");
     let chunks = chunk_text_for_channel(
         text,
@@ -765,6 +832,66 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             );
         }
     }
+    Ok(ChannelSendOutcome {
+        provider_message_ids,
+    })
+}
+
+async fn send_whatsapp_web_bridge_result(
+    state: &AppState,
+    base: &str,
+    to: &str,
+    text: &str,
+    delivery_source: ChannelDeliverySource,
+) -> Result<ChannelSendOutcome, String> {
+    let media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
+    let text_without_media = strip_wechat_delivery_lines(text).trim().to_string();
+    let mut structured_media = Vec::with_capacity(media.len());
+    for item in &media {
+        let path = materialize_channel_outbound_media(state, item, "whatsapp-web").await?;
+        let kind = match item.kind {
+            WechatOutboundKind::Image => "image",
+            WechatOutboundKind::Video => "video",
+            WechatOutboundKind::Audio => "audio",
+            WechatOutboundKind::File => "file",
+        };
+        structured_media.push(json!({
+            "kind": kind,
+            "path": path,
+        }));
+    }
+    let response = state
+        .core
+        .http_client
+        .post(format!("{base}/v1/send-result"))
+        .json(&json!({
+            "schema_version": 1,
+            "to": to,
+            "text": text_without_media,
+            "media": structured_media,
+            "delivery_source": delivery_source
+        }))
+        .send()
+        .await
+        .map_err(|error| provider_transport_error("whatsapp_web", "send_result", &error))?;
+    let status = response.status();
+    let response_body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(provider_http_error(
+            "whatsapp_web",
+            "send_result",
+            status,
+            &response_body,
+        ));
+    }
+    let provider_message_ids = serde_json::from_str::<serde_json::Value>(&response_body)
+        .ok()
+        .and_then(|value| value.get("message_ids").cloned())
+        .and_then(|value| value.as_array().cloned())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect();
     Ok(ChannelSendOutcome {
         provider_message_ids,
     })

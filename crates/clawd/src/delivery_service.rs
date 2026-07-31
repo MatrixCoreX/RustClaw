@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Context};
 use claw_core::channel_delivery::{
     ChannelConversationWindow, ChannelConversationWindowState, ChannelDeliveryEnvelope,
-    ChannelDeliveryReceipt, ChannelDeliverySource, ChannelDeliveryStatus, ChannelTextFormat,
-    ChannelTextSegment, CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION, CHANNEL_DELIVERY_SCHEMA_VERSION,
+    ChannelDeliveryReceipt, ChannelDeliverySource, ChannelDeliveryStatus,
+    ChannelTaskDeliveryContent, ChannelTaskDeliveryResponse, ChannelTaskDeliveryStatus,
+    ChannelTextFormat, ChannelTextSegment, CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
+    CHANNEL_DELIVERY_SCHEMA_VERSION, CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
 };
 use claw_core::channel_ingress::{
     default_adapter_for_channel, default_reply_target, ChannelReplyTarget,
@@ -65,6 +67,28 @@ impl ChannelDeliveryServiceResult {
             ChannelDeliveryServiceStatus::QueryRequired => "query_required",
         }
     }
+
+    pub(crate) fn into_task_response(self) -> ChannelTaskDeliveryResponse {
+        ChannelTaskDeliveryResponse {
+            schema_version: CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
+            status: match self.status {
+                ChannelDeliveryServiceStatus::Accepted => ChannelTaskDeliveryStatus::Accepted,
+                ChannelDeliveryServiceStatus::Delivered => ChannelTaskDeliveryStatus::Delivered,
+                ChannelDeliveryServiceStatus::Read => ChannelTaskDeliveryStatus::Read,
+                ChannelDeliveryServiceStatus::Failed => ChannelTaskDeliveryStatus::Failed,
+                ChannelDeliveryServiceStatus::InProgress => ChannelTaskDeliveryStatus::InProgress,
+                ChannelDeliveryServiceStatus::QueryRequired => {
+                    ChannelTaskDeliveryStatus::QueryRequired
+                }
+            },
+            accepted: self.accepted(),
+            delivered: self.delivered(),
+            receipt: self.receipt,
+            error_code: self.error_code,
+            message_key: self.message_key,
+            retryable: self.retryable,
+        }
+    }
 }
 
 pub(crate) fn build_scheduled_delivery_envelope(
@@ -72,6 +96,57 @@ pub(crate) fn build_scheduled_delivery_envelope(
     task: &ClaimedTask,
     payload: &Value,
     text: &str,
+) -> anyhow::Result<ChannelDeliveryEnvelope> {
+    build_delivery_envelope(
+        state,
+        task,
+        payload,
+        text,
+        ChannelDeliverySource::ScheduledTask,
+        "schedule-terminal",
+        None,
+    )
+}
+
+pub(crate) fn build_daemon_delivery_envelope(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    text: &str,
+    source: ChannelDeliverySource,
+    content: ChannelTaskDeliveryContent,
+    notice: Option<claw_core::channel_notice::ChannelNotice>,
+) -> anyhow::Result<ChannelDeliveryEnvelope> {
+    if !matches!(
+        source,
+        ChannelDeliverySource::ImmediateDaemon | ChannelDeliverySource::BackgroundCompletion
+    ) {
+        return Err(anyhow!("channel_task_delivery_request_source_invalid"));
+    }
+    let idempotency_suffix = match content {
+        ChannelTaskDeliveryContent::Full => "terminal",
+        ChannelTaskDeliveryContent::TextOnly => "terminal-text",
+        ChannelTaskDeliveryContent::MediaOnly => "terminal-media",
+    };
+    build_delivery_envelope(
+        state,
+        task,
+        payload,
+        text,
+        source,
+        idempotency_suffix,
+        notice,
+    )
+}
+
+fn build_delivery_envelope(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    text: &str,
+    source: ChannelDeliverySource,
+    idempotency_suffix: &str,
+    notice: Option<claw_core::channel_notice::ChannelNotice>,
 ) -> anyhow::Result<ChannelDeliveryEnvelope> {
     let runtime_channel = crate::worker::runtime_channel_from_payload(state, payload);
     let channel = channel_kind(runtime_channel);
@@ -137,8 +212,8 @@ pub(crate) fn build_scheduled_delivery_envelope(
             context_token,
         }
     };
-    let delivery_id = format!("delivery:{}:schedule-terminal", task.task_id);
-    let base_idempotency_key = format!("{}:schedule-terminal", task.task_id);
+    let delivery_id = format!("delivery:{}:{idempotency_suffix}", task.task_id);
+    let base_idempotency_key = format!("{}:{idempotency_suffix}", task.task_id);
     let idempotency_key = match channel {
         ChannelKind::Feishu => {
             scoped_open_platform_receipt_key(OpenPlatformRegion::Feishu, &base_idempotency_key)
@@ -152,7 +227,7 @@ pub(crate) fn build_scheduled_delivery_envelope(
         schema_version: CHANNEL_DELIVERY_SCHEMA_VERSION,
         delivery_id,
         task_id: Some(task.task_id.clone()),
-        source: ChannelDeliverySource::ScheduledTask,
+        source,
         channel,
         adapter,
         reply_target,
@@ -165,7 +240,7 @@ pub(crate) fn build_scheduled_delivery_envelope(
         }],
         artifacts: Vec::new(),
         previews: Vec::new(),
-        notice: None,
+        notice,
     };
     envelope
         .validate()

@@ -10,7 +10,6 @@ const {
   buildSubmitTaskBody,
   canonicalUserJid,
   extractBindKeyCandidate,
-  extractTokenPaths,
   extractTextContent,
   isGroupJid,
   isLoopbackHost,
@@ -25,15 +24,8 @@ const {
   resolveIdentity,
   stableUserId,
   submitTask,
-  stripTokens,
-  stripStructuredArtifactTokens,
-  taskArtifactDeliveryEnabled,
-  taskArtifactDownloadUrl,
-  taskSuccessArtifacts,
-  taskSuccessMessages,
   updateLoginState,
   validateOutboundFile,
-  validateOutboundFileSize,
   shouldProcessUpsertMessage,
 } = require("./index.js");
 
@@ -82,67 +74,12 @@ assert.strictEqual(connectedStatus.connected, true);
 assert.strictEqual(connectedStatus.last_error_code, null);
 
 const mediaFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "wa-web-outbound-media-"));
-const imageFixture = path.join(mediaFixtureDir, "image.jpg");
 const videoFixture = path.join(mediaFixtureDir, "video.mp4");
-fs.writeFileSync(imageFixture, "image");
 fs.writeFileSync(videoFixture, "video");
-const mixedDelivery = `下载完成\nIMAGE_FILE:${imageFixture}\nVIDEO_FILE:${videoFixture}`;
-assert.strictEqual(stripTokens(mixedDelivery), "下载完成");
-assert.deepStrictEqual(extractTokenPaths(mixedDelivery, "IMAGE_FILE:"), [imageFixture]);
-assert.deepStrictEqual(extractTokenPaths(mixedDelivery, "VIDEO_FILE:"), [videoFixture]);
 assert.strictEqual(validateOutboundFile(videoFixture, "视频", 100), 5);
 assert.throws(
   () => validateOutboundFile(videoFixture, "视频", 4),
   /本地安全上限/
-);
-assert.strictEqual(validateOutboundFileSize(5, "视频", 100), 5);
-assert.throws(() => validateOutboundFileSize(0, "视频", 100), /附件为空/);
-const structuredTask = {
-  result_json: {
-    messages: ["下载完成"],
-    artifacts: [
-      {
-        id: "artifact-video",
-        kind: "video",
-        filename: "clip.mp4",
-        mime_type: "video/mp4",
-        size_bytes: 5,
-        download_url: "/v1/tasks/task-1/artifacts/artifact-video/content",
-      },
-    ],
-  },
-};
-assert.deepStrictEqual(taskSuccessMessages(structuredTask), ["下载完成"]);
-assert.strictEqual(taskSuccessArtifacts(structuredTask).length, 1);
-assert.strictEqual(taskArtifactDeliveryEnabled(structuredTask), true);
-assert.strictEqual(
-  stripStructuredArtifactTokens(
-    "下载完成\nFILE:/tmp/clip.mp4",
-    structuredTask.result_json.artifacts
-  ),
-  "下载完成"
-);
-assert.strictEqual(
-  taskArtifactDeliveryEnabled({
-    result_json: {
-      task_journal: {
-        trace: {
-          capability_results: [
-            { data: { extra: { delivery: { deliver_to_user: false } } } },
-          ],
-        },
-      },
-    },
-  }),
-  false
-);
-assert.strictEqual(
-  taskArtifactDownloadUrl("task-1", structuredTask.result_json.artifacts[0]),
-  "http://127.0.0.1:8787/v1/tasks/task-1/artifacts/artifact-video/content"
-);
-assert.throws(
-  () => taskArtifactDownloadUrl("other-task", structuredTask.result_json.artifacts[0]),
-  /不属于当前任务/
 );
 fs.rmSync(mediaFixtureDir, { recursive: true, force: true });
 

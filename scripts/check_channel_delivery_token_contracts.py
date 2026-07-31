@@ -19,6 +19,7 @@ PROTECTED_PATHS = (
     "crates/wechatd/src",
     "crates/feishud/src",
     "crates/larkd/src",
+    "services/wa-web-bridge/index.js",
 )
 TOKEN_PREFIX = (
     r"(?:IMAGE_FILE|VIDEO_FILE|VOICE_FILE|MUSIC_FILE|FILE_FILE|FILE|"
@@ -35,6 +36,10 @@ FORBIDDEN_PATTERNS = (
         "duplicate_prefixed_path_parser",
         re.compile(r"fn\s+extract_prefixed_(?:paths|tokens)\s*\("),
     ),
+    (
+        "javascript_inline_legacy_prefix_parser",
+        re.compile(rf"\.startsWith\(\s*\"{TOKEN_PREFIX}\""),
+    ),
 )
 REQUIRED_TOKENS_BY_PATH = {
     "crates/claw-core/src/channel_delivery_tokens.rs": (
@@ -42,6 +47,7 @@ REQUIRED_TOKENS_BY_PATH = {
         "legacy_delivery_tokens",
         "strip_legacy_delivery_lines",
         "strip_legacy_local_delivery_lines",
+        "legacy_delivery_lines",
         "legacy_local_delivery_lines",
     ),
     "crates/claw-core/src/wechat_reply_media.rs": (
@@ -49,13 +55,12 @@ REQUIRED_TOKENS_BY_PATH = {
         "parse_legacy_delivery_line_ref(t)",
     ),
     "crates/clawd/src/finalize/helpers.rs": ("parse_legacy_delivery_line_ref(text)",),
-    "crates/telegramd/src/telegram_formatting.rs": (
-        "legacy_delivery_tokens(answer)",
-        "strip_legacy_local_delivery_lines(answer)",
+    "crates/clawd/src/http/task_delivery.rs": (
+        "strip_legacy_delivery_lines(text)",
+        "legacy_delivery_lines(text)",
     ),
-    "crates/whatsappd/src/main.rs": (
-        "legacy_delivery_tokens(answer)",
-        "strip_legacy_local_delivery_lines(answer)",
+    "crates/telegramd/src/task_delivery_format.rs": (
+        "strip_legacy_delivery_lines(answer)",
     ),
 }
 
@@ -118,11 +123,15 @@ def run_self_test() -> int:
             'fn extract_prefixed_paths() {}\n',
             encoding="utf-8",
         )
+        bridge = root / "services/wa-web-bridge/index.js"
+        bridge.parent.mkdir(parents=True)
+        bridge.write_text('line.startsWith("VIDEO_FILE:");\n', encoding="utf-8")
         findings = scan(root)
         kinds = {finding.kind for finding in findings}
         if not {
             "inline_legacy_prefix_parser",
             "duplicate_prefixed_path_parser",
+            "javascript_inline_legacy_prefix_parser",
         }.issubset(kinds):
             print(f"SELF_TEST_FAIL findings={findings}")
             return 1

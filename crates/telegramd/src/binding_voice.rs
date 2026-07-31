@@ -210,7 +210,10 @@ pub(super) async fn store_pending_telegram_request(
             ingress: Some(ingress),
             idempotency_key: Some(idempotency_key),
             kind: TaskKind::Ask,
-            payload: json!({ "text": prompt }),
+            payload: json!({
+                "text": prompt,
+                "telegram_bot_name": state.bot_name.clone(),
+            }),
         },
     };
     let url = format!("{}/v1/auth/channel/pending-request", state.clawd_base_url);

@@ -24,6 +24,7 @@ fn compatibility_decoder_parses_every_legacy_prefix_once() {
     assert_eq!(tokens[5].kind, LegacyDeliveryKind::Auto);
     assert_eq!(tokens[6].location, LegacyDeliveryLocation::RemoteUrl);
     assert_eq!(strip_legacy_delivery_lines(text), "caption");
+    assert_eq!(legacy_delivery_lines(text).lines().count(), 10);
 }
 
 #[test]

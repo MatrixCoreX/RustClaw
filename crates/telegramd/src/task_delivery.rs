@@ -203,27 +203,34 @@ fn spawn_task_result_delivery_with_mode(
                             answers.len(),
                         );
                         if voice_reply {
-                            deliver_voice_answers(&bot, &state, chat_id, user_id, &answers).await;
+                            deliver_voice_answers(
+                                &state,
+                                chat_id,
+                                user_id,
+                                &task_id,
+                                &answers,
+                                soft_notice_sent || hard_notice_sent,
+                            )
+                            .await;
                         } else {
-                            for answer in answers {
-                                debug!(
-                                    "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} msg_preview={}",
-                                    task_id,
-                                    chat_id.0,
-                                    text_fingerprint_hex(&answer),
-                                    answer.len(),
-                                    text_preview_for_log(&answer, 160)
-                                );
-                                let _ = send_success_message_for_telegram(
-                                    &bot, &state, chat_id, &answer,
-                                )
-                                .await;
-                            }
+                            request_terminal_delivery(
+                                &state,
+                                chat_id.0,
+                                &task_id,
+                                soft_notice_sent || hard_notice_sent,
+                            )
+                            .await;
                         }
                         break;
                     }
                     TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                        let detail = task_terminal_error_text(&state, &task);
+                        request_terminal_delivery(
+                            &state,
+                            chat_id.0,
+                            &task_id,
+                            soft_notice_sent || hard_notice_sent,
+                        )
+                        .await;
                         if let Some(resume_context) = task
                             .result_json
                             .as_ref()
@@ -241,19 +248,8 @@ fn spawn_task_result_delivery_with_mode(
                             if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
                                 guard.insert(chat_id.0, pending);
                             }
-                            let fail_msg = format!(
-                                "{}",
-                                state.i18n.t_with(
-                                    "telegram.msg.resume_interrupted_hint",
-                                    &[("prefix", &fail_prefix), ("detail", &detail)],
-                                )
-                            );
-                            let _ = bot.send_message(chat_id, fail_msg).await;
                             break;
                         }
-                        let _ = bot
-                            .send_message(chat_id, format!("{fail_prefix}：{detail}"))
-                            .await;
                         break;
                     }
                 },
@@ -269,38 +265,42 @@ fn spawn_task_result_delivery_with_mode(
 }
 
 async fn deliver_voice_answers(
-    bot: &Bot,
     state: &BotState,
     chat_id: ChatId,
     user_id: i64,
+    original_task_id: &str,
     answers: &[String],
+    background: bool,
 ) {
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, chat_id.0));
-    let mut media_delivered_for_voice_mode = false;
-    if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
-        for answer in answers {
-            let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
-        }
-    } else if matches!(mode, VoiceReplyMode::Voice) {
-        for answer in answers {
-            let delivery_tokens = delivery_tokens_only(answer);
-            if delivery_tokens.is_empty() {
-                continue;
-            }
-            let _ = send_success_message_for_telegram(bot, state, chat_id, &delivery_tokens).await;
-            media_delivered_for_voice_mode = true;
-        }
-    }
+    let original_content = if matches!(mode, VoiceReplyMode::Voice) {
+        claw_core::channel_delivery::ChannelTaskDeliveryContent::MediaOnly
+    } else {
+        claw_core::channel_delivery::ChannelTaskDeliveryContent::Full
+    };
+    request_terminal_delivery_with_content(
+        state,
+        chat_id.0,
+        original_task_id,
+        background,
+        original_content,
+    )
+    .await;
     if !matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
         return;
     }
 
-    let tts_input = strip_delivery_tokens_for_tts(&answers.join("\n\n"));
+    let tts_input = terminal_tts_text(&answers.join("\n\n"));
     if tts_input.is_empty() {
-        if matches!(mode, VoiceReplyMode::Voice) && !media_delivered_for_voice_mode {
-            for answer in answers {
-                let _ = send_success_message_for_telegram(bot, state, chat_id, answer).await;
-            }
+        if matches!(mode, VoiceReplyMode::Voice) {
+            request_terminal_delivery_with_content(
+                state,
+                chat_id.0,
+                original_task_id,
+                background,
+                claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
+            )
+            .await;
         }
         return;
     }
@@ -312,7 +312,14 @@ async fn deliver_voice_answers(
         submit_task_only(state, user_id, chat_id.0, None, TaskKind::RunSkill, payload).await
     else {
         if matches!(mode, VoiceReplyMode::Voice) {
-            let _ = send_telegram_text(bot, chat_id, &tts_input).await;
+            request_terminal_delivery_with_content(
+                state,
+                chat_id.0,
+                original_task_id,
+                background,
+                claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
+            )
+            .await;
         }
         return;
     };
@@ -324,17 +331,83 @@ async fn deliver_voice_answers(
     )
     .await
     {
-        Ok(messages) => {
-            for message in messages {
-                let _ = send_success_message_for_telegram(bot, state, chat_id, &message).await;
-            }
+        Ok(_) => {
+            request_terminal_delivery(state, chat_id.0, &task_id, true).await;
         }
         Err(err) => {
             warn!("telegram voice reply synthesis failed: {err}");
             if matches!(mode, VoiceReplyMode::Voice) {
-                let _ = send_telegram_text(bot, chat_id, &tts_input).await;
+                request_terminal_delivery_with_content(
+                    state,
+                    chat_id.0,
+                    original_task_id,
+                    background,
+                    claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
+                )
+                .await;
             }
         }
+    }
+}
+
+async fn request_terminal_delivery(
+    state: &BotState,
+    chat_id: i64,
+    task_id: &str,
+    background: bool,
+) {
+    request_terminal_delivery_with_content(
+        state,
+        chat_id,
+        task_id,
+        background,
+        claw_core::channel_delivery::ChannelTaskDeliveryContent::Full,
+    )
+    .await;
+}
+
+async fn request_terminal_delivery_with_content(
+    state: &BotState,
+    chat_id: i64,
+    task_id: &str,
+    background: bool,
+    content: claw_core::channel_delivery::ChannelTaskDeliveryContent,
+) {
+    let Some(user_key) = bound_user_key_for_chat(state, chat_id) else {
+        warn!("telegramd: terminal delivery missing bound key task_id={task_id}");
+        return;
+    };
+    let source = if background {
+        claw_core::channel_delivery::ChannelDeliverySource::BackgroundCompletion
+    } else {
+        claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
+    };
+    match claw_core::channel_delivery_client::request_task_delivery_with_content(
+        &state.client,
+        &state.clawd_base_url,
+        task_id,
+        &user_key,
+        source,
+        content,
+    )
+    .await
+    {
+        Ok(result) if result.accepted => {
+            info!(
+                "telegramd: unified terminal delivery accepted task_id={} status={:?}",
+                task_id, result.status
+            );
+        }
+        Ok(result) => warn!(
+            "telegramd: unified terminal delivery not accepted task_id={} status={:?} error_code={}",
+            task_id,
+            result.status,
+            result.error_code.as_deref().unwrap_or("none")
+        ),
+        Err(error) => warn!(
+            "telegramd: unified terminal delivery request failed task_id={} error={}",
+            task_id, error
+        ),
     }
 }
 
@@ -345,136 +418,6 @@ pub(super) fn task_success_messages(state: &BotState, task: &TaskQueryResponse) 
         &state.workspace_root,
         task_success_messages_from_offset(state, task, 0),
     )
-}
-
-pub(super) async fn send_success_message_for_telegram(
-    bot: &Bot,
-    state: &BotState,
-    chat_id: ChatId,
-    answer: &str,
-) -> anyhow::Result<()> {
-    if let Some(blocks) = split_subtask_success_messages(answer) {
-        for (header, body) in blocks {
-            if body.is_empty() {
-                send_telegram_text(bot, chat_id, &header)
-                    .await
-                    .context("send subtask header failed")?;
-                continue;
-            }
-            if should_send_subtask_body_as_file(&header, &body) {
-                let file_path = write_subtask_body_to_temp_file(&header, &body)?;
-                let answer_with_file = format!("{header}\nFILE:{file_path}");
-                send_text_or_image(bot, state, chat_id, &answer_with_file).await?;
-                continue;
-            }
-            let html = format!(
-                "{}\n<pre><code>{}</code></pre>",
-                escape_telegram_html(&header),
-                escape_telegram_html(&body)
-            );
-            bot.send_message(chat_id, html)
-                .parse_mode(ParseMode::Html)
-                .await
-                .context("send subtask code block failed")?;
-        }
-        return Ok(());
-    }
-    send_text_or_image(bot, state, chat_id, answer).await
-}
-
-pub(super) fn split_subtask_success_messages(text: &str) -> Option<Vec<(String, String)>> {
-    let trimmed = text.trim();
-    if !trimmed.starts_with("subtask#") {
-        return None;
-    }
-
-    let mut raw_blocks = Vec::new();
-    let mut current = String::new();
-
-    for line in trimmed.lines() {
-        let line = line.trim_end();
-        if line.starts_with("subtask#") {
-            if !current.trim().is_empty() {
-                raw_blocks.push(current.trim().to_string());
-                current.clear();
-            }
-            current.push_str(line);
-        } else {
-            if !current.is_empty() {
-                current.push('\n');
-            }
-            current.push_str(line);
-        }
-    }
-
-    if !current.trim().is_empty() {
-        raw_blocks.push(current.trim().to_string());
-    }
-
-    let blocks = raw_blocks
-        .into_iter()
-        .map(|block| split_single_subtask_block(&block))
-        .collect::<Vec<_>>();
-    Some(blocks)
-}
-
-pub(super) fn split_single_subtask_block(block: &str) -> (String, String) {
-    let trimmed = block.trim();
-    let (first_line, rest) = match trimmed.split_once('\n') {
-        Some((head, tail)) => (head.trim(), tail.trim()),
-        None => (trimmed, ""),
-    };
-
-    if let Some((header, inline_body)) = first_line.split_once(" | ") {
-        let mut body = inline_body.trim().to_string();
-        if !rest.is_empty() {
-            if !body.is_empty() {
-                body.push('\n');
-            }
-            body.push_str(rest);
-        }
-        return (header.trim().to_string(), body);
-    }
-
-    (first_line.to_string(), rest.to_string())
-}
-
-pub(super) fn should_send_subtask_body_as_file(header: &str, body: &str) -> bool {
-    let html_len = escape_telegram_html(header).len() + escape_telegram_html(body).len() + 32;
-    html_len > 3000 || body.lines().count() > 120
-}
-
-pub(super) fn write_subtask_body_to_temp_file(header: &str, body: &str) -> anyhow::Result<String> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let sanitized = sanitize_filename_fragment(header);
-    let path = std::env::temp_dir().join(format!("agent-{sanitized}-{millis}.txt"));
-    fs::write(&path, body)
-        .with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-pub(super) fn sanitize_filename_fragment(text: &str) -> String {
-    let mut out = String::new();
-    let mut prev_dash = false;
-    for ch in text.chars() {
-        let keep = ch.is_ascii_alphanumeric();
-        if keep {
-            out.push(ch.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    let trimmed = out.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "subtask".to_string()
-    } else {
-        trimmed
-    }
 }
 
 pub(super) fn task_success_messages_from_offset(
@@ -496,18 +439,13 @@ pub(super) fn task_success_messages_from_offset(
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect::<Vec<_>>();
-        let mut out = dedupe_preserve_order(out);
+        let out = dedupe_terminal_messages(out);
         if !out.is_empty() {
-            let has_explicit_delivery = out.iter().any(|msg| has_delivery_prefix(msg));
-            if has_explicit_delivery {
-                out.retain(|msg| !is_written_file_confirmation_line(msg));
-            }
             debug!(
-                "phase=success_source task_id={} source=messages offset={} messages_len={} explicit_delivery={}",
+                "phase=success_source task_id={} source=messages offset={} messages_len={}",
                 task_id,
                 offset,
                 out.len(),
-                has_explicit_delivery
             );
             if offset >= out.len() {
                 // Progress delivery already consumed all message items.
@@ -531,7 +469,7 @@ pub(super) fn task_success_messages_from_offset(
         "phase=success_source task_id={} source=text_only offset={} text_fp={} text_len={}",
         task_id,
         offset,
-        text_fingerprint_hex(&text),
+        terminal_text_fingerprint_hex(&text),
         text.len()
     );
     vec![text]
@@ -552,7 +490,7 @@ pub(super) fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    dedupe_preserve_order(out)
+    dedupe_terminal_messages(out)
 }
 
 pub(super) fn skill_progress_message(
@@ -645,8 +583,14 @@ pub(super) async fn submit_task_only(
     chat_id: i64,
     message_id: Option<String>,
     kind: TaskKind,
-    payload: serde_json::Value,
+    mut payload: serde_json::Value,
 ) -> anyhow::Result<String> {
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "telegram_bot_name".to_string(),
+            json!(state.bot_name.clone()),
+        );
+    }
     let user_key = state
         .bound_identity_by_chat
         .lock()
@@ -654,8 +598,8 @@ pub(super) async fn submit_task_only(
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()));
     let user_key_header = user_key.clone();
     let payload_compact = payload.to_string();
-    let payload_fp = text_fingerprint_hex(&payload_compact);
-    let payload_preview = text_preview_for_log(&payload_compact, 180);
+    let payload_fp = terminal_text_fingerprint_hex(&payload_compact);
+    let payload_preview = terminal_text_preview_for_log(&payload_compact, 180);
     debug!(
         "phase=submit user_id={} chat_id={} kind={:?} payload_fp={} payload_len={} payload_preview={}",
         user_id,

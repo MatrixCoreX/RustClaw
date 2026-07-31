@@ -2,12 +2,11 @@ use super::{
     build_feishu_long_connection_config, extract_bind_key_candidate,
     extract_pending_bind_token_candidate, feishu_delivery_error_text, feishu_provider_http_error,
     handle_incoming_feishu_text, install_tls_crypto_provider, is_unbound_allowed_command,
-    parse_im_text_from_event_body, send_feishu_answer, AppState, FeishuConfig, FeishuSection,
+    parse_im_text_from_event_body, AppState, FeishuConfig, FeishuSection,
     FEISHU_BIND_REQUIRED_FALLBACK, FEISHU_I18N_BIND_REQUIRED_KEY,
 };
 use crate::config_helpers::feishu_t;
 use crate::media_helpers::feishu_media_agent_context;
-use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -198,113 +197,6 @@ fn text_event_keeps_platform_message_id() {
 fn start_without_token_does_not_create_pending_bind_token() {
     assert_eq!(extract_pending_bind_token_candidate("/start"), None);
     assert_eq!(extract_pending_bind_token_candidate("/start   "), None);
-}
-
-#[tokio::test]
-async fn feishu_outbound_delivery_sends_text_image_video_and_opus_audio() {
-    #[derive(Clone, Default)]
-    struct MockState {
-        image_uploads: Arc<AtomicUsize>,
-        file_uploads: Arc<AtomicUsize>,
-        message_types: Arc<Mutex<Vec<String>>>,
-    }
-
-    async fn mock_token() -> Json<Value> {
-        Json(json!({
-            "tenant_access_token": "tenant-token",
-            "expire": 7200
-        }))
-    }
-
-    async fn mock_image_upload(State(state): State<MockState>, _body: Bytes) -> Json<Value> {
-        state.image_uploads.fetch_add(1, Ordering::SeqCst);
-        Json(json!({ "code": 0, "data": { "image_key": "image-key" } }))
-    }
-
-    async fn mock_file_upload(State(state): State<MockState>, _body: Bytes) -> Json<Value> {
-        state.file_uploads.fetch_add(1, Ordering::SeqCst);
-        Json(json!({ "code": 0, "data": { "file_key": "file-key" } }))
-    }
-
-    async fn mock_message(
-        State(state): State<MockState>,
-        Json(payload): Json<Value>,
-    ) -> Json<Value> {
-        state
-            .message_types
-            .lock()
-            .expect("message types")
-            .push(payload["msg_type"].as_str().unwrap_or_default().to_string());
-        Json(json!({ "code": 0, "data": { "message_id": "om-feishu-fixture" } }))
-    }
-
-    let mock_state = MockState::default();
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock feishu");
-    let addr = listener.local_addr().expect("mock feishu addr");
-    let app = Router::new()
-        .route(
-            "/open-apis/auth/v3/tenant_access_token/internal",
-            post(mock_token),
-        )
-        .route("/open-apis/im/v1/images", post(mock_image_upload))
-        .route("/open-apis/im/v1/files", post(mock_file_upload))
-        .route("/open-apis/im/v1/messages", post(mock_message))
-        .with_state(mock_state.clone());
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve mock feishu");
-    });
-
-    let root = std::env::temp_dir().join(format!(
-        "feishu-outbound-media-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).expect("create fixture dir");
-    let image = root.join("image.jpg");
-    let video = root.join("video.mp4");
-    let audio = root.join("voice.opus");
-    std::fs::write(&image, b"image").expect("write image fixture");
-    std::fs::write(&video, b"video").expect("write video fixture");
-    std::fs::write(&audio, b"audio").expect("write audio fixture");
-    let answer = format!(
-        "download complete\nIMAGE_FILE:{}\nVIDEO_FILE:{}\nVOICE_FILE:{}",
-        image.display(),
-        video.display(),
-        audio.display()
-    );
-    let config = FeishuConfig {
-        feishu: FeishuSection {
-            api_base_url: format!("http://{addr}"),
-            app_id: "app-id".to_string(),
-            app_secret: "app-secret".to_string(),
-            ..FeishuSection::default()
-        },
-    };
-    let token_cache = OpenPlatformTokenCache::default();
-    send_feishu_answer(
-        &config,
-        &Client::new(),
-        &token_cache,
-        &root,
-        "chat-id",
-        &answer,
-        3500,
-    )
-    .await
-    .expect("send outbound answer");
-
-    assert_eq!(mock_state.image_uploads.load(Ordering::SeqCst), 1);
-    assert_eq!(mock_state.file_uploads.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        *mock_state.message_types.lock().expect("message types"),
-        vec!["text", "image", "media", "audio"]
-    );
-    std::fs::remove_dir_all(root).expect("remove fixture dir");
 }
 
 #[tokio::test]
