@@ -647,6 +647,7 @@ fn protocol_response_to_child(response: ProtocolResponse) -> ChildSkillResponse 
     }
 }
 
+#[cfg(test)]
 async fn run_child_skill(
     launch: &ChildLaunch,
     input_line: &str,
