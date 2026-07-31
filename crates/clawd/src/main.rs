@@ -887,6 +887,16 @@ async fn run() -> anyhow::Result<()> {
         ask_states: AskStateRegistry::default(),
     };
 
+    let recovered_cancel_escalations = crate::local_process_job::recover_pending_cancel_escalations(
+        &state.skill_rt.workspace_root,
+        crate::now_ts_u64() as i64,
+    );
+    if recovered_cancel_escalations > 0 {
+        info!(
+            recovered_cancel_escalations,
+            "restored pending local process cancellation escalation"
+        );
+    }
     spawn_worker(
         state.clone(),
         config.worker.poll_interval_ms,
