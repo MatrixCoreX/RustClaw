@@ -580,45 +580,65 @@ def run_health_concurrency(server: Server, long_task_id: str) -> dict[str, Any]:
     if not health_response.get("ok"):
         raise RegressionFailure(f"{case}: health endpoint failed while long command was active")
 
-    # Use a fixed host builtin for the concurrent queue check. Runner skills
+    # Use fixed host builtins for the concurrent checks. Runner skills
     # intentionally require immutable package receipts, while this isolated
-    # workspace contains no release receipts by design.
-    list_case = f"{case}/list_dir"
-    list_task_id = submit_skill(server, "list_dir", {"path": "."}, list_case)
-    list_started = time.monotonic()
-    list_task, _ = wait_for_terminal(server, list_task_id, list_case, timeout=20)
-    list_elapsed = time.monotonic() - list_started
-
+    # workspace contains no release receipts by design. list_dir returns
+    # symlink_metadata-backed file properties, so it supplies the explicit
+    # stat evidence without bypassing package admission.
     stat_case = f"{case}/stat_paths"
-    stat_task_id = submit_skill(
-        server,
-        "fs_basic",
-        {"action": "stat_paths", "path": "Cargo.toml"},
-        stat_case,
-    )
+    stat_task_id = submit_skill(server, "list_dir", {"path": "."}, stat_case)
     stat_started = time.monotonic()
     stat_task, _ = wait_for_terminal(server, stat_task_id, stat_case, timeout=20)
     stat_elapsed = time.monotonic() - stat_started
 
+    short_case = f"{case}/unrelated_read_file"
+    short_task_id = submit_skill(
+        server,
+        "read_file",
+        {"path": "Cargo.toml", "max_bytes": 256},
+        short_case,
+    )
+    short_started = time.monotonic()
+    short_task, _ = wait_for_terminal(server, short_task_id, short_case, timeout=20)
+    short_elapsed = time.monotonic() - short_started
+
     long_during = query_task(server, long_task_id)
     write_json(LOG_DIR / case / "long_task_during_health.json", long_during)
-    assert_real_execution(list_case, list_task)
     assert_real_execution(stat_case, stat_task)
-    if (list_task.get("data") or {}).get("status") != "succeeded":
-        raise RegressionFailure(f"{case}: concurrent list task did not succeed")
+    assert_real_execution(short_case, short_task)
     if (stat_task.get("data") or {}).get("status") != "succeeded":
         raise RegressionFailure(f"{case}: concurrent stat task did not succeed")
-    stat_result = serialized_result(stat_task)
-    if "Cargo.toml" not in stat_result or '"kind":"file"' not in stat_result.replace(" ", ""):
+    if (short_task.get("data") or {}).get("status") != "succeeded":
+        raise RegressionFailure(f"{case}: unrelated short task did not succeed")
+
+    def has_cargo_file_stat(value: Any) -> bool:
+        if isinstance(value, dict):
+            if (
+                value.get("name") == "Cargo.toml"
+                and value.get("kind") == "file"
+                and isinstance(value.get("size_bytes"), int)
+                and value["size_bytes"] > 0
+            ):
+                return True
+            return any(has_cargo_file_stat(child) for child in value.values())
+        if isinstance(value, list):
+            return any(has_cargo_file_stat(child) for child in value)
+        return False
+
+    stat_result = (stat_task.get("data") or {}).get("result_json") or {}
+    if not has_cargo_file_stat(stat_result):
         raise RegressionFailure(f"{case}: concurrent stat task did not verify Cargo.toml")
+    short_result = serialized_result(short_task)
+    if '"source":"read_file"' not in short_result.replace(" ", "") or "[workspace]" not in short_result:
+        raise RegressionFailure(f"{case}: unrelated read_file evidence missing")
     if (long_during.get("data") or {}).get("status") not in {"queued", "running"}:
         raise RegressionFailure(f"{case}: long command was not active when health completed")
     return {
-        "list_task_id": list_task_id,
         "stat_task_id": stat_task_id,
+        "short_task_id": short_task_id,
         "health_elapsed_seconds": round(health_elapsed, 3),
-        "list_task_elapsed_seconds": round(list_elapsed, 3),
         "stat_task_elapsed_seconds": round(stat_elapsed, 3),
+        "short_task_elapsed_seconds": round(short_elapsed, 3),
         "status": "pass",
     }
 
