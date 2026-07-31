@@ -965,7 +965,7 @@ async fn send_feishu_lark_answer(
             .unwrap_or("file.bin")
             .to_string();
         let part = Part::bytes(bytes).file_name(filename.clone());
-        let form = if field_name == "image" {
+        let form = if matches!(field_name, "image") {
             Form::new()
                 .text("image_type", file_type.to_string())
                 .part(field_name, part)

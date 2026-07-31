@@ -90,6 +90,24 @@ fn active_tool_event_includes_only_a_redacted_command_preview() {
 }
 
 #[test]
+fn active_tool_event_detects_command_args_after_runtime_alias_rewrite() {
+    let action = crate::AgentAction::CallSkill {
+        skill: "runtime_process_adapter".to_string(),
+        args: serde_json::json!({
+            "command": "cargo test -p clawd --features private",
+        }),
+    };
+
+    let payload =
+        active_tool_event_payload(&action, 1, 1, 1).expect("skill should emit active event");
+
+    assert_eq!(payload["action_ref"], "runtime_process_adapter");
+    assert_eq!(payload["command_preview"], "cargo test");
+    assert!(!payload.to_string().contains("--features"));
+    assert!(!payload.to_string().contains("private"));
+}
+
+#[test]
 fn command_preview_keeps_a_safe_executable_and_subcommand_only() {
     assert_eq!(
         safe_command_preview("cargo test -p clawd"),

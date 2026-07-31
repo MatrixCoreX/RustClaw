@@ -42,6 +42,14 @@ const MAX_VIDEO_POSTER_BYTES: usize = 8 * 1024 * 1024;
 const VIDEO_BROWSER_PREVIEW_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_VIDEO_BROWSER_PREVIEW_BYTES: u64 = 256 * 1024 * 1024;
 
+fn mime_has_top_level(mime_type: &str, expected: &str) -> bool {
+    mime_type
+        .split(';')
+        .next()
+        .and_then(|value| value.trim().split_once('/'))
+        .is_some_and(|(top_level, _)| top_level.eq_ignore_ascii_case(expected))
+}
+
 pub(crate) async fn list_task_artifacts(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -199,14 +207,7 @@ async fn serve_browser_video_preview(
     manifest: &TaskArtifactManifest,
     include_body: bool,
 ) -> Response {
-    if !manifest
-        .mime_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .starts_with("video/")
-    {
+    if !mime_has_top_level(&manifest.mime_type, "video") {
         return api_error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "task_artifact_browser_video_unsupported",
@@ -418,14 +419,7 @@ async fn serve_video_poster(
     manifest: &TaskArtifactManifest,
     include_body: bool,
 ) -> Response {
-    if !manifest
-        .mime_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .starts_with("video/")
-    {
+    if !mime_has_top_level(&manifest.mime_type, "video") {
         return api_error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "task_artifact_video_poster_unsupported",
