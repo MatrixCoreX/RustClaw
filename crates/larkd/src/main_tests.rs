@@ -1,8 +1,10 @@
 use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, install_tls_crypto_provider,
     is_unbound_allowed_command, lark_media_agent_context, parse_im_text_from_event_body,
-    send_lark_answer, LarkConfig, LarkSection,
+    send_lark_answer, LarkConfig, LarkSection, LARK_BIND_REQUIRED_FALLBACK,
+    LARK_I18N_BIND_REQUIRED_KEY,
 };
+use crate::config_helpers::lark_t;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::post;
@@ -26,6 +28,28 @@ fn tls_crypto_provider_installation_is_idempotent() {
 fn unbound_plain_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command("hello"));
     assert_eq!(extract_bind_key_candidate("hello", false), None);
+}
+
+#[test]
+fn missing_lark_i18n_uses_safe_localized_fallback() {
+    let config = LarkConfig {
+        lark: LarkSection {
+            language: "en-US".to_string(),
+            i18n_path: "/tmp/agent-runtime-no-such-larkd.en-US.toml".to_string(),
+            ..LarkSection::default()
+        },
+    };
+
+    let text = lark_t(
+        &config,
+        LARK_I18N_BIND_REQUIRED_KEY,
+        LARK_BIND_REQUIRED_FALLBACK,
+    );
+    assert_eq!(
+        text,
+        claw_core::channel_i18n::safe_generic_text_for_locale("en-US")
+    );
+    assert!(!text.contains("message_key="));
 }
 
 #[test]

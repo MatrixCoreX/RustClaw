@@ -257,7 +257,7 @@ fn test_wechat_section(language: &str, i18n_path: String) -> WechatSection {
 }
 
 #[test]
-fn wechat_i18n_binding_keys_are_locale_specific_with_key_fallback() {
+fn wechat_i18n_binding_keys_are_locale_specific_with_safe_fallback() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let zh = test_wechat_section(
         "zh-CN",
@@ -280,10 +280,12 @@ fn wechat_i18n_binding_keys_are_locale_specific_with_key_fallback() {
     assert!(!wechat_t(&zh, "wechat.msg.bind_key_required_for_chat").contains("Please send"));
     assert!(wechat_t(&en, "wechat.msg.bind_success").contains("Key bound"));
     assert!(!wechat_t(&en, "wechat.msg.bind_key_required_for_chat").contains("请先"));
+    let fallback = wechat_t(&missing, "wechat.msg.bind_success");
     assert_eq!(
-        wechat_t(&missing, "wechat.msg.bind_success"),
-        "wechat.msg.bind_success"
+        fallback,
+        claw_core::channel_i18n::safe_generic_text_for_locale("en-US")
     );
+    assert!(!fallback.contains("wechat.msg.bind_success"));
 }
 
 #[test]

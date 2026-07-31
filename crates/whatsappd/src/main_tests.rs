@@ -120,7 +120,7 @@ fn unbound_media_like_empty_text_requires_binding_prompt() {
 }
 
 #[test]
-fn whatsapp_i18n_is_locale_specific_with_machine_fallback() {
+fn whatsapp_i18n_is_locale_specific_with_safe_fallback() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let zh_path = root.join("configs/i18n/whatsapp-cloud.zh-CN.toml");
     let en_path = root.join("configs/i18n/whatsapp-cloud.en-US.toml");
@@ -139,5 +139,14 @@ fn whatsapp_i18n_is_locale_specific_with_machine_fallback() {
     assert!(!zh.contains("Please send"));
     assert!(en.contains("Please send"));
     assert!(!en.contains("请先"));
-    assert!(WA_BIND_REQUIRED_FALLBACK.starts_with("message_key="));
+    let missing = text_from_path(
+        "/tmp/agent-runtime-no-such-whatsapp-cloud.zh-CN.toml",
+        WA_I18N_BIND_REQUIRED_KEY,
+        WA_BIND_REQUIRED_FALLBACK,
+    );
+    assert_eq!(
+        missing,
+        claw_core::channel_i18n::safe_generic_text_for_locale("zh-CN")
+    );
+    assert!(!missing.contains("message_key="));
 }

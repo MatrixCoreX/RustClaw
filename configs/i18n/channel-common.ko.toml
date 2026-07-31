@@ -1,0 +1,4 @@
+locale = "ko"
+
+[dict]
+"common.safe_generic_error" = "요청을 완료할 수 없습니다. 잠시 후 다시 시도해 주세요."
