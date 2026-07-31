@@ -90,6 +90,53 @@ fn delivery_requires_payload_and_preview_parent() {
         orphan.validate(),
         Err(ChannelDeliveryValidationError::InvalidPreview)
     );
+
+    let mut overwriting_preview = delivery();
+    overwriting_preview.previews[0].preview_artifact_ref =
+        overwriting_preview.previews[0].artifact_ref.clone();
+    assert_eq!(
+        overwriting_preview.validate(),
+        Err(ChannelDeliveryValidationError::InvalidPreview)
+    );
+}
+
+#[test]
+fn transport_metadata_never_becomes_assistant_success_history() {
+    for source in [
+        ChannelDeliverySource::ImmediateDaemon,
+        ChannelDeliverySource::BackgroundCompletion,
+        ChannelDeliverySource::ScheduledTask,
+    ] {
+        let mut value = delivery();
+        value.source = source;
+        assert_eq!(
+            value.history_disposition(),
+            ChannelDeliveryHistoryDisposition::AssistantResult
+        );
+    }
+
+    let mut proactive = delivery();
+    proactive.source = ChannelDeliverySource::ProactiveNotice;
+    assert_eq!(
+        proactive.history_disposition(),
+        ChannelDeliveryHistoryDisposition::TransportOnly
+    );
+
+    let mut notice = delivery();
+    notice.notice = Some(crate::channel_notice::ChannelNotice::status(
+        "channel.typing",
+        "channel.msg.typing",
+        crate::channel_notice::ChannelNoticeSeverity::Info,
+    ));
+    assert_eq!(
+        notice.history_disposition(),
+        ChannelDeliveryHistoryDisposition::TransportOnly
+    );
+
+    assert_eq!(
+        receipt(ChannelDeliveryStatus::Accepted, false).history_disposition(),
+        ChannelDeliveryHistoryDisposition::TransportOnly
+    );
 }
 
 #[test]
