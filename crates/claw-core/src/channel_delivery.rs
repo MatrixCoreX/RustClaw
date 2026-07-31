@@ -19,6 +19,13 @@ pub enum ChannelDeliverySource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ChannelDeliveryHistoryDisposition {
+    AssistantResult,
+    TransportOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChannelTextFormat {
     Plain,
     Markdown,
@@ -100,6 +107,14 @@ pub struct ChannelDeliveryEnvelope {
 }
 
 impl ChannelDeliveryEnvelope {
+    pub fn history_disposition(&self) -> ChannelDeliveryHistoryDisposition {
+        if self.notice.is_some() || self.source == ChannelDeliverySource::ProactiveNotice {
+            ChannelDeliveryHistoryDisposition::TransportOnly
+        } else {
+            ChannelDeliveryHistoryDisposition::AssistantResult
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ChannelDeliveryValidationError> {
         if self.schema_version != CHANNEL_DELIVERY_SCHEMA_VERSION {
             return Err(ChannelDeliveryValidationError::UnsupportedSchemaVersion);
@@ -148,10 +163,11 @@ impl ChannelDeliveryEnvelope {
         for preview in &self.previews {
             validate_artifact_ref(&preview.artifact_ref)?;
             validate_artifact_ref(&preview.preview_artifact_ref)?;
-            if !self
-                .artifacts
-                .iter()
-                .any(|artifact| artifact.artifact_ref == preview.artifact_ref)
+            if preview.preview_artifact_ref == preview.artifact_ref
+                || !self
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.artifact_ref == preview.artifact_ref)
                 || preview
                     .mime_type
                     .as_deref()
@@ -227,6 +243,10 @@ pub struct ChannelDeliveryReceipt {
 }
 
 impl ChannelDeliveryReceipt {
+    pub fn history_disposition(&self) -> ChannelDeliveryHistoryDisposition {
+        ChannelDeliveryHistoryDisposition::TransportOnly
+    }
+
     pub fn validate(&self) -> Result<(), ChannelDeliveryValidationError> {
         if self.schema_version != CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION {
             return Err(ChannelDeliveryValidationError::UnsupportedReceiptSchemaVersion);
