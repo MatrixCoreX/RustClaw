@@ -45,6 +45,8 @@ pub struct SubmitTaskRequest {
     pub external_chat_id: Option<String>,
     #[serde(default)]
     pub ingress: Option<crate::channel_ingress::ChannelIngressEnvelope>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
     pub kind: TaskKind,
     pub payload: Value,
 }
@@ -116,6 +118,38 @@ pub struct BindChannelKeyRequest {
     pub user_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingChannelRequestStoreRequest {
+    pub idempotency_key: String,
+    #[serde(default)]
+    pub expires_in_seconds: Option<u64>,
+    pub request: SubmitTaskRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingChannelRequestStatus {
+    pub pending_request_id: Uuid,
+    pub status: String,
+    pub expires_at: i64,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+    #[serde(default)]
+    pub context_token: Option<String>,
+    #[serde(default)]
+    pub task_id: Option<Uuid>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BindChannelKeyResponse {
+    pub identity: AuthIdentity,
+    #[serde(default)]
+    pub pending_resume: Option<PendingChannelRequestStatus>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StartFeishuBindSessionRequest {
     #[serde(default)]
@@ -156,6 +190,10 @@ pub struct DetectFeishuBindSessionResponse {
     pub matched: bool,
     #[serde(default)]
     pub session: Option<FeishuBindSessionStatusResponse>,
+    #[serde(default)]
+    pub identity: Option<AuthIdentity>,
+    #[serde(default)]
+    pub pending_resume: Option<PendingChannelRequestStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

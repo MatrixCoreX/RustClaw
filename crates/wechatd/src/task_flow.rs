@@ -521,6 +521,7 @@ pub(super) async fn submit_wechat_task_with_payload(
     user_key: Option<String>,
     kind: TaskKind,
     mut payload: Value,
+    existing_task_id: Option<String>,
 ) {
     let from_user_id = context.scope.peer_id().to_string();
     let context_token = context.context_token.clone();
@@ -556,6 +557,7 @@ pub(super) async fn submit_wechat_task_with_payload(
             .with_locale(state.config.language.clone())
             .with_context_token(context_token.clone())
         }),
+        idempotency_key: None,
         kind,
         payload,
     };
@@ -567,50 +569,54 @@ pub(super) async fn submit_wechat_task_with_payload(
         "{}/v1/tasks",
         state.config.clawd_base_url.trim_end_matches('/')
     );
-    let submit_resp = match state
-        .client
-        .post(&submit_url)
-        .json(&submit_req)
-        .send()
-        .await
-    {
-        Ok(resp) => resp,
-        Err(err) => {
-            warn!("wechatd: task submit failed err={}", err);
+    let task_id = if let Some(task_id) = existing_task_id {
+        task_id
+    } else {
+        let submit_resp = match state
+            .client
+            .post(&submit_url)
+            .json(&submit_req)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                warn!("wechatd: task submit failed err={}", err);
+                finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+                return;
+            }
+        };
+        if !submit_resp.status().is_success() {
+            let status = submit_resp.status();
+            let body = submit_resp.text().await.unwrap_or_default();
+            let error = claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "submit_task",
+                status.as_u16(),
+                &body,
+            );
+            warn!(
+                "wechatd: task submit failed error_code={} diagnostic_id={}",
+                error.error_code, error.diagnostic_id
+            );
             finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
             return;
         }
-    };
-    if !submit_resp.status().is_success() {
-        let status = submit_resp.status();
-        let body = submit_resp.text().await.unwrap_or_default();
-        let error = claw_core::channel_provider_error::ChannelProviderError::from_http_response(
-            "wechat_ilink",
-            "submit_task",
-            status.as_u16(),
-            &body,
-        );
-        warn!(
-            "wechatd: task submit failed error_code={} diagnostic_id={}",
-            error.error_code, error.diagnostic_id
-        );
-        finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
-        return;
-    }
-    let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
-        Ok(body) => body,
-        Err(err) => {
-            warn!("wechatd: task submit parse failed err={}", err);
+        let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
+            Ok(body) => body,
+            Err(err) => {
+                warn!("wechatd: task submit parse failed err={}", err);
+                finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+                return;
+            }
+        };
+        let Some(task_data) = submit_body.data else {
+            warn!("wechatd: task submit missing task_id");
             finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
             return;
-        }
+        };
+        task_data.task_id.to_string()
     };
-    let Some(task_data) = submit_body.data else {
-        warn!("wechatd: task submit missing task_id");
-        finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
-        return;
-    };
-    let task_id = task_data.task_id.to_string();
     let started = std::time::Instant::now();
     let delivery_timeout_secs = state.config.task_delivery_timeout_seconds.max(1);
     let poll_interval = Duration::from_millis(1500);
@@ -779,7 +785,7 @@ pub(super) async fn submit_wechat_task_and_reply(
         "channel": "wechat",
         "context_token": context.context_token.clone(),
     });
-    submit_wechat_task_with_payload(state, context, user_key, TaskKind::Ask, payload).await;
+    submit_wechat_task_with_payload(state, context, user_key, TaskKind::Ask, payload, None).await;
 }
 
 pub(super) async fn submit_wechat_run_skill_and_reply(
@@ -793,7 +799,24 @@ pub(super) async fn submit_wechat_run_skill_and_reply(
         "skill_name": skill_name,
         "args": args,
     });
-    submit_wechat_task_with_payload(state, context, user_key, TaskKind::RunSkill, payload).await;
+    submit_wechat_task_with_payload(state, context, user_key, TaskKind::RunSkill, payload, None)
+        .await;
+}
+
+pub(super) async fn spawn_existing_wechat_task_delivery(
+    state: State,
+    context: PinnedWechatTaskContext,
+    user_key: String,
+    task_id: String,
+) {
+    tokio::spawn(submit_wechat_task_with_payload(
+        state,
+        context,
+        Some(user_key),
+        TaskKind::Ask,
+        json!({}),
+        Some(task_id),
+    ));
 }
 
 pub(super) async fn spawn_inbound_ask_flow(

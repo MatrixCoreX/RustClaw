@@ -19,6 +19,7 @@ fn request(ingress: Option<ChannelIngressEnvelope>) -> SubmitTaskRequest {
         external_user_id: Some("wx-user".to_string()),
         external_chat_id: Some("wx-chat".to_string()),
         ingress,
+        idempotency_key: None,
         kind: TaskKind::Ask,
         payload: json!({"text": "hello"}),
     }
@@ -155,6 +156,7 @@ fn payload_and_task_row_keep_the_same_platform_message_id() {
         Some("open-id"),
         Some("chat-id"),
         Some("platform-message-1"),
+        None,
         "ask",
         &payload.to_string(),
     )
@@ -180,4 +182,52 @@ fn payload_and_task_row_keep_the_same_platform_message_id() {
         stored_payload["channel_ingress"]["adapter"],
         "feishu_open_platform"
     );
+}
+
+#[test]
+fn submitted_task_idempotency_key_allows_exactly_one_task() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let first_id = Uuid::new_v4();
+    let second_id = Uuid::new_v4();
+    let first = insert_submitted_task(
+        &state,
+        &first_id,
+        70,
+        80,
+        Some("rk-test"),
+        ChannelKind::Feishu,
+        Some("open-id"),
+        Some("chat-id"),
+        Some("platform-message-2"),
+        Some("pending:feishu:platform-message-2"),
+        "ask",
+        &json!({"text": "hello"}).to_string(),
+    )
+    .expect("insert first task");
+    let second = insert_submitted_task(
+        &state,
+        &second_id,
+        70,
+        80,
+        Some("rk-test"),
+        ChannelKind::Feishu,
+        Some("open-id"),
+        Some("chat-id"),
+        Some("platform-message-2"),
+        Some("pending:feishu:platform-message-2"),
+        "ask",
+        &json!({"text": "hello again"}).to_string(),
+    )
+    .expect("reuse first task");
+    assert_eq!(first, (first_id, true));
+    assert_eq!(second, (first_id, false));
+    let db = state.core.db.get().expect("main db");
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE idempotency_key = ?1",
+            ["pending:feishu:platform-message-2"],
+            |row| row.get(0),
+        )
+        .expect("count idempotent tasks");
+    assert_eq!(count, 1);
 }

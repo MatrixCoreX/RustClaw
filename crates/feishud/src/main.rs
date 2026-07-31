@@ -22,10 +22,10 @@ use claw_core::channel_open_platform::{
 };
 use claw_core::channel_provider_error::ChannelProviderTransportKind;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DetectFeishuBindSessionRequest,
-    DetectFeishuBindSessionResponse, FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
-    TaskQueryResponse, TaskStatus,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
+    DetectFeishuBindSessionRequest, DetectFeishuBindSessionResponse, PendingChannelRequestStatus,
+    PendingChannelRequestStoreRequest, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
+    SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus,
 };
 use claw_core::wechat_reply_media::{
     extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
@@ -38,9 +38,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
+mod binding_api;
 mod config_helpers;
 mod media_helpers;
 
+use binding_api::*;
 use config_helpers::*;
 use media_helpers::*;
 
@@ -257,7 +259,7 @@ fn feishu_id_to_i64(s: &str) -> i64 {
 
 /// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
 /// 返回 (open_id, chat_id, message_id, text)；若非该事件或非文本或缺少 chat_id 则返回 None。
-fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String, String)> {
+fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String, String, bool)> {
     let (open_id, chat_id, message_id, message_type, content) = parse_im_receive_v1(body)?;
     if message_type != "text" {
         return None;
@@ -270,135 +272,18 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
     if text.is_empty() {
         return None;
     }
-    Some((open_id, chat_id, message_id, text.to_string()))
-}
-
-/// 解析绑定：调用 clawd /v1/auth/channel/resolve，返回已绑定身份（若有）。
-async fn resolve_feishu_identity(
-    client: &Client,
-    base_url: &str,
-    open_id: &str,
-    chat_id: &str,
-) -> Result<Option<AuthIdentity>, String> {
-    let url = format!("{}/v1/auth/channel/resolve", base_url.trim_end_matches('/'));
-    let req = ResolveChannelBindingRequest {
-        channel: ChannelKind::Feishu,
-        external_user_id: Some(open_id.to_string()),
-        external_chat_id: Some(chat_id.to_string()),
-        telegram_bot_name: None,
-    };
-    let resp = client
-        .post(&url)
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| format!("resolve request failed: {}", e))?;
-    let status = resp.status();
-    let body: ApiResponse<ResolveChannelBindingResponse> = resp
-        .json()
-        .await
-        .map_err(|e| format!("resolve response parse failed: {}", e))?;
-    if !status.is_success() || !body.ok {
-        return Err(feishu_provider_invalid_response(
-            "resolve_identity",
-            body.error.as_deref().unwrap_or("application_rejected"),
-        ));
-    }
-    Ok(body.data.and_then(|d| d.identity))
-}
-
-/// 绑定 key：调用 clawd /v1/auth/channel/bind，成功返回身份。
-async fn bind_feishu_identity(
-    client: &Client,
-    base_url: &str,
-    open_id: &str,
-    chat_id: &str,
-    user_key: &str,
-) -> Result<Option<AuthIdentity>, String> {
-    let url = format!("{}/v1/auth/channel/bind", base_url.trim_end_matches('/'));
-    let req = BindChannelKeyRequest {
-        channel: ChannelKind::Feishu,
-        external_user_id: Some(open_id.to_string()),
-        external_chat_id: Some(chat_id.to_string()),
-        telegram_bot_name: None,
-        user_key: user_key.trim().to_string(),
-    };
-    let resp = client
-        .post(&url)
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| format!("bind request failed: {}", e))?;
-    let status = resp.status();
-    let body: ApiResponse<AuthIdentity> = resp
-        .json()
-        .await
-        .map_err(|e| format!("bind response parse failed: {}", e))?;
-    if status.as_u16() == 401 || !body.ok {
-        return Ok(None);
-    }
-    Ok(body.data)
-}
-
-fn extract_pending_bind_token_candidate(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Some(rest) = trimmed.strip_prefix("/start") {
-        let candidate = rest.trim();
-        if candidate.starts_with("pb-") {
-            return Some(candidate.to_string());
-        }
-    }
-    if trimmed.starts_with("pb-") {
-        return Some(trimmed.to_string());
-    }
-    None
-}
-
-async fn detect_pending_feishu_bind(
-    client: &Client,
-    base_url: &str,
-    open_id: &str,
-    chat_id: &str,
-    bind_token: Option<&str>,
-) -> Result<Option<FeishuBindSessionStatusResponse>, String> {
-    let url = format!(
-        "{}/v1/auth/channel-binds/feishu/detect",
-        base_url.trim_end_matches('/')
-    );
-    let req = DetectFeishuBindSessionRequest {
-        bind_token: bind_token.map(|token| token.trim().to_string()),
-        external_user_id: open_id.to_string(),
-        external_chat_id: chat_id.to_string(),
-    };
-    let resp = client
-        .post(&url)
-        .json(&req)
-        .send()
-        .await
-        .map_err(|e| format!("detect request failed: {}", e))?;
-    let status = resp.status();
-    let body: ApiResponse<DetectFeishuBindSessionResponse> = resp
-        .json()
-        .await
-        .map_err(|e| format!("detect response parse failed: {}", e))?;
-    if !status.is_success() || !body.ok {
-        return Err(feishu_provider_invalid_response(
-            "detect_binding",
-            body.error.as_deref().unwrap_or("application_rejected"),
-        ));
-    }
-    Ok(body
-        .data
-        .and_then(|data| if data.matched { data.session } else { None }))
+    let is_group = body
+        .pointer("/event/message/chat_type")
+        .and_then(Value::as_str)
+        .is_some_and(|chat_type| chat_type != "p2p");
+    Some((open_id, chat_id, message_id, text.to_string(), is_group))
 }
 
 const FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY: &str = "feishu.msg.identity_check_unavailable";
 const FEISHU_I18N_BIND_REQUIRED_KEY: &str = "feishu.msg.bind_key_required_for_chat";
 const FEISHU_I18N_BIND_HELP_KEY: &str = "feishu.msg.bind_help";
 const FEISHU_I18N_BIND_SUCCESS_KEY: &str = "feishu.msg.bind_success";
+const FEISHU_I18N_PENDING_RESUME_STOPPED_KEY: &str = "feishu.msg.pending_resume_stopped";
 const FEISHU_I18N_BIND_INVALID_KEY: &str = "feishu.msg.bind_invalid";
 const FEISHU_I18N_BIND_REQUEST_FAILED_KEY: &str = "feishu.msg.bind_request_failed";
 const FEISHU_I18N_MEDIA_DOWNLOAD_FAILED_KEY: &str = "feishu.msg.media_download_failed";
@@ -413,6 +298,8 @@ const FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str =
 const FEISHU_BIND_REQUIRED_FALLBACK: &str = "message_key=feishu.msg.bind_key_required_for_chat";
 const FEISHU_BIND_HELP_FALLBACK: &str = "message_key=feishu.msg.bind_help";
 const FEISHU_BIND_SUCCESS_FALLBACK: &str = "message_key=feishu.msg.bind_success";
+const FEISHU_PENDING_RESUME_STOPPED_FALLBACK: &str =
+    "message_key=feishu.msg.pending_resume_stopped";
 const FEISHU_BIND_INVALID_FALLBACK: &str = "message_key=feishu.msg.bind_invalid";
 const FEISHU_BIND_REQUEST_FAILED_FALLBACK: &str = "message_key=feishu.msg.bind_request_failed";
 const FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "message_key=feishu.msg.media_download_failed";
@@ -475,17 +362,32 @@ async fn handle_incoming_feishu_text(
     chat_id: String,
     message_id: String,
     text: String,
+    is_group: bool,
 ) {
     let base = state.config.feishu.clawd_base_url.clone();
     let client = state.client.clone();
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
+    let explicit_bind_candidate = extract_bind_key_candidate(text.trim(), false);
+    if is_group && explicit_bind_candidate.is_some() {
+        let msg = feishu_t(
+            &config,
+            FEISHU_I18N_BIND_REQUIRED_KEY,
+            FEISHU_BIND_REQUIRED_FALLBACK,
+        );
+        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+        return;
+    }
 
     info!(
         "feishud: binding resolve start external_chat_id={}",
         chat_id
     );
-    let identity = match resolve_feishu_identity(&client, &base, &open_id, &chat_id).await {
+    let identity = match if explicit_bind_candidate.is_some() {
+        Ok(None)
+    } else {
+        resolve_feishu_identity(&client, &base, &open_id, &chat_id).await
+    } {
         Ok(ident) => ident,
         Err(e) => {
             warn!("feishud: binding resolve failed err={}", e);
@@ -512,6 +414,7 @@ async fn handle_incoming_feishu_text(
             message_id,
             text,
             Some(ident.user_key),
+            None,
         );
         return;
     }
@@ -525,7 +428,7 @@ async fn handle_incoming_feishu_text(
     if let Some(bind_token) = pending_bind_token.as_deref() {
         match detect_pending_feishu_bind(&client, &base, &open_id, &chat_id, Some(bind_token)).await
         {
-            Ok(Some(_session)) => {
+            Ok(Some(bind_result)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!(
                     "feishud: pending bind finalized external_chat_id={}",
@@ -537,6 +440,30 @@ async fn handle_incoming_feishu_text(
                     FEISHU_BIND_SUCCESS_FALLBACK,
                 );
                 let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+                if let (Some(identity), Some(resume)) =
+                    (bind_result.identity, bind_result.pending_resume)
+                {
+                    if let Some(task_id) = resume.task_id {
+                        handle_text_message_to_clawd(
+                            state.clone(),
+                            resume.external_user_id.unwrap_or_else(|| open_id.clone()),
+                            resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
+                            message_id.clone(),
+                            String::new(),
+                            Some(identity.user_key),
+                            Some(task_id.to_string()),
+                        );
+                    } else if resume.error_code.is_some() {
+                        let stopped = feishu_t(
+                            &config,
+                            FEISHU_I18N_PENDING_RESUME_STOPPED_KEY,
+                            FEISHU_PENDING_RESUME_STOPPED_FALLBACK,
+                        );
+                        let _ =
+                            send_feishu_text(&config, &client, &token_cache, &chat_id, &stopped)
+                                .await;
+                    }
+                }
                 return;
             }
             Ok(None) => {}
@@ -558,8 +485,29 @@ async fn handle_incoming_feishu_text(
         let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
         return;
     }
-    let maybe_candidate =
-        extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
+    if is_group {
+        if !should_expect_key_reply(&state, &chat_id) {
+            if let Err(error) =
+                store_pending_feishu_request(&state, &open_id, &chat_id, &message_id, trimmed, None)
+                    .await
+            {
+                warn!(
+                    "feishud: group pending request persistence failed external_chat_id={} error={}",
+                    chat_id, error
+                );
+            }
+        }
+        set_expect_key_reply(&state, &chat_id, true);
+        let msg = feishu_t(
+            &config,
+            FEISHU_I18N_BIND_REQUIRED_KEY,
+            FEISHU_BIND_REQUIRED_FALLBACK,
+        );
+        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+        return;
+    }
+    let maybe_candidate = explicit_bind_candidate
+        .or_else(|| extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id)));
     if let Some(candidate) = maybe_candidate {
         info!(
             "feishud: bind attempt external_chat_id={} key_len={}",
@@ -567,7 +515,7 @@ async fn handle_incoming_feishu_text(
             candidate.len()
         );
         match bind_feishu_identity(&client, &base, &open_id, &chat_id, &candidate).await {
-            Ok(Some(_)) => {
+            Ok(Some(bind_result)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("feishud: bind success external_chat_id={}", chat_id);
                 let msg = feishu_t(
@@ -576,6 +524,28 @@ async fn handle_incoming_feishu_text(
                     FEISHU_BIND_SUCCESS_FALLBACK,
                 );
                 let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+                if let Some(resume) = bind_result.pending_resume {
+                    if let Some(task_id) = resume.task_id {
+                        handle_text_message_to_clawd(
+                            state.clone(),
+                            resume.external_user_id.unwrap_or_else(|| open_id.clone()),
+                            resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
+                            message_id.clone(),
+                            String::new(),
+                            Some(bind_result.identity.user_key),
+                            Some(task_id.to_string()),
+                        );
+                    } else if resume.error_code.is_some() {
+                        let stopped = feishu_t(
+                            &config,
+                            FEISHU_I18N_PENDING_RESUME_STOPPED_KEY,
+                            FEISHU_PENDING_RESUME_STOPPED_FALLBACK,
+                        );
+                        let _ =
+                            send_feishu_text(&config, &client, &token_cache, &chat_id, &stopped)
+                                .await;
+                    }
+                }
             }
             Ok(None) => {
                 set_expect_key_reply(&state, &chat_id, true);
@@ -610,6 +580,14 @@ async fn handle_incoming_feishu_text(
         info!(
             "feishud: unbound user prompted for key (empty text) external_chat_id={}",
             chat_id
+        );
+    }
+    if let Err(error) =
+        store_pending_feishu_request(&state, &open_id, &chat_id, &message_id, trimmed, None).await
+    {
+        warn!(
+            "feishud: pending request persistence failed external_chat_id={} error={}",
+            chat_id, error
         );
     }
     set_expect_key_reply(&state, &chat_id, true);
@@ -649,6 +627,21 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
     };
 
     let Some(ident) = identity else {
+        if let Err(error) = store_pending_feishu_request(
+            &state,
+            &ctx.open_id,
+            &ctx.chat_id,
+            &ctx.message_id,
+            "",
+            Some((
+                &ctx.message_type,
+                format!("provider://feishu/{}/{}", ctx.message_id, ctx.resource_key),
+            )),
+        )
+        .await
+        {
+            warn!("feishud: pending media reference persistence failed err={error}");
+        }
         set_expect_key_reply(&state, &ctx.chat_id, true);
         let msg = feishu_t(
             &config,
@@ -735,14 +728,17 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         ctx.message_id,
         hint,
         Some(ident.user_key),
+        None,
     );
 }
 
 /// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
 fn dispatch_im_incoming_event(state: AppState, body: Value) {
-    if let Some((open_id, chat_id, message_id, text)) = parse_im_text_from_event_body(&body) {
+    if let Some((open_id, chat_id, message_id, text, is_group)) =
+        parse_im_text_from_event_body(&body)
+    {
         tokio::spawn(handle_incoming_feishu_text(
-            state, open_id, chat_id, message_id, text,
+            state, open_id, chat_id, message_id, text, is_group,
         ));
         return;
     }
@@ -798,6 +794,7 @@ fn handle_text_message_to_clawd(
     message_id: String,
     text: String,
     user_key: Option<String>,
+    existing_task_id: Option<String>,
 ) {
     let user_id = feishu_id_to_i64(if open_id.is_empty() {
         &chat_id
@@ -819,12 +816,13 @@ fn handle_text_message_to_clawd(
                 open_platform_contract(OpenPlatformRegion::Feishu).source_adapter,
             )
             .with_external_ids(open_id.clone(), chat_id.clone())
-            .with_message_id(message_id)
+            .with_message_id(message_id.clone())
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
                 chat_id.clone(),
             ))
             .with_locale(state.config.feishu.language.clone()),
         ),
+        idempotency_key: Some(format!("feishu:{message_id}")),
         kind: TaskKind::Ask,
         payload: json!({ "text": text }),
     };
@@ -840,50 +838,56 @@ fn handle_text_message_to_clawd(
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
-        let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("feishud: task submit failed err={}", e);
+        let task_id = if let Some(task_id) = existing_task_id {
+            task_id
+        } else {
+            let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("feishud: task submit failed err={}", e);
+                    return;
+                }
+            };
+
+            if !submit_resp.status().is_success() {
+                let status = submit_resp.status();
+                let resp_body = submit_resp.text().await.unwrap_or_default();
+                let error = feishu_provider_http_error("submit_task", status.as_u16(), &resp_body);
+                let decoded =
+                    claw_core::channel_provider_error::ChannelProviderError::decode(&error);
+                warn!(
+                    "feishud: task submit failed error_code={} diagnostic_id={}",
+                    decoded
+                        .as_ref()
+                        .map(|value| value.error_code.as_str())
+                        .unwrap_or("channel.provider.unknown"),
+                    decoded
+                        .as_ref()
+                        .map(|value| value.diagnostic_id.as_str())
+                        .unwrap_or("none")
+                );
                 return;
             }
-        };
 
-        if !submit_resp.status().is_success() {
-            let status = submit_resp.status();
-            let resp_body = submit_resp.text().await.unwrap_or_default();
-            let error = feishu_provider_http_error("submit_task", status.as_u16(), &resp_body);
-            let decoded = claw_core::channel_provider_error::ChannelProviderError::decode(&error);
-            warn!(
-                "feishud: task submit failed error_code={} diagnostic_id={}",
-                decoded
-                    .as_ref()
-                    .map(|value| value.error_code.as_str())
-                    .unwrap_or("channel.provider.unknown"),
-                decoded
-                    .as_ref()
-                    .map(|value| value.diagnostic_id.as_str())
-                    .unwrap_or("none")
+            let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("feishud: task submit response parse failed err={}", e);
+                    return;
+                }
+            };
+
+            let Some(data) = submit_body.data else {
+                warn!("feishud: task submit no task_id");
+                return;
+            };
+            let task_id = data.task_id.to_string();
+            info!(
+                "feishud: bound user task submitted task_id={} external_chat_id={}",
+                task_id, chat_id
             );
-            return;
-        }
-
-        let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("feishud: task submit response parse failed err={}", e);
-                return;
-            }
+            task_id
         };
-
-        let Some(data) = submit_body.data else {
-            warn!("feishud: task submit no task_id");
-            return;
-        };
-        let task_id = data.task_id.to_string();
-        info!(
-            "feishud: bound user task submitted task_id={} external_chat_id={}",
-            task_id, chat_id
-        );
         let running_notice_text = feishu_t_with(
             &config,
             FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,

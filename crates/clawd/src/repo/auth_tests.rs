@@ -262,6 +262,13 @@ fn task_message_id_migration_preserves_rows_indexes_and_foreign_keys() {
             |row| row.get(0),
         )
         .expect("message id affinity");
+    let idempotency_column_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'idempotency_key'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("idempotency column count");
     let task: (String, String, i64, i64, i64) = db
         .query_row(
             "SELECT message_id, lease_owner, lease_expires_at, claim_attempt, claimed_at
@@ -302,6 +309,7 @@ fn task_message_id_migration_preserves_rows_indexes_and_foreign_keys() {
         .expect("foreign key check");
 
     assert_eq!(affinity, "TEXT");
+    assert_eq!(idempotency_column_count, 1);
     assert_eq!(
         task,
         ("message-1".to_string(), "worker-1".to_string(), 200, 2, 99)

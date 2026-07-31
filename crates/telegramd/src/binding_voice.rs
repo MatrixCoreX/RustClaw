@@ -145,7 +145,7 @@ pub(super) async fn bind_telegram_identity(
     platform_user_id: i64,
     platform_chat_id: i64,
     user_key: &str,
-) -> anyhow::Result<Option<AuthIdentity>> {
+) -> anyhow::Result<Option<BindChannelKeyResponse>> {
     let url = format!("{}/v1/auth/channel/bind", state.clawd_base_url);
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Telegram,
@@ -156,7 +156,7 @@ pub(super) async fn bind_telegram_identity(
     };
     let resp = state.client.post(&url).json(&req).send().await?;
     let status = resp.status();
-    let body: ApiResponse<AuthIdentity> = resp.json().await?;
+    let body: ApiResponse<BindChannelKeyResponse> = resp.json().await?;
     if !status.is_success() {
         if status.as_u16() == 401 {
             return Ok(None);
@@ -168,6 +168,60 @@ pub(super) async fn bind_telegram_identity(
     }
     if !body.ok {
         return Ok(None);
+    }
+    Ok(body.data)
+}
+
+pub(super) async fn store_pending_telegram_request(
+    state: &BotState,
+    platform_user_id: i64,
+    platform_chat_id: i64,
+    message_id: String,
+    text: &str,
+) -> anyhow::Result<Option<PendingChannelRequestStatus>> {
+    let prompt = text.trim();
+    if prompt.is_empty() {
+        return Ok(None);
+    }
+    let ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+        ChannelKind::Telegram,
+        "telegram_bot",
+    )
+    .with_external_ids(platform_user_id.to_string(), platform_chat_id.to_string())
+    .with_message_id(message_id.clone())
+    .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
+        platform_chat_id.to_string(),
+    ))
+    .with_locale(state.language.clone());
+    let idempotency_key = format!(
+        "pending:telegram:{}:{}:{}",
+        state.bot_name, platform_chat_id, message_id
+    );
+    let pending = PendingChannelRequestStoreRequest {
+        idempotency_key: idempotency_key.clone(),
+        expires_in_seconds: None,
+        request: SubmitTaskRequest {
+            user_id: Some(platform_user_id),
+            chat_id: Some(platform_chat_id),
+            user_key: None,
+            channel: Some(ChannelKind::Telegram),
+            external_user_id: Some(platform_user_id.to_string()),
+            external_chat_id: Some(platform_chat_id.to_string()),
+            ingress: Some(ingress),
+            idempotency_key: Some(idempotency_key),
+            kind: TaskKind::Ask,
+            payload: json!({ "text": prompt }),
+        },
+    };
+    let url = format!("{}/v1/auth/channel/pending-request", state.clawd_base_url);
+    let response = state.client.post(url).json(&pending).send().await?;
+    let status = response.status();
+    let body: ApiResponse<PendingChannelRequestStatus> = response.json().await?;
+    if !status.is_success() || !body.ok {
+        return Err(anyhow!(telegram_provider_invalid_response(
+            "store_pending_request",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        )));
     }
     Ok(body.data)
 }

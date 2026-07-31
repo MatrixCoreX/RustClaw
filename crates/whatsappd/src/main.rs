@@ -20,7 +20,8 @@ use claw_core::channel_delivery_tokens::{
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
+    PendingChannelRequestStatus, PendingChannelRequestStoreRequest, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
@@ -35,6 +36,7 @@ use tracing::{info, warn};
 type HmacSha256 = Hmac<Sha256>;
 const WA_I18N_BIND_REQUIRED_KEY: &str = "whatsapp_cloud.msg.bind_key_required_for_chat";
 const WA_I18N_BIND_SUCCESS_KEY: &str = "whatsapp_cloud.msg.bind_success";
+const WA_I18N_PENDING_RESUME_STOPPED_KEY: &str = "whatsapp_cloud.msg.pending_resume_stopped";
 const WA_I18N_BIND_INVALID_KEY: &str = "whatsapp_cloud.msg.bind_invalid";
 const WA_I18N_BIND_HELP_KEY: &str = "whatsapp_cloud.msg.bind_help";
 const WA_I18N_RUN_USAGE_KEY: &str = "whatsapp_cloud.msg.run_usage";
@@ -47,6 +49,8 @@ const WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str =
 
 const WA_BIND_REQUIRED_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_key_required_for_chat";
 const WA_BIND_SUCCESS_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_success";
+const WA_PENDING_RESUME_STOPPED_FALLBACK: &str =
+    "message_key=whatsapp_cloud.msg.pending_resume_stopped";
 const WA_BIND_INVALID_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_invalid";
 const WA_BIND_HELP_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_help";
 const WA_RUN_USAGE_FALLBACK: &str = "message_key=whatsapp_cloud.msg.run_usage";
@@ -475,7 +479,7 @@ async fn bind_whatsapp_identity(
     state: &AppState,
     wa_id: &str,
     user_key: &str,
-) -> anyhow::Result<Option<AuthIdentity>> {
+) -> anyhow::Result<Option<BindChannelKeyResponse>> {
     let url = format!("{}/v1/auth/channel/bind", state.clawd_base_url);
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Whatsapp,
@@ -486,7 +490,7 @@ async fn bind_whatsapp_identity(
     };
     let resp = state.client.post(&url).json(&req).send().await?;
     let status = resp.status();
-    let body: ApiResponse<AuthIdentity> = resp.json().await?;
+    let body: ApiResponse<BindChannelKeyResponse> = resp.json().await?;
     if !status.is_success() {
         if status.as_u16() == 401 {
             return Ok(None);
@@ -498,6 +502,77 @@ async fn bind_whatsapp_identity(
     }
     if !body.ok {
         return Ok(None);
+    }
+    Ok(body.data)
+}
+
+async fn store_pending_whatsapp_request(
+    state: &AppState,
+    msg: &WaMessage,
+    text: &str,
+) -> anyhow::Result<Option<PendingChannelRequestStatus>> {
+    let prompt = text.trim();
+    let media = msg
+        .image
+        .as_ref()
+        .map(|media| ("image", media))
+        .or_else(|| msg.audio.as_ref().map(|media| ("audio", media)))
+        .or_else(|| msg.document.as_ref().map(|media| ("file", media)));
+    if (prompt.is_empty() && media.is_none()) || msg.id.trim().is_empty() {
+        return Ok(None);
+    }
+    let idempotency_key = format!("pending:whatsapp_cloud:{}", msg.id.trim());
+    let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+        ChannelKind::Whatsapp,
+        "whatsapp_cloud",
+    )
+    .with_external_ids(msg.from.clone(), msg.from.clone())
+    .with_message_id(msg.id.clone())
+    .with_received_at_ts(now_ts())
+    .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
+        msg.from.clone(),
+    ))
+    .with_locale(state.language.clone());
+    if let Some((kind, media)) = media {
+        ingress
+            .attachments
+            .push(claw_core::channel_ingress::ChannelIngressAttachment {
+                kind: kind.to_string(),
+                path: format!("provider://whatsapp_cloud/{}", media.id),
+                mime_type: media.mime_type.clone(),
+                size: None,
+            });
+    }
+    let request = SubmitTaskRequest {
+        user_id: None,
+        chat_id: None,
+        user_key: None,
+        channel: Some(ChannelKind::Whatsapp),
+        external_user_id: Some(msg.from.clone()),
+        external_chat_id: Some(msg.from.clone()),
+        ingress: Some(ingress),
+        idempotency_key: Some(idempotency_key.clone()),
+        kind: TaskKind::Ask,
+        payload: json!({ "text": prompt, "adapter": "whatsapp_cloud" }),
+    };
+    let url = format!("{}/v1/auth/channel/pending-request", state.clawd_base_url);
+    let response = state
+        .client
+        .post(url)
+        .json(&PendingChannelRequestStoreRequest {
+            idempotency_key,
+            expires_in_seconds: None,
+            request,
+        })
+        .send()
+        .await?;
+    let status = response.status();
+    let body: ApiResponse<PendingChannelRequestStatus> = response.json().await?;
+    if !status.is_success() || !body.ok {
+        return Err(whatsapp_provider_invalid_response(
+            "store_pending_request",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        ));
     }
     Ok(body.data)
 }
@@ -568,6 +643,33 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
     let core_action = slash_command
         .as_ref()
         .and_then(|command| command.definition.core_action());
+    if let Some(candidate) = extract_bind_key_candidate(inbound_text.trim(), false) {
+        if let Some(bind_result) = bind_whatsapp_identity(state, &msg.from, &candidate).await? {
+            let identity = bind_result.identity;
+            set_expect_key_reply(state, &msg.from, false);
+            store_bound_identity(state, &msg.from, &identity);
+            let text = wa_t(state, WA_I18N_BIND_SUCCESS_KEY, WA_BIND_SUCCESS_FALLBACK);
+            let _ = send_whatsapp_text(state, &msg.from, &text).await;
+            if let Some(resume) = bind_result.pending_resume {
+                if let Some(task_id) = resume.task_id {
+                    let target = resume.external_user_id.unwrap_or_else(|| msg.from.clone());
+                    spawn_task_result_delivery(state.clone(), target, task_id.to_string(), None);
+                } else if resume.error_code.is_some() {
+                    let stopped = wa_t(
+                        state,
+                        WA_I18N_PENDING_RESUME_STOPPED_KEY,
+                        WA_PENDING_RESUME_STOPPED_FALLBACK,
+                    );
+                    let _ = send_whatsapp_text(state, &msg.from, &stopped).await;
+                }
+            }
+        } else {
+            set_expect_key_reply(state, &msg.from, true);
+            let text = wa_t(state, WA_I18N_BIND_INVALID_KEY, WA_BIND_INVALID_FALLBACK);
+            let _ = send_whatsapp_text(state, &msg.from, &text).await;
+        }
+        return Ok(());
+    }
     let identity = match resolve_whatsapp_identity(state, &msg.from).await? {
         Some(identity) => {
             set_expect_key_reply(state, &msg.from, false);
@@ -585,18 +687,45 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
             let maybe_candidate =
                 extract_bind_key_candidate(trimmed_text, should_expect_key_reply(state, &msg.from));
             if let Some(candidate) = maybe_candidate {
-                if let Some(identity) = bind_whatsapp_identity(state, &msg.from, &candidate).await?
+                if let Some(bind_result) =
+                    bind_whatsapp_identity(state, &msg.from, &candidate).await?
                 {
+                    let identity = bind_result.identity;
                     set_expect_key_reply(state, &msg.from, false);
                     store_bound_identity(state, &msg.from, &identity);
                     let text = wa_t(state, WA_I18N_BIND_SUCCESS_KEY, WA_BIND_SUCCESS_FALLBACK);
                     let _ = send_whatsapp_text(state, &msg.from, &text).await;
+                    if let Some(resume) = bind_result.pending_resume {
+                        if let Some(task_id) = resume.task_id {
+                            let target =
+                                resume.external_user_id.unwrap_or_else(|| msg.from.clone());
+                            spawn_task_result_delivery(
+                                state.clone(),
+                                target,
+                                task_id.to_string(),
+                                None,
+                            );
+                        } else if resume.error_code.is_some() {
+                            let stopped = wa_t(
+                                state,
+                                WA_I18N_PENDING_RESUME_STOPPED_KEY,
+                                WA_PENDING_RESUME_STOPPED_FALLBACK,
+                            );
+                            let _ = send_whatsapp_text(state, &msg.from, &stopped).await;
+                        }
+                    }
                 } else {
                     set_expect_key_reply(state, &msg.from, true);
                     let text = wa_t(state, WA_I18N_BIND_INVALID_KEY, WA_BIND_INVALID_FALLBACK);
                     let _ = send_whatsapp_text(state, &msg.from, &text).await;
                 }
                 return Ok(());
+            }
+            if let Err(error) = store_pending_whatsapp_request(state, &msg, trimmed_text).await {
+                warn!(
+                    "whatsappd: pending request persistence failed wa_id={} error={}",
+                    msg.from, error
+                );
             }
             let _ = send_bind_required_prompt(state, &msg.from).await;
             return Ok(());
@@ -914,6 +1043,7 @@ async fn submit_task_only(
             }
             ingress
         }),
+        idempotency_key: message_id.map(|value| format!("whatsapp_cloud:{value}")),
         kind,
         payload,
     };

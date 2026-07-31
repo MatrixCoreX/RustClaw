@@ -24,12 +24,30 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     };
 
     if extract_text_message(&msg).is_none() {
+        let pending_attachment_kind = if inbound_image_decrypt_params(&msg).is_some() {
+            Some("image")
+        } else if inbound_video_decrypt_params(&msg).is_some() {
+            Some("video")
+        } else if inbound_file_decrypt_params(&msg).is_some() {
+            Some("file")
+        } else if inbound_voice_decrypt_params(&msg).is_some() {
+            Some("audio")
+        } else {
+            None
+        };
+        let pending_message_id = format!(
+            "{}:{}:{}",
+            from_user_id,
+            msg.create_time_ms.unwrap_or_default(),
+            pending_attachment_kind.unwrap_or("media")
+        );
         let Some(identity) = ensure_bound_before_task(
             &state,
-            &task_context.scope,
+            &task_context,
             &from_user_id,
-            Some(&task_context.context_token),
             None,
+            Some(&pending_message_id),
+            pending_attachment_kind,
         )
         .await
         else {
@@ -271,12 +289,19 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     })
     .await;
 
+    let pending_message_id = format!(
+        "{}:{}:{}",
+        from_user_id,
+        msg.create_time_ms.unwrap_or_default(),
+        stable_i64_from_string(&text)
+    );
     let Some(identity) = ensure_bound_before_task(
         &state,
-        &task_context.scope,
+        &task_context,
         &from_user_id,
-        Some(&task_context.context_token),
         Some(text.as_str()),
+        Some(&pending_message_id),
+        None,
     )
     .await
     else {

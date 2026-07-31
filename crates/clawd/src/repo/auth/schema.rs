@@ -36,6 +36,15 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     )?;
     crate::ensure_column_exists(
         db,
+        "tasks",
+        "idempotency_key",
+        "ALTER TABLE tasks ADD COLUMN idempotency_key TEXT",
+    )?;
+    db.execute_batch(include_str!(
+        "../../../../../migrations/007_pending_channel_requests.sql"
+    ))?;
+    crate::ensure_column_exists(
+        db,
         "scheduled_jobs",
         "user_key",
         "ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT",
@@ -114,6 +123,16 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
 }
 
 pub(super) fn rebuild_task_message_id_as_text(db: &Connection) -> anyhow::Result<()> {
+    // This migration is also exercised directly by upgrade verification tests and may
+    // encounter a database created before task submission idempotency was introduced.
+    // Materialize the nullable column before rebuilding so the copy remains valid for
+    // both old and current task schemas.
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "idempotency_key",
+        "ALTER TABLE tasks ADD COLUMN idempotency_key TEXT",
+    )?;
     let column_type = db
         .query_row(
             "SELECT type FROM pragma_table_info('tasks') WHERE name = 'message_id'",
@@ -154,6 +173,7 @@ pub(super) fn rebuild_task_message_id_as_text(db: &Connection) -> anyhow::Result
                  external_user_id TEXT,
                  external_chat_id TEXT,
                  message_id    TEXT,
+                 idempotency_key TEXT,
                  user_key      TEXT,
                  kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
                  payload_json  TEXT NOT NULL,
@@ -169,12 +189,12 @@ pub(super) fn rebuild_task_message_id_as_text(db: &Connection) -> anyhow::Result
              );
              INSERT INTO tasks_message_id_text_migration (
                  task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
-                 message_id, user_key, kind, payload_json, status, result_json, error_text,
+                 message_id, idempotency_key, user_key, kind, payload_json, status, result_json, error_text,
                  created_at, updated_at, lease_owner, lease_expires_at, claim_attempt, claimed_at
              )
              SELECT
                  task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
-                 CAST(message_id AS TEXT), user_key, kind, payload_json, status, result_json,
+                 CAST(message_id AS TEXT), idempotency_key, user_key, kind, payload_json, status, result_json,
                  error_text, created_at, updated_at, lease_owner, lease_expires_at,
                  claim_attempt, claimed_at
              FROM tasks;",

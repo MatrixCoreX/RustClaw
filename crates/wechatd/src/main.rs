@@ -32,7 +32,8 @@ use base64::Engine;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
+    PendingChannelRequestStatus, PendingChannelRequestStoreRequest, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };

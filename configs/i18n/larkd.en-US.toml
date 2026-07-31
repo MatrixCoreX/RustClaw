@@ -2,9 +2,10 @@ locale = "en-US"
 
 [dict]
 "lark.msg.identity_check_unavailable" = "Identity check temporarily unavailable, please try again later."
-"lark.msg.bind_key_required_for_chat" = "Please send your key first to bind this account before chatting or using features."
+"lark.msg.bind_key_required_for_chat" = "To protect your key, send /key <YOUR_KEY> in a private chat with the bot. The pending request will resume in its original chat."
 "lark.msg.bind_help" = "Welcome to {product_name}.\nPlease send /key <your_key> first to bind this account."
-"lark.msg.bind_success" = "Bound successfully. Please send your previous message again."
+"lark.msg.bind_success" = "Bound successfully. Your pending request will resume automatically."
+"lark.msg.pending_resume_stopped" = "The pending request expired, lost an attachment, or no longer has permission. Please send the original request again."
 "lark.msg.bind_invalid" = "Invalid key. Please try again."
 "lark.msg.bind_request_failed" = "Bind request failed, please try again later."
 "lark.msg.media_download_failed" = "Media download failed, please try again later."

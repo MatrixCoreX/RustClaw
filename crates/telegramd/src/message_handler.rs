@@ -48,6 +48,67 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         return Ok(());
     }
 
+    if !msg.chat.is_private() && text.trim().starts_with("/key") {
+        send_bind_key_required_prompt(&bot, &msg, &state).await?;
+        return Ok(());
+    }
+
+    let explicit_bind_candidate = msg
+        .chat
+        .is_private()
+        .then(|| {
+            text.trim()
+                .strip_prefix("/key")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+        .flatten();
+    if let Some(candidate) = explicit_bind_candidate {
+        if let Some(bind_result) =
+            bind_telegram_identity(&state, platform_user_id, platform_chat_id, &candidate).await?
+        {
+            let identity = bind_result.identity;
+            set_expect_key_reply(&state, platform_chat_id, false);
+            store_bound_identity(&state, platform_chat_id, &identity);
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.bind_success"))
+                .await
+                .context("send key bind success failed")?;
+            if let Some(resume) = bind_result.pending_resume {
+                if let Some(task_id) = resume.task_id {
+                    let delivery_chat = resume
+                        .external_chat_id
+                        .as_deref()
+                        .and_then(|value| value.parse::<i64>().ok())
+                        .map(ChatId)
+                        .unwrap_or(msg.chat.id);
+                    spawn_task_result_delivery(
+                        bot.clone(),
+                        state.clone(),
+                        delivery_chat,
+                        identity.user_id,
+                        task_id.to_string(),
+                        None,
+                        state.i18n.t("telegram.msg.process_failed"),
+                    );
+                } else if resume.error_code.is_some() {
+                    bot.send_message(
+                        msg.chat.id,
+                        state.i18n.t("telegram.msg.pending_resume_stopped"),
+                    )
+                    .await
+                    .context("send pending resume stopped failed")?;
+                }
+            }
+        } else {
+            set_expect_key_reply(&state, platform_chat_id, true);
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.bind_invalid"))
+                .await
+                .context("send invalid key failed")?;
+        }
+        return Ok(());
+    }
+
     let bound_identity = match resolve_telegram_identity(&state, platform_user_id, platform_chat_id)
         .await?
     {
@@ -57,18 +118,53 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
             Some(identity)
         }
         None => {
-            let maybe_candidate =
-                extract_bind_key_candidate(text, should_expect_key_reply(&state, platform_chat_id));
+            let maybe_candidate = msg
+                .chat
+                .is_private()
+                .then(|| {
+                    extract_bind_key_candidate(
+                        text,
+                        should_expect_key_reply(&state, platform_chat_id),
+                    )
+                })
+                .flatten();
             if let Some(candidate) = maybe_candidate {
-                if let Some(identity) =
+                if let Some(bind_result) =
                     bind_telegram_identity(&state, platform_user_id, platform_chat_id, &candidate)
                         .await?
                 {
+                    let identity = bind_result.identity;
                     set_expect_key_reply(&state, platform_chat_id, false);
                     store_bound_identity(&state, platform_chat_id, &identity);
                     bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.bind_success"))
                         .await
                         .context("send key bind success failed")?;
+                    if let Some(resume) = bind_result.pending_resume {
+                        if let Some(task_id) = resume.task_id {
+                            let delivery_chat = resume
+                                .external_chat_id
+                                .as_deref()
+                                .and_then(|value| value.parse::<i64>().ok())
+                                .map(ChatId)
+                                .unwrap_or(msg.chat.id);
+                            spawn_task_result_delivery(
+                                bot.clone(),
+                                state.clone(),
+                                delivery_chat,
+                                identity.user_id,
+                                task_id.to_string(),
+                                None,
+                                state.i18n.t("telegram.msg.process_failed"),
+                            );
+                        } else if resume.error_code.is_some() {
+                            bot.send_message(
+                                msg.chat.id,
+                                state.i18n.t("telegram.msg.pending_resume_stopped"),
+                            )
+                            .await
+                            .context("send pending resume stopped failed")?;
+                        }
+                    }
                     return Ok(());
                 } else {
                     set_expect_key_reply(&state, platform_chat_id, true);
@@ -82,6 +178,39 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         }
     };
     if bound_identity.is_none() {
+        let may_persist =
+            msg.chat.is_private() || !should_expect_key_reply(&state, platform_chat_id);
+        if may_persist {
+            let pending_media =
+                match store_pending_telegram_attachment(&bot, &msg, &state, platform_user_id, text)
+                    .await
+                {
+                    Ok(stored) => stored,
+                    Err(error) => {
+                        warn!(
+                            "telegramd: pending attachment persistence failed chat_id={} error={}",
+                            platform_chat_id, error
+                        );
+                        false
+                    }
+                };
+            if !pending_media {
+                if let Err(error) = store_pending_telegram_request(
+                    &state,
+                    platform_user_id,
+                    platform_chat_id,
+                    msg.id.0.to_string(),
+                    text,
+                )
+                .await
+                {
+                    warn!(
+                        "telegramd: pending request persistence failed chat_id={} error={}",
+                        platform_chat_id, error
+                    );
+                }
+            }
+        }
         send_bind_key_required_prompt(&bot, &msg, &state).await?;
         return Ok(());
     }

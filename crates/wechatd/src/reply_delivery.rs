@@ -285,7 +285,7 @@ pub(super) async fn bind_wechat_identity(
     external_user_id: &str,
     external_chat_id: &str,
     user_key: &str,
-) -> Result<Option<AuthIdentity>, String> {
+) -> Result<Option<BindChannelKeyResponse>, String> {
     let url = format!("{}/v1/auth/channel/bind", base_url.trim_end_matches('/'));
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Wechat,
@@ -301,7 +301,7 @@ pub(super) async fn bind_wechat_identity(
         .await
         .map_err(|e| format!("bind request failed: {e}"))?;
     let status = resp.status();
-    let body: ApiResponse<AuthIdentity> = resp
+    let body: ApiResponse<BindChannelKeyResponse> = resp
         .json()
         .await
         .map_err(|e| format!("bind response parse failed: {e}"))?;

@@ -1110,7 +1110,7 @@ pub(crate) fn resolve_channel_binding_identity(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let row = if external_user_id.is_some() && external_chat_id.is_some() {
+    let mut row = if external_user_id.is_some() && external_chat_id.is_some() {
         db.query_row(
             "SELECT k.user_key, k.role
              FROM channel_bindings b
@@ -1154,6 +1154,22 @@ pub(crate) fn resolve_channel_binding_identity(
         )
         .optional()?
     };
+    if row.is_none() && external_user_id.is_some() && external_chat_id.is_some() {
+        row = db
+            .query_row(
+                "SELECT k.user_key, k.role
+                 FROM channel_bindings b
+                 JOIN auth_keys k ON k.user_key = b.user_key
+                 WHERE b.channel = ?1
+                   AND k.enabled = 1
+                   AND b.external_user_id = ?2
+                 ORDER BY b.id DESC
+                 LIMIT 1",
+                params![channel, external_user_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+    }
     if let Some((user_key, role)) = row {
         touch_auth_key_usage(&db, &user_key)?;
         return Ok(Some(build_auth_identity(

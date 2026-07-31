@@ -443,7 +443,7 @@ async function bindIdentity(externalUserId, externalChatId, userKey) {
   if (!resp.ok) {
     throw new Error(`bind channel identity failed: ${body.error || resp.status}`);
   }
-  if (!body.ok || !body.data?.user_key) return null;
+  if (!body.ok || !body.data?.identity?.user_key) return null;
   return body.data;
 }
 
@@ -459,10 +459,19 @@ function resetWaLoginState() {
   updateLoginState("logged_out", { clearQr: true });
 }
 
-function buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, identity) {
+function buildSubmitTaskBody(
+  externalUserId,
+  externalChatId,
+  kind,
+  payload,
+  identity,
+  messageId = null,
+  idempotencyKey = null
+) {
   const userId = Number(identity?.user_id || stableUserId(externalUserId));
   const userKey = String(identity?.user_key || "").trim();
   if (!userKey) throw new Error("bound user key is required");
+  const stableMessageId = String(messageId || "").trim();
   return {
     user_id: userId,
     chat_id: userId,
@@ -470,6 +479,19 @@ function buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, iden
     channel: "whatsapp",
     external_user_id: externalUserId,
     external_chat_id: externalChatId,
+    ingress: {
+      schema_version: 1,
+      channel: "whatsapp",
+      adapter: "whatsapp_web",
+      external_user_id: externalUserId,
+      external_chat_id: externalChatId,
+      ...(stableMessageId ? { message_id: stableMessageId } : {}),
+      reply_target: { kind: "chat", external_id: externalChatId },
+      locale: cfg.language,
+    },
+    idempotency_key:
+      idempotencyKey ||
+      (stableMessageId ? `whatsapp_web:${stableMessageId}` : null),
     kind,
     payload: {
       adapter: "whatsapp_web",
@@ -478,8 +500,22 @@ function buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, iden
   };
 }
 
-async function submitTask(externalUserId, externalChatId, kind, payload, identity) {
-  const body = buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, identity);
+async function submitTask(
+  externalUserId,
+  externalChatId,
+  kind,
+  payload,
+  identity,
+  messageId = null
+) {
+  const body = buildSubmitTaskBody(
+    externalUserId,
+    externalChatId,
+    kind,
+    payload,
+    identity,
+    messageId
+  );
   const userKey = body.user_key;
   const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks`, {
     method: "POST",
@@ -495,6 +531,62 @@ async function submitTask(externalUserId, externalChatId, kind, payload, identit
     throw new Error(`submit task rejected: ${parsed.error || "unknown"}`);
   }
   return String(parsed.data.task_id);
+}
+
+async function storePendingRequest(
+  externalUserId,
+  externalChatId,
+  messageId,
+  text,
+  mediaType = null
+) {
+  const prompt = String(text || "").trim();
+  const stableMessageId = String(messageId || "").trim();
+  const stableMediaType = String(mediaType || "").trim();
+  if ((!prompt && !stableMediaType) || !stableMessageId) return null;
+  const idempotencyKey = `pending:whatsapp_web:${stableMessageId}`;
+  const request = {
+    user_id: null,
+    chat_id: null,
+    user_key: null,
+    channel: "whatsapp",
+    external_user_id: externalUserId,
+    external_chat_id: externalChatId,
+    ingress: {
+      schema_version: 1,
+      channel: "whatsapp",
+      adapter: "whatsapp_web",
+      external_user_id: externalUserId,
+      external_chat_id: externalChatId,
+      message_id: stableMessageId,
+      reply_target: { kind: "chat", external_id: externalChatId },
+      locale: cfg.language,
+      attachments: stableMediaType
+        ? [
+            {
+              kind: stableMediaType,
+              path: `provider://whatsapp_web/${stableMessageId}`,
+            },
+          ]
+        : [],
+    },
+    idempotency_key: idempotencyKey,
+    kind: "ask",
+    payload: { text: prompt, adapter: "whatsapp_web" },
+  };
+  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/pending-request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      idempotency_key: idempotencyKey,
+      request,
+    }),
+  });
+  const body = await resp.json();
+  if (!resp.ok || !body.ok) {
+    throw new Error(`store pending request failed: ${body.error || resp.status}`);
+  }
+  return body.data || null;
 }
 
 async function queryTask(taskId, identity) {
@@ -799,9 +891,26 @@ async function runTaskFlow(
   kind,
   payload,
   identity,
+  quickWait = cfg.quickResultWaitSeconds,
+  messageId = null
+) {
+  const taskId = await submitTask(
+    externalUserId,
+    jid,
+    kind,
+    payload,
+    identity,
+    messageId
+  );
+  await runExistingTaskFlow(jid, taskId, identity, quickWait);
+}
+
+async function runExistingTaskFlow(
+  jid,
+  taskId,
+  identity,
   quickWait = cfg.quickResultWaitSeconds
 ) {
-  const taskId = await submitTask(externalUserId, jid, kind, payload, identity);
   try {
     const task = await pollTaskResult(taskId, quickWait, identity);
     await sendTaskResult(jid, taskId, task, identity);
@@ -903,12 +1012,29 @@ async function handleInboundMessage(msg, upsertType = "notify") {
   }
 
   const text = extractTextContent(msg.message);
-  let identity = await resolveIdentity(externalUserId, jid);
+  const explicitBindCandidate = extractBindKeyCandidate(text, false);
+  let identity = explicitBindCandidate
+    ? null
+    : await resolveIdentity(externalUserId, jid);
   if (!identity && isGroupJid(jid)) {
     identity = await resolveIdentity(externalUserId, externalUserId);
   }
   if (!identity) {
     if (isGroupJid(jid)) {
+      if (!expectingKeyReply.has(bindingScope)) {
+        try {
+          await storePendingRequest(
+            externalUserId,
+            jid,
+            msg.key.id,
+            text,
+            getMediaType(msg.message)
+          );
+        } catch (err) {
+          log.warn({ err: String(err.message || err), jid }, "pending request persistence failed");
+        }
+      }
+      expectingKeyReply.add(bindingScope);
       await sendWaMessage(jid, {
         text: tr(
           "whatsapp_web.msg.bind_private",
@@ -917,17 +1043,32 @@ async function handleInboundMessage(msg, upsertType = "notify") {
       });
       return;
     }
-    const candidate = extractBindKeyCandidate(text, expectingKeyReply.has(bindingScope));
+    const candidate =
+      explicitBindCandidate ||
+      extractBindKeyCandidate(text, expectingKeyReply.has(bindingScope));
     if (candidate) {
-      identity = await bindIdentity(externalUserId, jid, candidate);
-      if (identity) {
+      const bindResult = await bindIdentity(externalUserId, jid, candidate);
+      if (bindResult) {
+        identity = bindResult.identity;
         expectingKeyReply.delete(bindingScope);
         await sendWaMessage(jid, {
           text: tr(
             "whatsapp_web.msg.bind_success",
-            "Key bound successfully. Please send your previous message again."
+            "Key bound successfully."
           ),
         });
+        const resume = bindResult.pending_resume;
+        if (resume?.task_id) {
+          const targetJid = normalizeJid(resume.external_chat_id || jid) || jid;
+          await runExistingTaskFlow(targetJid, String(resume.task_id), identity);
+        } else if (resume?.error_code) {
+          await sendWaMessage(jid, {
+            text: tr(
+              "whatsapp_web.msg.pending_resume_stopped",
+              "The pending request expired, lost an attachment, or no longer has permission. Please send the original request again."
+            ),
+          });
+        }
       } else {
         expectingKeyReply.add(bindingScope);
         await sendWaMessage(jid, {
@@ -935,6 +1076,17 @@ async function handleInboundMessage(msg, upsertType = "notify") {
         });
       }
       return;
+    }
+    try {
+      await storePendingRequest(
+        externalUserId,
+        jid,
+        msg.key.id,
+        text,
+        getMediaType(msg.message)
+      );
+    } catch (err) {
+      log.warn({ err: String(err.message || err), jid }, "pending request persistence failed");
     }
     expectingKeyReply.add(bindingScope);
     await sendWaMessage(jid, {
@@ -961,7 +1113,15 @@ async function handleInboundMessage(msg, upsertType = "notify") {
       });
       return;
     }
-    await runTaskFlow(jid, externalUserId, "run_skill", { skill_name: skill, args }, identity);
+    await runTaskFlow(
+      jid,
+      externalUserId,
+      "run_skill",
+      { skill_name: skill, args },
+      identity,
+      cfg.quickResultWaitSeconds,
+      msg.key.id
+    );
     return;
   }
 
@@ -975,7 +1135,7 @@ async function handleInboundMessage(msg, upsertType = "notify") {
         images: [{ path: media.relPath }],
         detail_level: "normal",
       },
-    }, identity);
+    }, identity, cfg.quickResultWaitSeconds, msg.key.id);
     return;
   }
   if (media?.mediaType === "audio") {
@@ -984,12 +1144,20 @@ async function handleInboundMessage(msg, upsertType = "notify") {
       args: {
         audio: { path: media.relPath },
       },
-    }, identity, 120);
+    }, identity, 120, msg.key.id);
     return;
   }
 
   if (text) {
-    await runTaskFlow(jid, externalUserId, "ask", { text }, identity);
+    await runTaskFlow(
+      jid,
+      externalUserId,
+      "ask",
+      { text },
+      identity,
+      cfg.quickResultWaitSeconds,
+      msg.key.id
+    );
   }
 }
 
