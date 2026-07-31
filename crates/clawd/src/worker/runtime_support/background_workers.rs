@@ -119,7 +119,7 @@ fn stamp_current_admin_policy_for_legacy_scheduled_job(
     crate::task_execution_policy::stamp_authenticated_submission_policy(
         payload,
         identity.as_ref(),
-        Some("schedule"),
+        None,
         None,
     )
     .map_err(|error| anyhow!(error.as_token()))

@@ -72,6 +72,16 @@ fn browser_video_cache_is_separate_from_the_original_download() {
     assert_ne!(browser_video_cache_path(path, "abc").as_deref(), Some(path));
 }
 
+#[test]
+fn video_mime_top_level_is_case_insensitive_and_ignores_parameters() {
+    assert!(mime_has_top_level(
+        " VIDEO/mp4; codecs=\"avc1.42E01E\" ",
+        "video"
+    ));
+    assert!(!mime_has_top_level("application/video", "video"));
+    assert!(!mime_has_top_level("video", "video"));
+}
+
 #[tokio::test]
 async fn video_poster_rejects_non_video_artifacts_before_running_ffmpeg() {
     let manifest = TaskArtifactManifest {

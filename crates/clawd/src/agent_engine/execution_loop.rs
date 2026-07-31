@@ -53,21 +53,14 @@ fn active_tool_event_payload(
 }
 
 fn command_preview_for_action(action: &AgentAction) -> Option<String> {
-    let (action_ref, args) = match action {
-        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
-        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
-        AgentAction::CallCapability { capability, args } => (capability.as_str(), args),
+    let args = match action {
+        AgentAction::CallTool { args, .. }
+        | AgentAction::CallSkill { args, .. }
+        | AgentAction::CallCapability { args, .. } => args,
         AgentAction::Think { .. }
         | AgentAction::SynthesizeAnswer { .. }
         | AgentAction::Respond { .. } => return None,
     };
-    let normalized = action_ref.trim().to_ascii_lowercase().replace('-', "_");
-    if !normalized.ends_with("run_command")
-        && !normalized.ends_with("run_cmd")
-        && !normalized.ends_with("shell_run")
-    {
-        return None;
-    }
     let command = args
         .get("command")
         .or_else(|| args.get("cmd"))
