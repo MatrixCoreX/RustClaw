@@ -67,6 +67,10 @@ pub const HOST_TOOL_DESCRIPTORS: &[HostToolDescriptor] = &[
         adapter_kind: HostToolAdapterKind::InProcessBuiltin,
     },
     HostToolDescriptor {
+        name: "task_plan",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
         name: "subagent",
         adapter_kind: HostToolAdapterKind::AgentLoopInternal,
     },

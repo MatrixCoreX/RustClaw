@@ -33,6 +33,15 @@ fn summary_keeps_compaction_records_out_of_string_projection() {
             compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
+        task_plan_snapshot: Some(serde_json::json!({
+            "schema_version": 1,
+            "plan_revision": 7,
+            "steps": [{
+                "step_id": "secret-looking-title",
+                "title": "Never project this plan title into context summary",
+                "status": "in_progress",
+            }],
+        })),
         compaction_records: vec![serde_json::json!({
             "schema_version": 1,
             "summary_kind": "deterministic_context_budget",
@@ -62,6 +71,8 @@ fn summary_keeps_compaction_records_out_of_string_projection() {
     );
     assert_eq!(budget["compaction_triggers"][0], "over_budget");
     assert!(!summary.contains("transcript_compaction_records="));
+    assert!(summary.contains("task_plan_revision=7"));
+    assert!(!summary.contains("Never project this plan title"));
     assert_eq!(
         bundle.compaction_records[0]["summary_kind"],
         "deterministic_context_budget"
@@ -101,6 +112,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
             compacted_history_context: "<none>".to_string(),
             image_context: None,
         }),
+        task_plan_snapshot: None,
         compaction_records: Vec::new(),
     };
 

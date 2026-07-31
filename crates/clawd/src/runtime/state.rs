@@ -1109,6 +1109,7 @@ impl AppState {
         crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
         crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
             .expect("child_task_graph_schema_test");
+        crate::repo::task_plan::ensure_task_plan_schema(&conn).expect("task_plan_schema_test");
         drop(conn);
         self
     }

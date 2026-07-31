@@ -355,6 +355,7 @@ skills_list = [
     "make_dir",
     "remove_file",
     "workspace_patch",
+    "task_plan",
     "schedule",
     "subagent",
     "system_basic",

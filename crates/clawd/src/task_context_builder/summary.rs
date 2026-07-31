@@ -24,6 +24,12 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .execution_view
         .as_ref()
         .is_some_and(|view| value_present(&view.goal_context));
+    let task_plan_revision = bundle
+        .task_plan_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.get("plan_revision"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
     let context_budget_report = bundle
         .execution_view
         .as_ref()
@@ -31,7 +37,7 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .map(|value| value.to_string())
         .unwrap_or_else(|| "{}".to_string());
     format!(
-        "execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={}",
+        "execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} task_plan_revision={} context_budget_report={}",
         execution_attached,
         execution_budget,
         execution_profile,
@@ -40,6 +46,7 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         has_resume_context,
         has_binding_context,
         has_goal_context,
+        task_plan_revision,
         context_budget_report
     )
 }
