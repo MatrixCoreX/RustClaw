@@ -1,7 +1,9 @@
 use claw_core::skill_registry::{CapabilityIsolationProfile, SkillKind, SkillRiskLevel};
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
+use std::sync::Arc;
 use tokio::process::Command;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// §E2 step1: skill-runner 子进程在 strict 模式下允许从父进程继承的 env 白名单。
 ///
@@ -165,6 +167,54 @@ use crate::{AppState, ClaimedTask, RuntimeChannel};
 const READ_FILE_NOT_FOUND_PREFIX: &str = "__RC_READ_FILE_NOT_FOUND__:";
 const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
+
+struct SkillDispatchPermits {
+    _skill: Option<OwnedSemaphorePermit>,
+    _global: OwnedSemaphorePermit,
+}
+
+async fn acquire_skill_dispatch_permits(
+    gates: &Arc<crate::runtime::state::SkillConcurrencyGates>,
+    global: &Arc<Semaphore>,
+    task_id: &str,
+    skill_name: &str,
+    skill_limit: Option<usize>,
+) -> Result<SkillDispatchPermits, String> {
+    // The skill-specific permit is intentionally acquired first. A queued
+    // resource-heavy skill therefore cannot consume one of the shared runner
+    // slots before its own FIFO slot is available.
+    let skill_permit = if let Some(limit) = skill_limit {
+        let semaphore = gates.semaphore(skill_name, limit);
+        tracing::info!(
+            task_id,
+            skill = skill_name,
+            max_concurrency = limit,
+            available_permits = semaphore.available_permits(),
+            "skill_concurrency_queue_waiting"
+        );
+        let permit = semaphore.acquire_owned().await.map_err(|error| {
+            format!("skill concurrency semaphore closed for {skill_name}: {error}")
+        })?;
+        tracing::info!(
+            task_id,
+            skill = skill_name,
+            max_concurrency = limit,
+            "skill_concurrency_queue_acquired"
+        );
+        Some(permit)
+    } else {
+        None
+    };
+    let global_permit = global
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|error| format!("skill semaphore closed: {error}"))?;
+    Ok(SkillDispatchPermits {
+        _skill: skill_permit,
+        _global: global_permit,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyBlockError {
@@ -1740,44 +1790,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         "skill_timeout_resolved"
     );
 
-    // Acquire the skill-specific permit before the global permit. A queued
-    // resource-heavy skill must not occupy one of the global execution slots
-    // while it waits, and the runner process is not spawned until both permits
-    // have been acquired.
-    let _skill_concurrency_permit =
-        if let Some(limit) = state.skill_max_concurrency_for_dispatch(&skill_name) {
-            let semaphore = state
-                .skill_rt
-                .skill_concurrency_gates
-                .semaphore(&skill_name, limit);
-            tracing::info!(
-                task_id = task.task_id,
-                skill = skill_name,
-                max_concurrency = limit,
-                available_permits = semaphore.available_permits(),
-                "skill_concurrency_queue_waiting"
-            );
-            let permit = semaphore.acquire_owned().await.map_err(|err| {
-                format!("skill concurrency semaphore closed for {skill_name}: {err}")
-            })?;
-            tracing::info!(
-                task_id = task.task_id,
-                skill = skill_name,
-                max_concurrency = limit,
-                "skill_concurrency_queue_acquired"
-            );
-            Some(permit)
-        } else {
-            None
-        };
-
-    let _global_skill_permit = state
-        .skill_rt
-        .skill_semaphore
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|err| format!("skill semaphore closed: {err}"))?;
+    let _dispatch_permits = acquire_skill_dispatch_permits(
+        &state.skill_rt.skill_concurrency_gates,
+        &state.skill_rt.skill_semaphore,
+        &task.task_id,
+        &skill_name,
+        state.skill_max_concurrency_for_dispatch(&skill_name),
+    )
+    .await?;
 
     let args = inject_skill_memory_context(execution_state, task, &skill_name, args);
     let source = match task_runtime_channel(execution_state, task) {
