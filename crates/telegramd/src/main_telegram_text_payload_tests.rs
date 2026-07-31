@@ -107,3 +107,20 @@ fn voice_mode_can_separate_media_delivery_from_spoken_caption() {
     );
     assert_eq!(strip_delivery_tokens_for_tts(answer), "图片已下载。");
 }
+
+#[test]
+fn unicode_chunks_are_formatted_only_after_safe_segmentation() {
+    let input = "🙂甲<&>🚀乙<&>🦀丙";
+    let chunks = chunk_text_for_channel(input, 5);
+    assert_eq!(chunks.concat(), input);
+    assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 5));
+
+    for chunk in chunks {
+        let (body, mode) = telegram_text_payload(&format!("`{chunk}`"));
+        assert_eq!(mode, Some(ParseMode::Html));
+        assert!(body.starts_with("<code>"));
+        assert!(body.ends_with("</code>"));
+        assert!(!body.contains("<&>"));
+        assert!(body.contains("&lt;&amp;&gt;") || !chunk.contains("<&>"));
+    }
+}
