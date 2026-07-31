@@ -20,6 +20,10 @@ app_secret = "REPLACE_ME_META_APP_SECRET"
 verify_token = "REPLACE_ME_WHATSAPP_VERIFY_TOKEN"
 # Meta 电话号码 ID
 phone_number_id = "REPLACE_ME_PHONE_NUMBER_ID"
+# 24 小时会话窗外只允许使用管理员预先审核并在此明确选择的模板。
+# 留空表示不主动发送，等待用户再次发消息开启会话窗；LLM 无权选择模板。
+out_of_window_template_name = ""
+out_of_window_template_language = "en_US"
 # 本地 webhook 监听地址
 webhook_listen = "127.0.0.1:8091"
 # 本地 webhook 路径
@@ -50,3 +54,5 @@ audio_inbox_dir = "audio/upload"
 [whatsapp_cloud]
 # 兼容/扩展段：供 clawd 读取云端能力状态时使用
 enabled = false
+out_of_window_template_name = ""
+out_of_window_template_language = "en_US"

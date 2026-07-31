@@ -6,6 +6,14 @@ use claw_core::channel_delivery::{
 };
 use claw_core::channel_ingress::ChannelReplyTarget;
 use claw_core::types::ChannelKind;
+use r2d2_sqlite::SqliteConnectionManager;
+
+fn pool() -> crate::db_init::DbPool {
+    r2d2::Pool::builder()
+        .max_size(1)
+        .build(SqliteConnectionManager::memory())
+        .expect("sqlite pool")
+}
 
 fn receipt(status: ChannelDeliveryStatus, updated_at_ts: u64) -> ChannelDeliveryReceipt {
     let terminal_success = matches!(
@@ -26,6 +34,7 @@ fn receipt(status: ChannelDeliveryStatus, updated_at_ts: u64) -> ChannelDelivery
         error_code: None,
         message_key: None,
         diagnostic_id: None,
+        provider_error_code: None,
         retryable: false,
         updated_at_ts,
     }
@@ -197,4 +206,136 @@ fn completed_dispatch_returns_existing_receipt_without_resend() {
             .expect("load existing receipt"),
         ClaimChannelDeliveryDispatchOutcome::ExistingReceipt(accepted)
     );
+}
+
+#[test]
+fn whatsapp_window_is_persistent_monotonic_and_expires_after_twenty_four_hours() {
+    let pool = pool();
+    record_whatsapp_cloud_inbound(&pool, "phone-1", "user-1", 1_000).expect("record inbound");
+    record_whatsapp_cloud_inbound(&pool, "phone-1", "user-1", 900).expect("ignore older inbound");
+
+    let open =
+        whatsapp_cloud_conversation_window(&pool, "phone-1", "user-1", 1_001).expect("open window");
+    assert_eq!(open.state, ChannelConversationWindowState::Open);
+    assert_eq!(
+        open.expires_at_ts,
+        Some(1_000 + claw_core::channel_whatsapp_cloud::WHATSAPP_CUSTOMER_SERVICE_WINDOW_SECONDS)
+    );
+    let closed = whatsapp_cloud_conversation_window(
+        &pool,
+        "phone-1",
+        "user-1",
+        open.expires_at_ts.expect("expiry") + 1,
+    )
+    .expect("closed window");
+    assert_eq!(closed.state, ChannelConversationWindowState::Closed);
+}
+
+#[test]
+fn whatsapp_wamid_statuses_advance_receipt_without_out_of_order_regression() {
+    let pool = pool();
+    let mut accepted = receipt(ChannelDeliveryStatus::Accepted, 10);
+    accepted.channel = ChannelKind::Whatsapp;
+    accepted.adapter = "whatsapp_cloud".to_string();
+    accepted.provider_message_ids = vec!["wamid.fixture".to_string()];
+    record_channel_delivery_receipt(&pool, &accepted).expect("record accepted");
+
+    assert_eq!(
+        record_whatsapp_cloud_provider_status(
+            &pool,
+            "wamid.fixture",
+            WhatsappDeliveryEventStatus::Delivered,
+            20,
+            None,
+        )
+        .expect("record delivered"),
+        RecordWhatsappProviderStatusOutcome::Updated
+    );
+    assert_eq!(
+        record_whatsapp_cloud_provider_status(
+            &pool,
+            "wamid.fixture",
+            WhatsappDeliveryEventStatus::Accepted,
+            30,
+            None,
+        )
+        .expect("ignore sent regression"),
+        RecordWhatsappProviderStatusOutcome::Unchanged
+    );
+    record_whatsapp_cloud_provider_status(
+        &pool,
+        "wamid.fixture",
+        WhatsappDeliveryEventStatus::Read,
+        40,
+        None,
+    )
+    .expect("record read");
+
+    let db = pool.get().expect("db");
+    let stored = load_channel_delivery_receipt_from_db(&db, &accepted.idempotency_key)
+        .expect("load receipt")
+        .expect("receipt");
+    assert_eq!(stored.status, ChannelDeliveryStatus::Read);
+    assert_eq!(stored.provider_message_ids, vec!["wamid.fixture"]);
+}
+
+#[test]
+fn whatsapp_failed_status_retains_provider_code_and_diagnostic_id() {
+    let pool = pool();
+    let mut accepted = receipt(ChannelDeliveryStatus::Accepted, 10);
+    accepted.channel = ChannelKind::Whatsapp;
+    accepted.adapter = "whatsapp_cloud".to_string();
+    accepted.provider_message_ids = vec!["wamid.failed".to_string()];
+    record_channel_delivery_receipt(&pool, &accepted).expect("record accepted");
+    record_whatsapp_cloud_provider_status(
+        &pool,
+        "wamid.failed",
+        WhatsappDeliveryEventStatus::Failed,
+        20,
+        Some("131047"),
+    )
+    .expect("record failure");
+
+    let db = pool.get().expect("db");
+    let stored = load_channel_delivery_receipt_from_db(&db, &accepted.idempotency_key)
+        .expect("load receipt")
+        .expect("receipt");
+    assert_eq!(stored.status, ChannelDeliveryStatus::Failed);
+    assert_eq!(stored.provider_error_code.as_deref(), Some("131047"));
+    assert!(stored.diagnostic_id.is_some());
+}
+
+#[test]
+fn whatsapp_status_arriving_before_accepted_receipt_is_replayed() {
+    let pool = pool();
+    assert_eq!(
+        record_whatsapp_cloud_provider_status(
+            &pool,
+            "wamid.race",
+            WhatsappDeliveryEventStatus::Delivered,
+            20,
+            None,
+        )
+        .expect("store pending status"),
+        RecordWhatsappProviderStatusOutcome::UnknownMessage
+    );
+    let mut accepted = receipt(ChannelDeliveryStatus::Accepted, 10);
+    accepted.channel = ChannelKind::Whatsapp;
+    accepted.adapter = "whatsapp_cloud".to_string();
+    accepted.provider_message_ids = vec!["wamid.race".to_string()];
+    record_channel_delivery_receipt(&pool, &accepted).expect("record and replay");
+
+    let db = pool.get().expect("db");
+    let stored = load_channel_delivery_receipt_from_db(&db, &accepted.idempotency_key)
+        .expect("load receipt")
+        .expect("receipt");
+    assert_eq!(stored.status, ChannelDeliveryStatus::Delivered);
+    let pending_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM whatsapp_cloud_pending_provider_statuses",
+            [],
+            |row| row.get(0),
+        )
+        .expect("pending count");
+    assert_eq!(pending_count, 0);
 }

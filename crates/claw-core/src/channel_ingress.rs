@@ -59,6 +59,8 @@ pub struct ChannelIngressEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received_at_ts: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_target: Option<ChannelReplyTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
@@ -79,6 +81,7 @@ impl ChannelIngressEnvelope {
             external_user_id: None,
             external_chat_id: None,
             message_id: None,
+            received_at_ts: None,
             reply_target: None,
             locale: None,
             attachments: Vec::new(),
@@ -98,6 +101,11 @@ impl ChannelIngressEnvelope {
 
     pub fn with_message_id(mut self, message_id: impl Into<String>) -> Self {
         self.message_id = Some(message_id.into());
+        self
+    }
+
+    pub fn with_received_at_ts(mut self, received_at_ts: u64) -> Self {
+        self.received_at_ts = Some(received_at_ts);
         self
     }
 

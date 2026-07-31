@@ -29,7 +29,7 @@ use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -65,8 +65,7 @@ fn whatsapp_provider_http_error(
     response_body: &str,
 ) -> anyhow::Error {
     anyhow!(
-        claw_core::channel_provider_error::ChannelProviderError::from_http_response(
-            "whatsapp_cloud",
+        claw_core::channel_whatsapp_cloud::provider_error_from_response(
             operation,
             status.as_u16(),
             response_body,
@@ -97,12 +96,15 @@ struct AppState {
     app_secret: String,
     verify_token: String,
     phone_number_id: String,
+    out_of_window_template_name: String,
+    out_of_window_template_language: String,
     poll_interval_ms: u64,
     task_wait_seconds: u64,
     quick_result_wait_seconds: u64,
     image_inbox_dir: String,
     audio_inbox_dir: String,
     inbound_dedup: Arc<Mutex<HashMap<String, u64>>>,
+    last_inbound_at_by_user: Arc<Mutex<HashMap<String, u64>>>,
     pending_key_bind: Arc<Mutex<HashSet<String>>>,
     bound_identity_by_user: Arc<Mutex<HashMap<String, AuthIdentity>>>,
 }
@@ -226,12 +228,15 @@ async fn main() -> anyhow::Result<()> {
         app_secret: config.whatsapp.app_secret.clone(),
         verify_token: config.whatsapp.verify_token.clone(),
         phone_number_id: config.whatsapp.phone_number_id.clone(),
+        out_of_window_template_name: config.whatsapp.out_of_window_template_name.clone(),
+        out_of_window_template_language: config.whatsapp.out_of_window_template_language.clone(),
         poll_interval_ms: config.worker.poll_interval_ms.max(100),
         task_wait_seconds: config.whatsapp.task_delivery_timeout_seconds.max(1),
         quick_result_wait_seconds: config.whatsapp.quick_result_wait_seconds.max(1),
         image_inbox_dir: config.whatsapp.image_inbox_dir.clone(),
         audio_inbox_dir: config.whatsapp.audio_inbox_dir.clone(),
         inbound_dedup: Arc::new(Mutex::new(HashMap::new())),
+        last_inbound_at_by_user: Arc::new(Mutex::new(HashMap::new())),
         pending_key_bind: Arc::new(Mutex::new(HashSet::new())),
         bound_identity_by_user: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -303,6 +308,23 @@ async fn handle_webhook(
         }
     };
 
+    let status_payload =
+        serde_json::from_slice::<claw_core::channel_whatsapp_cloud::WhatsappWebhookPayload>(&body)
+            .ok();
+    if status_payload
+        .as_ref()
+        .is_some_and(|payload| payload.statuses().next().is_some())
+    {
+        if let Err(err) = forward_delivery_statuses(&state, &headers, &body).await {
+            warn!("forward whatsapp delivery statuses failed: {}", err);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "whatsapp_cloud_status_forward_failed",
+            )
+                .into_response();
+        }
+    }
+
     for entry in payload.entry {
         for change in entry.changes {
             for msg in change.value.messages {
@@ -313,6 +335,31 @@ async fn handle_webhook(
         }
     }
     (StatusCode::OK, "ok").into_response()
+}
+
+async fn forward_delivery_statuses(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> anyhow::Result<()> {
+    let signature = headers
+        .get("x-hub-signature-256")
+        .ok_or_else(|| anyhow!("x-hub-signature-256 missing"))?;
+    let response = state
+        .client
+        .post(format!(
+            "{}/v1/internal/channel-events/whatsapp-cloud",
+            state.clawd_base_url
+        ))
+        .header("x-hub-signature-256", signature)
+        .body(body.to_vec())
+        .send()
+        .await
+        .context("forward whatsapp status request failed")?;
+    if !response.status().is_success() {
+        return Err(anyhow!("forward whatsapp status rejected"));
+    }
+    Ok(())
 }
 
 fn verify_signature(app_secret: &str, headers: &HeaderMap, body: &[u8]) -> anyhow::Result<()> {
@@ -397,7 +444,8 @@ fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<Stri
 async fn send_bind_required_prompt(state: &AppState, wa_id: &str) -> anyhow::Result<()> {
     set_expect_key_reply(state, wa_id, true);
     let text = wa_t(state, WA_I18N_BIND_REQUIRED_KEY, WA_BIND_REQUIRED_FALLBACK);
-    send_whatsapp_text(state, wa_id, &text).await
+    send_whatsapp_text(state, wa_id, &text).await?;
+    Ok(())
 }
 
 async fn resolve_whatsapp_identity(
@@ -505,6 +553,9 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
     }
     if msg.from.trim().is_empty() {
         return Ok(());
+    }
+    if let Ok(mut windows) = state.last_inbound_at_by_user.lock() {
+        windows.insert(msg.from.clone(), now_ts());
     }
     let inbound_text = msg
         .text
@@ -853,6 +904,7 @@ async fn submit_task_only(
                 "whatsapp_cloud",
             )
             .with_external_ids(wa_id.to_string(), wa_id.to_string())
+            .with_received_at_ts(now_ts())
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
                 wa_id.to_string(),
             ))
@@ -1101,7 +1153,7 @@ async fn try_deliver_quick_result(
     {
         Ok(answers) => {
             for answer in answers {
-                send_answer(state, wa_id, &answer).await?;
+                send_answer(state, wa_id, task_id, &answer).await?;
             }
             Ok(true)
         }
@@ -1137,7 +1189,7 @@ fn spawn_task_result_delivery(
         match out {
             Ok(answers) => {
                 for answer in answers {
-                    if let Err(err) = send_answer(&state, &wa_id, &answer).await {
+                    if let Err(err) = send_answer(&state, &wa_id, &task_id, &answer).await {
                         warn!("whatsapp outbound delivery failed: {err}");
                         let msg = wa_t_with(
                             &state,
@@ -1162,7 +1214,48 @@ fn spawn_task_result_delivery(
     });
 }
 
-async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Result<()> {
+async fn send_answer(
+    state: &AppState,
+    wa_id: &str,
+    task_id: &str,
+    answer: &str,
+) -> anyhow::Result<()> {
+    let now = now_ts();
+    let window_is_open = state
+        .last_inbound_at_by_user
+        .lock()
+        .ok()
+        .and_then(|windows| windows.get(wa_id).copied())
+        .is_some_and(|last_inbound_at_ts| {
+            claw_core::channel_whatsapp_cloud::customer_service_window_is_open(
+                last_inbound_at_ts,
+                now,
+            )
+        });
+    if !window_is_open {
+        let Some(policy) = claw_core::channel_whatsapp_cloud::WhatsappTemplatePolicy::from_config(
+            &state.out_of_window_template_name,
+            &state.out_of_window_template_language,
+        ) else {
+            warn!(
+                event = "whatsapp_cloud_out_of_window_waiting_for_user",
+                task_id, "whatsapp_cloud_delivery_waiting_for_user_window"
+            );
+            return Ok(());
+        };
+        let provider_message_ids = send_whatsapp_template(state, wa_id, &policy).await?;
+        if let Err(error) =
+            register_accepted_delivery(state, task_id, answer, provider_message_ids).await
+        {
+            warn!(
+                event = "whatsapp_cloud_accepted_registration_failed",
+                task_id,
+                diagnostic = %error,
+                "whatsapp_cloud_template_acceptance_registration_failed"
+            );
+        }
+        return Ok(());
+    }
     let tokens = legacy_delivery_tokens(answer)
         .into_iter()
         .filter(|token| token.location == LegacyDeliveryLocation::LocalFile)
@@ -1189,9 +1282,10 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
     let voice_paths = references(LegacyDeliveryKind::Voice);
     let music_paths = references(LegacyDeliveryKind::Music);
     let text_without_tokens = strip_legacy_local_delivery_lines(answer).trim().to_string();
+    let mut provider_message_ids = Vec::new();
 
     if !text_without_tokens.is_empty() {
-        send_whatsapp_text(state, wa_id, &text_without_tokens).await?;
+        provider_message_ids.extend(send_whatsapp_text(state, wa_id, &text_without_tokens).await?);
     }
 
     for p in &image_paths {
@@ -1201,7 +1295,8 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
             claw_core::channel_media_limits::WhatsappCloudMediaKind::Image,
         )
         .await?;
-        send_whatsapp_media_by_id(state, wa_id, "image", &media_id, None).await?;
+        provider_message_ids
+            .extend(send_whatsapp_media_by_id(state, wa_id, "image", &media_id, None).await?);
     }
     for p in &video_paths {
         let media_id = upload_media(
@@ -1210,7 +1305,8 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
             claw_core::channel_media_limits::WhatsappCloudMediaKind::Video,
         )
         .await?;
-        send_whatsapp_media_by_id(state, wa_id, "video", &media_id, None).await?;
+        provider_message_ids
+            .extend(send_whatsapp_media_by_id(state, wa_id, "video", &media_id, None).await?);
     }
     for p in &file_paths {
         let media_id = upload_media(
@@ -1223,7 +1319,10 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
             .file_name()
             .and_then(|v| v.to_str())
             .map(|v| v.to_string());
-        send_whatsapp_media_by_id(state, wa_id, "document", &media_id, filename.as_deref()).await?;
+        provider_message_ids.extend(
+            send_whatsapp_media_by_id(state, wa_id, "document", &media_id, filename.as_deref())
+                .await?,
+        );
     }
     for p in &voice_paths {
         let media_id = upload_media(
@@ -1232,7 +1331,8 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
             claw_core::channel_media_limits::WhatsappCloudMediaKind::Audio,
         )
         .await?;
-        send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?;
+        provider_message_ids
+            .extend(send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?);
     }
     for p in &music_paths {
         let media_id = upload_media(
@@ -1241,7 +1341,8 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
             claw_core::channel_media_limits::WhatsappCloudMediaKind::Audio,
         )
         .await?;
-        send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?;
+        provider_message_ids
+            .extend(send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?);
     }
 
     if text_without_tokens.is_empty()
@@ -1251,7 +1352,98 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
         && voice_paths.is_empty()
         && music_paths.is_empty()
     {
-        send_whatsapp_text(state, wa_id, answer).await?;
+        provider_message_ids.extend(send_whatsapp_text(state, wa_id, answer).await?);
+    }
+    if let Err(error) =
+        register_accepted_delivery(state, task_id, answer, provider_message_ids).await
+    {
+        warn!(
+            event = "whatsapp_cloud_accepted_registration_failed",
+            task_id,
+            diagnostic = %error,
+            "whatsapp_cloud_accepted_delivery_registration_failed"
+        );
+    }
+    Ok(())
+}
+
+async fn send_whatsapp_template(
+    state: &AppState,
+    wa_id: &str,
+    policy: &claw_core::channel_whatsapp_cloud::WhatsappTemplatePolicy,
+) -> anyhow::Result<Vec<String>> {
+    let response = state
+        .client
+        .post(format!(
+            "{}/v23.0/{}/messages",
+            state.api_base,
+            state.phone_number_id.trim()
+        ))
+        .bearer_auth(state.access_token.trim())
+        .json(&json!({
+            "messaging_product": "whatsapp",
+            "to": wa_id,
+            "type": "template",
+            "template": {
+                "name": policy.name,
+                "language": {"code": policy.language, "policy": "deterministic"}
+            }
+        }))
+        .send()
+        .await
+        .context("send whatsapp template failed")?;
+    let status = response.status();
+    let response_body = response
+        .text()
+        .await
+        .context("read whatsapp template response failed")?;
+    if !status.is_success() {
+        return Err(whatsapp_provider_http_error(
+            "send_template",
+            status,
+            &response_body,
+        ));
+    }
+    claw_core::channel_whatsapp_cloud::decode_message_ids("send_template", &response_body)
+        .map_err(anyhow::Error::from)
+}
+
+async fn register_accepted_delivery(
+    state: &AppState,
+    task_id: &str,
+    answer: &str,
+    provider_message_ids: Vec<String>,
+) -> anyhow::Result<()> {
+    let response_digest = hex::encode(Sha256::digest(answer.as_bytes()));
+    let event = claw_core::channel_whatsapp_cloud::WhatsappAcceptedDeliveryEvent {
+        schema_version:
+            claw_core::channel_whatsapp_cloud::WHATSAPP_ACCEPTED_DELIVERY_EVENT_SCHEMA_VERSION,
+        task_id: task_id.to_string(),
+        response_digest,
+        provider_message_ids,
+        accepted_at_ts: now_ts(),
+    };
+    if !event.validate() {
+        return Err(anyhow!("whatsapp_cloud_accepted_event_invalid"));
+    }
+    let body = serde_json::to_vec(&event).context("encode whatsapp accepted event failed")?;
+    let mut mac = HmacSha256::new_from_slice(state.app_secret.as_bytes())
+        .map_err(|_| anyhow!("whatsapp_cloud_app_secret_invalid"))?;
+    mac.update(&body);
+    let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    let response = state
+        .client
+        .post(format!(
+            "{}/v1/internal/channel-events/whatsapp-cloud/accepted",
+            state.clawd_base_url
+        ))
+        .header("x-channel-event-signature-256", signature)
+        .body(body)
+        .send()
+        .await
+        .context("register whatsapp accepted event failed")?;
+    if !response.status().is_success() {
+        return Err(anyhow!("whatsapp_cloud_accepted_event_rejected"));
     }
     Ok(())
 }
@@ -1262,25 +1454,27 @@ async fn upload_media(
     kind: claw_core::channel_media_limits::WhatsappCloudMediaKind,
 ) -> anyhow::Result<String> {
     let path_ref = Path::new(path);
-    let (mime, max_bytes, media_label) =
-        claw_core::channel_media_limits::whatsapp_cloud_upload_spec(path_ref, kind)
-            .map_err(anyhow::Error::msg)?;
-    claw_core::channel_media_limits::validate_local_media_file(
+    let prepared = claw_core::channel_media_limits::prepare_whatsapp_cloud_media(
         path_ref,
-        "WhatsApp Cloud",
-        media_label,
-        max_bytes,
+        kind,
+        &std::env::temp_dir().join("agent-runtime/whatsapp-cloud-compatible"),
     )
+    .await
     .map_err(anyhow::Error::msg)?;
-    let bytes = fs::read(path).with_context(|| format!("read media file failed: {path}"))?;
-    let filename = Path::new(path)
+    let filename = prepared
+        .path
         .file_name()
         .and_then(|v| v.to_str())
         .unwrap_or("file.bin")
         .to_string();
+    let bytes_result = fs::read(&prepared.path);
+    if prepared.compatible_copy_created {
+        let _ = fs::remove_file(&prepared.path);
+    }
+    let bytes = bytes_result.context("whatsapp_cloud_media_read_failed")?;
     let part = Part::bytes(bytes)
         .file_name(filename)
-        .mime_str(mime)
+        .mime_str(prepared.mime_type)
         .context("invalid media mime")?;
     let form = Form::new()
         .text("messaging_product", "whatsapp")
@@ -1320,7 +1514,7 @@ async fn send_whatsapp_media_by_id(
     media_type: &str,
     media_id: &str,
     filename: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<String>> {
     let mut body = json!({
         "messaging_product": "whatsapp",
         "to": wa_id,
@@ -1352,18 +1546,35 @@ async fn send_whatsapp_media_by_id(
         .send()
         .await
         .context("send media message failed")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(whatsapp_provider_http_error("send_media", status, &text));
+    let status = resp.status();
+    let response_body = resp
+        .text()
+        .await
+        .context("read send media response failed")?;
+    if !status.is_success() {
+        return Err(whatsapp_provider_http_error(
+            "send_media",
+            status,
+            &response_body,
+        ));
     }
-    Ok(())
+    let ids = claw_core::channel_whatsapp_cloud::decode_message_ids("send_media", &response_body)?;
+    info!(
+        event = "whatsapp_cloud_message_accepted",
+        provider_message_ids = ?ids,
+        "whatsapp_cloud_media_accepted"
+    );
+    Ok(ids)
 }
 
 /// Max characters per WhatsApp text message (conservative; platform limit ~4096).
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 
-async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow::Result<()> {
+async fn send_whatsapp_text(
+    state: &AppState,
+    wa_id: &str,
+    text: &str,
+) -> anyhow::Result<Vec<String>> {
     let url = format!(
         "{}/v23.0/{}/messages",
         state.api_base,
@@ -1374,6 +1585,7 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
         WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
+    let mut provider_message_ids = Vec::new();
     if n > 1 {
         info!(
             "send_chunks channel=whatsapp wa_id={} original_len={} chunk_count={}",
@@ -1409,13 +1621,28 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
             .send()
             .await
             .context("send text message failed")?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(whatsapp_provider_http_error("send_text", status, &body));
+        let status = resp.status();
+        let response_body = resp
+            .text()
+            .await
+            .context("read send text response failed")?;
+        if !status.is_success() {
+            return Err(whatsapp_provider_http_error(
+                "send_text",
+                status,
+                &response_body,
+            ));
         }
+        let ids =
+            claw_core::channel_whatsapp_cloud::decode_message_ids("send_text", &response_body)?;
+        info!(
+            event = "whatsapp_cloud_message_accepted",
+            provider_message_ids = ?ids,
+            "whatsapp_cloud_text_accepted"
+        );
+        provider_message_ids.extend(ids);
     }
-    Ok(())
+    Ok(provider_message_ids)
 }
 
 #[cfg(test)]

@@ -50,6 +50,7 @@ fn receipt(status: ChannelDeliveryStatus, retryable: bool) -> ChannelDeliveryRec
         error_code: None,
         message_key: None,
         diagnostic_id: None,
+        provider_error_code: None,
         retryable,
         updated_at_ts: 100,
     }

@@ -710,6 +710,7 @@ dependencies = [
  "fs-discovery",
  "fs2",
  "futures-util",
+ "hex",
  "hmac",
  "libc",
  "portable-pty",

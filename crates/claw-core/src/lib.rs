@@ -12,6 +12,7 @@ pub mod channel_media_limits;
 pub mod channel_notice;
 pub mod channel_open_platform;
 pub mod channel_provider_error;
+pub mod channel_whatsapp_cloud;
 pub mod config;
 pub mod hard_rules;
 pub mod model_catalog;
