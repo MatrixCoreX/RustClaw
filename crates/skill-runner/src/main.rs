@@ -11,18 +11,23 @@
 //! - 单进程串行处理多次请求语义保持不变（每条 stdin 行 = 一次请求）。
 
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use skill_sdk::{
-    prepare_sandboxed_command, validate_response_line, LauncherKind, ProtocolResponse,
-    ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec, SkillRuntimeResolver,
-    PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+    prepare_sandboxed_command, validate_progress_frame_line, validate_response_line, LauncherKind,
+    ProtocolResponse, ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec,
+    SkillRuntimeResolver, MAX_PROGRESS_FRAMES_PER_INVOCATION, MAX_PROGRESS_FRAMES_PER_SECOND,
+    MAX_PROTOCOL_LINE_BYTES, PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
+use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 
 #[derive(Debug, Deserialize)]
 struct SkillRequest {
@@ -100,6 +105,7 @@ struct ExecutionFailure {
     timed_out: bool,
     truncated: bool,
     retryable: bool,
+    progress_diagnostics: Option<ProgressFrameDiagnostics>,
 }
 
 impl ExecutionFailure {
@@ -112,6 +118,7 @@ impl ExecutionFailure {
             timed_out: false,
             truncated: false,
             retryable: false,
+            progress_diagnostics: None,
         }
     }
 
@@ -119,6 +126,36 @@ impl ExecutionFailure {
         self.retryable = retryable;
         self
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+struct ProgressFrameDiagnostics {
+    schema_version: u32,
+    declared: bool,
+    observed: u64,
+    accepted: u64,
+    dropped_invalid: u64,
+    dropped_request_id_mismatch: u64,
+    dropped_oversized: u64,
+    dropped_rate_limited: u64,
+    dropped_total_limited: u64,
+    dropped_sequence_invalid: u64,
+}
+
+impl ProgressFrameDiagnostics {
+    fn declared() -> Self {
+        Self {
+            schema_version: 1,
+            declared: true,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ChildExecution {
+    final_output: Vec<u8>,
+    progress_diagnostics: ProgressFrameDiagnostics,
 }
 
 #[derive(Debug)]
@@ -147,7 +184,26 @@ async fn main() -> anyhow::Result<()> {
 
         let parsed: Result<SkillRequest, _> = serde_json::from_str(trimmed);
         let resp = match parsed {
-            Ok(req) => execute_skill(req).await,
+            Ok(req) => {
+                let (progress_tx, mut progress_rx) = mpsc::channel::<String>(32);
+                let execution = execute_skill(req, progress_tx);
+                tokio::pin!(execution);
+                let response = loop {
+                    tokio::select! {
+                        response = &mut execution => break response,
+                        Some(frame) = progress_rx.recv() => {
+                            stdout.write_all(frame.as_bytes()).await?;
+                            stdout.write_all(b"\n").await?;
+                            stdout.flush().await?;
+                        }
+                    }
+                };
+                while let Ok(frame) = progress_rx.try_recv() {
+                    stdout.write_all(frame.as_bytes()).await?;
+                    stdout.write_all(b"\n").await?;
+                }
+                response
+            }
             Err(err) => SkillResponse {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -175,7 +231,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn execute_skill(req: SkillRequest) -> SkillResponse {
+async fn execute_skill(req: SkillRequest, progress_tx: mpsc::Sender<String>) -> SkillResponse {
     let configured_timeout_limit = match configured_timeout_limit_from_env() {
         Ok(limit) => limit,
         Err(detail) => {
@@ -259,69 +315,118 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
     child_launch.timeout_seconds = timeout_seconds;
     let timeout = Duration::from_secs(timeout_seconds);
     let execution = if child_launch.launcher == LauncherKind::HttpJson {
-        run_http_json_skill(&child_launch, &child_req, timeout).await
+        run_http_json_skill(&child_launch, &child_req, timeout)
+            .await
+            .map(|final_output| ChildExecution {
+                final_output,
+                progress_diagnostics: ProgressFrameDiagnostics::default(),
+            })
     } else {
-        run_child_skill(&child_launch, &child_req.to_string(), timeout).await
+        run_child_skill_streaming(
+            &child_launch,
+            &child_req.to_string(),
+            &req.request_id,
+            timeout,
+            Some(progress_tx),
+        )
+        .await
     };
     let response = match execution {
-        Ok(out) => {
-            let parsed = parse_child_response(&out, &req.request_id, child_launch.strict_protocol);
+        Ok(execution) => {
+            let parsed = parse_child_response(
+                &execution.final_output,
+                &req.request_id,
+                child_launch.strict_protocol,
+            );
             match parsed {
-                Ok(v) => SkillResponse {
-                    request_id: v.request_id.unwrap_or_else(|| "unknown".to_string()),
-                    status: v.status.unwrap_or_else(|| "ok".to_string()),
-                    text: v.text.unwrap_or_default(),
-                    buttons: v.buttons,
-                    error_code: v.error_code,
-                    platform: v.platform,
-                    exit_code: v.exit_code,
-                    validation: v.validation,
-                    extra: v.extra,
-                    error_text: v.error_text,
-                },
-                Err(err) => SkillResponse {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    buttons: None,
-                    error_code: Some(err.error_code.clone()),
-                    platform: Some(std::env::consts::OS.to_string()),
-                    exit_code: None,
-                    validation: None,
-                    extra: Some(serde_json::json!({
-                        "error_code": err.error_code,
-                        "message_key": "skill_runner.protocol_response_invalid",
-                        "retryable": false,
-                    })),
-                    error_text: Some(format!(
-                        "invalid child response: {err}; output_bytes={}",
-                        out.len()
-                    )),
-                },
+                Ok(v) => attach_progress_diagnostics(
+                    SkillResponse {
+                        request_id: v.request_id.unwrap_or_else(|| "unknown".to_string()),
+                        status: v.status.unwrap_or_else(|| "ok".to_string()),
+                        text: v.text.unwrap_or_default(),
+                        buttons: v.buttons,
+                        error_code: v.error_code,
+                        platform: v.platform,
+                        exit_code: v.exit_code,
+                        validation: v.validation,
+                        extra: v.extra,
+                        error_text: v.error_text,
+                    },
+                    &execution.progress_diagnostics,
+                ),
+                Err(err) => attach_progress_diagnostics(
+                    SkillResponse {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        buttons: None,
+                        error_code: Some(err.error_code.clone()),
+                        platform: Some(std::env::consts::OS.to_string()),
+                        exit_code: None,
+                        validation: None,
+                        extra: Some(serde_json::json!({
+                            "error_code": err.error_code,
+                            "message_key": "skill_runner.protocol_response_invalid",
+                            "retryable": false,
+                        })),
+                        error_text: Some(format!(
+                            "invalid child response: {err}; output_bytes={}",
+                            execution.final_output.len()
+                        )),
+                    },
+                    &execution.progress_diagnostics,
+                ),
             }
         }
-        Err(err) => SkillResponse {
-            request_id: req.request_id,
-            status: "error".to_string(),
-            text: String::new(),
-            buttons: None,
-            error_code: Some(err.error_code.to_string()),
-            platform: Some(std::env::consts::OS.to_string()),
-            exit_code: err.exit_code,
-            validation: None,
-            extra: Some(serde_json::json!({
-                "error_code": err.error_code,
-                "message_key": format!("skill_runner.{}", err.error_code),
-                "retryable": err.retryable,
-                "exit_code": err.exit_code,
-                "signal": err.signal,
-                "timed_out": err.timed_out,
-                "truncated": err.truncated,
-            })),
-            error_text: Some(err.detail),
-        },
+        Err(err) => {
+            let diagnostics = err.progress_diagnostics.clone();
+            let response = SkillResponse {
+                request_id: req.request_id,
+                status: "error".to_string(),
+                text: String::new(),
+                buttons: None,
+                error_code: Some(err.error_code.to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
+                exit_code: err.exit_code,
+                validation: None,
+                extra: Some(serde_json::json!({
+                    "error_code": err.error_code,
+                    "message_key": format!("skill_runner.{}", err.error_code),
+                    "retryable": err.retryable,
+                    "exit_code": err.exit_code,
+                    "signal": err.signal,
+                    "timed_out": err.timed_out,
+                    "truncated": err.truncated,
+                })),
+                error_text: Some(err.detail),
+            };
+            match diagnostics.as_ref() {
+                Some(value) => attach_progress_diagnostics(response, value),
+                None => response,
+            }
+        }
     };
     attach_execution_binding(response, child_launch.execution_binding.as_ref())
+}
+
+fn attach_progress_diagnostics(
+    mut response: SkillResponse,
+    diagnostics: &ProgressFrameDiagnostics,
+) -> SkillResponse {
+    if !diagnostics.declared {
+        return response;
+    }
+    let mut extra = match response.extra.take() {
+        Some(Value::Object(extra)) => extra,
+        Some(child_extra) => serde_json::Map::from_iter([("child_extra".to_string(), child_extra)]),
+        None => serde_json::Map::new(),
+    };
+    extra.insert(
+        "progress_frame_diagnostics".to_string(),
+        serde_json::to_value(diagnostics).expect("progress diagnostics serialize"),
+    );
+    response.extra = Some(Value::Object(extra));
+    response
 }
 
 fn attach_execution_binding(
@@ -387,6 +492,7 @@ struct ChildLaunch {
     remote_endpoint: Option<String>,
     runtime_network: bool,
     timeout_seconds: u64,
+    progress_frames: bool,
     installed: bool,
     sandbox_profile: SandboxProfile,
     execution_binding: Option<ExecutionBinding>,
@@ -418,6 +524,7 @@ impl ChildLaunch {
             remote_endpoint: None,
             runtime_network: false,
             timeout_seconds: 86_400,
+            progress_frames: false,
             installed: false,
             sandbox_profile: SandboxProfile::Required,
             execution_binding: None,
@@ -448,6 +555,7 @@ impl ChildLaunch {
             remote_endpoint: spec.remote_endpoint,
             runtime_network: spec.runtime_network,
             timeout_seconds: spec.timeout_seconds,
+            progress_frames: spec.progress_frames,
             installed: true,
             sandbox_profile: spec.sandbox_profile,
             execution_binding: Some(execution_binding),
@@ -544,6 +652,18 @@ async fn run_child_skill(
     input_line: &str,
     timeout: Duration,
 ) -> Result<Vec<u8>, ExecutionFailure> {
+    run_child_skill_streaming(launch, input_line, "ignored", timeout, None)
+        .await
+        .map(|execution| execution.final_output)
+}
+
+async fn run_child_skill_streaming(
+    launch: &ChildLaunch,
+    input_line: &str,
+    expected_request_id: &str,
+    timeout: Duration,
+    progress_tx: Option<mpsc::Sender<String>>,
+) -> Result<ChildExecution, ExecutionFailure> {
     let mut command = child_process_command(launch)
         .map_err(|detail| ExecutionFailure::new("child_launch_invalid", detail))?;
     #[cfg(unix)]
@@ -576,7 +696,21 @@ async fn run_child_skill(
         .stderr
         .take()
         .ok_or_else(|| ExecutionFailure::new("child_stderr_unavailable", "stderr pipe missing"))?;
-    let stdout_reader = tokio::spawn(read_bounded_output(stdout));
+    let stdout_reader = if launch.progress_frames {
+        let expected_request_id = expected_request_id.to_string();
+        tokio::spawn(async move {
+            read_framed_child_output(stdout, &expected_request_id, progress_tx).await
+        })
+    } else {
+        tokio::spawn(async move {
+            read_bounded_output(stdout)
+                .await
+                .map(|final_output| ChildExecution {
+                    final_output,
+                    progress_diagnostics: ProgressFrameDiagnostics::default(),
+                })
+        })
+    };
     let stderr_reader = tokio::spawn(read_bounded_output(stderr));
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => status,
@@ -589,12 +723,15 @@ async fn run_child_skill(
             let mut failure = ExecutionFailure::new("child_timeout", "child skill timeout");
             failure.timed_out = true;
             failure.retryable = true;
+            if launch.progress_frames {
+                failure.progress_diagnostics = Some(ProgressFrameDiagnostics::declared());
+            }
             return Err(failure);
         }
     };
-    let stdout = stdout_reader
+    let execution = stdout_reader
         .await
-        .map_err(|error| ExecutionFailure::new("child_stdout_read_failed", error.to_string()))??;
+        .map_err(|error| ExecutionFailure::new("child_stdout_read_failed", error.to_string()))?;
     let stderr = stderr_reader
         .await
         .map_err(|error| ExecutionFailure::new("child_stderr_read_failed", error.to_string()))??;
@@ -606,16 +743,130 @@ async fn run_child_skill(
         );
         failure.exit_code = status.code();
         failure.signal = exit_signal(&status);
+        let diagnostics = match &execution {
+            Ok(execution) => Some(execution.progress_diagnostics.clone()),
+            Err(error) => error.progress_diagnostics.clone(),
+        };
+        if diagnostics.as_ref().is_some_and(|value| value.declared) {
+            failure.progress_diagnostics = diagnostics;
+        }
         return Err(failure);
     }
+    let execution = execution?;
 
-    if stdout.is_empty() {
+    if execution.final_output.is_empty() {
         return Err(ExecutionFailure::new(
             "child_stdout_empty",
             "child stdout is empty",
         ));
     }
-    Ok(stdout)
+    Ok(execution)
+}
+
+async fn read_framed_child_output(
+    stdout: impl tokio::io::AsyncRead + Unpin,
+    expected_request_id: &str,
+    progress_tx: Option<mpsc::Sender<String>>,
+) -> Result<ChildExecution, ExecutionFailure> {
+    let mut records = FramedRead::new(
+        stdout,
+        LinesCodec::new_with_max_length(MAX_PROTOCOL_LINE_BYTES),
+    );
+    let mut diagnostics = ProgressFrameDiagnostics::declared();
+    let mut final_output: Option<Vec<u8>> = None;
+    let mut last_sequence = 0_u64;
+    let mut accepted_times = VecDeque::<Instant>::new();
+
+    while let Some(record) = records.next().await {
+        let line = match record {
+            Ok(line) => line,
+            Err(LinesCodecError::MaxLineLengthExceeded) => {
+                diagnostics.observed = diagnostics.observed.saturating_add(1);
+                diagnostics.dropped_oversized = diagnostics.dropped_oversized.saturating_add(1);
+                continue;
+            }
+            Err(LinesCodecError::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData => {
+                diagnostics.observed = diagnostics.observed.saturating_add(1);
+                diagnostics.dropped_invalid = diagnostics.dropped_invalid.saturating_add(1);
+                continue;
+            }
+            Err(LinesCodecError::Io(error)) => {
+                let mut failure =
+                    ExecutionFailure::new("child_stdout_read_failed", error.to_string());
+                failure.progress_diagnostics = Some(diagnostics);
+                return Err(failure);
+            }
+        };
+
+        if final_output.is_none()
+            && validate_response_line(line.as_bytes(), expected_request_id).is_ok()
+        {
+            let mut output = line.into_bytes();
+            output.push(b'\n');
+            final_output = Some(output);
+            continue;
+        }
+
+        diagnostics.observed = diagnostics.observed.saturating_add(1);
+        if diagnostics.observed > MAX_PROGRESS_FRAMES_PER_INVOCATION {
+            diagnostics.dropped_total_limited = diagnostics.dropped_total_limited.saturating_add(1);
+            continue;
+        }
+        let frame = match validate_progress_frame_line(line.as_bytes(), expected_request_id) {
+            Ok(frame) => frame,
+            Err(error) => {
+                diagnostics.dropped_invalid = diagnostics.dropped_invalid.saturating_add(1);
+                if error.code == "progress_frame_request_id_mismatch" {
+                    diagnostics.dropped_request_id_mismatch =
+                        diagnostics.dropped_request_id_mismatch.saturating_add(1);
+                }
+                if error.code == "progress_frame_oversized" {
+                    diagnostics.dropped_oversized = diagnostics.dropped_oversized.saturating_add(1);
+                }
+                continue;
+            }
+        };
+        if final_output.is_some() {
+            diagnostics.dropped_invalid = diagnostics.dropped_invalid.saturating_add(1);
+            continue;
+        }
+        if frame.sequence <= last_sequence {
+            diagnostics.dropped_sequence_invalid =
+                diagnostics.dropped_sequence_invalid.saturating_add(1);
+            continue;
+        }
+        last_sequence = frame.sequence;
+
+        let now = Instant::now();
+        while accepted_times
+            .front()
+            .is_some_and(|accepted| now.duration_since(*accepted) >= Duration::from_secs(1))
+        {
+            accepted_times.pop_front();
+        }
+        if accepted_times.len() >= MAX_PROGRESS_FRAMES_PER_SECOND {
+            diagnostics.dropped_rate_limited = diagnostics.dropped_rate_limited.saturating_add(1);
+            continue;
+        }
+        accepted_times.push_back(now);
+        diagnostics.accepted = diagnostics.accepted.saturating_add(1);
+        if let Some(sender) = progress_tx.as_ref() {
+            let _ = sender.send(line).await;
+        }
+    }
+
+    let Some(final_output) = final_output else {
+        let mut failure = ExecutionFailure::new(
+            "child_final_response_missing",
+            "progress-capable child exited without a valid final response",
+        );
+        failure.progress_diagnostics = Some(diagnostics);
+        return Err(failure);
+    };
+    Ok(ChildExecution {
+        final_output,
+        progress_diagnostics: diagnostics,
+    })
 }
 
 fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {

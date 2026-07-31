@@ -4,6 +4,10 @@
 
 `kb` is a local namespace-based knowledge retrieval layer for user-managed documents.
 
+The package opts into versioned progress frames. A valid action emits a machine-only
+`kb.operation.starting` record before the final response. The host owns localization and
+display; the frame is progress/stall evidence only and does not determine success.
+
 Use it when the user wants the agent runtime to:
 - build a searchable knowledge base from local files or directories
 - add/update indexed materials under a named namespace

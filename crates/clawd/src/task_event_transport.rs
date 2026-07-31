@@ -356,6 +356,47 @@ pub(crate) fn replay_events_after(
     })
 }
 
+pub(crate) fn latest_skill_progress_event(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<Option<Value>> {
+    let db = state.core.db.get().context("task progress event db pool")?;
+    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    let mut statement = db.prepare(
+        "SELECT event_json FROM task_event_stream
+         WHERE task_id = ?1 ORDER BY seq DESC LIMIT ?2",
+    )?;
+    let rows = statement.query_map(params![task_id, EVENT_REPLAY_LIMIT], |row| {
+        row.get::<_, String>(0)
+    })?;
+    for row in rows {
+        let Ok(event) = serde_json::from_str::<Value>(&row?) else {
+            continue;
+        };
+        if event.get("event_type").and_then(Value::as_str) != Some("skill_progress") {
+            continue;
+        }
+        let payload = event.get("payload");
+        if payload
+            .and_then(|value| value.get("schema_version"))
+            .and_then(Value::as_u64)
+            != Some(1)
+            || payload
+                .and_then(|value| value.get("source"))
+                .and_then(Value::as_str)
+                != Some("skill_progress")
+            || payload
+                .and_then(|value| value.get("data_only"))
+                .and_then(Value::as_bool)
+                != Some(true)
+        {
+            continue;
+        }
+        return Ok(Some(event));
+    }
+    Ok(None)
+}
+
 pub(crate) fn read_event_artifact(
     state: &AppState,
     task_id: &str,

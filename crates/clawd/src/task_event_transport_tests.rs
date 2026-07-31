@@ -31,6 +31,49 @@ fn event_schema_is_ordered_deduplicated_and_replayable() {
 }
 
 #[test]
+fn latest_skill_progress_projection_comes_from_the_validated_task_event() {
+    let state = state();
+    publish_event(
+        &state,
+        "task-progress",
+        "skill_progress",
+        json!({
+            "schema_version": 1,
+            "source": "skill_progress",
+            "data_only": true,
+            "render_owner": "ui_cli_channel_projection",
+            "skill_name": "kb",
+            "frame": {
+                "schema_version": 1,
+                "record_type": "skill_progress",
+                "request_id": "task-progress",
+                "sequence": 1,
+                "kind": "progress",
+                "detail_key": "kb.operation.starting",
+                "params": {}
+            }
+        }),
+    )
+    .expect("publish progress event");
+    publish_event(
+        &state,
+        "task-progress",
+        "tool_finished",
+        json!({"status":"ok"}),
+    )
+    .expect("publish later event");
+
+    let projection = latest_skill_progress_event(&state, "task-progress")
+        .expect("read projection")
+        .expect("progress event");
+    assert_eq!(projection["event_type"], "skill_progress");
+    assert_eq!(
+        projection["payload"]["frame"]["detail_key"],
+        "kb.operation.starting"
+    );
+}
+
+#[test]
 fn claimed_event_rejects_stale_generation_from_same_worker() {
     let state = state();
     let task_id = "task-event-generation";

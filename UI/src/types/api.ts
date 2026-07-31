@@ -56,6 +56,7 @@ export interface TaskQueryResponse {
   execution_state?: string | null;
   goal?: unknown | null;
   task_plan?: unknown | null;
+  skill_progress?: unknown | null;
   result_json?: unknown | null;
   error_text?: string | null;
   lifecycle?: TaskLifecycleProjection | null;

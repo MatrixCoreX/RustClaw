@@ -26,6 +26,8 @@ pub struct SkillLaunchSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_endpoint: Option<String>,
     pub timeout_seconds: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub progress_frames: bool,
     pub sandbox_profile: SandboxProfile,
     pub runtime_network: bool,
     pub install_root: PathBuf,
@@ -33,11 +35,16 @@ pub struct SkillLaunchSpec {
     pub receipt_digest: String,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillVersionPin {
     pub skill_name: String,
     pub version: String,
     pub adapter: BuildAdapter,
+    pub progress_frames: bool,
     pub install_root: PathBuf,
     pub manifest_digest: String,
     pub receipt_digest: String,
@@ -261,6 +268,7 @@ impl SkillRuntimeResolver {
             skill_name: receipt.skill_name,
             version: receipt.version,
             adapter: receipt.adapter,
+            progress_frames: manifest.run.progress_frames,
             install_root: canonical_install,
             manifest_digest: manifest.digest()?,
             receipt_digest,
@@ -320,6 +328,7 @@ impl SkillRuntimeResolver {
             environment_allowlist: receipt.launch.environment_allowlist,
             remote_endpoint: receipt.launch.remote_endpoint,
             timeout_seconds: manifest.run.timeout_seconds,
+            progress_frames: manifest.run.progress_frames,
             sandbox_profile: receipt.sandbox_profile,
             runtime_network: receipt.runtime_network,
             install_root: canonical_install,

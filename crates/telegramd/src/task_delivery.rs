@@ -92,6 +92,7 @@ fn spawn_task_result_delivery_with_mode(
         let mut soft_notice_sent = false;
         let mut hard_notice_sent = false;
         let mut sent_progress_count = 0usize;
+        let mut last_skill_progress_seq = 0_u64;
 
         loop {
             match query_task_status(
@@ -103,6 +104,13 @@ fn spawn_task_result_delivery_with_mode(
             {
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
+                        if let Some((seq, message)) = skill_progress_message(&state, &task) {
+                            if seq > last_skill_progress_seq {
+                                let _ = bot.send_message(chat_id, message).await;
+                                last_skill_progress_seq = seq;
+                                sent_progress_count = sent_progress_count.saturating_add(1);
+                            }
+                        }
                         let progress_messages = task_progress_messages(&task);
                         debug!(
                             "phase=poll task_id={} chat_id={} status={:?} elapsed_ms={} sent_progress_count={} progress_len={}",
@@ -545,6 +553,33 @@ pub(super) fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
         })
         .unwrap_or_default();
     dedupe_preserve_order(out)
+}
+
+pub(super) fn skill_progress_message(
+    state: &BotState,
+    task: &TaskQueryResponse,
+) -> Option<(u64, String)> {
+    let event = task.skill_progress.as_ref()?;
+    let seq = event.get("seq")?.as_u64()?;
+    let payload = event.get("payload")?;
+    if payload.get("source").and_then(serde_json::Value::as_str) != Some("skill_progress")
+        || payload
+            .get("data_only")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    let detail_key = payload
+        .pointer("/frame/detail_key")
+        .and_then(serde_json::Value::as_str)?;
+    let message_key = match detail_key {
+        "media_download.precheck.starting" => "telegram.progress.skill_media_precheck",
+        "kb.operation.starting" => "telegram.progress.skill_kb",
+        "package_manager.operation.starting" => "telegram.progress.skill_package",
+        _ => "telegram.progress.skill_generic",
+    };
+    Some((seq, state.i18n.t(message_key)))
 }
 
 pub(super) fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {

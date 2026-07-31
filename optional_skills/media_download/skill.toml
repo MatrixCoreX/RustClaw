@@ -29,6 +29,7 @@ working_directory = "."
 timeout_seconds = 3600
 environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WHISPER_BIN", "WHISPER_CLI", "WHISPER_CPP_BIN", "WHISPER_CPP_MODEL", "WHISPER_MODEL", "WHISPER_MODEL_PATH", "WORKSPACE_ROOT"]
 smoke_args = { action = "capabilities" }
+progress_frames = true
 
 [security]
 capability_policy_source = "registry"

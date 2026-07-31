@@ -545,6 +545,7 @@ pub struct SkillManifest {
     pub name: String,
     pub kind: SkillKind,
     pub planner_kind: PlannerCapabilityKind,
+    pub progress_frames: bool,
     pub output_kind: OutputKind,
     pub description: Option<String>,
     pub semantic_tags: Vec<String>,
@@ -619,6 +620,11 @@ pub struct SkillRegistryEntry {
     /// scheduling policy, not a permission requested by the package.
     #[serde(default)]
     pub max_concurrency: Option<usize>,
+    /// Whether the package may emit versioned machine progress records before
+    /// its final protocol response. Missing keeps the legacy one-result-line
+    /// contract.
+    #[serde(default)]
+    pub progress_frames: bool,
     /// prompt 文件路径，相对 workspace 或绝对
     #[serde(default)]
     pub prompt_file: String,
@@ -1713,6 +1719,7 @@ impl SkillsRegistry {
             name: entry.name.clone(),
             kind: entry.kind,
             planner_kind: resolved_planner_kind(entry),
+            progress_frames: entry.progress_frames,
             output_kind: entry.output_kind,
             description: trim_optional_string(entry.description.as_deref()),
             semantic_tags: entry.semantic_tags.clone(),

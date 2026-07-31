@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-system:schema:agent-jsonl-v1-progress-frame",
+  "title": "Agent JSONL v1 machine progress frame",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "sequence",
+    "kind",
+    "detail_key"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "record_type": { "const": "skill_progress" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "kind": {
+      "enum": ["progress", "heartbeat", "artifact_reference", "log_reference"]
+    },
+    "detail_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "params": {
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+      "additionalProperties": { "$ref": "#/$defs/paramValue" }
+    },
+    "current": { "type": "integer", "minimum": 0 },
+    "total": { "type": "integer", "minimum": 1 },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id"],
+      "properties": {
+        "reference_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,128}$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9/._+-]{1,128}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "paramValue": {
+      "oneOf": [
+        { "type": ["null", "boolean", "number"] },
+        { "type": "string", "maxLength": 256 },
+        {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/paramValue" }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": { "enum": ["artifact_reference", "log_reference"] }
+        },
+        "required": ["kind"]
+      },
+      "then": { "required": ["reference"] },
+      "else": { "not": { "required": ["reference"] } }
+    },
+    {
+      "if": { "required": ["current"] },
+      "then": { "required": ["total"] }
+    },
+    {
+      "if": { "required": ["total"] },
+      "then": { "required": ["current"] }
+    }
+  ]
+}

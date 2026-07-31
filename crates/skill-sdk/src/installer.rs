@@ -795,7 +795,11 @@ fn protocol_smoke(
         )
         .phase("protocol_smoke"));
     }
-    validate_response_line(&output.stdout, &request_id)?;
+    crate::protocol::validate_protocol_output(
+        &output.stdout,
+        &request_id,
+        manifest.run.progress_frames,
+    )?;
     Ok(ProtocolSmokeReceipt {
         protocol: AGENT_JSONL_PROTOCOL.to_string(),
         passed: true,

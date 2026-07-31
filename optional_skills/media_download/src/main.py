@@ -629,6 +629,22 @@ def _error(request_id: str, failure: SkillFailure) -> dict[str, Any]:
     }
 
 
+def _emit_precheck_progress(request_id: str, action: str) -> None:
+    frame = {
+        "schema_version": 1,
+        "record_type": "skill_progress",
+        "request_id": request_id,
+        "sequence": 1,
+        "kind": "progress",
+        "detail_key": "media_download.precheck.starting",
+        "params": {"action": action},
+        "current": 0,
+        "total": 1,
+    }
+    sys.stdout.write(json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
 def respond(request: dict[str, Any]) -> dict[str, Any]:
     try:
         request_id = request.get("request_id")
@@ -751,6 +767,10 @@ def main() -> None:
         raw_request_id = request.get("request_id")
         if isinstance(raw_request_id, str) and raw_request_id.strip():
             request_id = raw_request_id
+        raw_args = request.get("args")
+        raw_action = raw_args.get("action") if isinstance(raw_args, dict) else None
+        if isinstance(raw_action, str) and raw_action in SUPPORTED_ACTIONS:
+            _emit_precheck_progress(request_id, raw_action)
         response = respond(request)
     except SkillFailure as failure:
         response = _error(request_id, failure)

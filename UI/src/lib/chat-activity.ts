@@ -116,6 +116,18 @@ export function reduceChatActivity(
       commandPreview: commandPreview(payload),
     };
   }
+  if (eventType === "skill_progress") {
+    const skillName =
+      typeof payload.skill_name === "string" && payload.skill_name.trim()
+        ? payload.skill_name.trim().slice(0, 80)
+        : current.activeName;
+    return {
+      ...next,
+      stage: "running_tool",
+      activeName: skillName,
+      commandPreview: null,
+    };
+  }
   if (eventType === "tool_finished") {
     return {
       ...next,

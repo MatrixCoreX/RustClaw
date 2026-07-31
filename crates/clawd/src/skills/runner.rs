@@ -1,7 +1,10 @@
+use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 
 use claw_core::config::ToolSandboxMode;
 use claw_core::skill_registry::{Capability, CapabilityIsolationProfile, PlannerCapabilityMapping};
@@ -697,21 +700,118 @@ pub(crate) async fn run_skill_with_runner_once(
     let mut stderr = child.stderr.take();
 
     if let Some(stdout) = child.stdout.take() {
-        let mut reader = BufReader::new(stdout);
-        let read_out = tokio::time::timeout(
-            Duration::from_secs(skill_timeout_secs.max(1)),
-            reader.read_line(&mut out_line),
-        )
-        .await;
+        let mut records = FramedRead::new(
+            stdout,
+            LinesCodec::new_with_max_length(skill_sdk::MAX_PROTOCOL_LINE_BYTES),
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(skill_timeout_secs.max(1));
+        let mut observed_frames = 0_u64;
+        let mut accepted_times = VecDeque::<Instant>::new();
+        loop {
+            let record = match tokio::time::timeout_at(deadline, records.next()).await {
+                Ok(Some(Ok(line))) => line,
+                Ok(Some(Err(LinesCodecError::MaxLineLengthExceeded))) => {
+                    tracing::warn!(
+                        skill = canonical_skill_name,
+                        reason_code = "runner_record_oversized",
+                        "skill_progress_frame_discarded"
+                    );
+                    continue;
+                }
+                Ok(Some(Err(LinesCodecError::Io(err)))) => {
+                    return Err(format!("read skill-runner stdout failed: {err}"));
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let _ = terminate_subprocess_group(child.id()).await;
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    return Err("skill-runner timeout".to_string());
+                }
+            };
+            let progress_record = serde_json::from_str::<Value>(&record)
+                .ok()
+                .and_then(|value| {
+                    (value.get("record_type").and_then(Value::as_str)
+                        == Some(skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE))
+                    .then_some(value)
+                });
+            let Some(progress_record) = progress_record else {
+                out_line = record;
+                break;
+            };
 
-        match read_out {
-            Ok(Ok(_)) => {}
-            Ok(Err(err)) => return Err(format!("read skill-runner stdout failed: {err}")),
-            Err(_) => {
-                let _ = terminate_subprocess_group(child.id()).await;
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err("skill-runner timeout".to_string());
+            observed_frames = observed_frames.saturating_add(1);
+            if !installed_launch.progress_frames {
+                tracing::warn!(
+                    skill = canonical_skill_name,
+                    reason_code = "progress_frames_not_declared",
+                    observed_frames,
+                    "skill_progress_frame_discarded"
+                );
+                continue;
+            }
+            if observed_frames > skill_sdk::MAX_PROGRESS_FRAMES_PER_INVOCATION {
+                tracing::warn!(
+                    skill = canonical_skill_name,
+                    reason_code = "progress_frame_total_limit",
+                    observed_frames,
+                    "skill_progress_frame_discarded"
+                );
+                continue;
+            }
+            let encoded = serde_json::to_vec(&progress_record)
+                .map_err(|err| format!("encode skill progress frame failed: {err}"))?;
+            let frame_validation = skill_sdk::validate_progress_frame_line(&encoded, &task.task_id);
+            let frame = match frame_validation {
+                Ok(frame) => frame,
+                Err(error) => {
+                    tracing::warn!(
+                        skill = canonical_skill_name,
+                        reason_code = error.code,
+                        observed_frames,
+                        "skill_progress_frame_discarded"
+                    );
+                    continue;
+                }
+            };
+            let now = Instant::now();
+            while accepted_times
+                .front()
+                .is_some_and(|accepted| now.duration_since(*accepted) >= Duration::from_secs(1))
+            {
+                accepted_times.pop_front();
+            }
+            if accepted_times.len() >= skill_sdk::MAX_PROGRESS_FRAMES_PER_SECOND {
+                tracing::warn!(
+                    skill = canonical_skill_name,
+                    reason_code = "progress_frame_rate_limit",
+                    observed_frames,
+                    "skill_progress_frame_discarded"
+                );
+                continue;
+            }
+            accepted_times.push_back(now);
+            let payload = json!({
+                "schema_version": 1,
+                "source": "skill_progress",
+                "data_only": true,
+                "render_owner": "ui_cli_channel_projection",
+                "skill_name": canonical_skill_name,
+                "skill_version": &installed_launch.version,
+                "frame": frame,
+            });
+            if let Err(error) = crate::task_event_transport::publish_claimed_event(
+                state,
+                task,
+                "skill_progress",
+                payload,
+            ) {
+                tracing::warn!(
+                    skill = canonical_skill_name,
+                    error = %error,
+                    "skill_progress_event_publish_failed"
+                );
             }
         }
     }

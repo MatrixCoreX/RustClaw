@@ -31,6 +31,7 @@ working_directory = "."
 timeout_seconds = 30
 environment_allowlist = ["HOME", "KB_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
+progress_frames = true
 
 [security]
 capability_policy_source = "registry"

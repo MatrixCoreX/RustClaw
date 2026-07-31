@@ -3,6 +3,10 @@ use super::*;
 const WECHAT_TASK_DONE_FALLBACK_TEXT_KEY: &str = "wechat.msg.task_done_fallback_text";
 const WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "wechat.msg.task_failed_fallback_error";
 const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout_retry_later";
+const WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY: &str = "wechat.msg.skill_progress_media_precheck";
+const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
+const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
+const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
 
 pub(super) fn task_success_messages(
     task: &TaskQueryResponse,
@@ -34,6 +38,30 @@ pub(super) fn task_success_messages(
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| wechat_t(config, WECHAT_TASK_DONE_FALLBACK_TEXT_KEY))]
+}
+
+pub(super) fn skill_progress_message(
+    task: &TaskQueryResponse,
+    config: &WechatSection,
+) -> Option<(u64, String)> {
+    let event = task.skill_progress.as_ref()?;
+    let seq = event.get("seq")?.as_u64()?;
+    let payload = event.get("payload")?;
+    if payload.get("source").and_then(Value::as_str) != Some("skill_progress")
+        || payload.get("data_only").and_then(Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+    let detail_key = payload
+        .pointer("/frame/detail_key")
+        .and_then(Value::as_str)?;
+    let message_key = match detail_key {
+        "media_download.precheck.starting" => WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY,
+        "kb.operation.starting" => WECHAT_SKILL_PROGRESS_KB_KEY,
+        "package_manager.operation.starting" => WECHAT_SKILL_PROGRESS_PACKAGE_KEY,
+        _ => WECHAT_SKILL_PROGRESS_GENERIC_KEY,
+    };
+    Some((seq, wechat_t(config, message_key)))
 }
 
 /// Refresh `ilink/bot/sendtyping` while clawd runs (`keepaliveIntervalMs` ≈ 5s in OpenClaw weixin).
@@ -383,6 +411,7 @@ pub(super) async fn submit_wechat_task_with_payload(
         &[("task_id", &task_id)],
     );
     let mut timeout_notice_sent = false;
+    let mut last_skill_progress_seq = 0_u64;
     let mut last_seen_status: Option<TaskStatus> = None;
     let (poll_token, poll_base) = {
         let g = state.session.read().await;
@@ -523,6 +552,18 @@ pub(super) async fn submit_wechat_task_with_payload(
         last_seen_status = Some(task.status.clone());
         match task.status {
             TaskStatus::Queued | TaskStatus::Running => {
+                if let Some((seq, message)) = skill_progress_message(&task, &state.config) {
+                    if seq > last_skill_progress_seq {
+                        send_text_reply_via_session(
+                            &state,
+                            &from_user_id,
+                            context_token.as_deref(),
+                            &message,
+                        )
+                        .await;
+                        last_skill_progress_seq = seq;
+                    }
+                }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     if !timeout_notice_sent {
                         warn!(

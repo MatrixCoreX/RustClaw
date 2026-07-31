@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use skill_sdk::{ArtifactSpill, BoundedResult};
+use skill_sdk::{ArtifactSpill, BoundedResult, SkillProgressFrame, SkillProgressKind};
 
 const SKILL_NAME: &str = "package_manager";
 
@@ -46,22 +47,25 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(err.extra),
-                    error_text: Some(err.message),
-                },
-            },
+            Ok(req) => {
+                emit_start_progress(&mut stdout, &req)?;
+                match execute(req.args) {
+                    Ok((text, extra)) => Resp {
+                        request_id: req.request_id,
+                        status: "ok".to_string(),
+                        text,
+                        extra: Some(extra),
+                        error_text: None,
+                    },
+                    Err(err) => Resp {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        extra: Some(err.extra),
+                        error_text: Some(err.message),
+                    },
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -73,6 +77,35 @@ fn main() -> anyhow::Result<()> {
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
     }
+    Ok(())
+}
+
+fn emit_start_progress(stdout: &mut impl Write, request: &Req) -> anyhow::Result<()> {
+    let action = request
+        .args
+        .get("action")
+        .and_then(Value::as_str)
+        .filter(|action| {
+            matches!(
+                *action,
+                "detect" | "install" | "smart_install_preview" | "smart_install" | "uninstall"
+            )
+        })
+        .unwrap_or("detect");
+    let frame = SkillProgressFrame {
+        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
+        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
+        request_id: request.request_id.clone(),
+        sequence: 1,
+        kind: SkillProgressKind::Progress,
+        detail_key: "package_manager.operation.starting".to_string(),
+        params: BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
+        current: Some(0),
+        total: Some(1),
+        reference: None,
+    };
+    writeln!(stdout, "{}", frame.to_line()?)?;
+    stdout.flush()?;
     Ok(())
 }
 

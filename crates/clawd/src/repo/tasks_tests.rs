@@ -1156,6 +1156,46 @@ fn get_task_query_record_exposes_the_persisted_task_plan_snapshot() {
 }
 
 #[test]
+fn get_task_query_record_exposes_the_latest_skill_progress_event() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4();
+    insert_task(&state, &task_id.to_string(), "running", None, 1234);
+    crate::task_event_transport::publish_event(
+        &state,
+        &task_id.to_string(),
+        "skill_progress",
+        json!({
+            "schema_version": 1,
+            "source": "skill_progress",
+            "data_only": true,
+            "render_owner": "ui_cli_channel_projection",
+            "skill_name": "package_manager",
+            "frame": {
+                "schema_version": 1,
+                "record_type": "skill_progress",
+                "request_id": task_id.to_string(),
+                "sequence": 1,
+                "kind": "progress",
+                "detail_key": "package_manager.operation.starting",
+                "params": {}
+            }
+        }),
+    )
+    .expect("publish skill progress");
+
+    let (response, _, _) = get_task_query_record(&state, task_id)
+        .expect("query task")
+        .expect("task exists");
+    let progress = response.skill_progress.expect("skill progress projection");
+
+    assert_eq!(progress["event_type"], "skill_progress");
+    assert_eq!(
+        progress["payload"]["frame"]["detail_key"],
+        "package_manager.operation.starting"
+    );
+}
+
+#[test]
 fn list_active_tasks_exposes_lifecycle_projection() {
     let state = state_with_tasks_table();
     let mut checkpoint = checkpoint_json("ckpt-active", vec![]);

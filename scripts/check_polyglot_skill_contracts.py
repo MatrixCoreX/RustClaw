@@ -107,6 +107,11 @@ def validate_manifest(path: Path) -> dict[str, object]:
     safe_relative(build.get("source_root", "."), "build.source_root", allow_dot=True)
     safe_relative(run.get("entrypoint"), "run.entrypoint")
     safe_relative(run.get("working_directory", "."), "run.working_directory", allow_dot=True)
+    progress_frames = run.get("progress_frames", False)
+    if not isinstance(progress_frames, bool):
+        raise ContractError(f"{path}: run.progress_frames must be boolean")
+    if progress_frames and run.get("launcher") == "http_json":
+        raise ContractError(f"{path}: http_json cannot declare progress frames")
     if adapter in {"python", "node", "go"}:
         safe_relative(build.get("lockfile"), "build.lockfile")
     if adapter == "cargo":
@@ -268,6 +273,7 @@ def read_registry(path: Path) -> list[dict[str, object]]:
 
 def check_registry_projection(root: Path, manifests: list[Path]) -> None:
     manifest_by_name: dict[str, str] = {}
+    manifest_progress_by_name: dict[str, bool] = {}
     for path in manifests:
         value = validate_manifest(path)
         name = str(required_table(value, "package", path)["name"])
@@ -275,6 +281,9 @@ def check_registry_projection(root: Path, manifests: list[Path]) -> None:
         if name in manifest_by_name:
             raise ContractError(f"duplicate package manifest name={name}")
         manifest_by_name[name] = relative
+        manifest_progress_by_name[name] = bool(
+            required_table(value, "run", path).get("progress_frames", False)
+        )
 
     projections: list[dict[str, tuple[object, ...]]] = []
     for registry_relative in REGISTRIES:
@@ -297,11 +306,23 @@ def check_registry_projection(root: Path, manifests: list[Path]) -> None:
                         f"{registry_path}: {name} manifest projection mismatch "
                         f"expected={manifest_by_name.get(name)!r} actual={package_manifest!r}"
                     )
+                registry_progress = entry.get("progress_frames", False)
+                if not isinstance(registry_progress, bool):
+                    raise ContractError(
+                        f"{registry_path}: {name} progress_frames must be boolean"
+                    )
+                if registry_progress != manifest_progress_by_name.get(name, False):
+                    raise ContractError(
+                        f"{registry_path}: {name} progress frame declaration mismatch "
+                        f"manifest={manifest_progress_by_name.get(name, False)} "
+                        f"registry={registry_progress}"
+                    )
             projection[name] = (
                 kind,
                 package_manifest,
                 entry.get("install_mode"),
                 entry.get("enabled"),
+                entry.get("progress_frames", False),
             )
         projections.append(projection)
     if projections[0] != projections[1]:
