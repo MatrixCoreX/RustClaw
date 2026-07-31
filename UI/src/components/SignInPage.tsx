@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { KeyRound, Loader2, Moon, Sun } from "lucide-react";
 import { PRODUCT_DISPLAY_NAME } from "../lib/product-identity";
+import { UiBuildBadge } from "./UiBuildBadge";
 
 type UiLanguage = "zh" | "en";
 type LoginTab = "key" | "webd";
@@ -64,7 +65,10 @@ export function SignInPage({
       <div className="theme-shell min-h-screen px-4 py-8">
         <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="theme-panel p-6 sm:p-8">
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("欢迎", "Welcome")}</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("欢迎", "Welcome")}</p>
+              <UiBuildBadge t={t} />
+            </div>
             <h1 className="mt-4 flex items-center gap-2 text-2xl font-bold sm:text-3xl">
               <img className="app-logo app-logo-hero" src="/app-logo.svg" alt="" />
               <span>{t(`进入 ${PRODUCT_DISPLAY_NAME} 控制台`, `Enter ${PRODUCT_DISPLAY_NAME} Console`)}</span>

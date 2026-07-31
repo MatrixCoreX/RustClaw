@@ -1,10 +1,11 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 
-function productIdentityConfig(): {displayName: string} {
+function productIdentityConfig(): {configPath: string; displayName: string} {
   const configPath = process.env.APP_PRODUCT_IDENTITY_CONFIG
     ? path.resolve(process.env.APP_PRODUCT_IDENTITY_CONFIG)
     : path.resolve(__dirname, '../configs/product_identity.toml');
@@ -29,17 +30,58 @@ function productIdentityConfig(): {displayName: string} {
   if (!splashImage || splashImage === '.' || splashImage === '..' || /[\\/]/.test(splashImage)) {
     throw new Error(`Invalid small_screen_splash_image in ${configPath}`);
   }
-  return {displayName};
+  return {configPath, displayName};
+}
+
+function uiSourceVersion(identityConfigPath: string): string {
+  const digest = crypto.createHash('sha256');
+  const appendFile = (absolutePath: string, relativePath: string) => {
+    digest.update(relativePath);
+    digest.update('\0');
+    digest.update(fs.readFileSync(absolutePath));
+    digest.update('\0');
+  };
+  const fixedFiles = [
+    'index.html',
+    'package.json',
+    'package-lock.json',
+    'tsconfig.json',
+    'vite.config.ts',
+  ];
+  for (const relativePath of fixedFiles) {
+    const absolutePath = path.resolve(__dirname, relativePath);
+    if (fs.existsSync(absolutePath)) appendFile(absolutePath, relativePath);
+  }
+  for (const rootName of ['public', 'src']) {
+    const rootPath = path.resolve(__dirname, rootName);
+    const pending = [rootPath];
+    const discovered: string[] = [];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      for (const entry of fs.readdirSync(current, {withFileTypes: true})) {
+        const entryPath = path.join(current, entry.name);
+        if (entry.isDirectory()) pending.push(entryPath);
+        if (entry.isFile()) discovered.push(entryPath);
+      }
+    }
+    for (const absolutePath of discovered.sort()) {
+      appendFile(absolutePath, path.relative(__dirname, absolutePath));
+    }
+  }
+  appendFile(identityConfigPath, 'product_identity.toml');
+  return digest.digest('hex').slice(0, 12);
 }
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const identity = productIdentityConfig();
+  const uiVersion = uiSourceVersion(identity.configPath);
   return {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       __APP_DISPLAY_NAME__: JSON.stringify(identity.displayName),
+      __APP_UI_VERSION__: JSON.stringify(uiVersion),
     },
     resolve: {
       alias: {

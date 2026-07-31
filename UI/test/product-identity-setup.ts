@@ -11,3 +11,4 @@ const displayName = raw.match(/^\s*display_name\s*=\s*"([^"]+)"/m)?.[1]?.trim();
 if (!displayName) throw new Error(`Missing display_name in ${configPath}`);
 
 globalThis.__APP_DISPLAY_NAME__ = displayName;
+globalThis.__APP_UI_VERSION__ = "test-build";

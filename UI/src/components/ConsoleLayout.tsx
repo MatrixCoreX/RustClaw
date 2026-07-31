@@ -7,6 +7,7 @@ import {
   appStorageKey,
   PRODUCT_DISPLAY_NAME,
 } from "../lib/product-identity";
+import { UiBuildBadge } from "./UiBuildBadge";
 
 type UiLanguage = "zh" | "en";
 type AuthMode = "key" | "webd" | null;
@@ -104,15 +105,16 @@ export function ConsoleLayout({
       {factoryResetModal}
       <header className="theme-header sticky top-0 z-40 border-b border-white/10 px-3 sm:px-6">
         <div className="theme-header-inner mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 py-2">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
               onClick={() => onCurrentPageChange("dashboard")}
-              className="theme-brand-link inline-flex items-center gap-2 truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
+              className="theme-brand-link inline-flex min-w-0 items-center gap-2 truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
             >
               <img className="app-logo app-logo-header" src="/app-logo.svg" alt="" />
-              <span>{PRODUCT_DISPLAY_NAME}</span>
+              <span className="truncate">{PRODUCT_DISPLAY_NAME}</span>
             </button>
+            <UiBuildBadge t={t} />
           </div>
 
           <div className="theme-header-actions flex flex-wrap items-center justify-end gap-2">
