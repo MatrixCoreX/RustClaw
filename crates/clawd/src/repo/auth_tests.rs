@@ -1,4 +1,7 @@
-use super::schema::{rebuild_auth_keys_for_flexible_roles, rebuild_channel_tables_for_ui};
+use super::schema::{
+    rebuild_auth_keys_for_flexible_roles, rebuild_channel_tables_for_ui,
+    rebuild_task_message_id_as_text,
+};
 use super::*;
 use super::{
     get_auth_key_value_by_id_from_db, normalize_auth_key_role, rebind_user_key_references,
@@ -199,6 +202,114 @@ fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
         [],
     )
     .expect("insert wechat task");
+}
+
+#[test]
+fn task_message_id_migration_preserves_rows_indexes_and_foreign_keys() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         CREATE TABLE tasks (
+             task_id TEXT PRIMARY KEY,
+             user_id INTEGER NOT NULL,
+             chat_id INTEGER NOT NULL,
+             channel TEXT NOT NULL,
+             external_user_id TEXT,
+             external_chat_id TEXT,
+             message_id INTEGER,
+             user_key TEXT,
+             kind TEXT NOT NULL,
+             payload_json TEXT NOT NULL,
+             status TEXT NOT NULL,
+             result_json TEXT,
+             error_text TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             lease_owner TEXT,
+             lease_expires_at INTEGER NOT NULL DEFAULT 0,
+             claim_attempt INTEGER NOT NULL DEFAULT 0,
+             claimed_at INTEGER NOT NULL DEFAULT 0
+         );
+         CREATE INDEX idx_tasks_test_status ON tasks(status, created_at);
+         CREATE TABLE task_children (
+             task_id TEXT NOT NULL,
+             FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+         );
+         INSERT INTO tasks (
+             task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
+             message_id, user_key, kind, payload_json, status, result_json, error_text,
+             created_at, updated_at, lease_owner, lease_expires_at, claim_attempt, claimed_at
+         ) VALUES (
+             'task-1', 7, 8, 'feishu', 'open-1', 'chat-1', 'message-1', 'key-1',
+             'ask', '{}', 'running', NULL, NULL, '100', '101', 'worker-1', 200, 2, 99
+         );
+         CREATE TRIGGER trg_tasks_test_update
+         AFTER UPDATE ON tasks
+         BEGIN
+             SELECT NEW.task_id;
+         END;
+         INSERT INTO task_children (task_id) VALUES ('task-1');",
+    )
+    .expect("create legacy task schema");
+
+    rebuild_task_message_id_as_text(&db).expect("migrate message id affinity");
+    rebuild_task_message_id_as_text(&db).expect("migration is idempotent");
+
+    let affinity: String = db
+        .query_row(
+            "SELECT type FROM pragma_table_info('tasks') WHERE name = 'message_id'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("message id affinity");
+    let task: (String, String, i64, i64, i64) = db
+        .query_row(
+            "SELECT message_id, lease_owner, lease_expires_at, claim_attempt, claimed_at
+             FROM tasks WHERE task_id = 'task-1'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("migrated task");
+    let child_count: i64 = db
+        .query_row("SELECT COUNT(*) FROM task_children", [], |row| row.get(0))
+        .expect("child count");
+    let index_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tasks_test_status'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("index count");
+    let trigger_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='trg_tasks_test_update'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("trigger count");
+    let violation_count: i64 = db
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .expect("foreign key check");
+
+    assert_eq!(affinity, "TEXT");
+    assert_eq!(
+        task,
+        ("message-1".to_string(), "worker-1".to_string(), 200, 2, 99)
+    );
+    assert_eq!(child_count, 1);
+    assert_eq!(index_count, 1);
+    assert_eq!(trigger_count, 1);
+    assert_eq!(violation_count, 0);
 }
 
 #[test]
