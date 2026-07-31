@@ -13,21 +13,18 @@ pub fn chunk_text_for_channel(text: &str, max_chars: usize) -> Vec<String> {
     if s.is_empty() || max_chars == 0 {
         return vec![];
     }
-    if s.len() <= max_chars {
+    if s.chars().count() <= max_chars {
         return vec![s.to_string()];
     }
     let mut out = Vec::new();
     let mut start = 0;
     while start < s.len() {
-        let mut chunk_end = (start + max_chars).min(s.len());
-        while chunk_end > start && !s.is_char_boundary(chunk_end) {
-            chunk_end -= 1;
-        }
-        if chunk_end == start {
-            chunk_end = (start + 1..=s.len())
-                .find(|&i| s.is_char_boundary(i))
-                .unwrap_or(s.len());
-        }
+        let remaining = &s[start..];
+        let chunk_end = remaining
+            .char_indices()
+            .nth(max_chars)
+            .map(|(byte_index, _)| start + byte_index)
+            .unwrap_or(s.len());
         let window = &s[start..chunk_end];
         let segment_end = if let Some(rel) = window.rfind('\n') {
             start + rel + 1
@@ -42,3 +39,7 @@ pub fn chunk_text_for_channel(text: &str, max_chars: usize) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "channel_chunk_tests.rs"]
+mod tests;

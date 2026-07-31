@@ -495,6 +495,7 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
     let mut startup_error: Option<String> = None;
     if let Err(err) = register_telegram_commands_and_menu(
         &state.bot_token,
+        &state.language,
         state.i18n.as_ref(),
         state.command_catalog.as_ref(),
     )
@@ -635,6 +636,7 @@ async fn wait_for_telegram_api(bot: &Bot, state: &BotState) {
 
 async fn register_telegram_commands_and_menu(
     bot_token: &str,
+    language: &str,
     i18n: &TextCatalog,
     command_catalog: &ChannelCommandCatalog,
 ) -> anyhow::Result<()> {
@@ -644,50 +646,37 @@ async fn register_telegram_commands_and_menu(
         .build()
         .context("build telegram menu client failed")?;
 
-    let commands = command_catalog
-        .menu_commands_for_channel("telegram")
-        .into_iter()
-        .map(|command| {
-            json!({
-                "command": command.name,
-                "description": command
-                    .description_key()
-                    .map(|key| i18n.t(key))
-                    .unwrap_or_else(|| command.name.clone()),
-            })
-        })
-        .collect::<Vec<_>>();
-    let commands_payload = json!({ "commands": commands });
-
-    let cmd_resp = client
-        .post(format!("{api_base}/setMyCommands"))
-        .json(&commands_payload)
-        .send()
-        .await
-        .context("request setMyCommands failed")?;
-    let cmd_status = cmd_resp.status();
-    let cmd_body = cmd_resp
-        .text()
-        .await
-        .context("read setMyCommands response failed")?;
-    if !cmd_status.is_success() {
-        return Err(anyhow!(telegram_provider_http_error(
-            "set_commands",
-            cmd_status,
-            &cmd_body,
-        )));
-    }
-    let cmd_json: JsonValue =
-        serde_json::from_str(&cmd_body).unwrap_or_else(|_| json!({"ok": false}));
-    if !cmd_json
-        .get("ok")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return Err(anyhow!(telegram_provider_invalid_response(
-            "set_commands",
-            &cmd_body,
-        )));
+    for commands_payload in telegram_command_payloads(language, i18n, command_catalog) {
+        let cmd_resp = client
+            .post(format!("{api_base}/setMyCommands"))
+            .json(&commands_payload)
+            .send()
+            .await
+            .context("request setMyCommands failed")?;
+        let cmd_status = cmd_resp.status();
+        let cmd_body = cmd_resp
+            .text()
+            .await
+            .context("read setMyCommands response failed")?;
+        if !cmd_status.is_success() {
+            return Err(anyhow!(telegram_provider_http_error(
+                "set_commands",
+                cmd_status,
+                &cmd_body,
+            )));
+        }
+        let cmd_json: JsonValue =
+            serde_json::from_str(&cmd_body).unwrap_or_else(|_| json!({"ok": false}));
+        if !cmd_json
+            .get("ok")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            return Err(anyhow!(telegram_provider_invalid_response(
+                "set_commands",
+                &cmd_body,
+            )));
+        }
     }
 
     let menu_payload = json!({
@@ -727,6 +716,44 @@ async fn register_telegram_commands_and_menu(
     }
 
     Ok(())
+}
+
+fn telegram_command_payloads(
+    language: &str,
+    i18n: &TextCatalog,
+    command_catalog: &ChannelCommandCatalog,
+) -> Vec<JsonValue> {
+    let commands = command_catalog
+        .menu_commands_for_channel("telegram")
+        .into_iter()
+        .map(|command| {
+            json!({
+                "command": command.name,
+                "description": command
+                    .description_key()
+                    .map(|key| i18n.t(key))
+                    .unwrap_or_else(|| command.name.clone()),
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut payloads = vec![json!({ "commands": commands })];
+    if let Some(language_code) = telegram_menu_language_code(language) {
+        payloads.push(json!({
+            "commands": payloads[0]["commands"].clone(),
+            "language_code": language_code,
+        }));
+    }
+    payloads
+}
+
+fn telegram_menu_language_code(language: &str) -> Option<String> {
+    let primary = language
+        .trim()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    (primary.len() == 2 && primary.bytes().all(|byte| byte.is_ascii_lowercase())).then_some(primary)
 }
 
 #[cfg(target_os = "linux")]
