@@ -8,6 +8,7 @@ import {
   buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
+  buildTaskPlanView,
   buildTaskTraceEventView,
   extractTaskText,
   taskArtifactRefs,
@@ -44,6 +45,89 @@ test("appends progressive model events into the live task trace", () => {
   assert.equal(
     events[0].payload && (events[0].payload as Record<string, unknown>).tool_name,
     "call_capability",
+  );
+});
+
+test("builds a beginner-facing task plan from the persisted API projection", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-plan-persisted",
+    status: "running",
+    result_json: null,
+    error_text: null,
+    task_plan: {
+      schema_version: 1,
+      source: "task_plan",
+      status: "ok",
+      data_only: true,
+      render_owner: "ui_cli_channel_projection",
+      task_id: "task-plan-persisted",
+      plan_revision: 3,
+      updated_at_ms: 1234,
+      steps: [
+        { step_id: "inspect", title: "Inspect current state", status: "completed" },
+        { step_id: "implement", title: "Implement the change", status: "in_progress" },
+      ],
+      checkpoint: { kind: "task_plan", ref: "task_plan:task-plan-persisted:3" },
+    },
+  };
+
+  const view = buildTaskPlanView(result);
+
+  assert.equal(view?.planRevision, 3);
+  assert.equal(view?.completedCount, 1);
+  assert.equal(view?.steps[1]?.title, "Implement the change");
+  assert.equal(view?.checkpointRef, "task_plan:task-plan-persisted:3");
+});
+
+test("uses a newer live task-plan event and rejects non-data projections", () => {
+  const result = appendLiveTaskEvent(
+    {
+      task_id: "task-plan-live",
+      status: "running",
+      result_json: null,
+      error_text: null,
+      task_plan: {
+        schema_version: 1,
+        source: "task_plan",
+        data_only: true,
+        plan_revision: 1,
+        steps: [{ step_id: "inspect", title: "Inspect", status: "in_progress" }],
+      },
+    },
+    "task-plan-live",
+    {
+      schema_version: 1,
+      seq: 4,
+      task_id: "task-plan-live",
+      event_kind: "task_plan_updated",
+      payload: {
+        schema_version: 1,
+        source: "task_plan",
+        data_only: true,
+        plan_revision: 2,
+        steps: [
+          { step_id: "inspect", title: "Inspect", status: "completed" },
+          { step_id: "verify", title: "Verify", status: "in_progress" },
+        ],
+      },
+    },
+  );
+
+  assert.equal(buildTaskPlanView(result)?.planRevision, 2);
+  assert.equal(buildTaskPlanView(result)?.steps[1]?.stepId, "verify");
+  assert.equal(
+    buildTaskPlanView({
+      task_id: "task-plan-invalid",
+      status: "running",
+      task_plan: {
+        schema_version: 1,
+        source: "task_plan",
+        data_only: false,
+        plan_revision: 1,
+        steps: [{ step_id: "unsafe", title: "Unsafe", status: "pending" }],
+      },
+    }),
+    null,
   );
 });
 

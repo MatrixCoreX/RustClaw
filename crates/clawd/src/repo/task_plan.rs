@@ -151,6 +151,33 @@ pub(crate) fn read_task_plan(
     }
 }
 
+pub(crate) fn read_task_plan_query_projection(
+    state: &AppState,
+    task_id: &str,
+) -> Result<Option<Value>, TaskPlanError> {
+    let snapshot = read_task_plan(state, task_id, "read_plan")?;
+    if snapshot
+        .get("plan_revision")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        == 0
+    {
+        return Ok(None);
+    }
+    Ok(Some(json!({
+        "schema_version": TASK_PLAN_SCHEMA_VERSION,
+        "source": TASK_PLAN_SOURCE,
+        "status": "ok",
+        "data_only": true,
+        "render_owner": "ui_cli_channel_projection",
+        "task_id": task_id,
+        "plan_revision": snapshot.get("plan_revision"),
+        "updated_at_ms": snapshot.get("updated_at_ms"),
+        "steps": snapshot.get("steps"),
+        "checkpoint": snapshot.get("checkpoint"),
+    })))
+}
+
 pub(crate) fn set_task_plan(
     state: &AppState,
     task_id: &str,

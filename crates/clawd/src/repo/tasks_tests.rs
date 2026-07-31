@@ -20,6 +20,7 @@ use crate::repo::child_tasks::{
     enqueue_child_task_specs, record_child_task_terminal_projection,
     refresh_parent_child_task_merge, ChildTaskParentContext,
 };
+use crate::repo::task_plan::{TaskPlanStep, TaskPlanStepStatus};
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
     get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskResumeControlInput,
@@ -1117,6 +1118,41 @@ fn get_task_query_record_exposes_lifecycle_projection() {
     assert_eq!(directive_payload["checkpoint_id"], "ckpt-query");
     assert_eq!(directive_payload["completed_side_effect_count"], 1);
     assert_eq!(directive_payload["requires_idempotency_guard"], true);
+}
+
+#[test]
+fn get_task_query_record_exposes_the_persisted_task_plan_snapshot() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4();
+    insert_task(&state, &task_id.to_string(), "running", None, 1234);
+    crate::repo::set_task_plan(
+        &state,
+        &task_id.to_string(),
+        0,
+        vec![
+            TaskPlanStep {
+                step_id: "inspect".to_string(),
+                title: "Inspect current state".to_string(),
+                status: TaskPlanStepStatus::Completed,
+            },
+            TaskPlanStep {
+                step_id: "implement".to_string(),
+                title: "Implement the change".to_string(),
+                status: TaskPlanStepStatus::InProgress,
+            },
+        ],
+    )
+    .expect("persist task plan");
+
+    let (response, _, _) = get_task_query_record(&state, task_id)
+        .expect("query task")
+        .expect("task exists");
+    let plan = response.task_plan.expect("task plan projection");
+
+    assert_eq!(plan["data_only"], true);
+    assert_eq!(plan["plan_revision"], 1);
+    assert_eq!(plan["steps"][0]["step_id"], "inspect");
+    assert_eq!(plan["steps"][1]["status"], "in_progress");
 }
 
 #[test]
