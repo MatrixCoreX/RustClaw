@@ -1,4 +1,9 @@
-use super::{redact_sensitive_text, sanitize_user_visible_text};
+use claw_core::types::{TaskQueryResponse, TaskStatus};
+use uuid::Uuid;
+
+use super::{
+    redact_sensitive_text, sanitize_task_query_response_for_delivery, sanitize_user_visible_text,
+};
 
 #[test]
 fn sanitizes_ansi_and_sensitive_url_params() {
@@ -78,6 +83,29 @@ fn sanitizes_structured_skill_error_payloads() {
     );
     assert!(!sanitized.contains("__RC_SKILL_ERROR__"));
     assert!(!sanitized.contains("\"skill\""));
+}
+
+#[test]
+fn task_query_delivery_exposes_readable_error_without_internal_envelope() {
+    let task = TaskQueryResponse {
+        task_id: Uuid::new_v4(),
+        status: TaskStatus::Failed,
+        execution_state: None,
+        goal: None,
+        result_json: None,
+        error_text: Some(
+            r#"__RC_SKILL_ERROR__:{"error_code":"media_not_found","error_text":"No downloadable media was found.","extra":{"retryable":false}}"#
+                .to_string(),
+        ),
+        lifecycle: None,
+    };
+
+    let delivered = sanitize_task_query_response_for_delivery(task);
+
+    assert_eq!(
+        delivered.error_text.as_deref(),
+        Some("No downloadable media was found.")
+    );
 }
 
 #[test]

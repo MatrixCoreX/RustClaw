@@ -546,7 +546,14 @@ pub(super) async fn submit_wechat_task_with_payload(
                 continue;
             }
             TaskStatus::Succeeded => {
-                for reply_text in task_success_messages(&task, &state.config) {
+                let reply_messages =
+                    claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
+                        &task.task_id.to_string(),
+                        task.result_json.as_ref(),
+                        &state.workspace_root,
+                        task_success_messages(&task, &state.config),
+                    );
+                for reply_text in reply_messages {
                     deliver_wechat_clawd_reply(
                         &state,
                         &from_user_id,

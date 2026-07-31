@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-runtime.invalid/schemas/image_vision_text_extraction.schema.json",
+  "title": "Image Vision Text Extraction Output",
+  "description": "Schema for visible text transcribed from one or more images.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pages",
+    "uncertainties"
+  ],
+  "properties": {
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

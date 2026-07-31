@@ -4,7 +4,7 @@ schema_version = 2
 [package]
 name = "image_vision"
 version = "0.1.8"
-description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
+description = "Planner-facing multimodal image understanding for description, structured extraction, visible-text transcription to a deliverable UTF-8 text file, comparison, and screenshot summaries."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
@@ -29,12 +29,12 @@ launcher = "native"
 entrypoint = "runtime/bin/image-vision-skill"
 working_directory = "."
 timeout_seconds = 90
-environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "ANTHROPIC_API_KEY", "APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_VENDOR", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "MINIMAX_MCP_STARTUP_TIMEOUT_MS", "MINIMAX_MCP_TIMEOUT_MS", "MINIMAX_MCP_UV_PATH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "ANTHROPIC_API_KEY", "APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_VENDOR", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
 capability_policy_source = "registry"
-sandbox = "required"
+sandbox = "workspace_write"
 runtime_network = false
 inherit_credentials = false
 
@@ -50,16 +50,16 @@ update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["describe", "analyze", "extract", "compare", "screenshot_summary"] }, "images" = { "type" = "array", "items" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" }, "base64" = { "type" = "string" } } }] } }, "image" = { "type" = "string" }, "instruction" = { "type" = "string" }, "query" = { "type" = "string" }, "text" = { "type" = "string" }, "response_language" = { "type" = "string" }, "language" = { "type" = "string" }, "detail_level" = { "type" = "string" }, "schema" = { "type" = "object" } } }
+input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["describe", "analyze", "extract", "extract_text", "compare", "screenshot_summary"] }, "images" = { "type" = "array", "items" = { "anyOf" = [{ "type" = "string" }, { "type" = "object", "properties" = { "path" = { "type" = "string" }, "url" = { "type" = "string" }, "base64" = { "type" = "string" } } }] } }, "image" = { "type" = "string" }, "instruction" = { "type" = "string" }, "query" = { "type" = "string" }, "text" = { "type" = "string" }, "response_language" = { "type" = "string" }, "language" = { "type" = "string" }, "detail_level" = { "type" = "string" }, "schema" = { "type" = "object" }, "output_name" = { "type" = "string", "pattern" = "^[^/\\\\]{1,176}\\.txt$" }, "save_text_file" = { "type" = "boolean" }, "deliver_to_user" = { "type" = "boolean" } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
-capabilities = [{ "name" = "image_vision.describe", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "describe" }, { "name" = "image_vision.analyze", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "analyze" }, { "name" = "image_vision.extract", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "schema"], "timeout_seconds" = 90, "action" = "extract" }, { "name" = "image_vision.compare", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "compare" }, { "name" = "image_vision.screenshot_summary", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "screenshot_summary" }]
+capabilities = [{ "name" = "image_vision.describe", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "describe" }, { "name" = "image_vision.analyze", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "analyze" }, { "name" = "image_vision.extract", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "schema"], "timeout_seconds" = 90, "action" = "extract", "description" = "Use multimodal vision for structured field or table extraction. For a user request to recognize visible image text and receive a text file, use image_vision.extract_text instead." }, { "name" = "image_vision.extract_text", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "output_name", "save_text_file", "deliver_to_user"], "timeout_seconds" = 90, "action" = "extract_text", "description" = "Use only when the user explicitly asks to recognize/transcribe visible text from images. Prefer the Agent multimodal model, write the recognized text to a UTF-8 .txt artifact, and deliver the file by default. This must never be added to an ordinary media-download request." }, { "name" = "image_vision.compare", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "compare" }, { "name" = "image_vision.screenshot_summary", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["images|image"], "optional" = ["instruction", "query", "text", "response_language", "language", "detail_level"], "timeout_seconds" = 90, "action" = "screenshot_summary" }]
 
 [capability_request.permissions]
 llm_gateway = true
 network = true
-filesystem_read = false
-filesystem_write = false
+filesystem_read = true
+filesystem_write = true
 subprocess = false
 package_install = false
 privilege_escalation = false
@@ -67,7 +67,7 @@ external_publish = false
 credential_refs = []
 
 [capability_request.artifact_contract]
-kinds = ["image"]
+kinds = ["file", "structured_data"]
 output_fields = ["extra.artifacts"]
 
 [capability_request.evidence_contract]

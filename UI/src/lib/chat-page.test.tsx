@@ -162,6 +162,17 @@ test("keeps the composer visible while scrolling only the chat interaction", () 
   assert.doesNotMatch(markup, /lg:min-h-\[32rem\]/);
 });
 
+test("offers browser-window maximize controls on the agent chat container", () => {
+  const markup = renderToStaticMarkup(<ChatPage {...props()} />);
+
+  assert.match(markup, /id="agent-chat-window"/);
+  assert.match(markup, /title="双击标题栏占满浏览器窗口"/);
+  assert.match(markup, /aria-label="占满浏览器窗口"/);
+  assert.match(markup, /aria-pressed="false"/);
+  assert.match(markup, /aria-controls="agent-chat-window"/);
+  assert.match(markup, />全屏<\/button>/);
+});
+
 test("renders a newly prepended task above older task history", () => {
   const pageProps = props();
   pageProps.chatThreads = [

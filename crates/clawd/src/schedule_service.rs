@@ -11,6 +11,8 @@ use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 // ---------- Schedule skill catalog & validation (dynamic from registry) ----------
 // `create` persists jobs generically; no per-skill subprocess preflight or merge-on-create paths live here.
 const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
+pub(crate) const SCHEDULE_TASK_MODE_AGENT: &str = "agent";
+pub(crate) const SCHEDULE_TASK_MODE_DIRECT_TEXT: &str = "direct_text";
 
 #[derive(Debug, Clone)]
 struct SkillContractHint {
@@ -636,6 +638,46 @@ fn sanitize_schedule_ask_payload_text(payload: &mut Value, fallback_prompt: &str
     }
 }
 
+fn normalize_schedule_ask_execution_mode(payload: &mut Value) {
+    let Value::Object(map) = payload else {
+        return;
+    };
+    let requested_mode = map
+        .get("schedule_task_mode")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let canonical_mode = if requested_mode.eq_ignore_ascii_case(SCHEDULE_TASK_MODE_DIRECT_TEXT) {
+        SCHEDULE_TASK_MODE_DIRECT_TEXT
+    } else {
+        SCHEDULE_TASK_MODE_AGENT
+    };
+    map.insert(
+        "schedule_task_mode".to_string(),
+        Value::String(canonical_mode.to_string()),
+    );
+}
+
+fn inherit_schedule_task_execution_policy(
+    state: &AppState,
+    source_task: &ClaimedTask,
+    payload: &mut Value,
+) {
+    let Value::Object(map) = payload else {
+        return;
+    };
+    // The planner-provided task payload is not an authority source. Scheduled
+    // work inherits only the server-validated policy of the creating task.
+    map.remove(crate::task_execution_policy::POLICY_PAYLOAD_FIELD);
+    if let Some(policy) = crate::task_execution_policy::inheritable_policy_stamp(state, source_task)
+    {
+        map.insert(
+            crate::task_execution_policy::POLICY_PAYLOAD_FIELD.to_string(),
+            policy,
+        );
+    }
+}
+
 /// Key-value pairs to inject into task payload when schedule triggers execution.
 /// Skills can read these machine tokens to know they were invoked by schedule.
 pub(crate) fn schedule_invocation_metadata(job_id: &str, run_id: &str) -> Vec<(String, Value)> {
@@ -1162,23 +1204,11 @@ pub(crate) async fn try_handle_schedule_request(
                     if !has_text {
                         map.insert("text".to_string(), Value::String(prompt.to_string()));
                     }
-                    if map
-                        .get("schedule_task_mode")
-                        .and_then(|x| x.as_str())
-                        .map(|s| s.trim().is_empty())
-                        .unwrap_or(true)
-                    {
-                        // 定时 ask 默认按“原文提醒”发送，避免触发时二次意图误判。
-                        map.insert(
-                            "schedule_task_mode".to_string(),
-                            Value::String("direct_text".to_string()),
-                        );
-                    }
                     v
                 } else {
                     json!({
                         "text": prompt,
-                        "schedule_task_mode": "direct_text"
+                        "schedule_task_mode": SCHEDULE_TASK_MODE_AGENT
                     })
                 }
             } else {
@@ -1188,7 +1218,9 @@ pub(crate) async fn try_handle_schedule_request(
             let mut payload = inherit_schedule_delivery_context(task, payload);
             if task_kind == "ask" {
                 sanitize_schedule_ask_payload_text(&mut payload, prompt);
+                normalize_schedule_ask_execution_mode(&mut payload);
             }
+            inherit_schedule_task_execution_policy(state, task, &mut payload);
 
             let payload = if task_kind == "run_skill" {
                 match validate_schedule_run_skill(state, &payload) {

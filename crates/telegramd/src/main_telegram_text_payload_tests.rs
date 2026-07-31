@@ -97,3 +97,13 @@ fn video_file_token_is_classified_as_delivery_not_code() {
     assert!(has_delivery_prefix("MUSIC_FILE:/tmp/audio.mp3"));
     assert!(!payload_uses_code_block("MUSIC_FILE:/tmp/audio.mp3"));
 }
+
+#[test]
+fn voice_mode_can_separate_media_delivery_from_spoken_caption() {
+    let answer = "图片已下载。\nIMAGE_FILE:/tmp/photo.jpg\nVIDEO_FILE:/tmp/video.mp4";
+    assert_eq!(
+        delivery_tokens_only(answer),
+        "IMAGE_FILE:/tmp/photo.jpg\nVIDEO_FILE:/tmp/video.mp4"
+    );
+    assert_eq!(strip_delivery_tokens_for_tts(answer), "图片已下载。");
+}

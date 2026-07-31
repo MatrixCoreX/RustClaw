@@ -72,6 +72,11 @@ Contract for action kinds:
   instruction; do not copy the full raw scheduling request when a narrower task content exists.
   This rule is language-independent. `schedule.content` is an accepted compatibility alias, but
   `task.payload.text` is preferred.
+- Scheduled `ask` tasks run through the agent by default. Omit
+  `task.payload.schedule_task_mode` or use `"agent"` for work that must be performed when the
+  schedule fires. Use `"direct_text"` only when the user explicitly requests sending the literal
+  `task.payload.text` unchanged. Fetching, searching, summarizing, translating, inspecting,
+  generating, and other work must never use `"direct_text"`.
 - A preview's machine `title` is derived from `task.payload.text` (or the `schedule.content`
   compatibility alias), never from an unparsed copy of `raw`.
 - Set `mode="execute"` only when the request authorizes changing scheduled jobs. Set `mode="compile_only"` when the request asks to parse, preview, explain required structured fields, test the schedule parser, or otherwise avoid creating/updating/deleting jobs. `mode="dry_run"` is equivalent to `compile_only` for runtime behavior.

@@ -58,6 +58,7 @@ const WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
 #[derive(Clone)]
 struct AppState {
     clawd_base_url: String,
+    workspace_root: PathBuf,
     i18n_path: String,
     command_catalog: Arc<ChannelCommandCatalog>,
     client: Client,
@@ -178,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let state = AppState {
         clawd_base_url,
+        workspace_root: workspace_root.clone(),
         i18n_path,
         command_catalog: Arc::new(ChannelCommandCatalog::load_or_default(
             &workspace_root.join("configs/channel_commands.toml"),
@@ -843,7 +845,7 @@ async fn query_task_status(
 }
 
 fn task_success_messages(state: &AppState, task: &TaskQueryResponse) -> Vec<String> {
-    if let Some(messages) = task
+    let messages = if let Some(messages) = task
         .result_json
         .as_ref()
         .and_then(|v| v.get("messages"))
@@ -857,9 +859,22 @@ fn task_success_messages(state: &AppState, task: &TaskQueryResponse) -> Vec<Stri
             .map(str::to_string)
             .collect::<Vec<_>>();
         if !out.is_empty() {
-            return out;
+            out
+        } else {
+            task_success_fallback_messages(state, task)
         }
-    }
+    } else {
+        task_success_fallback_messages(state, task)
+    };
+    claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
+        &task.task_id.to_string(),
+        task.result_json.as_ref(),
+        &state.workspace_root,
+        messages,
+    )
+}
+
+fn task_success_fallback_messages(state: &AppState, task: &TaskQueryResponse) -> Vec<String> {
     vec![task
         .result_json
         .as_ref()

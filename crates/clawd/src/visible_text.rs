@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+use claw_core::types::TaskQueryResponse;
 use regex::Regex;
 
 const REDACTED: &str = "[REDACTED]";
@@ -23,6 +24,17 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = replace_structured_skill_error_payloads(&stripped);
     let redacted = redact_sensitive_text(&stripped);
     redact_runtime_template_placeholders(&redacted)
+}
+
+pub(crate) fn sanitize_task_query_response_for_delivery(
+    mut task: TaskQueryResponse,
+) -> TaskQueryResponse {
+    task.error_text = task.error_text.take().and_then(|error_text| {
+        let sanitized = sanitize_user_visible_text(&error_text);
+        let sanitized = sanitized.trim();
+        (!sanitized.is_empty()).then(|| sanitized.to_string())
+    });
+    task
 }
 
 pub(crate) fn redact_sensitive_text(text: &str) -> String {

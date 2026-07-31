@@ -109,7 +109,13 @@ JS_STATE_MARKERS = (
 )
 DOUYIN_DOMAINS = ("douyin.com", "iesdouyin.com")
 KUAISHOU_DOMAINS = ("kuaishou.com", "gifshow.com", "ksurl.cn", "kwai.com", "v.kuaishou.com")
-XIAOHONGSHU_DOMAINS = ("xiaohongshu.com", "xhslink.com", "xhscdn.com", "xhs.cn")
+XIAOHONGSHU_DOMAINS = (
+    "xiaohongshu.com",
+    "xhslink.com",
+    "xhslink.cn",
+    "xhscdn.com",
+    "xhs.cn",
+)
 TIKTOK_DOMAINS = ("tiktok.com", "tiktokv.com", "tiktokcdn.com", "vm.tiktok.com", "vt.tiktok.com")
 YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
 PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")

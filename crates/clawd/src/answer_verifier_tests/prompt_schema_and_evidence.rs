@@ -559,3 +559,82 @@ fn execution_evidence_prefers_explicit_model_observation_over_bulk_metadata() {
         "block: {block}"
     );
 }
+
+#[test]
+fn execution_evidence_keeps_large_explicit_model_observation_inline() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-provider-safe-large-model-observation",
+        "ask",
+        "summarize observed pages",
+    );
+    let excerpt = format!("{} observed-page-tail", "page evidence ".repeat(900));
+    journal
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "browser.open_extract",
+            Some("open_extract".to_string()),
+            json!({
+                "extra": {
+                    "bulk": "bulk-value-that-must-not-replace-model-observation".repeat(2_000),
+                    "model_observation": {
+                        "items": [{
+                            "title": "Observed page",
+                            "url": "https://example.com/news",
+                            "content_excerpt": excerpt
+                        }],
+                        "trust": {
+                            "classification": "untrusted_web_content",
+                            "instructions_executable": false
+                        }
+                    }
+                }
+            }),
+        ));
+
+    let block = execution_evidence_prompt_block(&journal);
+
+    assert!(block.contains("observed-page-tail"), "block: {block}");
+    assert!(
+        block.contains("\"projection\": \"structured_result\""),
+        "block: {block}"
+    );
+    assert!(
+        !block.contains("bulk-value-that-must-not-replace-model-observation"),
+        "block: {block}"
+    );
+}
+
+#[test]
+fn execution_evidence_recovers_content_fields_from_large_generic_result() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-provider-safe-large-generic-result",
+        "ask",
+        "summarize observed content",
+    );
+    journal
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "registry.fixture",
+            Some("inspect".to_string()),
+            json!({
+                "extra": {
+                    "bulk": "x".repeat(30_000),
+                    "items": [{
+                        "title": "Observed title",
+                        "content_excerpt": "deep-observed-content-marker"
+                    }]
+                }
+            }),
+        ));
+
+    let block = execution_evidence_prompt_block(&journal);
+
+    assert!(
+        block.contains("\"projection\": \"canonical_evidence_reference\""),
+        "block: {block}"
+    );
+    assert!(
+        block.contains("deep-observed-content-marker"),
+        "block: {block}"
+    );
+}

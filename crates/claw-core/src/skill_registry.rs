@@ -614,6 +614,11 @@ pub struct SkillRegistryEntry {
     /// 该技能专用超时（秒）；未设或 0 表示用全局默认
     #[serde(default)]
     pub timeout_seconds: u64,
+    /// Host-enforced maximum number of concurrent runner processes for this
+    /// skill. `None` uses only the global skill concurrency limit. This is a
+    /// scheduling policy, not a permission requested by the package.
+    #[serde(default)]
+    pub max_concurrency: Option<usize>,
     /// prompt 文件路径，相对 workspace 或绝对
     #[serde(default)]
     pub prompt_file: String,
@@ -1472,6 +1477,15 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            if entry
+                .max_concurrency
+                .is_some_and(|limit| limit == 0 || limit > 1_024)
+            {
+                return Err(format!(
+                    "skill `{canonical}` max_concurrency must be in 1..=1024 in {}",
+                    path.display()
+                ));
+            }
             validate_planner_capability_schemas(&entry, path)?;
             entry.planner_capability_aliases = normalize_planner_capability_aliases(
                 &entry.planner_capability_aliases,
@@ -1643,6 +1657,10 @@ impl SkillsRegistry {
                 }
             })
             .unwrap_or(0)
+    }
+
+    pub fn max_concurrency(&self, canonical_name: &str) -> Option<usize> {
+        self.get(canonical_name)?.max_concurrency
     }
 
     /// 所有已注册的 canonical 名称（含未启用）

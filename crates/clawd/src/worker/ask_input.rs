@@ -47,12 +47,7 @@ pub(super) fn prepare_run_skill_input(payload: &Value) -> PreparedRunSkillInput 
 
 /// Scheduled direct-text delivery is an explicit protocol mode, not an
 /// ordinary semantic routing decision.
-pub(super) async fn maybe_finalize_schedule_direct_text_success(
-    state: &AppState,
-    task: &ClaimedTask,
-    payload: &Value,
-    prompt: &str,
-) -> anyhow::Result<bool> {
+fn is_explicit_schedule_direct_text(payload: &Value, prompt: &str) -> bool {
     let is_schedule_triggered = payload
         .get("schedule_triggered")
         .and_then(Value::as_bool)
@@ -61,17 +56,25 @@ pub(super) async fn maybe_finalize_schedule_direct_text_success(
         .get("schedule_task_mode")
         .and_then(Value::as_str)
         .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
+        .trim();
     let schedule_force_agent = payload
         .get("schedule_force_agent")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if !is_schedule_triggered
-        || schedule_force_agent
-        || (!schedule_task_mode.is_empty() && schedule_task_mode != "direct_text")
-        || prompt.trim().is_empty()
-    {
+    is_schedule_triggered
+        && !schedule_force_agent
+        && schedule_task_mode
+            .eq_ignore_ascii_case(crate::schedule_service::SCHEDULE_TASK_MODE_DIRECT_TEXT)
+        && !prompt.trim().is_empty()
+}
+
+pub(super) async fn maybe_finalize_schedule_direct_text_success(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    prompt: &str,
+) -> anyhow::Result<bool> {
+    if !is_explicit_schedule_direct_text(payload, prompt) {
         return Ok(false);
     }
 
@@ -88,4 +91,50 @@ pub(super) async fn maybe_finalize_schedule_direct_text_success(
     )
     .await?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_explicit_schedule_direct_text;
+    use serde_json::json;
+
+    #[test]
+    fn schedule_without_explicit_direct_text_runs_through_agent() {
+        for payload in [
+            json!({"schedule_triggered": true}),
+            json!({"schedule_triggered": true, "schedule_task_mode": "agent"}),
+            json!({"schedule_triggered": true, "schedule_task_mode": "unknown"}),
+        ] {
+            assert!(!is_explicit_schedule_direct_text(
+                &payload,
+                "scheduled-work-fixture"
+            ));
+        }
+    }
+
+    #[test]
+    fn only_explicit_direct_text_can_finalize_before_agent() {
+        assert!(is_explicit_schedule_direct_text(
+            &json!({
+                "schedule_triggered": true,
+                "schedule_task_mode": "direct_text"
+            }),
+            "literal-reminder-fixture"
+        ));
+        assert!(!is_explicit_schedule_direct_text(
+            &json!({
+                "schedule_triggered": true,
+                "schedule_task_mode": "direct_text",
+                "schedule_force_agent": true
+            }),
+            "scheduled-work-fixture"
+        ));
+        assert!(!is_explicit_schedule_direct_text(
+            &json!({
+                "schedule_triggered": true,
+                "schedule_task_mode": "direct_text"
+            }),
+            "  "
+        ));
+    }
 }

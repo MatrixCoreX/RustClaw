@@ -813,6 +813,9 @@ async fn run() -> anyhow::Result<()> {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
             skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
+            skill_concurrency_gates: Arc::new(
+                crate::runtime::state::SkillConcurrencyGates::default(),
+            ),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
             cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
@@ -1350,7 +1353,7 @@ async fn get_task(
                     );
                 }
             }
-            api_ok(task)
+            api_ok(crate::visible_text::sanitize_task_query_response_for_delivery(task))
         }
         Ok(None) => api_err::<TaskQueryResponse>(StatusCode::NOT_FOUND, "Task not found"),
         Err(err) => {

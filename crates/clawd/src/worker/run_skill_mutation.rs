@@ -160,26 +160,40 @@ pub(super) fn persist_direct_run_skill_mutation_result(
     let DirectRunSkillMutationGuard::Acquired(lease) = guard else {
         return true;
     };
-    let Ok(outcome) = result else {
-        let _ = repo::mark_task_mutation_uncertain(&state.core.db, lease);
-        return false;
-    };
-    let projection = crate::agent_engine::safe_mutation_outcome_projection(outcome.extra.as_ref());
-    if repo::record_task_mutation_receipt(&state.core.db, lease, &outcome.text, projection.as_ref())
-        .is_err()
-    {
-        return false;
+    match result {
+        Ok(outcome) => {
+            let projection =
+                crate::agent_engine::safe_mutation_outcome_projection(outcome.extra.as_ref());
+            if repo::record_task_mutation_receipt(
+                &state.core.db,
+                lease,
+                &outcome.text,
+                projection.as_ref(),
+            )
+            .is_err()
+            {
+                return false;
+            }
+            let verification = json!({
+                "schema_version": 1,
+                "status": "not_required",
+                "required": false,
+            });
+            if repo::record_task_mutation_verification(&state.core.db, lease, &verification, true)
+                .is_err()
+            {
+                return false;
+            }
+            repo::commit_task_mutation(&state.core.db, lease).is_ok()
+        }
+        Err(error) => {
+            if crate::agent_engine::settle_verified_not_applied_mutation(state, lease, error) {
+                return true;
+            }
+            let _ = repo::mark_task_mutation_uncertain(&state.core.db, lease);
+            false
+        }
     }
-    let verification = json!({
-        "schema_version": 1,
-        "status": "not_required",
-        "required": false,
-    });
-    if repo::record_task_mutation_verification(&state.core.db, lease, &verification, true).is_err()
-    {
-        return false;
-    }
-    repo::commit_task_mutation(&state.core.db, lease).is_ok()
 }
 
 pub(super) fn finalize_direct_run_skill_reconciliation(

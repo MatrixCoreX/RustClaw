@@ -41,6 +41,18 @@ class ShareTextTest(unittest.TestCase):
             "douyin",
         )
 
+    def test_douyin_website_video_and_note_urls(self) -> None:
+        for url in (
+            "https://www.douyin.com/video/7658893225607908651",
+            "https://www.douyin.com/note/7658893225607908651?modal_id=7658893225607908651",
+        ):
+            with self.subTest(url=url):
+                self.assert_share_text(url, url, "douyin")
+                self.assertEqual(
+                    self.downloader.extract_aweme_id(url),
+                    "7658893225607908651",
+                )
+
     def test_kuaishou_phone_share_text(self) -> None:
         url = "https://v.kuaishou.com/AbCdEf"
         self.assert_share_text(
@@ -49,13 +61,87 @@ class ShareTextTest(unittest.TestCase):
             "kuaishou",
         )
 
-    def test_xiaohongshu_phone_share_text(self) -> None:
+    def test_kuaishou_website_share_url(self) -> None:
+        url = "https://www.kuaishou.com/short-video/3xexample?photoId=3xexample"
+        self.assert_share_text(url, url, "kuaishou")
+        self.assertEqual(self.downloader.extract_kuaishou_id(url), "3xexample")
+
+    def test_xiaohongshu_app_share_text_with_cn_short_link(self) -> None:
+        url = "http://xhslink.cn/o/5H9ovWUGFUd"
+        self.assert_share_text(
+            "发现我妈是低智商儿的证据 " + url + " 复制一下这行字，然后打开【小红书】看笔记。",
+            url,
+            "xiaohongshu",
+        )
+
+    def test_xiaohongshu_app_share_text_with_com_short_link(self) -> None:
         url = "https://xhslink.com/a/AbCdEf"
         self.assert_share_text(
             "我在小红书发现了一篇笔记，快来看看吧！" + url + " 复制本条信息打开小红书",
             url,
             "xiaohongshu",
         )
+
+    def test_xiaohongshu_web_share_url(self) -> None:
+        url = (
+            "https://www.xiaohongshu.com/explore/66a1b2c3d4e5f60718293abc"
+            "?xsec_token=example-token&xsec_source=pc_user"
+        )
+        self.assert_share_text(url, url, "xiaohongshu")
+        self.assertEqual(
+            self.downloader.extract_xiaohongshu_id(url),
+            "66a1b2c3d4e5f60718293abc",
+        )
+
+    def test_xiaohongshu_legacy_web_item_url(self) -> None:
+        url = (
+            "https://www.xiaohongshu.com/discovery/item/66a1b2c3d4e5f60718293abc"
+            "?source=webshare&xsec_source=pc_share"
+        )
+        self.assert_share_text(url, url, "xiaohongshu")
+        self.assertEqual(
+            self.downloader.extract_xiaohongshu_id(url),
+            "66a1b2c3d4e5f60718293abc",
+        )
+
+    def test_tiktok_app_and_website_share_urls(self) -> None:
+        cases = (
+            ("https://vm.tiktok.com/ZMexample/", None),
+            (
+                "https://www.tiktok.com/@bamperboll_tm/video/7652359434898787592"
+                "?is_from_webapp=1&sender_device=pc",
+                "7652359434898787592",
+            ),
+        )
+        for url, expected_id in cases:
+            with self.subTest(url=url):
+                self.assert_share_text(
+                    "Shared from TikTok " + url,
+                    url,
+                    "tiktok",
+                )
+                if expected_id is not None:
+                    self.assertEqual(
+                        self.downloader.extract_tiktok_id(url),
+                        expected_id,
+                    )
+
+    def test_youtube_app_and_website_share_urls(self) -> None:
+        cases = (
+            ("https://youtu.be/dQw4w9WgXcQ?si=example", "dQw4w9WgXcQ"),
+            (
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=shared",
+                "dQw4w9WgXcQ",
+            ),
+            ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        )
+        for url, expected_id in cases:
+            with self.subTest(url=url):
+                self.assert_share_text(url, url, "youtube")
+                self.assertEqual(
+                    self.downloader.extract_youtube_id(url),
+                    expected_id,
+                )
 
     def test_video_download_prefers_candidate_with_audio(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

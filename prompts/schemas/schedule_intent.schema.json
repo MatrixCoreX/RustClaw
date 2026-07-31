@@ -76,6 +76,11 @@
             "text": {
               "type": "string",
               "description": "Canonical task content for ask schedules and the source of the preview title."
+            },
+            "schedule_task_mode": {
+              "type": "string",
+              "enum": ["agent", "direct_text"],
+              "description": "Optional ask execution mode. Omit or use agent for work that must be performed at trigger time. Use direct_text only when the user explicitly requests sending the literal text unchanged."
             }
           }
         }

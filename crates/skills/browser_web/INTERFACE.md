@@ -93,6 +93,10 @@ Top-level fields include:
 - `trust`
 - `network_policy`
 - `capture`
+- `model_observation`: a bounded, provider-safe projection containing page
+  identity fields and content excerpts. Runtime synthesis and answer
+  verification consume this projection instead of dropping all page evidence
+  when the complete capture is stored as an artifact.
 
 Each successful `items[]` entry includes:
 
