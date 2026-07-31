@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use crate::channel_delivery_tokens::{
+    legacy_delivery_tokens, parse_legacy_delivery_line_ref, LegacyDeliveryKind,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WechatOutboundKind {
     Image,
@@ -33,109 +37,26 @@ pub fn extract_wechat_outbound_media(
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     collect_structured_media(answer, workspace_root, &mut out, &mut seen);
+    for token in legacy_delivery_tokens(answer) {
+        let forced_kind = match token.kind {
+            LegacyDeliveryKind::Image => Some(WechatOutboundKind::Image),
+            LegacyDeliveryKind::Video => Some(WechatOutboundKind::Video),
+            LegacyDeliveryKind::Voice | LegacyDeliveryKind::Music => {
+                Some(WechatOutboundKind::Audio)
+            }
+            LegacyDeliveryKind::File => Some(WechatOutboundKind::File),
+            LegacyDeliveryKind::Auto => None,
+        };
+        push_media_reference(
+            &mut out,
+            &mut seen,
+            workspace_root,
+            token.reference,
+            forced_kind,
+        );
+    }
     for line in answer.lines() {
-        let t = line.trim();
-        if let Some(rest) = t.strip_prefix("IMAGE_FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Image),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("VIDEO_FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Video),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("VOICE_FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Audio),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("MUSIC_FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Audio),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                None,
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("FILE_FILE:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::File),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("IMAGE_URL:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Image),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("VIDEO_URL:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::Video),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("FILE_URL:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                Some(WechatOutboundKind::File),
-            );
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("MEDIA_URL:") {
-            push_media_reference(
-                &mut out,
-                &mut seen,
-                workspace_root,
-                normalize_token(rest),
-                None,
-            );
-            continue;
-        }
-        if let Some(p) = parse_written_bytes_line(t) {
+        if let Some(p) = parse_written_bytes_line(line.trim()) {
             push_media_reference(&mut out, &mut seen, workspace_root, p, None);
         }
     }
@@ -161,17 +82,7 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
         .lines()
         .filter(|line| {
             let t = line.trim();
-            if t.starts_with("IMAGE_FILE:")
-                || t.starts_with("VIDEO_FILE:")
-                || t.starts_with("VOICE_FILE:")
-                || t.starts_with("MUSIC_FILE:")
-                || t.starts_with("FILE:")
-                || t.starts_with("FILE_FILE:")
-                || t.starts_with("IMAGE_URL:")
-                || t.starts_with("VIDEO_URL:")
-                || t.starts_with("FILE_URL:")
-                || t.starts_with("MEDIA_URL:")
-            {
+            if parse_legacy_delivery_line_ref(t).is_some() {
                 return false;
             }
             if line_has_structured_media(t) {

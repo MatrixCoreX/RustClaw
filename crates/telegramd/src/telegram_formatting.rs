@@ -1,4 +1,8 @@
 use super::*;
+use claw_core::channel_delivery_tokens::{
+    legacy_delivery_tokens, legacy_local_delivery_lines, strip_legacy_local_delivery_lines,
+    LegacyDeliveryKind, LegacyDeliveryLocation,
+};
 
 pub(super) async fn send_text_or_image(
     bot: &Bot,
@@ -6,25 +10,44 @@ pub(super) async fn send_text_or_image(
     chat_id: ChatId,
     answer: &str,
 ) -> anyhow::Result<()> {
-    const PREFIX: &str = "IMAGE_FILE:";
-    const VIDEO_PREFIX: &str = "VIDEO_FILE:";
-    const FILE_PREFIX: &str = "FILE:";
-    const VOICE_PREFIX: &str = "VOICE_FILE:";
-    const MUSIC_PREFIX: &str = "MUSIC_FILE:";
     const EPHEMERAL_PREFIX: &str = "EPHEMERAL:";
     const EPHEMERAL_IMAGE_SAVED_TOKEN: &str = "EPHEMERAL:IMAGE_SAVED";
     let parsed_buttons = extract_url_buttons_from_text(answer);
     let answer = parsed_buttons.text_without_buttons.as_str();
     let url_buttons = &parsed_buttons.buttons;
 
-    let mut image_paths = dedupe_preserve_order(extract_prefixed_paths(answer, PREFIX));
-    let video_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VIDEO_PREFIX));
-    let explicit_file_tokens = dedupe_preserve_order(extract_prefixed_tokens(answer, FILE_PREFIX));
+    let tokens = legacy_delivery_tokens(answer)
+        .into_iter()
+        .filter(|token| token.location == LegacyDeliveryLocation::LocalFile)
+        .collect::<Vec<_>>();
+    let references = |kind: LegacyDeliveryKind| {
+        dedupe_preserve_order(
+            tokens
+                .iter()
+                .filter(|token| token.kind == kind)
+                .map(|token| token.reference.clone())
+                .collect(),
+        )
+    };
+    let mut image_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Image)).0;
+    let video_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Video)).0;
+    let explicit_file_tokens = dedupe_preserve_order(
+        tokens
+            .iter()
+            .filter(|token| {
+                matches!(
+                    token.kind,
+                    LegacyDeliveryKind::File | LegacyDeliveryKind::Auto
+                )
+            })
+            .map(|token| token.reference.clone())
+            .collect(),
+    );
     let (explicit_file_paths, missing_explicit_file_tokens) =
         resolve_delivery_paths(&explicit_file_tokens);
     let mut file_paths = explicit_file_paths.clone();
-    let voice_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VOICE_PREFIX));
-    let music_paths = dedupe_preserve_order(extract_prefixed_paths(answer, MUSIC_PREFIX));
+    let voice_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Voice)).0;
+    let music_paths = resolve_delivery_paths(&references(LegacyDeliveryKind::Music)).0;
     let inferred_write_paths = if file_paths.is_empty() {
         dedupe_preserve_order(extract_written_file_paths(answer))
     } else {
@@ -60,19 +83,10 @@ pub(super) async fn send_text_or_image(
             line.trim()
                 .eq_ignore_ascii_case(EPHEMERAL_IMAGE_SAVED_TOKEN)
         });
-        let mut text_without_tokens = strip_prefixed_tokens(
-            answer,
-            &[
-                PREFIX,
-                VIDEO_PREFIX,
-                FILE_PREFIX,
-                VOICE_PREFIX,
-                MUSIC_PREFIX,
-                EPHEMERAL_PREFIX,
-            ],
-        )
-        .trim()
-        .to_string();
+        let without_delivery = strip_legacy_local_delivery_lines(answer);
+        let mut text_without_tokens = strip_prefixed_tokens(&without_delivery, &[EPHEMERAL_PREFIX])
+            .trim()
+            .to_string();
         if !inferred_write_paths.is_empty() {
             text_without_tokens = strip_written_file_confirmation_lines(&text_without_tokens)
                 .trim()
@@ -1062,11 +1076,7 @@ pub(super) fn code_or_command_block_body(text: &str) -> Option<String> {
 }
 
 pub(super) fn has_delivery_prefix(text: &str) -> bool {
-    text.starts_with("FILE:")
-        || text.starts_with("IMAGE_FILE:")
-        || text.starts_with("VIDEO_FILE:")
-        || text.starts_with("VOICE_FILE:")
-        || text.starts_with("MUSIC_FILE:")
+    claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(text).is_some()
         || text.starts_with("EPHEMERAL:")
 }
 
@@ -1360,26 +1370,6 @@ pub(super) fn looks_like_multiline_code(text: &str) -> bool {
     score >= 4
 }
 
-pub(super) fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
-    let tokens = extract_prefixed_tokens(answer, prefix);
-    let (resolved, _) = resolve_delivery_paths(&tokens);
-    resolved
-}
-
-pub(super) fn extract_prefixed_tokens(answer: &str, prefix: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in answer.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            let cleaned = normalize_path_token(rest.trim());
-            if !cleaned.is_empty() {
-                out.push(cleaned.to_string());
-            }
-        }
-    }
-    out
-}
-
 pub(super) fn resolve_delivery_paths(tokens: &[String]) -> (Vec<String>, Vec<String>) {
     let mut found = Vec::new();
     let mut missing = Vec::new();
@@ -1497,35 +1487,14 @@ pub(super) fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
 }
 
 pub(super) fn strip_delivery_tokens_for_tts(answer: &str) -> String {
-    strip_prefixed_tokens(
-        answer,
-        &[
-            "IMAGE_FILE:",
-            "VIDEO_FILE:",
-            "FILE:",
-            "VOICE_FILE:",
-            "MUSIC_FILE:",
-            "EPHEMERAL:",
-        ],
-    )
-    .trim()
-    .to_string()
+    let without_delivery = strip_legacy_local_delivery_lines(answer);
+    strip_prefixed_tokens(&without_delivery, &["EPHEMERAL:"])
+        .trim()
+        .to_string()
 }
 
 pub(super) fn delivery_tokens_only(answer: &str) -> String {
-    const PREFIXES: &[&str] = &[
-        "IMAGE_FILE:",
-        "VIDEO_FILE:",
-        "FILE:",
-        "VOICE_FILE:",
-        "MUSIC_FILE:",
-    ];
-    answer
-        .lines()
-        .map(str::trim)
-        .filter(|line| PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
-        .collect::<Vec<_>>()
-        .join("\n")
+    legacy_local_delivery_lines(answer)
 }
 
 pub(super) fn normalize_path_token(token: &str) -> &str {

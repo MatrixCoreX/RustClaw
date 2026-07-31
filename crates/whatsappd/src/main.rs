@@ -13,6 +13,10 @@ use axum::routing::get;
 use axum::Router;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
+use claw_core::channel_delivery_tokens::{
+    legacy_delivery_tokens, strip_legacy_local_delivery_lines, LegacyDeliveryKind,
+    LegacyDeliveryLocation,
+};
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
 use claw_core::types::{
@@ -1159,29 +1163,32 @@ fn spawn_task_result_delivery(
 }
 
 async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Result<()> {
-    const IMAGE_PREFIX: &str = "IMAGE_FILE:";
-    const VIDEO_PREFIX: &str = "VIDEO_FILE:";
-    const FILE_PREFIX: &str = "FILE:";
-    const VOICE_PREFIX: &str = "VOICE_FILE:";
-    const MUSIC_PREFIX: &str = "MUSIC_FILE:";
-
-    let image_paths = extract_prefixed_paths(answer, IMAGE_PREFIX);
-    let video_paths = extract_prefixed_paths(answer, VIDEO_PREFIX);
-    let file_paths = extract_prefixed_paths(answer, FILE_PREFIX);
-    let voice_paths = extract_prefixed_paths(answer, VOICE_PREFIX);
-    let music_paths = extract_prefixed_paths(answer, MUSIC_PREFIX);
-    let text_without_tokens = strip_prefixed_tokens(
-        answer,
-        &[
-            IMAGE_PREFIX,
-            VIDEO_PREFIX,
-            FILE_PREFIX,
-            VOICE_PREFIX,
-            MUSIC_PREFIX,
-        ],
-    )
-    .trim()
-    .to_string();
+    let tokens = legacy_delivery_tokens(answer)
+        .into_iter()
+        .filter(|token| token.location == LegacyDeliveryLocation::LocalFile)
+        .collect::<Vec<_>>();
+    let references = |kind: LegacyDeliveryKind| {
+        tokens
+            .iter()
+            .filter(|token| token.kind == kind)
+            .map(|token| token.reference.clone())
+            .collect::<Vec<_>>()
+    };
+    let image_paths = references(LegacyDeliveryKind::Image);
+    let video_paths = references(LegacyDeliveryKind::Video);
+    let file_paths = tokens
+        .iter()
+        .filter(|token| {
+            matches!(
+                token.kind,
+                LegacyDeliveryKind::File | LegacyDeliveryKind::Auto
+            )
+        })
+        .map(|token| token.reference.clone())
+        .collect::<Vec<_>>();
+    let voice_paths = references(LegacyDeliveryKind::Voice);
+    let music_paths = references(LegacyDeliveryKind::Music);
+    let text_without_tokens = strip_legacy_local_delivery_lines(answer).trim().to_string();
 
     if !text_without_tokens.is_empty() {
         send_whatsapp_text(state, wa_id, &text_without_tokens).await?;
@@ -1247,36 +1254,6 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
         send_whatsapp_text(state, wa_id, answer).await?;
     }
     Ok(())
-}
-
-fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in answer.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            let cleaned = normalize_path_token(rest.trim());
-            if !cleaned.is_empty() {
-                out.push(cleaned.to_string());
-            }
-        }
-    }
-    out
-}
-
-fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
-    answer
-        .lines()
-        .filter(|line| {
-            !prefixes
-                .iter()
-                .any(|prefix| line.trim_start().starts_with(prefix))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn normalize_path_token(token: &str) -> &str {
-    token.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '，' | ',' | ':' | '：' | ';'))
 }
 
 async fn upload_media(

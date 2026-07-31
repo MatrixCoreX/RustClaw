@@ -279,8 +279,11 @@ fn route_contract_can_publish_ordered_entries(route_result: &crate::IntentOutput
 fn combined_contains_delivery_file_token(combined: &str) -> bool {
     combined
         .lines()
-        .map(str::trim_start)
-        .any(|line| line.starts_with("FILE:"))
+        .filter_map(claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref)
+        .any(|token| {
+            token.location == claw_core::channel_delivery_tokens::LegacyDeliveryLocation::LocalFile
+                && token.kind == claw_core::channel_delivery_tokens::LegacyDeliveryKind::Auto
+        })
 }
 
 fn scalar_path_answer_bound_target(
@@ -334,7 +337,7 @@ fn normalize_scalar_path_bound_target(
         )
     });
     if candidate.is_empty()
-        || candidate.starts_with("FILE:")
+        || claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(candidate).is_some()
         || candidate.starts_with("http://")
         || candidate.starts_with("https://")
         || candidate.starts_with('{')
