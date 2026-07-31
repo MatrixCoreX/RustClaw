@@ -1,4 +1,6 @@
-use rusqlite::Connection;
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use tracing::info;
 
 pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
@@ -100,6 +102,7 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     rebuild_user_preferences_for_key_scope(db)?;
     rebuild_long_term_memories_for_key_scope(db)?;
     rebuild_channel_tables_for_ui(db)?;
+    rebuild_task_message_id_as_text(db)?;
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_tasks_user_key_created_at ON tasks(user_key, created_at);
          CREATE INDEX IF NOT EXISTS idx_memories_user_key_chat_created_at ON memories(user_key, chat_id, created_at_ts);
@@ -108,6 +111,175 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_long_term_memories_user_key_chat_updated_ts ON long_term_memories(user_key, chat_id, updated_at_ts);",
     )?;
     Ok(())
+}
+
+pub(super) fn rebuild_task_message_id_as_text(db: &Connection) -> anyhow::Result<()> {
+    let column_type = db
+        .query_row(
+            "SELECT type FROM pragma_table_info('tasks') WHERE name = 'message_id'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(column_type) = column_type else {
+        crate::ensure_column_exists(
+            db,
+            "tasks",
+            "message_id",
+            "ALTER TABLE tasks ADD COLUMN message_id TEXT",
+        )?;
+        return Ok(());
+    };
+    if column_type.trim().eq_ignore_ascii_case("TEXT") {
+        return Ok(());
+    }
+
+    info!("task schema: migrating message_id affinity to TEXT");
+    let foreign_keys_enabled =
+        db.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))?;
+    if foreign_keys_enabled != 0 {
+        db.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    }
+
+    let migration_result = (|| -> anyhow::Result<()> {
+        let tx = db.unchecked_transaction()?;
+        let schema_objects = task_schema_objects(&tx)?;
+        let before = task_rows_fingerprint(&tx, "tasks")?;
+        tx.execute_batch(
+            "CREATE TABLE tasks_message_id_text_migration (
+                 task_id       TEXT PRIMARY KEY,
+                 user_id       INTEGER NOT NULL,
+                 chat_id       INTEGER NOT NULL,
+                 channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
+                 external_user_id TEXT,
+                 external_chat_id TEXT,
+                 message_id    TEXT,
+                 user_key      TEXT,
+                 kind          TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
+                 payload_json  TEXT NOT NULL,
+                 status        TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'timeout')),
+                 result_json   TEXT,
+                 error_text    TEXT,
+                 created_at    TEXT NOT NULL,
+                 updated_at    TEXT NOT NULL,
+                 lease_owner   TEXT,
+                 lease_expires_at INTEGER NOT NULL DEFAULT 0,
+                 claim_attempt INTEGER NOT NULL DEFAULT 0,
+                 claimed_at    INTEGER NOT NULL DEFAULT 0
+             );
+             INSERT INTO tasks_message_id_text_migration (
+                 task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
+                 message_id, user_key, kind, payload_json, status, result_json, error_text,
+                 created_at, updated_at, lease_owner, lease_expires_at, claim_attempt, claimed_at
+             )
+             SELECT
+                 task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
+                 CAST(message_id AS TEXT), user_key, kind, payload_json, status, result_json,
+                 error_text, created_at, updated_at, lease_owner, lease_expires_at,
+                 claim_attempt, claimed_at
+             FROM tasks;",
+        )?;
+        let after = task_rows_fingerprint(&tx, "tasks_message_id_text_migration")?;
+        anyhow::ensure!(
+            before == after,
+            "task message_id migration verification failed"
+        );
+        tx.execute_batch(
+            "DROP TABLE tasks;
+             ALTER TABLE tasks_message_id_text_migration RENAME TO tasks;",
+        )?;
+        for sql in schema_objects {
+            tx.execute_batch(&sql)?;
+        }
+        tx.commit()?;
+        Ok(())
+    })();
+
+    let restore_result = if foreign_keys_enabled != 0 {
+        db.execute_batch("PRAGMA foreign_keys = ON;")
+    } else {
+        Ok(())
+    };
+    migration_result?;
+    restore_result?;
+    let violation = db
+        .query_row("PRAGMA foreign_key_check", [], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .optional()?;
+    anyhow::ensure!(
+        violation.is_none(),
+        "task message_id migration foreign key check failed"
+    );
+    Ok(())
+}
+
+fn task_schema_objects(db: &Connection) -> anyhow::Result<Vec<String>> {
+    let mut stmt = db.prepare(
+        "SELECT sql
+         FROM sqlite_master
+         WHERE tbl_name = 'tasks'
+           AND type IN ('index', 'trigger')
+           AND sql IS NOT NULL
+         ORDER BY type, name",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn task_rows_fingerprint(db: &Connection, table: &str) -> anyhow::Result<(u64, String)> {
+    let table = match table {
+        "tasks" => "tasks",
+        "tasks_message_id_text_migration" => "tasks_message_id_text_migration",
+        _ => anyhow::bail!("unsupported task fingerprint table"),
+    };
+    let sql = format!(
+        "SELECT task_id, user_id, chat_id, channel, external_user_id, external_chat_id,
+                CAST(message_id AS TEXT), user_key, kind, payload_json, status, result_json,
+                error_text, created_at, updated_at, lease_owner, lease_expires_at,
+                claim_attempt, claimed_at
+         FROM {table}
+         ORDER BY task_id"
+    );
+    let mut stmt = db.prepare(&sql)?;
+    let mut rows = stmt.query([])?;
+    let mut count = 0_u64;
+    let mut digest = Sha256::new();
+    while let Some(row) = rows.next()? {
+        count += 1;
+        for index in 0..19 {
+            hash_sql_value(&mut digest, row.get::<_, SqlValue>(index)?);
+        }
+    }
+    Ok((count, format!("{:x}", digest.finalize())))
+}
+
+fn hash_sql_value(digest: &mut Sha256, value: SqlValue) {
+    match value {
+        SqlValue::Null => digest.update([0]),
+        SqlValue::Integer(value) => {
+            digest.update([1]);
+            digest.update(value.to_le_bytes());
+        }
+        SqlValue::Real(value) => {
+            digest.update([2]);
+            digest.update(value.to_bits().to_le_bytes());
+        }
+        SqlValue::Text(value) => {
+            digest.update([3]);
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value.as_bytes());
+        }
+        SqlValue::Blob(value) => {
+            digest.update([4]);
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value);
+        }
+    }
 }
 
 pub(super) fn rebuild_auth_keys_for_flexible_roles(db: &Connection) -> anyhow::Result<()> {
