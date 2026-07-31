@@ -103,7 +103,10 @@ class SummaryContractTest(unittest.TestCase):
             self.assertIn(persisted["worktree"]["status"], {"clean", "dirty"})
             self.assertTrue(persisted["binary"]["sha256"])
             self.assertIn("tree_sha256", persisted["ui"])
-            self.assertEqual(persisted["case_counts"], {"total": 1, "passed": 1, "failed": 0})
+            self.assertEqual(
+                persisted["case_counts"],
+                {"total": 1, "passed": 1, "failed": 0, "unrecorded_failed": 0},
+            )
             self.assertEqual(persisted["build_strategy"]["cargo_environment"], "existing_binary")
             self.assertEqual(persisted["redaction"]["status"], "pass")
             self.assertIn("case/final.json", persisted["evidence_relative_paths"])

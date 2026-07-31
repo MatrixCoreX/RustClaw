@@ -212,7 +212,9 @@ def finalize_summary(
         for result in cases.values()
         if isinstance(result, dict) and result.get("status") == "pass"
     )
-    failed = len(cases) - passed
+    recorded_failed = len(cases) - passed
+    unrecorded_failed = 1 if summary.get("status") != "pass" and recorded_failed == 0 else 0
+    failed = recorded_failed + unrecorded_failed
     summary.update(
         {
             "schema_version": 1,
@@ -231,11 +233,13 @@ def finalize_summary(
             "ui": {
                 "path": "UI/dist",
                 "tree_sha256": sha256_tree(ROOT / "UI" / "dist"),
+                "digest_algorithm": "sha256(relative_path_nul_file_sha256_nul)",
             },
             "case_counts": {
-                "total": len(cases),
+                "total": passed + failed,
                 "passed": passed,
                 "failed": failed,
+                "unrecorded_failed": unrecorded_failed,
             },
             "started_at": started_at,
             "finished_at": utc_now(),
