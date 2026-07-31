@@ -201,6 +201,32 @@ def main() -> int:
         )
         assert capability_row["assertion"] == "pass"
 
+        repeated_calls = write_result(
+            root,
+            "repeated-calls.json",
+            result_with_steps(
+                [
+                    capability_step(capability="system.terminal_poll"),
+                    capability_step(capability="system.terminal_terminate"),
+                    capability_step(capability="system.terminal_terminate"),
+                    terminal_step(),
+                ]
+            ),
+        )
+        repeated_calls_row = row_for(
+            repeated_calls,
+            "requires_tool_call=true;"
+            "min_successful_capability_calls:system.terminal_poll=1;"
+            "min_successful_capability_calls:system.terminal_terminate=2",
+        )
+        assert repeated_calls_row["assertion"] == "pass"
+        insufficient_calls_row = row_for(
+            repeated_calls,
+            "requires_tool_call=true;"
+            "min_successful_capability_calls:system.terminal_terminate=3",
+        )
+        assert insufficient_calls_row["assertion"] == "fail"
+
         wrong_capability_row = row_for(
             capability,
             "capability:fixture.other;requires_tool_call=true;dry_run",
@@ -339,6 +365,22 @@ def main() -> int:
             "requires_tool_call=true;concurrent_health_probe=true",
         )
         assert missing_health_row["assertion"] == "fail"
+
+        nested_machine_text = result_with_steps(
+            [capability_step()],
+            text='{"final_result_json":{"exit_code":0}}',
+        )
+        nested_machine_result = write_result(
+            root,
+            "nested-machine-result.json",
+            nested_machine_text,
+        )
+        nested_machine_row = row_for(
+            nested_machine_result,
+            "requires_tool_call=true",
+            "result_text_json_eq:/final_result_json/exit_code=0",
+        )
+        assert nested_machine_row["assertion"] == "pass"
 
         allowed_success = row_for_status(
             direct,
