@@ -1,4 +1,18 @@
-import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  CircleSlash2,
+  ListChecks,
+  Loader2,
+  MessageCircle,
+  Pause,
+  Play,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  ShieldX,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -14,6 +28,7 @@ import {
   buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
+  buildTaskPlanView,
   buildTaskTraceEventView,
   taskArtifactRefs,
   taskTraceEvents,
@@ -95,6 +110,7 @@ export function TaskResultPanel({
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const taskPollingView = taskResult ? buildTaskPollingView(taskResult.lifecycle, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
+  const taskPlanView = taskResult ? buildTaskPlanView(taskResult) : null;
   const taskCostView = taskResult ? buildTaskCostGovernance(taskResult) : null;
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
@@ -175,6 +191,84 @@ export function TaskResultPanel({
               <p className="text-red-200">{taskResult.error_text || "--"}</p>
             </div>
           </div>
+          {taskPlanView ? (
+            <div className="mt-4 rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-3 text-white">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <ListChecks className="mt-0.5 h-5 w-5 shrink-0 text-sky-200" />
+                  <div>
+                    <p className="font-semibold">{t("当前执行计划", "Current plan")}</p>
+                    <p className="mt-1 text-xs text-white/65">
+                      {t(
+                        `已完成 ${taskPlanView.completedCount} / ${taskPlanView.steps.length} 步`,
+                        `${taskPlanView.completedCount} of ${taskPlanView.steps.length} steps completed`,
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-md border border-sky-300/15 bg-black/15 px-2 py-1 font-mono text-[11px] text-white/70">
+                  v{taskPlanView.planRevision}
+                </span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/20">
+                <div
+                  className="h-full rounded-full bg-sky-300/70 transition-[width]"
+                  style={{
+                    width: `${Math.round(
+                      (taskPlanView.completedCount / taskPlanView.steps.length) * 100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <ol className="mt-3 space-y-2">
+                {taskPlanView.steps.map((step, index) => {
+                  const statusLabel =
+                    step.status === "completed"
+                      ? t("已完成", "Completed")
+                      : step.status === "in_progress"
+                        ? t("进行中", "In progress")
+                        : step.status === "cancelled"
+                          ? t("已取消", "Cancelled")
+                          : t("待处理", "Pending");
+                  const StepIcon =
+                    step.status === "completed"
+                      ? CheckCircle2
+                      : step.status === "in_progress"
+                        ? Loader2
+                        : step.status === "cancelled"
+                          ? CircleSlash2
+                          : Circle;
+                  return (
+                    <li
+                      key={step.stepId}
+                      className="flex items-start gap-2.5 rounded-lg border border-white/8 bg-black/15 px-3 py-2.5"
+                    >
+                      <StepIcon
+                        className={`mt-0.5 h-4 w-4 shrink-0 ${
+                          step.status === "in_progress" ? "animate-spin text-sky-200" : "text-white/60"
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-sm text-white">
+                          <span className="mr-2 text-xs text-white/45">{index + 1}.</span>
+                          {step.title}
+                        </p>
+                        <p className="mt-1 text-[11px] text-white/55">{statusLabel}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+              <details className="mt-3 rounded-lg border border-white/8 bg-black/15 p-3">
+                <summary className="cursor-pointer text-xs text-white/60">
+                  {t("技术详情（原始 JSON）", "Technical details (raw JSON)")}
+                </summary>
+                <pre className="mt-2 max-h-52 overflow-auto rounded-md bg-black/25 p-2 text-[11px] text-white/65">
+                  {JSON.stringify(taskPlanView.raw, null, 2)}
+                </pre>
+              </details>
+            </div>
+          ) : null}
           {taskCostView ? (
             <div className="mt-4 border-t border-white/10 pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

@@ -114,4 +114,24 @@ fn read_before_set_returns_revision_zero_and_no_checkpoint() {
     assert_eq!(result["plan_revision"], 0);
     assert!(result["steps"].is_null());
     assert!(result["checkpoint"].is_null());
+    assert!(read_task_plan_query_projection(&state, "task-plan-empty")
+        .expect("read empty projection")
+        .is_none());
+}
+
+#[test]
+fn query_projection_is_data_only_and_uses_the_persisted_snapshot() {
+    let state = test_state();
+    let created = set_task_plan(&state, "task-plan-query", 0, steps()).expect("create query plan");
+    let projection = read_task_plan_query_projection(&state, "task-plan-query")
+        .expect("read query projection")
+        .expect("plan projection");
+
+    assert_eq!(projection["schema_version"], 1);
+    assert_eq!(projection["source"], "task_plan");
+    assert_eq!(projection["data_only"], true);
+    assert_eq!(projection["render_owner"], "ui_cli_channel_projection");
+    assert_eq!(projection["plan_revision"], created["plan_revision"]);
+    assert_eq!(projection["steps"], created["steps"]);
+    assert_eq!(projection["checkpoint"], created["checkpoint"]);
 }

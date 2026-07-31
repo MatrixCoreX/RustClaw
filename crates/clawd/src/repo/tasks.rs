@@ -1820,7 +1820,7 @@ pub(crate) fn get_task_query_record(
          LIMIT 1",
     )?;
 
-    let row = stmt
+    let mut row = stmt
         .query_row(params![task_id.to_string()], |row| {
             let status_str: String = row.get(0)?;
             let payload_json: String = row.get(1)?;
@@ -1870,6 +1870,7 @@ pub(crate) fn get_task_query_record(
                     status,
                     execution_state: Some(execution_state),
                     goal,
+                    task_plan: None,
                     result_json,
                     error_text,
                     lifecycle: Some(lifecycle),
@@ -1879,6 +1880,20 @@ pub(crate) fn get_task_query_record(
             ))
         })
         .optional()?;
+
+    drop(stmt);
+    drop(db);
+    if let Some((task, _, _)) = row.as_mut() {
+        task.task_plan =
+            crate::repo::task_plan::read_task_plan_query_projection(state, &task_id.to_string())
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "read task plan projection failed: error_code={} detail={}",
+                        error.error_code,
+                        error.detail.as_deref().unwrap_or_default()
+                    )
+                })?;
+    }
 
     Ok(row)
 }

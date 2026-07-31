@@ -92,6 +92,7 @@ fn task_query_delivery_exposes_readable_error_without_internal_envelope() {
         status: TaskStatus::Failed,
         execution_state: None,
         goal: None,
+        task_plan: None,
         result_json: None,
         error_text: Some(
             r#"__RC_SKILL_ERROR__:{"error_code":"media_not_found","error_text":"No downloadable media was found.","extra":{"retryable":false}}"#

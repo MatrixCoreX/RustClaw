@@ -87,6 +87,23 @@ export interface TaskTraceEventView {
   meta: string[];
 }
 
+export type TaskPlanStepStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export interface TaskPlanStepView {
+  stepId: string;
+  title: string;
+  status: TaskPlanStepStatus;
+}
+
+export interface TaskPlanView {
+  planRevision: number;
+  updatedAtMs?: number;
+  checkpointRef?: string;
+  steps: TaskPlanStepView[];
+  completedCount: number;
+  raw: Record<string, unknown>;
+}
+
 export function extractTaskText(result: TaskQueryResponse): string {
   if (result.result_json && typeof result.result_json === "object") {
     const maybeText = (result.result_json as { text?: unknown }).text;
@@ -291,6 +308,91 @@ export function taskTraceEvents(result: TaskQueryResponse): Record<string, unkno
   if (!Array.isArray(value)) return [];
   return value.filter(
     (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item),
+  );
+}
+
+function parseTaskPlanSnapshot(value: unknown): TaskPlanView | null {
+  const snapshot = asRecord(value);
+  if (
+    !snapshot
+    || snapshot.schema_version !== 1
+    || snapshot.source !== "task_plan"
+    || snapshot.data_only !== true
+  ) {
+    return null;
+  }
+  const planRevision = snapshot.plan_revision;
+  if (
+    typeof planRevision !== "number"
+    || !Number.isSafeInteger(planRevision)
+    || planRevision < 1
+    || !Array.isArray(snapshot.steps)
+    || snapshot.steps.length === 0
+  ) {
+    return null;
+  }
+  const allowedStatuses = new Set<TaskPlanStepStatus>([
+    "pending",
+    "in_progress",
+    "completed",
+    "cancelled",
+  ]);
+  const stepIds = new Set<string>();
+  const steps: TaskPlanStepView[] = [];
+  for (const value of snapshot.steps) {
+    const step = asRecord(value);
+    const stepId = typeof step?.step_id === "string" ? step.step_id.trim() : "";
+    const title = typeof step?.title === "string" ? step.title.trim() : "";
+    const status = typeof step?.status === "string" ? step.status : "";
+    if (
+      !stepId
+      || !title
+      || stepIds.has(stepId)
+      || !allowedStatuses.has(status as TaskPlanStepStatus)
+    ) {
+      return null;
+    }
+    stepIds.add(stepId);
+    steps.push({ stepId, title, status: status as TaskPlanStepStatus });
+  }
+  const checkpoint = asRecord(snapshot.checkpoint);
+  const checkpointRef =
+    typeof checkpoint?.ref === "string" && checkpoint.ref.trim()
+      ? checkpoint.ref.trim()
+      : undefined;
+  const updatedAtMs =
+    typeof snapshot.updated_at_ms === "number" && Number.isSafeInteger(snapshot.updated_at_ms)
+      ? snapshot.updated_at_ms
+      : undefined;
+  return {
+    planRevision,
+    updatedAtMs,
+    checkpointRef,
+    steps,
+    completedCount: steps.filter((step) => step.status === "completed").length,
+    raw: snapshot,
+  };
+}
+
+export function buildTaskPlanView(result: TaskQueryResponse): TaskPlanView | null {
+  const candidates: TaskPlanView[] = [];
+  const projected = parseTaskPlanSnapshot(result.task_plan);
+  if (projected) candidates.push(projected);
+  for (const event of taskTraceEvents(result)) {
+    const eventType =
+      typeof event.event_type === "string" && event.event_type.trim()
+        ? event.event_type.trim()
+        : typeof event.event_kind === "string"
+          ? event.event_kind.trim()
+          : "";
+    if (eventType !== "task_plan_updated") continue;
+    const live = parseTaskPlanSnapshot(traceEventPayload(event));
+    if (live) candidates.push(live);
+  }
+  return candidates.reduce<TaskPlanView | null>(
+    (latest, candidate) =>
+      !latest || candidate.planRevision >= latest.planRevision ? candidate : latest,
+    null,
   );
 }
 

@@ -55,6 +55,7 @@ export interface TaskQueryResponse {
   status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "timeout";
   execution_state?: string | null;
   goal?: unknown | null;
+  task_plan?: unknown | null;
   result_json?: unknown | null;
   error_text?: string | null;
   lifecycle?: TaskLifecycleProjection | null;
