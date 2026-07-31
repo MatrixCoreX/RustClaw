@@ -23,6 +23,7 @@ fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
         "precompiled_package_unavailable",
         "precompiled_platform_mismatch",
         "precompiled_manifest_mismatch",
+        "manifest_protocol_unsupported",
         "precompiled_adapter_unsupported",
     ] {
         assert!(precompiled_source_fallback_allowed(code), "code={code}");

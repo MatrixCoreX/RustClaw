@@ -505,6 +505,7 @@ fn precompiled_source_fallback_allowed(error_code: &str) -> bool {
         "precompiled_package_unavailable"
             | "precompiled_platform_mismatch"
             | "precompiled_manifest_mismatch"
+            | "manifest_protocol_unsupported"
             | "precompiled_adapter_unsupported"
     )
 }
