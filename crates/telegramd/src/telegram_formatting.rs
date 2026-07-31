@@ -157,10 +157,10 @@ pub(super) async fn send_text_or_image(
                 Path::new(&path),
                 "Telegram",
                 "图片",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
             )
             .map_err(anyhow::Error::msg)?;
-            if size <= claw_core::channel_media_limits::TELEGRAM_IMAGE_MAX_BYTES {
+            if size <= claw_core::channel_media_limits::telegram_image_max_bytes() {
                 if let Err(err) = bot.send_photo(chat_id, InputFile::file(path.clone())).await {
                     warn!(
                         "send_photo failed for {}: {}; falling back to document",
@@ -182,7 +182,7 @@ pub(super) async fn send_text_or_image(
                 Path::new(&path),
                 "Telegram",
                 "视频",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
             )
             .map_err(anyhow::Error::msg)?;
             if let Err(err) = bot.send_video(chat_id, InputFile::file(path.clone())).await {
@@ -198,7 +198,7 @@ pub(super) async fn send_text_or_image(
                 Path::new(&path),
                 "Telegram",
                 "文件",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
             )
             .map_err(anyhow::Error::msg)?;
             // FILE: always means "send as document/file", even for image extensions.
@@ -212,7 +212,7 @@ pub(super) async fn send_text_or_image(
                 Path::new(&path),
                 "Telegram",
                 "语音",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
             )
             .map_err(anyhow::Error::msg)?;
             if let Err(err) = bot.send_voice(chat_id, InputFile::file(path.clone())).await {
@@ -227,7 +227,7 @@ pub(super) async fn send_text_or_image(
                 Path::new(&path),
                 "Telegram",
                 "音频",
-                claw_core::channel_media_limits::TELEGRAM_OTHER_MAX_BYTES,
+                claw_core::channel_media_limits::telegram_file_max_bytes(),
             )
             .map_err(anyhow::Error::msg)?;
             if let Err(err) = bot.send_audio(chat_id, InputFile::file(path.clone())).await {

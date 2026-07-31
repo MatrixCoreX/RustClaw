@@ -1124,6 +1124,27 @@ fn capability_items_include_disabled_machine_reason() {
 }
 
 #[test]
+fn channel_capability_payload_exposes_auditable_provenance_without_secret_fields() {
+    let payload = channel_capabilities_payload();
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["policy_version"], "channel-capability-policy-v1");
+    assert_eq!(payload["verified_at"], "2026-07-31");
+
+    let capabilities = payload["capabilities"].as_array().expect("capabilities");
+    assert!(capabilities.len() >= 20);
+    for source_kind in [
+        "official_contract",
+        "local_safety_policy",
+        "experimental_inference",
+    ] {
+        assert!(capabilities
+            .iter()
+            .any(|record| record["source_kind"] == source_kind));
+    }
+    assert!(!payload.to_string().to_ascii_lowercase().contains("api_key"));
+}
+
+#[test]
 fn skill_items_expose_registry_owned_instruction_metadata() {
     let skill = SkillListItem {
         name: "weather".to_string(),

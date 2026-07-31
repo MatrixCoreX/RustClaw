@@ -5,24 +5,75 @@
 
 use std::path::Path;
 
-pub const MIB: u64 = 1024 * 1024;
+use crate::channel_capabilities::{
+    channel_capability, channel_media_max_bytes, ChannelAdapterKind, ChannelCapabilityKind,
+};
 
-pub const TELEGRAM_IMAGE_MAX_BYTES: u64 = 10 * MIB;
-pub const TELEGRAM_OTHER_MAX_BYTES: u64 = 50 * MIB;
+pub use crate::channel_capabilities::MIB;
 
-pub const WHATSAPP_CLOUD_IMAGE_MAX_BYTES: u64 = 5 * MIB;
-pub const WHATSAPP_CLOUD_VIDEO_MAX_BYTES: u64 = 16 * MIB;
-pub const WHATSAPP_CLOUD_AUDIO_MAX_BYTES: u64 = 16 * MIB;
-pub const WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES: u64 = 100 * MIB;
+pub fn required_channel_media_max_bytes(
+    adapter: ChannelAdapterKind,
+    capability: ChannelCapabilityKind,
+) -> u64 {
+    channel_media_max_bytes(adapter, capability)
+        .expect("every executable outbound media path must have a catalog limit")
+}
 
-pub const FEISHU_LARK_IMAGE_MAX_BYTES: u64 = 10 * MIB;
-pub const FEISHU_LARK_FILE_MAX_BYTES: u64 = 30 * MIB;
+pub fn telegram_image_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::TelegramBot,
+        ChannelCapabilityKind::SendImage,
+    )
+}
 
-// WeChat iLink does not publish a stable public outbound bot-media contract.
-// Keep outbound guards aligned with this repository's existing inbound safety
-// policy instead of presenting them as upstream API guarantees.
-pub const WECHAT_IMAGE_SAFETY_MAX_BYTES: u64 = 25 * MIB;
-pub const WECHAT_OTHER_SAFETY_MAX_BYTES: u64 = 100 * MIB;
+pub fn telegram_file_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::TelegramBot,
+        ChannelCapabilityKind::SendFile,
+    )
+}
+
+pub fn feishu_image_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::FeishuOpenPlatform,
+        ChannelCapabilityKind::SendImage,
+    )
+}
+
+pub fn feishu_file_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::FeishuOpenPlatform,
+        ChannelCapabilityKind::SendFile,
+    )
+}
+
+pub fn lark_image_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::LarkOpenPlatform,
+        ChannelCapabilityKind::SendImage,
+    )
+}
+
+pub fn lark_file_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::LarkOpenPlatform,
+        ChannelCapabilityKind::SendFile,
+    )
+}
+
+pub fn wechat_image_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::WechatIlink,
+        ChannelCapabilityKind::SendImage,
+    )
+}
+
+pub fn wechat_file_max_bytes() -> u64 {
+    required_channel_media_max_bytes(
+        ChannelAdapterKind::WechatIlink,
+        ChannelCapabilityKind::SendFile,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WhatsappCloudMediaKind {
@@ -41,10 +92,21 @@ pub fn whatsapp_cloud_upload_spec(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let capability_kind = match kind {
+        WhatsappCloudMediaKind::Image => ChannelCapabilityKind::SendImage,
+        WhatsappCloudMediaKind::Video => ChannelCapabilityKind::SendVideo,
+        WhatsappCloudMediaKind::Audio => ChannelCapabilityKind::SendAudio,
+        WhatsappCloudMediaKind::Document => ChannelCapabilityKind::SendFile,
+    };
+    let record = channel_capability(ChannelAdapterKind::WhatsappCloud, capability_kind)
+        .ok_or_else(|| "channel_capability_catalog_missing".to_string())?;
+    let max_bytes = record
+        .max_payload_bytes
+        .ok_or_else(|| "channel_capability_limit_missing".to_string())?;
     let spec = match kind {
         WhatsappCloudMediaKind::Image => match extension.as_str() {
-            "jpg" | "jpeg" => ("image/jpeg", WHATSAPP_CLOUD_IMAGE_MAX_BYTES, "图片"),
-            "png" => ("image/png", WHATSAPP_CLOUD_IMAGE_MAX_BYTES, "图片"),
+            "jpg" | "jpeg" => ("image/jpeg", max_bytes, "图片"),
+            "png" => ("image/png", max_bytes, "图片"),
             _ => {
                 return Err(format!(
                     "WhatsApp Cloud 图片格式不支持：.{extension}。仅支持 JPEG 和 PNG。"
@@ -52,8 +114,8 @@ pub fn whatsapp_cloud_upload_spec(
             }
         },
         WhatsappCloudMediaKind::Video => match extension.as_str() {
-            "mp4" => ("video/mp4", WHATSAPP_CLOUD_VIDEO_MAX_BYTES, "视频"),
-            "3gp" | "3gpp" => ("video/3gpp", WHATSAPP_CLOUD_VIDEO_MAX_BYTES, "视频"),
+            "mp4" => ("video/mp4", max_bytes, "视频"),
+            "3gp" | "3gpp" => ("video/3gpp", max_bytes, "视频"),
             _ => {
                 return Err(format!(
                     "WhatsApp Cloud 视频格式不支持：.{extension}。仅支持 MP4/3GP，且视频需为 H.264、音频需为 AAC。"
@@ -61,11 +123,11 @@ pub fn whatsapp_cloud_upload_spec(
             }
         },
         WhatsappCloudMediaKind::Audio => match extension.as_str() {
-            "aac" => ("audio/aac", WHATSAPP_CLOUD_AUDIO_MAX_BYTES, "音频"),
-            "m4a" | "mp4" => ("audio/mp4", WHATSAPP_CLOUD_AUDIO_MAX_BYTES, "音频"),
-            "mp3" => ("audio/mpeg", WHATSAPP_CLOUD_AUDIO_MAX_BYTES, "音频"),
-            "amr" => ("audio/amr", WHATSAPP_CLOUD_AUDIO_MAX_BYTES, "音频"),
-            "ogg" | "opus" => ("audio/ogg", WHATSAPP_CLOUD_AUDIO_MAX_BYTES, "音频"),
+            "aac" => ("audio/aac", max_bytes, "音频"),
+            "m4a" | "mp4" => ("audio/mp4", max_bytes, "音频"),
+            "mp3" => ("audio/mpeg", max_bytes, "音频"),
+            "amr" => ("audio/amr", max_bytes, "音频"),
+            "ogg" | "opus" => ("audio/ogg", max_bytes, "音频"),
             _ => {
                 return Err(format!(
                     "WhatsApp Cloud 音频格式不支持：.{extension}。支持 AAC、M4A、MP3、AMR 和 Opus OGG。"
@@ -73,14 +135,14 @@ pub fn whatsapp_cloud_upload_spec(
             }
         },
         WhatsappCloudMediaKind::Document => match extension.as_str() {
-            "txt" => ("text/plain", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "pdf" => ("application/pdf", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "ppt" => ("application/vnd.ms-powerpoint", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "doc" => ("application/msword", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "xls" => ("application/vnd.ms-excel", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "docx" => ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "pptx" => ("application/vnd.openxmlformats-officedocument.presentationml.presentation", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
-            "xlsx" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", WHATSAPP_CLOUD_DOCUMENT_MAX_BYTES, "文件"),
+            "txt" => ("text/plain", max_bytes, "文件"),
+            "pdf" => ("application/pdf", max_bytes, "文件"),
+            "ppt" => ("application/vnd.ms-powerpoint", max_bytes, "文件"),
+            "doc" => ("application/msword", max_bytes, "文件"),
+            "xls" => ("application/vnd.ms-excel", max_bytes, "文件"),
+            "docx" => ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", max_bytes, "文件"),
+            "pptx" => ("application/vnd.openxmlformats-officedocument.presentationml.presentation", max_bytes, "文件"),
+            "xlsx" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", max_bytes, "文件"),
             _ => {
                 return Err(format!(
                     "WhatsApp Cloud 文件格式不支持：.{extension}。支持 TXT、PDF、PPT/PPTX、DOC/DOCX 和 XLS/XLSX。"
@@ -88,6 +150,9 @@ pub fn whatsapp_cloud_upload_spec(
             }
         },
     };
+    if !record.accepted_mime_types.contains(&spec.0) {
+        return Err("channel_capability_mime_mismatch".to_string());
+    }
     Ok(spec)
 }
 
