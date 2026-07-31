@@ -1266,6 +1266,41 @@ fn integrity_report_clean_when_all_required_builtins_present() {
 }
 
 #[test]
+fn host_tool_catalog_is_unique_and_records_execution_surface() {
+    let mut names = std::collections::BTreeSet::new();
+    for descriptor in HOST_TOOL_DESCRIPTORS {
+        assert!(
+            names.insert(descriptor.name),
+            "duplicate host tool descriptor: {}",
+            descriptor.name
+        );
+    }
+
+    let adapter_kind = |name: &str| {
+        HOST_TOOL_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.name == name)
+            .map(|descriptor| descriptor.adapter_kind)
+    };
+    assert_eq!(
+        adapter_kind("workspace_patch"),
+        Some(HostToolAdapterKind::InProcessBuiltin)
+    );
+    assert_eq!(
+        adapter_kind("subagent"),
+        Some(HostToolAdapterKind::AgentLoopInternal)
+    );
+    assert_eq!(
+        adapter_kind("fs_basic"),
+        Some(HostToolAdapterKind::VirtualFacade)
+    );
+    assert_eq!(
+        adapter_kind("config_basic"),
+        Some(HostToolAdapterKind::VirtualFacade)
+    );
+}
+
+#[test]
 fn test_registry_manifest_view() {
     let toml = r#"
 [[skills]]

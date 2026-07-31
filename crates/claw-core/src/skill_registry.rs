@@ -1986,7 +1986,7 @@ fn to_canonical_key(s: &str) -> String {
 #[path = "skill_registry_host_tools.rs"]
 mod skill_registry_host_tools;
 pub use skill_registry_host_tools::{
-    HostToolDescriptor, RegistryIntegrityReport, HOST_TOOL_DESCRIPTORS,
+    HostToolAdapterKind, HostToolDescriptor, RegistryIntegrityReport, HOST_TOOL_DESCRIPTORS,
 };
 
 #[cfg(test)]
