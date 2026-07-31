@@ -16,6 +16,9 @@ const {
 
 const log = pino({ level: process.env.WA_WEB_LOG_LEVEL || "info" });
 const bridgeStartedAtMs = Date.now();
+const WA_WEB_ADAPTER_MODE = "experimental_unofficial";
+const WA_WEB_TRANSPORT = "baileys";
+const PROACTIVE_DELIVERY_SOURCES = new Set(["scheduled_task", "proactive_notice"]);
 
 function loadConfig() {
   const workspaceRoot = path.resolve(process.env.APP_WORKSPACE_ROOT || path.join(__dirname, "..", ".."));
@@ -66,6 +69,7 @@ function loadConfig() {
     bridgeListen: String(ww.bridge_listen || "127.0.0.1:8092"),
     authDir: path.join(workspaceRoot, String(ww.auth_dir || "data/wa-web-auth")),
     quickResultWaitSeconds: Number(ww.quick_result_wait_seconds || 3),
+    allowProactiveSend: ww.allow_proactive_send === true,
     allowlist: new Set((ww.allowlist || []).map((v) => String(v).trim()).filter(Boolean)),
     admins: new Set((ww.admins || []).map((v) => String(v).trim()).filter(Boolean)),
     i18n,
@@ -125,13 +129,86 @@ const pendingOutboundMessages = new Map();
 const OUTBOUND_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 const PENDING_OUTBOUND_WINDOW_MS = 30 * 1000;
 const waLoginState = {
+  phase: "starting",
   connected: false,
   qrRaw: null,
   qrDataUrl: null,
   lastUpdateTs: Date.now(),
-  lastError: null,
+  lastErrorCode: null,
+  lastDiagnosticId: null,
 };
 const expectingKeyReply = new Set();
+
+function adapterDiagnosticId(operation, material) {
+  const digest = crypto
+    .createHash("sha256")
+    .update(`whatsapp_web\u0000${operation}\u0000${String(material || "unknown")}`)
+    .digest("hex")
+    .slice(0, 24);
+  return `whatsapp-web:${digest}`;
+}
+
+function adapterError(errorCode, operation, material, retryable = false) {
+  return {
+    ok: false,
+    error_code: String(errorCode || "adapter_error"),
+    diagnostic_id: adapterDiagnosticId(operation, material),
+    retryable: Boolean(retryable),
+  };
+}
+
+function updateLoginState(phase, options = {}) {
+  waLoginState.phase = phase;
+  waLoginState.connected = phase === "connected";
+  waLoginState.lastUpdateTs = Date.now();
+  if (options.clearQr === true) {
+    waLoginState.qrRaw = null;
+    waLoginState.qrDataUrl = null;
+  }
+  if (options.errorCode) {
+    waLoginState.lastErrorCode = String(options.errorCode);
+    waLoginState.lastDiagnosticId = adapterDiagnosticId(
+      String(options.operation || "login_state"),
+      String(options.diagnosticMaterial || options.errorCode)
+    );
+  } else {
+    waLoginState.lastErrorCode = null;
+    waLoginState.lastDiagnosticId = null;
+  }
+}
+
+function loginStatusSnapshot() {
+  return {
+    ok: true,
+    adapter_mode: WA_WEB_ADAPTER_MODE,
+    official_bot_api: false,
+    transport: WA_WEB_TRANSPORT,
+    phase: waLoginState.phase,
+    connected: waLoginState.connected,
+    qr_ready: Boolean(waLoginState.qrDataUrl),
+    qr_data_url: waLoginState.qrDataUrl,
+    last_update_ts: waLoginState.lastUpdateTs,
+    last_error_code: waLoginState.lastErrorCode,
+    last_diagnostic_id: waLoginState.lastDiagnosticId,
+    proactive_send_enabled: cfg.allowProactiveSend,
+    local_safety_limits: {
+      image_bytes: cfg.maxOutboundImageBytes,
+      video_bytes: cfg.maxOutboundVideoBytes,
+      audio_bytes: cfg.maxOutboundAudioBytes,
+      file_bytes: cfg.maxOutboundFileBytes,
+    },
+  };
+}
+
+function normalizeDeliverySource(value) {
+  return String(value || "unknown").trim().toLowerCase() || "unknown";
+}
+
+function deliverySourceAllowed(source, allowProactiveSend) {
+  const normalized = normalizeDeliverySource(source);
+  if (PROACTIVE_DELIVERY_SOURCES.has(normalized)) return allowProactiveSend === true;
+  return normalized === "immediate_daemon" || normalized === "background_completion";
+}
 
 function tr(key, fallback, vars = {}) {
   let text = String(cfg.i18n?.[key] || fallback);
@@ -379,11 +456,7 @@ function ensureParentDir(filePath) {
 }
 
 function resetWaLoginState() {
-  waLoginState.connected = false;
-  waLoginState.qrRaw = null;
-  waLoginState.qrDataUrl = null;
-  waLoginState.lastUpdateTs = Date.now();
-  waLoginState.lastError = null;
+  updateLoginState("logged_out", { clearQr: true });
 }
 
 function buildSubmitTaskBody(externalUserId, externalChatId, kind, payload, identity) {
@@ -936,10 +1009,8 @@ async function connectWhatsApp() {
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
-      waLoginState.connected = false;
+      updateLoginState("qr_ready", { clearQr: true });
       waLoginState.qrRaw = qr;
-      waLoginState.lastUpdateTs = Date.now();
-      waLoginState.lastError = null;
       try {
         waLoginState.qrDataUrl = await QRCode.toDataURL(qr, {
           width: 320,
@@ -948,27 +1019,28 @@ async function connectWhatsApp() {
         });
       } catch (err) {
         waLoginState.qrDataUrl = null;
-        waLoginState.lastError = `render qr failed: ${String(err?.message || err)}`;
+        updateLoginState("error", {
+          errorCode: "qr_render_failed",
+          operation: "render_qr",
+          diagnosticMaterial: String(err?.message || err),
+        });
       }
       console.log("\n[wa-web-bridge] 请扫码登录 WhatsApp:");
       qrcode.generate(qr, { small: true });
     }
     if (connection === "open") {
       log.info("wa-web connected");
-      waLoginState.connected = true;
-      waLoginState.qrRaw = null;
-      waLoginState.qrDataUrl = null;
-      waLoginState.lastUpdateTs = Date.now();
-      waLoginState.lastError = null;
+      updateLoginState("connected", { clearQr: true });
     }
     if (connection === "close") {
-      waLoginState.connected = false;
-      waLoginState.lastUpdateTs = Date.now();
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      waLoginState.lastError = shouldReconnect
-        ? `connection closed: status=${String(statusCode || "unknown")}`
-        : "logged_out";
+      updateLoginState(shouldReconnect ? "reconnecting" : "logged_out", {
+        clearQr: true,
+        errorCode: shouldReconnect ? "connection_closed" : "logged_out",
+        operation: "connection_update",
+        diagnosticMaterial: String(statusCode || "unknown"),
+      });
       log.warn({ statusCode, shouldReconnect }, "wa-web connection closed");
       if (shouldReconnect) {
         setTimeout(connectWhatsApp, 2000);
@@ -1015,30 +1087,32 @@ function startHttpServer() {
   });
 
   app.get("/v1/login-status", (_req, res) => {
-    res.json({
-      ok: true,
-      connected: waLoginState.connected,
-      qr_ready: Boolean(waLoginState.qrDataUrl),
-      qr_data_url: waLoginState.qrDataUrl,
-      last_update_ts: waLoginState.lastUpdateTs,
-      last_error: waLoginState.lastError,
-    });
+    res.json(loginStatusSnapshot());
   });
 
   app.post("/v1/send-text", async (req, res) => {
     try {
       const to = String(req.body?.to || "").trim();
       const text = String(req.body?.text || "").trim();
+      const deliverySource = normalizeDeliverySource(req.body?.delivery_source);
       if (!to || !text) {
-        return res.status(400).json({ ok: false, error: "missing to/text" });
+        return res.status(400).json(adapterError("invalid_request", "send_text", "missing_to_or_text"));
+      }
+      if (!deliverySourceAllowed(deliverySource, cfg.allowProactiveSend)) {
+        return res
+          .status(403)
+          .json(adapterError("proactive_send_disabled", "send_text", deliverySource));
       }
       if (!sock) {
-        return res.status(503).json({ ok: false, error: "wa socket not ready" });
+        return res.status(503).json(adapterError("socket_not_ready", "send_text", "socket_not_ready", true));
       }
-      await sendAnswer(to, text);
-      return res.json({ ok: true });
+      const sent = await sendWaMessage(to, { text });
+      const messageId = String(sent?.key?.id || "").trim();
+      return res.json({ ok: true, message_ids: messageId ? [messageId] : [] });
     } catch (err) {
-      return res.status(500).json({ ok: false, error: String(err.message || err) });
+      const material = String(err?.message || err);
+      log.error({ diagnostic_id: adapterDiagnosticId("send_text", material) }, "wa-web send failed");
+      return res.status(500).json(adapterError("adapter_send_failed", "send_text", material, true));
     }
   });
 
@@ -1061,15 +1135,20 @@ function startHttpServer() {
       }
       fs.mkdirSync(cfg.authDir, { recursive: true });
       setTimeout(() => {
+        updateLoginState("starting");
         connectWhatsApp().catch((err) => {
-          waLoginState.lastError = `reconnect after logout failed: ${String(err?.message || err)}`;
-          waLoginState.lastUpdateTs = Date.now();
+          updateLoginState("error", {
+            errorCode: "reconnect_failed",
+            operation: "reconnect_after_logout",
+            diagnosticMaterial: String(err?.message || err),
+          });
           log.error({ err: String(err?.stack || err) }, "reconnect after logout failed");
         });
       }, 500);
       return res.json({ ok: true });
     } catch (err) {
-      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+      const material = String(err?.message || err);
+      return res.status(500).json(adapterError("logout_failed", "logout", material));
     }
   });
 
@@ -1099,6 +1178,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  adapterDiagnosticId,
+  adapterError,
   bindIdentity,
   buildSubmitTaskBody,
   canonicalUserJid,
@@ -1108,7 +1189,10 @@ module.exports = {
   isGroupJid,
   isLoopbackHost,
   isSameAccountJid,
+  deliverySourceAllowed,
+  loginStatusSnapshot,
   messageTimestampSeconds,
+  normalizeDeliverySource,
   normalizeInternalApiBaseUrl,
   parseListenAddress,
   queryTask,
@@ -1121,6 +1205,7 @@ module.exports = {
   taskArtifactDownloadUrl,
   taskSuccessArtifacts,
   taskSuccessMessages,
+  updateLoginState,
   materializeTaskArtifact,
   validateOutboundFile,
   validateOutboundFileSize,

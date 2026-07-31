@@ -15,6 +15,22 @@ export interface UseWhatsappWebRuntimeParams {
   setServiceActionMessage: (notice: ServiceActionNotice | null) => void;
 }
 
+export function whatsappWebRequestError(t: Translate, code: string | null | undefined): string {
+  switch (code) {
+    case "whatsapp_web.not_configured":
+      return t("WhatsApp Web 尚未完成配置。", "WhatsApp Web is not configured yet.");
+    case "whatsapp_web.login_status_invalid":
+      return t("连接状态返回异常，请重启服务。", "The connection returned an invalid status. Restart the service.");
+    case "whatsapp_web.logout_failed":
+      return t("退出登录失败，请重启服务后重试。", "Sign-out failed. Restart the service and try again.");
+    case "whatsapp_web.logout_unavailable":
+      return t("暂时无法连接退出登录服务。", "The sign-out service is temporarily unreachable.");
+    case "whatsapp_web.login_status_unavailable":
+    default:
+      return t("暂时无法读取 WhatsApp Web 连接状态。", "The WhatsApp Web connection status is temporarily unavailable.");
+  }
+}
+
 export function useWhatsappWebRuntime({
   apiFetch,
   t,
@@ -39,7 +55,7 @@ export function useWhatsappWebRuntime({
       const res = await apiFetch(`/v1/whatsapp-web/login-status`);
       const body = (await res.json()) as ApiResponse<WhatsappWebLoginStatus>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `whatsapp web login status failed (${res.status})`);
+        throw new Error(whatsappWebRequestError(t, body.error));
       }
       setWaLoginStatus(body.data);
       setWaWebBridgeReachable(true);
@@ -68,7 +84,7 @@ export function useWhatsappWebRuntime({
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `whatsapp web logout failed (${res.status})`);
+        throw new Error(whatsappWebRequestError(t, body.error || "whatsapp_web.logout_failed"));
       }
       await sleep(1200);
       await fetchWhatsappWebLoginStatus();

@@ -135,6 +135,7 @@ pub(crate) async fn send_task_channel_message(
     payload: &Value,
     text: &str,
     conversation_window: &claw_core::channel_delivery::ChannelConversationWindow,
+    delivery_source: claw_core::channel_delivery::ChannelDeliverySource,
 ) -> Result<crate::channel_send::ChannelSendOutcome, String> {
     match runtime_channel_from_payload(state, payload) {
         crate::RuntimeChannel::Telegram => {
@@ -150,9 +151,13 @@ pub(crate) async fn send_task_channel_message(
                 .ok_or_else(|| "missing external_chat_id for whatsapp task".to_string())?;
             match resolve_whatsapp_delivery_route(state, payload) {
                 crate::WhatsappDeliveryRoute::WebBridge => {
-                    crate::channel_send::send_whatsapp_web_bridge_text_message(state, &to, text)
-                        .await
-                        .map(|_| crate::channel_send::ChannelSendOutcome::default())
+                    crate::channel_send::send_whatsapp_web_bridge_text_message(
+                        state,
+                        &to,
+                        text,
+                        delivery_source,
+                    )
+                    .await
                 }
                 crate::WhatsappDeliveryRoute::Cloud => {
                     crate::channel_send::send_whatsapp_cloud_text_message(

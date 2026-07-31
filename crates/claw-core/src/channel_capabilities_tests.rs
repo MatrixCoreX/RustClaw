@@ -169,3 +169,34 @@ fn whatsapp_upload_specs_are_constrained_by_the_catalog_contract() {
         assert_eq!(record.max_payload_bytes, Some(max_bytes));
     }
 }
+
+#[test]
+fn whatsapp_web_media_limits_are_local_policy_not_cloud_contracts() {
+    for (capability, expected_bytes) in [
+        (ChannelCapabilityKind::SendImage, 100 * MIB),
+        (ChannelCapabilityKind::SendVideo, 100 * MIB),
+        (ChannelCapabilityKind::SendAudio, 100 * MIB),
+        (ChannelCapabilityKind::SendFile, 2 * 1024 * MIB),
+    ] {
+        let record = channel_capability(ChannelAdapterKind::WhatsappWeb, capability)
+            .expect("WhatsApp Web local policy record");
+        assert_eq!(record.max_payload_bytes, Some(expected_bytes));
+        assert_eq!(
+            record.source_kind,
+            ChannelCapabilitySourceKind::LocalSafetyPolicy
+        );
+        assert!(record.source_ref.starts_with("policy:"));
+        assert!(!record.source_ref.contains("meta"));
+    }
+
+    let text = channel_capability(
+        ChannelAdapterKind::WhatsappWeb,
+        ChannelCapabilityKind::SendText,
+    )
+    .expect("WhatsApp Web experimental text record");
+    assert_eq!(
+        text.source_kind,
+        ChannelCapabilitySourceKind::ExperimentalInference
+    );
+    assert!(text.source_ref.starts_with("evidence:"));
+}

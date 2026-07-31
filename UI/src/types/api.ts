@@ -1177,10 +1177,24 @@ export interface LogFilesResponse {
 }
 
 export interface WhatsappWebLoginStatus {
+  adapter_mode?: "experimental_unofficial" | string;
+  official_bot_api?: boolean;
+  transport?: string;
+  phase?: "starting" | "qr_ready" | "connected" | "reconnecting" | "logged_out" | "error" | string;
   connected?: boolean;
   qr_ready?: boolean;
   qr_data_url?: string | null;
   last_update_ts?: number;
+  last_error_code?: string | null;
+  last_diagnostic_id?: string | null;
+  proactive_send_enabled?: boolean;
+  local_safety_limits?: {
+    image_bytes?: number;
+    video_bytes?: number;
+    audio_bytes?: number;
+    file_bytes?: number;
+  };
+  /** Legacy bridge responses only. New adapters expose machine error fields above. */
   last_error?: string | null;
 }
 

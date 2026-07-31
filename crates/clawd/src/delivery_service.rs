@@ -224,6 +224,7 @@ pub(crate) async fn deliver_task_envelope(
         payload,
         &text,
         &envelope.conversation_window,
+        envelope.source,
     )
     .await;
     let now = crate::now_ts_u64();

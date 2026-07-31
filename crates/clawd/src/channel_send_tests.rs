@@ -72,3 +72,28 @@ fn open_platform_monthly_quota_is_terminal_and_redacted() {
     assert!(!decoded.retryable);
     assert!(!encoded.contains("private reply"));
 }
+
+#[tokio::test]
+async fn whatsapp_web_scheduled_send_is_blocked_by_default_with_machine_error() {
+    let state = AppState::test_default_with_fixture_provider();
+    assert!(!state.channels.whatsapp_web_allow_proactive_send);
+
+    let encoded = send_whatsapp_web_bridge_text_message(
+        &state,
+        "recipient@s.whatsapp.net",
+        "scheduled result",
+        ChannelDeliverySource::ScheduledTask,
+    )
+    .await
+    .expect_err("experimental proactive send must be opt-in");
+    let error = ChannelProviderError::decode(&encoded).expect("machine provider error");
+    assert_eq!(
+        error.failure_class,
+        claw_core::channel_provider_error::ChannelProviderFailureClass::PermissionDenied
+    );
+    assert_eq!(
+        error.provider_error_code.as_deref(),
+        Some("proactive_send_disabled")
+    );
+    assert!(!error.retryable);
+}

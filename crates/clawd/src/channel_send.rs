@@ -11,7 +11,9 @@ use tracing::info;
 use uuid::Uuid;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
-use claw_core::channel_delivery::{ChannelConversationWindow, ChannelConversationWindowState};
+use claw_core::channel_delivery::{
+    ChannelConversationWindow, ChannelConversationWindowState, ChannelDeliverySource,
+};
 use claw_core::channel_open_platform::{
     chunk_open_platform_text, open_platform_contract, plan_open_platform_media,
     preflight_open_platform_media, process_open_platform_rate_limiter,
@@ -72,7 +74,7 @@ struct PersistedWechatSession {
 /// Max characters per Telegram message (conservative; platform limit ~4096).
 const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
 
-/// Max characters per WhatsApp text message (conservative; platform limit ~4096).
+/// Local transport chunk target. It is not an official WhatsApp Web limit.
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
 const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
@@ -674,7 +676,24 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
     state: &AppState,
     to: &str,
     text: &str,
-) -> Result<(), String> {
+    delivery_source: ChannelDeliverySource,
+) -> Result<ChannelSendOutcome, String> {
+    if matches!(
+        delivery_source,
+        ChannelDeliverySource::ScheduledTask | ChannelDeliverySource::ProactiveNotice
+    ) && !state.channels.whatsapp_web_allow_proactive_send
+    {
+        return Err(ChannelProviderError::from_machine_failure(
+            "whatsapp_web",
+            "send_text",
+            claw_core::channel_provider_error::ChannelProviderFailureClass::PermissionDenied,
+            Some(403),
+            Some("proactive_send_disabled"),
+            None,
+            "local_policy:proactive_send_disabled",
+        )
+        .to_string());
+    }
     let base = state
         .channels
         .whatsapp_web_bridge_base_url
@@ -689,6 +708,7 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
         WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
     );
     let n = chunks.len();
+    let mut provider_message_ids = Vec::new();
     if n > 1 {
         info!(
             "send_chunks channel=whatsapp_web_bridge to={} original_len={} chunk_count={}",
@@ -717,23 +737,37 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             .post(&url)
             .json(&json!({
                 "to": to,
-                "text": body
+                "text": body,
+                "delivery_source": delivery_source
             }))
             .send()
             .await
             .map_err(|error| provider_transport_error("whatsapp_web", "send_text", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        let status = resp.status();
+        let response_body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
             return Err(provider_http_error(
                 "whatsapp_web",
                 "send_text",
                 status,
-                &body,
+                &response_body,
             ));
         }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&response_body) {
+            provider_message_ids.extend(
+                value
+                    .get("message_ids")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string),
+            );
+        }
     }
-    Ok(())
+    Ok(ChannelSendOutcome {
+        provider_message_ids,
+    })
 }
 
 /// Max characters per Feishu/Lark text message (conservative; platform limit ~4096).
