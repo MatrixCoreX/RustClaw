@@ -1,8 +1,8 @@
 use super::{
-    collect_whitelisted_env_pairs, extract_task_request_text, is_crypto_account_access_error,
-    is_missing_target_skill_error, is_recoverable_skill_error, parse_policy_block_error,
-    parse_structured_skill_error, policy_block_default_text, policy_block_error,
-    request_reply_language, run_safe_command, skill_error_machine_observation,
+    acquire_skill_dispatch_permits, collect_whitelisted_env_pairs, extract_task_request_text,
+    is_crypto_account_access_error, is_missing_target_skill_error, is_recoverable_skill_error,
+    parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
+    policy_block_error, request_reply_language, run_safe_command, skill_error_machine_observation,
     skill_runner_env_strict_enabled, structured_skill_error_from_parts,
     structured_skill_error_string, task_allows_path_outside_workspace, task_allows_sudo,
     task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
@@ -20,8 +20,110 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+use tokio::sync::{oneshot, Semaphore};
 
 static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn queued_skill_waits_before_global_slot_and_unrelated_skill_continues() {
+    let gates = Arc::new(crate::runtime::state::SkillConcurrencyGates::default());
+    let global = Arc::new(Semaphore::new(2));
+    let first = acquire_skill_dispatch_permits(
+        &gates,
+        &global,
+        "task-media-first",
+        "media_download",
+        Some(1),
+    )
+    .await
+    .unwrap();
+    assert_eq!(global.available_permits(), 1);
+
+    let waiting_gates = gates.clone();
+    let waiting_global = global.clone();
+    let mut waiting = tokio::spawn(async move {
+        acquire_skill_dispatch_permits(
+            &waiting_gates,
+            &waiting_global,
+            "task-media-second",
+            "media_download",
+            Some(1),
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), &mut waiting)
+            .await
+            .is_err(),
+        "the second media task must wait for the skill-specific slot"
+    );
+    assert_eq!(
+        global.available_permits(),
+        1,
+        "a skill-specific waiter must not occupy the remaining global slot"
+    );
+
+    let unrelated = acquire_skill_dispatch_permits(
+        &gates,
+        &global,
+        "task-unrelated",
+        "unrelated_skill",
+        Some(1),
+    )
+    .await
+    .unwrap();
+    assert_eq!(global.available_permits(), 0);
+    drop(unrelated);
+    drop(first);
+
+    let second = tokio::time::timeout(Duration::from_secs(1), waiting)
+        .await
+        .expect("second media task should continue")
+        .expect("second media join")
+        .expect("second media permits");
+    drop(second);
+    assert_eq!(global.available_permits(), 2);
+}
+
+#[tokio::test]
+async fn cancellation_failure_and_timeout_paths_release_skill_and_global_slots() {
+    let gates = Arc::new(crate::runtime::state::SkillConcurrencyGates::default());
+    let global = Arc::new(Semaphore::new(1));
+    let (acquired_tx, acquired_rx) = oneshot::channel();
+    let held_gates = gates.clone();
+    let held_global = global.clone();
+    let holder = tokio::spawn(async move {
+        let _permits = acquire_skill_dispatch_permits(
+            &held_gates,
+            &held_global,
+            "task-aborted",
+            "media_download",
+            Some(1),
+        )
+        .await
+        .unwrap();
+        let _ = acquired_tx.send(());
+        std::future::pending::<()>().await;
+    });
+    acquired_rx.await.expect("holder acquired permits");
+    assert_eq!(global.available_permits(), 0);
+    holder.abort();
+    let _ = holder.await;
+
+    for exit_path in ["cancel", "failure", "timeout"] {
+        let permits = tokio::time::timeout(
+            Duration::from_secs(1),
+            acquire_skill_dispatch_permits(&gates, &global, exit_path, "media_download", Some(1)),
+        )
+        .await
+        .expect("slot release must be prompt")
+        .expect("slot acquisition after prior exit");
+        assert_eq!(global.available_permits(), 0);
+        drop(permits);
+        assert_eq!(global.available_permits(), 1);
+    }
+}
 
 #[path = "skills_receipt_test_support.rs"]
 mod receipt_support;
