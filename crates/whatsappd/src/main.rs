@@ -55,6 +55,31 @@ const WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str =
 const WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
     "message_key=whatsapp_cloud.msg.request_timeout_retry_later task_id={task_id}";
 
+fn whatsapp_provider_http_error(
+    operation: &str,
+    status: reqwest::StatusCode,
+    response_body: &str,
+) -> anyhow::Error {
+    anyhow!(
+        claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+            "whatsapp_cloud",
+            operation,
+            status.as_u16(),
+            response_body,
+        )
+    )
+}
+
+fn whatsapp_provider_invalid_response(operation: &str, diagnostic_material: &str) -> anyhow::Error {
+    anyhow!(
+        claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+            "whatsapp_cloud",
+            operation,
+            diagnostic_material,
+        )
+    )
+}
+
 #[derive(Clone)]
 struct AppState {
     clawd_base_url: String,
@@ -386,9 +411,9 @@ async fn resolve_whatsapp_identity(
     let status = resp.status();
     let body: ApiResponse<ResolveChannelBindingResponse> = resp.json().await?;
     if !status.is_success() || !body.ok {
-        return Err(anyhow!(
-            "resolve whatsapp identity failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
+        return Err(whatsapp_provider_invalid_response(
+            "resolve_identity",
+            "application_rejected",
         ));
     }
     Ok(body.data.and_then(|v| v.identity))
@@ -414,9 +439,9 @@ async fn bind_whatsapp_identity(
         if status.as_u16() == 401 {
             return Ok(None);
         }
-        return Err(anyhow!(
-            "bind whatsapp identity failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
+        return Err(whatsapp_provider_invalid_response(
+            "bind_identity",
+            "application_rejected",
         ));
     }
     if !body.ok {
@@ -766,7 +791,11 @@ async fn download_whatsapp_media(
     if !meta.status().is_success() {
         let status = meta.status();
         let body = meta.text().await.unwrap_or_default();
-        return Err(anyhow!("media meta http {}: {}", status, body));
+        return Err(whatsapp_provider_http_error(
+            "fetch_media_metadata",
+            status,
+            &body,
+        ));
     }
     let meta_body: WaMediaMeta = meta.json().await.context("decode media meta failed")?;
     let bytes = state
@@ -843,16 +872,16 @@ async fn submit_task_only(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("submit task http {}: {}", status, body));
+        return Err(whatsapp_provider_http_error("submit_task", status, &body));
     }
     let body: ApiResponse<SubmitTaskResponse> = resp
         .json()
         .await
         .context("decode submit task response failed")?;
     if !body.ok {
-        return Err(anyhow!(
-            "submit task rejected: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
+        return Err(whatsapp_provider_invalid_response(
+            "submit_task",
+            "application_rejected",
         ));
     }
     let task_id = body
@@ -876,16 +905,16 @@ async fn query_task_status(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("query task status http {}: {}", status, body));
+        return Err(whatsapp_provider_http_error("query_task", status, &body));
     }
     let body: ApiResponse<TaskQueryResponse> = resp
         .json()
         .await
         .context("decode query task response failed")?;
     if !body.ok {
-        return Err(anyhow!(
-            "query task failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
+        return Err(whatsapp_provider_invalid_response(
+            "query_task",
+            "application_rejected",
         ));
     }
     body.data.ok_or_else(|| anyhow!("query task missing data"))
@@ -1295,7 +1324,7 @@ async fn upload_media(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("upload media http {}: {}", status, body));
+        return Err(whatsapp_provider_http_error("upload_media", status, &body));
     }
     let body: Value = resp
         .json()
@@ -1349,7 +1378,7 @@ async fn send_whatsapp_media_by_id(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("send media http {}: {}", status, text));
+        return Err(whatsapp_provider_http_error("send_media", status, &text));
     }
     Ok(())
 }
@@ -1406,7 +1435,7 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(anyhow!("send text message http {}: {}", status, body));
+            return Err(whatsapp_provider_http_error("send_text", status, &body));
         }
     }
     Ok(())

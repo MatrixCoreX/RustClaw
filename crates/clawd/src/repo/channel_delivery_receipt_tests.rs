@@ -24,6 +24,7 @@ fn receipt(status: ChannelDeliveryStatus, updated_at_ts: u64) -> ChannelDelivery
             .unwrap_or_default(),
         parts: Vec::new(),
         error_code: None,
+        message_key: None,
         diagnostic_id: None,
         retryable: false,
         updated_at_ts,

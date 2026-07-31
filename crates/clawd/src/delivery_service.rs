@@ -7,6 +7,7 @@ use claw_core::channel_delivery::{
 use claw_core::channel_ingress::{
     default_adapter_for_channel, default_reply_target, ChannelReplyTarget,
 };
+use claw_core::channel_provider_error::ChannelProviderError;
 use claw_core::types::ChannelKind;
 use serde_json::Value;
 use tracing::warn;
@@ -31,7 +32,9 @@ pub(crate) enum ChannelDeliveryServiceStatus {
 pub(crate) struct ChannelDeliveryServiceResult {
     pub(crate) status: ChannelDeliveryServiceStatus,
     pub(crate) receipt: Option<ChannelDeliveryReceipt>,
-    pub(crate) error_text: Option<String>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) message_key: Option<String>,
+    pub(crate) retryable: bool,
 }
 
 impl ChannelDeliveryServiceResult {
@@ -170,14 +173,18 @@ pub(crate) async fn deliver_task_envelope(
             return Ok(ChannelDeliveryServiceResult {
                 status: ChannelDeliveryServiceStatus::InProgress,
                 receipt: None,
-                error_text: None,
+                error_code: None,
+                message_key: None,
+                retryable: false,
             });
         }
         ClaimChannelDeliveryDispatchOutcome::QueryRequired => {
             return Ok(ChannelDeliveryServiceResult {
                 status: ChannelDeliveryServiceStatus::QueryRequired,
                 receipt: None,
-                error_text: None,
+                error_code: None,
+                message_key: None,
+                retryable: false,
             });
         }
     };
@@ -190,25 +197,35 @@ pub(crate) async fn deliver_task_envelope(
         .join("\n");
     let send_result = crate::worker::send_task_channel_message(state, task, payload, &text).await;
     let now = crate::now_ts_u64();
-    let (receipt, error_text) = match send_result {
-        Ok(()) => (
-            ChannelDeliveryReceipt {
-                schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
-                delivery_id: envelope.delivery_id.clone(),
-                idempotency_key: envelope.idempotency_key.clone(),
-                channel: envelope.channel,
-                adapter: envelope.adapter.clone(),
-                status: ChannelDeliveryStatus::Accepted,
-                provider_message_ids: Vec::new(),
-                parts: Vec::new(),
-                error_code: None,
-                diagnostic_id: None,
-                retryable: false,
-                updated_at_ts: now,
-            },
-            None,
-        ),
-        Err(error_text) => (
+    let receipt = match send_result {
+        Ok(()) => ChannelDeliveryReceipt {
+            schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
+            delivery_id: envelope.delivery_id.clone(),
+            idempotency_key: envelope.idempotency_key.clone(),
+            channel: envelope.channel,
+            adapter: envelope.adapter.clone(),
+            status: ChannelDeliveryStatus::Accepted,
+            provider_message_ids: Vec::new(),
+            parts: Vec::new(),
+            error_code: None,
+            message_key: None,
+            diagnostic_id: None,
+            retryable: false,
+            updated_at_ts: now,
+        },
+        Err(error_text) => {
+            let (error_code, message_key, diagnostic_id, retryable) =
+                delivery_failure_fields(&error_text);
+            warn!(
+                event = "channel_delivery_failure",
+                delivery_id = %envelope.delivery_id,
+                adapter = %envelope.adapter,
+                error_code = %error_code,
+                message_key = %message_key,
+                retryable,
+                diagnostic_id = %diagnostic_id,
+                "channel delivery failed"
+            );
             ChannelDeliveryReceipt {
                 schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
                 delivery_id: envelope.delivery_id.clone(),
@@ -218,13 +235,13 @@ pub(crate) async fn deliver_task_envelope(
                 status: ChannelDeliveryStatus::Failed,
                 provider_message_ids: Vec::new(),
                 parts: Vec::new(),
-                error_code: Some("channel.send_failed".to_string()),
-                diagnostic_id: Some(format!("delivery:{}", Uuid::new_v4().simple())),
-                retryable: false,
+                error_code: Some(error_code),
+                message_key: Some(message_key),
+                diagnostic_id: Some(diagnostic_id),
+                retryable,
                 updated_at_ts: now,
-            },
-            Some(error_text),
-        ),
+            }
+        }
     };
     crate::repo::record_channel_delivery_receipt(&state.core.db, &receipt)?;
     if let Err(err) = crate::repo::complete_channel_delivery_dispatch(
@@ -239,16 +256,38 @@ pub(crate) async fn deliver_task_envelope(
     }
     Ok(ChannelDeliveryServiceResult {
         status: receipt_status(receipt.status),
+        error_code: receipt.error_code.clone(),
+        message_key: receipt.message_key.clone(),
+        retryable: receipt.retryable,
         receipt: Some(receipt),
-        error_text,
     })
+}
+
+fn delivery_failure_fields(error_text: &str) -> (String, String, String, bool) {
+    let provider_error = ChannelProviderError::decode(error_text);
+    let error_code = provider_error
+        .as_ref()
+        .map(|error| error.error_code.clone())
+        .unwrap_or_else(|| "channel.delivery.failed".to_string());
+    let message_key = provider_error
+        .as_ref()
+        .map(|error| error.message_key.clone())
+        .unwrap_or_else(|| "channel.error.delivery_failed".to_string());
+    let diagnostic_id = provider_error
+        .as_ref()
+        .map(|error| error.diagnostic_id.clone())
+        .unwrap_or_else(|| format!("delivery:{}", Uuid::new_v4().simple()));
+    let retryable = provider_error.as_ref().is_some_and(|error| error.retryable);
+    (error_code, message_key, diagnostic_id, retryable)
 }
 
 fn result_from_existing_receipt(receipt: ChannelDeliveryReceipt) -> ChannelDeliveryServiceResult {
     ChannelDeliveryServiceResult {
         status: receipt_status(receipt.status),
+        error_code: receipt.error_code.clone(),
+        message_key: receipt.message_key.clone(),
+        retryable: receipt.retryable,
         receipt: Some(receipt),
-        error_text: None,
     }
 }
 

@@ -271,7 +271,14 @@ pub(super) async fn resolve_wechat_identity(
         .await
         .map_err(|e| format!("resolve response parse failed: {e}"))?;
     if !status.is_success() || !body.ok {
-        return Err(body.error.unwrap_or_else(|| "resolve failed".to_string()));
+        return Err(
+            claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+                "wechat_ilink",
+                "resolve_identity",
+                body.error.as_deref().unwrap_or("application_rejected"),
+            )
+            .to_string(),
+        );
     }
     Ok(body.data.and_then(|d| d.identity))
 }

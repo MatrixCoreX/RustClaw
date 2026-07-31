@@ -618,16 +618,8 @@ pub(super) async fn query_task_status(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        let msg = if (body.contains("<!doctype") || body.contains("<html")) && body.len() > 100 {
-            state.i18n.t("telegram.error.query_task_wrong_host")
-        } else {
-            let body_preview = text_preview_for_log(&body, 300);
-            state.i18n.t_with(
-                "telegram.error.query_task_failed_http",
-                &[("status", &status.to_string()), ("body", &body_preview)],
-            )
-        };
-        return Err(anyhow!("{}", msg));
+        let error = telegram_provider_http_error("query_task", status, &body);
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let body: ApiResponse<TaskQueryResponse> = resp
@@ -636,18 +628,11 @@ pub(super) async fn query_task_status(
         .context("decode query task response failed")?;
 
     if !body.ok {
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.query_task_failed",
-                &[(
-                    "error",
-                    &body
-                        .error
-                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
-                )],
-            )
-        ));
+        let error = telegram_provider_invalid_response(
+            "query_task",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        );
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     body.data
@@ -721,13 +706,8 @@ pub(super) async fn submit_task_only(
     if !submit_resp.status().is_success() {
         let status = submit_resp.status();
         let body = submit_resp.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.submit_task_failed_http",
-                &[("status", &status.to_string()), ("body", &body)],
-            )
-        ));
+        let error = telegram_provider_http_error("submit_task", status, &body);
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let submit_body: ApiResponse<SubmitTaskResponse> = submit_resp
@@ -736,18 +716,14 @@ pub(super) async fn submit_task_only(
         .context("decode submit task response failed")?;
 
     if !submit_body.ok {
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.submit_task_rejected",
-                &[(
-                    "error",
-                    &submit_body
-                        .error
-                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
-                )],
-            )
-        ));
+        let error = telegram_provider_invalid_response(
+            "submit_task",
+            submit_body
+                .error
+                .as_deref()
+                .unwrap_or("application_rejected"),
+        );
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let task_id = submit_body
@@ -819,17 +795,19 @@ pub(super) async fn cancel_tasks_for_chat(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("cancel http {status}: {body}",));
+        let error = telegram_provider_http_error("cancel_task", status, &body);
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let body: ApiResponse<JsonValue> =
         resp.json().await.context("decode cancel response failed")?;
 
     if !body.ok {
-        return Err(anyhow!(
-            "cancel failed: {}",
-            body.error.unwrap_or_else(|| "unknown error".to_string())
-        ));
+        let error = telegram_provider_invalid_response(
+            "cancel_task",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        );
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let canceled = body
@@ -851,31 +829,19 @@ pub(super) async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow:
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.health_http_failed",
-                &[("status", &status.to_string()), ("body", &body)],
-            )
-        ));
+        let error = telegram_provider_http_error("health_check", status, &body);
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let body: ApiResponse<HealthResponse> =
         resp.json().await.context("decode health response failed")?;
 
     if !body.ok {
-        return Err(anyhow!(
-            "{}",
-            state.i18n.t_with(
-                "telegram.error.health_failed",
-                &[(
-                    "error",
-                    &body
-                        .error
-                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
-                )],
-            )
-        ));
+        let error = telegram_provider_invalid_response(
+            "health_check",
+            body.error.as_deref().unwrap_or("application_rejected"),
+        );
+        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
     }
 
     let data = body

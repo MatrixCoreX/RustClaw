@@ -112,3 +112,28 @@ fn bundled_common_catalogs_cover_supported_channel_locale_families() {
         assert_ne!(text, CHANNEL_NOTICE_SAFE_GENERIC_MESSAGE_KEY);
     }
 }
+
+#[test]
+fn bundled_common_catalogs_cover_every_channel_provider_error_key() {
+    let keys = [
+        "channel.error.delivery_failed",
+        "channel.error.provider_authentication",
+        "channel.error.provider_permission_denied",
+        "channel.error.provider_rate_limited",
+        "channel.error.provider_payload_rejected",
+        "channel.error.provider_unavailable",
+        "channel.error.provider_invalid_response",
+    ];
+    for locale in ["en-US", "zh-CN", "ja", "ko"] {
+        let dict = common_i18n_dicts()
+            .get(locale)
+            .unwrap_or_else(|| panic!("missing bundled locale {locale}"));
+        for key in keys {
+            let value = dict
+                .get(key)
+                .unwrap_or_else(|| panic!("missing {key} for {locale}"));
+            assert!(!value.trim().is_empty(), "empty {key} for {locale}");
+            assert_ne!(value, key, "machine key exposed for {locale}");
+        }
+    }
+}
