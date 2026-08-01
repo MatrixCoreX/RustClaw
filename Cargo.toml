@@ -47,6 +47,7 @@ members = [
     "crates/skills/kb",
     "crates/skills/browser_web",
     "optional_skills/crypto",
+    "optional_skills/chinese_almanac",
     "optional_skills/invest_copy",
     "optional_skills/map_merchant",
     "optional_skills/photo_organize",

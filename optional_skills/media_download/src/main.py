@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -24,6 +25,7 @@ SUPPORTED_ACTIONS = (
 SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
 MAX_ARTIFACTS = 32
 MAX_DIAGNOSTIC_CHARS = 4_000
+INLINE_TEXT_MAX_CHARS = 200
 
 
 class SkillFailure(Exception):
@@ -434,12 +436,139 @@ def _snapshot(directory: Path) -> dict[Path, tuple[int, int]]:
 
 def _artifact(path: Path) -> dict[str, Any]:
     mime_type, _ = mimetypes.guess_type(path.name)
-    return {
+    artifact = {
         "path": str(path),
         "filename": path.name,
         "mime_type": mime_type or "application/octet-stream",
         "size_bytes": path.stat().st_size,
     }
+    if path.suffix.lower() == ".txt" and re.search(r"_article(?:\.\d+)?$", path.stem):
+        artifact.update(
+            {
+                "artifact_role": "article_text",
+                "content_source": "platform_post",
+            }
+        )
+    elif artifact["mime_type"].startswith("image/"):
+        artifact["artifact_role"] = "original_image"
+    elif artifact["mime_type"].startswith("video/"):
+        artifact["artifact_role"] = "original_video"
+    elif path.suffix.lower() == ".json":
+        artifact["artifact_role"] = "metadata"
+    return artifact
+
+
+def _content_bundle(
+    artifacts: list[dict[str, Any]],
+    inline_article: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    counts = {
+        "image_count": 0,
+        "video_count": 0,
+        "article_count": 0,
+        "other_file_count": 0,
+    }
+    roles = {
+        "original_image": "image_count",
+        "original_video": "video_count",
+        "article_text": "article_count",
+    }
+    for artifact in artifacts:
+        count_key = roles.get(str(artifact.get("artifact_role") or ""), "other_file_count")
+        counts[count_key] += 1
+    inline_article_count = 1 if inline_article is not None else 0
+    counts["article_count"] += inline_article_count
+    if counts["image_count"] and counts["article_count"]:
+        kind = "image_article"
+    elif counts["image_count"]:
+        kind = "images"
+    elif counts["video_count"]:
+        kind = "video"
+    else:
+        kind = "files"
+    return {
+        "schema_version": 1,
+        "kind": kind,
+        **counts,
+        "inline_article_count": inline_article_count,
+    }
+
+
+def _consume_short_text_artifact(
+    artifacts: list[dict[str, Any]],
+    artifact: dict[str, Any] | None,
+    *,
+    body_marker: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if artifact is None:
+        return artifacts, None
+    path = Path(str(artifact["path"]))
+    try:
+        document = path.read_text(encoding="utf-8")
+    except OSError:
+        return artifacts, None
+    body = (
+        document.partition(body_marker)[2].strip()
+        if body_marker and body_marker in document
+        else document.strip()
+    )
+    if not body or len(body) >= INLINE_TEXT_MAX_CHARS:
+        return artifacts, None
+    try:
+        path.unlink()
+    except OSError:
+        return artifacts, None
+    return (
+        [item for item in artifacts if item is not artifact],
+        body,
+    )
+
+
+def _inline_short_article(
+    artifacts: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    article = next(
+        (item for item in artifacts if item.get("artifact_role") == "article_text"),
+        None,
+    )
+    remaining, body = _consume_short_text_artifact(
+        artifacts,
+        article,
+        body_marker="\n正文：\n",
+    )
+    if body is None:
+        return artifacts, None
+    return (
+        remaining,
+        {
+            "mode": "inline",
+            "content_source": "platform_post",
+            "character_count": len(body),
+            "text": body,
+        },
+    )
+
+
+def _inline_short_ocr(
+    artifacts: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    ocr_artifact = next(
+        (item for item in artifacts if item.get("recognition_source") == "local_ocr"),
+        None,
+    )
+    remaining, text = _consume_short_text_artifact(artifacts, ocr_artifact)
+    if text is None:
+        return artifacts, None
+    return (
+        remaining,
+        {
+            "mode": "inline",
+            "source": "local_ocr",
+            "engine": "tesseract",
+            "character_count": len(text),
+            "text": text,
+        },
+    )
 
 
 def _diagnostics(stderr: str) -> str:
@@ -583,6 +712,12 @@ def _capabilities_extra() -> dict[str, Any]:
         "supported_platforms": list(SUPPORTED_PLATFORMS),
         "public_content_only": True,
         "system_browser_cookies": False,
+        "image_article_posts": {
+            "platforms": ["douyin", "xiaohongshu"],
+            "default_outputs": ["original_images", "article_text"],
+            "inline_text_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
+            "ocr_is_separate": True,
+        },
         "optional_dependencies": {
             "youtube": ["yt-dlp"],
             "media_processing": ["ffmpeg", "ffprobe"],
@@ -705,17 +840,33 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             message_key="media_download.error.media_not_found",
             details={"diagnostics": _diagnostics(stderr)},
         )
-    count = len(urls) if action == "resolve" else len(artifacts)
-    noun = "URL" if action == "resolve" else "file"
     delivery_capable = action in {"download", "ocr"}
     deliver_to_user = not delivery_capable or _bool(args, "deliver_to_user", True)
+    inline_article = None
+    inline_recognition = None
+    if action == "download" and deliver_to_user:
+        artifacts, inline_article = _inline_short_article(artifacts)
+    elif action == "ocr" and deliver_to_user:
+        artifacts, inline_recognition = _inline_short_ocr(artifacts)
+    count = len(urls) if action == "resolve" else len(artifacts)
+    noun = "URL" if action == "resolve" else "file"
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
+    if inline_article is not None:
+        text = f"{text}\n\n{inline_article['text']}"
+    elif inline_recognition is not None:
+        text = f"ocr completed with inline text.\n\n{inline_recognition['text']}"
     result_artifacts = artifacts
     delivery = None
     saved_files = None
     if delivery_capable:
         delivery = {
-            "intent": "artifact" if deliver_to_user else "save_only",
+            "intent": (
+                "artifact"
+                if deliver_to_user and result_artifacts
+                else "model_synthesis"
+                if deliver_to_user
+                else "save_only"
+            ),
             "deliver_to_user": deliver_to_user,
         }
         if not deliver_to_user:
@@ -730,6 +881,10 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
         "output_directory": str(output_dir),
         "diagnostics": _diagnostics(stderr),
     }
+    if action == "download":
+        extra["content_bundle"] = _content_bundle(artifacts, inline_article)
+        if inline_article is not None:
+            extra["article_delivery"] = inline_article
     if delivery is not None:
         extra["delivery"] = delivery
     if saved_files is not None:
@@ -739,6 +894,8 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             "source": "local_ocr",
             "engine": "tesseract",
         }
+        if inline_recognition is not None:
+            extra["recognition_delivery"] = inline_recognition
     return _success(
         request_id,
         action,

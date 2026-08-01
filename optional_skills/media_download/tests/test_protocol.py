@@ -44,6 +44,15 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(response["extra"]["status"], "ok")
         self.assertFalse(response["extra"]["system_browser_cookies"])
         self.assertIn("download", response["extra"]["actions"])
+        self.assertEqual(
+            response["extra"]["image_article_posts"]["default_outputs"],
+            ["original_images", "article_text"],
+        )
+        self.assertTrue(response["extra"]["image_article_posts"]["ocr_is_separate"])
+        self.assertEqual(
+            response["extra"]["image_article_posts"]["inline_text_max_characters_exclusive"],
+            200,
+        )
 
     def test_download_command_disables_system_browser_cookies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -189,7 +198,7 @@ class AdapterTest(unittest.TestCase):
             def fake_run(command, **kwargs):
                 output = Path(command[command.index("--output") + 1])
                 output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_text("识别结果\n", encoding="utf-8")
+                output.write_text("识别结果" * 50 + "\n", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             request = {
@@ -227,6 +236,55 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(
             Path(command[command.index("--output") + 1]).name,
             "image_text_ocr.txt",
+        )
+
+    def test_short_ocr_result_is_delivered_inline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            image = workspace / "page.jpg"
+            image.write_bytes(b"image")
+
+            def fake_run(command, **kwargs):
+                output = Path(command[command.index("--output") + 1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text("短OCR结果", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "ocr-inline-1",
+                "args": {"action": "ocr", "input_paths": [str(image)]},
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+            self.assertFalse((artifacts / "image_text_ocr.txt").exists())
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["artifacts"], [])
+        self.assertIn("短OCR结果", response["text"])
+        self.assertEqual(
+            response["extra"]["delivery"],
+            {"intent": "model_synthesis", "deliver_to_user": True},
+        )
+        self.assertEqual(
+            response["extra"]["recognition_delivery"],
+            {
+                "mode": "inline",
+                "source": "local_ocr",
+                "engine": "tesseract",
+                "character_count": 6,
+                "text": "短OCR结果",
+            },
         )
 
     def test_download_returns_new_files_as_artifacts(self) -> None:
@@ -270,6 +328,118 @@ class AdapterTest(unittest.TestCase):
         command = runner.call_args.args[0]
         self.assertIn("--no-system-browser-cookies", command)
         self.assertNotIn("shell", runner.call_args.kwargs)
+
+    def test_download_classifies_image_article_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "note_01.jpg").write_bytes(b"one")
+                (output_dir / "note_02.jpg").write_bytes(b"two")
+                (output_dir / "note_article.txt").write_text(
+                    "平台：小红书\n\n正文：\n" + "长" * 200,
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-image-article-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.xiaohongshu.com/explore/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(
+            response["extra"]["content_bundle"],
+            {
+                "schema_version": 1,
+                "kind": "image_article",
+                "image_count": 2,
+                "video_count": 0,
+                "article_count": 1,
+                "other_file_count": 0,
+                "inline_article_count": 0,
+            },
+        )
+        artifacts_by_role = {
+            artifact["artifact_role"]: artifact
+            for artifact in response["extra"]["artifacts"]
+            if "artifact_role" in artifact
+        }
+        self.assertEqual(artifacts_by_role["article_text"]["mime_type"], "text/plain")
+        self.assertEqual(
+            artifacts_by_role["article_text"]["content_source"],
+            "platform_post",
+        )
+        self.assertIn("original_image", artifacts_by_role)
+
+    def test_short_platform_article_is_delivered_inline_only_for_this_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "short_note.jpg").write_bytes(b"image")
+                (output_dir / "short_note_article.txt").write_text(
+                    "平台：小红书\n作者：测试作者\n\n正文：\n这是一段少于二百字的平台原始正文。\n",
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-short-article-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.xiaohongshu.com/explore/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+            self.assertFalse((artifacts / "short_note_article.txt").exists())
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual([item["artifact_role"] for item in response["extra"]["artifacts"]], ["original_image"])
+        self.assertIn("这是一段少于二百字的平台原始正文。", response["text"])
+        self.assertEqual(
+            response["extra"]["article_delivery"],
+            {
+                "mode": "inline",
+                "content_source": "platform_post",
+                "character_count": 17,
+                "text": "这是一段少于二百字的平台原始正文。",
+            },
+        )
+        self.assertEqual(response["extra"]["content_bundle"]["kind"], "image_article")
+        self.assertEqual(response["extra"]["content_bundle"]["article_count"], 1)
+        self.assertEqual(response["extra"]["content_bundle"]["inline_article_count"], 1)
 
     def test_download_can_save_without_returning_delivery_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

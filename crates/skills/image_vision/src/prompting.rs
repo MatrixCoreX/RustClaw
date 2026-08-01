@@ -229,19 +229,13 @@ pub(super) fn render_structured_narrative_action_output(
         StructuredNarrativeActionOutput::Describe(out) => out.summary.trim().to_string(),
         StructuredNarrativeActionOutput::Compare(out) => out.summary.trim().to_string(),
         StructuredNarrativeActionOutput::ScreenshotSummary(out) => out.purpose.trim().to_string(),
-        StructuredNarrativeActionOutput::ExtractText(out) => {
-            if out.pages.len() == 1 {
-                return out.pages[0].text.trim().to_string();
-            }
-            out.pages
-                .iter()
-                .enumerate()
-                .map(|(index, page)| {
-                    format!("===== Image {} =====\n{}", index + 1, page.text.trim())
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        }
+        StructuredNarrativeActionOutput::ExtractText(out) => out
+            .pages
+            .iter()
+            .map(|page| page.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
     }
 }
 

@@ -2,7 +2,7 @@
 
 ## Capability Summary
 
-- Download publicly accessible media from Douyin, Kuaishou, Xiaohongshu, TikTok, and YouTube share text or URLs.
+- Download publicly accessible media from Douyin, Kuaishou, Xiaohongshu, TikTok, and YouTube share text or URLs. Douyin and Xiaohongshu image-article posts return every extracted original image plus the platform article by default; articles shorter than 200 characters are delivered inline, while articles of 200 or more characters use a separate UTF-8 text artifact.
 - Resolve direct media URLs without downloading.
 - Transcribe local video/audio, OCR local images, and prepare local video for X.
 - Write generated files only to the runtime-provided task artifact directory by default.
@@ -27,13 +27,13 @@ this frame is only progress/stall evidence and never changes the final result.
 - All actions in this resource-heavy skill share one host-enforced FIFO execution slot. A new media task waits before any runner process is spawned. Completion, structured failure, timeout, cancellation, or abnormal task exit releases the slot so the next queued media task can continue; unrelated skills keep their normal concurrency.
 - When the user wants the images/video themselves, prefer `media_download.download` over a general browser capability. Use a browser only when the requested output is page text, comments, navigation, or a page summary rather than the media files.
 - These are semantic capability rules for the planner, not runtime phrase matching. Select by the current request shape and the newest concrete target.
-- Ordinary media download requests must stop after `media_download.download`: by default download and return only the original image/video files. Never recognize image text, transcribe video/audio, or generate a text file unless the current user explicitly asks for that conversion.
+- Ordinary media download requests must stop after `media_download.download`. Video posts return original video media. Image-article posts from Douyin or Xiaohongshu return the original images and the platform-provided title/body by default. A body shorter than 200 characters is included directly in the skill's conversation response and its temporary `_article.txt` is removed; a body of 200 or more characters is delivered as `_article.txt`. This media-download-only rule does not change delivery behavior for any other skill. The article is first-party post content, not OCR; never recognize text inside images or transcribe video/audio unless the current user explicitly asks for that conversion.
 - Default download delivery is `deliver_to_user=true`: send the downloaded media back to the originating communication channel and expose it in the UI.
 - If the user explicitly says not to send the media back (for example, “不要发我”), set `deliver_to_user=false`. Do not remove that phrase from `share`; the downloader still extracts the URL from the complete text. Reply with the saved local path only and do not emit a delivery artifact.
 - “只解析这个分享链接的媒体直链，不要下载” -> `resolve`
 - “把这个视频转成文字/提取音频” -> `transcribe`
 - Only when the user explicitly requests image text recognition, prefer the host `image_vision.extract_text` multimodal capability and pass the downloaded/local image paths as `images`. It generates one UTF-8 `.txt` artifact and delivers it by default. Use this skill's `ocr` action only when multimodal vision is unavailable, returns a structured failure, or the user explicitly asks for offline/local OCR.
-- When one request explicitly asks both to download images and read their text, run `media_download.download` first, then pass its successful image artifact paths to `image_vision.extract_text`; do not enable the downloader's legacy automatic OCR flag.
+- When one request explicitly asks both to download images and read their text, run `media_download.download` first, then pass its successful image artifact paths to `image_vision.extract_text`; do not enable the downloader's legacy automatic OCR flag. When this skill's local `ocr` fallback is used, recognized text shorter than 200 characters is returned inline and text of 200 or more characters remains a `.txt` artifact.
 - “检查或转换成可以发到 X/Twitter 的视频” -> `prepare_x`
 - Prefer a dedicated built-in media skill when the request is unrelated to this package's supported actions.
 
@@ -47,7 +47,7 @@ Return supported actions, platforms, security defaults, and optional dependencie
 
 Extract the supported URL from `share` and download public media. `share` may be a URL by itself or complete copied App share text from any supported platform. App short links and full website share URLs are equally valid, and the complete input must be preserved across UI and communication-channel entry points. Xiaohongshu accepts both App share text containing `xhslink.cn`/`xhslink.com` and website share URLs under `xiaohongshu.com`. Do not require the user to clean the copied message or resend only the URL. A profile URL can download multiple recent works with `profile_limit`; use `"all"` only when the user explicitly requests every accessible item.
 
-The `download` action only produces the original image/video media. It never adds OCR text, extracted audio, or a video transcript. When the user explicitly asks for image text recognition, prefer the host `image_vision.extract_text` capability after download and use this skill's separate `ocr` action only as the local fallback. For video/audio transcription, use `transcribe` only when explicitly requested.
+The `download` action produces original image/video media. For a Douyin or Xiaohongshu image-article post, it also extracts the exact platform-provided title/body without requiring a separate request. If the normalized body has fewer than 200 characters and normal delivery is enabled, return it inline through `text` and `extra.article_delivery`; otherwise deliver `<output-stem>_article.txt` with the images. At exactly 200 characters the text-file path is used. It never treats the copied share-message preview as the full article and never adds OCR text, extracted audio, or a video transcript. When the user explicitly asks to recognize text inside images, prefer the host `image_vision.extract_text` capability after download and use this skill's separate `ocr` action only as the local fallback. For video/audio transcription, use `transcribe` only when explicitly requested.
 
 After success, expose every generated artifact through the task artifact contract when `deliver_to_user` is omitted or `true`. The originating communication adapter can send the file back, and the UI can render its preview/download URL. Host channel size limits still apply. When `deliver_to_user=false`, return generated files under `extra.saved_files`, keep `extra.artifacts` empty, and report the saved path without sending the media.
 
@@ -61,7 +61,7 @@ Transcribe `input_path`, or only extract WAV audio when `extract_audio_only=true
 
 ### `ocr`
 
-Run Tesseract OCR for `input_paths` and save one text artifact. This action is never automatic: the user must explicitly request image text recognition. It is the deterministic local/offline fallback; normal image text recognition should first use the Agent's multimodal `image_vision.extract_text` capability. Its default filename is `image_text_ocr.txt`, while multimodal output defaults to `image_text_ai.txt`.
+Run Tesseract OCR for `input_paths`. This action is never automatic: the user must explicitly request image text recognition. It is the deterministic local/offline fallback; normal image text recognition should first use the Agent's multimodal `image_vision.extract_text` capability. Multiple inputs are merged in input order into one continuous document without image numbers, filenames, source paths, or per-image headings. With normal delivery enabled, recognized text shorter than 200 characters is returned inline through `text` and `extra.recognition_delivery`, while text of 200 or more characters is delivered as `image_text_ocr.txt`. This threshold is local to this skill.
 
 ### `prepare_x`
 
@@ -117,8 +117,11 @@ Success returns `status=ok` and stable `extra` fields:
 - `action`: executed action.
 - `count`: number of returned URLs or generated artifacts.
 - `urls`: direct URLs for `resolve`; otherwise an empty array.
-- `artifacts`: generated files with `path`, `filename`, `mime_type`, and `size_bytes`.
+- `artifacts`: generated files with `path`, `filename`, `mime_type`, and `size_bytes`. Download artifacts can also identify `artifact_role=original_image|original_video|article_text|metadata`; article files include `content_source=platform_post`.
+- `content_bundle`: for `download`, reports `kind=image_article|images|video|files`, separate image/video/article/other-file counts, and `inline_article_count`.
+- `article_delivery`: present only for a delivered platform article shorter than 200 characters; reports `mode=inline`, `content_source=platform_post`, `character_count`, and the inline `text`.
 - `recognition`: for `ocr`, identifies `source=local_ocr` and `engine=tesseract`; each OCR artifact also has `recognition_source=local_ocr`.
+- `recognition_delivery`: present only when this skill's local OCR result is shorter than 200 characters and delivered inline; reports `mode=inline`, source, engine, character count, and text.
 - `output_directory`: runtime-provided task artifact directory.
 - `diagnostics`: bounded stderr diagnostics; never use this field for routing or success detection.
 
@@ -140,16 +143,16 @@ Success returns `status=ok` and stable `extra` fields:
 
 ## Request/Response Examples
 
-### Download a public video
+### Download a Douyin image-article post
 
 Request:
 ```json
-{"request_id":"media-1","args":{"action":"download","share":"https://v.douyin.com/example/","platform":"auto","save_meta":true},"context":{"artifact_output_directory":"/workspace/.agent-runtime/artifacts/task-1","workspace_root":"/workspace","permissions":{"allow_path_outside_workspace":false}},"user_id":1,"chat_id":1}
+{"request_id":"media-1","args":{"action":"download","share":"复制打开抖音，看看这个图文作品 https://v.douyin.com/example/","platform":"auto"},"context":{"artifact_output_directory":"/workspace/.agent-runtime/artifacts/task-1","workspace_root":"/workspace","permissions":{"allow_path_outside_workspace":false}},"user_id":1,"chat_id":1}
 ```
 
 Response:
 ```json
-{"request_id":"media-1","status":"ok","text":"download completed with 2 files.","error_text":null,"extra":{"schema_version":1,"source_skill":"media_download","status":"ok","action":"download","count":2,"urls":[],"artifacts":[{"path":"/workspace/.agent-runtime/artifacts/task-1/video.mp4","filename":"video.mp4","mime_type":"video/mp4","size_bytes":12345},{"path":"/workspace/.agent-runtime/artifacts/task-1/video.json","filename":"video.json","mime_type":"application/json","size_bytes":456}],"output_directory":"/workspace/.agent-runtime/artifacts/task-1","diagnostics":""}}
+{"request_id":"media-1","status":"ok","text":"download completed with 3 files.","error_text":null,"extra":{"schema_version":1,"source_skill":"media_download","status":"ok","action":"download","count":3,"urls":[],"artifacts":[{"path":"/workspace/.agent-runtime/artifacts/task-1/note_01.webp","filename":"note_01.webp","mime_type":"image/webp","size_bytes":12345,"artifact_role":"original_image"},{"path":"/workspace/.agent-runtime/artifacts/task-1/note_02.webp","filename":"note_02.webp","mime_type":"image/webp","size_bytes":23456,"artifact_role":"original_image"},{"path":"/workspace/.agent-runtime/artifacts/task-1/note_article.txt","filename":"note_article.txt","mime_type":"text/plain","size_bytes":456,"artifact_role":"article_text","content_source":"platform_post"}],"content_bundle":{"schema_version":1,"kind":"image_article","image_count":2,"video_count":0,"article_count":1,"other_file_count":0,"inline_article_count":0},"delivery":{"intent":"artifact","deliver_to_user":true},"output_directory":"/workspace/.agent-runtime/artifacts/task-1","diagnostics":""}}
 ```
 
 The `share` field can also be the full copied text, for example `"复制这条消息，打开快手看看 https://v.kuaishou.com/example/ 更多内容"`.

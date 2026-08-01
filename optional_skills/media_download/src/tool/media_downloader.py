@@ -254,6 +254,14 @@ class ImageCandidate:
 
 
 @dataclass(frozen=True)
+class ArticleContent:
+    title: str
+    body: str
+    author: str
+    source: str
+
+
+@dataclass(frozen=True)
 class DouyinProfilePost:
     item_id: str
     create_time: int
@@ -559,9 +567,45 @@ def extract_balanced_json_text(text: str, start: int) -> str | None:
     return None
 
 
+def replace_javascript_undefined(raw: str) -> str:
+    """Convert JavaScript-state `undefined` values without changing quoted text."""
+    output: list[str] = []
+    index = 0
+    quote: str | None = None
+    escaped = False
+    while index < len(raw):
+        char = raw[index]
+        if quote is not None:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            output.append(char)
+            index += 1
+            continue
+        if raw.startswith("undefined", index):
+            before = raw[index - 1] if index else ""
+            after_index = index + len("undefined")
+            after = raw[after_index] if after_index < len(raw) else ""
+            if not (before.isalnum() or before in "_$") and not (after.isalnum() or after in "_$"):
+                output.append("null")
+                index = after_index
+                continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def load_json_text(raw: str) -> Any | None:
     text = html.unescape(raw.strip())
-    candidates = [text]
+    candidates = [text, replace_javascript_undefined(text)]
     try:
         candidates.append(text.encode("utf-8").decode("unicode_escape"))
     except UnicodeDecodeError:
@@ -933,6 +977,21 @@ def extract_xiaohongshu_image_candidates_from_text(
     return sorted(candidates_by_key.values(), key=lambda candidate: candidate.priority)
 
 
+def extract_xiaohongshu_item_image_candidates(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> list[ImageCandidate]:
+    raw_images = payload.get("imageList") or payload.get("image_list") or payload.get("images")
+    if not isinstance(raw_images, list):
+        return []
+    candidates_by_key: dict[str, ImageCandidate] = {}
+    for order, image_payload in enumerate(raw_images):
+        for raw_url in iter_strings(image_payload):
+            add_xiaohongshu_image_candidate(candidates_by_key, raw_url, source, order)
+    return sorted(candidates_by_key.values(), key=lambda candidate: candidate.priority)
+
+
 def add_candidate(
     candidates: list[Candidate],
     seen: set[str],
@@ -1084,6 +1143,129 @@ def find_douyin_aweme_payload_in_html(page_text: str, item_id: str | None) -> di
     if not matches:
         return None
     return max(matches, key=lambda item: len(item))
+
+
+def normalize_article_field(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = html.unescape(value).replace("\u200b", "").replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip() for line in normalized.splitlines()).strip()
+
+
+def article_author(payload: dict[str, Any]) -> str:
+    for key in ("author", "user"):
+        author = payload.get(key)
+        if not isinstance(author, dict):
+            continue
+        for name_key in ("nickname", "nickName", "nick_name", "name"):
+            name = normalize_article_field(author.get(name_key))
+            if name:
+                return name
+    return ""
+
+
+def article_content(
+    payload: dict[str, Any],
+    *,
+    source: str,
+    title_keys: tuple[str, ...],
+    body_keys: tuple[str, ...],
+) -> ArticleContent | None:
+    title = next(
+        (text for key in title_keys if (text := normalize_article_field(payload.get(key)))),
+        "",
+    )
+    body = next(
+        (text for key in body_keys if (text := normalize_article_field(payload.get(key)))),
+        "",
+    )
+    if not title and not body:
+        return None
+    return ArticleContent(title, body, article_author(payload), source)
+
+
+def article_from_douyin_payload(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> ArticleContent | None:
+    return article_content(
+        payload,
+        source=source,
+        title_keys=("title",),
+        body_keys=("desc", "description", "content", "caption"),
+    )
+
+
+def xiaohongshu_note_id(payload: dict[str, Any]) -> str:
+    for key in ("noteId", "note_id", "itemId", "item_id", "id"):
+        value = payload.get(key)
+        if isinstance(value, (str, int)) and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def find_xiaohongshu_note_payload(value: Any, item_id: str | None) -> dict[str, Any] | None:
+    """Find the richest exact Xiaohongshu note and avoid nearby recommendation text."""
+    if not item_id:
+        return None
+    matches = [item for item in iter_dicts(value) if xiaohongshu_note_id(item) == item_id]
+    if not matches:
+        return None
+
+    def payload_score(item: dict[str, Any]) -> tuple[int, int, int]:
+        score = 0
+        if any(normalize_article_field(item.get(key)) for key in ("title", "displayTitle", "display_title")):
+            score += 4
+        if any(normalize_article_field(item.get(key)) for key in ("desc", "description", "content")):
+            score += 8
+        if isinstance(item.get("imageList") or item.get("image_list") or item.get("images"), list):
+            score += 4
+        if isinstance(item.get("user") or item.get("author"), dict):
+            score += 2
+        return score, len(item), len(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
+
+    return max(matches, key=payload_score)
+
+
+def find_xiaohongshu_note_payload_in_html(
+    page_text: str,
+    item_id: str | None,
+) -> dict[str, Any] | None:
+    matches = [
+        payload
+        for value in extract_json_from_html(page_text)
+        if (payload := find_xiaohongshu_note_payload(value, item_id)) is not None
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda item: len(json.dumps(item, ensure_ascii=False)))
+
+
+def article_from_xiaohongshu_payload(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> ArticleContent | None:
+    return article_content(
+        payload,
+        source=source,
+        title_keys=("title", "displayTitle", "display_title"),
+        body_keys=("desc", "description", "content"),
+    )
+
+
+def richer_article(
+    current: ArticleContent | None,
+    candidate: ArticleContent | None,
+) -> ArticleContent | None:
+    if candidate is None:
+        return current
+    if current is None:
+        return candidate
+    current_score = len(current.title) + len(current.body) + len(current.author)
+    candidate_score = len(candidate.title) + len(candidate.body) + len(candidate.author)
+    return candidate if candidate_score > current_score else current
 
 
 def douyin_flag_enabled(value: Any) -> bool:
@@ -1845,7 +2027,7 @@ def gather_douyin_browser_item_candidates(
     timeout: float,
     chrome_path: str,
     use_system_browser_cookies: bool = True,
-) -> tuple[list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     """Read the exact requested Aweme payload from an authenticated browser page."""
     logs: list[str] = []
     token = current_cancellation_token()
@@ -2029,7 +2211,7 @@ def gather_douyin_browser_item_candidates(
 
     if target_payload is None:
         logs.append(f"douyin: exact-item browser found no payload for {item_id}")
-        return [], [], logs
+        return [], [], None, logs
 
     candidates, image_candidates = extract_douyin_item_media_candidates(
         target_payload,
@@ -2048,7 +2230,8 @@ def gather_douyin_browser_item_candidates(
     logs.append(
         f"douyin: exact requested item media type={media_type} count={count} aweme_id={item_id}"
     )
-    return candidates, image_candidates, logs
+    article = article_from_douyin_payload(target_payload, source="douyin.browser-item")
+    return candidates, image_candidates, article, logs
 
 
 def gather_browser_candidates(
@@ -2060,7 +2243,7 @@ def gather_browser_candidates(
     chrome_path: str | None = None,
     require_audio: bool = False,
     use_system_browser_cookies: bool = True,
-) -> tuple[str | None, list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     platform = normalize_platform(platform)
     urls = extract_urls(share_text)
     if not urls:
@@ -2076,13 +2259,14 @@ def gather_browser_candidates(
             "Browser fallback skipped: no Chromium-compatible browser was found. "
             "Install Chrome, Chromium, Edge, Brave, or pass --chrome-path."
         )
-        return extract_platform_id(platform, share_text), [], [], logs
+        return extract_platform_id(platform, share_text), [], [], None, logs
     if cookie and platform != "douyin":
         logs.append("Browser fallback uses a fresh local Chrome profile; --cookie only applies to direct HTTP parsing.")
 
     item_id = extract_platform_id(platform, share_text)
     candidates: list[Candidate] = []
     image_candidates: list[ImageCandidate] = []
+    article: ArticleContent | None = None
     seen_image_urls: set[str] = set()
     seen: set[str] = set()
     target_urls: list[str] = []
@@ -2098,6 +2282,20 @@ def gather_browser_candidates(
             )
             page_text = decode_text(resolved.content, resolved.headers)
             item_id = item_id or extract_platform_id(platform, resolved.url, page_text)
+            if platform == "douyin":
+                payload = find_douyin_aweme_payload_in_html(page_text, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_douyin_payload(payload, source="douyin.browser-preresolve"),
+                    )
+            elif platform == "xiaohongshu":
+                payload = find_xiaohongshu_note_payload_in_html(page_text, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_xiaohongshu_payload(payload, source="xiaohongshu.browser-preresolve"),
+                    )
             if resolved.url not in target_urls:
                 target_urls.append(resolved.url)
         except DouyinDownloadError as exc:
@@ -2111,7 +2309,7 @@ def gather_browser_candidates(
     target_urls = prioritized_target_urls
 
     if platform == "douyin" and item_id:
-        exact_candidates, exact_images, exact_logs = gather_douyin_browser_item_candidates(
+        exact_candidates, exact_images, exact_article, exact_logs = gather_douyin_browser_item_candidates(
             target_urls,
             item_id=item_id,
             cookie=cookie,
@@ -2121,7 +2319,7 @@ def gather_browser_candidates(
         )
         logs.extend(exact_logs)
         if exact_candidates or exact_images:
-            return item_id, exact_candidates, exact_images, logs
+            return item_id, exact_candidates, exact_images, richer_article(article, exact_article), logs
 
     for target_url in target_urls:
         with tempfile.TemporaryDirectory(prefix="media_downloader_chrome_", ignore_cleanup_errors=True) as tmpdir:
@@ -2170,6 +2368,20 @@ def gather_browser_candidates(
                 logs.append(f"{platform}: browser fallback Chrome exited with {completed.returncode}{detail}")
 
             item_id = item_id or extract_platform_id(platform, target_url, completed.stdout)
+            if platform == "douyin":
+                payload = find_douyin_aweme_payload_in_html(completed.stdout, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_douyin_payload(payload, source="douyin.browser-dom"),
+                    )
+            elif platform == "xiaohongshu":
+                payload = find_xiaohongshu_note_payload_in_html(completed.stdout, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_xiaohongshu_payload(payload, source="xiaohongshu.browser-dom"),
+                    )
             if platform in {"douyin", "xiaohongshu"}:
                 image_extractor = (
                     extract_douyin_image_candidates_from_text
@@ -2266,6 +2478,7 @@ def gather_browser_candidates(
         item_id,
         sorted(candidates, key=lambda candidate: candidate.priority),
         sorted(image_candidates, key=lambda candidate: candidate.priority),
+        article,
         logs,
     )
 
@@ -3362,7 +3575,7 @@ def gather_candidates(
     *,
     cookie: str | None = None,
     timeout: float = 20.0,
-) -> tuple[str | None, list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     """Resolve a share message and gather candidate video URLs."""
     urls = extract_urls(share_text)
     if not urls:
@@ -3378,6 +3591,7 @@ def gather_candidates(
     seen_candidates: set[str] = set()
     aweme_id = extract_aweme_id(share_text)
     exact_payload_found = False
+    article: ArticleContent | None = None
 
     for share_url in urls:
         logs.append(f"Resolving {share_url}")
@@ -3388,6 +3602,10 @@ def gather_candidates(
 
         exact_payload = find_douyin_aweme_payload_in_html(page_text, aweme_id)
         if exact_payload is not None:
+            article = richer_article(
+                article,
+                article_from_douyin_payload(exact_payload, source="douyin.page-item"),
+            )
             exact_candidates, exact_images = extract_douyin_item_media_candidates(
                 exact_payload,
                 source="douyin.page-item",
@@ -3447,6 +3665,10 @@ def gather_candidates(
 
             exact_payload = find_douyin_aweme_payload(payload, aweme_id)
             if exact_payload is not None:
+                article = richer_article(
+                    article,
+                    article_from_douyin_payload(exact_payload, source="douyin.detail-item"),
+                )
                 exact_candidates, exact_images = extract_douyin_item_media_candidates(
                     exact_payload,
                     source="douyin.detail-item",
@@ -3486,6 +3708,7 @@ def gather_candidates(
         aweme_id,
         sorted(all_candidates, key=lambda candidate: candidate.priority),
         sorted(image_candidates, key=lambda candidate: candidate.priority),
+        article,
         logs,
     )
 
@@ -3514,7 +3737,9 @@ def extract_platform_id(platform: str, *parts: str) -> str | None:
     return extract_aweme_id(*parts)
 
 
-def gather_youtube_candidates(share_text: str) -> tuple[str | None, list[Candidate], list[ImageCandidate], list[str]]:
+def gather_youtube_candidates(
+    share_text: str,
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     urls = extract_urls(share_text)
     if not urls:
         if share_text.strip().startswith(("http://", "https://")):
@@ -3527,6 +3752,7 @@ def gather_youtube_candidates(share_text: str) -> tuple[str | None, list[Candida
         extract_youtube_id(share_text, url),
         [Candidate(url, "youtube.yt-dlp", 1, referer=platform_referer("youtube"))],
         [],
+        None,
         [f"youtube: using yt-dlp for {url}"],
     )
 
@@ -3537,7 +3763,7 @@ def gather_web_platform_candidates(
     platform: str,
     cookie: str | None = None,
     timeout: float = 20.0,
-) -> tuple[str | None, list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     platform = normalize_platform(platform)
     urls = extract_urls(share_text)
     if not urls:
@@ -3552,6 +3778,8 @@ def gather_web_platform_candidates(
     seen_image_urls: set[str] = set()
     seen_candidates: set[str] = set()
     item_id = extract_platform_id(platform, share_text)
+    article: ArticleContent | None = None
+    exact_xiaohongshu_images_found = False
     headers = {
         "Referer": platform_referer(platform),
         "Origin": platform_referer(platform).rstrip("/"),
@@ -3580,6 +3808,25 @@ def gather_web_platform_candidates(
         logs.append(f"{platform}: final URL: {resolved.url}")
         item_id = item_id or extract_platform_id(platform, resolved.url, page_text)
 
+        if platform == "xiaohongshu":
+            exact_payload = find_xiaohongshu_note_payload_in_html(page_text, item_id)
+            if exact_payload is not None:
+                article = richer_article(
+                    article,
+                    article_from_xiaohongshu_payload(
+                        exact_payload,
+                        source="xiaohongshu.page-item",
+                    ),
+                )
+                exact_images = extract_xiaohongshu_item_image_candidates(
+                    exact_payload,
+                    source="xiaohongshu.page-item.image",
+                )
+                if exact_images:
+                    exact_xiaohongshu_images_found = True
+                    image_candidates = exact_images
+                    seen_image_urls = {candidate.url for candidate in exact_images}
+
         for candidate in extract_platform_candidates_from_html(page_text, platform):
             add_platform_candidate(
                 all_candidates,
@@ -3591,7 +3838,7 @@ def gather_web_platform_candidates(
                 cookie=session_cookie if platform == "tiktok" else candidate.cookie,
                 referer=resolved.url if platform == "tiktok" else candidate.referer,
             )
-        if platform == "xiaohongshu":
+        if platform == "xiaohongshu" and not exact_xiaohongshu_images_found:
             for image_candidate in extract_xiaohongshu_image_candidates_from_text(page_text):
                 if image_candidate.url in seen_image_urls:
                     continue
@@ -3602,6 +3849,7 @@ def gather_web_platform_candidates(
         item_id,
         sorted(all_candidates, key=lambda candidate: candidate.priority),
         sorted(image_candidates, key=lambda candidate: candidate.priority),
+        article,
         logs,
     )
 
@@ -3617,7 +3865,7 @@ def gather_candidates_for_request(
     chrome_path: str | None = None,
     require_audio: bool = False,
     use_system_browser_cookies: bool = True,
-) -> tuple[str, str | None, list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[str, str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     platform = normalize_platform(platform)
     resolved_platform = detect_platform(share_text) if platform == "auto" else platform
     if not resolved_platform:
@@ -3627,11 +3875,15 @@ def gather_candidates_for_request(
         )
 
     if resolved_platform == "youtube":
-        item_id, candidates, image_candidates, logs = gather_youtube_candidates(share_text)
-        return resolved_platform, item_id, candidates, image_candidates, logs
+        item_id, candidates, image_candidates, article, logs = gather_youtube_candidates(share_text)
+        return resolved_platform, item_id, candidates, image_candidates, article, logs
 
     if resolved_platform == "douyin":
-        item_id, candidates, image_candidates, logs = gather_candidates(share_text, cookie=cookie, timeout=timeout)
+        item_id, candidates, image_candidates, article, logs = gather_candidates(
+            share_text,
+            cookie=cookie,
+            timeout=timeout,
+        )
         exact_direct_match = any(
             line.startswith("Matched exact requested item payload")
             for line in logs
@@ -3648,7 +3900,13 @@ def gather_candidates_for_request(
                 )
             else:
                 logs.append("douyin: direct extraction found no candidates, trying browser fallback")
-            browser_item_id, browser_candidates, browser_image_candidates, browser_logs = gather_browser_candidates(
+            (
+                browser_item_id,
+                browser_candidates,
+                browser_image_candidates,
+                browser_article,
+                browser_logs,
+            ) = gather_browser_candidates(
                 share_text,
                 platform=resolved_platform,
                 cookie=cookie,
@@ -3659,13 +3917,14 @@ def gather_candidates_for_request(
             )
             logs.extend(browser_logs)
             item_id = item_id or browser_item_id
+            article = richer_article(article, browser_article)
             if browser_candidates or browser_image_candidates:
                 candidates = browser_candidates
                 image_candidates = browser_image_candidates
-        return resolved_platform, item_id, candidates, image_candidates, logs
+        return resolved_platform, item_id, candidates, image_candidates, article, logs
 
     if resolved_platform in {"kuaishou", "xiaohongshu", "tiktok"}:
-        item_id, candidates, image_candidates, platform_logs = gather_web_platform_candidates(
+        item_id, candidates, image_candidates, article, platform_logs = gather_web_platform_candidates(
             share_text,
             platform=resolved_platform,
             cookie=cookie,
@@ -3673,7 +3932,13 @@ def gather_candidates_for_request(
         )
         if not candidates and not image_candidates and browser_fallback:
             platform_logs.append(f"{resolved_platform}: direct extraction found no candidates, trying browser fallback")
-            browser_item_id, browser_candidates, browser_image_candidates, browser_logs = gather_browser_candidates(
+            (
+                browser_item_id,
+                browser_candidates,
+                browser_image_candidates,
+                browser_article,
+                browser_logs,
+            ) = gather_browser_candidates(
                 share_text,
                 platform=resolved_platform,
                 cookie=cookie,
@@ -3684,9 +3949,10 @@ def gather_candidates_for_request(
             )
             platform_logs.extend(browser_logs)
             item_id = item_id or browser_item_id
+            article = richer_article(article, browser_article)
             candidates = browser_candidates
             image_candidates = browser_image_candidates
-        return resolved_platform, item_id, candidates, image_candidates, platform_logs
+        return resolved_platform, item_id, candidates, image_candidates, article, platform_logs
 
     raise DouyinDownloadError(f"Unsupported platform: {resolved_platform}")
 
@@ -4248,6 +4514,63 @@ def download_image_candidates(
     return saved_paths
 
 
+def article_document(
+    article: ArticleContent,
+    *,
+    platform: str,
+    item_id: str | None,
+    share_text: str,
+) -> str:
+    platform_name = {
+        "douyin": "抖音",
+        "xiaohongshu": "小红书",
+    }.get(normalize_platform(platform), platform)
+    source_urls = extract_urls(share_text)
+    header = [f"平台：{platform_name}"]
+    if article.title:
+        header.insert(0, f"标题：{article.title}")
+    if article.author:
+        header.append(f"作者：{article.author}")
+    if item_id:
+        header.append(f"作品 ID：{item_id}")
+    if source_urls:
+        header.append(f"来源链接：{source_urls[0]}")
+    body = article.body or article.title
+    return "\n".join([*header, "", "正文：", body, ""])
+
+
+def save_article_content(
+    article: ArticleContent,
+    output_dir: Path,
+    *,
+    output_name: str,
+    platform: str,
+    item_id: str | None,
+    share_text: str,
+    overwrite: bool,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{Path(output_name).stem}_article.txt"
+    if output_path.exists() and not overwrite:
+        output_path = unique_output_path(output_path)
+    temporary_path = output_path.with_name(f"{output_path.name}.part")
+    try:
+        temporary_path.write_text(
+            article_document(
+                article,
+                platform=platform,
+                item_id=item_id,
+                share_text=share_text,
+            ),
+            encoding="utf-8",
+        )
+        temporary_path.replace(output_path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    return output_path
+
+
 def candidate_metadata(candidate: Candidate) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "url": candidate.url,
@@ -4691,9 +5014,16 @@ def gather_candidates_for_request_with_retries(
     args: argparse.Namespace,
     share_text: str,
     cookie: str | None,
-) -> tuple[str, str | None, list[Candidate], list[ImageCandidate], list[str]]:
+) -> tuple[str, str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     max_attempts = PARSE_RETRY_COUNT + 1
-    last_result: tuple[str, str | None, list[Candidate], list[ImageCandidate], list[str]] | None = None
+    last_result: tuple[
+        str,
+        str | None,
+        list[Candidate],
+        list[ImageCandidate],
+        ArticleContent | None,
+        list[str],
+    ] | None = None
     for attempt in range(1, max_attempts + 1):
         raise_if_task_cancelled()
         print(f"parse_attempt: {attempt}/{max_attempts}", file=sys.stderr)
@@ -4715,7 +5045,7 @@ def gather_candidates_for_request_with_retries(
             print(f"parse_failed: attempt {attempt}/{max_attempts}: {exc}", file=sys.stderr)
             continue
 
-        platform, _item_id, candidates, image_candidates, _logs = result
+        platform, _item_id, candidates, image_candidates, _article, _logs = result
         if candidates or image_candidates:
             return result
 
@@ -5998,6 +6328,11 @@ def handle_douyin_profile(
         )
 
         candidates, image_candidates = profile_post_media_candidates(post)
+        article = (
+            article_from_douyin_payload(post.payload, source="douyin.profile")
+            if post.payload
+            else None
+        )
         item_logs = [
             f"douyin profile: user={result.username}",
             f"douyin profile: item {index}/{len(result.posts)}",
@@ -6014,8 +6349,10 @@ def handle_douyin_profile(
                     _resolved_item_id,
                     candidates,
                     image_candidates,
+                    resolved_article,
                     resolved_logs,
                 ) = gather_candidates_for_request_with_retries(item_args, item_url, cookie)
+                article = richer_article(article, resolved_article)
                 item_logs.extend(resolved_logs)
 
             media_output_dir = profile_media_output_dir(
@@ -6051,6 +6388,7 @@ def handle_douyin_profile(
                     candidates,
                     image_candidates,
                     item_logs,
+                    article=article,
                 )
             except DouyinDownloadError as exc:
                 print(
@@ -6220,12 +6558,14 @@ def handle_xiaohongshu_profile(
         ]
         candidates: list[Candidate] = []
         image_candidates: list[ImageCandidate] = []
+        article: ArticleContent | None = None
         try:
             (
                 _resolved_platform,
                 _resolved_item_id,
                 candidates,
                 image_candidates,
+                article,
                 resolved_logs,
             ) = gather_candidates_for_request_with_retries(item_args, item_url, cookie)
             item_logs.extend(resolved_logs)
@@ -6262,6 +6602,7 @@ def handle_xiaohongshu_profile(
                 candidates,
                 image_candidates,
                 item_logs,
+                article=article,
             )
         except OperationCancelled:
             raise
@@ -6322,7 +6663,7 @@ def handle_share_text(args: argparse.Namespace, share_text: str, cookie: str | N
             cookie,
         )
 
-    platform, item_id, candidates, image_candidates, logs = gather_candidates_for_request_with_retries(
+    platform, item_id, candidates, image_candidates, article, logs = gather_candidates_for_request_with_retries(
         args,
         share_text,
         cookie,
@@ -6338,6 +6679,7 @@ def handle_share_text(args: argparse.Namespace, share_text: str, cookie: str | N
         candidates,
         image_candidates,
         logs,
+        article=article,
     )
 
 
@@ -6350,6 +6692,8 @@ def handle_resolved_media(
     candidates: list[Candidate],
     image_candidates: list[ImageCandidate],
     logs: list[str],
+    *,
+    article: ArticleContent | None = None,
 ) -> int:
     raise_if_task_cancelled()
 
@@ -6407,7 +6751,7 @@ def handle_resolved_media(
     if image_candidates and not candidates:
         output_dir = Path(args.output_dir).expanduser()
         image_output_name = args.output_name or timestamp_output_stem()
-        saved_paths = download_image_candidates(
+        image_paths = download_image_candidates(
             image_candidates,
             output_dir,
             output_name=image_output_name,
@@ -6416,6 +6760,19 @@ def handle_resolved_media(
             timeout=args.timeout,
             referer=platform_referer(platform),
         )
+        saved_paths = list(image_paths)
+        if article is not None and normalize_platform(platform) in {"douyin", "xiaohongshu"}:
+            saved_paths.append(
+                save_article_content(
+                    article,
+                    output_dir,
+                    output_name=image_output_name,
+                    platform=platform,
+                    item_id=item_id,
+                    share_text=share_text,
+                    overwrite=args.overwrite,
+                )
+            )
         if args.save_meta:
             meta_name = f"{Path(image_output_name).stem}.json"
             save_metadata(output_dir / meta_name, platform, item_id, [], image_candidates, logs)
@@ -6425,7 +6782,7 @@ def handle_resolved_media(
                 print(f"size: {path.stat().st_size / 1024 / 1024:.2f} MiB ({path.stat().st_size} bytes)")
             else:
                 print(path)
-        ocr_images_if_needed(saved_paths, Path(image_output_name).stem, args)
+        ocr_images_if_needed(image_paths, Path(image_output_name).stem, args)
         return 0
 
     if platform == "youtube":
@@ -6469,7 +6826,7 @@ def handle_resolved_media(
                 browser_audio_retry_attempted = True
                 print("audio_candidate_retry: gathering browser candidates with audio", file=sys.stderr)
                 try:
-                    browser_item_id, browser_candidates, _, browser_logs = gather_browser_candidates(
+                    browser_item_id, browser_candidates, _, _, browser_logs = gather_browser_candidates(
                         share_text,
                         platform=platform,
                         cookie=cookie,

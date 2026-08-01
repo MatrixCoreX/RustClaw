@@ -5,6 +5,7 @@ Return JSON only with this shape:
 Field guidance:
 - `pages`: exactly one entry per input image, in the same order as the inputs.
 - `pages[].text`: the visible text for that image. Use an empty string when no text is visible.
+- Keep `pages` as machine-only ordering structure. Do not add image numbers, filenames, source paths, page headings, or other source labels inside `pages[].text`; the runtime merges non-empty entries into one continuous document in input order.
 - `uncertainties`: brief notes for text that is blurred, occluded, cropped, or otherwise uncertain.
 - Do not summarize, translate, correct, complete, or invent text.
 - Do not include visual descriptions unless they are part of visible text.

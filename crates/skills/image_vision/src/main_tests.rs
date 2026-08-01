@@ -444,19 +444,17 @@ fn render_structured_narrative_action_output_keeps_model_primary_text() {
 }
 
 #[test]
-fn extract_text_renders_pages_in_input_order() {
+fn extract_text_merges_pages_in_input_order_without_source_labels() {
     let raw = r#"{
-        "pages":[{"text":"第一页文字"},{"text":"Second page"}],
+        "pages":[{"text":"第一页文字"},{"text":"   "},{"text":"Second page"}],
         "uncertainties":[]
     }"#;
     let parsed =
         parse_structured_narrative_action_output("extract_text", raw).expect("extract text parse");
     let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"));
 
-    assert_eq!(
-        rendered,
-        "===== Image 1 =====\n第一页文字\n\n===== Image 2 =====\nSecond page"
-    );
+    assert_eq!(rendered, "第一页文字\n\nSecond page");
+    assert!(!rendered.contains("Image"));
 }
 
 #[test]
