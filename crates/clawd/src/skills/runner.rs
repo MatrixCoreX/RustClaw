@@ -308,6 +308,180 @@ fn durable_runner_execution_binding(
     })
 }
 
+#[derive(Debug, Clone)]
+struct PinnedRunnerExecutionBinding {
+    value: Value,
+    version: String,
+    manifest_digest: String,
+    package_receipt: String,
+}
+
+fn parse_pinned_runner_execution_binding(
+    value: &Value,
+    expected_adapter_id: &str,
+) -> Result<PinnedRunnerExecutionBinding, String> {
+    const FIELDS: &[&str] = &[
+        "skill_name",
+        "version",
+        "manifest_digest",
+        "receipt_digest",
+        "registry_generation",
+        "registry_generation_digest",
+        "base_registry_digest",
+        "overlay_generation_digest",
+        "policy_digest",
+        "admission_receipt_digest",
+    ];
+    let object = value
+        .as_object()
+        .ok_or_else(|| "pinned skill execution binding is not an object".to_string())?;
+    if object.keys().any(|field| !FIELDS.contains(&field.as_str())) {
+        return Err("pinned skill execution binding has unknown fields".to_string());
+    }
+    let required_string = |field: &str| match object.get(field) {
+        Some(Value::String(value)) if !value.is_empty() && value.as_str() == value.trim() => {
+            Ok(value.clone())
+        }
+        _ => Err(format!(
+            "pinned skill execution binding field is missing: {field}"
+        )),
+    };
+    let optional_string = |field: &str| -> Result<Option<String>, String> {
+        match object.get(field) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(value)) if !value.is_empty() && value.as_str() == value.trim() => {
+                Ok(Some(value.clone()))
+            }
+            _ => Err(format!(
+                "pinned skill execution binding field is invalid: {field}"
+            )),
+        }
+    };
+    let pinned_adapter_id = required_string("skill_name")?;
+    if pinned_adapter_id != expected_adapter_id {
+        return Err("pinned skill execution binding skill mismatch".to_string());
+    }
+    let version = required_string("version")?;
+    let manifest_digest = required_string("manifest_digest")?;
+    let receipt_digest = required_string("receipt_digest")?;
+    let _registry_generation = object
+        .get("registry_generation")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            "pinned skill execution binding registry generation is missing".to_string()
+        })?;
+    optional_string("registry_generation_digest")?;
+    optional_string("base_registry_digest")?;
+    optional_string("overlay_generation_digest")?;
+    optional_string("policy_digest")?;
+    optional_string("admission_receipt_digest")?;
+    Ok(PinnedRunnerExecutionBinding {
+        value: value.clone(),
+        version,
+        manifest_digest,
+        package_receipt: receipt_digest,
+    })
+}
+
+fn package_runtime_resolver(package_root: &Path) -> skill_sdk::SkillRuntimeResolver {
+    skill_sdk::SkillRuntimeResolver::new(package_root)
+}
+
+fn retain_pending_provider_job_version_lease(
+    package_root: &Path,
+    installed_launch: &skill_sdk::SkillVersionPin,
+    response: &Value,
+    now_unix: u64,
+) -> Result<(), String> {
+    let Some(job) = response.pointer("/extra/pending_async_job") else {
+        return Ok(());
+    };
+    let adapter_kind = job
+        .get("poll_adapter")
+        .and_then(|adapter| adapter.get("adapter_kind").or_else(|| adapter.get("kind")))
+        .and_then(Value::as_str)
+        .map(str::trim);
+    if !adapter_kind
+        .is_some_and(crate::async_job_contract::skill_runner_poll_adapter_kind_supported)
+    {
+        return Ok(());
+    }
+    let job_id = job
+        .get("job_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "pending provider job id is missing".to_string())?;
+    let expires_at_unix = job
+        .get("retention_deadline_at")
+        .or_else(|| job.get("expires_at"))
+        .and_then(Value::as_u64)
+        .filter(|expires| *expires > now_unix)
+        .ok_or_else(|| "pending provider job retention deadline is invalid".to_string())?;
+    skill_sdk::InstallReceiptStore::new(package_root)
+        .retain_background_version_lease(
+            &installed_launch.skill_name,
+            &installed_launch.install_root,
+            job_id,
+            expires_at_unix,
+            now_unix,
+        )
+        .map_err(|error| {
+            format!(
+                "pending provider job version lease failed: code={} detail={}",
+                error.code, error.detail
+            )
+        })
+}
+
+pub(crate) fn update_pinned_provider_job_version_lease(
+    workspace_root: &Path,
+    expected_skill_name: &str,
+    execution_binding: &Value,
+    job_id: &str,
+    expires_at_unix: u64,
+    now_unix: u64,
+    release: bool,
+) -> Result<(), String> {
+    let binding = parse_pinned_runner_execution_binding(execution_binding, expected_skill_name)?;
+    let package_root = workspace_root.join("data/skill-packages");
+    let installed_launch = package_runtime_resolver(&package_root)
+        .pin_exact(
+            expected_skill_name,
+            &binding.version,
+            &binding.manifest_digest,
+            &binding.package_receipt,
+        )
+        .map_err(|error| {
+            format!(
+                "pinned provider job package unavailable: code={} detail={}",
+                error.code, error.detail
+            )
+        })?;
+    let store = skill_sdk::InstallReceiptStore::new(&package_root);
+    let result = if release {
+        store.release_background_version_lease(
+            expected_skill_name,
+            &installed_launch.install_root,
+            job_id,
+        )
+    } else {
+        store.retain_background_version_lease(
+            expected_skill_name,
+            &installed_launch.install_root,
+            job_id,
+            expires_at_unix,
+            now_unix,
+        )
+    };
+    result.map_err(|error| {
+        format!(
+            "pinned provider job version lease update failed: code={} detail={}",
+            error.code, error.detail
+        )
+    })
+}
+
 fn write_durable_job_metadata(job_dir: &Path, name: &str, value: &str) -> Result<(), String> {
     crate::local_process_job::write_atomic(&job_dir.join(name), value).map_err(|error| {
         format!("durable_skill_job_metadata_write_failed: field={name} error={error}")
@@ -539,6 +713,29 @@ pub(crate) async fn run_skill_with_runner_once(
     skill_timeout_secs: u64,
     execution_context: Option<&super::SkillExecutionContext>,
 ) -> Result<serde_json::Value, String> {
+    run_skill_with_runner_once_pinned(
+        state,
+        task,
+        canonical_skill_name,
+        args,
+        source,
+        skill_timeout_secs,
+        execution_context,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn run_skill_with_runner_once_pinned(
+    state: &AppState,
+    task: &ClaimedTask,
+    canonical_skill_name: &str,
+    args: &serde_json::Value,
+    source: &str,
+    skill_timeout_secs: u64,
+    execution_context: Option<&super::SkillExecutionContext>,
+    pinned_execution_binding: Option<&Value>,
+) -> Result<serde_json::Value, String> {
     let dispatch_started = std::time::Instant::now();
     let package_root = state.skill_rt.workspace_root.join("data/skill-packages");
     let skill_views = state.get_skill_views_snapshot();
@@ -546,9 +743,19 @@ pub(crate) async fn run_skill_with_runner_once(
         .binding
         .admission_bindings
         .get(canonical_skill_name);
-    let resolver = skill_sdk::SkillRuntimeResolver::new(&package_root);
-    let installed_launch = admission_binding
-        .map_or_else(
+    let resolver = package_runtime_resolver(&package_root);
+    let pinned_execution_binding = pinned_execution_binding
+        .map(|binding| parse_pinned_runner_execution_binding(binding, canonical_skill_name))
+        .transpose()?;
+    let installed_launch = if let Some(binding) = pinned_execution_binding.as_ref() {
+        resolver.pin_exact(
+            canonical_skill_name,
+            &binding.version,
+            &binding.manifest_digest,
+            &binding.package_receipt,
+        )
+    } else {
+        admission_binding.map_or_else(
             || resolver.pin_current(canonical_skill_name),
             |binding| {
                 resolver.pin_exact(
@@ -559,12 +766,19 @@ pub(crate) async fn run_skill_with_runner_once(
                 )
             },
         )
-        .map_err(|error| {
-            format!(
-                "verified skill package unavailable: skill={canonical_skill_name} code={} detail={}",
-                error.code, error.detail
-            )
-        })?;
+    }
+    .map_err(|error| {
+        format!(
+            "verified skill package unavailable: skill={canonical_skill_name} code={} detail={}",
+            error.code, error.detail
+        )
+    })?;
+    let expected_execution_binding = pinned_execution_binding
+        .as_ref()
+        .map(|binding| binding.value.clone())
+        .unwrap_or_else(|| {
+            durable_runner_execution_binding(&installed_launch, &skill_views, admission_binding)
+        });
     let version_lease = skill_sdk::InstallReceiptStore::new(&package_root)
         .acquire_version_lease(canonical_skill_name, &installed_launch.install_root)
         .map_err(|error| {
@@ -859,7 +1073,8 @@ pub(crate) async fn run_skill_with_runner_once(
         || internal_admission_token.is_some()
         || !selected_provider_key_tokens.is_empty()
         || !tokenized_secret_envs.is_empty();
-    let warm_reuse_allowed = !durable_background
+    let warm_reuse_allowed = pinned_execution_binding.is_none()
+        && !durable_background
         && stateless_readonly_reuse_allowed(
             installed_launch.execution_profile,
             installed_launch.sandbox_profile,
@@ -976,16 +1191,15 @@ pub(crate) async fn run_skill_with_runner_once(
         "external_user_id": task.external_user_id,
         "external_chat_id": crate::task_external_chat_id(task),
         "skill_name": canonical_skill_name,
-        "expected_skill_version": installed_launch.version.clone(),
-        "expected_manifest_digest": installed_launch.manifest_digest.clone(),
-        "expected_receipt_digest": installed_launch.receipt_digest.clone(),
-        "expected_registry_generation": skill_views.binding.registry_generation,
-        "expected_registry_generation_digest": skill_views.binding.registry_generation_digest.clone(),
-        "expected_base_registry_digest": skill_views.binding.base_registry_digest.clone(),
-        "expected_overlay_generation_digest": skill_views.binding.overlay_generation_digest.clone(),
-        "expected_policy_digest": admission_binding.and_then(|binding| binding.policy_digest.clone()),
-        "expected_admission_receipt_digest": admission_binding
-            .map(|binding| binding.admission_receipt_digest.clone()),
+        "expected_skill_version": expected_execution_binding["version"].clone(),
+        "expected_manifest_digest": expected_execution_binding["manifest_digest"].clone(),
+        "expected_receipt_digest": expected_execution_binding["receipt_digest"].clone(),
+        "expected_registry_generation": expected_execution_binding["registry_generation"].clone(),
+        "expected_registry_generation_digest": expected_execution_binding["registry_generation_digest"].clone(),
+        "expected_base_registry_digest": expected_execution_binding["base_registry_digest"].clone(),
+        "expected_overlay_generation_digest": expected_execution_binding["overlay_generation_digest"].clone(),
+        "expected_policy_digest": expected_execution_binding["policy_digest"].clone(),
+        "expected_admission_receipt_digest": expected_execution_binding["admission_receipt_digest"].clone(),
         "args": args,
         "context": skill_context
     })
@@ -1107,8 +1321,6 @@ pub(crate) async fn run_skill_with_runner_once(
             sandbox_durable_paths
                 .as_ref()
                 .ok_or_else(|| "durable skill sandbox paths unavailable".to_string())?;
-        let expected_execution_binding =
-            durable_runner_execution_binding(&installed_launch, &skill_views, admission_binding);
         let mut response = start_durable_skill_runner_process(
             cmd,
             &req_line,
@@ -1134,18 +1346,12 @@ pub(crate) async fn run_skill_with_runner_once(
             &sandbox_artifact_output_directory,
             &artifact_output_directory,
         );
-        validate_runner_execution_binding(
+        validate_runner_execution_binding_snapshot(&response, &expected_execution_binding)?;
+        retain_pending_provider_job_version_lease(
+            &package_root,
+            &installed_launch,
             &response,
-            &installed_launch.skill_name,
-            &installed_launch.version,
-            &installed_launch.manifest_digest,
-            &installed_launch.receipt_digest,
-            skill_views.binding.registry_generation,
-            skill_views.binding.registry_generation_digest.as_deref(),
-            skill_views.binding.base_registry_digest.as_deref(),
-            skill_views.binding.overlay_generation_digest.as_deref(),
-            admission_binding.and_then(|binding| binding.policy_digest.as_deref()),
-            admission_binding.map(|binding| binding.admission_receipt_digest.as_str()),
+            crate::now_ts_u64(),
         )?;
         add_runner_dispatch_metadata(&mut response, "durable_background", None);
         tracing::info!(
@@ -1167,17 +1373,18 @@ pub(crate) async fn run_skill_with_runner_once(
             )
         })
     };
-    let warm_key = warm_reuse_allowed.then(|| WarmRunnerKey {
-        scope_token: canonical_skill_name.to_string(),
-        version_pin: installed_launch.clone(),
-        admission_binding: admission_binding.cloned(),
-        registry_generation: skill_views.binding.registry_generation,
-        registry_generation_digest: skill_views.binding.registry_generation_digest.clone(),
-        base_registry_digest: skill_views.binding.base_registry_digest.clone(),
-        overlay_generation_digest: skill_views.binding.overlay_generation_digest.clone(),
-        sandbox_backend: sandbox_backend.to_string(),
-        timeout_seconds: skill_timeout_secs,
-    });
+    let warm_key =
+        (warm_reuse_allowed && pinned_execution_binding.is_none()).then(|| WarmRunnerKey {
+            scope_token: canonical_skill_name.to_string(),
+            version_pin: installed_launch.clone(),
+            admission_binding: admission_binding.cloned(),
+            registry_generation: skill_views.binding.registry_generation,
+            registry_generation_digest: skill_views.binding.registry_generation_digest.clone(),
+            base_registry_digest: skill_views.binding.base_registry_digest.clone(),
+            overlay_generation_digest: skill_views.binding.overlay_generation_digest.clone(),
+            sandbox_backend: sandbox_backend.to_string(),
+            timeout_seconds: skill_timeout_secs,
+        });
     let (mut runner_process, runner_dispatch_mode, runner_fallback_reason, reusable_key) =
         match warm_key {
             Some(key) => match state.skill_rt.runner_pool.checkout(&key) {
@@ -1343,18 +1550,12 @@ pub(crate) async fn run_skill_with_runner_once(
         &sandbox_artifact_output_directory,
         &artifact_output_directory,
     );
-    validate_runner_execution_binding(
+    validate_runner_execution_binding_snapshot(&response, &expected_execution_binding)?;
+    retain_pending_provider_job_version_lease(
+        &package_root,
+        &installed_launch,
         &response,
-        &installed_launch.skill_name,
-        &installed_launch.version,
-        &installed_launch.manifest_digest,
-        &installed_launch.receipt_digest,
-        skill_views.binding.registry_generation,
-        skill_views.binding.registry_generation_digest.as_deref(),
-        skill_views.binding.base_registry_digest.as_deref(),
-        skill_views.binding.overlay_generation_digest.as_deref(),
-        admission_binding.and_then(|binding| binding.policy_digest.as_deref()),
-        admission_binding.map(|binding| binding.admission_receipt_digest.as_str()),
+        crate::now_ts_u64(),
     )?;
     add_runner_dispatch_metadata(&mut response, runner_dispatch_mode, runner_fallback_reason);
     if let Some((key, epoch)) = reusable_key {
@@ -1368,10 +1569,11 @@ pub(crate) async fn run_skill_with_runner_once(
         version = installed_launch.version,
         adapter = installed_launch.adapter.as_token(),
         receipt_digest = installed_launch.receipt_digest,
-        registry_generation = skill_views.binding.registry_generation,
-        registry_generation_digest = skill_views
-            .binding
-            .registry_generation_digest
+        registry_generation = expected_execution_binding["registry_generation"]
+            .as_u64()
+            .unwrap_or_default(),
+        registry_generation_digest = expected_execution_binding["registry_generation_digest"]
+            .as_str()
             .as_deref()
             .unwrap_or("unavailable"),
         duration_ms = dispatch_started.elapsed().as_millis() as u64,
@@ -1386,6 +1588,7 @@ pub(crate) async fn run_skill_with_runner_once(
     Ok(response)
 }
 
+#[cfg(test)]
 fn validate_runner_execution_binding(
     response: &Value,
     expected_skill_name: &str,

@@ -234,6 +234,19 @@ fn allow_test_skills(state: &mut AppState, skills: &[&str]) {
         .collect();
     state.skill_rt.tools_policy =
         Arc::new(ToolsPolicy::from_config(&config).expect("test tools policy"));
+    let (registry, mut enabled) = {
+        let snapshot = state.core.skill_views_snapshot.read().unwrap();
+        (
+            snapshot.registry.clone(),
+            snapshot.skills_list.as_ref().clone(),
+        )
+    };
+    enabled.extend(skills.iter().map(|skill| (*skill).to_string()));
+    *state.core.skill_views_snapshot.write().unwrap() = Arc::new(SkillViewsSnapshot {
+        binding: Default::default(),
+        registry,
+        skills_list: Arc::new(enabled),
+    });
 }
 
 fn init_git_fixture_repo(root: &Path) {

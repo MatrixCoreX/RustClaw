@@ -354,6 +354,18 @@ fn pending_async_job_visible_reply_carries_checkpoint_markers() {
 fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
     let loop_state = LoopState::new();
     let extra = json!({
+        "execution_binding": {
+            "skill_name": "video_generate",
+            "version": "1.2.3",
+            "manifest_digest": "manifest-digest",
+            "receipt_digest": "receipt-digest",
+            "registry_generation": 42,
+            "registry_generation_digest": "generation-digest",
+            "base_registry_digest": "base-digest",
+            "overlay_generation_digest": "overlay-digest",
+            "policy_digest": "policy-digest",
+            "admission_receipt_digest": "admission-digest"
+        },
         "pending_async_job": {
             "job_id": "provider:video_generate:minimax:task-1",
             "status": "accepted",
@@ -398,6 +410,16 @@ fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
     assert_eq!(
         payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]["skill_name"],
         "video_generate"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]["execution_binding"]
+            ["registry_generation"],
+        42
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]["execution_binding"]
+            ["version"],
+        "1.2.3"
     );
     assert_eq!(
         payload["task_lifecycle"]["async_timeout_policy"]["adapter_kind"],

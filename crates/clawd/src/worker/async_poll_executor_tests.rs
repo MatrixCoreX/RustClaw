@@ -850,6 +850,37 @@ async fn skill_poll_adapter_rejects_unknown_adapter_kind() {
     assert!(result.get("error_text").is_none());
 }
 
+#[tokio::test]
+async fn skill_poll_adapter_rejects_checkpoint_binding_skill_drift() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut claimed = async_poll_claimed_dispatch(None);
+    claimed.task_checkpoint.boundary_context["async_poll_adapter"] = json!({
+        "kind": "remote_job_poll",
+        "skill_name": "video_generate",
+        "args": {"action": "poll", "job_id": "job-async-poll-adapter"},
+        "execution_binding": {
+            "skill_name": "replacement_skill",
+            "version": "2.0.0",
+            "manifest_digest": "a".repeat(64),
+            "receipt_digest": "b".repeat(64),
+            "registry_generation": 7,
+            "registry_generation_digest": null,
+            "base_registry_digest": null,
+            "overlay_generation_digest": null,
+            "policy_digest": null,
+            "admission_receipt_digest": null
+        }
+    });
+
+    let result = super::skill_poll_async_adapter_result(&state, &claimed, "job-async-poll-adapter")
+        .await
+        .expect("adapter result");
+
+    assert_eq!(result["error_code"], "skill_poll_adapter_execution_failed");
+    assert!(result.get("text").is_none());
+    assert!(result.get("error_text").is_none());
+}
+
 #[test]
 fn async_poll_adapter_result_rejects_text_leak_and_job_mismatch() {
     let text_leak = async_poll_claimed_dispatch(Some(json!({

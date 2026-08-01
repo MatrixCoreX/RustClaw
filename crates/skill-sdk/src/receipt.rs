@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,15 @@ use crate::{SkillSdkError, SkillSdkResult};
 pub const LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 1;
 pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 2;
 pub const CURRENT_INSTALL_POINTER_SCHEMA_VERSION: u32 = 1;
+const BACKGROUND_VERSION_LEASE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackgroundVersionLeaseRecord {
+    schema_version: u32,
+    job_ref_digest: String,
+    expires_at_unix: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -537,6 +547,139 @@ impl InstallReceiptStore {
         })
     }
 
+    pub fn retain_background_version_lease(
+        &self,
+        skill_name: &str,
+        install_root: &Path,
+        job_ref: &str,
+        expires_at_unix: u64,
+        now_unix: u64,
+    ) -> SkillSdkResult<()> {
+        if job_ref.trim().is_empty() || expires_at_unix <= now_unix {
+            return Err(SkillSdkError::new(
+                "skill_background_lease_invalid",
+                format!("skill={skill_name} expires_at_unix={expires_at_unix}"),
+            ));
+        }
+        let install_dir = self.background_lease_install_dir(skill_name, install_root)?;
+        let job_ref_digest = hex::encode(Sha256::digest(job_ref.trim().as_bytes()));
+        let lease_root = self
+            .skill_root(skill_name)?
+            .join("background-leases")
+            .join(install_dir);
+        fs::create_dir_all(&lease_root)?;
+        atomic_write_json(
+            &lease_root.join(format!("{job_ref_digest}.json")),
+            &BackgroundVersionLeaseRecord {
+                schema_version: BACKGROUND_VERSION_LEASE_SCHEMA_VERSION,
+                job_ref_digest,
+                expires_at_unix,
+            },
+        )
+    }
+
+    pub fn release_background_version_lease(
+        &self,
+        skill_name: &str,
+        install_root: &Path,
+        job_ref: &str,
+    ) -> SkillSdkResult<()> {
+        if job_ref.trim().is_empty() {
+            return Err(SkillSdkError::new(
+                "skill_background_lease_invalid",
+                format!("skill={skill_name}"),
+            ));
+        }
+        let install_dir = self.background_lease_install_dir(skill_name, install_root)?;
+        let job_ref_digest = hex::encode(Sha256::digest(job_ref.trim().as_bytes()));
+        let leases_root = self.skill_root(skill_name)?.join("background-leases");
+        let install_leases = leases_root.join(install_dir);
+        match fs::remove_file(install_leases.join(format!("{job_ref_digest}.json"))) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        }
+        remove_empty_directory(&install_leases)?;
+        remove_empty_directory(&leases_root)?;
+        Ok(())
+    }
+
+    fn background_lease_install_dir(
+        &self,
+        skill_name: &str,
+        install_root: &Path,
+    ) -> SkillSdkResult<String> {
+        let versions_root = self.skill_root(skill_name)?.join("versions");
+        let canonical_versions = fs::canonicalize(&versions_root)?;
+        let canonical_install = fs::canonicalize(install_root)?;
+        if !canonical_install.starts_with(&canonical_versions)
+            || canonical_install.parent() != Some(canonical_versions.as_path())
+        {
+            return Err(SkillSdkError::new(
+                "skill_background_lease_install_root_invalid",
+                canonical_install.display().to_string(),
+            ));
+        }
+        canonical_install
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                SkillSdkError::new(
+                    "skill_background_lease_install_dir_invalid",
+                    canonical_install.display().to_string(),
+                )
+            })
+    }
+
+    fn version_has_active_background_lease(
+        &self,
+        skill_name: &str,
+        install_dir: &str,
+    ) -> SkillSdkResult<bool> {
+        let lease_root = self
+            .skill_root(skill_name)?
+            .join("background-leases")
+            .join(install_dir);
+        if !lease_root.is_dir() {
+            return Ok(false);
+        }
+        let now_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| SkillSdkError::new("system_time_before_epoch", error.to_string()))?
+            .as_secs();
+        let mut active = false;
+        for entry in fs::read_dir(&lease_root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                active = true;
+                continue;
+            }
+            let record = fs::read(entry.path())
+                .ok()
+                .and_then(|raw| serde_json::from_slice::<BackgroundVersionLeaseRecord>(&raw).ok());
+            match record {
+                Some(record)
+                    if record.schema_version == BACKGROUND_VERSION_LEASE_SCHEMA_VERSION
+                        && record.expires_at_unix > now_unix =>
+                {
+                    active = true;
+                }
+                Some(record)
+                    if record.schema_version == BACKGROUND_VERSION_LEASE_SCHEMA_VERSION =>
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+                _ => active = true,
+            }
+        }
+        if !active {
+            remove_empty_directory(&lease_root)?;
+            remove_empty_directory(&self.skill_root(skill_name)?.join("background-leases"))?;
+        }
+        Ok(active)
+    }
+
     fn active_install_path(&self, skill_name: &str) -> SkillSdkResult<PathBuf> {
         Ok(self.skill_root(skill_name)?.join("current.json"))
     }
@@ -611,6 +754,10 @@ impl InstallReceiptStore {
                     continue;
                 }
                 let install_dir = entry.file_name().to_string_lossy().to_string();
+                if self.version_has_active_background_lease(skill_name, &install_dir)? {
+                    retained = true;
+                    continue;
+                }
                 fs::create_dir_all(&leases_root)?;
                 let lease_path = leases_root.join(format!("{install_dir}.lock"));
                 let lease = OpenOptions::new()
@@ -661,6 +808,9 @@ impl InstallReceiptStore {
                 .as_ref()
                 .is_some_and(|pointer| pointer.install_dir == install_dir)
             {
+                continue;
+            }
+            if self.version_has_active_background_lease(skill_name, &install_dir)? {
                 continue;
             }
             fs::create_dir_all(&leases_root)?;
@@ -756,6 +906,21 @@ fn valid_environment_name(value: &str) -> bool {
 fn atomic_write_json(path: &Path, value: &impl Serialize) -> SkillSdkResult<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
     atomic_write(path, &bytes)
+}
+
+fn remove_empty_directory(path: &Path) -> SkillSdkResult<()> {
+    match fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> SkillSdkResult<()> {

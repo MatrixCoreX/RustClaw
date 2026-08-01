@@ -580,3 +580,55 @@ fn runner_resolution_errors_do_not_claim_an_execution_binding() {
     )
     .expect("pre-execution structured failure is allowed without an actual binding");
 }
+
+#[test]
+fn pinned_poll_binding_is_normalized_for_exact_runner_dispatch() {
+    let binding = json!({
+        "skill_name": "fixture_skill",
+        "version": "2.0.0",
+        "manifest_digest": "a".repeat(64),
+        "receipt_digest": "b".repeat(64),
+        "registry_generation": 7,
+        "registry_generation_digest": "c".repeat(64),
+        "base_registry_digest": "f".repeat(64),
+        "overlay_generation_digest": "0".repeat(64),
+        "policy_digest": "d".repeat(64),
+        "admission_receipt_digest": "e".repeat(64)
+    });
+
+    let pinned = parse_pinned_runner_execution_binding(&binding, "fixture_skill")
+        .expect("valid pinned binding");
+
+    assert_eq!(pinned.version, "2.0.0");
+    assert_eq!(pinned.manifest_digest, "a".repeat(64));
+    assert_eq!(pinned.package_receipt, "b".repeat(64));
+    assert_eq!(pinned.value, binding);
+}
+
+#[test]
+fn pinned_poll_binding_rejects_skill_drift_and_unknown_fields() {
+    let mut binding = json!({
+        "skill_name": "fixture_skill",
+        "version": "2.0.0",
+        "manifest_digest": "a".repeat(64),
+        "receipt_digest": "b".repeat(64),
+        "registry_generation": 7,
+        "registry_generation_digest": null,
+        "base_registry_digest": null,
+        "overlay_generation_digest": null,
+        "policy_digest": null,
+        "admission_receipt_digest": null
+    });
+    assert!(
+        parse_pinned_runner_execution_binding(&binding, "replacement_skill")
+            .expect_err("skill drift must fail closed")
+            .contains("skill mismatch")
+    );
+
+    binding["current_pointer"] = json!(true);
+    assert!(
+        parse_pinned_runner_execution_binding(&binding, "fixture_skill")
+            .expect_err("unknown binding fields must fail closed")
+            .contains("unknown fields")
+    );
+}
