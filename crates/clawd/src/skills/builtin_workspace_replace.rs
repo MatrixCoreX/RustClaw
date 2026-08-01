@@ -44,7 +44,7 @@ pub(super) fn execute_workspace_replace_for_root(
     let action = required_token(args, "action")?;
     let root = canonical_workspace_root(workspace_root)?;
     let requested_path = required_nonempty_string(args, "path")?;
-    let target = validate_replace_path(&root, requested_path).map_err(|error| {
+    let target = validate_replace_path(workspace_root, &root, requested_path).map_err(|error| {
         if crate::skills::parse_structured_skill_error(&error)
             .is_some_and(|parsed| parsed.error_code == "invalid_patch_path")
         {
@@ -163,19 +163,26 @@ pub(super) fn execute_workspace_replace_for_root(
     encode_result(result)
 }
 
-fn validate_replace_path(root: &Path, requested_path: &str) -> Result<PathBuf, String> {
+fn validate_replace_path(
+    configured_root: &Path,
+    canonical_root: &Path,
+    requested_path: &str,
+) -> Result<PathBuf, String> {
     let requested = Path::new(requested_path);
     if !requested.is_absolute() {
-        return validate_relative_patch_path(root, requested_path);
+        return validate_relative_patch_path(canonical_root, requested_path);
     }
 
+    // Accept the configured root spelling and its canonical spelling, then run
+    // the same component-by-component symlink and traversal checks either way.
     let relative = requested
-        .strip_prefix(root)
+        .strip_prefix(canonical_root)
+        .or_else(|_| requested.strip_prefix(configured_root))
         .map_err(|_| super::builtin_workspace_patch::invalid_path_error(requested_path))?;
     let relative = relative
         .to_str()
         .ok_or_else(|| super::builtin_workspace_patch::invalid_path_error(requested_path))?;
-    validate_relative_patch_path(root, relative)
+    validate_relative_patch_path(canonical_root, relative)
 }
 
 fn prepare_replacement(

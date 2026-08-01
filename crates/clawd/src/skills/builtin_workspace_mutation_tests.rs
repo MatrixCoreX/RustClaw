@@ -137,6 +137,39 @@ fn existing_file_write_can_be_rewound_with_compensation_evidence() {
     assert_eq!(fs::read_to_string(path).expect("restored file"), "before\n");
 }
 
+#[cfg(unix)]
+#[test]
+fn configured_workspace_root_alias_rebases_targets_to_the_canonical_root() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = TestWorkspace::new("configured-root-alias-target");
+    let alias_parent = TestWorkspace::new("configured-root-alias-parent");
+    let alias_root = alias_parent.path().join("workspace");
+    symlink(workspace.path(), &alias_root).expect("create configured workspace alias");
+    let target = alias_root.join("notes.txt");
+    fs::write(workspace.path().join("notes.txt"), "before").expect("seed target");
+
+    let output = run_checkpointed_workspace_mutation(
+        &alias_root,
+        "task-configured-root-alias",
+        "write_text",
+        &target,
+        || fs::write(&target, "after").map_err(|error| error.to_string()),
+    )
+    .expect("write through configured workspace alias");
+    assert_eq!(
+        fs::read_to_string(workspace.path().join("notes.txt")).expect("changed target"),
+        "after"
+    );
+
+    rewind_structured_mutation(&alias_root, &checkpoint_id(&output))
+        .expect("rewind through configured workspace alias");
+    assert_eq!(
+        fs::read_to_string(workspace.path().join("notes.txt")).expect("restored target"),
+        "before"
+    );
+}
+
 #[test]
 fn created_file_rewind_removes_empty_created_parents() {
     let workspace = TestWorkspace::new("created-file");
