@@ -22,7 +22,7 @@
 - 无专用配置、账户、API key、登录态或外部服务依赖。
 
 ## Actions (from interface)
-- `query`：查询一个公历日期的老黄历信息。`lookup` 是仅供旧调用兼容的等价 action；新规划统一使用 `query`。
+- `query`：查询一个公历日期的老黄历信息。
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -38,7 +38,7 @@
 ## Error Contract (from interface)
 - `invalid_input`：输入不是有效的 JSONL 请求。
 - `invalid_arguments`：`args` 或字段类型错误。
-- `unsupported_action`：action 不是 `query`/`lookup`。
+- `unsupported_action`：action 不是 `query`。
 - `invalid_date`：日期格式、日期值或偏移结果无效。
 - `ambiguous_date`：同时提供 `date` 与日期分量。
 - `incomplete_date`：日期分量不完整。

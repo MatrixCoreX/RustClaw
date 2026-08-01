@@ -69,3 +69,14 @@ fn component_date_requires_all_three_fields() {
     assert_eq!(response.status, "error");
     assert_eq!(response.extra["error_code"], "incomplete_date");
 }
+
+#[test]
+fn rejects_noncanonical_action() {
+    let response = handle_line(&request(json!({"action": "lookup"})));
+    assert_eq!(response.status, "error");
+    assert_eq!(response.extra["error_code"], "unsupported_action");
+    assert_eq!(
+        response.extra["message_key"],
+        "skill.chinese_almanac.unsupported_action"
+    );
+}
