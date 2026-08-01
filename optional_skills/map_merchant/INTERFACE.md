@@ -11,6 +11,9 @@
 - 成功响应的 `text` 是 `message_key=...` 机器 fallback；自然语言推荐说明由 finalizer/i18n/LLM 根据 `extra` 渲染。
 - 成功响应会返回结构化候选列表、`reason_codes`、评分/距离/价格事实，以及可供通信端转换为按钮的导航链接行。
 - `preview_recommend` 可离线规范化 provider、中心点、关键词、半径、排序和数量，并报告 provider 配置就绪度；它不调用地图 API。
+- 地图 provider 凭据只从宿主环境加载：高德使用 `AMAP_API_KEY`；Google 优先使用
+  `GOOGLE_MAPS_API_KEY`，其次使用 `GOOGLE_PLACES_API_KEY`。`configs/map_merchant.toml`
+  只保存非敏感选项，不接受 API key。
 
 ## Actions
 - `preview_recommend`：provider-free 商户推荐请求预览。
@@ -80,5 +83,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"map-3","status":"error","text":"","extra":{"schema_version":1,"source_skill":"map_merchant","status":"error","error_code":"provider_api_key_missing","message_key":"skill.map_merchant.provider_api_key_missing","retryable":false},"error_text":"code=provider_api_key_missing provider=google config=configs/map_merchant.toml"}
+{"request_id":"map-3","status":"error","text":"","extra":{"schema_version":1,"source_skill":"map_merchant","status":"error","error_code":"provider_api_key_missing","message_key":"skill.map_merchant.provider_api_key_missing","retryable":false},"error_text":"code=provider_api_key_missing provider=google credential_env=GOOGLE_MAPS_API_KEY|GOOGLE_PLACES_API_KEY"}
 ```

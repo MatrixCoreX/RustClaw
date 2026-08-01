@@ -868,9 +868,13 @@ fn ensure_provider_ready(provider: MapProvider, cfg: &RuntimeConfig) -> Result<(
         ));
     }
     if p.api_key.trim().is_empty() {
+        let credential_env = match provider {
+            MapProvider::Amap => "AMAP_API_KEY",
+            MapProvider::Google => "GOOGLE_MAPS_API_KEY|GOOGLE_PLACES_API_KEY",
+        };
         return Err(format!(
-            "code=provider_api_key_missing provider={} config=configs/map_merchant.toml",
-            provider_token(provider)
+            "code=provider_api_key_missing provider={} credential_env={credential_env}",
+            provider_token(provider),
         ));
     }
     Ok(())

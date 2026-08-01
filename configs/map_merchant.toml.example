@@ -19,10 +19,8 @@ default_keyword = "商户"
 
 [map_merchant.amap]
 enabled = true
-# 高德 Web 服务 API key（在高德开放平台申请）
-api_key = "REPLACE_ME_AMAP_WEB_API_KEY"
+# 凭据只从环境变量 AMAP_API_KEY 加载，不写入本文件。
 
 [map_merchant.google]
 enabled = false
-# Google Maps Places API key（在 Google Cloud Console 申请）
-api_key = ""
+# 凭据只从 GOOGLE_MAPS_API_KEY 或 GOOGLE_PLACES_API_KEY 加载。

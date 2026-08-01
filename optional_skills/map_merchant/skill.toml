@@ -64,7 +64,7 @@ subprocess = false
 package_install = false
 privilege_escalation = false
 external_publish = false
-credential_refs = []
+credential_refs = ["amap_api_key", "google_maps_api_key", "google_places_api_key"]
 
 [capability_request.artifact_contract]
 kinds = []

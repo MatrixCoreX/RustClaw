@@ -587,7 +587,15 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("image_edit", &["fs.write", "llm", "net"]),
         ("list_dir", &["fs.read"]),
         ("log_analyze", &["fs.read"]),
-        ("map_merchant", &["net"]),
+        (
+            "map_merchant",
+            &[
+                "net",
+                "secrets.amap_api_key",
+                "secrets.google_maps_api_key",
+                "secrets.google_places_api_key",
+            ],
+        ),
         ("make_dir", &["fs.write"]),
         ("media_download", &["exec", "fs.read", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
@@ -651,7 +659,15 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("kb", &["fs.read", "fs.write"]),
         ("list_dir", &["fs.read"]),
         ("log_analyze", &["fs.read"]),
-        ("map_merchant", &["net"]),
+        (
+            "map_merchant",
+            &[
+                "net",
+                "secrets.amap_api_key",
+                "secrets.google_maps_api_key",
+                "secrets.google_places_api_key",
+            ],
+        ),
         ("make_dir", &["fs.write"]),
         ("media_download", &["exec", "fs.read", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
@@ -961,9 +977,26 @@ fn provision_secret_envs_matches_manifest_expectation() {
     let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+        (
+            "map_merchant",
+            vec![
+                "AMAP_API_KEY",
+                "GOOGLE_MAPS_API_KEY",
+                "GOOGLE_PLACES_API_KEY",
+            ],
+        ),
     ]);
-    let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> =
-        HashMap::from([("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"])]);
+    let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
+        ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+        (
+            "map_merchant",
+            vec![
+                "AMAP_API_KEY",
+                "GOOGLE_MAPS_API_KEY",
+                "GOOGLE_PLACES_API_KEY",
+            ],
+        ),
+    ]);
 
     let registry_paths = [
         workspace_root().join("configs/skills_registry.toml"),

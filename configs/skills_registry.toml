@@ -1483,14 +1483,14 @@ prompt_file = "prompts/skills/map_merchant.md"
 output_kind = "text"
 description = "Recommend nearby merchants or places from structured location and preference inputs."
 description_zh = "根据位置和偏好推荐附近商户或地点。"
-capabilities = ["net"]
+capabilities = ["net", "secrets.amap_api_key", "secrets.google_maps_api_key", "secrets.google_places_api_key"]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
 retryable = true
 planner_capabilities = [
   { name = "map.preview_merchant_recommend", action = "preview_recommend", effect = "observe", required = ["city|district|address|place|location|q|latitude+longitude"], optional = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
-  { name = "map.merchant_recommend", action = "recommend", effect = "observe", required = ["city|district|address|place|location|q|latitude+longitude"], optional = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "map.merchant_recommend", action = "recommend", effect = "observe", required = ["city|district|address|place|location|q|latitude+longitude"], optional = ["provider", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "radius", "sort_by", "top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_recommend", "recommend"] }, provider = { type = "string" }, city = { type = "string" }, district = { type = "string" }, address = { type = "string" }, place = { type = "string" }, location = { type = "string" }, q = { type = "string" }, keyword = { type = "string" }, category = { type = "string" }, cuisine = { type = "string" }, price_level = { anyOf = [ { type = "string" }, { type = "number" } ] }, max_distance_meters = { type = "number", minimum = 0 }, radius = { type = "number", minimum = 0 }, sort_by = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 10 }, latitude = { description = "Optional latitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -90, maximum = 90 }, { type = "null" } ] }, longitude = { description = "Optional longitude supplied by the user. Use null or omit when absent; never invent a placeholder coordinate.", anyOf = [ { type = "number", minimum = -180, maximum = 180 }, { type = "null" } ] } } }
 
