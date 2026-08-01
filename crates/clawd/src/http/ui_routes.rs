@@ -423,6 +423,7 @@ include!("ui_routes/config_helpers.rs");
 include!("ui_routes/agent_config.rs");
 include!("ui_routes/host_system.rs");
 include!("ui_routes/host_dependencies.rs");
+include!("ui_routes/managed_runtime_assets.rs");
 include!("ui_routes/nni_internal_llm.rs");
 
 #[cfg(test)]

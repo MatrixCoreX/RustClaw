@@ -921,7 +921,7 @@ async fn skill_store_requires_explicit_choice_before_deleting_private_data() {
         state
             .core
             .skill_storage
-            .data_state("crypto")
+            .data_state("crypto", "sqlite")
             .expect("crypto private data state"),
         "empty"
     );
@@ -1109,7 +1109,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
                 state
                     .core
                     .skill_storage
-                    .data_state(&skill_name)
+                    .data_state(&skill_name, &entry.storage.as_ref().expect("storage").kind)
                     .expect("retained private data"),
                 "present"
             );
@@ -1165,7 +1165,7 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
                 state
                     .core
                     .skill_storage
-                    .data_state(&skill_name)
+                    .data_state(&skill_name, &entry.storage.as_ref().expect("storage").kind)
                     .expect("deleted private data"),
                 "empty"
             );
@@ -1245,9 +1245,9 @@ fn skill_store_rejects_install_when_registry_excludes_the_host_platform() {
     } else {
         "linux"
     };
-    let weather_header = "name = \"weather\"\nenabled = true\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"linux\", \"macos\"]";
+    let weather_header = "name = \"weather\"\nenabled = false\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"linux\", \"macos\"]";
     let unsupported_header = format!(
-        "name = \"weather\"\nenabled = true\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"{unsupported_os}\"]"
+        "name = \"weather\"\nenabled = false\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"{unsupported_os}\"]"
     );
     assert!(
         raw.contains(weather_header),

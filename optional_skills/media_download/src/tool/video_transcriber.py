@@ -33,6 +33,14 @@ DEFAULT_FUNASR_PUNC_MODEL = None
 DEFAULT_FUNASR_BATCH_SIZE_S = 60
 DEFAULT_FUNASR_RICH_TEXT = False
 DEFAULT_SIMPLIFY_CHINESE = True
+FUNASR_MANAGED_MODEL_PATHS = {
+    DEFAULT_FUNASR_MODEL: ("iic", "SenseVoiceSmall"),
+    DEFAULT_FUNASR_VAD_MODEL: ("iic", "speech_fsmn_vad_zh-cn-16k-common-pytorch"),
+    "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch": (
+        "iic",
+        "speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    ),
+}
 FUNASR_RICH_TAG_RE = re.compile(r"<\|[^|>]+?\|>")
 FUNASR_RICH_MARKER_RE = re.compile(
     "["
@@ -622,17 +630,23 @@ def transcribe_audio_with_funasr(
     except ImportError as exc:
         raise VideoTranscribeError(
             "FunASR is not installed in the current Python environment. "
-            "Install it with: python -m pip install funasr modelscope torch torchaudio"
+            "Install it with: python -m pip install funasr modelscope torch"
         ) from exc
 
     model_kwargs: dict[str, object] = {
-        "model": model,
+        "model": resolve_managed_funasr_model(model),
         "device": device,
+        "disable_update": True,
+        # Local paths still trigger ModelScope's latest-version HTTP check
+        # unless this is disabled explicitly. Runtime network is intentionally
+        # unavailable for this skill after installation.
+        "check_latest": False,
     }
     normalized_vad_model = normalize_optional_model(vad_model)
     normalized_punc_model = normalize_optional_model(punc_model)
     if normalized_vad_model:
-        model_kwargs["vad_model"] = normalized_vad_model
+        model_kwargs["vad_model"] = resolve_managed_funasr_model(normalized_vad_model)
+        model_kwargs["vad_kwargs"] = {"check_latest": False}
     if normalized_punc_model:
         model_kwargs["punc_model"] = normalized_punc_model
     if verbose:
@@ -659,6 +673,25 @@ def transcribe_audio_with_funasr(
         text = convert_chinese_to_simplified(text)
     transcript_path.write_text(text + "\n", encoding="utf-8")
     return transcript_path
+
+
+def resolve_managed_funasr_model(model: str) -> str:
+    if Path(model).is_dir():
+        return model
+    relative = FUNASR_MANAGED_MODEL_PATHS.get(model)
+    cache = os.environ.get("MODELSCOPE_CACHE", "").strip()
+    if relative is None or not cache:
+        return model
+    candidate = Path(cache).joinpath(*relative)
+    if candidate.is_dir() and (candidate / "model.pt").is_file() and (
+        (candidate / "config.yaml").is_file()
+        or (candidate / "configuration.json").is_file()
+    ):
+        return str(candidate)
+    raise VideoTranscribeError(
+        f"Installed FunASR model is missing or incomplete: {candidate}. "
+        "Repair or reinstall the media skill before transcription."
+    )
 
 
 def transcribe_audio_with_engine(

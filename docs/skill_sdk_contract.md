@@ -23,6 +23,15 @@ to omit dependencies. Only an unsupported platform or a measured memory/disk
 shortfall may stop a complete installation. System toolchains and shared tools
 remain installed when a skill is removed.
 
+`install.runtime_assets` follows the same host-owned-ID rule for large local
+resources such as speech models. Runtime assets require `storage.kind =
+"directory"`; the host prepares them during installation inside that skill's
+private data directory. The runner exposes only that directory as writable,
+and removal follows the explicit private-data retention choice instead of
+deleting shared user caches or granting write access to the user's home.
+Host catalog entries pin provider revisions, and a failed resource preparation
+rolls the mutable package pointer back before the skill can be enabled.
+
 Every local process uses `agent-jsonl-v1`: one JSON request record on stdin
 and exactly one JSON response record on stdout. Diagnostics belong on stderr.
 The response must echo `request_id`; errors require `error_text` plus stable

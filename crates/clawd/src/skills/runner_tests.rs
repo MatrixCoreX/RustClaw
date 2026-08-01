@@ -111,6 +111,7 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
         storage_kind: "sqlite",
         database_path: storage_directory.join("state.db").display().to_string(),
         database_busy_timeout_ms: 5_000,
+        directory_path: None,
     };
 
     let mapped = map_storage_descriptor_to_sandbox(Some(descriptor), Some(&sandbox_storage))
@@ -125,6 +126,30 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
         sandbox_target_for_source(Some(&sources[0]), &sources, &targets),
         Some(std::path::PathBuf::from("/run/agent-runtime-writable/0"))
     );
+}
+
+#[test]
+fn declared_directory_storage_uses_only_its_mapped_sandbox_directory() {
+    let host_storage = std::path::PathBuf::from("/runtime/skill-data/media_download");
+    let sandbox_storage = std::path::PathBuf::from("/run/agent-runtime-writable/3");
+    let descriptor = crate::skill_storage::SkillStorageDescriptor {
+        schema_version: 1,
+        skill_name: "media_download".to_string(),
+        storage_kind: "directory",
+        database_path: String::new(),
+        database_busy_timeout_ms: 0,
+        directory_path: Some(host_storage.display().to_string()),
+    };
+
+    let mapped = map_storage_descriptor_to_sandbox(Some(descriptor), Some(&sandbox_storage))
+        .expect("map directory descriptor")
+        .expect("directory descriptor");
+
+    assert_eq!(
+        mapped.directory_path.as_deref(),
+        Some("/run/agent-runtime-writable/3")
+    );
+    assert_eq!(mapped.database_path, "");
 }
 
 #[test]

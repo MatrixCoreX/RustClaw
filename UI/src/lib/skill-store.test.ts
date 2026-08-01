@@ -69,6 +69,8 @@ test("renders structured store errors in the selected UI language", () => {
   assert.match(skillStoreErrorMessage("skill_store_host_dependency_admin_required", zh), /管理员账号/);
   assert.match(skillStoreErrorMessage("skill_store_host_dependency_unknown", en), /does not recognize/i);
   assert.match(skillStoreErrorMessage("skill_store_host_dependency_install_failed", zh), /系统依赖/);
+  assert.match(skillStoreErrorMessage("skill_store_runtime_asset_unknown", en), /local resource/i);
+  assert.match(skillStoreErrorMessage("skill_store_runtime_asset_install_failed", zh), /技能未启用/);
   assert.match(skillStoreErrorMessage("skill_store_resource_insufficient", en), /free disk space/i);
   assert.match(skillStoreErrorMessage("future_error_code", en), /try again/i);
 });

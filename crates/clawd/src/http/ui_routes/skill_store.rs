@@ -538,7 +538,12 @@ async fn get_skill_store_catalog(
             let (config_files, existing_config_files) = skill_config_state(&state, &name);
             let storage = registry.storage(&name);
             let private_data_state = storage
-                .map(|_| state.core.skill_storage.data_state(&name))
+                .map(|declaration| {
+                    state
+                        .core
+                        .skill_storage
+                        .data_state(&name, &declaration.kind)
+                })
                 .transpose()
                 .ok()
                 .flatten();
@@ -580,6 +585,9 @@ async fn get_skill_store_catalog(
                 "host_dependencies": manifest
                     .as_ref()
                     .map(|value| &value.install.host_dependencies),
+                "runtime_assets": manifest
+                    .as_ref()
+                    .map(|value| &value.install.runtime_assets),
                 "supported_os": manifest.as_ref().map(|value| &value.package.supported_os),
                 "supported_arch": manifest.as_ref().map(|value| &value.package.supported_arch),
                 "package_version": manifest.as_ref().map(|value| value.package.version.as_str()),

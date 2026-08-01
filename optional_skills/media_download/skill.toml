@@ -23,7 +23,8 @@ lifecycle_scripts = false
 options = { python = ">=3.13" }
 
 [install]
-host_dependencies = ["ffmpeg", "tesseract", "tesseract_chi_sim", "chromium"]
+host_dependencies = ["git", "ffmpeg", "tesseract", "tesseract_chi_sim", "chromium"]
+runtime_assets = ["modelscope_sensevoice_small", "modelscope_fsmn_vad"]
 
 [install.resources]
 min_memory_mb = 4096
@@ -45,7 +46,7 @@ runtime_network = false
 inherit_credentials = false
 
 [storage]
-kind = "none"
+kind = "directory"
 schema_version = 1
 migration_owner = "media_download"
 

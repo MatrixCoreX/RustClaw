@@ -14,6 +14,8 @@ pub(crate) struct SkillStorageDescriptor {
     pub(crate) storage_kind: &'static str,
     pub(crate) database_path: String,
     pub(crate) database_busy_timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) directory_path: Option<String>,
 }
 
 impl SkillStorageResolver {
@@ -78,6 +80,19 @@ impl SkillStorageResolver {
         Ok(path)
     }
 
+    pub(crate) fn directory_path(&self, skill_name: &str) -> anyhow::Result<PathBuf> {
+        validate_skill_name(skill_name)?;
+        let path = self.root.join(skill_name);
+        std::fs::create_dir_all(&path)?;
+        apply_private_directory_permissions(&path)?;
+        Ok(path)
+    }
+
+    pub(crate) fn resolved_directory_path(&self, skill_name: &str) -> anyhow::Result<PathBuf> {
+        validate_skill_name(skill_name)?;
+        Ok(self.root.join(skill_name))
+    }
+
     pub(crate) fn resolved_database_path(&self, skill_name: &str) -> anyhow::Result<PathBuf> {
         validate_skill_name(skill_name)?;
         Ok(self.root.join(skill_name).join("state.db"))
@@ -95,6 +110,23 @@ impl SkillStorageResolver {
             storage_kind: "sqlite",
             database_path: path.display().to_string(),
             database_busy_timeout_ms: self.busy_timeout_ms,
+            directory_path: None,
+        })
+    }
+
+    pub(crate) fn directory_descriptor(
+        &self,
+        skill_name: &str,
+        schema_version: u32,
+    ) -> anyhow::Result<SkillStorageDescriptor> {
+        let path = self.directory_path(skill_name)?;
+        Ok(SkillStorageDescriptor {
+            schema_version,
+            skill_name: skill_name.to_string(),
+            storage_kind: "directory",
+            database_path: String::new(),
+            database_busy_timeout_ms: 0,
+            directory_path: Some(path.display().to_string()),
         })
     }
 }

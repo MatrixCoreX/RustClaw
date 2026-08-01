@@ -93,6 +93,19 @@ impl SkillStorageRuntime {
         self.resolver.descriptor(skill_name, schema_version)
     }
 
+    pub(crate) fn directory_descriptor(
+        &self,
+        skill_name: &str,
+        schema_version: u32,
+    ) -> anyhow::Result<SkillStorageDescriptor> {
+        self.resolver
+            .directory_descriptor(skill_name, schema_version)
+    }
+
+    pub(crate) fn directory_path(&self, skill_name: &str) -> anyhow::Result<PathBuf> {
+        self.resolver.directory_path(skill_name)
+    }
+
     pub(crate) fn take_kb_user_data(&self, user_key: &str) -> anyhow::Result<KbUserDataSnapshot> {
         ownership::take_user_data(self.pool_for("kb")?, Some(user_key))
     }
@@ -113,48 +126,92 @@ impl SkillStorageRuntime {
         ownership::rebind_user_key(self.pool_for("kb")?, old_user_key, new_user_key)
     }
 
-    pub(crate) fn data_state(&self, skill_name: &str) -> anyhow::Result<&'static str> {
-        if let (Some(owner), Some(pool)) =
-            (data_owners::owner(skill_name), self.pools.get(skill_name))
-        {
-            return owner.data_state(pool);
+    pub(crate) fn data_state(
+        &self,
+        skill_name: &str,
+        storage_kind: &str,
+    ) -> anyhow::Result<&'static str> {
+        match storage_kind {
+            "sqlite" => {
+                if let (Some(owner), Some(pool)) =
+                    (data_owners::owner(skill_name), self.pools.get(skill_name))
+                {
+                    return owner.data_state(pool);
+                }
+                let database_path = self.resolver.resolved_database_path(skill_name)?;
+                Ok(
+                    if sqlite_storage_files(&database_path)
+                        .iter()
+                        .any(|path| path.is_file())
+                    {
+                        "present"
+                    } else {
+                        "empty"
+                    },
+                )
+            }
+            "directory" => {
+                let directory = self.resolver.resolved_directory_path(skill_name)?;
+                Ok(
+                    if directory.is_dir() && std::fs::read_dir(directory)?.next().is_some() {
+                        "present"
+                    } else {
+                        "empty"
+                    },
+                )
+            }
+            other => anyhow::bail!("skill_storage_kind_invalid kind={other}"),
         }
-        Ok(
-            if self.resolver.resolved_database_path(skill_name)?.is_file() {
-                "present"
-            } else {
-                "empty"
-            },
-        )
     }
 
     pub(crate) fn clear_skill_data(
         &self,
         skill_name: &str,
+        storage_kind: &str,
     ) -> anyhow::Result<SkillStorageDataRemoval> {
-        if let (Some(owner), Some(pool)) =
-            (data_owners::owner(skill_name), self.pools.get(skill_name))
-        {
-            return owner.clear(pool);
-        }
-        let database_path = self.resolver.resolved_database_path(skill_name)?;
-        let mut files_deleted = 0usize;
-        for path in sqlite_storage_files(&database_path) {
-            if path.is_file() {
-                std::fs::remove_file(&path)?;
-                files_deleted += 1;
+        match storage_kind {
+            "sqlite" => {
+                if let (Some(owner), Some(pool)) =
+                    (data_owners::owner(skill_name), self.pools.get(skill_name))
+                {
+                    return owner.clear(pool);
+                }
+                let database_path = self.resolver.resolved_database_path(skill_name)?;
+                let mut files_deleted = 0usize;
+                for path in sqlite_storage_files(&database_path) {
+                    if path.is_file() {
+                        std::fs::remove_file(&path)?;
+                        files_deleted += 1;
+                    }
+                }
+                if let Some(directory) = database_path.parent() {
+                    if directory.is_dir() && std::fs::read_dir(directory)?.next().is_none() {
+                        std::fs::remove_dir(directory)?;
+                    }
+                }
+                Ok(SkillStorageDataRemoval {
+                    data_present_before: files_deleted > 0,
+                    rows_deleted: 0,
+                    files_deleted,
+                })
             }
-        }
-        if let Some(directory) = database_path.parent() {
-            if directory.is_dir() && std::fs::read_dir(directory)?.next().is_none() {
-                std::fs::remove_dir(directory)?;
+            "directory" => {
+                let directory = self.resolver.resolved_directory_path(skill_name)?;
+                let files_deleted = if directory.is_dir() {
+                    let count = count_files(&directory)?;
+                    std::fs::remove_dir_all(&directory)?;
+                    count
+                } else {
+                    0
+                };
+                Ok(SkillStorageDataRemoval {
+                    data_present_before: files_deleted > 0,
+                    rows_deleted: 0,
+                    files_deleted,
+                })
             }
+            other => anyhow::bail!("skill_storage_kind_invalid kind={other}"),
         }
-        Ok(SkillStorageDataRemoval {
-            data_present_before: files_deleted > 0,
-            rows_deleted: 0,
-            files_deleted,
-        })
     }
 }
 
@@ -168,6 +225,23 @@ fn sqlite_storage_files(database_path: &Path) -> [PathBuf; 3] {
         database_path.with_file_name(format!("{file_name}-wal")),
         database_path.with_file_name(format!("{file_name}-shm")),
     ]
+}
+
+fn count_files(root: &Path) -> anyhow::Result<usize> {
+    let mut count = 0usize;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    Ok(count)
 }
 
 fn open_pool(
