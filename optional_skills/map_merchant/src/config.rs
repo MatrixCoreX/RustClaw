@@ -73,8 +73,6 @@ impl Default for MapMerchantConfig {
 struct ProviderConfig {
     #[serde(default = "default_true")]
     enabled: bool,
-    #[serde(default)]
-    api_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -149,43 +147,28 @@ pub(super) fn resolve_runtime_config(workspace_root: &Path) -> RuntimeConfig {
         provider_aliases,
         amap: ProviderRuntime {
             enabled: cfg.amap.enabled,
-            api_key: std::env::var("AMAP_API_KEY")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .or_else(|| {
-                    cfg.amap
-                        .api_key
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())
-                        .map(str::to_string)
-                })
-                .unwrap_or_default(),
+            api_key: provider_api_key(&["AMAP_API_KEY"]),
         },
         google: ProviderRuntime {
             enabled: cfg.google.enabled,
-            api_key: std::env::var("GOOGLE_MAPS_API_KEY")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .or_else(|| {
-                    std::env::var("GOOGLE_PLACES_API_KEY")
-                        .ok()
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .or_else(|| {
-                    cfg.google
-                        .api_key
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())
-                        .map(str::to_string)
-                })
-                .unwrap_or_default(),
+            api_key: provider_api_key(&["GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_API_KEY"]),
         },
     }
+}
+
+fn provider_api_key(names: &[&str]) -> String {
+    provider_api_key_with(names, |name| std::env::var(name).ok())
+}
+
+fn provider_api_key_with(names: &[&str], mut lookup: impl FnMut(&str) -> Option<String>) -> String {
+    names
+        .iter()
+        .find_map(|name| {
+            lookup(name)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default()
 }
 
 fn default_true() -> bool {
@@ -254,5 +237,26 @@ fn non_empty_or_default(raw: &str, default_fn: fn() -> String) -> String {
         default_fn()
     } else {
         trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider_api_key_with;
+
+    #[test]
+    fn provider_key_uses_the_first_non_empty_environment_value() {
+        let value = provider_api_key_with(&["PRIMARY", "FALLBACK"], |name| match name {
+            "PRIMARY" => Some("   ".to_string()),
+            "FALLBACK" => Some("  from-env  ".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(value, "from-env");
+    }
+
+    #[test]
+    fn provider_key_is_empty_when_environment_has_no_credential() {
+        assert!(provider_api_key_with(&["PRIMARY"], |_| None).is_empty());
     }
 }
