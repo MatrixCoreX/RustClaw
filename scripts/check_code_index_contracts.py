@@ -37,8 +37,14 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/skills/builtin_tests.rs": (
         "code_index_builtin_dispatch_returns_structured_definition_ranges",
     ),
+    "crates/clawd/src/skills.rs": (
+        'let policy_token = format!("skill:{skill_name}")',
+        "is_any_allowed_for_execution",
+    ),
     "crates/clawd/src/runtime/policy.rs": (
-        '"skill:code_index"',
+        'p.starts_with("skill:")',
+        "self.profile_allow",
+        "wildcard_match",
     ),
     "configs/skills_registry.toml": (
         'name = "code_index"',

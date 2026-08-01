@@ -20,12 +20,15 @@ REGISTRY = ROOT / "configs/skills_registry.toml"
 # registry and generated skill playbooks, so keep enough room for bounded
 # protocol maintenance without allowing the old catalog to return.
 MAX_GLOBAL_TOOL_OVERLAY_BYTES = 10_000
-MAX_EAGER_NATIVE_GROUPS = 7
+MAX_EAGER_NATIVE_GROUPS = 8
 # Exact replace/image discovery, confirmation-gated local Git writes, and the
 # explicit command deadline/no-deadline modes are core execution-loop actions.
 # They extend existing eager groups without adding a new group or restoring
 # domain catalogs to the global prompt.
-MAX_EAGER_PLANNER_CAPABILITIES = 80
+# Phase 3 adds the machine-owned task_plan group, and Phase 7 extends the
+# existing filesystem group with atomic preview/edit actions. These remain
+# registry contracts rather than a domain catalog in the global prompt.
+MAX_EAGER_PLANNER_CAPABILITIES = 84
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 
@@ -152,8 +155,8 @@ planner_capabilities = [{ name = "demo.hidden" }]
         )
         assert findings_for(oversized) == [
             f"global_tool_overlay_bytes_grew:{MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1}>{MAX_GLOBAL_TOOL_OVERLAY_BYTES}",
-            "eager_native_groups_grew:8>7",
-            "eager_planner_capabilities_grew:81>80",
+            "eager_native_groups_grew:9>8",
+            "eager_planner_capabilities_grew:85>84",
         ]
         overlay.write_text("generic protocol\n### visible\n", encoding="utf-8")
         named_heading = inventory(overlay, registry)
