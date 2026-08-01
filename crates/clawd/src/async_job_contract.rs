@@ -268,20 +268,34 @@ pub(crate) fn parse_pending_async_job_poll_adapter_from_extra(
     if !async_poll_adapter_kind_supported(adapter_kind) {
         return Err(machine_error(error_prefix, "unsupported_poll_adapter_kind"));
     }
-    if skill_runner_poll_adapter_kind_supported(adapter_kind) {
-        adapter
-            .get("skill_name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| machine_error(error_prefix, "poll_adapter_skill_name_missing"))?;
-    }
+    let poll_skill_name = if skill_runner_poll_adapter_kind_supported(adapter_kind) {
+        Some(
+            adapter
+                .get("skill_name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| machine_error(error_prefix, "poll_adapter_skill_name_missing"))?,
+        )
+    } else {
+        None
+    };
     if let Some(args) = adapter.get("args") {
         if !args.is_object() || args.get("text").is_some() || args.get("error_text").is_some() {
             return Err(machine_error(error_prefix, "poll_adapter_args_invalid"));
         }
     }
-    Ok(Some(adapter.clone()))
+    let mut adapter = adapter.clone();
+    if let Some(skill_name) = poll_skill_name {
+        if let Some(binding) = extra.and_then(|value| value.get("execution_binding")) {
+            validate_poll_execution_binding(binding, skill_name, error_prefix)?;
+            adapter
+                .as_object_mut()
+                .expect("validated poll adapter object")
+                .insert("execution_binding".to_string(), binding.clone());
+        }
+    }
+    Ok(Some(adapter))
 }
 
 pub(crate) fn async_poll_adapter_kind_supported(adapter_kind: &str) -> bool {
@@ -347,6 +361,50 @@ fn poll_adapter_kind(adapter: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn validate_poll_execution_binding(
+    binding: &Value,
+    expected_skill_name: &str,
+    error_prefix: &str,
+) -> Result<(), String> {
+    if !binding.is_object() || binding.get("text").is_some() || binding.get("error_text").is_some()
+    {
+        return Err(machine_error(
+            error_prefix,
+            "poll_execution_binding_invalid",
+        ));
+    }
+    if binding
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        != Some(expected_skill_name)
+    {
+        return Err(machine_error(
+            error_prefix,
+            "poll_execution_binding_skill_mismatch",
+        ));
+    }
+    for field in ["version", "manifest_digest"] {
+        if required_machine_string(binding, field).is_none() {
+            return Err(machine_error(
+                error_prefix,
+                "poll_execution_binding_required_field_missing",
+            ));
+        }
+    }
+    if binding
+        .get("registry_generation")
+        .and_then(Value::as_u64)
+        .is_none()
+    {
+        return Err(machine_error(
+            error_prefix,
+            "poll_execution_binding_generation_missing",
+        ));
+    }
+    Ok(())
 }
 
 fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {

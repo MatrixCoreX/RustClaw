@@ -33,9 +33,10 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     now_ts: i64,
     default_retry_after_seconds: i64,
 ) -> Option<Value> {
-    if let Some(payload) =
+    if let Some(mut payload) =
         execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
     {
+        update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
         return Some(payload);
     }
     if !claimed_async_poll_dispatch_ready(claimed) {
@@ -43,13 +44,95 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     }
     let job_id = poll_job_id(claimed)?;
     let adapter_result = skill_poll_async_adapter_result(state, claimed, job_id).await?;
-    async_poll_dispatch_result_payload_from_adapter_result(
+    let mut payload = async_poll_dispatch_result_payload_from_adapter_result(
         claimed,
         &adapter_result,
         job_id,
         now_ts,
         default_retry_after_seconds,
-    )
+    )?;
+    update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
+    Some(payload)
+}
+
+fn update_provider_job_version_lease(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    payload: &mut Value,
+    now_ts: i64,
+) {
+    let Some(adapter) = claimed
+        .task_checkpoint
+        .boundary_context
+        .get("async_poll_adapter")
+        .filter(|value| value.is_object())
+    else {
+        return;
+    };
+    let Some(execution_binding) = adapter.get("execution_binding") else {
+        return;
+    };
+    let Some(skill_name) = adapter
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let Some(job_id) = payload
+        .get("job_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+    else {
+        return;
+    };
+    let terminal = matches!(
+        payload.get("adapter_status").and_then(Value::as_str),
+        Some("succeeded" | "failed" | "expired" | "cancelled")
+    );
+    let expires_at = payload
+        .get("retention_deadline_at")
+        .or_else(|| payload.get("expires_at"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| now_ts.max(0) as u64 + 1);
+    let result = crate::skills::runner::update_pinned_provider_job_version_lease(
+        &state.skill_rt.workspace_root,
+        skill_name,
+        execution_binding,
+        &job_id,
+        expires_at,
+        now_ts.max(0) as u64,
+        terminal,
+    );
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "version_lease_status".to_string(),
+            json!(match (&result, terminal) {
+                (Ok(()), true) => "released",
+                (Ok(()), false) => "renewed",
+                (Err(_), _) => "update_failed",
+            }),
+        );
+        if result.is_err() {
+            object.insert(
+                "version_lease_error_code".to_string(),
+                json!("provider_job_version_lease_update_failed"),
+            );
+        }
+    }
+    if let Err(error) = result {
+        tracing::warn!(
+            task_id = claimed.task_id,
+            skill = skill_name,
+            job_id,
+            terminal,
+            error = %error,
+            "provider_job_version_lease_update_failed"
+        );
+    }
 }
 
 fn claimed_async_poll_dispatch_ready(
@@ -697,9 +780,24 @@ async fn skill_poll_async_adapter_result(
     obj.entry("action".to_string()).or_insert(json!("poll"));
     obj.entry("job_id".to_string()).or_insert(json!(job_id));
 
-    match crate::run_skill_with_runner_outcome(state, &claimed.task, skill_name, args).await {
-        Ok(outcome) => {
-            let Some(extra) = outcome.extra else {
+    let runner_result = if let Some(binding) = adapter.get("execution_binding") {
+        crate::skills::run_pinned_async_poll_skill_with_runner(
+            state,
+            &claimed.task,
+            skill_name,
+            args,
+            binding,
+        )
+        .await
+        .map(|value| value.get("extra").cloned())
+    } else {
+        crate::run_skill_with_runner_outcome(state, &claimed.task, skill_name, args)
+            .await
+            .map(|outcome| outcome.extra)
+    };
+    match runner_result {
+        Ok(extra) => {
+            let Some(extra) = extra else {
                 return Some(skill_poll_failed_adapter_result(
                     job_id,
                     "skill_poll_adapter_result_missing",

@@ -31,7 +31,7 @@ fn state_with_all_bundled_skills_enabled() -> crate::AppState {
         .join("configs/skills_registry.toml");
     let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
         .expect("real skill registry");
-    let enabled = registry.enabled_names().into_iter().collect();
+    let enabled = registry.all_names().into_iter().collect();
     *state.core.skill_views_snapshot.write().unwrap() =
         std::sync::Arc::new(crate::SkillViewsSnapshot {
             binding: Default::default(),

@@ -140,6 +140,7 @@ pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
     false
 }
 
+mod async_poll;
 mod builtin;
 mod credential_fallback;
 #[cfg(test)]
@@ -150,6 +151,7 @@ mod memory_context;
 mod result_enrichment;
 pub(crate) mod runner;
 pub(crate) mod runner_pool;
+pub(crate) use async_poll::run_pinned_async_poll_skill_with_runner;
 
 pub(crate) use builtin::execute_builtin_skill_for_task;
 #[cfg(test)]

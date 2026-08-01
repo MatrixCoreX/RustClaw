@@ -675,6 +675,27 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         "launch_pinned_version_missing"
     );
 
+    store
+        .retain_background_version_lease(
+            "sample_weather",
+            &launch.install_root,
+            "provider:sample_weather:fixture:job-1",
+            u64::MAX,
+            1,
+        )
+        .expect("retain durable background version lease");
+    assert!(!store
+        .remove_installed_versions("sample_weather")
+        .expect("defer removal for durable background job"));
+    assert!(launch.install_root.is_dir());
+    store
+        .release_background_version_lease(
+            "sample_weather",
+            &launch.install_root,
+            "provider:sample_weather:fixture:job-1",
+        )
+        .expect("release durable background version lease");
+
     let lease = store
         .acquire_version_lease("sample_weather", &launch.install_root)
         .expect("acquire version lease");
