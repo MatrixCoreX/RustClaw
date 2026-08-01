@@ -1,14 +1,18 @@
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
+use std::fs::OpenOptions;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio_util::codec::LinesCodecError;
 
 use claw_core::config::ToolSandboxMode;
 use claw_core::skill_registry::{
-    Capability, CapabilityIsolationProfile, PlannerCapabilityEffect, PlannerCapabilityMapping,
+    Capability, CapabilityExecutionMode, CapabilityIsolationProfile, PlannerCapabilityEffect,
+    PlannerCapabilityMapping,
 };
 
 use crate::{AppState, ClaimedTask};
@@ -131,6 +135,100 @@ fn invocation_artifact_output_directory(
         .join(uuid::Uuid::new_v4().to_string())
 }
 
+#[derive(Debug, Clone)]
+struct DurableRunnerJobPlan {
+    job_id: String,
+    job_dir: PathBuf,
+    global_slot_root: PathBuf,
+    skill_slot_root: PathBuf,
+    poll_after_seconds: u64,
+    retention_seconds: u64,
+    retention_deadline_at: i64,
+}
+
+impl DurableRunnerJobPlan {
+    fn new(workspace_root: &Path, skill_name: &str, retention_seconds: u64) -> Self {
+        let job_uuid = uuid::Uuid::new_v4().to_string();
+        let state_root = claw_core::workspace_state::workspace_state_root(workspace_root);
+        let slot_root = state_root.join("durable_skill_slots");
+        let skill_component = safe_path_component(skill_name, "skill");
+        let retention_seconds = retention_seconds.max(1);
+        let now_ts = crate::now_ts_u64().min(i64::MAX as u64) as i64;
+        Self {
+            job_id: format!("local_process:{job_uuid}"),
+            job_dir: state_root.join("async_jobs").join(job_uuid),
+            global_slot_root: slot_root.join("global"),
+            skill_slot_root: slot_root.join("skills").join(skill_component),
+            poll_after_seconds: 5,
+            retention_seconds,
+            retention_deadline_at: now_ts
+                .saturating_add(retention_seconds.min(i64::MAX as u64) as i64),
+        }
+    }
+
+    fn create_directories(&self) -> Result<(), String> {
+        for path in [
+            self.job_dir.as_path(),
+            self.global_slot_root.as_path(),
+            self.skill_slot_root.as_path(),
+        ] {
+            std::fs::create_dir_all(path).map_err(|error| {
+                format!(
+                    "durable_skill_job_directory_create_failed: path={} error={error}",
+                    path.display()
+                )
+            })?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.job_dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("durable_skill_job_permissions_failed: {error}"))?;
+        }
+        Ok(())
+    }
+}
+
+fn safe_path_component(value: &str, fallback: &str) -> String {
+    let normalized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .take(96)
+        .collect();
+    if normalized.is_empty() {
+        fallback.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn local_process_durable_background_requested(mapping: Option<&PlannerCapabilityMapping>) -> bool {
+    mapping.is_some_and(|mapping| {
+        matches!(
+            mapping.execution_mode,
+            Some(CapabilityExecutionMode::AsyncPreferred | CapabilityExecutionMode::AsyncRequired)
+        ) && mapping.async_adapter_kind.as_deref() == Some("local_process_poll")
+    })
+}
+
+fn skill_secret_token_ttl(durable_background: bool, retention_seconds: u64) -> Duration {
+    // Durable runners redeem ordinary credential references before they can
+    // outlive the parent dispatch. Internal endpoint tokens must remain valid
+    // while a job waits for a concurrency slot, so bind their lifetime to the
+    // renewable job-retention window instead of the foreground handoff window.
+    Duration::from_secs(if durable_background {
+        retention_seconds.max(300)
+    } else {
+        300
+    })
+}
+
 fn sandbox_target_for_source(
     source: Option<&std::path::Path>,
     sources: &[std::path::PathBuf],
@@ -188,6 +286,248 @@ async fn read_skill_runner_stderr_line(stderr: &mut Option<tokio::process::Child
     )
     .await;
     err_line
+}
+
+fn durable_runner_execution_binding(
+    installed_launch: &skill_sdk::SkillVersionPin,
+    skill_views: &crate::runtime::state::SkillViewsSnapshot,
+    admission_binding: Option<&crate::skill_admission::AdmissionExecutionBinding>,
+) -> Value {
+    json!({
+        "skill_name": installed_launch.skill_name,
+        "version": installed_launch.version,
+        "manifest_digest": installed_launch.manifest_digest,
+        "receipt_digest": installed_launch.receipt_digest,
+        "registry_generation": skill_views.binding.registry_generation,
+        "registry_generation_digest": skill_views.binding.registry_generation_digest,
+        "base_registry_digest": skill_views.binding.base_registry_digest,
+        "overlay_generation_digest": skill_views.binding.overlay_generation_digest,
+        "policy_digest": admission_binding.and_then(|binding| binding.policy_digest.clone()),
+        "admission_receipt_digest": admission_binding
+            .map(|binding| binding.admission_receipt_digest.clone()),
+    })
+}
+
+fn write_durable_job_metadata(job_dir: &Path, name: &str, value: &str) -> Result<(), String> {
+    crate::local_process_job::write_atomic(&job_dir.join(name), value).map_err(|error| {
+        format!("durable_skill_job_metadata_write_failed: field={name} error={error}")
+    })
+}
+
+fn open_durable_job_output(path: &Path) -> Result<std::fs::File, String> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path).map_err(|error| {
+        format!(
+            "durable_skill_job_output_open_failed: path={} error={error}",
+            path.display()
+        )
+    })
+}
+
+pub(crate) fn read_last_runner_response(path: &Path) -> Result<Value, String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const MAX_TAIL_BYTES: u64 = 2 * 1024 * 1024;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("durable_skill_job_output_read_failed: {error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("durable_skill_job_output_metadata_failed: {error}"))?
+        .len();
+    let start = length.saturating_sub(MAX_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| format!("durable_skill_job_output_seek_failed: {error}"))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| format!("durable_skill_job_output_read_failed: {error}"))?;
+    let output = String::from_utf8_lossy(&bytes);
+    for line in output.lines().rev() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value.get("record_type").and_then(Value::as_str)
+            == Some(skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE)
+        {
+            continue;
+        }
+        if value.get("status").and_then(Value::as_str).is_some() {
+            return Ok(value);
+        }
+    }
+    Err("durable_skill_job_final_response_missing".to_string())
+}
+
+async fn start_durable_skill_runner_process(
+    mut cmd: tokio::process::Command,
+    req_line: &str,
+    request_id: &str,
+    canonical_skill_name: &str,
+    plan: &DurableRunnerJobPlan,
+    expected_execution_binding: &Value,
+    process_command_marker: &Path,
+    host_artifact_output_directory: &Path,
+    sandbox_artifact_output_directory: &Path,
+    sandbox_job_dir: &Path,
+    sandbox_global_slot_root: &Path,
+    sandbox_skill_slot_root: &Path,
+    global_max_concurrency: usize,
+    skill_max_concurrency: usize,
+    terminate_grace_seconds: u64,
+) -> Result<Value, String> {
+    for (name, value) in [
+        ("job_id", plan.job_id.as_str()),
+        ("job_kind", "skill_runner"),
+        ("skill_name", canonical_skill_name),
+        ("runtime_timeout_seconds", "disabled"),
+        ("poll_after_seconds", &plan.poll_after_seconds.to_string()),
+        ("retention_seconds", &plan.retention_seconds.to_string()),
+        (
+            "retention_deadline_at",
+            &plan.retention_deadline_at.to_string(),
+        ),
+        (
+            "terminate_grace_seconds",
+            &terminate_grace_seconds.max(1).to_string(),
+        ),
+        (
+            "process_command_marker",
+            &process_command_marker.display().to_string(),
+        ),
+        (
+            "host_artifact_output_directory",
+            &host_artifact_output_directory.display().to_string(),
+        ),
+        (
+            "sandbox_artifact_output_directory",
+            &sandbox_artifact_output_directory.display().to_string(),
+        ),
+    ] {
+        write_durable_job_metadata(&plan.job_dir, name, value)?;
+    }
+    write_durable_job_metadata(
+        &plan.job_dir,
+        "expected_execution_binding.json",
+        &expected_execution_binding.to_string(),
+    )?;
+
+    let stdout = open_durable_job_output(&plan.job_dir.join("stdout"))?;
+    let stderr = open_durable_job_output(&plan.job_dir.join("stderr"))?;
+    cmd.env_remove("SKILL_TIMEOUT_SECONDS")
+        .env("APP_DURABLE_BACKGROUND", "1")
+        .env("APP_DURABLE_JOB_DIR", sandbox_job_dir)
+        .env("APP_DURABLE_GLOBAL_SLOT_ROOT", sandbox_global_slot_root)
+        .env(
+            "APP_DURABLE_GLOBAL_MAX_CONCURRENCY",
+            global_max_concurrency.max(1).to_string(),
+        )
+        .env("APP_DURABLE_SKILL_SLOT_ROOT", sandbox_skill_slot_root)
+        .env(
+            "APP_DURABLE_SKILL_MAX_CONCURRENCY",
+            skill_max_concurrency.max(1).to_string(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(stdout)
+        .stderr(stderr)
+        .kill_on_drop(false);
+    let mut child = cmd.spawn().map_err(|error| {
+        format!(
+            "durable_skill_job_spawn_failed: path={} error={error}",
+            process_command_marker.display()
+        )
+    })?;
+    let pid = child
+        .id()
+        .ok_or_else(|| "durable_skill_job_pid_missing".to_string())?;
+    if let Err(error) = write_durable_job_metadata(&plan.job_dir, "pid", &pid.to_string()) {
+        let _ = terminate_subprocess_group(Some(pid)).await;
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        return Err(error);
+    }
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "durable_skill_job_stdin_missing".to_string())?;
+    if let Err(error) = stdin.write_all(format!("{req_line}\n").as_bytes()).await {
+        let _ = terminate_subprocess_group(Some(pid)).await;
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        return Err(format!("durable_skill_job_stdin_write_failed: {error}"));
+    }
+    if let Err(error) = stdin.shutdown().await {
+        let _ = terminate_subprocess_group(Some(pid)).await;
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        return Err(format!("durable_skill_job_stdin_close_failed: {error}"));
+    }
+    drop(stdin);
+
+    // This is an admission/lease handoff timeout, not an operation runtime
+    // deadline. Once the marker exists, the background operation is unbounded
+    // unless an explicit caller/host deadline is supplied by another contract.
+    let startup_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        if plan.job_dir.join("lease_ready").exists() {
+            return Ok(json!({
+                "request_id": request_id,
+                "status": "ok",
+                "text": "",
+                "buttons": null,
+                "validation": null,
+                "extra": {
+                    "schema_version": 1,
+                    "source_skill": "skill_runner",
+                    "status": "ok",
+                    "action": "durable_background_start",
+                    "execution_binding": expected_execution_binding,
+                    "runner_dispatch": {
+                        "schema_version": 1,
+                        "mode": "durable_background",
+                        "fallback_reason": null
+                    },
+                    "pending_async_job": {
+                        "job_id": plan.job_id,
+                        "provider": "local_process",
+                        "status": "accepted",
+                        "poll_after_seconds": plan.poll_after_seconds,
+                        "poll_after_ms": plan.poll_after_seconds.saturating_mul(1_000),
+                        "expires_at": plan.retention_deadline_at,
+                        "runtime_deadline_at": null,
+                        "retention_deadline_at": plan.retention_deadline_at,
+                        "cancel_ref": format!("local_process:{}", plan.job_dir.display()),
+                        "cancel_token": format!("local_process:{}", plan.job_dir.display()),
+                        "result_ref": plan.job_id,
+                        "retryable": true,
+                        "message_key": "clawd.task.async_job_pending"
+                    }
+                },
+                "error_text": null
+            }));
+        }
+        let exited = plan.job_dir.join("exit_code").exists()
+            || child
+                .try_wait()
+                .map_err(|error| format!("durable_skill_job_wait_failed: {error}"))?
+                .is_some();
+        if exited {
+            let _ = child.wait().await;
+            return read_last_runner_response(&plan.job_dir.join("stdout"));
+        }
+        if tokio::time::Instant::now() >= startup_deadline {
+            let _ = terminate_subprocess_group(Some(pid)).await;
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            write_durable_job_metadata(&plan.job_dir, "startup_failed", "lease_handoff_timeout")?;
+            return Err("durable_skill_job_lease_handoff_timeout".to_string());
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 pub(crate) async fn run_skill_with_runner_once(
@@ -277,6 +617,17 @@ pub(crate) async fn run_skill_with_runner_once(
     // process. Missing declared secrets fail before spawn instead of becoming
     // empty runtime environment variables.
     let action_mapping = action_scoped_planner_mapping(state, canonical_skill_name, args);
+    let durable_background = local_process_durable_background_requested(action_mapping.as_ref());
+    let durable_job_plan = durable_background.then(|| {
+        DurableRunnerJobPlan::new(
+            &state.skill_rt.workspace_root,
+            canonical_skill_name,
+            state.skill_rt.cmd_async_retention_seconds,
+        )
+    });
+    if let Some(plan) = durable_job_plan.as_ref() {
+        plan.create_directories()?;
+    }
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let caps: Vec<Capability> = state
         .get_skills_registry()
@@ -371,7 +722,10 @@ pub(crate) async fn run_skill_with_runner_once(
         }
     };
 
-    let secret_token_ttl = Duration::from_secs(300);
+    let secret_token_ttl = skill_secret_token_ttl(
+        durable_background,
+        state.skill_rt.cmd_async_retention_seconds,
+    );
     let internal_skill_context = json!({
         "task_id": task.task_id.clone(),
         "user_id": task.user_id,
@@ -505,20 +859,28 @@ pub(crate) async fn run_skill_with_runner_once(
         || internal_admission_token.is_some()
         || !selected_provider_key_tokens.is_empty()
         || !tokenized_secret_envs.is_empty();
-    let warm_reuse_allowed = stateless_readonly_reuse_allowed(
-        installed_launch.execution_profile,
-        installed_launch.sandbox_profile,
-        &caps,
-        action_mapping.as_ref(),
-        storage_descriptor.is_some(),
-        has_secrets,
-        admission_capable,
-    );
-    let additional_writable_paths = runner_additional_writable_paths(
+    let warm_reuse_allowed = !durable_background
+        && stateless_readonly_reuse_allowed(
+            installed_launch.execution_profile,
+            installed_launch.sandbox_profile,
+            &caps,
+            action_mapping.as_ref(),
+            storage_descriptor.is_some(),
+            has_secrets,
+            admission_capable,
+        );
+    let mut additional_writable_paths = runner_additional_writable_paths(
         secret_token_scope.as_ref().map(|scope| scope.store_dir()),
         storage_writable_directory.as_deref(),
         (!warm_reuse_allowed).then_some(artifact_output_directory.as_path()),
     );
+    if let Some(plan) = durable_job_plan.as_ref() {
+        additional_writable_paths.extend([
+            plan.job_dir.clone(),
+            plan.global_slot_root.clone(),
+            plan.skill_slot_root.clone(),
+        ]);
+    }
     let prepared = if warm_reuse_allowed {
         // The outer runner is trusted host code. Keeping it outside a sandbox
         // lets it create a fresh receipt-controlled sandbox (and fresh /tmp on
@@ -576,6 +938,24 @@ pub(crate) async fn run_skill_with_runner_once(
         )
         .ok_or_else(|| "skill artifact sandbox target unavailable".to_string())?
     };
+    let sandbox_durable_paths = durable_job_plan
+        .as_ref()
+        .map(|plan| {
+            let map = |path: &Path, label: &str| {
+                sandbox_target_for_source(
+                    Some(path),
+                    &additional_writable_paths,
+                    &prepared.additional_writable_targets,
+                )
+                .ok_or_else(|| format!("durable skill {label} sandbox target unavailable"))
+            };
+            Ok::<_, String>((
+                map(&plan.job_dir, "job directory")?,
+                map(&plan.global_slot_root, "global slot root")?,
+                map(&plan.skill_slot_root, "skill slot root")?,
+            ))
+        })
+        .transpose()?;
     let storage_descriptor = map_storage_descriptor_to_sandbox(
         storage_descriptor,
         sandbox_storage_directory.as_deref(),
@@ -722,6 +1102,62 @@ pub(crate) async fn run_skill_with_runner_once(
         cmd.env(env_name, token);
     }
     cmd.current_dir(&state.skill_rt.workspace_root);
+    if let Some(plan) = durable_job_plan.as_ref() {
+        let (sandbox_job_dir, sandbox_global_slot_root, sandbox_skill_slot_root) =
+            sandbox_durable_paths
+                .as_ref()
+                .ok_or_else(|| "durable skill sandbox paths unavailable".to_string())?;
+        let expected_execution_binding =
+            durable_runner_execution_binding(&installed_launch, &skill_views, admission_binding);
+        let mut response = start_durable_skill_runner_process(
+            cmd,
+            &req_line,
+            &task.task_id,
+            canonical_skill_name,
+            plan,
+            &expected_execution_binding,
+            &state.skill_rt.skill_runner_path,
+            &artifact_output_directory,
+            &sandbox_artifact_output_directory,
+            sandbox_job_dir,
+            sandbox_global_slot_root,
+            sandbox_skill_slot_root,
+            state.skill_rt.skill_global_max_concurrency,
+            state
+                .skill_max_concurrency_for_dispatch(canonical_skill_name)
+                .unwrap_or(state.skill_rt.skill_global_max_concurrency),
+            state.skill_rt.cmd_terminate_grace_seconds,
+        )
+        .await?;
+        remap_sandbox_artifact_paths(
+            &mut response,
+            &sandbox_artifact_output_directory,
+            &artifact_output_directory,
+        );
+        validate_runner_execution_binding(
+            &response,
+            &installed_launch.skill_name,
+            &installed_launch.version,
+            &installed_launch.manifest_digest,
+            &installed_launch.receipt_digest,
+            skill_views.binding.registry_generation,
+            skill_views.binding.registry_generation_digest.as_deref(),
+            skill_views.binding.base_registry_digest.as_deref(),
+            skill_views.binding.overlay_generation_digest.as_deref(),
+            admission_binding.and_then(|binding| binding.policy_digest.as_deref()),
+            admission_binding.map(|binding| binding.admission_receipt_digest.as_str()),
+        )?;
+        add_runner_dispatch_metadata(&mut response, "durable_background", None);
+        tracing::info!(
+            skill = canonical_skill_name,
+            version = installed_launch.version,
+            job_id = plan.job_id,
+            runtime_deadline = "none",
+            duration_ms = dispatch_started.elapsed().as_millis() as u64,
+            "verified_skill_execution_background_started"
+        );
+        return Ok(response);
+    }
     let spawn_runner = |command| {
         WarmRunnerProcess::spawn(command).map_err(|err| {
             format!(
@@ -1021,6 +1457,25 @@ fn validate_runner_execution_binding(
     Ok(())
 }
 
+pub(crate) fn validate_runner_execution_binding_snapshot(
+    response: &Value,
+    expected_binding: &Value,
+) -> Result<(), String> {
+    let actual = response.pointer("/extra/execution_binding");
+    if actual.is_none()
+        && response
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status != "ok")
+    {
+        return Ok(());
+    }
+    if actual != Some(expected_binding) {
+        return Err("skill runner execution binding snapshot mismatch".to_string());
+    }
+    Ok(())
+}
+
 fn action_scoped_runner_capabilities(
     mut capabilities: Vec<Capability>,
     mapping: Option<&PlannerCapabilityMapping>,
@@ -1229,7 +1684,7 @@ pub(crate) fn build_runner_skill_context(
     Value::Object(ctx)
 }
 
-fn remap_sandbox_artifact_paths(
+pub(crate) fn remap_sandbox_artifact_paths(
     value: &mut Value,
     sandbox_directory: &std::path::Path,
     host_directory: &std::path::Path,

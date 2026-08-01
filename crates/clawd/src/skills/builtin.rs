@@ -528,7 +528,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 let expires_in_seconds = map
                     .get("expires_in_seconds")
                     .and_then(Value::as_u64)
-                    .unwrap_or(3_600)
+                    .unwrap_or(state.skill_rt.cmd_async_retention_seconds)
                     .max(poll_after_seconds.saturating_add(1));
                 let now_ts = crate::now_ts_u64();
                 let task_ref = task
@@ -758,14 +758,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     .and_then(Value::as_u64)
                     .and_then(|value| u16::try_from(value).ok())
                     .unwrap_or(80);
-                let expires_in_seconds = map
-                    .get("expires_in_seconds")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(3_600);
-                let session_idle_timeout_seconds = map
-                    .get("idle_timeout_seconds")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1_800);
+                let expires_in_seconds = map.get("expires_in_seconds").and_then(Value::as_u64);
+                let session_idle_timeout_seconds =
+                    map.get("idle_timeout_seconds").and_then(Value::as_u64);
                 let session_max_output_bytes = map
                     .get("max_output_bytes")
                     .and_then(Value::as_u64)

@@ -165,13 +165,24 @@ class AdapterTest(unittest.TestCase):
 
         self.assertEqual(run.call_args.kwargs["timeout"], 3_000)
 
-    def test_media_operation_rejects_a_deadline_beyond_the_host_lifecycle(self) -> None:
-        with self.assertRaisesRegex(self.skill.SkillFailure, "between 5 and 3500"):
+    def test_media_operation_accepts_an_explicit_deadline_beyond_one_hour(self) -> None:
+        self.assertEqual(
             self.skill._optional_integer(
-                {"operation_timeout_seconds": 3_501},
+                {"operation_timeout_seconds": 7_200},
                 "operation_timeout_seconds",
                 minimum=5,
-                maximum=3_500,
+                maximum=2_592_000,
+            ),
+            7_200,
+        )
+
+    def test_media_operation_rejects_an_unreasonable_explicit_deadline(self) -> None:
+        with self.assertRaisesRegex(self.skill.SkillFailure, "between 5 and 2592000"):
+            self.skill._optional_integer(
+                {"operation_timeout_seconds": 2_592_001},
+                "operation_timeout_seconds",
+                minimum=5,
+                maximum=2_592_000,
             )
 
     def test_transcribe_command_defaults_to_local_whisper(self) -> None:

@@ -216,13 +216,13 @@ impl CoreServices {
 pub(crate) struct SkillRuntime {
     pub(crate) skill_timeout_seconds: u64,
     pub(crate) skill_runner_path: PathBuf,
+    pub(crate) skill_global_max_concurrency: usize,
     pub(crate) skill_semaphore: Arc<Semaphore>,
     pub(crate) skill_concurrency_gates: Arc<SkillConcurrencyGates>,
     pub(crate) runner_pool: Arc<crate::skills::runner_pool::WarmRunnerPool>,
     pub(crate) tools_policy: Arc<ToolsPolicy>,
     pub(crate) cmd_timeout_seconds: u64,
     pub(crate) cmd_idle_timeout_seconds: u64,
-    pub(crate) cmd_async_timeout_seconds: u64,
     pub(crate) cmd_async_retention_seconds: u64,
     pub(crate) cmd_terminate_grace_seconds: u64,
     pub(crate) cmd_max_output_bytes: usize,
@@ -276,13 +276,13 @@ impl SkillRuntime {
         Self {
             skill_timeout_seconds: 30,
             skill_runner_path: PathBuf::new(),
+            skill_global_max_concurrency: 1,
             skill_semaphore: Arc::new(Semaphore::new(1)),
             skill_concurrency_gates: Arc::new(SkillConcurrencyGates::default()),
             runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::default()),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: 60,
             cmd_idle_timeout_seconds: 60,
-            cmd_async_timeout_seconds: 3_600,
             cmd_async_retention_seconds: 86_400,
             cmd_terminate_grace_seconds: 5,
             cmd_max_output_bytes: 8000,
@@ -1056,12 +1056,12 @@ impl AppState {
         self.core.active_provider_type =
             Some(crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string());
         self.skill_rt.skill_timeout_seconds = config.skills.skill_timeout_seconds;
+        self.skill_rt.skill_global_max_concurrency = config.skills.skill_max_concurrency.max(1);
         self.skill_rt.skill_runner_path =
             crate::bootstrap::resolve_skill_runner_path(&workspace_root);
         self.skill_rt.tools_policy = Arc::new(tools_policy);
         self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
         self.skill_rt.cmd_idle_timeout_seconds = config.tools.cmd_idle_timeout_seconds.max(1);
-        self.skill_rt.cmd_async_timeout_seconds = config.tools.cmd_async_timeout_seconds.max(1);
         self.skill_rt.cmd_async_retention_seconds = config.tools.cmd_async_retention_seconds.max(1);
         self.skill_rt.cmd_terminate_grace_seconds = config.tools.cmd_terminate_grace_seconds.max(1);
         self.skill_rt.cmd_max_output_bytes = config.tools.cmd_max_output_bytes.max(128);

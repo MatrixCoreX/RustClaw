@@ -128,6 +128,14 @@ fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_to
         .snapshot()
         .expect("restart snapshot");
     assert_eq!(restarted.generation_digest, disabled.generation_digest);
+    let catalog = service
+        .catalog_snapshot()
+        .expect("catalog reads the same signed generation state");
+    assert_eq!(catalog.generation_digest, disabled.generation_digest);
+    assert_eq!(
+        catalog.state(&skill_name),
+        Some(AdmissionState::InstalledDisabled)
+    );
 
     let awaiting = service
         .set_state(&skill_name, AdmissionState::AwaitingPolicyApproval, None)

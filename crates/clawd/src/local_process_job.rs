@@ -112,8 +112,12 @@ pub(crate) fn process_identity_state(job_dir: &Path, pid: u32) -> ProcessIdentit
             Err(_) => return ProcessIdentityState::Unknown,
         };
         let command = String::from_utf8_lossy(&output.stdout);
-        let run_script = job_dir.join("run.sh").to_string_lossy().to_string();
-        if command.contains(&run_script) {
+        let command_marker = std::fs::read_to_string(job_dir.join("process_command_marker"))
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| job_dir.join("run.sh").to_string_lossy().to_string());
+        if command.contains(&command_marker) {
             ProcessIdentityState::AliveVerified
         } else {
             ProcessIdentityState::IdentityMismatch

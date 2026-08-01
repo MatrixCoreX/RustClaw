@@ -277,6 +277,14 @@ fn local_process_async_poll_adapter_result(
             ));
         }
     };
+    if std::fs::read_to_string(job_dir.join("job_kind"))
+        .ok()
+        .is_some_and(|value| value.trim() == "skill_runner")
+    {
+        return Some(durable_skill_runner_terminal_adapter_result(
+            job, job_id, job_dir, exit_code,
+        ));
+    }
     let stdout = read_bounded_output(&job_dir.join("stdout"), 32 * 1024);
     let stderr = read_bounded_output(&job_dir.join("stderr"), 32 * 1024);
     let result_json =
@@ -317,6 +325,126 @@ fn local_process_async_poll_adapter_result(
             "failure_result_json": result_json
         }))
     }
+}
+
+fn durable_skill_runner_terminal_adapter_result(
+    job: &crate::task_lifecycle::AsyncJobRef,
+    job_id: &str,
+    job_dir: &Path,
+    exit_code: i32,
+) -> Value {
+    let failure = |error_code: &str, failure_result_json: Value| {
+        json!({
+            "job_id": job_id,
+            "adapter_kind": "local_process_poll",
+            "status": "failed",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": job.expires_at,
+            "runtime_deadline_at": job.runtime_deadline_at,
+            "retention_deadline_at": job.retention_deadline_at.unwrap_or(job.expires_at),
+            "error_code": error_code,
+            "message_key": "clawd.task.async_job_failed",
+            "retryable": false,
+            "failure_result_json": failure_result_json,
+        })
+    };
+    if exit_code != 0 {
+        return failure(
+            "durable_skill_runner_nonzero_exit",
+            json!({
+                "schema_version": 1,
+                "source": "durable_skill_runner_supervisor",
+                "job_id": job_id,
+                "exit_code": exit_code,
+                "terminal_reason": local_process_terminal_reason(job_dir, exit_code),
+            }),
+        );
+    }
+    let mut response =
+        match crate::skills::runner::read_last_runner_response(&job_dir.join("stdout")) {
+            Ok(response) => response,
+            Err(error_code) => {
+                return failure(
+                    "durable_skill_runner_response_missing",
+                    json!({
+                        "schema_version": 1,
+                        "source": "durable_skill_runner_supervisor",
+                        "job_id": job_id,
+                        "exit_code": exit_code,
+                        "error_code": error_code,
+                    }),
+                );
+            }
+        };
+    let expected_binding =
+        match std::fs::read_to_string(job_dir.join("expected_execution_binding.json"))
+            .ok()
+            .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+        {
+            Some(binding) => binding,
+            None => {
+                return failure(
+                    "durable_skill_runner_binding_metadata_invalid",
+                    json!({
+                        "schema_version": 1,
+                        "source": "durable_skill_runner_supervisor",
+                        "job_id": job_id,
+                        "exit_code": exit_code,
+                    }),
+                );
+            }
+        };
+    if let (Some(sandbox), Some(host)) = (
+        read_nonempty_path(job_dir, "sandbox_artifact_output_directory"),
+        read_nonempty_path(job_dir, "host_artifact_output_directory"),
+    ) {
+        crate::skills::runner::remap_sandbox_artifact_paths(&mut response, &sandbox, &host);
+    }
+    if crate::skills::runner::validate_runner_execution_binding_snapshot(
+        &response,
+        &expected_binding,
+    )
+    .is_err()
+    {
+        return failure(
+            "durable_skill_runner_binding_mismatch",
+            json!({
+                "schema_version": 1,
+                "source": "durable_skill_runner_supervisor",
+                "job_id": job_id,
+                "exit_code": exit_code,
+            }),
+        );
+    }
+    if response.get("status").and_then(Value::as_str) == Some("ok") {
+        return json!({
+            "job_id": job_id,
+            "adapter_kind": "local_process_poll",
+            "status": "succeeded",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": job.expires_at,
+            "runtime_deadline_at": job.runtime_deadline_at,
+            "retention_deadline_at": job.retention_deadline_at.unwrap_or(job.expires_at),
+            "message_key": job.message_key,
+            "final_result_json": response,
+        });
+    }
+    let error_code = response
+        .get("error_code")
+        .or_else(|| response.pointer("/extra/error_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("durable_skill_runner_skill_failed")
+        .to_string();
+    failure(&error_code, response)
+}
+
+fn read_nonempty_path(job_dir: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_to_string(job_dir.join(name))
+        .ok()
+        .map(|value| PathBuf::from(value.trim()))
+        .filter(|path| path.is_absolute())
 }
 
 fn local_process_exit_record_failure(

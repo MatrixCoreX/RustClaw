@@ -106,7 +106,6 @@ install_mode = "on_demand"
 package_manifest = "optional_skills/media_download/skill.toml"
 storage = { kind = "directory", schema_version = 1, migration_owner = "media_download" }
 aliases = ["media_downloader", "download_media", "video_download"]
-timeout_seconds = 3600
 max_concurrency = 1
 progress_frames = true
 prompt_file = "prompts/layers/generated/skills/media_download.md"

@@ -1288,7 +1288,6 @@ export default function App() {
     void fetchAuthMe();
     void fetchSkills();
     void fetchSkillsConfig();
-    void fetchSkillStore();
     void fetchLlmConfig();
     void fetchMultimodalConfig();
     void fetchModelCatalog();
@@ -1389,7 +1388,7 @@ export default function App() {
   }, [currentPage, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "skill_store") return;
+    if (!uiAuthReady || (currentPage !== "skills" && currentPage !== "skill_store")) return;
     void fetchSkillStore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady]);
@@ -1973,7 +1972,7 @@ export default function App() {
               error={skillStoreError}
               message={skillStoreMessage}
               actionName={skillStoreActionName}
-              onRefresh={fetchSkillStore}
+              onRefresh={() => fetchSkillStore(true)}
               onInstall={installSkillFromStore}
               onRemove={removeSkillFromStore}
               onCancel={cancelSkillStoreOperation}

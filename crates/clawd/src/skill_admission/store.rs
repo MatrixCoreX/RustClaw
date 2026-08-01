@@ -108,7 +108,23 @@ impl SkillAdmissionService {
                 ..OverlaySnapshot::default()
             });
         };
-        self.validate_generation(&pointer, &record, &generation_root)
+        self.validate_generation(&pointer, &record, &generation_root, true)
+    }
+
+    /// Read the signed admission state for control-plane display without
+    /// re-hashing every installed package artifact.
+    ///
+    /// Runtime reload and execution continue to use `snapshot`, which performs
+    /// full installed-artifact verification. This projection is only suitable
+    /// for catalog/status UI and never grants execution authority.
+    pub(crate) fn catalog_snapshot(&self) -> Result<OverlaySnapshot> {
+        let Some((pointer, record, generation_root)) = self.read_current_generation()? else {
+            return Ok(OverlaySnapshot {
+                base_registry_digest: Some(digest_file(&self.base_registry_path)?),
+                ..OverlaySnapshot::default()
+            });
+        };
+        self.validate_generation(&pointer, &record, &generation_root, false)
     }
 
     pub(crate) fn admit_external(&self, mutation: AdmissionMutation) -> Result<OverlaySnapshot> {
@@ -258,7 +274,7 @@ impl SkillAdmissionService {
                 generation_digest: digest_json(&previous_record)?,
                 activated_at_unix: now_unix(),
             };
-            self.validate_generation(&pointer, &previous_record, &previous_root)?;
+            self.validate_generation(&pointer, &previous_record, &previous_root, true)?;
             atomic_write_json(&self.root.join("current-generation.json"), &pointer)?;
             self.snapshot()
         })();
@@ -439,7 +455,7 @@ impl SkillAdmissionService {
             generation_digest,
             activated_at_unix: now_unix(),
         };
-        self.validate_generation(&pointer, &record, staging.path())?;
+        self.validate_generation(&pointer, &record, staging.path(), true)?;
 
         let generations_root = self.root.join("generations");
         fs::create_dir_all(&generations_root)
@@ -642,6 +658,7 @@ impl SkillAdmissionService {
         pointer: &GenerationPointer,
         record: &GenerationRecord,
         generation_root: &Path,
+        verify_installed_artifacts: bool,
     ) -> Result<OverlaySnapshot> {
         if record.schema_version != OVERLAY_GENERATION_SCHEMA_VERSION
             || record.generation != pointer.generation
@@ -769,7 +786,7 @@ impl SkillAdmissionService {
                     ));
                 }
             }
-            if skill.state != AdmissionState::Tombstoned {
+            if verify_installed_artifacts && skill.state != AdmissionState::Tombstoned {
                 admission
                     .verify_installed(&self.package_root)
                     .map_err(|source| {

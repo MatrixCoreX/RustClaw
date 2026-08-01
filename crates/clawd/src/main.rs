@@ -633,10 +633,9 @@ async fn run() -> anyhow::Result<()> {
         );
     }
     info!(
-        "run_cmd config: timeout_seconds={}, idle_timeout_seconds={}, async_timeout_seconds={}, async_retention_seconds={}, terminate_grace_seconds={}, max_output_bytes={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
+        "run_cmd config: timeout_seconds={}, idle_timeout_seconds={}, async_runtime_deadline_default=none, async_retention_seconds={}, terminate_grace_seconds={}, max_output_bytes={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
         config.tools.cmd_timeout_seconds.max(1),
         config.tools.cmd_idle_timeout_seconds.max(1),
-        config.tools.cmd_async_timeout_seconds.max(1),
         config.tools.cmd_async_retention_seconds.max(1),
         config.tools.cmd_terminate_grace_seconds.max(1),
         config.tools.cmd_max_output_bytes.max(128),
@@ -843,6 +842,7 @@ async fn run() -> anyhow::Result<()> {
         skill_rt: crate::SkillRuntime {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
+            skill_global_max_concurrency: config.skills.skill_max_concurrency.max(1),
             skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
             skill_concurrency_gates: Arc::new(
                 crate::runtime::state::SkillConcurrencyGates::default(),
@@ -856,7 +856,6 @@ async fn run() -> anyhow::Result<()> {
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
             cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
-            cmd_async_timeout_seconds: config.tools.cmd_async_timeout_seconds.max(1),
             cmd_async_retention_seconds: config.tools.cmd_async_retention_seconds.max(1),
             cmd_terminate_grace_seconds: config.tools.cmd_terminate_grace_seconds.max(1),
             cmd_max_output_bytes: config.tools.cmd_max_output_bytes.max(128),

@@ -295,17 +295,6 @@ fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
     )
 }
 
-fn skill_store_package_available(
-    state: &AppState,
-    registry: &claw_core::skill_registry::SkillsRegistry,
-    skill_name: &str,
-) -> bool {
-    let _ = registry;
-    skill_sdk::SkillRuntimeResolver::new(skill_package_root(state))
-        .resolve(skill_name)
-        .is_ok()
-}
-
 fn skill_store_manifest_metadata(
     state: &AppState,
     registry: &claw_core::skill_registry::SkillsRegistry,

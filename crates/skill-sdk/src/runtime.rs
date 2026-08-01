@@ -165,6 +165,64 @@ impl SkillRuntimeResolver {
         )
     }
 
+    /// Inspect the active package for control-plane display without hashing
+    /// every installed artifact.
+    ///
+    /// This validates the pointer, receipt, manifest, confined paths, and
+    /// artifact sizes. It intentionally is not an execution authorization:
+    /// callers that launch a skill must still use `resolve`/`resolve_pinned`,
+    /// which verify every artifact digest immediately before execution.
+    pub fn inspect_current(&self, skill_name: &str) -> SkillSdkResult<SkillVersionPin> {
+        let pointer = self.store.current_pointer(skill_name)?;
+        let (canonical_install, manifest, receipt, receipt_digest) = self
+            .verified_receipt_metadata(
+                skill_name,
+                &pointer.install_dir,
+                Some(&pointer.version),
+                Some(&pointer.receipt_digest),
+                None,
+            )?;
+        match receipt.launch.program_scope {
+            LaunchProgramScope::Package => {
+                verify_launch_artifact_metadata(
+                    &canonical_install,
+                    &receipt,
+                    &receipt.launch.program,
+                )?;
+            }
+            LaunchProgramScope::TrustedRuntime => {
+                let program = fs::canonicalize(&receipt.launch.program)?;
+                if !program.is_file() {
+                    return Err(SkillSdkError::new(
+                        "launch_runtime_missing",
+                        format!("program={}", program.display()),
+                    ));
+                }
+            }
+        }
+        confined_existing_path(&canonical_install, &receipt.launch.working_directory, false)?;
+        for argument in &receipt.launch.args {
+            if receipt
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.path == *argument)
+            {
+                verify_launch_artifact_metadata(&canonical_install, &receipt, argument)?;
+            }
+        }
+        Ok(SkillVersionPin {
+            skill_name: receipt.skill_name,
+            version: receipt.version,
+            adapter: receipt.adapter,
+            progress_frames: manifest.run.progress_frames,
+            execution_profile: manifest.run.execution_profile,
+            sandbox_profile: receipt.sandbox_profile,
+            install_root: canonical_install,
+            manifest_digest: manifest.digest()?,
+            receipt_digest,
+        })
+    }
+
     pub fn pin_exact(
         &self,
         skill_name: &str,
@@ -469,6 +527,31 @@ fn verify_artifacts(install_root: &Path, receipt: &InstallReceipt) -> SkillSdkRe
         }
         Ok(())
     })
+}
+
+fn verify_launch_artifact_metadata(
+    install_root: &Path,
+    receipt: &InstallReceipt,
+    relative: &str,
+) -> SkillSdkResult<()> {
+    let path = confined_existing_path(install_root, relative, true)?;
+    let artifact = receipt
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.path == relative)
+        .ok_or_else(|| {
+            SkillSdkError::new(
+                "launch_artifact_receipt_missing",
+                format!("path={relative}"),
+            )
+        })?;
+    if fs::metadata(&path)?.len() != artifact.size_bytes {
+        return Err(SkillSdkError::new(
+            "launch_artifact_metadata_mismatch",
+            format!("path={}", path.display()),
+        ));
+    }
+    Ok(())
 }
 
 fn verify_artifact(install_root: &Path, artifact: &ArtifactReceipt) -> SkillSdkResult<()> {

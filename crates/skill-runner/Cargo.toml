@@ -6,11 +6,13 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+claw-core = { path = "../claw-core" }
 serde.workspace = true
 serde_json.workspace = true
 skill-sdk = { package = "agent-skill-sdk", path = "../skill-sdk" }
 reqwest.workspace = true
 futures-util = "0.3"
+fs2 = "0.4"
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "macros",

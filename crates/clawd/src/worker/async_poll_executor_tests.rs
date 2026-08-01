@@ -170,6 +170,136 @@ fn async_poll_local_process_job_dir_becomes_terminal_result() {
 }
 
 #[test]
+fn durable_skill_runner_terminal_response_is_verified_and_remapped() {
+    let workspace = TempDirGuard::new("async_poll_durable_skill_runner");
+    let job_dir = workspace.root_job_dir("durable-skill-job");
+    let binding = json!({
+        "skill_name": "media_download",
+        "version": "0.3.0",
+        "manifest_digest": "manifest-digest",
+        "receipt_digest": "receipt-digest",
+        "registry_generation": 48,
+        "registry_generation_digest": "generation-digest",
+        "base_registry_digest": "base-digest",
+        "overlay_generation_digest": "overlay-digest",
+        "policy_digest": "policy-digest",
+        "admission_receipt_digest": "admission-digest"
+    });
+    let sandbox_artifacts = std::path::PathBuf::from("/sandbox/artifacts");
+    let host_artifacts = workspace.path.join("host-artifacts");
+    std::fs::create_dir_all(&host_artifacts).unwrap();
+    std::fs::write(job_dir.join("job_kind"), "skill_runner").unwrap();
+    std::fs::write(job_dir.join("exit_code"), "0\n").unwrap();
+    std::fs::write(
+        job_dir.join("expected_execution_binding.json"),
+        binding.to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        job_dir.join("sandbox_artifact_output_directory"),
+        sandbox_artifacts.display().to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        job_dir.join("host_artifact_output_directory"),
+        host_artifacts.display().to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        job_dir.join("stdout"),
+        format!(
+            "{}\n{}\n",
+            json!({
+                "record_type": skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE,
+                "request_id": "request",
+                "sequence": 1,
+                "kind": "progress"
+            }),
+            json!({
+                "request_id": "request",
+                "status": "ok",
+                "text": "",
+                "extra": {
+                    "execution_binding": binding,
+                    "artifacts": [{"path": "/sandbox/artifacts/result.webp"}]
+                },
+                "error_text": null
+            })
+        ),
+    )
+    .unwrap();
+    std::fs::write(job_dir.join("stderr"), "").unwrap();
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:durable-skill-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+        job.runtime_deadline_at = None;
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("durable skill runner terminal payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_completed");
+    assert_eq!(payload["adapter_status"], "succeeded");
+    assert!(payload["runtime_deadline_at"].is_null());
+    assert_eq!(
+        payload["final_result_json"]["extra"]["artifacts"][0]["path"],
+        host_artifacts.join("result.webp").display().to_string()
+    );
+    assert_eq!(
+        payload["final_result_json"]["extra"]["execution_binding"],
+        binding
+    );
+}
+
+#[test]
+fn durable_skill_runner_binding_mismatch_fails_closed() {
+    let workspace = TempDirGuard::new("async_poll_durable_binding_mismatch");
+    let job_dir = workspace.root_job_dir("binding-mismatch");
+    std::fs::write(job_dir.join("job_kind"), "skill_runner").unwrap();
+    std::fs::write(job_dir.join("exit_code"), "0\n").unwrap();
+    std::fs::write(
+        job_dir.join("expected_execution_binding.json"),
+        json!({"skill_name": "expected"}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        job_dir.join("stdout"),
+        format!(
+            "{}\n",
+            json!({
+                "request_id": "request",
+                "status": "ok",
+                "text": "",
+                "extra": {"execution_binding": {"skill_name": "different"}},
+                "error_text": null
+            })
+        ),
+    )
+    .unwrap();
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:binding-mismatch";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", job_dir.display());
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("binding mismatch payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(
+        payload["error_code"],
+        "durable_skill_runner_binding_mismatch"
+    );
+}
+
+#[test]
 fn async_poll_large_output_keeps_exact_artifact_and_bounded_preview() {
     let workspace = TempDirGuard::new("async_poll_local_process_large");
     let job_dir = workspace.root_job_dir("large-job");
