@@ -1,4 +1,4 @@
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -706,23 +706,94 @@ fn path_args(args: &Value) -> Vec<&str> {
 }
 
 fn path_value_is_workspace_scoped(path: &str, workspace_root: &Path) -> bool {
-    let candidate = Path::new(path);
-    if candidate
+    let requested = Path::new(path);
+    if requested
         .components()
         .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
     {
         return false;
     }
-    if !candidate.is_absolute() {
-        return true;
-    }
-    let root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-    let target = candidate
-        .canonicalize()
-        .unwrap_or_else(|_| candidate.to_path_buf());
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        workspace_root.join(requested)
+    };
+    let Some(root) = normalize_through_existing_ancestor(workspace_root) else {
+        return false;
+    };
+    let Some(target) = normalize_through_existing_ancestor(&candidate) else {
+        return false;
+    };
     target.starts_with(root)
+}
+
+// Canonicalizing only the existing ancestor preserves platform aliases such as
+// macOS `/var` -> `/private/var` for creation targets while still resolving an
+// existing symlink before any missing suffix is appended.
+fn normalize_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut ancestor = absolute.as_path();
+    let mut missing_suffix = Vec::new();
+    loop {
+        if let Ok(mut normalized) = ancestor.canonicalize() {
+            for component in missing_suffix.iter().rev() {
+                normalized.push(component);
+            }
+            return Some(normalized);
+        }
+        missing_suffix.push(ancestor.file_name()?.to_os_string());
+        ancestor = ancestor.parent()?;
+    }
+}
+
+#[cfg(all(test, unix))]
+mod workspace_scope_path_tests {
+    use super::path_value_is_workspace_scoped;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "verifier-workspace-path-{label}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&root).expect("create verifier path test root");
+        root
+    }
+
+    #[test]
+    fn missing_target_under_workspace_alias_is_scoped() {
+        let parent = temp_root("alias");
+        let real_workspace = parent.join("real");
+        let workspace_alias = parent.join("alias");
+        fs::create_dir_all(&real_workspace).expect("create real workspace");
+        symlink(&real_workspace, &workspace_alias).expect("create workspace alias");
+
+        assert!(path_value_is_workspace_scoped(
+            &workspace_alias.join("missing/file.txt").to_string_lossy(),
+            &workspace_alias
+        ));
+        fs::remove_dir_all(parent).ok();
+    }
+
+    #[test]
+    fn missing_target_below_symlink_escape_is_not_scoped() {
+        let workspace = temp_root("workspace");
+        let outside = temp_root("outside");
+        symlink(&outside, workspace.join("escape")).expect("create escape alias");
+
+        assert!(!path_value_is_workspace_scoped(
+            "escape/missing/file.txt",
+            &workspace
+        ));
+        fs::remove_dir_all(workspace).ok();
+        fs::remove_dir_all(outside).ok();
+    }
 }
 
 fn verifier_workspace_scope_summary(
