@@ -12,7 +12,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Search text content under a bounded root.
 - Compare explicit paths.
 - Write or append text, create directories, or remove files/directories when confirmation permits.
-- Preview/apply exact replacements or structured patches with unique-match, hash, context, and checkpoint protection.
+- Preview/apply unique, replace-all, or single-file atomic batch edits, and apply structured patches with hash, context, checkpoint, diff, and rewind protection.
 - Review and decide isolated child-task patches through parent-owned machine actions.
 
 ## Actions
@@ -86,9 +86,9 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |
-| `preview_replace_text` | `path`, `old_text`, `new_text` | yes | strings | - | Validate one exact occurrence and return bounded diff/hash evidence without writing. Optional `expected_sha256` and `preserve_line_endings`. |
-| `replace_text` | `path`, `old_text`, `new_text` | yes | strings | - | Atomically replace one exact occurrence in a UTF-8 text file. Returns checkpoint and hash evidence. Optional `expected_sha256`; `expected_occurrences` may only be `1`. Requires confirmation. |
-| `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a Git-compatible unified diff. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
+| `preview_replace_text` | `path` plus direct text pair or `edits` | yes | strings / object[] | - | Preview without writing. Direct mode uses `old_text`/`new_text`; batch mode uses 1–128 edit objects. Default matching is unique. Set `replace_all=true` to replace every match and optionally pin `expected_occurrences` to `1..10000`. Optional `expected_sha256` and `preserve_line_endings`. |
+| `replace_text` | `path` plus direct text pair or `edits` | yes | strings / object[] | - | Atomically apply either one direct edit or sequential `edits[]` to one UTF-8 file. Any failed edit leaves the whole file unchanged. Returns one checkpoint plus hash/diff evidence. Each edit may set `replace_all` and `expected_occurrences`; top-level and batch edit modes cannot be mixed. Requires confirmation. |
+| `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a bounded unified diff. Git worktrees prefer Git check/apply; non-Git workspaces use the pure-Rust fallback. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
 | `diff` | `checkpoint_id` / `paths` | no | string / string[] | current workspace | Return a checkpoint patch or a bounded current Git diff as machine evidence. |
 | `rewind` | `checkpoint_id` | yes | string | - | Restore a patch checkpoint only when target hashes still match the recorded post-patch state. Requires confirmation. |
 | `review_child_patch` | `child_task_id` | yes | string | - | Load a terminal child worktree patch after validating parent ownership, artifact hash, base commit, and preconditions. Optional `patch_ref` pins the expected artifact. |
@@ -96,6 +96,16 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `reject_child_patch` | `child_task_id` | yes | string | - | Persist parent rejection and clean the isolated worktree without changing the primary workspace. Optional `patch_ref` pins the expected artifact. Requires confirmation. |
 
 ## Boundaries
+
+### Edit action matrix
+
+| Intent | Capability | Runtime action / arguments |
+|---|---|---|
+| One known unique fragment | `workspace.replace_text` | `replace_text` with `path`, `old_text`, `new_text`; unique match is the default |
+| Every exact occurrence | `workspace.replace_text` | Same action plus explicit `replace_all=true`; add `expected_occurrences` when the count is known |
+| Several dependent edits in one file | `workspace.edit_text` | Same `replace_text` action with `path` and `edits[]`; the runtime commits once |
+| Multi-hunk or multi-file change | `workspace.apply_patch` | `apply_patch` with unified `patch` and optional `precondition_hashes` |
+| Inspect or undo a successful edit | `workspace.diff` / `workspace.revert_checkpoint` | Reuse the observed `checkpoint_id`; never reconstruct it from prose |
 - Known explicit path facts: use `stat_paths`, not search.
 - Known explicit path content: use `read_text_range` or a known-file `grep_text`; do not launch a repository-wide path search first.
 - Symbol definitions, references, tests, and impact: prefer `code_index`. Use `grep_text` only as literal/regex fallback when parser coverage is unavailable or incomplete, and do not describe it as semantic resolution.
@@ -115,7 +125,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Last non-empty line of a known file: use `read_text_range` with `mode="last_non_empty"` and answer from observed `line_text`; do not replace this read-only operation with a shell pipeline.
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
-- Existing source edits: prefer `replace_text` for one known unique fragment and `apply_patch` for multi-hunk/multi-file changes; resolve missing/ambiguous/stale machine facts from current content, never from user-language reinterpretation.
+- Existing source edits: prefer `replace_text` for one known fragment, `workspace.edit_text` for several dependent edits in one file, and `apply_patch` for multi-hunk/multi-file changes; resolve missing/ambiguous/stale machine facts from current content, never from user-language reinterpretation.
 - Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
 - Child patch decisions: call `review_child_patch` before `apply_child_patch`; use only observed `child_task_id` and `patch_ref` machine fields. Children never apply or merge directly into the primary workspace.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.

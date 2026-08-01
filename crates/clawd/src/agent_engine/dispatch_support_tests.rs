@@ -804,6 +804,10 @@ fn workspace_exact_replace_machine_mismatches_replan_next_round() {
         "replacement_target_ambiguous",
         "replacement_precondition_failed",
         "invalid_expected_occurrences",
+        "replacement_occurrence_mismatch",
+        "replacement_occurrence_limit_exceeded",
+        "conflicting_edit_modes",
+        "invalid_edits",
     ] {
         let err = format!(
             "__RC_SKILL_ERROR__:{}",

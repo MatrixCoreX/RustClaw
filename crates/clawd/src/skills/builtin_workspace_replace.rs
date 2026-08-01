@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 use super::builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
 use super::builtin_workspace_patch::{canonical_workspace_root, validate_relative_patch_path};
 
+#[path = "builtin_workspace_replace_edit.rs"]
+mod edit;
+
 const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
-const MAX_FRAGMENT_BYTES: usize = 1024 * 1024;
 const MAX_PREVIEW_BYTES: usize = 64 * 1024;
 
 struct Replacement {
@@ -16,8 +18,8 @@ struct Replacement {
     after: String,
     before_sha256: String,
     after_sha256: String,
-    match_start: usize,
-    match_end: usize,
+    edits: Vec<edit::AppliedEdit>,
+    replacement_count: usize,
 }
 
 pub(super) fn execute_workspace_replace_for_root(
@@ -33,6 +35,8 @@ pub(super) fn execute_workspace_replace_for_root(
             "old_text",
             "new_text",
             "expected_occurrences",
+            "replace_all",
+            "edits",
             "expected_sha256",
             "preserve_line_endings",
         ],
@@ -86,7 +90,6 @@ pub(super) fn execute_workspace_replace_for_root(
     }
 
     let expected_before_hash = replacement.before_sha256.clone();
-    let old_text = required_string(args, "old_text")?.to_string();
     let after = replacement.after.as_bytes().to_vec();
     let mutation =
         run_checkpointed_workspace_mutation(&root, task_id, "replace_text", &target, || {
@@ -102,10 +105,6 @@ pub(super) fn execute_workspace_replace_for_root(
                         "actual_sha256": current_hash,
                     }),
                 ));
-            }
-            let occurrence_count = current.match_indices(&old_text).count();
-            if occurrence_count != 1 {
-                return Err(occurrence_error(&path, occurrence_count));
             }
             atomic_write_file(&target, &after).map_err(|error| {
                 replace_error(
@@ -141,9 +140,11 @@ pub(super) fn execute_workspace_replace_for_root(
         "after_sha256",
         "occurrence_count",
         "changed_byte_range",
+        "changed_byte_ranges",
         "diff_preview",
         "diff_truncated",
         "path",
+        "edit_count",
     ] {
         if let Some(value) = preview_object.get(key) {
             object.insert(key.to_string(), value.clone());
@@ -154,7 +155,10 @@ pub(super) fn execute_workspace_replace_for_root(
         "message_key".to_string(),
         json!("workspace.replace.applied"),
     );
-    object.insert("replacement_count".to_string(), json!(1));
+    object.insert(
+        "replacement_count".to_string(),
+        json!(replacement.replacement_count),
+    );
     object.insert("idempotency_replay".to_string(), json!(false));
     encode_result(result)
 }
@@ -179,49 +183,6 @@ fn prepare_replacement(
     requested_path: &str,
     target: &Path,
 ) -> Result<Replacement, String> {
-    let old_text = required_string(args, "old_text")?;
-    let new_text = required_string(args, "new_text")?;
-    if old_text.is_empty() {
-        return Err(replace_error(
-            "empty_old_text",
-            "workspace.replace.empty_old_text",
-            json!({"path": requested_path}),
-        ));
-    }
-    if old_text.len() > MAX_FRAGMENT_BYTES || new_text.len() > MAX_FRAGMENT_BYTES {
-        return Err(replace_error(
-            "replacement_fragment_too_large",
-            "workspace.replace.fragment_too_large",
-            json!({
-                "path": requested_path,
-                "old_text_bytes": old_text.len(),
-                "new_text_bytes": new_text.len(),
-                "max_fragment_bytes": MAX_FRAGMENT_BYTES,
-            }),
-        ));
-    }
-    let expected_occurrences = match args.get("expected_occurrences") {
-        None => 1,
-        Some(value) => value.as_u64().ok_or_else(|| {
-            replace_error(
-                "invalid_expected_occurrences",
-                "workspace.replace.invalid_expected_occurrences",
-                json!({"path": requested_path}),
-            )
-        })?,
-    };
-    if expected_occurrences != 1 {
-        return Err(replace_error(
-            "invalid_expected_occurrences",
-            "workspace.replace.unique_match_required",
-            json!({
-                "path": requested_path,
-                "expected_occurrences": expected_occurrences,
-                "required_occurrences": 1,
-            }),
-        ));
-    }
-
     let before = read_text_file(target, requested_path)?;
     if let Some(expected) = optional_nonempty_string(args, "expected_sha256") {
         let actual = sha256_label(before.as_bytes());
@@ -237,53 +198,43 @@ fn prepare_replacement(
             ));
         }
     }
-    let matches = before.match_indices(old_text).collect::<Vec<_>>();
-    if matches.len() != 1 {
-        return Err(occurrence_error(requested_path, matches.len()));
-    }
     let preserve_line_endings = optional_bool(args, "preserve_line_endings")?.unwrap_or(true);
-    let replacement_text = if preserve_line_endings && uses_crlf(&before) {
-        normalize_to_crlf(new_text)
-    } else {
-        new_text.to_string()
-    };
-    let (match_start, _) = matches[0];
-    let match_end = match_start + old_text.len();
-    let mut after =
-        String::with_capacity(before.len().saturating_sub(old_text.len()) + replacement_text.len());
-    after.push_str(&before[..match_start]);
-    after.push_str(&replacement_text);
-    after.push_str(&before[match_end..]);
+    let outcome =
+        edit::apply_requested_edits(args, requested_path, &before, preserve_line_endings)?;
 
     Ok(Replacement {
         path: requested_path.to_string(),
         before_sha256: sha256_label(before.as_bytes()),
-        after_sha256: sha256_label(after.as_bytes()),
+        after_sha256: sha256_label(outcome.after.as_bytes()),
         before,
-        after,
-        match_start,
-        match_end,
+        after: outcome.after,
+        edits: outcome.edits,
+        replacement_count: outcome.replacement_count,
     })
 }
 
 fn replacement_preview(action: &str, replacement: &Replacement) -> Value {
-    let inserted_end = replacement.match_start
-        + replacement.after.len().saturating_sub(
-            replacement
-                .before
-                .len()
-                .saturating_sub(replacement.match_end - replacement.match_start),
-        );
-    let old_fragment = &replacement.before[replacement.match_start..replacement.match_end];
-    let new_fragment = &replacement.after[replacement.match_start..inserted_end];
-    let raw_preview = format!(
-        "--- a/{path}\n+++ b/{path}\n@@ exact byte {start} @@\n-{old}\n+{new}\n",
-        path = replacement.path,
-        start = replacement.match_start,
-        old = old_fragment,
-        new = new_fragment,
-    );
+    let mut raw_preview = format!("--- a/{0}\n+++ b/{0}\n", replacement.path);
+    let mut changed_byte_ranges = Vec::new();
+    for applied in &replacement.edits {
+        raw_preview.push_str(&format!(
+            "@@ staged edit {} occurrences {} @@\n-{}\n+{}\n",
+            applied.index, applied.occurrence_count, applied.old_text, applied.new_text,
+        ));
+        changed_byte_ranges.extend(applied.ranges.iter().map(|range| {
+            json!({
+                "edit_index": applied.index,
+                "coordinate_space": "staged_before_edit",
+                "before_start": range.before_start,
+                "before_end": range.before_end,
+                "after_start": range.after_start,
+                "after_end": range.after_end,
+                "ranges_truncated": applied.ranges_truncated,
+            })
+        }));
+    }
     let (diff_preview, diff_truncated) = bounded_utf8(&raw_preview, MAX_PREVIEW_BYTES);
+    let changed_byte_range = changed_byte_ranges.first().cloned().unwrap_or(Value::Null);
     json!({
         "schema_version": 1,
         "source": "workspace_replace",
@@ -291,15 +242,12 @@ fn replacement_preview(action: &str, replacement: &Replacement) -> Value {
         "action": action,
         "message_key": "workspace.replace.preview_ready",
         "path": replacement.path,
-        "occurrence_count": 1,
+        "occurrence_count": replacement.replacement_count,
+        "edit_count": replacement.edits.len(),
         "before_sha256": replacement.before_sha256,
         "after_sha256": replacement.after_sha256,
-        "changed_byte_range": {
-            "before_start": replacement.match_start,
-            "before_end": replacement.match_end,
-            "after_start": replacement.match_start,
-            "after_end": inserted_end,
-        },
+        "changed_byte_range": changed_byte_range,
+        "changed_byte_ranges": changed_byte_ranges,
         "would_change": replacement.before != replacement.after,
         "diff_preview": diff_preview,
         "diff_truncated": diff_truncated,
@@ -464,26 +412,6 @@ fn optional_bool(args: &Map<String, Value>, key: &str) -> Result<Option<bool>, S
     }
 }
 
-fn occurrence_error(path: &str, actual: usize) -> String {
-    replace_error(
-        if actual == 0 {
-            "replacement_target_not_found"
-        } else {
-            "replacement_target_ambiguous"
-        },
-        if actual == 0 {
-            "workspace.replace.target_not_found"
-        } else {
-            "workspace.replace.target_ambiguous"
-        },
-        json!({
-            "path": path,
-            "expected_occurrences": 1,
-            "actual_occurrences": actual,
-        }),
-    )
-}
-
 fn encode_result(value: Value) -> Result<String, String> {
     serde_json::to_string(&value).map_err(|error| {
         replace_error(
@@ -512,3 +440,7 @@ fn replace_error(error_code: &str, message_key: &str, details: Value) -> String 
 #[cfg(test)]
 #[path = "builtin_workspace_replace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_replace_batch_tests.rs"]
+mod batch_tests;

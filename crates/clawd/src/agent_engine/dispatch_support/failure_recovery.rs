@@ -207,6 +207,8 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
                 | "patch_context_mismatch"
                 | "invalid_patch"
                 | "invalid_patch_size"
+                | "patch_file_limit_exceeded"
+                | "patch_target_limit_exceeded"
                 | "empty_patch"
                 | "invalid_patch_stat"
                 | "duplicate_patch_path"
@@ -219,6 +221,14 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
                 | "replacement_target_ambiguous"
                 | "replacement_precondition_failed"
                 | "invalid_expected_occurrences"
+                | "replacement_occurrence_mismatch"
+                | "replacement_occurrence_limit_exceeded"
+                | "conflicting_edit_modes"
+                | "invalid_edits"
+                | "invalid_edit"
+                | "missing_edit_arg"
+                | "unexpected_edit_arg"
+                | "invalid_edit_arg_type"
         )
     })
 }
