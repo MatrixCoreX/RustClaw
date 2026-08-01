@@ -7,11 +7,8 @@ import {
   LayoutDashboard,
   MessageCircle,
   Network,
-  Server,
-  Sparkles,
   SquareTerminal,
   Store,
-  Wrench,
 } from "lucide-react";
 
 import type { DashboardOnboardingStep } from "../components/DashboardPage";
@@ -417,11 +414,6 @@ export function useConsoleProjections({
         icon: <MessageCircle className="h-4 w-4" />,
       },
       {
-        id: "ai_learning" as const,
-        label: t("学习/维护", "Learning / Maintenance"),
-        icon: <BookOpenCheck className="h-4 w-4" />,
-      },
-      {
         id: "nni" as const,
         label: "NNI",
         icon: <Network className="h-4 w-4" />,
@@ -430,21 +422,6 @@ export function useConsoleProjections({
         id: "channels" as const,
         label: t("账号绑定", "Account Binding"),
         icon: <Database className="h-4 w-4" />,
-      },
-      {
-        id: "models" as const,
-        label: t("大模型", "Models"),
-        icon: <Sparkles className="h-4 w-4" />,
-      },
-      {
-        id: "services" as const,
-        label: t("通信接入", "Communication Setup"),
-        icon: <Server className="h-4 w-4" />,
-      },
-      {
-        id: "skills" as const,
-        label: t("工具/技能", "Tools/Skills"),
-        icon: <Wrench className="h-4 w-4" />,
       },
       {
         id: "skill_store" as const,
@@ -465,6 +442,11 @@ export function useConsoleProjections({
         id: "tasks" as const,
         label: t("手动任务", "Manual Tasks"),
         icon: <SquareTerminal className="h-4 w-4" />,
+      },
+      {
+        id: "ai_learning" as const,
+        label: t("学习/维护", "Learning / Maintenance"),
+        icon: <BookOpenCheck className="h-4 w-4" />,
       },
     ],
     [lang],

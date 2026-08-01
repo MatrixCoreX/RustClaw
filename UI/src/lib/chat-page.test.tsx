@@ -154,8 +154,8 @@ test("loads protected media through the authenticated fetcher instead of a raw m
 test("keeps the send button aligned while allowing the shorter input to grow vertically", () => {
   const markup = renderToStaticMarkup(<ChatPage {...props()} />);
 
-  assert.match(markup, /theme-input h-\[72px\] min-h-\[72px\] max-h-60 w-full resize-y/);
-  assert.match(markup, /theme-accent-btn min-h-\[72px\].*self-stretch/);
+  assert.match(markup, /theme-input h-12 min-h-12 max-h-60 w-full resize-y sm:h-\[72px\] sm:min-h-\[72px\]/);
+  assert.match(markup, /theme-accent-btn chat-send-btn min-h-12 min-w-16.*self-stretch.*sm:min-h-\[72px\]/);
 });
 
 test("keeps the composer visible while scrolling only the chat interaction", () => {

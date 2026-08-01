@@ -231,6 +231,18 @@
     --tw-ring-color: var(--theme-focus-ring);
   }
 
+  .theme-icon-btn {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border p-0 transition disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: var(--theme-border-strong);
+    background: var(--theme-card);
+    color: var(--theme-text-soft);
+  }
+
+  .theme-icon-btn:hover {
+    background: color-mix(in srgb, var(--theme-card) 80%, white 20%);
+    color: var(--theme-text-strong);
+  }
+
   .theme-accent-btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60;
     background: linear-gradient(135deg, var(--theme-primary-btn-start) 0%, var(--theme-primary-btn-end) 100%);
@@ -291,6 +303,60 @@
   .theme-topbar-nav-btn:hover {
     background: color-mix(in srgb, var(--theme-card) 72%, transparent);
     color: var(--theme-text-strong);
+  }
+
+  .dashboard-section-tabs {
+    gap: 0.5rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .dashboard-section-tab {
+    @apply inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition;
+    scroll-snap-align: start;
+    border-color: var(--theme-border);
+    background: color-mix(in srgb, var(--theme-card) 72%, transparent);
+    color: var(--theme-text-muted);
+  }
+
+  .dashboard-section-tab:hover {
+    border-color: var(--theme-border-strong);
+    background: var(--theme-card);
+    color: var(--theme-text-strong);
+  }
+
+  .dashboard-section-tab:focus-visible {
+    outline: 2px solid var(--theme-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .dashboard-section-tab-active {
+    border-color: color-mix(in srgb, var(--theme-focus-ring) 48%, var(--theme-border));
+    background: color-mix(in srgb, var(--theme-focus-ring) 16%, var(--theme-card));
+    color: var(--theme-text-strong);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-focus-ring) 15%, transparent);
+  }
+
+  .dashboard-agent-entry {
+    @apply inline-flex min-h-10 max-w-full items-center gap-2 rounded-lg border px-3 py-1.5 text-white transition;
+    border-color: color-mix(in srgb, var(--theme-primary-btn-start) 58%, transparent);
+    background: linear-gradient(135deg, var(--theme-primary-btn-start) 0%, var(--theme-primary-btn-end) 100%);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-primary-btn-end) 22%, transparent);
+  }
+
+  .dashboard-agent-entry:hover {
+    background: linear-gradient(135deg, var(--theme-primary-btn-start-hover) 0%, var(--theme-primary-btn-end-hover) 100%);
+    transform: translateY(-1px);
+  }
+
+  .dashboard-agent-entry:focus-visible {
+    outline: 2px solid var(--theme-focus-ring);
+    outline-offset: 3px;
+  }
+
+  .dashboard-agent-entry-icon {
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 bg-black/10;
   }
 
   .theme-toolbar-shell {
@@ -1107,6 +1173,40 @@
   }
 
   @media (max-width: 767px) {
+    .dashboard-section-tabs {
+      flex-wrap: wrap;
+      gap: 0.375rem;
+      overflow-x: visible;
+      padding-bottom: 0;
+      scroll-snap-type: none;
+      scrollbar-width: none;
+    }
+
+    .dashboard-section-tab {
+      min-height: 2.25rem;
+      gap: 0.375rem;
+      border-radius: 0.65rem;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.75rem;
+      line-height: 1rem;
+    }
+
+    .dashboard-section-tab svg {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+
+    .dashboard-agent-entry {
+      min-height: 2.5rem;
+      gap: 0.5rem;
+      padding: 0.375rem 0.625rem;
+    }
+
+    .dashboard-agent-entry-icon {
+      width: 1.75rem;
+      height: 1.75rem;
+    }
+
     .theme-header {
       backdrop-filter: blur(14px);
     }
@@ -1198,12 +1298,13 @@
     }
 
     .channel-setup-actions {
-      flex-direction: column;
-      align-items: stretch;
+      flex-flow: row wrap;
+      align-items: center;
     }
 
     .channel-setup-actions > button {
-      width: 100%;
+      width: auto;
+      max-width: 100%;
     }
 
     .wechat-login-shell {
@@ -1254,15 +1355,54 @@
     }
 
     .wechat-login-actions {
-      flex-direction: column;
-      align-items: stretch;
+      flex-flow: row wrap;
+      align-items: center;
     }
 
     .wechat-login-actions > button {
-      width: 100%;
+      width: auto;
+      max-width: 100%;
     }
   }
 }
+
+@media (max-width: 767px) {
+  :is(.theme-accent-btn, .theme-accent-soft-btn, .theme-secondary-btn, .theme-topbar-btn):not(.theme-choice-btn):not(.chat-send-btn) {
+    min-height: 2.25rem;
+    gap: 0.375rem;
+    border-radius: 0.65rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.8125rem;
+    line-height: 1rem;
+  }
+
+  .theme-icon-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-height: 2.25rem;
+    border-radius: 0.65rem;
+    padding: 0;
+  }
+
+  :is(.theme-topbar-nav-btn, .theme-toolbar-segment) {
+    min-height: 2.25rem;
+    gap: 0.375rem;
+    border-radius: 0.65rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  :is(.theme-accent-btn, .theme-accent-soft-btn, .theme-secondary-btn, .theme-topbar-btn, .theme-icon-btn) > svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  button {
+    touch-action: manipulation;
+  }
+}
+
 @keyframes chat-activity-sweep {
   0% {
     transform: translateX(-130%);
