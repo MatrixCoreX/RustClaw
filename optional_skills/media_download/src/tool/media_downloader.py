@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+import hashlib
 import html
 import http.cookiejar
 import json
@@ -127,6 +128,10 @@ PARSE_RETRY_COUNT = 3
 DEFAULT_BROWSER_TIMEOUT = 30.0
 DEFAULT_PROFILE_LIMIT = 100
 PROFILE_MANIFEST_FILENAME = "profile_downloads.json"
+PROFILE_CHECKPOINT_SCHEMA_VERSION = 1
+PROFILE_CHECKPOINT_POINTER_FILENAME = "current.json"
+PROFILE_CHECKPOINT_SNAPSHOT_FOLDER = "manifests"
+PROFILE_CHECKPOINT_BLOB_FOLDER = "blobs"
 PROFILE_VIDEO_FOLDER = "videos"
 PROFILE_IMAGE_FOLDER = "images"
 DEFAULT_PROFILE_INTERVAL = 5.0
@@ -5190,6 +5195,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--profile-checkpoint-dir",
+        help=(
+            "Host-provided private directory for resumable profile checkpoints. "
+            "Completed items are content-addressed here and restored after a safe retry."
+        ),
+    )
+    parser.add_argument(
         "--chrome-path",
         help="Path or executable name for the Chromium-compatible browser used by fallback.",
     )
@@ -6140,26 +6152,163 @@ def profile_item_output_name(
     return f"{prefix}_{profile_publish_time(create_time, item_id)}.mp4"
 
 
+def profile_checkpoint_root(
+    args: argparse.Namespace,
+    platform: str,
+    profile_id: str,
+) -> Path | None:
+    raw = getattr(args, "profile_checkpoint_dir", None)
+    if not raw:
+        return None
+    base = Path(str(raw)).expanduser()
+    if not base.is_absolute():
+        raise DouyinDownloadError("Profile checkpoint directory must be an absolute host path.")
+    identity = hashlib.sha256(f"{platform}\0{profile_id}".encode("utf-8")).hexdigest()
+    root = base / platform / identity
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def profile_manifest_base(
+    profile_id: str,
+    username: str,
+    *,
+    platform: str,
+) -> dict[str, Any]:
+    id_key = "sec_uid" if platform == "douyin" else "user_id"
+    return {
+        "version": 2,
+        "schema_version": PROFILE_CHECKPOINT_SCHEMA_VERSION,
+        "platform": platform,
+        id_key: profile_id,
+        "username": username,
+        "state": "partial",
+        "item_count": 0,
+        "completed_count": 0,
+        "failed_count": 0,
+        "downloaded": {},
+        "failures": {},
+        "collection": {
+            "stable_id_kind": "platform_item_id",
+            "stable_item_ids": [],
+            "cursor": {
+                "next_index": 0,
+                "last_item_id": None,
+                "total": 0,
+            },
+        },
+    }
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def canonical_json_bytes(value: dict[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def load_profile_checkpoint_snapshot(
+    checkpoint_root: Path,
+    profile_id: str,
+    *,
+    platform: str,
+) -> dict[str, Any] | None:
+    pointer_path = checkpoint_root / PROFILE_CHECKPOINT_POINTER_FILENAME
+    if not pointer_path.exists():
+        return None
+    try:
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+        snapshot_name = str(pointer["snapshot"])
+        expected_digest = str(pointer["sha256"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise DouyinDownloadError(
+            f"Could not read profile checkpoint pointer {pointer_path}: {exc}"
+        ) from exc
+    if Path(snapshot_name).name != snapshot_name or not snapshot_name.endswith(".json"):
+        raise DouyinDownloadError(f"Profile checkpoint pointer is invalid: {pointer_path}")
+    snapshot_path = (
+        checkpoint_root / PROFILE_CHECKPOINT_SNAPSHOT_FOLDER / snapshot_name
+    )
+    try:
+        content = snapshot_path.read_bytes()
+    except OSError as exc:
+        raise DouyinDownloadError(
+            f"Could not read profile checkpoint snapshot {snapshot_path}: {exc}"
+        ) from exc
+    actual_digest = hashlib.sha256(content).hexdigest()
+    if actual_digest != expected_digest:
+        raise DouyinDownloadError(
+            f"Profile checkpoint snapshot digest mismatch: {snapshot_path}"
+        )
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise DouyinDownloadError(
+            f"Profile checkpoint snapshot is invalid JSON: {snapshot_path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise DouyinDownloadError(
+            f"Profile checkpoint snapshot is not an object: {snapshot_path}"
+        )
+    id_key = "sec_uid" if platform == "douyin" else "user_id"
+    if (
+        payload.get("schema_version") != PROFILE_CHECKPOINT_SCHEMA_VERSION
+        or payload.get("platform") != platform
+        or payload.get(id_key) != profile_id
+    ):
+        raise DouyinDownloadError(
+            f"Profile checkpoint identity does not match the requested account: {snapshot_path}"
+        )
+    payload["checkpoint_digest"] = actual_digest
+    payload["checkpoint_snapshot"] = snapshot_name
+    return payload
+
+
 def load_profile_manifest(
     path: Path,
     profile_id: str,
     username: str,
     *,
     platform: str = "douyin",
+    checkpoint_root: Path | None = None,
 ) -> dict[str, Any]:
     id_key = "sec_uid" if platform == "douyin" else "user_id"
-    if not path.exists():
-        return {
-            "version": 1,
-            "platform": platform,
-            id_key: profile_id,
-            "username": username,
-            "downloaded": {},
-        }
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise DouyinDownloadError(f"Could not read profile download manifest {path}: {exc}") from exc
+    payload = (
+        load_profile_checkpoint_snapshot(
+            checkpoint_root,
+            profile_id,
+            platform=platform,
+        )
+        if checkpoint_root is not None
+        else None
+    )
+    if payload is None and not path.exists():
+        return profile_manifest_base(profile_id, username, platform=platform)
+    if payload is None:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise DouyinDownloadError(f"Could not read profile download manifest {path}: {exc}") from exc
     if not isinstance(payload, dict):
         raise DouyinDownloadError(f"Profile download manifest is not a JSON object: {path}")
     existing_platform = str(payload.get("platform") or "douyin")
@@ -6174,9 +6323,18 @@ def load_profile_manifest(
         )
     if not isinstance(payload.get("downloaded"), dict):
         payload["downloaded"] = {}
+    if not isinstance(payload.get("failures"), dict):
+        payload["failures"] = {}
+    if not isinstance(payload.get("collection"), dict):
+        payload["collection"] = profile_manifest_base(
+            profile_id,
+            username,
+            platform=platform,
+        )["collection"]
     payload.update(
         {
-            "version": 1,
+            "version": 2,
+            "schema_version": PROFILE_CHECKPOINT_SCHEMA_VERSION,
             "platform": platform,
             id_key: profile_id,
             "username": username,
@@ -6185,14 +6343,345 @@ def load_profile_manifest(
     return payload
 
 
-def save_profile_manifest(path: Path, manifest: dict[str, Any]) -> None:
+def save_profile_manifest(
+    path: Path,
+    manifest: dict[str, Any],
+    checkpoint_root: Path | None = None,
+) -> None:
     manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    temporary_path = path.with_name(f"{path.name}.tmp")
-    temporary_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    if checkpoint_root is not None:
+        snapshot_payload = copy.deepcopy(manifest)
+        for key in (
+            "checkpoint_digest",
+            "checkpoint_snapshot",
+            "checkpoint_sequence",
+            "updated_at",
+        ):
+            snapshot_payload.pop(key, None)
+        content_digest = hashlib.sha256(
+            canonical_json_bytes(snapshot_payload)
+        ).hexdigest()
+        pointer_path = checkpoint_root / PROFILE_CHECKPOINT_POINTER_FILENAME
+        existing_pointer: dict[str, Any] | None = None
+        if pointer_path.exists():
+            try:
+                candidate = json.loads(pointer_path.read_text(encoding="utf-8"))
+                if isinstance(candidate, dict):
+                    existing_pointer = candidate
+            except (OSError, json.JSONDecodeError):
+                existing_pointer = None
+        if (
+            existing_pointer is not None
+            and existing_pointer.get("content_sha256") == content_digest
+        ):
+            manifest["checkpoint_sequence"] = existing_pointer.get("sequence")
+            manifest["checkpoint_digest"] = existing_pointer.get("sha256")
+            manifest["checkpoint_snapshot"] = existing_pointer.get("snapshot")
+            atomic_write_bytes(
+                path,
+                json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+            )
+            return
+
+        sequence = (
+            int(existing_pointer.get("sequence") or 0) + 1
+            if existing_pointer is not None
+            else 1
+        )
+        snapshot = snapshot_payload
+        snapshot["updated_at"] = manifest["updated_at"]
+        snapshot["checkpoint_sequence"] = sequence
+        content = canonical_json_bytes(snapshot)
+        digest = hashlib.sha256(content).hexdigest()
+        snapshot_name = (
+            f"{sequence:08d}-{str(snapshot.get('state') or 'partial')}-"
+            f"{digest[:16]}.json"
+        )
+        snapshot_dir = checkpoint_root / PROFILE_CHECKPOINT_SNAPSHOT_FOLDER
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / snapshot_name
+        try:
+            with snapshot_path.open("xb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            if snapshot_path.read_bytes() != content:
+                raise DouyinDownloadError(
+                    f"Profile checkpoint snapshot collision: {snapshot_path}"
+                )
+        pointer = {
+            "schema_version": PROFILE_CHECKPOINT_SCHEMA_VERSION,
+            "sequence": sequence,
+            "state": snapshot.get("state"),
+            "snapshot": snapshot_name,
+            "sha256": digest,
+            "content_sha256": content_digest,
+        }
+        atomic_write_bytes(
+            pointer_path,
+            canonical_json_bytes(pointer),
+        )
+        manifest["checkpoint_sequence"] = sequence
+        manifest["checkpoint_digest"] = digest
+        manifest["checkpoint_snapshot"] = snapshot_name
+
+    atomic_write_bytes(
+        path,
+        json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
     )
-    temporary_path.replace(path)
+
+
+def profile_file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def safe_profile_relative_path(value: str) -> Path:
+    relative = Path(value)
+    if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise DouyinDownloadError(f"Profile artifact path is invalid: {value}")
+    return relative
+
+
+def cache_profile_item_files(
+    checkpoint_root: Path,
+    profile_output_dir: Path,
+    files: list[str],
+) -> list[dict[str, Any]]:
+    if not files:
+        raise DouyinDownloadError("Completed profile item produced no verifiable artifacts.")
+    blob_dir = checkpoint_root / PROFILE_CHECKPOINT_BLOB_FOLDER
+    blob_dir.mkdir(parents=True, exist_ok=True)
+    descriptors: list[dict[str, Any]] = []
+    for value in files:
+        relative = safe_profile_relative_path(value)
+        source = profile_output_dir / relative
+        if not source.is_file():
+            raise DouyinDownloadError(f"Completed profile artifact is missing: {source}")
+        size = source.stat().st_size
+        digest = profile_file_sha256(source)
+        blob_path = blob_dir / digest
+        if blob_path.exists():
+            if blob_path.stat().st_size != size or profile_file_sha256(blob_path) != digest:
+                raise DouyinDownloadError(f"Profile checkpoint blob is corrupt: {blob_path}")
+        else:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{digest}.",
+                suffix=".tmp",
+                dir=blob_dir,
+            )
+            os.close(descriptor)
+            temporary_path = Path(temporary_name)
+            try:
+                shutil.copy2(source, temporary_path)
+                if profile_file_sha256(temporary_path) != digest:
+                    raise DouyinDownloadError(
+                        f"Profile checkpoint blob verification failed: {source}"
+                    )
+                try:
+                    temporary_path.replace(blob_path)
+                except FileExistsError:
+                    pass
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        descriptors.append(
+            {
+                "relative_path": relative.as_posix(),
+                "size_bytes": size,
+                "sha256": digest,
+            }
+        )
+    return descriptors
+
+
+def restore_profile_item_files(
+    checkpoint_root: Path,
+    profile_output_dir: Path,
+    entry: dict[str, Any],
+) -> bool:
+    descriptors = entry.get("artifacts")
+    if not isinstance(descriptors, list) or not descriptors:
+        return False
+    verified: list[tuple[Path, Path, int, str]] = []
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict):
+            return False
+        relative_value = descriptor.get("relative_path")
+        digest = descriptor.get("sha256")
+        size = descriptor.get("size_bytes")
+        if (
+            not isinstance(relative_value, str)
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 0
+        ):
+            return False
+        relative = safe_profile_relative_path(relative_value)
+        blob_path = checkpoint_root / PROFILE_CHECKPOINT_BLOB_FOLDER / digest
+        if (
+            not blob_path.is_file()
+            or blob_path.stat().st_size != size
+            or profile_file_sha256(blob_path) != digest
+        ):
+            raise DouyinDownloadError(f"Profile checkpoint artifact is unavailable: {blob_path}")
+        verified.append((blob_path, profile_output_dir / relative, size, digest))
+    for blob_path, destination, size, digest in verified:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            if (
+                not destination.is_file()
+                or destination.stat().st_size != size
+                or profile_file_sha256(destination) != digest
+            ):
+                raise DouyinDownloadError(
+                    f"Profile resume destination conflicts with cached artifact: {destination}"
+                )
+            continue
+        shutil.copy2(blob_path, destination)
+    return True
+
+
+def update_profile_manifest_progress(
+    manifest: dict[str, Any],
+    stable_item_ids: list[str],
+    *,
+    next_index: int,
+    last_item_id: str | None,
+    state: str,
+) -> None:
+    downloaded = manifest.get("downloaded")
+    failures = manifest.get("failures")
+    if not isinstance(downloaded, dict) or not isinstance(failures, dict):
+        raise DouyinDownloadError("Profile manifest progress maps are invalid.")
+    completed_count = sum(item_id in downloaded for item_id in stable_item_ids)
+    failed_count = sum(item_id in failures for item_id in stable_item_ids)
+    collection_digest = hashlib.sha256(
+        canonical_json_bytes({"stable_item_ids": stable_item_ids})
+    ).hexdigest()
+    previous_collection = manifest.get("collection")
+    previous_cursor = (
+        previous_collection.get("cursor")
+        if isinstance(previous_collection, dict)
+        and previous_collection.get("collection_digest") == collection_digest
+        else None
+    )
+    previous_next_index = (
+        previous_cursor.get("next_index", 0)
+        if isinstance(previous_cursor, dict)
+        else 0
+    )
+    if isinstance(previous_next_index, bool) or not isinstance(previous_next_index, int):
+        previous_next_index = 0
+    high_water_index = max(previous_next_index, next_index)
+    previous_last_item_id = (
+        previous_cursor.get("last_item_id")
+        if isinstance(previous_cursor, dict)
+        else None
+    )
+    high_water_last_item_id = (
+        last_item_id
+        if next_index >= previous_next_index and last_item_id is not None
+        else previous_last_item_id
+    )
+    manifest.update(
+        {
+            "state": state,
+            "item_count": len(stable_item_ids),
+            "completed_count": completed_count,
+            "failed_count": failed_count,
+            "collection": {
+                "stable_id_kind": "platform_item_id",
+                "collection_digest": collection_digest,
+                "stable_item_ids": stable_item_ids,
+                "cursor": {
+                    "next_index": high_water_index,
+                    "last_item_id": high_water_last_item_id,
+                    "total": len(stable_item_ids),
+                    "completed_count": completed_count,
+                    "remaining_item_ids": [
+                        item_id for item_id in stable_item_ids if item_id not in downloaded
+                    ],
+                },
+            },
+        }
+    )
+
+
+def persist_profile_progress(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    stable_item_ids: list[str],
+    *,
+    next_index: int,
+    last_item_id: str | None,
+    state: str,
+    checkpoint_root: Path | None,
+) -> None:
+    update_profile_manifest_progress(
+        manifest,
+        stable_item_ids,
+        next_index=next_index,
+        last_item_id=last_item_id,
+        state=state,
+    )
+    save_profile_manifest(manifest_path, manifest, checkpoint_root)
+
+
+def initial_profile_manifest_state(
+    manifest: dict[str, Any],
+    stable_item_ids: list[str],
+) -> str:
+    downloaded = manifest.get("downloaded")
+    failures = manifest.get("failures")
+    if (
+        manifest.get("state") == "complete"
+        and isinstance(downloaded, dict)
+        and isinstance(failures, dict)
+        and all(item_id in downloaded and item_id not in failures for item_id in stable_item_ids)
+    ):
+        return "complete"
+    return "partial"
+
+
+def verify_complete_profile_manifest(
+    manifest: dict[str, Any],
+    stable_item_ids: list[str],
+    profile_output_dir: Path,
+    checkpoint_root: Path | None,
+) -> None:
+    downloaded = manifest.get("downloaded")
+    if not isinstance(downloaded, dict):
+        raise DouyinDownloadError("Profile manifest downloaded map is invalid.")
+    for item_id in stable_item_ids:
+        entry = downloaded.get(item_id)
+        if not isinstance(entry, dict):
+            raise DouyinDownloadError(
+                f"Profile collection is incomplete; item {item_id} has no verified artifact record."
+            )
+        if checkpoint_root is not None:
+            if not restore_profile_item_files(checkpoint_root, profile_output_dir, entry):
+                raise DouyinDownloadError(
+                    f"Profile collection item {item_id} has no resumable artifact checkpoint."
+                )
+        else:
+            files = entry.get("files")
+            if not isinstance(files, list) or not files:
+                raise DouyinDownloadError(
+                    f"Profile collection item {item_id} has no artifact list."
+                )
+            for value in files:
+                if not isinstance(value, str) or not (
+                    profile_output_dir / safe_profile_relative_path(value)
+                ).is_file():
+                    raise DouyinDownloadError(
+                        f"Profile collection item {item_id} has a missing artifact."
+                    )
 
 
 def profile_output_files(profile_output_dir: Path, output_name: str) -> list[str]:
@@ -6270,12 +6759,30 @@ def handle_douyin_profile(
     folder_name = sanitize_profile_folder_name(result.username, result.sec_uid)
     profile_output_dir = Path(args.output_dir).expanduser() / folder_name
     manifest_path = profile_output_dir / PROFILE_MANIFEST_FILENAME
+    checkpoint_root = profile_checkpoint_root(args, "douyin", result.sec_uid)
     manifest: dict[str, Any] | None = None
     downloaded_items: dict[str, Any] = {}
+    failed_items: dict[str, Any] = {}
+    stable_item_ids = [post.item_id for post in result.posts]
     if not args.print_url:
         profile_output_dir.mkdir(parents=True, exist_ok=True)
-        manifest = load_profile_manifest(manifest_path, result.sec_uid, result.username)
+        manifest = load_profile_manifest(
+            manifest_path,
+            result.sec_uid,
+            result.username,
+            checkpoint_root=checkpoint_root,
+        )
         downloaded_items = manifest["downloaded"]
+        failed_items = manifest["failures"]
+        persist_profile_progress(
+            manifest_path,
+            manifest,
+            stable_item_ids,
+            next_index=0,
+            last_item_id=None,
+            state=initial_profile_manifest_state(manifest, stable_item_ids),
+            checkpoint_root=checkpoint_root,
+        )
         print(
             f"profile_manifest: path={manifest_path} downloaded={len(downloaded_items)}",
             file=sys.stderr,
@@ -6295,14 +6802,35 @@ def handle_douyin_profile(
     for index, post in enumerate(result.posts, start=1):
         raise_if_task_cancelled()
         if not args.print_url and post.item_id in downloaded_items:
-            skipped += 1
-            print(
-                f"profile_item_skipped: {index}/{len(result.posts)} "
-                f"aweme_id={post.item_id} already_downloaded",
-                file=sys.stderr,
-                flush=True,
+            entry = downloaded_items[post.item_id]
+            resumable = checkpoint_root is None or (
+                isinstance(entry, dict)
+                and restore_profile_item_files(
+                    checkpoint_root,
+                    profile_output_dir,
+                    entry,
+                )
             )
-            continue
+            if resumable:
+                skipped += 1
+                failed_items.pop(post.item_id, None)
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state=initial_profile_manifest_state(manifest, stable_item_ids),
+                    checkpoint_root=checkpoint_root,
+                )
+                print(
+                    f"profile_item_skipped: {index}/{len(result.posts)} "
+                    f"aweme_id={post.item_id} already_downloaded",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            downloaded_items.pop(post.item_id, None)
         if succeeded + failed > 0 and args.profile_interval > 0:
             print(
                 f"profile_throttle: waiting {args.profile_interval:g}s before next item",
@@ -6402,22 +6930,73 @@ def handle_douyin_profile(
             raise
         except (DouyinDownloadError, OSError) as exc:
             failed += 1
+            if manifest is not None:
+                failed_items[post.item_id] = {
+                    "status": "failed",
+                    "retryable": True,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
             print(f"profile_item_failed: {post.item_id}: {exc}", file=sys.stderr, flush=True)
             continue
-        succeeded += 1
         files: list[str] = []
-        if manifest is not None:
-            files = profile_output_files(profile_output_dir, item_args.output_name)
-            downloaded_items[post.item_id] = {
-                "create_time": post.create_time,
-                "published_at": published_at,
-                "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "media_type": (
-                    "images" if image_candidates and not candidates else "video" if candidates else "unknown"
-                ),
-                "files": files,
+        try:
+            if manifest is not None:
+                files = profile_output_files(profile_output_dir, item_args.output_name)
+                artifacts = (
+                    cache_profile_item_files(checkpoint_root, profile_output_dir, files)
+                    if checkpoint_root is not None
+                    else []
+                )
+                downloaded_items[post.item_id] = {
+                    "create_time": post.create_time,
+                    "published_at": published_at,
+                    "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "media_type": (
+                        "images" if image_candidates and not candidates else "video" if candidates else "unknown"
+                    ),
+                    "files": files,
+                    "artifacts": artifacts,
+                }
+                failed_items.pop(post.item_id, None)
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
+        except (DouyinDownloadError, OSError) as exc:
+            downloaded_items.pop(post.item_id, None)
+            failed_items[post.item_id] = {
+                "status": "failed",
+                "retryable": True,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
-            save_profile_manifest(manifest_path, manifest)
+            failed += 1
+            if manifest is not None:
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
+            print(f"profile_item_checkpoint_failed: {post.item_id}: {exc}", file=sys.stderr, flush=True)
+            continue
+        succeeded += 1
         print(
             f"profile_item_completed: {index}/{len(result.posts)} aweme_id={post.item_id} "
             f"files={','.join(files) if files else '-'}",
@@ -6426,7 +7005,8 @@ def handle_douyin_profile(
         )
 
     print(
-        f"profile_completed: user={result.username!r} succeeded={succeeded} "
+        f"{'profile_partial' if failed else 'profile_completed'}: "
+        f"user={result.username!r} succeeded={succeeded} "
         f"skipped={skipped} failed={failed} "
         f"output_dir={profile_output_dir}",
         file=sys.stderr,
@@ -6434,6 +7014,26 @@ def handle_douyin_profile(
     )
     if succeeded == 0 and skipped == 0:
         raise DouyinDownloadError(f"All {failed} collected profile posts failed.")
+    if failed > 0:
+        raise DouyinDownloadError(
+            f"Profile collection is partial: {failed} item(s) remain; the stable checkpoint was preserved."
+        )
+    if manifest is not None:
+        verify_complete_profile_manifest(
+            manifest,
+            stable_item_ids,
+            profile_output_dir,
+            checkpoint_root,
+        )
+        persist_profile_progress(
+            manifest_path,
+            manifest,
+            stable_item_ids,
+            next_index=len(stable_item_ids),
+            last_item_id=stable_item_ids[-1] if stable_item_ids else None,
+            state="complete",
+            checkpoint_root=checkpoint_root,
+        )
     return 0
 
 
@@ -6489,8 +7089,11 @@ def handle_xiaohongshu_profile(
     folder_name = sanitize_profile_folder_name(result.username, result.user_id)
     profile_output_dir = Path(args.output_dir).expanduser() / folder_name
     manifest_path = profile_output_dir / PROFILE_MANIFEST_FILENAME
+    checkpoint_root = profile_checkpoint_root(args, "xiaohongshu", result.user_id)
     manifest: dict[str, Any] | None = None
     downloaded_items: dict[str, Any] = {}
+    failed_items: dict[str, Any] = {}
+    stable_item_ids = [post.item_id for post in result.posts]
     if not args.print_url:
         profile_output_dir.mkdir(parents=True, exist_ok=True)
         manifest = load_profile_manifest(
@@ -6498,8 +7101,19 @@ def handle_xiaohongshu_profile(
             result.user_id,
             result.username,
             platform="xiaohongshu",
+            checkpoint_root=checkpoint_root,
         )
         downloaded_items = manifest["downloaded"]
+        failed_items = manifest["failures"]
+        persist_profile_progress(
+            manifest_path,
+            manifest,
+            stable_item_ids,
+            next_index=0,
+            last_item_id=None,
+            state=initial_profile_manifest_state(manifest, stable_item_ids),
+            checkpoint_root=checkpoint_root,
+        )
         print(
             f"profile_manifest: path={manifest_path} downloaded={len(downloaded_items)}",
             file=sys.stderr,
@@ -6519,14 +7133,35 @@ def handle_xiaohongshu_profile(
     for index, post in enumerate(result.posts, start=1):
         raise_if_task_cancelled()
         if not args.print_url and post.item_id in downloaded_items:
-            skipped += 1
-            print(
-                f"profile_item_skipped: {index}/{len(result.posts)} "
-                f"note_id={post.item_id} already_downloaded",
-                file=sys.stderr,
-                flush=True,
+            entry = downloaded_items[post.item_id]
+            resumable = checkpoint_root is None or (
+                isinstance(entry, dict)
+                and restore_profile_item_files(
+                    checkpoint_root,
+                    profile_output_dir,
+                    entry,
+                )
             )
-            continue
+            if resumable:
+                skipped += 1
+                failed_items.pop(post.item_id, None)
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state=initial_profile_manifest_state(manifest, stable_item_ids),
+                    checkpoint_root=checkpoint_root,
+                )
+                print(
+                    f"profile_item_skipped: {index}/{len(result.posts)} "
+                    f"note_id={post.item_id} already_downloaded",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            downloaded_items.pop(post.item_id, None)
         if succeeded + failed > 0 and args.profile_interval > 0:
             print(
                 f"profile_throttle: waiting {args.profile_interval:g}s before next item",
@@ -6608,24 +7243,75 @@ def handle_xiaohongshu_profile(
             raise
         except (DouyinDownloadError, OSError) as exc:
             failed += 1
+            if manifest is not None:
+                failed_items[post.item_id] = {
+                    "status": "failed",
+                    "retryable": True,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
             print(f"profile_item_failed: {post.item_id}: {exc}", file=sys.stderr, flush=True)
             continue
 
-        succeeded += 1
         files: list[str] = []
-        if manifest is not None:
-            files = profile_output_files(profile_output_dir, item_args.output_name)
-            downloaded_items[post.item_id] = {
-                "create_time": post.create_time,
-                "published_at": published_at,
-                "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "media_type": (
-                    "images" if image_candidates and not candidates else "video" if candidates else "unknown"
-                ),
-                "listed_type": post.note_type,
-                "files": files,
+        try:
+            if manifest is not None:
+                files = profile_output_files(profile_output_dir, item_args.output_name)
+                artifacts = (
+                    cache_profile_item_files(checkpoint_root, profile_output_dir, files)
+                    if checkpoint_root is not None
+                    else []
+                )
+                downloaded_items[post.item_id] = {
+                    "create_time": post.create_time,
+                    "published_at": published_at,
+                    "downloaded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "media_type": (
+                        "images" if image_candidates and not candidates else "video" if candidates else "unknown"
+                    ),
+                    "listed_type": post.note_type,
+                    "files": files,
+                    "artifacts": artifacts,
+                }
+                failed_items.pop(post.item_id, None)
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
+        except (DouyinDownloadError, OSError) as exc:
+            downloaded_items.pop(post.item_id, None)
+            failed_items[post.item_id] = {
+                "status": "failed",
+                "retryable": True,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
-            save_profile_manifest(manifest_path, manifest)
+            failed += 1
+            if manifest is not None:
+                persist_profile_progress(
+                    manifest_path,
+                    manifest,
+                    stable_item_ids,
+                    next_index=index,
+                    last_item_id=post.item_id,
+                    state="partial",
+                    checkpoint_root=checkpoint_root,
+                )
+            print(f"profile_item_checkpoint_failed: {post.item_id}: {exc}", file=sys.stderr, flush=True)
+            continue
+        succeeded += 1
         print(
             f"profile_item_completed: {index}/{len(result.posts)} note_id={post.item_id} "
             f"files={','.join(files) if files else '-'}",
@@ -6634,7 +7320,8 @@ def handle_xiaohongshu_profile(
         )
 
     print(
-        f"profile_completed: platform=xiaohongshu user={result.username!r} "
+        f"{'profile_partial' if failed else 'profile_completed'}: "
+        f"platform=xiaohongshu user={result.username!r} "
         f"succeeded={succeeded} skipped={skipped} failed={failed} "
         f"output_dir={profile_output_dir}",
         file=sys.stderr,
@@ -6642,6 +7329,26 @@ def handle_xiaohongshu_profile(
     )
     if succeeded == 0 and skipped == 0:
         raise DouyinDownloadError(f"All {failed} collected profile notes failed.")
+    if failed > 0:
+        raise DouyinDownloadError(
+            f"Profile collection is partial: {failed} item(s) remain; the stable checkpoint was preserved."
+        )
+    if manifest is not None:
+        verify_complete_profile_manifest(
+            manifest,
+            stable_item_ids,
+            profile_output_dir,
+            checkpoint_root,
+        )
+        persist_profile_progress(
+            manifest_path,
+            manifest,
+            stable_item_ids,
+            next_index=len(stable_item_ids),
+            last_item_id=stable_item_ids[-1] if stable_item_ids else None,
+            state="complete",
+            checkpoint_root=checkpoint_root,
+        )
     return 0
 
 
