@@ -262,7 +262,10 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawd/src/repo/tasks_tests.rs": (
         "due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it",
+    ),
+    "crates/clawd/src/repo/tasks_tests/checkpoint_lease.rs": (
         "foreground_heartbeat_cannot_reclaim_a_published_checkpoint",
+        "claim_due_paused_checkpoint_task_marks_expired_checkpoint_lease_takeover",
     ),
     "crates/clawd/src/agent_engine/loop_control_tests/soft_budget_checkpoint.rs": (
         "checkpoint_handoff_requires_matching_nonterminal_machine_state",
