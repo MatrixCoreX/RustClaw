@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
 use std::process::Stdio;
 
 use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 
+#[cfg(target_os = "linux")]
+use super::prepare_durable_process_command;
 use super::{
-    prepare_durable_process_command, prepare_process_command, sandbox_backend_diagnostics,
-    ProcessNetworkPolicy, ProcessSandboxRequest,
+    prepare_process_command, sandbox_backend_diagnostics, ProcessNetworkPolicy,
+    ProcessSandboxRequest,
 };
 
 struct TestDir(PathBuf);
@@ -18,6 +21,7 @@ impl TestDir {
         )
     }
 
+    #[cfg(target_os = "linux")]
     fn new_in_system_temp(label: &str) -> Self {
         Self::new_under(&std::env::temp_dir(), label)
     }

@@ -36,6 +36,7 @@ print(json.dumps({
     path
 }
 
+#[cfg(target_os = "linux")]
 pub(super) fn make_sandbox_probe_skill_runner(root: &Path) -> PathBuf {
     let path = root.join("sandbox-probe-skill-runner");
     fs::write(
