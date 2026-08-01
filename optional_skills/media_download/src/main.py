@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import platform
 import re
 import subprocess
 import sys
@@ -889,7 +890,17 @@ def _urls(stdout: str) -> list[str]:
     return urls
 
 
+def _funasr_prebuilt_supported(
+    system_name: str | None = None,
+    machine: str | None = None,
+) -> bool:
+    system = (system_name or platform.system()).strip().lower()
+    architecture = (machine or platform.machine()).strip().lower()
+    return not (system == "darwin" and architecture in {"x86_64", "amd64"})
+
+
 def _capabilities_extra() -> dict[str, Any]:
+    funasr_supported = _funasr_prebuilt_supported()
     return {
         "schema_version": SCHEMA_VERSION,
         "source_skill": SKILL_NAME,
@@ -910,16 +921,37 @@ def _capabilities_extra() -> dict[str, Any]:
             "media_processing": ["ffmpeg", "ffprobe"],
             "ocr": ["tesseract", "chi_sim"],
             "browser_fallback": ["chromium_or_chrome"],
-            "transcription_alternative": [
-                "funasr",
-                "modelscope",
-                "torch",
-                "modelscope_sensevoice_small",
-                "modelscope_fsmn_vad",
-            ],
+            "transcription_alternative": (
+                [
+                    "funasr",
+                    "modelscope",
+                    "torch",
+                    "modelscope_sensevoice_small",
+                    "modelscope_fsmn_vad",
+                ]
+                if funasr_supported
+                else []
+            ),
         },
         "host_integrated_dependencies": {
             "default_transcription": ["whisper.cpp"],
+        },
+        "transcription_engines": {
+            "whisper": {
+                "supported": True,
+                "default": True,
+                "dependency_source": "host",
+            },
+            "funasr": {
+                "supported": funasr_supported,
+                "default": False,
+                "dependency_source": "skill_package",
+                **(
+                    {}
+                    if funasr_supported
+                    else {"unavailable_reason_code": "platform_binary_unavailable"}
+                ),
+            },
         },
     }
 

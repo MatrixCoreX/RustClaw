@@ -53,6 +53,33 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["image_article_posts"]["inline_text_max_characters_exclusive"],
             200,
         )
+        self.assertTrue(response["extra"]["transcription_engines"]["whisper"]["default"])
+
+    def test_intel_macos_capabilities_keep_whisper_and_disable_funasr_package(self) -> None:
+        with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
+            self.skill.platform, "machine", return_value="x86_64"
+        ):
+            extra = self.skill._capabilities_extra()
+
+        self.assertTrue(extra["transcription_engines"]["whisper"]["supported"])
+        self.assertFalse(extra["transcription_engines"]["funasr"]["supported"])
+        self.assertEqual(
+            extra["transcription_engines"]["funasr"]["unavailable_reason_code"],
+            "platform_binary_unavailable",
+        )
+        self.assertEqual(extra["installed_dependencies"]["transcription_alternative"], [])
+
+    def test_intel_macos_requirement_roots_exclude_the_funasr_stack(self) -> None:
+        requirements = (SKILL_ROOT / "requirements.in").read_text(encoding="utf-8")
+        marker = 'sys_platform != "darwin" or platform_machine != "x86_64"'
+
+        for package in ("funasr", "modelscope", "torch", "torchaudio"):
+            line = next(
+                candidate
+                for candidate in requirements.splitlines()
+                if candidate.startswith(f"{package}==")
+            )
+            self.assertIn(marker, line)
 
     def test_download_command_disables_system_browser_cookies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
