@@ -36,7 +36,7 @@ LOG_DIR = Path(
     )
 )
 TERMINAL = {"succeeded", "failed", "timeout", "canceled"}
-CASE_IDS = (
+NORMAL_CASE_IDS = (
     "heartbeat_70s_crosses_poll_windows",
     "concurrent_health_while_long_command_runs",
     "silent_35s_survives_5s_poll_and_idle_hint",
@@ -44,6 +44,11 @@ CASE_IDS = (
     "explicit_5s_deadline_stops_90s_command",
     "cancel_is_idempotent_and_removes_process_group",
 )
+SLOW_CASE_ID = "durable_3705s_has_no_implicit_runtime_deadline"
+CASE_IDS = (*NORMAL_CASE_IDS, SLOW_CASE_ID)
+SLOW_DURATION_SECONDS = 3_705
+SLOW_RETENTION_SECONDS = 7_800
+SLOW_POLL_SECONDS = 15
 SENSITIVE_ENV_MARKERS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "COOKIE", "AUTHORIZATION")
 
 
@@ -76,6 +81,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=LOG_DIR,
         help=f"evidence directory (default: {LOG_DIR}).",
+    )
+    slow_group = parser.add_mutually_exclusive_group()
+    slow_group.add_argument(
+        "--include-slow",
+        action="store_true",
+        help="Run the opt-in 3705-second no-implicit-deadline case after the normal matrix.",
+    )
+    slow_group.add_argument(
+        "--slow-only",
+        action="store_true",
+        help="Run only the opt-in 3705-second no-implicit-deadline release acceptance case.",
     )
     return parser.parse_args(argv)
 
@@ -534,6 +550,24 @@ def serialized_result(task: dict[str, Any]) -> str:
     return json.dumps((task.get("data") or {}).get("result_json") or {}, ensure_ascii=False)
 
 
+def nested_values(value: Any, key: str) -> list[Any]:
+    found: list[Any] = []
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            if child_key == key:
+                found.append(child)
+            found.extend(nested_values(child, key))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(nested_values(child, key))
+    return found
+
+
+def maximum_integer_value(value: Any, key: str) -> int:
+    candidates = [item for item in nested_values(value, key) if isinstance(item, int)]
+    return max(candidates, default=0)
+
+
 def assert_real_execution(case: str, task: dict[str, Any]) -> None:
     if '"dry_run": true' in serialized_result(task):
         raise RegressionFailure(f"{case}: non-X task returned dry_run=true")
@@ -865,6 +899,150 @@ def run_cancel_case(server: Server) -> dict[str, Any]:
     return {"task_id": task_id, "cancelled_pids": sorted(collect_pids(cancel_result)), "status": "pass"}
 
 
+def slow_case_args() -> dict[str, Any]:
+    return {
+        "action": "exec",
+        "command": (
+            "printf 'APP_DURABLE_3705_START\\n'; "
+            f"sleep {SLOW_DURATION_SECONDS}; "
+            "printf 'APP_DURABLE_3705_DONE\\n'"
+        ),
+        "async_start": True,
+        "poll_after_seconds": SLOW_POLL_SECONDS,
+        "expires_in_seconds": SLOW_RETENTION_SECONDS,
+    }
+
+
+def run_no_implicit_deadline_slow_case(server: Server) -> dict[str, Any]:
+    case = SLOW_CASE_ID
+    start_marker = "APP_DURABLE_3705_START"
+    finish_marker = "APP_DURABLE_3705_DONE"
+    task_id = submit_command(server, slow_case_args(), case)
+    started_at = utc_now()
+    started_monotonic = time.monotonic()
+    pending = wait_for_checkpoint(server, task_id, case)
+    initial_job = pending_job(pending)
+    job_id = str(initial_job.get("job_id") or "")
+    if not job_id:
+        raise RegressionFailure(f"{case}: checkpoint did not expose a job_id")
+    runtime_deadlines = nested_values(pending, "runtime_deadline_at")
+    if not runtime_deadlines or any(value is not None for value in runtime_deadlines):
+        raise RegressionFailure(
+            f"{case}: durable checkpoint has an implicit runtime deadline: {runtime_deadlines}"
+        )
+    retention_deadline_at = initial_job.get("retention_deadline_at")
+    if not isinstance(retention_deadline_at, int):
+        raise RegressionFailure(f"{case}: retention deadline is missing")
+
+    observations: list[dict[str, Any]] = []
+    checkpoint_observations = 0
+    crossed_3600 = False
+    next_sample_at = 0.0
+    timeout_at = started_monotonic + SLOW_DURATION_SECONDS + 600
+    final: dict[str, Any] | None = None
+    while time.monotonic() < timeout_at:
+        task = query_task(server, task_id)
+        approve_if_needed(server, task, case)
+        elapsed = time.monotonic() - started_monotonic
+        current_job = pending_job(task)
+        current_job_id = str(current_job.get("job_id") or "")
+        if current_job_id:
+            checkpoint_observations += 1
+            if current_job_id != job_id:
+                raise RegressionFailure(
+                    f"{case}: job identity changed from {job_id} to {current_job_id}"
+                )
+        observed_deadlines = nested_values(task, "runtime_deadline_at")
+        if any(value is not None for value in observed_deadlines):
+            raise RegressionFailure(
+                f"{case}: runtime deadline appeared after handoff: {observed_deadlines}"
+            )
+        status = str((task.get("data") or {}).get("status") or "")
+        if elapsed >= 3_600 and status not in TERMINAL:
+            crossed_3600 = True
+        if elapsed >= next_sample_at or status in TERMINAL:
+            observations.append(
+                {
+                    "observed_at": utc_now(),
+                    "elapsed_seconds": round(elapsed, 3),
+                    "task_status": status,
+                    "execution_state": (task.get("data") or {}).get("execution_state"),
+                    "job_id": current_job_id or job_id,
+                    "stdout_cursor": maximum_integer_value(task, "stdout_cursor"),
+                    "stderr_cursor": maximum_integer_value(task, "stderr_cursor"),
+                    "runtime_deadline_at": None,
+                }
+            )
+            write_json(LOG_DIR / case / "observations.json", observations)
+            next_sample_at = elapsed + 300
+            print(
+                f"[INFO] {case} elapsed={elapsed:.0f}s status={status} "
+                f"cursor={observations[-1]['stdout_cursor']}",
+                flush=True,
+            )
+        if status in TERMINAL:
+            final = task
+            break
+        time.sleep(SLOW_POLL_SECONDS)
+    if final is None:
+        raise RegressionFailure(f"{case}: task did not become terminal after the acceptance window")
+
+    write_json(LOG_DIR / case / "final.json", final)
+    assert_real_execution(case, final)
+    final_data = final.get("data") or {}
+    result = final_data.get("result_json") or {}
+    wall_elapsed = time.monotonic() - started_monotonic
+    if final_data.get("status") != "succeeded":
+        raise RegressionFailure(f"{case}: unexpected terminal status {final_data.get('status')}")
+    if wall_elapsed < 3_700 or not crossed_3600:
+        raise RegressionFailure(
+            f"{case}: fixture did not prove the >3600s boundary, elapsed={wall_elapsed:.3f}"
+        )
+    if start_marker not in serialized_result(final) or finish_marker not in serialized_result(final):
+        raise RegressionFailure(f"{case}: start or finish marker is missing")
+    if result.get("job_id") != job_id:
+        raise RegressionFailure(f"{case}: terminal result changed the job_id")
+    final_runtime_deadlines = nested_values(final, "runtime_deadline_at")
+    if any(value is not None for value in final_runtime_deadlines):
+        raise RegressionFailure(
+            f"{case}: terminal result contains an implicit deadline: {final_runtime_deadlines}"
+        )
+    runtime_timeout_seconds = [
+        value for value in nested_values(final, "runtime_timeout_seconds") if value is not None
+    ]
+    if runtime_timeout_seconds:
+        raise RegressionFailure(
+            f"{case}: terminal result contains an implicit runtime timeout: {runtime_timeout_seconds}"
+        )
+    process_started_at = result.get("started_at")
+    process_finished_at = result.get("finished_at")
+    process_elapsed = None
+    if isinstance(process_started_at, (int, float)) and isinstance(process_finished_at, (int, float)):
+        process_elapsed = float(process_finished_at) - float(process_started_at)
+        if process_elapsed < 3_700:
+            raise RegressionFailure(
+                f"{case}: process elapsed time did not cross 3700s: {process_elapsed:.3f}"
+            )
+
+    return {
+        "task_id": task_id,
+        "job_id": job_id,
+        "started_at": started_at,
+        "finished_at": utc_now(),
+        "wall_elapsed_seconds": round(wall_elapsed, 3),
+        "process_elapsed_seconds": round(process_elapsed, 3) if process_elapsed is not None else None,
+        "checkpoint_observations": checkpoint_observations,
+        "observation_samples": len(observations),
+        "stdout_cursor": maximum_integer_value(final, "stdout_cursor"),
+        "stderr_cursor": maximum_integer_value(final, "stderr_cursor"),
+        "runtime_deadline_at": None,
+        "retention_deadline_at": retention_deadline_at,
+        "crossed_3600_seconds_while_running": crossed_3600,
+        "terminal_reason": result.get("terminal_reason"),
+        "status": "pass",
+    }
+
+
 def ensure_binary() -> None:
     if AUTO_BUILD:
         subprocess.run(
@@ -891,6 +1069,11 @@ def main(argv: list[str] | None = None) -> int:
     summary: dict[str, Any] = {
         "status": "fail",
         "submission_mode": "natural_language" if SUBMIT_VIA_NL else "direct_run_skill",
+        "selected_cases": (
+            [SLOW_CASE_ID]
+            if args.slow_only
+            else [*NORMAL_CASE_IDS, *([SLOW_CASE_ID] if args.include_slow else [])]
+        ),
         "cases": {},
     }
     try:
@@ -902,61 +1085,68 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
-        heartbeat_case = "heartbeat_70s_crosses_poll_windows"
-        heartbeat_task_id = submit_command(
-            server,
-            {
-                "action": "exec",
-                "command": (
-                    "i=1; while [ \"$i\" -le 7 ]; do "
-                    "printf 'APP_LONG_HEARTBEAT_%s\\n' \"$i\"; sleep 10; i=$((i+1)); "
-                    "done; printf 'APP_LONG_HEARTBEAT_DONE\\n'"
-                ),
-                "async_start": True,
-                "poll_after_seconds": 5,
-                "expires_in_seconds": 240,
-            },
-            heartbeat_case,
-        )
-        wait_for_checkpoint(server, heartbeat_task_id, heartbeat_case)
-        summary["cases"]["concurrent_health"] = run_health_concurrency(server, heartbeat_task_id)
-        heartbeat_final, heartbeat_observations = wait_for_terminal(
-            server, heartbeat_task_id, heartbeat_case, timeout=150
-        )
-        assert_real_execution(heartbeat_case, heartbeat_final)
-        if (heartbeat_final.get("data") or {}).get("status") != "succeeded":
-            raise RegressionFailure(f"{heartbeat_case}: task did not succeed")
-        if "APP_LONG_HEARTBEAT_DONE" not in serialized_result(heartbeat_final):
-            raise RegressionFailure(f"{heartbeat_case}: final marker missing")
-        if heartbeat_observations < 5:
-            raise RegressionFailure(
-                f"{heartbeat_case}: only {heartbeat_observations} checkpoint observations"
+        if not args.slow_only:
+            heartbeat_case = "heartbeat_70s_crosses_poll_windows"
+            heartbeat_task_id = submit_command(
+                server,
+                {
+                    "action": "exec",
+                    "command": (
+                        "i=1; while [ \"$i\" -le 7 ]; do "
+                        "printf 'APP_LONG_HEARTBEAT_%s\\n' \"$i\"; sleep 10; i=$((i+1)); "
+                        "done; printf 'APP_LONG_HEARTBEAT_DONE\\n'"
+                    ),
+                    "async_start": True,
+                    "poll_after_seconds": 5,
+                    "expires_in_seconds": 240,
+                },
+                heartbeat_case,
             )
-        summary["cases"]["heartbeat_70s"] = {
-            "task_id": heartbeat_task_id,
-            "checkpoint_observations": heartbeat_observations,
-            "status": "pass",
-        }
-        print("[PASS] 70s heartbeat and concurrent health", flush=True)
+            wait_for_checkpoint(server, heartbeat_task_id, heartbeat_case)
+            summary["cases"]["concurrent_health"] = run_health_concurrency(
+                server, heartbeat_task_id
+            )
+            heartbeat_final, heartbeat_observations = wait_for_terminal(
+                server, heartbeat_task_id, heartbeat_case, timeout=150
+            )
+            assert_real_execution(heartbeat_case, heartbeat_final)
+            if (heartbeat_final.get("data") or {}).get("status") != "succeeded":
+                raise RegressionFailure(f"{heartbeat_case}: task did not succeed")
+            if "APP_LONG_HEARTBEAT_DONE" not in serialized_result(heartbeat_final):
+                raise RegressionFailure(f"{heartbeat_case}: final marker missing")
+            if heartbeat_observations < 5:
+                raise RegressionFailure(
+                    f"{heartbeat_case}: only {heartbeat_observations} checkpoint observations"
+                )
+            summary["cases"]["heartbeat_70s"] = {
+                "task_id": heartbeat_task_id,
+                "checkpoint_observations": heartbeat_observations,
+                "status": "pass",
+            }
+            print("[PASS] 70s heartbeat and concurrent health", flush=True)
 
-        summary["cases"]["silent_35s"] = run_success_case(
-            server,
-            "silent_35s_survives_5s_poll_and_idle_hint",
-            "sleep 35; printf 'APP_LONG_SILENT_DONE\\n'",
-            "APP_LONG_SILENT_DONE",
-            {"idle_timeout_seconds": 5},
-            min_checkpoint_observations=4,
-        )
-        print("[PASS] 35s silent command", flush=True)
+            summary["cases"]["silent_35s"] = run_success_case(
+                server,
+                "silent_35s_survives_5s_poll_and_idle_hint",
+                "sleep 35; printf 'APP_LONG_SILENT_DONE\\n'",
+                "APP_LONG_SILENT_DONE",
+                {"idle_timeout_seconds": 5},
+                min_checkpoint_observations=4,
+            )
+            print("[PASS] 35s silent command", flush=True)
 
-        summary["cases"]["large_stream_artifacts"] = run_large_stream_artifact_case(server)
-        print("[PASS] concurrent large UTF-8 stream artifacts", flush=True)
+            summary["cases"]["large_stream_artifacts"] = run_large_stream_artifact_case(server)
+            print("[PASS] concurrent large UTF-8 stream artifacts", flush=True)
 
-        summary["cases"]["deadline_5s"] = run_deadline_case(server)
-        print("[PASS] explicit 5s runtime deadline", flush=True)
+            summary["cases"]["deadline_5s"] = run_deadline_case(server)
+            print("[PASS] explicit 5s runtime deadline", flush=True)
 
-        summary["cases"]["cancel_idempotent"] = run_cancel_case(server)
-        print("[PASS] cancel and repeated cancel", flush=True)
+            summary["cases"]["cancel_idempotent"] = run_cancel_case(server)
+            print("[PASS] cancel and repeated cancel", flush=True)
+
+        if args.include_slow or args.slow_only:
+            summary["cases"][SLOW_CASE_ID] = run_no_implicit_deadline_slow_case(server)
+            print("[PASS] 3705s durable command without implicit runtime deadline", flush=True)
 
         summary["status"] = "pass"
         exit_code = 0

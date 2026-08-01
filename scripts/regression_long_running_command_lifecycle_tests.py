@@ -57,6 +57,39 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual(args.binary, Path("/tmp/example-clawd"))
         self.assertEqual(args.log_dir, Path("/tmp/example-evidence"))
 
+    def test_slow_case_is_opt_in_and_mutually_exclusive(self) -> None:
+        default_args = self.harness.parse_args([])
+        self.assertFalse(default_args.include_slow)
+        self.assertFalse(default_args.slow_only)
+        self.assertTrue(self.harness.parse_args(["--include-slow"]).include_slow)
+        self.assertTrue(self.harness.parse_args(["--slow-only"]).slow_only)
+        with self.assertRaises(SystemExit) as raised:
+            self.harness.parse_args(["--include-slow", "--slow-only"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_slow_case_has_no_implicit_runtime_deadline_argument(self) -> None:
+        args = self.harness.slow_case_args()
+
+        self.assertEqual(args["action"], "exec")
+        self.assertTrue(args["async_start"])
+        self.assertNotIn("timeout_seconds", args)
+        self.assertNotIn("runtime_deadline_at", args)
+        self.assertGreaterEqual(self.harness.SLOW_DURATION_SECONDS, 3_705)
+        self.assertGreater(args["expires_in_seconds"], self.harness.SLOW_DURATION_SECONDS)
+        self.assertIn(f"sleep {self.harness.SLOW_DURATION_SECONDS}", args["command"])
+
+    def test_nested_runtime_deadline_and_cursor_helpers(self) -> None:
+        value = {
+            "runtime_deadline_at": None,
+            "children": [
+                {"runtime_deadline_at": None, "stdout_cursor": 7},
+                {"stdout_cursor": 19},
+            ],
+        }
+
+        self.assertEqual(self.harness.nested_values(value, "runtime_deadline_at"), [None, None])
+        self.assertEqual(self.harness.maximum_integer_value(value, "stdout_cursor"), 19)
+
 
 class SummaryContractTest(unittest.TestCase):
     @classmethod
