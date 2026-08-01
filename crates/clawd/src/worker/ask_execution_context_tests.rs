@@ -176,3 +176,66 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
     assert_eq!(record["model_summary_attached"], false);
     assert_eq!(record["continuity_summary_attached"], true);
 }
+
+#[tokio::test]
+async fn coding_execution_context_injects_workspace_instructions_and_attribution() {
+    let mut state = crate::AppState::test_default_with_fixture_provider()
+        .with_seeded_db_schema()
+        .with_prompt_layers_installed();
+    state.reload_ctx.workspace_instructions = claw_core::config::WorkspaceInstructionsConfig {
+        enabled_for_coding: true,
+        enabled_for_non_coding: false,
+        filenames: vec!["AGENTS.md".to_string()],
+        max_total_bytes: 4_096,
+        max_file_bytes: 8_192,
+        max_files: 8,
+    };
+    let payload = json!({
+        "text": "inspect the workspace",
+        "entrypoint": "exec",
+        "source": "clawcli_machine",
+        "execution_profile": "coding",
+        "workspace_context": {
+            "schema_version": 1,
+            "current_working_directory": state.skill_rt.workspace_root,
+        },
+    });
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-workspace-instruction-context".to_string(),
+        user_id: 7,
+        chat_id: 9,
+        user_key: Some("workspace-instruction-user".to_string()),
+        channel: "cli".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: payload.to_string(),
+    };
+
+    let prepared =
+        super::prepare_ask_execution_context(&state, &task, &payload, "inspect the workspace")
+            .await
+            .expect("prepare coding execution context");
+
+    assert!(prepared
+        .resolved_prompt_for_execution
+        .contains("### WORKSPACE_INSTRUCTION_CONTEXT"));
+    assert!(prepared
+        .prompt_with_memory_for_execution
+        .contains("### WORKSPACE_INSTRUCTION_CONTEXT"));
+    let attribution = prepared
+        .initial_task_observations
+        .iter()
+        .find(|item| {
+            item.get("source_kind").and_then(serde_json::Value::as_str)
+                == Some("workspace_instructions")
+        })
+        .expect("workspace instruction attribution");
+    assert_eq!(attribution["working_directory_status"], "resolved");
+    assert_eq!(attribution["instruction_authority"], "model_context_only");
+    assert_eq!(attribution["permission_authority"], false);
+    assert_eq!(attribution["sources"][0]["logical_path"], "AGENTS.md");
+    assert!(attribution["injected_bytes_total"].as_u64().unwrap() <= 4_096);
+    assert_eq!(attribution["sources"][0]["digest_scope"], "loaded_prefix");
+}

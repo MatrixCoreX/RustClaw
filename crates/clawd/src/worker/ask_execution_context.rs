@@ -158,6 +158,17 @@ pub(super) async fn prepare_ask_execution_context(
             "prompts": context_prompt_attribution,
         }));
     }
+    if let Some(workspace_context) =
+        super::workspace_instructions::prepare_workspace_instructions(state, payload)?
+    {
+        if let Some(rendered) = workspace_context.rendered_context {
+            resolved_prompt_for_execution.push_str("\n\n");
+            resolved_prompt_for_execution.push_str(&rendered);
+            prompt_with_memory_for_execution.push_str("\n\n");
+            prompt_with_memory_for_execution.push_str(&rendered);
+        }
+        initial_task_observations.push(workspace_context.attribution);
+    }
     info!(
         "ask_context_ready task_id={} recalled_recent_count={} context_summary_bytes={} recent_execution_bytes={}",
         task.task_id,

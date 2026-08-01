@@ -919,6 +919,7 @@ async fn run() -> anyhow::Result<()> {
         },
         reload_ctx: ReloadContext {
             config_path_for_reload: config_path.clone(),
+            workspace_instructions: config.workspace_instructions.clone(),
         },
         ask_states: AskStateRegistry::default(),
     };

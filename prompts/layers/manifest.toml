@@ -124,6 +124,10 @@ logical_path = "prompts/context_recent_execution.md"
 overlay = ["prompts/layers/overlays/context_recent_execution.md"]
 
 [[prompts]]
+logical_path = "prompts/context_workspace_instructions.md"
+overlay = ["prompts/layers/overlays/context_workspace_instructions.md"]
+
+[[prompts]]
 logical_path = "prompts/schedule_intent_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

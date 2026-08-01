@@ -40,6 +40,9 @@ impl AppConfig {
         app.image_generation = image_cfg.image_generation;
         app.image_edit = image_cfg.image_edit;
         apply_env_overrides(&mut app);
+        app.workspace_instructions
+            .validate()
+            .map_err(config::ConfigError::Message)?;
 
         Ok(app)
     }

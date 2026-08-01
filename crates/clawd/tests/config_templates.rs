@@ -150,6 +150,32 @@ fn llm_cost_governance_templates_are_enabled_aligned_and_bounded() {
 }
 
 #[test]
+fn workspace_instruction_templates_are_coding_only_aligned_and_bounded() {
+    let root = workspace_root();
+    let root_config = parse_toml(&root.join("configs/config.toml"));
+    let docker_config = parse_toml(&root.join("docker/config/config.toml"));
+    let root_instructions = &root_config["workspace_instructions"];
+    let docker_instructions = &docker_config["workspace_instructions"];
+
+    assert_eq!(root_instructions, docker_instructions);
+    assert_eq!(
+        root_instructions["enabled_for_coding"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        root_instructions["enabled_for_non_coding"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        root_instructions["filenames"][0].as_str(),
+        Some("AGENTS.md")
+    );
+    assert!(root_instructions["max_total_bytes"].as_integer().unwrap() <= 262_144);
+    assert!(root_instructions["max_file_bytes"].as_integer().unwrap() <= 1_048_576);
+    assert!(root_instructions["max_files"].as_integer().unwrap() <= 64);
+}
+
+#[test]
 fn mimo_templates_allow_the_repo_default_model() {
     let root = workspace_root();
     let root_config = parse_toml(&root.join("configs/config.toml"));
