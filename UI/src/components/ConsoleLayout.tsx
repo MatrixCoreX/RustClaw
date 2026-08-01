@@ -1,12 +1,13 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun } from "lucide-react";
+import { ArrowLeft, ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun } from "lucide-react";
 
 import type { AuthIdentityResponse, ConsolePage } from "../types/api";
 import {
   appStorageKey,
   PRODUCT_DISPLAY_NAME,
 } from "../lib/product-identity";
+import { isDashboardCategoryPage } from "../lib/dashboard-home";
 import { UiBuildBadge } from "./UiBuildBadge";
 
 type UiLanguage = "zh" | "en";
@@ -114,7 +115,6 @@ export function ConsoleLayout({
               <img className="app-logo app-logo-header" src="/app-logo.svg" alt="" />
               <span className="truncate">{PRODUCT_DISPLAY_NAME}</span>
             </button>
-            <UiBuildBadge t={t} />
           </div>
 
           <div className="theme-header-actions flex flex-wrap items-center justify-end gap-2">
@@ -165,6 +165,10 @@ export function ConsoleLayout({
                       </button>
                     </div>
                   ) : null}
+                  <div className="mt-1 flex items-center justify-between gap-3 border-t border-white/10 px-3 py-2">
+                    <span className="text-xs text-white/45">{t("界面版本", "UI version")}</span>
+                    <UiBuildBadge t={t} />
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -296,6 +300,11 @@ export function ConsoleLayout({
               </button>
             ) : null}
 
+            <div className={sidebarCollapsed ? "hidden" : "mt-3 flex items-center justify-between gap-3 px-1"}>
+              <span className="text-xs text-white/45">{t("界面版本", "UI version")}</span>
+              <UiBuildBadge t={t} />
+            </div>
+
             <div className={sidebarCollapsed ? "hidden" : "theme-panel-soft mt-3 p-3.5 text-sm text-white/70"}>
               <p className="font-medium text-white">{t("当前登录身份", "Current identity")}</p>
               {authMode === "webd" ? (
@@ -323,6 +332,18 @@ export function ConsoleLayout({
           }
           onClickCapture={collapseNavigationForContentClick}
         >
+          {isDashboardCategoryPage(currentPage) ? (
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => onCurrentPageChange("dashboard")}
+                className="theme-topbar-btn px-3 py-2 text-sm"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t("返回首页分类", "Back to Home categories")}
+              </button>
+            </div>
+          ) : null}
           {children}
         </main>
       </div>

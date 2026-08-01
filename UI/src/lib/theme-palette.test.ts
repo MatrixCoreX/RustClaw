@@ -124,3 +124,12 @@ test("every text-white opacity used by the UI has a readable light-theme overrid
   }
   assert.ok(css.includes(".placeholder\\:text-white\\/35::placeholder"));
 });
+
+test("mobile buttons use one compact size system without shrinking choice cards", () => {
+  assert.match(
+    css,
+    /@media \(max-width: 767px\)[\s\S]*:is\(\.theme-accent-btn,[^}]*:not\(\.theme-choice-btn\):not\(\.chat-send-btn\)[^}]*min-height:\s*2\.25rem;/,
+  );
+  assert.match(css, /\.theme-icon-btn\s*\{[^}]*width:\s*2\.25rem;[^}]*height:\s*2\.25rem;/s);
+  assert.match(css, /\.channel-setup-actions\s*>\s*button\s*\{[^}]*width:\s*auto;/s);
+});

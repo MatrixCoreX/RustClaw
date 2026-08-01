@@ -1,26 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   BellRing,
-  ChevronUp,
   Cpu,
   Download,
   GitBranch,
   LayoutDashboard,
   Loader2,
+  MessageCircle,
   PowerOff,
+  Radio,
   RefreshCw,
   ServerCog,
   ShieldCheck,
+  Sparkles,
   Settings2,
+  Wrench,
   X,
 } from "lucide-react";
 
 import {
   areRequiredDashboardStepsComplete,
+  getDefaultDashboardSection,
   type DashboardOverviewItem,
+  type DashboardSection,
   type DashboardStepStatus,
 } from "../lib/dashboard-home";
+import { appStorageKey } from "../lib/product-identity";
 import {
   buildWorkspaceVersionDisplay,
   type WorkspaceUpdateNotice,
@@ -44,6 +51,25 @@ import type {
 } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
+
+interface DashboardNavigationItem {
+  key: string;
+  label: string;
+  description: string;
+  icon: ReactNode;
+  section?: DashboardSection;
+  page?: ConsolePage;
+}
+
+const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
+const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
+  "overview",
+  "setup",
+  "persona",
+  "dependencies",
+  "updates",
+  "communications",
+]);
 
 export interface DashboardOnboardingStep {
   key: string;
@@ -212,13 +238,133 @@ export function DashboardPage({
       : t("正在检查...", "Checking..."));
   const workspaceVersionDisplay = buildWorkspaceVersionDisplay(workspaceUpdateStatus);
   const requiredSetupComplete = areRequiredDashboardStepsComplete(onboardingSteps);
-  const [completedSetupExpanded, setCompletedSetupExpanded] = useState(false);
-  const showOnboarding = !requiredSetupComplete || completedSetupExpanded;
+  const [activeDashboardSection, setActiveDashboardSection] = useState<DashboardSection>(() => {
+    const saved = window.localStorage.getItem(DASHBOARD_SECTION_STORAGE_KEY);
+    if (saved === "host") return "overview";
+    return DASHBOARD_SECTION_IDS.has(saved as DashboardSection)
+      ? (saved as DashboardSection)
+      : getDefaultDashboardSection(onboardingSteps);
+  });
   const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
+  const dashboardSections: DashboardNavigationItem[] = [
+    {
+      key: "overview",
+      section: "overview",
+      label: t("运行概览", "Overview"),
+      description: t("查看服务、主机资源和当前需要留意的事项。", "Check service health, host resources, and anything that needs attention."),
+      icon: <LayoutDashboard className="h-4 w-4" />,
+    },
+    {
+      key: "setup",
+      section: "setup",
+      label: t("快速开始", "Quick Start"),
+      description: t("按步骤完成模型、消息测试和可选通信接入。", "Complete model setup, message testing, and optional communication setup."),
+      icon: <ShieldCheck className="h-4 w-4" />,
+    },
+    {
+      key: "models",
+      page: "models",
+      label: t("大模型", "Models"),
+      description: t("配置主模型、多模态模型和接口凭证。", "Configure the primary model, multimodal models, and API credentials."),
+      icon: <Sparkles className="h-4 w-4" />,
+    },
+    {
+      key: "skills",
+      page: "skills",
+      label: t("工具技能", "Tools & Skills"),
+      description: t("管理内置工具、技能、MCP 和运行开关。", "Manage built-in tools, skills, MCP, and runtime switches."),
+      icon: <Wrench className="h-4 w-4" />,
+    },
+    {
+      key: "persona",
+      section: "persona",
+      label: t("助手个性", "Assistant Style"),
+      description: t("调整聊天语气，不改变任务交付标准。", "Adjust chat tone without changing delivery standards."),
+      icon: <Settings2 className="h-4 w-4" />,
+    },
+    {
+      key: "dependencies",
+      section: "dependencies",
+      label: t("系统依赖", "Dependencies"),
+      description: t("检查并安装运行所需的底层工具。", "Check and install the underlying tools required at runtime."),
+      icon: <ServerCog className="h-4 w-4" />,
+    },
+    {
+      key: "updates",
+      section: "updates",
+      label: t("更新部署", "Update & Deploy"),
+      description: t("检查版本、更新程序、配置 Web 服务或重启。", "Check versions, update the app, configure web access, or restart."),
+      icon: <Download className="h-4 w-4" />,
+    },
+    {
+      key: "communications",
+      section: "communications",
+      label: t("通信端", "Channels"),
+      description: t("配置通信接入，并查看或关闭已启动的通信端。", "Configure communication access, then review or stop running services."),
+      icon: <BellRing className="h-4 w-4" />,
+    },
+  ];
+  const selectedDashboardSection =
+    dashboardSections.find((item) => item.section === activeDashboardSection) ?? dashboardSections[0];
+
+  useEffect(() => {
+    window.localStorage.setItem(DASHBOARD_SECTION_STORAGE_KEY, activeDashboardSection);
+  }, [activeDashboardSection]);
 
   return (
     <>
-      <AgentPersonaCard
+      <header className="dashboard-section-header theme-panel-soft p-3 sm:p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 px-1">
+          <div>
+            <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("首页", "Home")}</p>
+            <h2 className="mt-1 text-lg font-semibold text-white">{selectedDashboardSection.label}</h2>
+            <p className="mt-1 text-sm leading-6 text-white/60">{selectedDashboardSection.description}</p>
+          </div>
+          {!requiredSetupComplete ? (
+            <button
+              type="button"
+              onClick={() => setActiveDashboardSection("setup")}
+              className="setup-status setup-status-attention"
+            >
+              {t("设置待完成", "Setup needed")}
+            </button>
+          ) : null}
+        </div>
+        <nav
+          className="dashboard-section-tabs mt-3 flex pb-1"
+          aria-label={t("首页功能切换", "Home sections")}
+        >
+          {dashboardSections.map((item) => {
+            const active = item.section === activeDashboardSection;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() => {
+                  if (item.page) {
+                    onSetCurrentPage(item.page);
+                  } else if (item.section) {
+                    setActiveDashboardSection(item.section);
+                  }
+                }}
+                className={`dashboard-section-tab ${active ? "dashboard-section-tab-active" : ""}`}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </header>
+
+      <div
+        id="dashboard-section-panel"
+        className="space-y-4"
+        aria-label={selectedDashboardSection.label}
+      >
+      {activeDashboardSection === "persona" ? (
+        <AgentPersonaCard
         t={t}
         config={agentConfig}
         loading={agentConfigLoading}
@@ -229,12 +375,13 @@ export function DashboardPage({
         onSave={onSaveAgentPersona}
         onOpenChat={() => onSetCurrentPage("chat")}
       />
+      ) : null}
 
-      {showOnboarding ? (
+      {activeDashboardSection === "setup" ? (
         <section className="theme-panel setup-hero p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-3xl">
-              <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("首次使用", "First run")}</p>
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("快速配置", "Quick setup")}</p>
               <h3 className="mt-2 text-xl font-semibold tracking-tight sm:text-3xl">
                 {t("开始使用 {product_name}", "Start using {product_name}")}
               </h3>
@@ -245,16 +392,6 @@ export function DashboardPage({
                 )}
               </p>
             </div>
-            {requiredSetupComplete ? (
-              <button
-                type="button"
-                onClick={() => setCompletedSetupExpanded(false)}
-                className="theme-topbar-btn px-3 py-2 text-sm"
-              >
-                <ChevronUp className="h-4 w-4" />
-                {t("收起", "Collapse")}
-              </button>
-            ) : null}
           </div>
 
           <div className="mt-6 grid gap-3 xl:grid-cols-3">
@@ -291,50 +428,59 @@ export function DashboardPage({
             ))}
           </div>
         </section>
-      ) : (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => setCompletedSetupExpanded(true)}
-            className="theme-topbar-btn px-3 py-2 text-sm"
-            title={t("重新查看模型、消息测试和通信接入设置", "Review model, message test, and communication settings")}
-          >
-            <Settings2 className="h-4 w-4" />
-            {t("重新配置", "Reconfigure")}
-          </button>
-        </div>
-      )}
+      ) : null}
 
-      <section className="theme-panel-soft rounded-[22px] border border-white/10 px-4 py-3 sm:px-5">
-        <div className="grid gap-3 md:grid-cols-3">
-          {dashboardOverviewItems.map((item, index) => (
-            <div key={item.key} className={`py-2 ${index > 0 ? "md:border-l md:border-white/8 md:pl-5" : ""}`}>
-              <p className="text-[11px] tracking-[0.16em] text-white/42">{item.label}</p>
-              <p
-                className={`mt-2 text-base font-semibold ${
-                  item.tone === "good"
-                    ? "text-emerald-200"
-                    : item.tone === "warning"
-                      ? "text-amber-200"
-                      : "text-white/92"
-                }`}
-              >
-                {item.value}
-              </p>
+      {activeDashboardSection === "overview" ? (
+        <>
+          <section className="theme-panel-soft rounded-[22px] border border-white/10 px-4 py-3 sm:px-5">
+            <div className="grid gap-3 md:grid-cols-3">
+              {dashboardOverviewItems.map((item, index) => (
+                <div key={item.key} className={`py-2 ${index > 0 ? "md:border-l md:border-white/8 md:pl-5" : ""}`}>
+                  <p className="text-[11px] tracking-[0.16em] text-white/42">{item.label}</p>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p
+                      className={`text-base font-semibold ${
+                        item.tone === "good"
+                          ? "text-emerald-200"
+                          : item.tone === "warning"
+                            ? "text-amber-200"
+                            : "text-white/92"
+                      }`}
+                    >
+                      {item.value}
+                    </p>
+                    {item.key === "status" && isOnline ? (
+                      <button
+                        type="button"
+                        onClick={() => onSetCurrentPage("chat")}
+                        className="dashboard-agent-entry group shrink-0 whitespace-nowrap"
+                      >
+                        <span className="dashboard-agent-entry-icon">
+                          <MessageCircle className="h-4 w-4" />
+                        </span>
+                        <span className="text-sm font-semibold">
+                          {t("进入 Agent", "Open Agent")}
+                        </span>
+                        <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
+          <HostSystemSummaryPanel
+            t={t}
+            summary={hostSystemSummary}
+            loading={hostSystemLoading}
+            errorCode={hostSystemErrorCode}
+            onRefresh={onFetchHostSystemSummary}
+          />
+        </>
+      ) : null}
 
-      <HostSystemSummaryPanel
-        t={t}
-        summary={hostSystemSummary}
-        loading={hostSystemLoading}
-        errorCode={hostSystemErrorCode}
-        onRefresh={onFetchHostSystemSummary}
-      />
-
-      <SystemDependenciesPanel
+      {activeDashboardSection === "dependencies" ? (
+        <SystemDependenciesPanel
         t={t}
         snapshot={hostDependencies}
         loading={hostDependenciesLoading}
@@ -344,8 +490,10 @@ export function DashboardPage({
         onRefresh={onFetchHostDependencies}
         onInstall={onInstallHostDependency}
       />
+      ) : null}
 
-      <section className="space-y-4">
+      {activeDashboardSection === "updates" ? (
+        <section className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
@@ -924,11 +1072,39 @@ export function DashboardPage({
             </pre>
           </details>
         ) : null}
-      </section>
+        </section>
+      ) : null}
 
-      {dashboardCommunicationRows.length > 0 ? (
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+      {activeDashboardSection === "communications" ? (
+        <div className="space-y-4">
+          <section className="theme-panel-soft p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="rounded-lg bg-sky-400/10 p-2 text-sky-200">
+                  <Radio className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-semibold">{t("通信接入", "Communication Setup")}</h3>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    {t(
+                      "配置并启动微信、WhatsApp、Telegram、飞书或 Lark。首次接入、重新登录和修改凭证都从这里进入。",
+                      "Configure and start WeChat, WhatsApp, Telegram, Feishu, or Lark. Use this entry for first-time setup, sign-in, or credential changes.",
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSetCurrentPage("services")}
+                className="theme-accent-btn px-3 py-2 text-sm"
+              >
+                <Radio className="h-4 w-4" />
+                {t("配置通信接入", "Configure channels")}
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
             <div>
               <h3 className="text-base font-semibold">{t("已启动的通信端", "Running communication services")}</h3>
               <p className="mt-2 text-sm text-white/65">
@@ -938,10 +1114,6 @@ export function DashboardPage({
                 )}
               </p>
             </div>
-            <button type="button" onClick={() => onSetCurrentPage("services")} className="theme-topbar-btn px-3 py-2 text-sm">
-              {t("去通信接入", "Open Communication Setup")}
-            </button>
-          </div>
 
           {serviceActionMessage ? (
             <p
@@ -955,7 +1127,8 @@ export function DashboardPage({
             </p>
           ) : null}
 
-          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {dashboardCommunicationRows.length > 0 ? (
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
             {dashboardCommunicationRows.map((row) => (
               <div key={row.key} className="rounded-2xl border border-white/10 bg-black/20 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -1032,11 +1205,23 @@ export function DashboardPage({
                 </div>
               </div>
             ))}
-          </div>
-        </section>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-white/12 bg-black/10 px-4 py-5 text-sm text-white/65">
+              <p className="font-medium text-white/85">{t("当前没有已启动的通信端", "No communication services are running")}</p>
+              <p className="mt-2 leading-6">
+                {t(
+                  "需要接收微信、WhatsApp、Telegram、飞书或 Lark 消息时，请先前往“通信接入”完成配置并启动。",
+                  "To receive messages from WeChat, WhatsApp, Telegram, Feishu, or Lark, open Communication Setup, finish configuration, and start the service.",
+                )}
+              </p>
+            </div>
+          )}
+          </section>
+        </div>
       ) : null}
 
-      {(queuePressureHigh || runningTooOld || !isOnline) && (
+      {activeDashboardSection === "overview" && (queuePressureHigh || runningTooOld || !isOnline) && (
         <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
           <div className="flex items-start gap-3">
             <BellRing className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
@@ -1061,6 +1246,7 @@ export function DashboardPage({
           </div>
         </section>
       )}
+      </div>
     </>
   );
 }

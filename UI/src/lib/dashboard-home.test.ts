@@ -4,9 +4,32 @@ import assert from "node:assert/strict";
 import {
   areRequiredDashboardStepsComplete,
   countCompletedDashboardSteps,
+  getDefaultDashboardSection,
   getDashboardOverviewItems,
   getSuggestedDashboardAction,
+  isDashboardCategoryPage,
 } from "./dashboard-home.ts";
+
+test("keeps model, communication setup, and tools under home categories", () => {
+  assert.equal(isDashboardCategoryPage("models"), true);
+  assert.equal(isDashboardCategoryPage("services"), true);
+  assert.equal(isDashboardCategoryPage("skills"), true);
+  assert.equal(isDashboardCategoryPage("skill_store"), false);
+});
+
+test("opens quick setup until required setup is complete", () => {
+  assert.equal(
+    getDefaultDashboardSection([{ required: true, status: "attention" }]),
+    "setup",
+  );
+  assert.equal(
+    getDefaultDashboardSection([
+      { required: true, status: "done" },
+      { required: false, status: "todo" },
+    ]),
+    "overview",
+  );
+});
 
 test("considers only required onboarding steps when deciding whether setup is complete", () => {
   assert.equal(

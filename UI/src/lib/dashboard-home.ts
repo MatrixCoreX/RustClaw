@@ -1,5 +1,21 @@
 export type DashboardStepStatus = "done" | "attention" | "todo";
 
+export type DashboardSection =
+  | "overview"
+  | "setup"
+  | "persona"
+  | "dependencies"
+  | "updates"
+  | "communications";
+
+export const DASHBOARD_CATEGORY_PAGES = ["models", "services", "skills"] as const;
+
+export type DashboardCategoryPage = (typeof DASHBOARD_CATEGORY_PAGES)[number];
+
+export function isDashboardCategoryPage(page: string): page is DashboardCategoryPage {
+  return DASHBOARD_CATEGORY_PAGES.some((candidate) => candidate === page);
+}
+
 export type DashboardActionKind =
   | "offline"
   | "llm_setup"
@@ -26,6 +42,12 @@ export function areRequiredDashboardStepsComplete(
 ): boolean {
   const requiredSteps = steps.filter((step) => step.required);
   return requiredSteps.length > 0 && requiredSteps.every((step) => step.status === "done");
+}
+
+export function getDefaultDashboardSection(
+  steps: ReadonlyArray<{ required: boolean; status: DashboardStepStatus }>,
+): DashboardSection {
+  return areRequiredDashboardStepsComplete(steps) ? "overview" : "setup";
 }
 
 export function countCompletedDashboardSteps(statuses: DashboardStepStatus[]): number {

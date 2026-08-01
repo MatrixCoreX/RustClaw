@@ -912,9 +912,9 @@ export function ChatPage({
                   )}
             </span>
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 sm:gap-3">
             <textarea
-              className="theme-input h-[72px] min-h-[72px] max-h-60 w-full resize-y"
+              className="theme-input h-12 min-h-12 max-h-60 w-full resize-y sm:h-[72px] sm:min-h-[72px]"
               placeholder={t(
                 "例如：你好，请告诉我你现在能做什么；或上传附件让我看看",
                 "For example: Hello, tell me what you can do; or upload an attachment for review",
@@ -929,7 +929,7 @@ export function ChatPage({
               disabled={
                 chatSending || chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
               }
-              className="theme-accent-btn min-h-[72px] min-w-20 shrink-0 self-stretch justify-center"
+              className="theme-accent-btn chat-send-btn min-h-12 min-w-16 shrink-0 self-stretch justify-center sm:min-h-[72px] sm:min-w-20"
             >
               {chatSending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

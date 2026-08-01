@@ -466,7 +466,7 @@ export function CommunicationSetupPage({
                     healthy={wechatServiceHealthy}
                     loading={Boolean(serviceActionLoading.wechatd)}
                     disabled={!wechatConfigEnabled}
-                    className="!px-4 !py-2.5"
+                    className="px-4 py-2.5"
                     onControlService={onControlService}
                   />
                   <button
@@ -610,7 +610,7 @@ export function CommunicationSetupPage({
                   healthy={whatsappWebServiceHealthy}
                   loading={Boolean(serviceActionLoading.whatsapp_webd)}
                   disabled={false}
-                  className="!px-4 !py-2.5"
+                  className="px-4 py-2.5"
                   onControlService={onControlService}
                 />
                 {!whatsappWebConnected ? (

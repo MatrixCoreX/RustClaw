@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Download,
   Loader2,
   PackageCheck,
@@ -245,11 +243,6 @@ export function SystemDependenciesPanel({
   onRefresh,
   onInstall,
 }: SystemDependenciesPanelProps) {
-  const [expanded, setExpanded] = useState(() => (snapshot?.summary.missing_required ?? 0) > 0);
-  useEffect(() => {
-    if ((snapshot?.summary.missing_required ?? 0) > 0) setExpanded(true);
-  }, [snapshot?.summary.missing_required]);
-
   const operationsByDependency = useMemo(() => {
     const operations = [...(snapshot?.operations ?? [])].sort(
       (left, right) => (right.started_ts ?? 0) - (left.started_ts ?? 0),
@@ -281,27 +274,16 @@ export function SystemDependenciesPanel({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void onRefresh()}
-            disabled={loading}
-            className="theme-icon-btn"
-            title={t("重新检查", "Check again")}
-            aria-label={t("重新检查", "Check again")}
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="theme-secondary-btn px-3 py-2 text-xs"
-            aria-expanded={expanded}
-          >
-            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {expanded ? t("收起", "Collapse") : t("查看详情", "View details")}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+          className="theme-icon-btn"
+          title={t("重新检查", "Check again")}
+          aria-label={t("重新检查", "Check again")}
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
       {errorCode ? (
@@ -311,7 +293,7 @@ export function SystemDependenciesPanel({
         </div>
       ) : null}
 
-      {expanded && snapshot ? (
+      {snapshot ? (
         <div className="mt-4 border-t border-white/8 pt-3">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
             <span>{t("缺失项优先显示", "Missing items are shown first")}</span>

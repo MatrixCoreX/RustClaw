@@ -171,7 +171,7 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
                   ref={index === 0 ? primaryButtonRef : undefined}
                   type="button"
                   onClick={() => finish(choice.value)}
-                  className="theme-secondary-btn min-h-16 w-full items-start px-4 py-3 text-left"
+                  className="theme-secondary-btn theme-choice-btn min-h-16 w-full items-start px-4 py-3 text-left"
                 >
                   <span className="block text-sm font-semibold text-white">{choice.label}</span>
                   {choice.description ? (
