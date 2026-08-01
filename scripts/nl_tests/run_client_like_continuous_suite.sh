@@ -661,7 +661,7 @@ text_l = text.lower()
 
 failed_structural_assertions = [
     detail
-    for detail in structural_assertions(case_tags, final_visible, result)
+    for detail in structural_assertions(case_tags, final_visible, result, {})
     if not detail.get("ok")
 ]
 if failed_structural_assertions:
