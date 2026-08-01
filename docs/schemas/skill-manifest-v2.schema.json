@@ -60,7 +60,8 @@
         "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
         "environment_allowlist": { "type": "array", "items": { "$ref": "#/$defs/environmentName" } },
         "smoke_args": { "type": "object" },
-        "progress_frames": { "type": "boolean", "default": false }
+        "progress_frames": { "type": "boolean", "default": false },
+        "execution_profile": { "enum": ["per_request", "stateless_readonly"], "default": "per_request" }
       }
     },
     "security": {

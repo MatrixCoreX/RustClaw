@@ -229,6 +229,73 @@ fn read_only_preview_forces_read_only_process_sandbox() {
 }
 
 #[test]
+fn warm_reuse_requires_every_host_side_readonly_guard() {
+    let mapping = preview_mapping();
+    assert!(stateless_readonly_reuse_allowed(
+        skill_sdk::ExecutionProfile::StatelessReadonly,
+        &[Capability::FsRead],
+        Some(&mapping),
+        ToolSandboxMode::ReadOnly,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    ));
+    assert!(!stateless_readonly_reuse_allowed(
+        skill_sdk::ExecutionProfile::PerRequest,
+        &[Capability::FsRead],
+        Some(&mapping),
+        ToolSandboxMode::ReadOnly,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    ));
+    assert!(!stateless_readonly_reuse_allowed(
+        skill_sdk::ExecutionProfile::StatelessReadonly,
+        &[Capability::FsRead, Capability::Net],
+        Some(&mapping),
+        ToolSandboxMode::ReadOnly,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    ));
+    assert!(!stateless_readonly_reuse_allowed(
+        skill_sdk::ExecutionProfile::StatelessReadonly,
+        &[Capability::FsRead],
+        Some(&mapping),
+        ToolSandboxMode::ReadOnly,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+    ));
+}
+
+#[test]
+fn runner_dispatch_metadata_is_machine_readable() {
+    let mut response = json!({"status": "ok", "extra": {}});
+    add_runner_dispatch_metadata(&mut response, "per_request", Some("warm_pool_low_memory"));
+    assert_eq!(
+        response.pointer("/extra/runner_dispatch/mode"),
+        Some(&json!("per_request"))
+    );
+    assert_eq!(
+        response.pointer("/extra/runner_dispatch/fallback_reason"),
+        Some(&json!("warm_pool_low_memory"))
+    );
+}
+
+#[test]
 fn read_only_local_api_action_retains_network_only() {
     let capabilities = vec![
         Capability::Net,

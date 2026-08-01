@@ -855,6 +855,12 @@ The implementation flow is language-neutral:
 skill.toml -> build adapter -> install receipt -> SkillLaunchSpec -> JSONL capability result
 ```
 
+Packages may request `run.execution_profile="stateless_readonly"` to let the
+host reuse only the outer runner process. The host still verifies read-only
+effects and effective permissions for every call; storage, credentials,
+network, writes, subprocesses, policy changes, and low-memory conditions keep
+the normal per-request lifecycle.
+
 See [Polyglot Skill SDK contract](docs/skill_sdk_contract.md) for Rust, Python,
 Node, Go, prebuilt, lifecycle, security, and publishing guidance.
 

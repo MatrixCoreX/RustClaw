@@ -3,15 +3,18 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio_util::codec::LinesCodecError;
 
 use claw_core::config::ToolSandboxMode;
-use claw_core::skill_registry::{Capability, CapabilityIsolationProfile, PlannerCapabilityMapping};
+use claw_core::skill_registry::{
+    Capability, CapabilityIsolationProfile, PlannerCapabilityEffect, PlannerCapabilityMapping,
+};
 
 use crate::{AppState, ClaimedTask};
 
 use super::credential_fallback::provision_skill_secret_envs;
+use super::runner_pool::{WarmPoolCheckout, WarmRunnerKey, WarmRunnerProcess};
 use super::{
     action_scoped_planner_mapping, apply_skill_runner_env_isolation, current_task_auth_role,
     place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
@@ -470,11 +473,6 @@ pub(crate) async fn run_skill_with_runner_once(
             }
         }
     }
-    let additional_writable_paths = runner_additional_writable_paths(
-        secret_token_scope.as_ref().map(|scope| scope.store_dir()),
-        storage_writable_directory.as_deref(),
-        Some(&artifact_output_directory),
-    );
     let network = if caps.iter().any(|cap| {
         matches!(
             cap,
@@ -487,24 +485,60 @@ pub(crate) async fn run_skill_with_runner_once(
     };
     let sandbox_mode =
         action_scoped_runner_sandbox_mode(execution_policy.sandbox_mode, action_mapping.as_ref());
-    let prepared = crate::process_sandbox::prepare_process_command(
-        &state.skill_rt.skill_runner_path,
-        crate::process_sandbox::ProcessSandboxRequest {
-            mode: sandbox_mode,
-            backend: state.skill_rt.tools_policy.sandbox_backend,
-            workspace_root: &state.skill_rt.workspace_root,
-            execution_root: &state.skill_rt.workspace_root,
-            network,
-            additional_writable_paths: &additional_writable_paths,
-        },
-    )
-    .map_err(|reason_code| {
-        format!(
-            "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={} sandbox_backend={}",
-            sandbox_mode.as_token(),
-            state.skill_rt.tools_policy.sandbox_backend_token()
+    let unrestricted_admin = execution_policy.has_unrestricted_admin_authority();
+    let allow_path_outside_workspace = task_allows_path_outside_workspace(state, Some(task));
+    let allow_sudo = task_allows_sudo(state, Some(task));
+    let has_secrets = secret_token_scope.is_some()
+        || internal_llm_token.is_some()
+        || internal_admission_token.is_some()
+        || !selected_provider_key_tokens.is_empty()
+        || !tokenized_secret_envs.is_empty();
+    let warm_reuse_allowed = stateless_readonly_reuse_allowed(
+        installed_launch.execution_profile,
+        &caps,
+        action_mapping.as_ref(),
+        sandbox_mode,
+        storage_descriptor.is_some(),
+        has_secrets,
+        admission_capable,
+        unrestricted_admin,
+        allow_path_outside_workspace,
+        allow_sudo,
+    );
+    let additional_writable_paths = runner_additional_writable_paths(
+        secret_token_scope.as_ref().map(|scope| scope.store_dir()),
+        storage_writable_directory.as_deref(),
+        (!warm_reuse_allowed).then_some(artifact_output_directory.as_path()),
+    );
+    let prepared = if warm_reuse_allowed {
+        // The outer runner is trusted host code. Keeping it outside a sandbox
+        // lets it create a fresh receipt-controlled sandbox (and fresh /tmp on
+        // Linux) for every skill child instead of sharing one warm namespace.
+        crate::process_sandbox::PreparedProcessCommand {
+            command: tokio::process::Command::new(&state.skill_rt.skill_runner_path),
+            backend: "child_sandbox",
+            additional_writable_targets: Vec::new(),
+        }
+    } else {
+        crate::process_sandbox::prepare_process_command(
+            &state.skill_rt.skill_runner_path,
+            crate::process_sandbox::ProcessSandboxRequest {
+                mode: sandbox_mode,
+                backend: state.skill_rt.tools_policy.sandbox_backend,
+                workspace_root: &state.skill_rt.workspace_root,
+                execution_root: &state.skill_rt.workspace_root,
+                network,
+                additional_writable_paths: &additional_writable_paths,
+            },
         )
-    })?;
+        .map_err(|reason_code| {
+            format!(
+                "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={} sandbox_backend={}",
+                sandbox_mode.as_token(),
+                state.skill_rt.tools_policy.sandbox_backend_token()
+            )
+        })?
+    };
     tracing::debug!(
         skill = canonical_skill_name,
         sandbox_backend = prepared.backend,
@@ -523,12 +557,16 @@ pub(crate) async fn run_skill_with_runner_once(
         &additional_writable_paths,
         &prepared.additional_writable_targets,
     );
-    let sandbox_artifact_output_directory = sandbox_target_for_source(
-        Some(&artifact_output_directory),
-        &additional_writable_paths,
-        &prepared.additional_writable_targets,
-    )
-    .ok_or_else(|| "skill artifact sandbox target unavailable".to_string())?;
+    let sandbox_artifact_output_directory = if warm_reuse_allowed {
+        artifact_output_directory.clone()
+    } else {
+        sandbox_target_for_source(
+            Some(&artifact_output_directory),
+            &additional_writable_paths,
+            &prepared.additional_writable_targets,
+        )
+        .ok_or_else(|| "skill artifact sandbox target unavailable".to_string())?
+    };
     let storage_descriptor = map_storage_descriptor_to_sandbox(
         storage_descriptor,
         sandbox_storage_directory.as_deref(),
@@ -563,7 +601,10 @@ pub(crate) async fn run_skill_with_runner_once(
         "context": skill_context
     })
     .to_string();
-    let inherited_sandbox_backend = inherited_sandbox_backend(prepared.backend);
+    let sandbox_backend = prepared.backend;
+    let inherited_sandbox_backend = (!warm_reuse_allowed)
+        .then(|| inherited_sandbox_backend(sandbox_backend))
+        .flatten();
     let internal_listen = claw_core::product_identity::env_string("INTERNAL_LISTEN").ok();
     let local_clawd_base_url =
         local_clawd_base_url_from_internal_listen(internal_listen.as_deref());
@@ -582,28 +623,17 @@ pub(crate) async fn run_skill_with_runner_once(
         .env("CLAWD_BASE_URL", &local_clawd_base_url)
         .env(
             "APP_UNRESTRICTED_ADMIN",
-            if execution_policy.has_unrestricted_admin_authority() {
-                "1"
-            } else {
-                "0"
-            },
+            if unrestricted_admin { "1" } else { "0" },
         )
         .env(
             "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
-            if task_allows_path_outside_workspace(state, Some(task)) {
+            if allow_path_outside_workspace {
                 "1"
             } else {
                 "0"
             },
         )
-        .env(
-            "APP_ALLOW_SUDO",
-            if task_allows_sudo(state, Some(task)) {
-                "1"
-            } else {
-                "0"
-            },
-        )
+        .env("APP_ALLOW_SUDO", if allow_sudo { "1" } else { "0" })
         .env(
             "APP_SKILL_PACKAGES_ROOT",
             package_root.display().to_string(),
@@ -672,183 +702,177 @@ pub(crate) async fn run_skill_with_runner_once(
         cmd.env(env_name, token);
     }
     cmd.current_dir(&state.skill_rt.workspace_root);
-    let mut child = cmd
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|err| {
+    let spawn_runner = |command| {
+        WarmRunnerProcess::spawn(command).map_err(|err| {
             format!(
                 "spawn skill-runner failed: path={} err={}",
                 state.skill_rt.skill_runner_path.display(),
                 err
             )
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(format!("{req_line}\n").as_bytes())
-            .await
-            .map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
-    }
+        })
+    };
+    let warm_key = warm_reuse_allowed.then(|| WarmRunnerKey {
+        scope_token: canonical_skill_name.to_string(),
+        version_pin: installed_launch.clone(),
+        admission_binding: admission_binding.cloned(),
+        registry_generation: skill_views.binding.registry_generation,
+        registry_generation_digest: skill_views.binding.registry_generation_digest.clone(),
+        base_registry_digest: skill_views.binding.base_registry_digest.clone(),
+        overlay_generation_digest: skill_views.binding.overlay_generation_digest.clone(),
+        sandbox_backend: sandbox_backend.to_string(),
+        timeout_seconds: skill_timeout_secs,
+    });
+    let (mut runner_process, runner_dispatch_mode, runner_fallback_reason, reusable_key) =
+        match warm_key {
+            Some(key) => match state.skill_rt.runner_pool.checkout(&key) {
+                WarmPoolCheckout::Reused(process, epoch) => {
+                    (process, "warm_reused", None, Some((key, epoch)))
+                }
+                WarmPoolCheckout::Spawn(epoch) => {
+                    (spawn_runner(cmd)?, "warm_spawned", None, Some((key, epoch)))
+                }
+                WarmPoolCheckout::Fallback(reason) => {
+                    (spawn_runner(cmd)?, "per_request", Some(reason), None)
+                }
+            },
+            None => (
+                spawn_runner(cmd)?,
+                "per_request",
+                Some("execution_profile_ineligible"),
+                None,
+            ),
+        };
+    runner_process
+        .send(&req_line)
+        .await
+        .map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
 
     let mut out_line = String::new();
-    let mut stderr = child.stderr.take();
-
-    if let Some(stdout) = child.stdout.take() {
-        let mut records = FramedRead::new(
-            stdout,
-            LinesCodec::new_with_max_length(skill_sdk::MAX_PROTOCOL_LINE_BYTES),
-        );
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(skill_timeout_secs.max(1));
-        let mut observed_frames = 0_u64;
-        let mut accepted_times = VecDeque::<Instant>::new();
-        loop {
-            let record = match tokio::time::timeout_at(deadline, records.next()).await {
-                Ok(Some(Ok(line))) => line,
-                Ok(Some(Err(LinesCodecError::MaxLineLengthExceeded))) => {
-                    tracing::warn!(
-                        skill = canonical_skill_name,
-                        reason_code = "runner_record_oversized",
-                        "skill_progress_frame_discarded"
-                    );
-                    continue;
-                }
-                Ok(Some(Err(LinesCodecError::Io(err)))) => {
-                    return Err(format!("read skill-runner stdout failed: {err}"));
-                }
-                Ok(None) => break,
-                Err(_) => {
-                    let _ = terminate_subprocess_group(child.id()).await;
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    return Err("skill-runner timeout".to_string());
-                }
-            };
-            let progress_record = serde_json::from_str::<Value>(&record)
-                .ok()
-                .and_then(|value| {
-                    (value.get("record_type").and_then(Value::as_str)
-                        == Some(skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE))
-                    .then_some(value)
-                });
-            let Some(progress_record) = progress_record else {
-                out_line = record;
-                break;
-            };
-
-            observed_frames = observed_frames.saturating_add(1);
-            if !installed_launch.progress_frames {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(skill_timeout_secs.max(1));
+    let mut observed_frames = 0_u64;
+    let mut accepted_times = VecDeque::<Instant>::new();
+    loop {
+        let record = match tokio::time::timeout_at(deadline, runner_process.records.next()).await {
+            Ok(Some(Ok(line))) => line,
+            Ok(Some(Err(LinesCodecError::MaxLineLengthExceeded))) => {
                 tracing::warn!(
                     skill = canonical_skill_name,
-                    reason_code = "progress_frames_not_declared",
-                    observed_frames,
+                    reason_code = "runner_record_oversized",
                     "skill_progress_frame_discarded"
                 );
                 continue;
             }
-            if observed_frames > skill_sdk::MAX_PROGRESS_FRAMES_PER_INVOCATION {
-                tracing::warn!(
-                    skill = canonical_skill_name,
-                    reason_code = "progress_frame_total_limit",
-                    observed_frames,
-                    "skill_progress_frame_discarded"
-                );
-                continue;
+            Ok(Some(Err(LinesCodecError::Io(err)))) => {
+                return Err(format!("read skill-runner stdout failed: {err}"));
             }
-            let encoded = serde_json::to_vec(&progress_record)
-                .map_err(|err| format!("encode skill progress frame failed: {err}"))?;
-            let frame_validation = skill_sdk::validate_progress_frame_line(&encoded, &task.task_id);
-            let frame = match frame_validation {
-                Ok(frame) => frame,
-                Err(error) => {
-                    tracing::warn!(
-                        skill = canonical_skill_name,
-                        reason_code = error.code,
-                        observed_frames,
-                        "skill_progress_frame_discarded"
-                    );
-                    continue;
-                }
-            };
-            let now = Instant::now();
-            while accepted_times
-                .front()
-                .is_some_and(|accepted| now.duration_since(*accepted) >= Duration::from_secs(1))
-            {
-                accepted_times.pop_front();
+            Ok(None) => break,
+            Err(_) => {
+                let _ = terminate_subprocess_group(runner_process.id()).await;
+                runner_process.kill_and_wait().await;
+                return Err("skill-runner timeout".to_string());
             }
-            if accepted_times.len() >= skill_sdk::MAX_PROGRESS_FRAMES_PER_SECOND {
-                tracing::warn!(
-                    skill = canonical_skill_name,
-                    reason_code = "progress_frame_rate_limit",
-                    observed_frames,
-                    "skill_progress_frame_discarded"
-                );
-                continue;
-            }
-            accepted_times.push_back(now);
-            let payload = json!({
-                "schema_version": 1,
-                "source": "skill_progress",
-                "data_only": true,
-                "render_owner": "ui_cli_channel_projection",
-                "skill_name": canonical_skill_name,
-                "skill_version": &installed_launch.version,
-                "frame": frame,
+        };
+        let progress_record = serde_json::from_str::<Value>(&record)
+            .ok()
+            .and_then(|value| {
+                (value.get("record_type").and_then(Value::as_str)
+                    == Some(skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE))
+                .then_some(value)
             });
-            if let Err(error) = crate::task_event_transport::publish_claimed_event(
-                state,
-                task,
-                "skill_progress",
-                payload,
-            ) {
+        let Some(progress_record) = progress_record else {
+            out_line = record;
+            break;
+        };
+
+        observed_frames = observed_frames.saturating_add(1);
+        if !installed_launch.progress_frames {
+            tracing::warn!(
+                skill = canonical_skill_name,
+                reason_code = "progress_frames_not_declared",
+                observed_frames,
+                "skill_progress_frame_discarded"
+            );
+            continue;
+        }
+        if observed_frames > skill_sdk::MAX_PROGRESS_FRAMES_PER_INVOCATION {
+            tracing::warn!(
+                skill = canonical_skill_name,
+                reason_code = "progress_frame_total_limit",
+                observed_frames,
+                "skill_progress_frame_discarded"
+            );
+            continue;
+        }
+        let encoded = serde_json::to_vec(&progress_record)
+            .map_err(|err| format!("encode skill progress frame failed: {err}"))?;
+        let frame_validation = skill_sdk::validate_progress_frame_line(&encoded, &task.task_id);
+        let frame = match frame_validation {
+            Ok(frame) => frame,
+            Err(error) => {
                 tracing::warn!(
                     skill = canonical_skill_name,
-                    error = %error,
-                    "skill_progress_event_publish_failed"
+                    reason_code = error.code,
+                    observed_frames,
+                    "skill_progress_frame_discarded"
                 );
+                continue;
             }
+        };
+        let now = Instant::now();
+        while accepted_times
+            .front()
+            .is_some_and(|accepted| now.duration_since(*accepted) >= Duration::from_secs(1))
+        {
+            accepted_times.pop_front();
+        }
+        if accepted_times.len() >= skill_sdk::MAX_PROGRESS_FRAMES_PER_SECOND {
+            tracing::warn!(
+                skill = canonical_skill_name,
+                reason_code = "progress_frame_rate_limit",
+                observed_frames,
+                "skill_progress_frame_discarded"
+            );
+            continue;
+        }
+        accepted_times.push_back(now);
+        let payload = json!({
+            "schema_version": 1,
+            "source": "skill_progress",
+            "data_only": true,
+            "render_owner": "ui_cli_channel_projection",
+            "skill_name": canonical_skill_name,
+            "skill_version": &installed_launch.version,
+            "frame": frame,
+        });
+        if let Err(error) = crate::task_event_transport::publish_claimed_event(
+            state,
+            task,
+            "skill_progress",
+            payload,
+        ) {
+            tracing::warn!(
+                skill = canonical_skill_name,
+                error = %error,
+                "skill_progress_event_publish_failed"
+            );
         }
     }
 
-    let wait_result = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
     let mut err_line = String::new();
-
-    match wait_result {
-        Ok(Ok(_)) => {
-            err_line = read_skill_runner_stderr_line(&mut stderr).await;
-        }
-        Ok(Err(err)) => {
-            err_line = read_skill_runner_stderr_line(&mut stderr).await;
-            if out_line.trim().is_empty() {
-                let detail = err_line.trim();
-                if detail.is_empty() {
-                    return Err(format!("wait skill-runner failed: {err}"));
-                }
-                return Err(format!("wait skill-runner failed: {err}; stderr: {detail}"));
-            }
-        }
-        Err(_) => {
-            let _ = terminate_subprocess_group(child.id()).await;
-            let _ = child.kill().await;
-            let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
-            if out_line.trim().is_empty() {
-                err_line = read_skill_runner_stderr_line(&mut stderr).await;
-                let detail = err_line.trim();
-                if detail.is_empty() {
-                    return Err("skill-runner exit wait timeout".to_string());
-                }
-                return Err(format!("skill-runner exit wait timeout: {detail}"));
-            }
-        }
+    if reusable_key.is_none() {
+        runner_process
+            .shutdown()
+            .await
+            .map_err(|err| format!("wait skill-runner failed: {err}"))?;
+        let mut stderr = runner_process.take_stderr();
+        err_line = read_skill_runner_stderr_line(&mut stderr).await;
     }
 
     if out_line.trim().is_empty() {
+        if err_line.is_empty() {
+            let mut stderr = runner_process.take_stderr();
+            err_line = read_skill_runner_stderr_line(&mut stderr).await;
+        }
         let detail = err_line.trim();
         if detail.is_empty() {
             return Err("empty skill-runner output".to_string());
@@ -876,6 +900,13 @@ pub(crate) async fn run_skill_with_runner_once(
         admission_binding.and_then(|binding| binding.policy_digest.as_deref()),
         admission_binding.map(|binding| binding.admission_receipt_digest.as_str()),
     )?;
+    add_runner_dispatch_metadata(&mut response, runner_dispatch_mode, runner_fallback_reason);
+    if let Some((key, epoch)) = reusable_key {
+        state
+            .skill_rt
+            .runner_pool
+            .checkin(key, epoch, runner_process);
+    }
     tracing::info!(
         skill = canonical_skill_name,
         version = installed_launch.version,
@@ -892,6 +923,8 @@ pub(crate) async fn run_skill_with_runner_once(
             .get("status")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("invalid"),
+        runner_dispatch_mode,
+        runner_fallback_reason = runner_fallback_reason.unwrap_or("none"),
         "verified_skill_execution_completed"
     );
     Ok(response)
@@ -1005,6 +1038,71 @@ fn action_scoped_runner_sandbox_mode(
     } else {
         default_mode
     }
+}
+
+fn stateless_readonly_reuse_allowed(
+    execution_profile: skill_sdk::ExecutionProfile,
+    capabilities: &[Capability],
+    mapping: Option<&PlannerCapabilityMapping>,
+    sandbox_mode: ToolSandboxMode,
+    has_storage: bool,
+    has_secrets: bool,
+    admission_capable: bool,
+    unrestricted_admin: bool,
+    allow_path_outside_workspace: bool,
+    allow_sudo: bool,
+) -> bool {
+    let Some(mapping) = mapping else {
+        return false;
+    };
+    execution_profile == skill_sdk::ExecutionProfile::StatelessReadonly
+        && matches!(
+            mapping.effect,
+            Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
+        )
+        && mapping.once_per_task != Some(true)
+        && mapping.idempotent != Some(false)
+        && mapping.network_access != Some(true)
+        && mapping.filesystem_write != Some(true)
+        && mapping.external_publish != Some(true)
+        && mapping.credential_access != Some(true)
+        && mapping.subprocess != Some(true)
+        && mapping.package_install != Some(true)
+        && mapping.privilege_escalation != Some(true)
+        && sandbox_mode == ToolSandboxMode::ReadOnly
+        && capabilities
+            .iter()
+            .all(|capability| matches!(capability, Capability::FsRead))
+        && !has_storage
+        && !has_secrets
+        && !admission_capable
+        && !unrestricted_admin
+        && !allow_path_outside_workspace
+        && !allow_sudo
+}
+
+fn add_runner_dispatch_metadata(
+    response: &mut Value,
+    mode: &'static str,
+    fallback_reason: Option<&'static str>,
+) {
+    let Some(response) = response.as_object_mut() else {
+        return;
+    };
+    let extra = response
+        .entry("extra")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let Some(extra) = extra.as_object_mut() else {
+        return;
+    };
+    extra.insert(
+        "runner_dispatch".to_string(),
+        json!({
+            "schema_version": 1,
+            "mode": mode,
+            "fallback_reason": fallback_reason,
+        }),
+    );
 }
 
 pub(crate) fn build_runner_skill_context(

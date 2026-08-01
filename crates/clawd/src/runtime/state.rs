@@ -218,6 +218,7 @@ pub(crate) struct SkillRuntime {
     pub(crate) skill_runner_path: PathBuf,
     pub(crate) skill_semaphore: Arc<Semaphore>,
     pub(crate) skill_concurrency_gates: Arc<SkillConcurrencyGates>,
+    pub(crate) runner_pool: Arc<crate::skills::runner_pool::WarmRunnerPool>,
     pub(crate) tools_policy: Arc<ToolsPolicy>,
     pub(crate) cmd_timeout_seconds: u64,
     pub(crate) cmd_idle_timeout_seconds: u64,
@@ -277,6 +278,7 @@ impl SkillRuntime {
             skill_runner_path: PathBuf::new(),
             skill_semaphore: Arc::new(Semaphore::new(1)),
             skill_concurrency_gates: Arc::new(SkillConcurrencyGates::default()),
+            runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::default()),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: 60,
             cmd_idle_timeout_seconds: 60,
@@ -675,6 +677,7 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
 
     let snapshot = assemble_skill_views_snapshot(views, &overlay);
     *state.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
+    state.skill_rt.runner_pool.invalidate_all();
 
     tracing::info!(
         "reload_skill_views: success path={} registry_entries={} execution_skills_count={} planner_visible_count={}",

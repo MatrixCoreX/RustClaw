@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::Digest;
 use tempfile::tempdir;
 
-use crate::manifest::{BuildAdapter, LauncherKind, PackageManifest, SandboxProfile};
+use crate::manifest::{
+    BuildAdapter, ExecutionProfile, LauncherKind, PackageManifest, SandboxProfile,
+};
 use crate::platform::HostPlatform;
 use crate::protocol::{
     validate_progress_frame_line, validate_protocol_output, validate_response_line, ProtocolStatus,
@@ -109,6 +111,31 @@ fn manifest_is_strict_versioned_and_deterministic() {
             .code,
         "manifest_parse_failed"
     );
+}
+
+#[test]
+fn stateless_readonly_profile_is_explicit_and_cannot_grant_mutation() {
+    let default_manifest = PackageManifest::from_toml_str(manifest_source()).expect("manifest");
+    assert_eq!(
+        default_manifest.run.execution_profile,
+        ExecutionProfile::PerRequest
+    );
+
+    let mut readonly =
+        PackageManifest::from_toml_str(include_str!("../../skills/system_basic/skill.toml"))
+            .expect("repository readonly manifest");
+    assert_eq!(
+        readonly.run.execution_profile,
+        ExecutionProfile::StatelessReadonly
+    );
+    readonly
+        .capability_request
+        .as_mut()
+        .expect("capability request")
+        .capabilities[0]
+        .effect = crate::capability_request::RequestedEffect::Mutate;
+    let error = readonly.validate().expect_err("mutation must reject reuse");
+    assert_eq!(error.code, "manifest_execution_profile_unsafe");
 }
 
 #[test]

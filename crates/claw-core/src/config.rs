@@ -1222,6 +1222,15 @@ pub struct SkillsConfig {
     pub skill_timeout_seconds: u64,
     #[serde(default = "default_skill_max_concurrency")]
     pub skill_max_concurrency: usize,
+    /// Reuse only host-verified stateless/read-only outer runner processes.
+    #[serde(default)]
+    pub runner_warm_pool_enabled: bool,
+    #[serde(default = "default_runner_warm_pool_max_idle_per_skill")]
+    pub runner_warm_pool_max_idle_per_skill: usize,
+    #[serde(default = "default_runner_warm_pool_min_available_memory_mib")]
+    pub runner_warm_pool_min_available_memory_mib: u64,
+    #[serde(default = "default_runner_warm_pool_idle_timeout_seconds")]
+    pub runner_warm_pool_idle_timeout_seconds: u64,
     #[serde(default = "default_skills_list")]
     pub skills_list: Vec<String>,
     #[serde(default)]
@@ -1243,6 +1252,11 @@ impl Default for SkillsConfig {
         Self {
             skill_timeout_seconds: default_skill_timeout_seconds(),
             skill_max_concurrency: default_skill_max_concurrency(),
+            runner_warm_pool_enabled: false,
+            runner_warm_pool_max_idle_per_skill: default_runner_warm_pool_max_idle_per_skill(),
+            runner_warm_pool_min_available_memory_mib:
+                default_runner_warm_pool_min_available_memory_mib(),
+            runner_warm_pool_idle_timeout_seconds: default_runner_warm_pool_idle_timeout_seconds(),
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
             uninstalled_skills: default_uninstalled_skills(),

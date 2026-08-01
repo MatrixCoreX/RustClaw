@@ -28,6 +28,14 @@ MIGRATION_PATH_TOKENS = ("legacy", "historical", "compat")
 CONTRACT_AUTHORITY_PATHS = {
     "crates/skill-sdk/src/admission.rs",
 }
+# Channel-delivery receipts are a separate machine contract, not skill package
+# install receipts. Keep this explicit so the generic digest token cannot be
+# mistaken for a skill hot-plug coupling surface.
+SURFACE_EXCLUSIONS = {
+    "receipt_resolution_or_pin": {
+        "crates/clawd/src/repo/channel_delivery_receipt.rs",
+    },
+}
 DOMAIN_ADAPTER_PATHS = {
     "crates/clawd/src/repo/crypto_storage.rs",
     "crates/clawd/src/skill_storage/data_owners.rs",
@@ -155,6 +163,8 @@ def scan(root: Path) -> tuple[dict[str, Any], list[str]]:
             if is_test_path(relative):
                 continue
             for surface, surface_pattern in SURFACE_PATTERNS.items():
+                if relative.as_posix() in SURFACE_EXCLUSIONS.get(surface, set()):
+                    continue
                 if surface_pattern.search(code):
                     surfaces.append(
                         {
@@ -246,6 +256,15 @@ def self_test() -> None:
         )
         inventory, findings = scan(root)
         assert not findings
+        delivery_receipt = root / "crates/clawd/src/repo/channel_delivery_receipt.rs"
+        delivery_receipt.parent.mkdir(parents=True, exist_ok=True)
+        delivery_receipt.write_text("fn delivery(receipt_digest: &str) {}\n", encoding="utf-8")
+        inventory, findings = scan(root)
+        assert not findings
+        assert not any(
+            item["path"] == delivery_receipt.relative_to(root).as_posix()
+            for item in inventory["coupling_surfaces"]
+        )
         baseline = snapshot(inventory)
         assert not check_baseline(inventory, baseline)
         source.write_text(source.read_text() + 'const EXTRA: &str = "crypto";\n')
