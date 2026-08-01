@@ -120,6 +120,13 @@ def sandbox_profile(entry: dict[str, object]) -> str:
         mapping.get("filesystem_write") is True or mapping.get("effect") == "mutate"
         for mapping in mappings
     )
+    execution_profile = str(entry.get("execution_profile") or "").strip()
+    if execution_profile == "stateless_readonly":
+        if writes:
+            raise ValueError(
+                "stateless_readonly registry entry cannot request filesystem writes or mutate effects"
+            )
+        return "read_only"
     return "workspace_write" if writes else "required"
 
 
@@ -237,6 +244,14 @@ def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -
     config_files = entry.get("config_files") or []
     environment_allowlist = runtime_environment_allowlist(skill, entry)
     sandbox = sandbox_profile(entry)
+    execution_profile = str(entry.get("execution_profile") or "").strip()
+    if execution_profile not in {"", "stateless_readonly"}:
+        raise ValueError(f"unsupported execution_profile: {execution_profile}")
+    execution_profile_line = (
+        f'\nexecution_profile = {json.dumps(execution_profile)}'
+        if execution_profile
+        else ""
+    )
     request = capability_request_projection(skill, entry, timeout)
     progress_frames = (
         "\nprogress_frames = true" if entry.get("progress_frames") is True else ""
@@ -273,7 +288,7 @@ entrypoint = {json.dumps('runtime/bin/' + skill.binary)}
 working_directory = "."
 timeout_seconds = {timeout}
 environment_allowlist = {json.dumps(environment_allowlist)}
-smoke_args = {{}}{progress_frames}
+smoke_args = {{}}{progress_frames}{execution_profile_line}
 
 [security]
 capability_policy_source = "registry"

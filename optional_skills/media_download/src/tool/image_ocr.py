@@ -387,19 +387,12 @@ def _ocr_candidate_score(candidate: ParsedOcrText) -> float:
 
 
 def render_ocr_results(results: list[OcrResult]) -> str:
-    if not results:
-        return ""
-    if len(results) == 1:
-        text = results[0].text.strip()
-        return f"{text}\n" if text else ""
-
-    chunks: list[str] = []
-    for result in results:
-        chunks.append(f"## {result.path}")
-        if result.text.strip():
-            chunks.append(result.text.strip())
-        chunks.append("")
-    return "\n".join(chunks).rstrip() + "\n"
+    document = "\n\n".join(
+        text
+        for result in results
+        if (text := result.text.strip())
+    )
+    return f"{document}\n" if document else ""
 
 
 def render_ocr_progress_bar(
