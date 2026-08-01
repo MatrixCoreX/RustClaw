@@ -82,7 +82,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `download`, `resolve` | `browser_fallback` | no | boolean | `true` | Allow local Chromium fallback without browser-profile cookies. |
 | `download` | `save_meta` | no | boolean | `false` | Save extraction metadata JSON. |
 | `download` | `show_info` | no | boolean | `false` | Probe downloaded media information. |
-| `transcribe` | `engine` | no | string | `whisper` | `whisper` or `funasr`. |
+| `transcribe` | `engine` | no | string | `whisper` | Uses the configured local whisper.cpp CLI/model by default. `funasr` is the privately installed alternative. |
 | `transcribe`, `ocr` | `language` | no | string | action-specific | Spoken language or Tesseract language list. |
 | `transcribe` | `input_path` | yes | string | - | Existing local video/audio file. |
 | `transcribe` | `extract_audio_only` | no | boolean | `false` | Extract WAV without ASR. |

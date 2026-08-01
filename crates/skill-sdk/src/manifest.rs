@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
@@ -106,6 +106,8 @@ pub struct PackageManifest {
     pub package: PackageMetadata,
     pub registry: RegistryReference,
     pub build: BuildSpec,
+    #[serde(default)]
+    pub install: InstallSpec,
     pub run: RunSpec,
     pub security: SecuritySpec,
     #[serde(default)]
@@ -114,6 +116,32 @@ pub struct PackageManifest {
     pub lifecycle: LifecycleSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capability_request: Option<CapabilityRequestSet>,
+}
+
+/// Host-owned installation prerequisites. Package authors may declare what is
+/// needed, but the host resolves the dependency IDs and decides whether it is
+/// allowed to install them. No command or package-manager string is accepted
+/// from a skill manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct InstallSpec {
+    #[serde(default)]
+    pub host_dependencies: Vec<String>,
+    #[serde(default)]
+    pub resources: InstallResourceRequirements,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct InstallResourceRequirements {
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub min_memory_mb: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub min_free_disk_mb: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +398,14 @@ impl PackageManifest {
                 format!("schema_version={}", self.schema_version),
             ));
         }
+        if self.schema_version == LEGACY_SKILL_MANIFEST_SCHEMA_VERSION
+            && self.install != InstallSpec::default()
+        {
+            return Err(SkillSdkError::new(
+                "manifest_install_requires_schema_v2",
+                "field=install required_schema_version=2",
+            ));
+        }
         match self.schema_version {
             LEGACY_SKILL_MANIFEST_SCHEMA_VERSION if self.capability_request.is_some() => {
                 return Err(SkillSdkError::new(
@@ -441,6 +477,41 @@ impl PackageManifest {
         }
         for config in &self.lifecycle.config_files {
             validate_relative_path(config, "lifecycle.config_files", false)?;
+        }
+        for dependency in &self.install.host_dependencies {
+            validate_safe_name(dependency, "install.host_dependencies")?;
+        }
+        if self
+            .install
+            .host_dependencies
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != self.install.host_dependencies.len()
+        {
+            return Err(SkillSdkError::new(
+                "manifest_host_dependency_duplicate",
+                "field=install.host_dependencies constraint=unique",
+            ));
+        }
+        if !self.install.host_dependencies.is_empty()
+            && self.build.network != BuildNetworkPolicy::ApprovalRequired
+        {
+            return Err(SkillSdkError::new(
+                "manifest_host_dependency_network_policy_invalid",
+                "install.host_dependencies requires build.network=approval_required",
+            ));
+        }
+        if self.install.resources.min_memory_mb > 1_048_576
+            || self.install.resources.min_free_disk_mb > 16_777_216
+        {
+            return Err(SkillSdkError::new(
+                "manifest_install_resource_invalid",
+                format!(
+                    "min_memory_mb={} min_free_disk_mb={}",
+                    self.install.resources.min_memory_mb, self.install.resources.min_free_disk_mb
+                ),
+            ));
         }
         if self.run.timeout_seconds == 0 || self.run.timeout_seconds > 86_400 {
             return Err(SkillSdkError::new(
@@ -619,6 +690,11 @@ impl PackageManifest {
                     "build.lockfile",
                 )?;
                 validate_relative_path(lockfile, "build.lockfile", false)?;
+                if self.build.adapter == BuildAdapter::Python {
+                    if let Some(requirement) = self.build.options.get("python") {
+                        parse_minimum_runtime_version(requirement, "build.options.python")?;
+                    }
+                }
                 if self.build.adapter == BuildAdapter::Go {
                     let main = self
                         .build
@@ -756,6 +832,39 @@ impl PackageManifest {
             }],
         }
     }
+}
+
+pub(crate) fn parse_minimum_runtime_version(
+    requirement: &str,
+    field: &str,
+) -> SkillSdkResult<[u64; 3]> {
+    let Some(version) = requirement.trim().strip_prefix(">=") else {
+        return Err(SkillSdkError::new(
+            "manifest_adapter_option_invalid",
+            format!("field={field} requirement={requirement:?}"),
+        ));
+    };
+    let components = version.split('.').collect::<Vec<_>>();
+    if !(2..=3).contains(&components.len())
+        || components.iter().any(|component| {
+            component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return Err(SkillSdkError::new(
+            "manifest_adapter_option_invalid",
+            format!("field={field} requirement={requirement:?}"),
+        ));
+    }
+    let mut parsed = [0_u64; 3];
+    for (index, component) in components.into_iter().enumerate() {
+        parsed[index] = component.parse::<u64>().map_err(|_| {
+            SkillSdkError::new(
+                "manifest_adapter_option_invalid",
+                format!("field={field} requirement={requirement:?}"),
+            )
+        })?;
+    }
+    Ok(parsed)
 }
 
 fn required_adapter_field<'a>(

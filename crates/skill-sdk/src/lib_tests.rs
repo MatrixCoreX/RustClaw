@@ -7,6 +7,7 @@ use tempfile::tempdir;
 
 use crate::manifest::{
     BuildAdapter, ExecutionProfile, LauncherKind, PackageManifest, SandboxProfile,
+    LEGACY_SKILL_MANIFEST_SCHEMA_VERSION,
 };
 use crate::platform::HostPlatform;
 use crate::protocol::{
@@ -110,6 +111,80 @@ fn manifest_is_strict_versioned_and_deterministic() {
             .expect_err("package cannot self-grant risk")
             .code,
         "manifest_parse_failed"
+    );
+}
+
+#[test]
+fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() {
+    let mut manifest = PackageManifest::from_toml_str(manifest_source())
+        .expect("legacy manifest")
+        .into_current()
+        .expect("current manifest");
+    manifest.install.host_dependencies = vec!["ffmpeg".into(), "tesseract_chi_sim".into()];
+    manifest.install.resources.min_memory_mb = 4096;
+    manifest.install.resources.min_free_disk_mb = 6144;
+    manifest.build.network = crate::manifest::BuildNetworkPolicy::ApprovalRequired;
+    manifest.validate().expect("install requirements");
+    assert_eq!(
+        manifest.install.host_dependencies,
+        ["ffmpeg", "tesseract_chi_sim"]
+    );
+    assert_eq!(manifest.install.resources.min_memory_mb, 4096);
+    assert_eq!(manifest.install.resources.min_free_disk_mb, 6144);
+
+    let mut unsafe_id = manifest.clone();
+    unsafe_id.install.host_dependencies[1] = "../../package".into();
+    assert_eq!(
+        unsafe_id.validate().expect_err("unsafe dependency ID").code,
+        "manifest_name_invalid"
+    );
+    let mut duplicate = manifest.clone();
+    duplicate.install.host_dependencies[1] = "ffmpeg".into();
+    assert_eq!(
+        duplicate
+            .validate()
+            .expect_err("duplicate dependency ID")
+            .code,
+        "manifest_host_dependency_duplicate"
+    );
+
+    let mut legacy = manifest;
+    legacy.schema_version = LEGACY_SKILL_MANIFEST_SCHEMA_VERSION;
+    legacy.capability_request = None;
+    assert_eq!(
+        legacy
+            .validate()
+            .expect_err("legacy manifests cannot declare install prerequisites")
+            .code,
+        "manifest_install_requires_schema_v2"
+    );
+}
+
+#[test]
+fn python_runtime_requirement_uses_a_strict_minimum_version_contract() {
+    let python = manifest_source()
+        .replace("adapter = \"cargo\"", "adapter = \"python\"")
+        .replace("package = \"sample-weather-skill\"\n", "")
+        .replace("binary = \"sample-weather-skill\"\n", "")
+        .replace(
+            "lockfile = \"Cargo.lock\"",
+            "lockfile = \"requirements.lock\"",
+        )
+        .replace(
+            "network = \"deny\"",
+            "network = \"deny\"\noptions = { python = \">=3.13\" }",
+        )
+        .replace("launcher = \"native\"", "launcher = \"python\"")
+        .replace(
+            "entrypoint = \"runtime/bin/sample-weather-skill\"",
+            "entrypoint = \"runtime/src/main.py\"",
+        );
+    PackageManifest::from_toml_str(&python).expect("valid Python minimum");
+    assert_eq!(
+        PackageManifest::from_toml_str(&python.replace(">=3.13", "~=3.13"))
+            .expect_err("unsupported requirement syntax")
+            .code,
+        "manifest_adapter_option_invalid"
     );
 }
 

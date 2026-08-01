@@ -178,6 +178,7 @@ impl SkillInstaller {
         let allow_network = matches!(manifest.build.network, BuildNetworkPolicy::ApprovalRequired)
             && request.allow_network;
         fs::create_dir_all(&request.package_root)?;
+        validate_install_resources(&manifest, &request.package_root)?;
         let store = InstallReceiptStore::new(&request.package_root);
         let staging = store.create_staging_dir(&manifest.package.name)?;
         let mut guard = StagingGuard::new(staging.clone());
@@ -315,6 +316,7 @@ impl SkillInstaller {
         };
         manifest.validate_for_platform(&platform)?;
         fs::create_dir_all(&request.package_root)?;
+        validate_install_resources(&manifest, &request.package_root)?;
         let store = InstallReceiptStore::new(&request.package_root);
         let staging = store.create_staging_dir(&manifest.package.name)?;
         let mut guard = StagingGuard::new(staging.clone());
@@ -440,6 +442,8 @@ impl SkillInstaller {
             None => HostPlatform::current(),
         };
         manifest.validate_for_platform(&platform)?;
+        fs::create_dir_all(&request.package_root)?;
+        validate_install_resources(&manifest, &request.package_root)?;
         let source_store = InstallReceiptStore::new(&request.precompiled_root);
         let pointer = source_store
             .current_pointer(&manifest.package.name)
@@ -925,6 +929,91 @@ fn lockfile_digests(
     }
     digests.insert(relative.to_string(), digest_file(&lockfile)?);
     Ok(digests)
+}
+
+/// Validate measurable host capacity before any dependency or build mutation.
+/// CPU count is intentionally not a gate: a slow supported CPU affects elapsed
+/// time, not whether a complete installation is permitted.
+pub fn validate_install_resources(
+    manifest: &PackageManifest,
+    package_root: &Path,
+) -> SkillSdkResult<()> {
+    const BYTES_PER_MB: u64 = 1024 * 1024;
+    let required_memory_mb = manifest.install.resources.min_memory_mb;
+    if required_memory_mb > 0 {
+        let available_memory_mb = physical_memory_bytes()
+            .map(|bytes| bytes / BYTES_PER_MB)
+            .ok_or_else(|| {
+                SkillSdkError::new("install_resource_probe_failed", "resource=physical_memory")
+                    .phase("preflight")
+            })?;
+        if available_memory_mb < required_memory_mb {
+            return Err(SkillSdkError::new(
+                "install_resource_insufficient",
+                format!(
+                    "resource=physical_memory required_mb={required_memory_mb} available_mb={available_memory_mb}"
+                ),
+            )
+            .phase("preflight"));
+        }
+    }
+
+    let required_disk_mb = manifest.install.resources.min_free_disk_mb;
+    if required_disk_mb > 0 {
+        let available_disk_mb = fs2::available_space(package_root).map_err(|error| {
+            SkillSdkError::new(
+                "install_resource_probe_failed",
+                format!(
+                    "resource=free_disk path={} error={error}",
+                    package_root.display()
+                ),
+            )
+            .phase("preflight")
+        })? / BYTES_PER_MB;
+        if available_disk_mb < required_disk_mb {
+            return Err(SkillSdkError::new(
+                "install_resource_insufficient",
+                format!(
+                    "resource=free_disk path={} required_mb={required_disk_mb} available_mb={available_disk_mb}",
+                    package_root.display()
+                ),
+            )
+            .phase("preflight"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn physical_memory_bytes() -> Option<u64> {
+    let mut value = 0_u64;
+    let mut length = std::mem::size_of::<u64>();
+    let name = std::ffi::CString::new("hw.memsize").ok()?;
+    // SAFETY: `value` and `length` point to valid writable storage and the
+    // sysctl is read-only with no replacement value.
+    let status = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            (&mut value as *mut u64).cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (status == 0 && length == std::mem::size_of::<u64>()).then_some(value)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn physical_memory_bytes() -> Option<u64> {
+    // SAFETY: sysconf is a read-only libc query with no pointer arguments.
+    let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    (pages > 0 && page_size > 0).then(|| (pages as u64).saturating_mul(page_size as u64))
+}
+
+#[cfg(not(unix))]
+fn physical_memory_bytes() -> Option<u64> {
+    None
 }
 
 fn now_unix() -> SkillSdkResult<u64> {

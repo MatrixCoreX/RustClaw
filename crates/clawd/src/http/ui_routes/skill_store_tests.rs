@@ -664,7 +664,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(store_item(&initial, "media_download")["installed"], false);
     assert_eq!(
         store_item(&initial, "media_download")["description_zh"],
-        "支持抖音、快手、小红书、TikTok 和 YouTube 的 App 复制分享文案、短链和网页分享链接；无论来自 UI 还是通信端，默认直接排队下载并返回原始视频或图片，不反问操作类型。仅在用户明确要求时解析直链、转写、识别文字或转码；同一时间只运行一个媒体任务，前一任务失败或超时后会继续下一项。"
+        "支持抖音、快手、小红书、TikTok 和 YouTube 的 App 复制分享文案、短链和网页分享链接；默认直接下载原始媒体。抖音和小红书图文帖会分别返回全部原图和平台正文；图片 OCR 仍需明确要求。本技能内正文和 OCR 少于 200 字直接对话交付，达到 200 字则发送文本文件。"
     );
     assert_eq!(
         store_item(&initial, "media_download")["source_kind"],
@@ -682,6 +682,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(
         store_item_names(&initial),
         BTreeSet::from([
+            "chinese_almanac",
             "crypto",
             "invest_copy",
             "map_merchant",
@@ -1032,7 +1033,13 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
             router.clone(),
             Method::POST,
             "/v1/skills/store/install",
-            Some(serde_json::json!({"skill_name": skill_name})),
+            Some(serde_json::json!({
+                "skill_name": skill_name,
+                "allow_network": matches!(
+                    spec.network_policy,
+                    skill_sdk::BuildNetworkPolicy::ApprovalRequired
+                )
+            })),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "install {skill_name}");
@@ -1112,10 +1119,20 @@ async fn all_on_demand_skills_complete_isolated_http_lifecycle() {
             router.clone(),
             Method::POST,
             "/v1/skills/store/install",
-            Some(serde_json::json!({"skill_name": skill_name})),
+            Some(serde_json::json!({
+                "skill_name": skill_name,
+                "allow_network": matches!(
+                    spec.network_policy,
+                    skill_sdk::BuildNetworkPolicy::ApprovalRequired
+                )
+            })),
         )
         .await;
-        assert_eq!(status, StatusCode::OK, "reinstall {skill_name}");
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "reinstall {skill_name}: {reinstalled}"
+        );
         assert_eq!(reinstalled["data"]["installed"], true);
         for relative in &config_files {
             assert!(value_array_contains(

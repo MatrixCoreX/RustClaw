@@ -508,11 +508,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     const item = skillStoreData?.items.find((candidate) => candidate.name === skillName);
     const allowNetwork = item?.build_network_policy === "approval_required";
     if (allowNetwork) {
+      const hostDependencies = item?.host_dependencies ?? [];
       const confirmed = await showConfirm({
-        title: t("允许安装时联网", "Allow network during installation"),
+        title: t("允许安装完整依赖", "Allow complete dependency installation"),
         message: t(
-          `${skillName} 的清单声明安装阶段需要联网。{product_name} 只会在隔离的安装任务中按清单获取依赖或验证端点；运行时联网权限仍单独受控。是否继续？`,
-          `${skillName} declares that installation needs network access. {product_name} will use it only in the isolated install job for declared dependencies or endpoint validation; runtime network access remains separately controlled. Continue?`,
+          `${skillName} 的清单声明安装阶段需要联网。{product_name} 会安装经过宿主白名单确认的系统依赖${hostDependencies.length ? `（${hostDependencies.join("、")}）` : ""}和技能私有依赖；系统工具在卸载技能后仍会保留，运行时联网权限仍单独受控。是否继续？`,
+          `${skillName} declares that installation needs network access. {product_name} will install host-approved system dependencies${hostDependencies.length ? ` (${hostDependencies.join(", ")})` : ""} and private skill dependencies. Shared system tools remain after skill removal, and runtime network access stays separately controlled. Continue?`,
         ),
         confirmLabel: t("允许并安装", "Allow and install"),
       });

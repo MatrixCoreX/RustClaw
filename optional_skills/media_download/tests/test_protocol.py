@@ -92,6 +92,25 @@ class AdapterTest(unittest.TestCase):
         self.assertNotIn("--extract-audio", command)
         self.assertNotIn("--whisper-translate", command)
 
+    def test_transcribe_command_defaults_to_local_whisper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "sample.wav"
+            input_path.write_bytes(b"audio")
+            request = {
+                "context": {
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                }
+            }
+            command = self.skill._build_transcribe_command(
+                request,
+                {"input_path": "sample.wav"},
+                root / "artifacts",
+            )
+
+        self.assertEqual(command[command.index("--engine") + 1], "whisper")
+
     def test_download_command_preserves_complete_share_text(self) -> None:
         share_text = "复制这条消息，打开快手看看 https://v.kuaishou.com/example/ 更多内容"
         with tempfile.TemporaryDirectory() as directory:

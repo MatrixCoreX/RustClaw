@@ -2,7 +2,8 @@ use super::{
     bounded_tail, browser_playwright_install_commands, build_ui_router,
     dependency_command_candidates, dependency_install_commands, dependency_version_text,
     dependency_version_text_for, detect_browser_playwright_manifest, host_dependency_catalog,
-    linux_dependency_package, playwright_managed_browser_available, prepare_dependency_install,
+    install_declared_host_dependencies, linux_dependency_package,
+    playwright_managed_browser_available, prepare_dependency_install,
 };
 use crate::AppState;
 use axum::body::{to_bytes, Body};
@@ -30,6 +31,8 @@ fn dependency_catalog_ids_are_unique_and_machine_safe() {
     assert!(sandbox.required);
     assert!(catalog.iter().any(|entry| entry.id == "npx"));
     assert!(catalog.iter().any(|entry| entry.id == "browser_playwright"));
+    assert!(catalog.iter().any(|entry| entry.id == "tesseract"));
+    assert!(catalog.iter().any(|entry| entry.id == "tesseract_chi_sim"));
 }
 
 #[test]
@@ -113,6 +116,27 @@ fn install_commands_are_whitelisted_by_catalog_and_platform_manager() {
         .expect("docker catalog entry");
     assert_eq!(linux_dependency_package(&docker, "apt"), Some("docker.io"));
     assert_eq!(linux_dependency_package(&docker, "pacman"), Some("docker"));
+
+    let chinese_ocr = host_dependency_catalog()
+        .into_iter()
+        .find(|entry| entry.id == "tesseract_chi_sim")
+        .expect("Chinese OCR dependency");
+    assert_eq!(
+        linux_dependency_package(&chinese_ocr, "apt"),
+        Some("tesseract-ocr-chi-sim")
+    );
+    assert_eq!(
+        linux_dependency_package(&chinese_ocr, "dnf"),
+        Some("tesseract-langpack-chi_sim")
+    );
+    assert_eq!(
+        linux_dependency_package(&chinese_ocr, "pacman"),
+        Some("tesseract-data-chi_sim")
+    );
+    assert_eq!(
+        linux_dependency_package(&chinese_ocr, "apk"),
+        Some("tesseract-ocr-data-chi_sim")
+    );
 }
 
 #[test]
@@ -126,6 +150,24 @@ fn installed_dependency_is_not_scheduled_again() {
         prepare_dependency_install(&bash, &workspace_root),
         Err("dependency_already_installed")
     ));
+}
+
+#[tokio::test]
+async fn declared_dependencies_reject_unknown_ids_without_running_a_command() {
+    let control = skill_sdk::InstallControl::new(std::sync::Arc::new(
+        std::sync::atomic::AtomicBool::new(false),
+    ));
+    let error = install_declared_host_dependencies(
+        &["not_in_the_host_catalog".to_string()],
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .as_path(),
+        &control,
+    )
+    .await
+    .expect_err("unknown dependency must be rejected before package-manager execution");
+    assert_eq!(error.dependency_id, "not_in_the_host_catalog");
+    assert_eq!(error.code, "dependency_unknown");
 }
 
 #[test]

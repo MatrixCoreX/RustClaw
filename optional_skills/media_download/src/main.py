@@ -14,6 +14,10 @@ from urllib.parse import urlsplit
 SKILL_NAME = "media_download"
 SCHEMA_VERSION = 1
 TOOL_DIR = Path(__file__).resolve().parent / "tool"
+PRIVATE_BIN_DIR = Path(sys.executable).resolve().parent
+os.environ["PATH"] = os.pathsep.join(
+    [str(PRIVATE_BIN_DIR), os.environ.get("PATH", "")]
+).rstrip(os.pathsep)
 SUPPORTED_ACTIONS = (
     "capabilities",
     "download",
@@ -616,7 +620,15 @@ def _failure_from_process(
     not_applied: bool = False,
 ) -> SkillFailure:
     lowered = stderr.lower()
-    if any(marker in lowered for marker in ("was not found in path", "is required", "no module named")):
+    if any(
+        marker in lowered
+        for marker in (
+            "was not found in path",
+            "is required",
+            "is not installed",
+            "no module named",
+        )
+    ):
         error_code = "dependency_unavailable"
         message_key = "media_download.error.dependency_unavailable"
     elif "no downloadable" in lowered or "no media" in lowered:
@@ -718,12 +730,15 @@ def _capabilities_extra() -> dict[str, Any]:
             "inline_text_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
             "ocr_is_separate": True,
         },
-        "optional_dependencies": {
+        "installed_dependencies": {
             "youtube": ["yt-dlp"],
             "media_processing": ["ffmpeg", "ffprobe"],
-            "ocr": ["tesseract"],
+            "ocr": ["tesseract", "chi_sim"],
             "browser_fallback": ["chromium_or_chrome"],
-            "transcription": ["whisper.cpp_or_funasr"],
+            "transcription_alternative": ["funasr", "modelscope", "torch"],
+        },
+        "host_integrated_dependencies": {
+            "default_transcription": ["whisper.cpp"],
         },
     }
 
