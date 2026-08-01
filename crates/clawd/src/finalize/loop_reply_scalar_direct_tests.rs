@@ -23,6 +23,13 @@ fn wrapped_current_dir_path_facts(path: &str) -> String {
     serde_json::json!({"extra": extra, "text": text}).to_string()
 }
 
+fn normalized_workspace_path(path: &Path) -> String {
+    path.components()
+        .collect::<PathBuf>()
+        .to_string_lossy()
+        .to_string()
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error() {
     let state = test_state();
@@ -383,7 +390,7 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
 #[tokio::test]
 async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_observed_path() {
     let state = test_state();
-    let expected_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
+    let expected_path = normalized_workspace_path(&state.skill_rt.workspace_root);
     let task = claimed_task("task-recoverable-scalar-path-dot");
     let mut route = scalar_route_result();
     route.selection.structured_field_selector = Some("resolved_path".to_string());
@@ -471,7 +478,7 @@ async fn finalize_loop_reply_preserves_richer_generic_path_facts_delivery() {
 #[tokio::test]
 async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_path() {
     let state = test_state();
-    let expected_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
+    let expected_path = normalized_workspace_path(&state.skill_rt.workspace_root);
     let task = claimed_task("task-scalar-path-field-placeholder");
     let mut route = scalar_route_result();
     route.selection.structured_field_selector = Some("resolved_path".to_string());
