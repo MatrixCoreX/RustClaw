@@ -254,6 +254,37 @@ fn replace_accepts_an_absolute_path_inside_the_workspace() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn replace_accepts_an_absolute_path_through_the_configured_root_alias() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TestWorkspace::new();
+    let alias_parent = TestWorkspace::new();
+    let alias_root = alias_parent.path().join("workspace");
+    symlink(dir.path(), &alias_root).expect("create configured workspace alias");
+    fs::write(dir.path().join("absolute.txt"), "before old after").expect("fixture");
+
+    let output = execute_workspace_replace_for_root(
+        &alias_root,
+        "task-absolute-configured-alias",
+        &args(json!({
+            "action": "replace_text",
+            "path": alias_root.join("absolute.txt").to_string_lossy(),
+            "old_text": "old",
+            "new_text": "new",
+        })),
+    )
+    .expect("replace absolute path through configured workspace alias");
+    let output: Value = serde_json::from_str(&output).expect("json");
+
+    assert_eq!(output["path"], "absolute.txt");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("absolute.txt")).expect("changed"),
+        "before new after"
+    );
+}
+
 #[test]
 fn replace_rejects_an_absolute_path_outside_the_workspace() {
     let dir = TestWorkspace::new();

@@ -843,6 +843,12 @@ def signal_tree(pids, sig):
         except (ProcessLookupError, PermissionError):
             pass
 
+def signal_group(root_pid, sig):
+    try:
+        os.killpg(root_pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
 limit = int(sys.argv[1])
 grace = int(sys.argv[2])
 command = sys.argv[3]
@@ -851,18 +857,24 @@ with open(sys.argv[4], "wb") as stdout, open(sys.argv[5], "wb") as stderr:
         ["bash", "-o", "pipefail", "-lc", command],
         stdout=stdout,
         stderr=stderr,
+        start_new_session=True,
     )
     try:
         code = process.wait(timeout=limit)
     except subprocess.TimeoutExpired:
         pids = process_tree(process.pid)
+        signal_group(process.pid, signal.SIGTERM)
         signal_tree(pids, signal.SIGTERM)
         deadline = time.monotonic() + grace
         while time.monotonic() < deadline and any(alive(pid) for pid in pids):
             time.sleep(0.05)
+        signal_group(process.pid, signal.SIGKILL)
         signal_tree([pid for pid in pids if alive(pid)], signal.SIGKILL)
-        process.wait()
-        code = 124
+        try:
+            process.wait(timeout=max(1, grace))
+            code = 124
+        except subprocess.TimeoutExpired:
+            code = 125
 sys.exit(code if code >= 0 else 128 - code)
 PY
 elif command -v timeout >/dev/null 2>&1; then

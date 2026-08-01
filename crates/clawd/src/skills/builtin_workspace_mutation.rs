@@ -146,7 +146,7 @@ where
     F: FnOnce() -> Result<(), String>,
 {
     let root = canonical_workspace_root(workspace_root)?;
-    if target.starts_with(&root) {
+    if target.starts_with(&root) || target.starts_with(workspace_root) {
         return run_checkpointed_workspace_mutation(
             workspace_root,
             task_id,
@@ -274,7 +274,7 @@ impl StructuredMutationCheckpoint {
         target: &Path,
     ) -> Result<Self, String> {
         let root = canonical_workspace_root(workspace_root)?;
-        let target_path = safe_relative_target(&root, target)?;
+        let target_path = safe_relative_target(workspace_root, &root, target)?;
         let checkpoint_id = format!("mutation_{}", uuid::Uuid::new_v4().simple());
         let checkpoint_dir = create_checkpoint_dir(&root, &checkpoint_id)?;
         restrict_directory_permissions(&checkpoint_dir);
@@ -598,12 +598,21 @@ fn missing_parent_paths(root: &Path, target_path: &str) -> Result<Vec<String>, S
     Ok(paths)
 }
 
-fn safe_relative_target(root: &Path, target: &Path) -> Result<String, String> {
-    if !target.starts_with(root) {
-        return Err(invalid_target_error(target));
-    }
-    let relative = relative_path(root, target)?;
-    let _ = safe_target_from_relative(root, &relative)?;
+fn safe_relative_target(
+    configured_root: &Path,
+    canonical_root: &Path,
+    target: &Path,
+) -> Result<String, String> {
+    // macOS may expose the configured `/var` path through canonical `/private/var`.
+    // Rebase only the trusted root alias; nested components are still inspected
+    // without following symlinks by `safe_target_from_relative` below.
+    let relative = target
+        .strip_prefix(canonical_root)
+        .or_else(|_| target.strip_prefix(configured_root))
+        .map_err(|_| invalid_target_error(target))?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let _ = safe_target_from_relative(canonical_root, &relative)?;
     Ok(relative)
 }
 
