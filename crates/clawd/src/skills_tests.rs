@@ -1069,7 +1069,7 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn runner_process_can_write_workspace_but_not_adjacent_host_path() {
+async fn runner_process_can_write_workspace_but_not_persist_adjacent_host_path() {
     if !Path::new("/usr/bin/bwrap").is_file() && !Path::new("/bin/bwrap").is_file() {
         return;
     }
@@ -1116,11 +1116,17 @@ capabilities = ["fs.write"]
         probe.get("workspace_write").and_then(|v| v.as_bool()),
         Some(true)
     );
-    assert_eq!(
-        probe.get("outside_write").and_then(|v| v.as_bool()),
-        Some(false)
+    assert!(
+        probe
+            .get("outside_write")
+            .and_then(|value| value.as_bool())
+            .is_some(),
+        "the sandbox probe must report its private write attempt"
     );
     assert!(root.path().join("workspace-probe.txt").is_file());
+    // A worktree below /tmp sees Bubblewrap's private tmpfs and may complete the
+    // write there. The host boundary is that the adjacent source path never
+    // persists outside the sandbox.
     assert!(!outside_path.exists());
 }
 
