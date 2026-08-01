@@ -62,6 +62,10 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
         "recover_pending_cancel_escalations",
         "restored pending local process cancellation escalation",
     ),
+    "crates/clawd/src/worker/mod.rs": (
+        "A claimed task has no implicit global wall-clock deadline",
+        "process_claimed_task_by_kind(state, &task, &mut payload).await",
+    ),
     "crates/clawd/src/worker/async_poll_executor.rs": (
         '"process_observation"',
         '"runtime_deadline_at"',
@@ -74,8 +78,7 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
         "retry_after_seconds.saturating_mul(4).max(60)",
     ),
     "crates/clawd/src/repo/tasks/lifecycle_projection.rs": (
-        "worker_timeout_preserves_recoverable_checkpoint",
-        "PausedCheckpointRecoveryStatus::Waiting",
+        "worker_failure_result_json",
     ),
     "crates/clawd/src/mcp_runtime/types.rs": (
         "pub(crate) timeout_seconds: u64",
@@ -109,15 +112,32 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
 FORBIDDEN_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "configs/config.toml": (
         "cmd_async_timeout_seconds",
+        "task_timeout_seconds",
     ),
     "docker/config/config.toml": (
         "cmd_async_timeout_seconds",
+        "task_timeout_seconds",
     ),
-    "optional_skills/media_download/skill.toml": (
-        "timeout_seconds = 3600",
+    "crates/claw-core/src/config.rs": (
+        "task_timeout_seconds",
+    ),
+    "crates/claw-core/src/types.rs": (
+        "task_timeout_seconds",
     ),
     "crates/clawd/src/runtime/state.rs": (
         "cmd_async_timeout_seconds",
+        "worker_task_timeout_seconds",
+    ),
+    "crates/clawd/src/worker/mod.rs": (
+        "tokio::time::timeout(Duration::from_secs(worker_timeout_secs)",
+        "finalize_worker_timeout",
+    ),
+    "crates/clawd/src/repo/tasks.rs": (
+        "update_task_timeout",
+        "worker_timeout_result_json",
+    ),
+    "optional_skills/media_download/skill.toml": (
+        "timeout_seconds = 3600",
     ),
     "crates/clawd/src/skills/builtin.rs": (
         "unwrap_or(3_600)",

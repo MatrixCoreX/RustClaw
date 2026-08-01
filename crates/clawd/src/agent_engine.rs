@@ -216,7 +216,6 @@ pub(crate) struct LoopState {
     pub(crate) round_no: usize,
     pub(crate) task_budget_slice: Option<crate::task_budget_contract::TaskBudgetSlice>,
     pub(crate) task_budget_slice_base_elapsed_ms: u64,
-    pub(crate) task_budget_worker_soft_limit_ms: u64,
     pub(crate) tool_calls_total: usize,
     pub(crate) total_steps_executed: usize,
     /// Exact registry skill tokens selected through the native capability

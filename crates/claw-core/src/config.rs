@@ -962,20 +962,16 @@ fn default_audit_pool_max_size() -> u32 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorkerConfig {
-    // Phase 0.1 / L4: 缺省值收敛为安全基线。
-    // 历史上这四个字段在 struct 上没有 `#[serde(default)]`，部署模板里硬编码
-    // `task_timeout_seconds = 86400`（24h），任何继承该模板的环境都会把单任务
-    // 硬超时拉到一天。补上 serde default 后，未在 toml 中显式声明就走安全值：
+    // Worker lifecycle settings are deliberately independent from task runtime
+    // deadlines. Durable/background work has no implicit global wall-clock kill;
+    // explicit operation deadlines, cancellation, adapter timeouts, resource
+    // policy and stale-lease recovery remain separate machine contracts.
+    // Missing fields use the safe worker scheduling defaults below:
     // - concurrency=1（单 worker，避免抢资源）
     // - poll_interval_ms=500
     // - queue_limit=64
-    // - task_timeout_seconds=3600（所有任务类别的管理员硬上限，远小于原 24h；
-    //   结构化 budget_profile 可选择更短预算，但不能突破该上限）
-    // 现存 demo 模板会显式设大值，行为不变；新部署默认即安全。
     #[serde(default = "default_worker_concurrency")]
     pub concurrency: usize,
-    #[serde(default = "default_worker_task_timeout_seconds")]
-    pub task_timeout_seconds: u64,
     #[serde(default = "default_worker_poll_interval_ms")]
     pub poll_interval_ms: u64,
     #[serde(default = "default_worker_queue_limit")]
@@ -992,7 +988,6 @@ impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             concurrency: default_worker_concurrency(),
-            task_timeout_seconds: default_worker_task_timeout_seconds(),
             poll_interval_ms: default_worker_poll_interval_ms(),
             queue_limit: default_worker_queue_limit(),
             task_heartbeat_seconds: default_worker_task_heartbeat_seconds(),

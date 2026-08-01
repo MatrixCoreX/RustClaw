@@ -185,10 +185,9 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, store_pending_channel_request, submit_task_audit_detail,
     task_count_by_status, task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
-    update_task_timeout, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
-    verify_webd_password_login, FactoryResetDbResult, PendingChannelBindSession,
-    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskAdminTarget,
-    TaskViewerAccessError,
+    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
+    FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
+    SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 #[cfg(test)]
@@ -882,7 +881,6 @@ async fn run() -> anyhow::Result<()> {
             worker_id: format!("worker:{}", Uuid::new_v4()),
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
-            worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
             worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
             worker_running_no_progress_timeout_seconds: config
                 .worker

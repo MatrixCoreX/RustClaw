@@ -336,7 +336,6 @@ async fn health(
         uptime_seconds: state.worker.started_at.elapsed().as_secs(),
         memory_rss_bytes: current_rss_bytes(),
         running_length,
-        task_timeout_seconds: state.worker.worker_task_timeout_seconds,
         running_oldest_age_seconds,
         telegramd_healthy,
         telegramd_process_count,

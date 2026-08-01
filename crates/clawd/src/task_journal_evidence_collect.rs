@@ -266,7 +266,6 @@ const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
     "running_length",
     "queue_length",
     "memory_rss_bytes",
-    "task_timeout_seconds",
     "running_oldest_age_seconds",
     "clawd_process_count",
     "clawd_health_port_open",

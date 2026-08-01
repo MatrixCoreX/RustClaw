@@ -465,7 +465,7 @@ deny = []
 allow = []
 deny = []
 
-# 用途/Purpose: worker 拉取队列并发与超时.
+# 用途/Purpose: worker 拉取队列、心跳与失联恢复.
 # 建议修改/Recommended change: 可改，需结合机器资源与任务负载.
 # 风险/Risk: 并发太高会争用 CPU/IO；队列太小会丢积压能力.
 [worker]
@@ -481,9 +481,8 @@ task_heartbeat_seconds = 30
 running_no_progress_timeout_seconds = 1200
 # 无进展清理检查间隔（秒）。
 running_recovery_check_interval_seconds = 60
-# 单任务硬超时（秒） / Hard timeout per task in seconds.
-# 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
-task_timeout_seconds = 86400
+# No global worker wall-clock timeout. Explicit deadlines, cancellation,
+# adapter/tool timeouts, resource policy and stale-lease recovery are separate.
 
 # 用途/Purpose: 启动期 prompt 校验与 SIGHUP 热重载控制.
 # 建议修改/Recommended change: 生产建议保持 strict_validation_at_startup=true.

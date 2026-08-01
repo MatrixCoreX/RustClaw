@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::{repo, AppState};
 use anyhow::anyhow;
 use serde_json::{json, Value};
@@ -20,7 +18,6 @@ mod run_skill_finalize;
 mod run_skill_mutation;
 mod run_skill_permission;
 mod runtime_support;
-pub(crate) mod task_budget;
 mod workspace_instructions;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
@@ -167,37 +164,20 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             }
         };
 
-        let task_kind_for_timeout_log = task.kind.clone();
-        let task_budget = task_budget::task_execution_budget(
-            state.worker.worker_task_timeout_seconds,
-            &task.kind,
-            &payload,
-        );
-        let worker_timeout_secs = task_budget.timeout_seconds;
-        info!(
-            "worker_task_budget task_id={} kind={} class={} requested_profile={} profile_valid={} timeout_seconds={} admin_max_seconds={}",
-            task.task_id,
-            task.kind,
-            task_budget.class.as_str(),
-            task_budget.requested_profile.as_deref().unwrap_or("none"),
-            task_budget.profile_valid,
-            worker_timeout_secs,
-            task_budget.admin_max_seconds
-        );
         let _task_cancellation = state.worker.register_active_task(&task.task_id);
         let heartbeat_stop =
             start_task_heartbeat(state.clone(), task.task_id.clone(), task.claim_attempt);
-        let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
-            process_claimed_task_by_kind(state, &task, &mut payload).await?;
-            Ok::<(), anyhow::Error>(())
-        })
-        .await;
+        // A claimed task has no implicit global wall-clock deadline. Durable
+        // jobs hand off through checkpoints, while explicit deadlines,
+        // cancellation, adapter/tool timeouts and stale-lease recovery remain
+        // independently enforceable.
+        let task_result = process_claimed_task_by_kind(state, &task, &mut payload).await;
         let _ = heartbeat_stop.send(());
         state.worker.unregister_active_task(&task.task_id);
 
         match task_result {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
+            Ok(()) => {}
+            Err(error) => {
                 if let Some(rejection) = error.downcast_ref::<repo::WorkerTaskWriteRejected>() {
                     warn!(
                         "worker_write_rejected status_code={} lease_lost={} operation={} task_id={} expected_claim_attempt={} task_status={} lease_owner={} active_claim_attempt={}",
@@ -217,16 +197,6 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 } else {
                     finalize_worker_runtime_error(state, &task, Some(&payload), &error)?;
                 }
-            }
-            Err(_) => {
-                finalize_worker_timeout(
-                    state,
-                    &task,
-                    &payload,
-                    worker_timeout_secs,
-                    &task_kind_for_timeout_log,
-                )
-                .await?
             }
         }
         crate::task_event_transport::publish_task_status_projection(state, &task.task_id);
@@ -330,42 +300,6 @@ async fn process_claimed_task_by_kind(
 #[cfg(test)]
 #[path = "worker_error_finalization_tests.rs"]
 mod worker_error_finalization_tests;
-
-async fn finalize_worker_timeout(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    payload: &Value,
-    worker_timeout_secs: u64,
-    task_kind_for_timeout_log: &str,
-) -> anyhow::Result<()> {
-    let timeout_err = format!(
-        "worker timeout after {}s while processing kind={}",
-        worker_timeout_secs, task_kind_for_timeout_log
-    );
-    error!(
-        "worker_once timeout: worker_id={} task_id={} kind={} timeout_seconds={}",
-        state.worker.worker_id, task.task_id, task_kind_for_timeout_log, worker_timeout_secs
-    );
-    let terminal_timeout =
-        crate::update_task_timeout(state, &task.task_id, task.claim_attempt, &timeout_err)?;
-    if terminal_timeout {
-        let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
-    }
-    info!("{}", crate::LOG_CALL_WRAP);
-    info!(
-        "task_call_end task_id={} kind={} status={} error={}",
-        task.task_id,
-        task_kind_for_timeout_log,
-        if terminal_timeout {
-            "timeout"
-        } else {
-            "checkpoint_preserved"
-        },
-        crate::truncate_for_log(&timeout_err)
-    );
-    info!("{}", crate::LOG_CALL_WRAP);
-    Ok(())
-}
 
 pub(crate) async fn maybe_notify_schedule_result(
     state: &AppState,

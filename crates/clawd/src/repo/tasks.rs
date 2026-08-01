@@ -17,7 +17,6 @@ use lifecycle_projection::{
     expired_resume_claim_recovery_metadata, normalized_optional_task_id,
     ready_paused_checkpoint_resume_executor_from_result_json, resume_entrypoint_token,
     summarize_active_task_payload, worker_failure_result_json,
-    worker_timeout_preserves_recoverable_checkpoint, worker_timeout_result_json,
 };
 
 pub(crate) const WORKER_LEASE_LOST_STATUS_CODE: &str = "worker_lease_lost";
@@ -777,102 +776,6 @@ pub(crate) fn update_task_failure_with_result(
     drop(db);
     publish_parent_graph_terminal_event(state, task_id, graph_snapshot);
     Ok(())
-}
-
-pub(crate) fn update_task_timeout(
-    state: &AppState,
-    task_id: &str,
-    claim_attempt: i64,
-    error_text: &str,
-) -> anyhow::Result<bool> {
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let existing_result_json = db
-        .query_row(
-            "SELECT result_json
-             FROM tasks
-             WHERE task_id = ?1
-               AND status = 'running'
-               AND lease_owner = ?2
-               AND claim_attempt = ?3
-             LIMIT 1",
-            params![task_id, state.worker.worker_id.as_str(), claim_attempt],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?;
-    let Some(existing_result_json) = existing_result_json else {
-        return Err(worker_task_write_rejection(
-            &db,
-            state,
-            task_id,
-            claim_attempt,
-            "update_task_timeout",
-            &["running"],
-        ));
-    };
-    if worker_timeout_preserves_recoverable_checkpoint(existing_result_json.as_deref()) {
-        let changed = db.execute(
-            "UPDATE tasks
-             SET updated_at = ?2
-             WHERE task_id = ?1
-               AND status = 'running'
-               AND lease_owner = ?3
-               AND claim_attempt = ?4",
-            params![
-                task_id,
-                now_ts(),
-                state.worker.worker_id.as_str(),
-                claim_attempt
-            ],
-        )?;
-        if changed > 0 {
-            warn!(
-                "update_task_timeout preserved recoverable checkpoint: task_id={}",
-                task_id
-            );
-            return Ok(false);
-        }
-    }
-    let result_json = worker_timeout_result_json(task_id);
-    let changed = db.execute(
-        "UPDATE tasks
-         SET status = 'timeout', result_json = ?2, error_text = ?3, updated_at = ?4
-         WHERE task_id = ?1
-           AND status = 'running'
-           AND lease_owner = ?5
-           AND claim_attempt = ?6",
-        params![
-            task_id,
-            result_json,
-            error_text,
-            now_ts(),
-            state.worker.worker_id.as_str(),
-            claim_attempt
-        ],
-    )?;
-    if changed == 0 {
-        return Err(worker_task_write_rejection(
-            &db,
-            state,
-            task_id,
-            claim_attempt,
-            "update_task_timeout",
-            &["running"],
-        ));
-    }
-    let graph_snapshot = crate::repo::child_task_graph::terminate_parent_graph_children(
-        state,
-        &db,
-        task_id,
-        "timeout",
-        &now_ts(),
-    )?;
-    drop(db);
-    publish_parent_graph_terminal_event(state, task_id, graph_snapshot);
-    Ok(true)
 }
 
 fn publish_parent_graph_terminal_event(
@@ -1943,10 +1846,6 @@ pub(crate) fn check_task_view_access(
 #[cfg(test)]
 #[path = "tasks_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "tasks_timeout_tests.rs"]
-mod tasks_timeout_tests;
 
 #[cfg(test)]
 #[path = "task_cancel_resume_tests.rs"]

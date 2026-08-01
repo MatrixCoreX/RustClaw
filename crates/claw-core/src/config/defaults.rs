@@ -262,12 +262,6 @@ pub(super) fn default_worker_concurrency() -> usize {
     1
 }
 
-pub(super) fn default_worker_task_timeout_seconds() -> u64 {
-    // 1 小时单任务硬上限。比 demo 模板里的 86400 (24h) 安全得多。
-    // 真的需要长任务（视频处理、大批量同步）就在 toml 中显式覆盖。
-    3600
-}
-
 pub(super) fn default_worker_poll_interval_ms() -> u64 {
     500
 }

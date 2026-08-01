@@ -438,7 +438,7 @@ fn generic_content_is_not_hard_summarized_by_observed_output() {
     loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"12|# timeout note\n13|task_timeout_seconds = 3600\n14|# end"}"#,
+            r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"12|# sample note\n13|sample_limit = 42\n14|# end"}"#,
         ));
     let route_result = IntentOutputContract {
             exact_sentence_count: None,

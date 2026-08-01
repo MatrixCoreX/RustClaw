@@ -27,7 +27,7 @@
 
 | Surface | 当前 owner | 职责 | 是否可绕过普通 planner |
 | --- | --- | --- | --- |
-| Task claim/kind dispatch | `worker_once()` | Lease、heartbeat、timeout、取消和 `ask/run_skill` 派发 | 可以，因为这是任务协议 |
+| Task claim/kind dispatch | `worker_once()` | Lease、heartbeat、取消和 `ask/run_skill` 派发；不设置全局墙钟 timeout | 可以，因为这是任务协议 |
 | 显式 capability payload | `run_capability` | 执行调用方给出的机器 capability 合同 | 只限显式 payload |
 | 显式 schedule direct text | `maybe_finalize_schedule_direct_text_success()` | 交付 `schedule_task_mode=direct_text`，不推断语义 | 只限显式 scheduler 元数据 |
 | 输入物化 | `prepare_ask_input()` 和 planner frontdoor | 文本、音频转写、附件 ref、显式命令/locator 事实 | 不可语义绕过 |

@@ -1,25 +1,22 @@
 # =============================================================================
 # [DEMO TEMPLATE - 不是生产默认值]
 #
-# 本文件是 agent runtime 自带的 demo / 开发模板，里面很多字段（tools.allow=["*"]、
-# tools.allow_sudo、worker.task_timeout_seconds=86400 等）
-# 为了演示方便而开到了"全权限/超长超时"。
+# 本文件是 agent runtime 自带的 demo / 开发模板，里面部分权限字段（tools.allow=["*"]、
+# tools.allow_sudo 等）为了演示方便而放宽。
 #
 # 真正的代码默认值（`*Config::default()` / `serde(default = ...)`) 已经
 # 在 Phase 0.1 / L4 收敛为安全基线：
 #   - ToolsConfig::default()               => allow=[], allow_sudo=false,
 #                                              allow_path_outside_workspace=false
-#   - WorkerConfig::default()              => task_timeout_seconds=3600 (1h)
 #   - default_skill_timeout_seconds()      => 30s
 #   - default_tool_cmd_timeout_seconds()   => 60s
 #
 # 部署生产环境的推荐做法：
 #   1. 复制本文件，删除 [tools] 整节让它走代码安全默认，或显式只保留需要的字段。
-#   2. worker.task_timeout_seconds 按真实任务上限设置，不要继承 86400。
-#   3. tools.allow 显式列出需要的技能，避免 ["*"]。
-#   4. 把本文件路径换成自己的 configs/<env>.toml，避免 demo 模板被无意继承。
+#   2. tools.allow 显式列出需要的技能，避免 ["*"]。
+#   3. 把本文件路径换成自己的 configs/<env>.toml，避免 demo 模板被无意继承。
 #
-# 不动本文件、直接用 demo 部署也能运行，但权限/超时面较大，请知悉。
+# 不动本文件、直接用 demo 部署也能运行，但权限面较大，请知悉。
 # =============================================================================
 
 # 用途/Purpose: 默认回复语言与结构化 verifier 配置.
@@ -576,12 +573,8 @@ task_heartbeat_seconds = 30
 running_no_progress_timeout_seconds = 1200
 # 无进展清理检查间隔（秒）。
 running_recovery_check_interval_seconds = 60
-# 单任务硬超时（秒） / Hard timeout per background task in seconds.
-# 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
-# Phase 0.1 收敛：86400 (24h, demo 演示值) → 3600 (1h)。
-# 多轮 agent 任务一般 5–15 min；超过 1h 通常是循环卡死，应当被 hard timeout 切断。
-# 真有"长跑批处理"需求请按 task 级别在创建时单独提 timeout，不要把全局调回大值。
-task_timeout_seconds = 3600
+# Worker 不设置统一任务墙钟超时。长任务通过 checkpoint/durable job 释放 worker；
+# 终止只来自显式 deadline、用户取消、单次 tool/provider timeout、资源策略或失联 lease 回收。
 # 模型 turn、工具调用、累计时长、token/cost 和 continuation 的管理员上限
 # 统一配置在 configs/agent_guard.toml 的 [agent.task_budget]。
 

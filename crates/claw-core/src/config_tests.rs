@@ -213,7 +213,7 @@ persona_profile = "not-a-profile"
 }
 
 #[test]
-fn removed_worker_model_budget_fields_are_ignored_without_becoming_runtime_authority() {
+fn removed_worker_timeout_and_model_budget_fields_are_ignored_without_runtime_authority() {
     let dir = unique_temp_config_dir("legacy-worker-model-budget");
     fs::create_dir_all(&dir).expect("create temp config dir");
     let config_path = dir.join("config.toml");
@@ -228,6 +228,7 @@ sqlite_path = "data/test.db"
 busy_timeout_ms = 2000
 
 [worker]
+task_timeout_seconds = 1
 llm_max_calls_per_task = 40
 llm_total_timeout_seconds = 900
 "#,
@@ -235,8 +236,8 @@ llm_total_timeout_seconds = 900
     .expect("write temp config");
 
     let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
-        .expect("legacy worker model-budget fields remain readable");
-    assert_eq!(cfg.worker.task_timeout_seconds, 3600);
+        .expect("removed worker timeout and model-budget fields remain readable");
+    assert_eq!(cfg.worker.concurrency, 1);
 
     fs::remove_dir_all(dir).expect("remove temp config dir");
 }

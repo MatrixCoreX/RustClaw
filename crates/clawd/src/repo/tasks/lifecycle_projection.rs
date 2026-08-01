@@ -133,51 +133,6 @@ fn result_has_visible_reply(result_json: &Value) -> bool {
             })
 }
 
-pub(super) fn worker_timeout_preserves_recoverable_checkpoint(result_json: Option<&str>) -> bool {
-    let Some(raw) = result_json else {
-        return false;
-    };
-    let Ok(result_json) = serde_json::from_str::<Value>(raw) else {
-        return false;
-    };
-    matches!(
-        crate::task_lifecycle::paused_checkpoint_recovery_status(
-            &result_json,
-            crate::now_ts_u64() as i64
-        ),
-        crate::task_lifecycle::PausedCheckpointRecoveryStatus::Waiting { .. }
-    )
-}
-
-pub(super) fn worker_timeout_result_json(task_id: &str) -> String {
-    let reason_code =
-        crate::task_lifecycle::TerminalFailureReason::ToolTimeoutWithoutAsyncResume.status_code();
-    json!({
-        "schema_version": 1,
-        "status_code": "worker_task_timeout",
-        "reason_code": reason_code,
-        "message_key": "clawd.task.worker_timeout",
-        "task_lifecycle": {
-            "schema_version": 1,
-            "state": "failed",
-            "source": "worker_timeout",
-            "terminal_reason": reason_code,
-            "reason_code": reason_code,
-            "worker_events": [
-                {
-                    "event_type": "tool_timeout",
-                    "owner_layer": "worker_runtime",
-                    "task_id": task_id,
-                    "state_from": "running",
-                    "state_to": "timeout",
-                    "reason_code": reason_code,
-                }
-            ]
-        }
-    })
-    .to_string()
-}
-
 pub(super) fn worker_failure_result_json(task_id: &str, error_text: &str) -> String {
     let reason_code = worker_failure_reason_code(error_text);
     let failure_attribution = worker_failure_attribution(reason_code);

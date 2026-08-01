@@ -291,8 +291,6 @@ pub struct HealthResponse {
     pub memory_rss_bytes: Option<u64>,
     /// 当前处于 running 状态的任务数量
     pub running_length: usize,
-    /// worker 级别的任务超时时间（秒）
-    pub task_timeout_seconds: u64,
     /// 最久运行中的任务已运行时长（秒），没有 running 任务时为 0
     pub running_oldest_age_seconds: u64,
     /// telegramd 进程健康状态（None 表示无法检测）
