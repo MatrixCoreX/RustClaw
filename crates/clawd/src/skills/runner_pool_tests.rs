@@ -10,6 +10,7 @@ fn key(generation: u64) -> WarmRunnerKey {
             adapter: skill_sdk::BuildAdapter::Cargo,
             progress_frames: false,
             execution_profile: skill_sdk::ExecutionProfile::StatelessReadonly,
+            sandbox_profile: skill_sdk::SandboxProfile::ReadOnly,
             install_root: std::path::PathBuf::from("/tmp/sample"),
             manifest_digest: "a".repeat(64),
             receipt_digest: "b".repeat(64),
