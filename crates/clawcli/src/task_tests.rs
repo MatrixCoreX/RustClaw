@@ -1,7 +1,7 @@
 use super::{
-    async_final_result_value, capability_task_payload, result_text_from_result_json,
-    resume_task_payload, submit_ask, threaded_ask_payload, TaskResumeRequest, TaskStatusView,
-    TaskSubmissionOptions, ThreadAskContext,
+    async_final_result_value, capability_task_payload, exec_ask_payload,
+    result_text_from_result_json, resume_task_payload, submit_ask, threaded_ask_payload,
+    TaskResumeRequest, TaskStatusView, TaskSubmissionOptions, ThreadAskContext,
 };
 
 fn capture_submit_headers(options: TaskSubmissionOptions) -> String {
@@ -323,6 +323,42 @@ fn capability_task_payload_uses_the_verified_machine_entrypoint() {
     assert_eq!(payload["args"]["checkpoint_id"], "checkpoint-1");
     assert_eq!(payload["args"]["paths"][0], "src/lib.rs");
     assert!(payload.get("text").is_none());
+}
+
+#[test]
+fn coding_exec_payload_carries_a_machine_profile_and_current_directory() {
+    let payload = exec_ask_payload(
+        "implement the change",
+        Some("task-before"),
+        Some("coding"),
+        Some(std::path::Path::new("/workspace/project/src")),
+    );
+
+    assert_eq!(payload["entrypoint"], "exec");
+    assert_eq!(payload["source"], "clawcli_machine");
+    assert_eq!(payload["execution_profile"], "coding");
+    assert_eq!(
+        payload["workspace_context"]["current_working_directory"],
+        "/workspace/project/src"
+    );
+    assert_eq!(payload["resume_task_id"], "task-before");
+    assert_eq!(payload["resume_trigger"], "user_followup");
+
+    let normalized = exec_ask_payload(
+        "implement",
+        None,
+        Some(" coding "),
+        Some(std::path::Path::new("/workspace/project")),
+    );
+    assert_eq!(normalized["execution_profile"], "coding");
+    assert_eq!(
+        normalized["workspace_context"]["current_working_directory"],
+        "/workspace/project"
+    );
+
+    let ordinary = exec_ask_payload("inspect", None, None, None);
+    assert!(ordinary.get("execution_profile").is_none());
+    assert!(ordinary.get("workspace_context").is_none());
 }
 
 #[test]

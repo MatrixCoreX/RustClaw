@@ -647,7 +647,7 @@ pub(crate) fn set_execution_image_context(
     }
 }
 
-fn render_context_projection_prompt(
+pub(crate) fn render_context_projection_prompt(
     state: &AppState,
     logical_path: &'static str,
     prompt_kind: &'static str,

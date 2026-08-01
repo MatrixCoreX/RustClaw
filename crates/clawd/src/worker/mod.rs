@@ -21,6 +21,7 @@ mod run_skill_mutation;
 mod run_skill_permission;
 mod runtime_support;
 pub(crate) mod task_budget;
+mod workspace_instructions;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
 // 调用面统一通过 `crate::finalize::*` facade 访问。

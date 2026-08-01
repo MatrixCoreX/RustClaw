@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde_json::{json, Value};
+use std::path::Path;
 
 use crate::chat_session::{ModelOverride, PermissionMode};
 use crate::client;
@@ -313,6 +314,90 @@ pub(crate) fn submit_resume_ask(
         }),
         options,
     )
+}
+
+pub(crate) fn submit_exec_ask(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    profile: Option<&str>,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
+    submit_exec_ask_with_resume(base_url, key, text, None, profile, options)
+}
+
+pub(crate) fn submit_exec_resume_ask(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    text: &str,
+    profile: Option<&str>,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
+    submit_exec_ask_with_resume(base_url, key, text, Some(task_id), profile, options)
+}
+
+fn submit_exec_ask_with_resume(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    resume_task_id: Option<&str>,
+    profile: Option<&str>,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
+    let current_working_directory = if profile.map(str::trim) == Some("coding") {
+        Some(std::env::current_dir().context("workspace_current_directory_unavailable")?)
+    } else {
+        None
+    };
+    submit_ask_with_payload(
+        base_url,
+        key,
+        exec_ask_payload(
+            text,
+            resume_task_id,
+            profile,
+            current_working_directory.as_deref(),
+        ),
+        options,
+    )
+}
+
+pub(super) fn exec_ask_payload(
+    text: &str,
+    resume_task_id: Option<&str>,
+    profile: Option<&str>,
+    current_working_directory: Option<&Path>,
+) -> Value {
+    let profile = profile.map(str::trim).filter(|profile| !profile.is_empty());
+    let mut payload = json!({
+        "text": text,
+        "entrypoint": "exec",
+        "source": "clawcli_machine",
+    });
+    let object = payload.as_object_mut().expect("exec payload object");
+    if let Some(profile) = profile {
+        object.insert("execution_profile".to_string(), json!(profile));
+    }
+    if profile == Some("coding") {
+        if let Some(cwd) = current_working_directory {
+            object.insert(
+                "workspace_context".to_string(),
+                json!({
+                    "schema_version": 1,
+                    "current_working_directory": cwd.display().to_string(),
+                }),
+            );
+        }
+    }
+    if let Some(task_id) = resume_task_id
+        .map(str::trim)
+        .filter(|task_id| !task_id.is_empty())
+    {
+        object.insert("resume_task_id".to_string(), json!(task_id));
+        object.insert("resume_trigger".to_string(), json!("user_followup"));
+    }
+    payload
 }
 
 pub(crate) fn submit_thread_ask(

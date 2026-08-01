@@ -1,5 +1,8 @@
 use super::runtime::apply_llm_vendor_api_key_envs_with;
-use super::{llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, SkillsConfig, ToolsConfig};
+use super::{
+    llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, SkillsConfig, ToolsConfig,
+    WorkspaceInstructionsConfig,
+};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
@@ -404,6 +407,46 @@ fn tools_defaults_are_least_privilege_coding_defaults() {
     assert!(tools.deny.is_empty());
     assert!(!tools.allow_sudo);
     assert!(!tools.allow_path_outside_workspace);
+}
+
+#[test]
+fn workspace_instruction_config_is_disabled_by_default_and_validates_enabled_budgets() {
+    let disabled = WorkspaceInstructionsConfig::default();
+    assert!(disabled.validate().is_ok());
+
+    let enabled = WorkspaceInstructionsConfig {
+        enabled_for_coding: true,
+        enabled_for_non_coding: false,
+        filenames: vec!["AGENTS.md".to_string()],
+        max_total_bytes: 32_768,
+        max_file_bytes: 131_072,
+        max_files: 16,
+    };
+    assert!(enabled.validate().is_ok());
+    assert_eq!(
+        WorkspaceInstructionsConfig {
+            filenames: vec!["../AGENTS.md".to_string()],
+            ..enabled.clone()
+        }
+        .validate(),
+        Err("workspace_instruction_filename_invalid".to_string())
+    );
+    assert_eq!(
+        WorkspaceInstructionsConfig {
+            filenames: vec!["AGENTS.md".to_string(), "AGENTS.md".to_string()],
+            ..enabled.clone()
+        }
+        .validate(),
+        Err("workspace_instruction_filenames_duplicate".to_string())
+    );
+    assert_eq!(
+        WorkspaceInstructionsConfig {
+            max_total_bytes: 0,
+            ..enabled
+        }
+        .validate(),
+        Err("workspace_instruction_budget_invalid".to_string())
+    );
 }
 
 #[test]

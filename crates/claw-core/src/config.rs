@@ -82,6 +82,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
+    pub workspace_instructions: WorkspaceInstructionsConfig,
+    #[serde(default)]
     pub image_vision: ImageSkillConfig,
     #[serde(default)]
     pub image_generation: ImageSkillConfig,
@@ -1556,6 +1558,60 @@ pub struct ToolsConfig {
     pub allow_sudo: bool,
     #[serde(default)]
     pub by_provider: HashMap<String, ProviderToolsConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WorkspaceInstructionsConfig {
+    #[serde(default)]
+    pub enabled_for_coding: bool,
+    #[serde(default)]
+    pub enabled_for_non_coding: bool,
+    #[serde(default)]
+    pub filenames: Vec<String>,
+    #[serde(default)]
+    pub max_total_bytes: usize,
+    #[serde(default)]
+    pub max_file_bytes: usize,
+    #[serde(default)]
+    pub max_files: usize,
+}
+
+impl WorkspaceInstructionsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled_for_coding && !self.enabled_for_non_coding {
+            return Ok(());
+        }
+        if self.filenames.is_empty() || self.filenames.len() > 8 {
+            return Err("workspace_instruction_filenames_invalid".to_string());
+        }
+        if self.filenames.iter().any(|name| {
+            let path = std::path::Path::new(name);
+            name.trim().is_empty()
+                || name.len() > 128
+                || path.components().count() != 1
+                || !matches!(
+                    path.components().next(),
+                    Some(std::path::Component::Normal(_))
+                )
+        }) {
+            return Err("workspace_instruction_filename_invalid".to_string());
+        }
+        let unique_filenames = self
+            .filenames
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        if unique_filenames.len() != self.filenames.len() {
+            return Err("workspace_instruction_filenames_duplicate".to_string());
+        }
+        if !(1_024..=262_144).contains(&self.max_total_bytes)
+            || !(1_024..=1_048_576).contains(&self.max_file_bytes)
+            || !(1..=64).contains(&self.max_files)
+        {
+            return Err("workspace_instruction_budget_invalid".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl Default for ToolsConfig {

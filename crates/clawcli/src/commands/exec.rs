@@ -534,9 +534,22 @@ pub(crate) fn run_exec(
         crate::interrupt::install()?;
     }
     let task_id = if let Some(resume_task_id) = resume_task_id {
-        task::submit_resume_ask(base_url, key, resume_task_id, prompt, submission_options)?
+        task::submit_exec_resume_ask(
+            base_url,
+            key,
+            resume_task_id,
+            prompt,
+            effective.profile.as_deref(),
+            submission_options,
+        )?
     } else {
-        task::submit_ask(base_url, key, prompt, submission_options)?
+        task::submit_exec_ask(
+            base_url,
+            key,
+            prompt,
+            effective.profile.as_deref(),
+            submission_options,
+        )?
     };
     if effective.detach {
         let exit_class = ExecExitClass::Success;
