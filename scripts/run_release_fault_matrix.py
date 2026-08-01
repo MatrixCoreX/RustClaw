@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -15,6 +17,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+RELEASE_BINARY = ROOT / "target" / "release" / "clawd"
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,8 @@ class FaultCase:
     track: str
     case_id: str
     test_name: str
+    package: str = "clawd"
+    binary: str | None = "clawd"
 
 
 CASES = (
@@ -160,6 +165,97 @@ CASES = (
         "checkpoint_handoff_requires_machine_state",
         "agent_engine::loop_control::tests::soft_budget_checkpoint::checkpoint_handoff_requires_matching_nonterminal_machine_state",
     ),
+    FaultCase(
+        "M",
+        "durable_partial_metadata_cleanup",
+        "skills::runner::tests::durable_job_metadata_write_failure_removes_partial_job_directory",
+    ),
+    FaultCase(
+        "M",
+        "durable_non_utf8_cursor",
+        "local_process_job::tests::non_utf8_output_advances_exact_byte_cursor_without_replay",
+    ),
+    FaultCase(
+        "M",
+        "durable_stream_rotation_cursor_reset",
+        "local_process_job::tests::output_cursor_resets_after_stream_truncation",
+    ),
+    FaultCase(
+        "M",
+        "durable_quiet_process_poll",
+        "worker::async_poll_executor::tests::async_poll_quiet_local_process_stays_running_and_advances_cursor",
+    ),
+    FaultCase(
+        "M",
+        "durable_large_output_artifact",
+        "worker::async_poll_executor::tests::async_poll_large_output_keeps_exact_artifact_and_bounded_preview",
+    ),
+    FaultCase(
+        "M",
+        "durable_partial_pid_metadata",
+        "worker::async_poll_executor::tests::async_poll_missing_pid_metadata_is_a_stable_machine_failure",
+    ),
+    FaultCase(
+        "M",
+        "durable_invalid_terminal_record",
+        "worker::async_poll_executor::tests::async_poll_invalid_exit_record_is_a_stable_machine_failure",
+    ),
+    FaultCase(
+        "M",
+        "durable_pid_identity_mismatch",
+        "worker::async_poll_executor::tests::async_poll_identity_mismatch_allows_terminal_record_grace",
+    ),
+    FaultCase(
+        "M",
+        "durable_term_kill_escalation",
+        "local_process_job::tests::durable_cancellation_escalates_a_verified_process_group",
+    ),
+    FaultCase(
+        "M",
+        "durable_restart_cancel_recovery",
+        "local_process_job::tests::restart_recovery_escalates_a_durable_pending_cancellation",
+    ),
+    FaultCase(
+        "M",
+        "durable_runner_exit_child_cleanup",
+        "local_process_job::tests::wrapper_exit_keeps_its_live_process_group_supervisable",
+    ),
+    FaultCase(
+        "M",
+        "durable_restart_terminal_recovery",
+        "worker::tests::runtime_recovery_reaches_terminal_state_after_file_backed_restart",
+    ),
+    FaultCase(
+        "M",
+        "provider_multi_day_virtual_clock",
+        "worker::async_poll_executor::tests::async_poll_virtual_multi_day_runtime_keeps_deadline_empty",
+    ),
+    FaultCase(
+        "M",
+        "provider_pinned_binding_drift",
+        "worker::async_poll_executor::tests::skill_poll_adapter_rejects_checkpoint_binding_skill_drift",
+    ),
+    FaultCase(
+        "M",
+        "background_version_lease_expiry",
+        "receipt::background_version_lease_tests::multi_day_lease_uses_explicit_expiry_and_unknown_schema_fails_safe",
+        package="agent-skill-sdk",
+        binary=None,
+    ),
+    FaultCase(
+        "M",
+        "sdk_process_group_cancellation",
+        "process::tests::cancellation_terminates_the_complete_process_group",
+        package="agent-skill-sdk",
+        binary=None,
+    ),
+    FaultCase(
+        "M",
+        "sdk_operation_restart_recovery",
+        "operation::tests::operations_are_durable_cancelable_and_recover_interrupted_state",
+        package="agent-skill-sdk",
+        binary=None,
+    ),
 )
 
 
@@ -192,6 +288,20 @@ def relative_artifact_ref(path: Path, output_dir: Path) -> str:
     return path.relative_to(output_dir).as_posix()
 
 
+def command_text(*args: str) -> str:
+    return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def run_case(case: FaultCase, output_dir: Path, index: int, total: int) -> dict[str, object]:
     log_path = output_dir / "cases" / f"{case.track}_{case.case_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,14 +310,11 @@ def run_case(case: FaultCase, output_dir: Path, index: int, total: int) -> dict[
         "test",
         "--locked",
         "-p",
-        "clawd",
-        "--bin",
-        "clawd",
-        case.test_name,
-        "--",
-        "--exact",
-        "--quiet",
+        case.package,
     ]
+    if case.binary:
+        command.extend(["--bin", case.binary])
+    command.extend([case.test_name, "--", "--exact", "--quiet"])
     print(
         f"FAULT_CASE {index}/{total} track={case.track} "
         f"case={case.case_id} test={case.test_name}",
@@ -251,6 +358,12 @@ def main() -> int:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     started_at = datetime.now(timezone.utc).isoformat()
+    source_commit = command_text("git", "rev-parse", "HEAD")
+    changed_paths = [
+        line
+        for line in command_text("git", "status", "--porcelain").splitlines()
+        if line.strip()
+    ]
     results = [
         run_case(case, output_dir, index, len(cases))
         for index, case in enumerate(cases, start=1)
@@ -263,6 +376,17 @@ def main() -> int:
         "status": "passed" if failed == 0 else "failed",
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
+        "source_commit": source_commit,
+        "worktree": {
+            "status": "clean" if not changed_paths else "dirty",
+            "changed_path_count": len(changed_paths),
+        },
+        "binary": {
+            "path": RELEASE_BINARY.relative_to(ROOT).as_posix(),
+            "sha256": sha256_file(RELEASE_BINARY),
+        },
+        "platform": platform.system().lower(),
+        "arch": platform.machine().lower(),
         "tracks": tracks,
         "case_count": len(results),
         "passed": len(results) - failed,

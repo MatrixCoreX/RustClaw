@@ -84,6 +84,26 @@ fn output_delta_never_splits_a_valid_utf8_scalar() {
 }
 
 #[test]
+fn non_utf8_output_advances_exact_byte_cursor_without_replay() {
+    let root = TempDirGuard::new("non_utf8_output");
+    let path = root.path().join("stdout");
+    let cursor = root.path().join("stdout_cursor");
+    std::fs::write(&path, b"ok\xfftail").expect("write non-utf8 output");
+
+    let first = read_output_delta(&path, &cursor, 3);
+    assert_eq!(first.text, "ok\u{fffd}");
+    assert_eq!(first.start_cursor, 0);
+    assert_eq!(first.end_cursor, 3);
+    assert_eq!(first.encoding, "utf-8-lossy");
+
+    let second = read_output_delta(&path, &cursor, 8);
+    assert_eq!(second.text, "tail");
+    assert_eq!(second.start_cursor, 3);
+    assert_eq!(second.end_cursor, 7);
+    assert_eq!(second.encoding, "utf-8");
+}
+
+#[test]
 fn cancellation_escalation_is_inert_without_durable_request() {
     let root = TempDirGuard::new("cancel_inert");
     assert_eq!(maybe_escalate_cancel(root.path(), 100), "not_requested");

@@ -189,6 +189,32 @@ impl DurableRunnerJobPlan {
     }
 }
 
+struct DurableRunnerJobSetupGuard {
+    job_dir: PathBuf,
+    preserve: bool,
+}
+
+impl DurableRunnerJobSetupGuard {
+    fn new(job_dir: &Path) -> Self {
+        Self {
+            job_dir: job_dir.to_path_buf(),
+            preserve: false,
+        }
+    }
+
+    fn preserve(&mut self) {
+        self.preserve = true;
+    }
+}
+
+impl Drop for DurableRunnerJobSetupGuard {
+    fn drop(&mut self) {
+        if !self.preserve {
+            let _ = std::fs::remove_dir_all(&self.job_dir);
+        }
+    }
+}
+
 fn safe_path_component(value: &str, fallback: &str) -> String {
     let normalized: String = value
         .chars()
@@ -839,9 +865,12 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             state.skill_rt.cmd_async_retention_seconds,
         )
     });
-    if let Some(plan) = durable_job_plan.as_ref() {
+    let mut durable_job_setup_guard = if let Some(plan) = durable_job_plan.as_ref() {
         plan.create_directories()?;
-    }
+        Some(DurableRunnerJobSetupGuard::new(&plan.job_dir))
+    } else {
+        None
+    };
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let caps: Vec<Capability> = state
         .get_skills_registry()
@@ -1341,6 +1370,9 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             state.skill_rt.cmd_terminate_grace_seconds,
         )
         .await?;
+        if let Some(guard) = durable_job_setup_guard.as_mut() {
+            guard.preserve();
+        }
         remap_sandbox_artifact_paths(
             &mut response,
             &sandbox_artifact_output_directory,
