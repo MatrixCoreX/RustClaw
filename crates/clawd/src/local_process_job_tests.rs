@@ -174,18 +174,26 @@ fn identity_mismatch_waits_for_a_terminal_record_grace_window() {
 #[cfg(unix)]
 #[test]
 fn process_identity_accepts_a_persisted_non_shell_command_marker() {
+    use std::process::Command;
+
     let root = TempDirGuard::new("durable_runner_identity_marker");
-    let executable = std::env::current_exe().expect("current test executable");
+    let executable = std::path::Path::new("/bin/sleep");
+    let mut child = Command::new(executable)
+        .arg("30")
+        .spawn()
+        .expect("spawn non-shell process");
     std::fs::write(
         root.path().join("process_command_marker"),
         executable.display().to_string(),
     )
     .expect("write process marker");
+    std::thread::sleep(std::time::Duration::from_millis(25));
 
-    assert_eq!(
-        process_identity_state(root.path(), std::process::id()),
-        ProcessIdentityState::AliveVerified
-    );
+    let identity = process_identity_state(root.path(), child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(identity, ProcessIdentityState::AliveVerified);
 }
 
 #[cfg(unix)]
