@@ -235,19 +235,25 @@ def finalize_summary(
     summary.update(
         {
             "schema_version": 1,
-            "source_commit": command_stdout(["git", "rev-parse", "HEAD"]),
-            "source_commit_pushed": (
+            "source_commit": summary.get("source_commit")
+            or command_stdout(["git", "rev-parse", "HEAD"]),
+            "source_commit_pushed": summary.get("source_commit_pushed")
+            if isinstance(summary.get("source_commit_pushed"), bool)
+            else (
                 command_stdout(["git", "rev-parse", "HEAD"])
                 == command_stdout(["git", "rev-parse", "origin/main"])
             ),
-            "worktree": worktree_summary(),
+            "worktree": summary.get("worktree") or worktree_summary(),
+            "finalization_worktree": worktree_summary(),
             "platform": platform.system().lower(),
             "arch": platform.machine().lower(),
-            "binary": {
+            "binary": summary.get("binary")
+            or {
                 "path": repo_path_ref(CLAWD_BIN),
                 "sha256": sha256_file(CLAWD_BIN),
             },
-            "ui": {
+            "ui": summary.get("ui")
+            or {
                 "path": "UI/dist",
                 "tree_sha256": sha256_tree(ROOT / "UI" / "dist"),
                 "digest_algorithm": "sha256(relative_path_nul_file_sha256_nul)",
@@ -1069,6 +1075,12 @@ def main(argv: list[str] | None = None) -> int:
     summary: dict[str, Any] = {
         "status": "fail",
         "submission_mode": "natural_language" if SUBMIT_VIA_NL else "direct_run_skill",
+        "source_commit": command_stdout(["git", "rev-parse", "HEAD"]),
+        "source_commit_pushed": (
+            command_stdout(["git", "rev-parse", "HEAD"])
+            == command_stdout(["git", "rev-parse", "origin/main"])
+        ),
+        "worktree": worktree_summary(),
         "selected_cases": (
             [SLOW_CASE_ID]
             if args.slow_only
@@ -1078,6 +1090,15 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         ensure_binary()
+        summary["binary"] = {
+            "path": repo_path_ref(CLAWD_BIN),
+            "sha256": sha256_file(CLAWD_BIN),
+        }
+        summary["ui"] = {
+            "path": "UI/dist",
+            "tree_sha256": sha256_tree(ROOT / "UI" / "dist"),
+            "digest_algorithm": "sha256(relative_path_nul_file_sha256_nul)",
+        }
         workspace = prepare_workspace()
         server = Server(workspace)
         print(
