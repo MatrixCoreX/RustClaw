@@ -65,12 +65,10 @@ REQUIRED_TOKENS_BY_PATH = {
     "crates/whatsappd/src/main.rs": (
         "with_received_at_ts(now_ts())",
         "forward_delivery_statuses",
-        "register_accepted_delivery",
         "last_inbound_at_by_user",
-        "send_whatsapp_template",
-        "x-channel-event-signature-256",
-        "decode_message_ids(\"send_text\"",
-        "decode_message_ids(\"send_media\"",
+        "x-hub-signature-256",
+        "request_unified_terminal_delivery",
+        "channel_delivery_client::request_task_delivery",
     ),
     "configs/channels/whatsapp-cloud.toml": (
         "out_of_window_template_name",

@@ -60,14 +60,14 @@ REQUIRED_TOKENS_BY_PATH = {
         "TaskStatus::Canceled",
         "TaskStatus::Timeout",
         "send_generating_message_state",
-        "WECHAT_AUDIO_FILE_FALLBACK_KEY",
-        "send_weixin_file",
+        "request_unified_terminal_delivery",
+        "channel_delivery_client::request_task_delivery",
     ),
     "crates/wechatd/src/incoming.rs": (
         "pin_inbound_task_context",
         "msg.context_token.as_deref()",
-        "&task_context.scope",
-        "Some(&task_context.context_token)",
+        "start_typing_heartbeat_for_peer(&state, &task_context)",
+        "spawn_inbound_skill_flow(",
     ),
     "crates/wechatd/src/config_cache.rs": (
         "scope: &WechatConversationScope",
@@ -84,6 +84,14 @@ REQUIRED_TOKENS_BY_PATH = {
         'pointer("/channel_ingress/reply_target/external_id")',
         'pointer("/channel_ingress/context_token")',
         "wechat_delivery_uses_raw_reply_target_not_scoped_conversation_id",
+    ),
+    "crates/clawd/src/channel_send.rs": (
+        "pub(crate) async fn send_wechat_text_message",
+        "extract_wechat_outbound_media",
+        "send_weixin_image_from_file",
+        "send_weixin_video_from_file",
+        "send_weixin_file_from_file",
+        "Some(context_token)",
     ),
     "crates/wechat-ilink/src/contract_tests.rs": (
         "conversation_scope_isolated_by_account_channel_and_peer",
