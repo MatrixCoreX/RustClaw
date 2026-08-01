@@ -49,7 +49,7 @@ webhook_listen = "127.0.0.1:8090"
 webhook_public_url = ""
 # webhook secret 只从这个环境变量读取，不写入 TOML。
 webhook_secret_env = "TELEGRAM_WEBHOOK_SECRET"
-# 任务结果投递最长等待秒数（仅 Telegram 通道；不影响 worker.task_timeout_seconds）
+# 任务结果投递最长等待秒数（仅 Telegram 通道；不终止后台任务）
 task_delivery_timeout_seconds = 600
 # 最大音频输入字节数
 max_audio_input_bytes = 26214400

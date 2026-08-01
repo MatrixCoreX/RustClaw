@@ -10,8 +10,7 @@ use super::{
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
-    update_task_success, update_task_timeout, WorkerTaskWriteRejected,
-    WORKER_LEASE_LOST_STATUS_CODE,
+    update_task_success, WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -839,7 +838,6 @@ fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
         "lease-failure",
         "lease-failure-result",
         "lease-checkpoint",
-        "lease-timeout",
     ] {
         insert_task(&stale_worker, task_id, "running", None, now);
         set_task_lease(
@@ -903,12 +901,6 @@ fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
         .expect_err("stale checkpoint must be fenced"),
         "update_task_checkpointed_result",
     );
-    assert_worker_lease_lost(
-        update_task_timeout(&stale_worker, "lease-timeout", 1, "worker_task_timeout")
-            .expect_err("stale timeout must be fenced"),
-        "update_task_timeout",
-    );
-
     let db = stale_worker.core.db.get().expect("get db");
     for task_id in [
         "lease-heartbeat",
@@ -917,7 +909,6 @@ fn stale_worker_cannot_renew_or_finalize_after_owner_takeover() {
         "lease-failure",
         "lease-failure-result",
         "lease-checkpoint",
-        "lease-timeout",
     ] {
         let (status, owner): (String, String) = db
             .query_row(

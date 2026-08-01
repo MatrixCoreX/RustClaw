@@ -1,7 +1,6 @@
 use super::super::{
     checkpoint_handoff_reply, loop_state_has_checkpoint_handoff,
     loop_state_has_recoverable_checkpoint_state, recoverable_provider_blocker_resume_reason,
-    worker_soft_checkpoint_after_seconds,
 };
 use super::LoopState;
 
@@ -33,15 +32,6 @@ fn provider_blocker_uses_machine_wait_reason() {
         recoverable_provider_blocker_resume_reason(&provider_blocker_state),
         Some("provider_blocker_wait_background")
     );
-}
-
-#[test]
-fn worker_soft_checkpoint_deadline_keeps_hard_timeout_reserve() {
-    assert_eq!(worker_soft_checkpoint_after_seconds(1), None);
-    assert_eq!(worker_soft_checkpoint_after_seconds(2), None);
-    assert_eq!(worker_soft_checkpoint_after_seconds(3), Some(2));
-    assert_eq!(worker_soft_checkpoint_after_seconds(10), Some(9));
-    assert_eq!(worker_soft_checkpoint_after_seconds(3600), Some(3570));
 }
 
 #[test]

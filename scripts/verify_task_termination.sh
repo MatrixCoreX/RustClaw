@@ -11,12 +11,9 @@ CHAT_ID="${CHAT_ID:-1985996990}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 RUN_ROOT_DEFAULT="${SCRIPT_DIR}/task_termination_logs"
 RUN_ROOT="${RUN_ROOT_DEFAULT}"
-TIMEOUT_MARGIN_SECONDS="${TIMEOUT_MARGIN_SECONDS:-20}"
 CANCEL_SLEEP_SECONDS="${CANCEL_SLEEP_SECONDS:-20}"
 CANCEL_AFTER_SECONDS="${CANCEL_AFTER_SECONDS:-2}"
-MAX_PRACTICAL_TIMEOUT_SECONDS="${MAX_PRACTICAL_TIMEOUT_SECONDS:-600}"
 VERIFY_CANCEL=1
-VERIFY_TIMEOUT=1
 DB_PATH=""
 
 usage() {
@@ -32,15 +29,14 @@ Options:
   --log-root DIR               default scripts/task_termination_logs
   --cancel-sleep-seconds N     long sleep for cancel case, default 20
   --cancel-after-seconds N     wait before sending cancel, default 2
-  --timeout-margin-seconds N   worker timeout extra margin, default 20
-  --max-practical-timeout N    skip timeout case when worker timeout exceeds this, default 600
   --skip-cancel                do not run cancel verification
-  --skip-timeout               do not run timeout verification
   -h, --help                   show help
 
 What it verifies:
-  1) cancel after running -> final status must remain canceled
-  2) long running task -> final status must become timeout
+  cancel after running -> final status must remain canceled
+
+Explicit runtime deadlines are verified by the async job lifecycle tests. There
+is intentionally no global worker wall-clock timeout to verify here.
 
 Logs:
   scripts/task_termination_logs/<timestamp>/
@@ -85,20 +81,8 @@ while [[ $# -gt 0 ]]; do
       CANCEL_AFTER_SECONDS="$2"
       shift 2
       ;;
-    --timeout-margin-seconds)
-      TIMEOUT_MARGIN_SECONDS="$2"
-      shift 2
-      ;;
-    --max-practical-timeout)
-      MAX_PRACTICAL_TIMEOUT_SECONDS="$2"
-      shift 2
-      ;;
     --skip-cancel)
       VERIFY_CANCEL=0
-      shift
-      ;;
-    --skip-timeout)
-      VERIFY_TIMEOUT=0
       shift
       ;;
     -h|--help)
@@ -163,18 +147,6 @@ elif isinstance(value, (dict, list)):
 else:
     print(value)
 PY
-}
-
-get_health_json() {
-  local -a auth_args=()
-  array_from_command_lines auth_args curl_auth_args
-  curl -sS "${auth_args[@]}" "${BASE_URL}/v1/health"
-}
-
-get_worker_timeout_seconds() {
-  local raw
-  raw="$(get_health_json)"
-  json_field "$raw" "data.task_timeout_seconds"
 }
 
 resolve_db_path() {
@@ -318,55 +290,6 @@ PY
   [[ "$final_status" == "canceled" ]]
 }
 
-run_case_timeout() {
-  local case_dir="$1"
-  local worker_timeout timeout_sleep submit_raw task_id final_raw final_status
-  local args_json
-
-  worker_timeout="$(get_worker_timeout_seconds)"
-  if [[ -z "$worker_timeout" || ! "$worker_timeout" =~ ^[0-9]+$ ]]; then
-    echo "failed to read worker timeout seconds" > "${case_dir}/assertion.txt"
-    return 1
-  fi
-  if (( worker_timeout > MAX_PRACTICAL_TIMEOUT_SECONDS )); then
-    {
-      echo "skip_reason=worker.task_timeout_seconds too large for practical verification"
-      echo "worker_timeout_seconds=${worker_timeout}"
-      echo "max_practical_timeout_seconds=${MAX_PRACTICAL_TIMEOUT_SECONDS}"
-    } > "${case_dir}/meta.txt"
-    return 2
-  fi
-  timeout_sleep=$((worker_timeout + TIMEOUT_MARGIN_SECONDS))
-
-  args_json="$(python3 - "$timeout_sleep" <<'PY'
-import json
-import sys
-seconds = int(sys.argv[1])
-print(json.dumps({"command": f"sleep {seconds}"}))
-PY
-)"
-
-  submit_raw="$(submit_run_skill_task "run_cmd" "$args_json")"
-  printf '%s\n' "$submit_raw" > "${case_dir}/submit.json"
-  task_id="$(extract_submit_task_id "$submit_raw")"
-  printf '%s\n' "$task_id" > "${case_dir}/task_id.txt"
-
-  final_raw="$(wait_task_until_terminal_with_limit "$task_id" "$((timeout_sleep + 60))")"
-  final_status="$(task_status "$final_raw")"
-  printf '%s\n' "$final_raw" > "${case_dir}/final.json"
-
-  {
-    echo "case=timeout"
-    echo "task_id=${task_id}"
-    echo "worker_timeout_seconds=${worker_timeout}"
-    echo "sleep_seconds=${timeout_sleep}"
-    echo "final_status=${final_status}"
-    echo "expected_status=timeout"
-  } > "${case_dir}/meta.txt"
-
-  [[ "$final_status" == "timeout" ]]
-}
-
 ensure_user_key
 DB_PATH="$(resolve_db_path)"
 export BASE_URL USER_ID CHAT_ID USER_KEY POLL_INTERVAL_SECONDS
@@ -419,27 +342,6 @@ if (( VERIFY_CANCEL )); then
     echo "[case_cancel] FAIL"
     record_case "case_cancel" "FAIL" "${case_dir}"
     fail_count=$((fail_count + 1))
-  fi
-fi
-
-if (( VERIFY_TIMEOUT )); then
-  case_dir="${RUN_DIR}/case_timeout"
-  mkdir -p "${case_dir}"
-  echo "[case_timeout] verifying long task ends as timeout"
-  if run_case_timeout "${case_dir}"; then
-    echo "[case_timeout] PASS"
-    record_case "case_timeout" "PASS" "${case_dir}"
-    pass_count=$((pass_count + 1))
-  else
-    rc=$?
-    if (( rc == 2 )); then
-      echo "[case_timeout] SKIP"
-      record_case "case_timeout" "SKIP" "${case_dir}"
-    else
-      echo "[case_timeout] FAIL"
-      record_case "case_timeout" "FAIL" "${case_dir}"
-      fail_count=$((fail_count + 1))
-    fi
   fi
 fi
 

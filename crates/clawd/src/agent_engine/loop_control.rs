@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde_json::{json, Value};
 use tracing::{info, warn};
@@ -521,20 +521,6 @@ fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<
     Some(PROVIDER_WAIT_RESUME_REASON)
 }
 
-fn worker_soft_checkpoint_after_seconds(worker_timeout_secs: u64) -> Option<u64> {
-    let timeout = worker_timeout_secs.max(1);
-    if timeout <= 2 {
-        return None;
-    }
-    let reserve = (timeout / 10).clamp(1, 30);
-    let soft_after = timeout.saturating_sub(reserve);
-    (soft_after > 0 && soft_after < timeout).then_some(soft_after)
-}
-
-fn worker_soft_checkpoint_after(worker_timeout_secs: u64) -> Option<Duration> {
-    worker_soft_checkpoint_after_seconds(worker_timeout_secs).map(Duration::from_secs)
-}
-
 fn task_budget_soft_slice_exhausted(started_at: Instant, loop_state: &LoopState) -> bool {
     loop_state
         .task_budget_slice
@@ -617,21 +603,12 @@ fn initialize_task_budget_slice(
     loop_state: &mut LoopState,
     profile: super::support::LoopBudgetProfile,
     task_budget_policy: &crate::task_budget_contract::TaskBudgetPolicy,
-    soft_checkpoint_after: Option<Duration>,
-    worker_timeout_seconds: u64,
 ) {
-    let soft_slice_ms = soft_checkpoint_after
-        .unwrap_or_else(|| Duration::from_secs(worker_timeout_seconds.max(1)))
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64;
-    loop_state.task_budget_worker_soft_limit_ms = soft_slice_ms;
-    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
-        slice.soft_slice_ms = slice.soft_slice_ms.min(soft_slice_ms).max(1);
+    if loop_state.task_budget_slice.is_some() {
         return;
     }
     let profile = task_budget_profile(profile);
-    let mut profile_policy = task_budget_policy.profile(profile);
-    profile_policy.soft_slice_ms = profile_policy.soft_slice_ms.min(soft_slice_ms);
+    let profile_policy = task_budget_policy.profile(profile);
     loop_state.task_budget_slice = Some(
         crate::task_budget_contract::TaskBudgetSlice::new_with_policy(
             profile,
@@ -651,11 +628,7 @@ fn apply_task_budget_profile(
     profile: crate::task_budget_contract::TaskBudgetProfile,
 ) {
     if let Some(slice) = loop_state.task_budget_slice.as_mut() {
-        slice.apply_profile(
-            profile,
-            task_budget_policy.profile(profile),
-            loop_state.task_budget_worker_soft_limit_ms,
-        );
+        slice.apply_profile(profile, task_budget_policy.profile(profile));
     }
 }
 
@@ -1446,19 +1419,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     // as a duplicate and skips directly to finalization.
     let mut round = initial_round_for_agent_loop(&loop_state);
     let loop_started_at = Instant::now();
-    let worker_task_timeout_seconds = crate::worker::task_budget::task_execution_timeout_seconds(
-        state.worker.worker_task_timeout_seconds,
-        &task.kind,
-        &task.payload_json,
-    );
-    let worker_soft_checkpoint_after = worker_soft_checkpoint_after(worker_task_timeout_seconds);
-    initialize_task_budget_slice(
-        &mut loop_state,
-        budget_profile,
-        &task_budget_policy,
-        worker_soft_checkpoint_after,
-        worker_task_timeout_seconds,
-    );
+    initialize_task_budget_slice(&mut loop_state, budget_profile, &task_budget_policy);
     let mut skip_planner_rounds = false;
     loop {
         if !skip_planner_rounds {

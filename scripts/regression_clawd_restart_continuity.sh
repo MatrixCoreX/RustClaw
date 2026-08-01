@@ -89,7 +89,6 @@ text = replace_once(r'^sqlite_path\s*=\s*".*"$', f'sqlite_path = "{sqlite_path}"
 text = replace_once(r'^access_profile\s*=\s*".*"$', 'access_profile = "full"', text)
 text = replace_once(r'^poll_interval_ms\s*=\s*\d+$', 'poll_interval_ms = 200', text)
 text = replace_once(r'^task_heartbeat_seconds\s*=\s*\d+$', 'task_heartbeat_seconds = 5', text)
-text = replace_once(r'^task_timeout_seconds\s*=\s*\d+$', 'task_timeout_seconds = 120', text)
 path.write_text(text, encoding="utf-8")
 PY
 

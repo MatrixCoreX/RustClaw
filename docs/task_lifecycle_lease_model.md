@@ -99,10 +99,10 @@ result, the runtime evaluates a closed `BudgetDecision`: `continue`, `finish`,
   and administrator hard ceilings remain deterministic boundaries.
 - Explicit round/tool caps remain valid only in non-interactive or child-task
   request contracts. They are not global interactive-loop defaults.
-- The worker outer timeout remains a last-resort terminal boundary for a
-  non-resumable stuck operation, missing heartbeat, administrator hard ceiling,
-  or unrecoverable checkpoint failure. Healthy resumable work should reach a
-  soft checkpoint before it.
+- There is no worker-wide wall-clock timeout. Resumable work reaches a soft
+  checkpoint from its task-budget profile; explicit operation deadlines,
+  cancellation, per-call provider/tool timeouts, administrator hard ceilings,
+  resource policy, and stale-lease recovery remain independent boundaries.
 
 Configured administrator hard ceilings cover cumulative model turns, tool
 calls, tokens, estimated cost, elapsed time, continuations, and non-resumable

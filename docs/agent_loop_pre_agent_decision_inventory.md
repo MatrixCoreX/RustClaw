@@ -34,7 +34,7 @@ from the live ask path.
 
 | Surface | Current owner | Role | May bypass the ordinary planner |
 | --- | --- | --- | --- |
-| Task claim and kind dispatch | `worker_once()` | Lease, heartbeat, timeout, cancellation, `ask` / `run_skill` dispatch | Yes, because this is task protocol |
+| Task claim and kind dispatch | `worker_once()` | Lease, heartbeat, cancellation, and `ask` / `run_skill` dispatch; no global wall-clock timeout | Yes, because this is task protocol |
 | Explicit capability payload | `run_capability` | Execute a caller-supplied machine capability contract | Yes, only for the explicit payload |
 | Explicit schedule direct text | `maybe_finalize_schedule_direct_text_success()` | Deliver `schedule_task_mode=direct_text` without semantic inference | Yes, only for explicit scheduler metadata |
 | Input materialization | `prepare_ask_input()` and planner frontdoor | Text, audio transcription, attachment refs, explicit command/locator facts | No semantic bypass |

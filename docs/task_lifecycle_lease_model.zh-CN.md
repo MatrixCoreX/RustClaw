@@ -89,7 +89,7 @@ Checkpoint 后的 `waiting`、`background` 和 `needs_user` 继续保存为 `tas
 - Resume 恢复 model/tool/token/cost/elapsed 计数，且 continuation index 只增加一次。
 - 重复、结构化停滞、取消、权限/沙箱策略和管理员 hard ceiling 仍是确定性边界。
 - 显式 round/tool cap 只允许出现在非交互或 child-task 请求合同中，不是交互 loop 全局默认值。
-- Worker 外层 timeout 只作为不可恢复卡死、heartbeat 丢失、管理员 hard ceiling 或 checkpoint 无法恢复时的最后终态边界。健康且可恢复的工作应先进入 soft checkpoint。
+- Worker 不再设置统一墙钟 timeout。可恢复工作按 task-budget profile 进入 soft checkpoint；显式 operation deadline、取消、单次 provider/tool timeout、管理员 hard ceiling、资源策略和失联 lease 回收继续作为彼此独立的边界。
 
 管理员 hard ceiling 覆盖累计模型轮次、工具调用、token、估算成本、耗时、continuation 次数和不可恢复工具运行时间，模型输出不能提高这些上限。
 

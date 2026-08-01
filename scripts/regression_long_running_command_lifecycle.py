@@ -328,7 +328,6 @@ def prepare_workspace() -> Path:
     text = replace_once(text, r'^access_profile\s*=\s*".*"$', 'access_profile = "full"')
     text = replace_once(text, r'^poll_interval_ms\s*=\s*\d+$', "poll_interval_ms = 200")
     text = replace_once(text, r'^task_heartbeat_seconds\s*=\s*\d+$', "task_heartbeat_seconds = 5")
-    text = replace_once(text, r'^task_timeout_seconds\s*=\s*\d+$', "task_timeout_seconds = 300")
     config_path.write_text(text, encoding="utf-8")
     return workspace
 

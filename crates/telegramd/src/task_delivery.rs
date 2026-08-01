@@ -804,10 +804,6 @@ pub(super) async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow:
                 "running_oldest_age_seconds",
                 &data.running_oldest_age_seconds.to_string(),
             ),
-            (
-                "task_timeout_seconds",
-                &data.task_timeout_seconds.to_string(),
-            ),
             ("uptime_seconds", &data.uptime_seconds.to_string()),
             ("version", &data.version),
         ],

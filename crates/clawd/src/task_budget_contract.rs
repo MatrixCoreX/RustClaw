@@ -532,12 +532,8 @@ impl TaskBudgetSlice {
     pub(crate) fn apply_profile(
         &mut self,
         profile: TaskBudgetProfile,
-        mut profile_policy: BudgetProfilePolicy,
-        worker_soft_limit_ms: u64,
+        profile_policy: BudgetProfilePolicy,
     ) {
-        profile_policy.soft_slice_ms = profile_policy
-            .soft_slice_ms
-            .min(worker_soft_limit_ms.max(1));
         self.profile = profile;
         self.soft_slice_ms = profile_policy.soft_slice_ms.max(1);
         self.stagnation_tolerance = profile_policy.stagnation_tolerance.max(1);
