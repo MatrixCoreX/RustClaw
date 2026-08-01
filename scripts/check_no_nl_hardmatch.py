@@ -23,6 +23,12 @@ DEFAULT_ROOTS = (
     REPO_ROOT / "configs",
     REPO_ROOT / "docker" / "config",
 )
+GENERATED_OR_DEPENDENCY_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "target",
+}
 REMOVED_RUN_CMD_SCHEMA = REPO_ROOT / "prompts" / "schemas" / "run_cmd_suggestion.schema.json"
 RUN_CMD_SOURCE = REPO_ROOT / "crates" / "clawd" / "src" / "skills" / "builtin_run_cmd.rs"
 
@@ -469,7 +475,14 @@ def iter_rust_files(roots: tuple[Path, ...]) -> list[Path]:
             if not is_test_path(root):
                 files.append(root)
         elif root.is_dir():
-            files.extend(sorted(path for path in root.rglob("*.rs") if not is_test_path(path)))
+            files.extend(
+                sorted(
+                    path
+                    for path in root.rglob("*.rs")
+                    if not is_test_path(path)
+                    and not GENERATED_OR_DEPENDENCY_DIR_NAMES.intersection(path.parts)
+                )
+            )
     return files
 
 
@@ -485,6 +498,7 @@ def iter_behavior_config_files(roots: tuple[Path, ...]) -> list[Path]:
                     for path in root.rglob("*")
                     if path.is_file()
                     and path.suffix in {".toml", ".json", ".yaml", ".yml"}
+                    and not GENERATED_OR_DEPENDENCY_DIR_NAMES.intersection(path.parts)
                 )
             )
     return files
@@ -658,6 +672,17 @@ def run_self_test() -> int:
         config_yaml_findings = scan_behavior_config(
             config_yaml_bad, config_yaml_bad.read_text(encoding="utf-8")
         )
+        dependency_config = root / "node_modules" / "fsevents" / "package.json"
+        dependency_config.parent.mkdir(parents=True)
+        dependency_config.write_text(
+            '{"keywords":["fsevents","mac"]}', encoding="utf-8"
+        )
+        generated_rust = root / "target" / "generated.rs"
+        generated_rust.parent.mkdir(parents=True)
+        generated_rust.write_text(
+            'fn route(prompt: &str) -> bool { prompt.contains("请执行") }\n',
+            encoding="utf-8",
+        )
         assert len(bad_findings) == 1, bad_findings
         assert not good_findings, good_findings
         assert not test_findings, test_findings
@@ -672,6 +697,8 @@ def run_self_test() -> int:
         assert len(config_findings) == 1, config_findings
         assert len(config_json_findings) == 1, config_json_findings
         assert len(config_yaml_findings) == 1, config_yaml_findings
+        assert dependency_config not in iter_behavior_config_files((root,))
+        assert generated_rust not in iter_rust_files((root,))
         assert not scan_removed_run_cmd_semantic_input("argv command", False)
         restored = scan_removed_run_cmd_semantic_input(
             'args.get("request_text")', True
