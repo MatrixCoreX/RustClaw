@@ -335,7 +335,10 @@ fn normalized_workspace_resource(workspace_root: &Path, raw: &str) -> Option<Str
         .unwrap_or_else(|_| workspace_root.to_path_buf());
     let raw_path = Path::new(raw);
     let relative = if raw_path.is_absolute() {
-        raw_path.strip_prefix(&root).ok()?
+        raw_path
+            .strip_prefix(&root)
+            .or_else(|_| raw_path.strip_prefix(workspace_root))
+            .ok()?
     } else {
         raw_path
     };
