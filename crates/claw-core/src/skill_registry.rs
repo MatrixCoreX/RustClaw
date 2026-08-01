@@ -1937,9 +1937,7 @@ impl SkillsRegistry {
     ///   （未声明时容忍，迁移友好；一旦显式关掉，必然是误配）。
     ///
     /// 返回违规列表（按字符串排序，便于 diff 稳定）。空列表表示通过。
-    /// 这个函数对外公开是为了让 CI 单独跑一遍以保证 registry 文件本身合法；
-    /// `load_from_path` 内部已经在加载流程结束时调用它，违规会让 registry
-    /// **加载失败**（与 `Capability::parse` 的失败行为一致）。
+    /// CI 可单独调用；`load_from_path` 也会拒绝这里报告的所有违规。
     pub fn validate_shape_consistency(&self) -> Vec<String> {
         let mut violations: Vec<String> = Vec::new();
 
