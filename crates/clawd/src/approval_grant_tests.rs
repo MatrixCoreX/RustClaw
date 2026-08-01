@@ -131,6 +131,52 @@ fn approval_binding_is_stable_across_capability_resolution() {
     assert_eq!(capability, resolved);
 }
 
+#[cfg(unix)]
+#[test]
+fn approval_scope_is_stable_when_creation_is_anchored_through_a_root_alias() {
+    use std::os::unix::fs::symlink;
+
+    let mut state = state_with_workspace_registry();
+    let fixture_root = std::env::temp_dir().join(format!(
+        "agent-runtime-approval-root-alias-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let canonical_root = fixture_root.join("canonical");
+    let configured_root = fixture_root.join("configured");
+    std::fs::create_dir_all(&canonical_root).expect("create canonical workspace");
+    symlink(&canonical_root, &configured_root).expect("create configured workspace alias");
+    state.skill_rt.workspace_root = configured_root.clone();
+    let ids = vec!["step-1".to_string()];
+    let relative = PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: json!({
+            "action": "write_text",
+            "path": "run/example.txt",
+            "content": "updated"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let anchored = PlanStep {
+        args: json!({
+            "action": "write_text",
+            "path": configured_root.join("run/example.txt"),
+            "content": "updated"
+        }),
+        ..relative.clone()
+    };
+
+    let relative = binding_for_confirmation_steps(&state, &[relative], &ids)
+        .expect("relative approval binding");
+    let anchored = binding_for_confirmation_steps(&state, &[anchored], &ids)
+        .expect("anchored approval binding");
+    std::fs::remove_dir_all(&fixture_root).expect("remove alias fixture");
+
+    assert_eq!(relative.scope, anchored.scope);
+}
+
 #[test]
 fn approval_binding_ignores_runtime_owned_validation_metadata() {
     let state = state_with_workspace_registry();
