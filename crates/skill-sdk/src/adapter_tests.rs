@@ -204,6 +204,76 @@ fn python_bytecode_caches_are_removed_without_touching_sources() {
     assert!(!runtime.join("legacy.pyo").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn python_console_scripts_remain_executable_after_staging_commit() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let python = find_program("python3").expect("python3");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let staging = temp.path().join("staging");
+    let bin = staging.join("runtime/venv/bin");
+    fs::create_dir_all(&bin).expect("venv bin");
+    symlink(python, bin.join("python")).expect("venv python");
+    let script = bin.join("fixture-command");
+    fs::write(
+        &script,
+        format!("#!{}/python\nprint('relocated-ok')\n", bin.display()),
+    )
+    .expect("console script");
+    let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script, permissions).expect("executable");
+    let pip_wrapper = bin.join("pip-wrapper-command");
+    fs::write(
+        &pip_wrapper,
+        format!(
+            "#!/bin/sh\n'''exec' {}/python \"$0\" \"$@\"\n' '''\nprint('pip-wrapper-relocated-ok')\n",
+            bin.display()
+        ),
+    )
+    .expect("pip console wrapper");
+    let mut permissions = fs::metadata(&pip_wrapper)
+        .expect("pip wrapper metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&pip_wrapper, permissions).expect("pip wrapper executable");
+
+    assert_eq!(
+        rewrite_python_console_scripts_for_relocation(&staging.join("runtime/venv"))
+            .expect("rewrite console scripts"),
+        2
+    );
+    let installed = temp.path().join("versions/fixture");
+    fs::create_dir_all(installed.parent().expect("versions parent")).expect("versions");
+    fs::rename(&staging, &installed).expect("commit staging directory");
+
+    let output = Command::new(installed.join("runtime/venv/bin/fixture-command"))
+        .output()
+        .expect("run relocated console script");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "relocated-ok"
+    );
+    let output = Command::new(installed.join("runtime/venv/bin/pip-wrapper-command"))
+        .output()
+        .expect("run relocated pip console wrapper");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "pip-wrapper-relocated-ok"
+    );
+}
+
 #[test]
 fn http_json_adapter_prepares_a_pinned_https_launch_without_local_toolchains() {
     let source = crate::tests::manifest_source()

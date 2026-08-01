@@ -20,7 +20,8 @@ use crate::{AppState, ClaimedTask};
 use super::credential_fallback::provision_skill_secret_envs;
 use super::runner_pool::{WarmPoolCheckout, WarmRunnerKey, WarmRunnerProcess};
 use super::{
-    action_scoped_planner_mapping, apply_skill_runner_env_isolation, current_task_auth_role,
+    action_scoped_planner_mapping, apply_skill_runner_env_isolation,
+    collect_declared_skill_env_pairs, current_task_auth_role,
     place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
     task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
 };
@@ -1248,6 +1249,20 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             report.preserved,
             report.stripped_count
         );
+    }
+    let declared_runtime_env =
+        collect_declared_skill_env_pairs(&installed_launch.environment_allowlist, std::env::vars());
+    if !declared_runtime_env.is_empty() {
+        let names: Vec<&str> = declared_runtime_env
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        tracing::info!(
+            skill = canonical_skill_name,
+            environment_names = ?names,
+            "skill_dispatch_declared_runtime_environment"
+        );
+        cmd.envs(declared_runtime_env);
     }
     place_subprocess_in_own_process_group(&mut cmd);
     cmd.kill_on_drop(true);

@@ -16,8 +16,9 @@ use crate::manifest::{BuildAdapter, BuildNetworkPolicy, PackageManifest, AGENT_J
 use crate::process::run_command_controlled;
 use crate::protocol::{validate_response_line, ProtocolRequest};
 use crate::receipt::{
-    digest_file, ArtifactReceipt, InstallReceipt, InstallReceiptStore, LaunchProgramScope,
-    ProtocolSmokeReceipt, ReceiptLaunch, INSTALL_RECEIPT_SCHEMA_VERSION,
+    digest_file, is_sensitive_runtime_environment_name, ArtifactReceipt, InstallReceipt,
+    InstallReceiptStore, LaunchProgramScope, ProtocolSmokeReceipt, ReceiptLaunch,
+    INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 use crate::sandbox::{prepare_sandboxed_command, SandboxNetwork};
 use crate::{HostPlatform, SkillSdkError, SkillSdkResult};
@@ -762,7 +763,7 @@ fn protocol_smoke(
     }
     command.envs(&prepared.launch.environment);
     for key in &prepared.launch.environment_allowlist {
-        if sensitive_runtime_environment_name(key) {
+        if is_sensitive_runtime_environment_name(key) {
             continue;
         }
         if key == "WORKSPACE_ROOT" {
@@ -869,20 +870,6 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
         .map(|root| root.join(name))
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| fs::canonicalize(candidate).ok())
-}
-
-fn sensitive_runtime_environment_name(key: &str) -> bool {
-    let upper = key.to_ascii_uppercase();
-    [
-        "SECRET",
-        "TOKEN",
-        "PASSWORD",
-        "CREDENTIAL",
-        "API_KEY",
-        "AUTH",
-    ]
-    .iter()
-    .any(|needle| upper.contains(needle))
 }
 
 fn set_executable(path: &Path) -> SkillSdkResult<()> {

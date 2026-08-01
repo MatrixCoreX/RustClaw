@@ -11,6 +11,7 @@ fn key(generation: u64) -> WarmRunnerKey {
             progress_frames: false,
             execution_profile: skill_sdk::ExecutionProfile::StatelessReadonly,
             sandbox_profile: skill_sdk::SandboxProfile::ReadOnly,
+            environment_allowlist: Vec::new(),
             install_root: std::path::PathBuf::from("/tmp/sample"),
             manifest_digest: "a".repeat(64),
             receipt_digest: "b".repeat(64),
