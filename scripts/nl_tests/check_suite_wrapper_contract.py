@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 RUN_SUITE = ROOT / "scripts/nl_tests/run_suite.sh"
 RUN_MULTI_TURN_SUITE = ROOT / "scripts/nl_tests/run_multi_turn_suite.sh"
 RUN_ALL_WITH_SERVER = ROOT / "scripts/nl_tests/run_all_nl_with_server.sh"
+RUN_CLIENT_LIKE_CONTINUOUS_SUITE = (
+    ROOT / "scripts/nl_tests/run_client_like_continuous_suite.sh"
+)
 SUITE_ARTIFACT_CONTRACT = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
 
 RUN_SUITE_REQUIRED_SNIPPETS = {
@@ -113,6 +116,12 @@ RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
     "on_demand_suite_projects_proactive_receipts": "project_proactive_skill_receipts",
     "receipt_projection_uses_manifest_inventory": "scripts/project_skill_receipts.py",
     "receipt_projection_uses_host_platform": "--target host",
+}
+
+RUN_CLIENT_LIKE_CONTINUOUS_REQUIRED_SNIPPETS = {
+    "structural_assertions_receives_harness_evidence": (
+        "structural_assertions(case_tags, final_visible, result, {})"
+    ),
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
@@ -290,6 +299,11 @@ def build_report() -> dict[str, Any]:
             "run_all_nl_with_server",
         ),
         (
+            RUN_CLIENT_LIKE_CONTINUOUS_SUITE,
+            RUN_CLIENT_LIKE_CONTINUOUS_REQUIRED_SNIPPETS,
+            "run_client_like_continuous_suite",
+        ),
+        (
             SUITE_ARTIFACT_CONTRACT,
             SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS,
             "suite_artifact_contract",
@@ -326,6 +340,7 @@ def build_report() -> dict[str, Any]:
             str(RUN_SUITE.relative_to(ROOT)),
             str(RUN_MULTI_TURN_SUITE.relative_to(ROOT)),
             str(RUN_ALL_WITH_SERVER.relative_to(ROOT)),
+            str(RUN_CLIENT_LIKE_CONTINUOUS_SUITE.relative_to(ROOT)),
             str(SUITE_ARTIFACT_CONTRACT.relative_to(ROOT)),
         ],
         "checked_count": checked_count,
