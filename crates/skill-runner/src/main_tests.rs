@@ -88,6 +88,30 @@ async fn installed_child_observes_the_effective_runner_timeout() {
 }
 
 #[tokio::test]
+async fn durable_child_has_no_inherited_or_runner_runtime_deadline() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let mut launch = ChildLaunch::legacy("/bin/sh");
+    launch.args = vec![
+        "-c".to_string(),
+        "printf '%s\n' \"${SKILL_TIMEOUT_SECONDS-unset}\"".to_string(),
+    ];
+    launch.installed = true;
+    launch.strict_protocol = true;
+    launch.working_directory = Some(root.path().to_path_buf());
+    launch.runtime_deadline_enabled = false;
+    launch
+        .environment
+        .insert("SKILL_TIMEOUT_SECONDS".to_string(), "3600".to_string());
+
+    let output = run_child_skill_streaming(&launch, "ignored", "ignored", None, None)
+        .await
+        .expect("durable child should complete without a runner deadline")
+        .final_output;
+
+    assert_eq!(output, b"unset\n");
+}
+
+#[tokio::test]
 async fn run_child_skill_times_out_and_kills_child() {
     let Some(child) = ["/bin/sh", "/usr/bin/sh"]
         .into_iter()
@@ -334,7 +358,7 @@ async fn http_json_launch_requires_receipt_network_permission() {
     let error = run_http_json_skill(
         &launch,
         &serde_json::json!({"request_id": "fixture"}),
-        Duration::from_millis(100),
+        Some(Duration::from_millis(100)),
     )
     .await
     .expect_err("network permission must be required");
@@ -399,7 +423,7 @@ async fn http_json_launch_posts_protocol_json_with_structured_idempotency() {
     launch.runtime_network = true;
     launch.remote_endpoint = Some(format!("http://{address}/skill"));
 
-    let output = run_http_json_skill(&launch, &request, Duration::from_secs(2))
+    let output = run_http_json_skill(&launch, &request, Some(Duration::from_secs(2)))
         .await
         .expect("HTTP transport succeeds");
     let response = validate_response_line(&output, "fixture").expect("valid protocol response");

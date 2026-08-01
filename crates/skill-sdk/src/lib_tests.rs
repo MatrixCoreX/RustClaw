@@ -592,6 +592,10 @@ fn receipt_activation_and_resolution_verify_every_digest() {
     let launch = SkillRuntimeResolver::new(store.root())
         .resolve("sample_weather")
         .expect("resolve launch");
+    let inspected = SkillRuntimeResolver::new(store.root())
+        .inspect_current("sample_weather")
+        .expect("inspect current package metadata");
+    assert_eq!(inspected.version, receipt.version);
     assert_eq!(
         launch.program,
         fs::canonicalize(binary).expect("canonical bin")
@@ -606,6 +610,40 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         )
         .expect("resolve exact pinned launch");
     assert_eq!(pinned.receipt_digest, launch.receipt_digest);
+    fs::write(&launch.program, b"short").expect("truncate artifact");
+    assert_eq!(
+        SkillRuntimeResolver::new(store.root())
+            .inspect_current("sample_weather")
+            .expect_err("metadata inspection rejects changed artifact size")
+            .code,
+        "launch_artifact_metadata_mismatch"
+    );
+    fs::write(&launch.program, b"tampered-bytes").expect("tamper with unchanged size");
+    SkillRuntimeResolver::new(store.root())
+        .inspect_current("sample_weather")
+        .expect("control-plane inspection intentionally skips full artifact hashing");
+    SkillRuntimeResolver::new(store.root())
+        .pin_exact(
+            "sample_weather",
+            &receipt.version,
+            &receipt.manifest_digest,
+            &receipt.digest().expect("receipt digest"),
+        )
+        .expect("host pin reads immutable receipt identity without caching artifact verification");
+    assert_eq!(
+        SkillRuntimeResolver::new(store.root())
+            .resolve_pinned(
+                "sample_weather",
+                &receipt.version,
+                &receipt.manifest_digest,
+                &receipt.digest().expect("receipt digest"),
+            )
+            .expect_err("tamper rejected")
+            .code,
+        "launch_artifact_digest_mismatch"
+    );
+    fs::write(&launch.program, b"fixture-binary").expect("restore verified artifact");
+
     let deactivated = store
         .deactivate_current("sample_weather")
         .expect("deactivate mutable current pointer")
@@ -635,28 +673,6 @@ fn receipt_activation_and_resolution_verify_every_digest() {
             .expect_err("receipt mismatch rejected")
             .code,
         "launch_pinned_version_missing"
-    );
-
-    fs::write(&launch.program, b"tampered").expect("tamper");
-    SkillRuntimeResolver::new(store.root())
-        .pin_exact(
-            "sample_weather",
-            &receipt.version,
-            &receipt.manifest_digest,
-            &receipt.digest().expect("receipt digest"),
-        )
-        .expect("host pin reads immutable receipt identity without caching artifact verification");
-    assert_eq!(
-        SkillRuntimeResolver::new(store.root())
-            .resolve_pinned(
-                "sample_weather",
-                &receipt.version,
-                &receipt.manifest_digest,
-                &receipt.digest().expect("receipt digest"),
-            )
-            .expect_err("tamper rejected")
-            .code,
-        "launch_artifact_digest_mismatch"
     );
 
     let lease = store

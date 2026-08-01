@@ -4203,6 +4203,8 @@ version = "0.1.8"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
+ "claw-core",
+ "fs2",
  "futures-util",
  "reqwest 0.12.28",
  "serde",

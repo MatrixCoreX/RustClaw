@@ -25,7 +25,7 @@ this frame is only progress/stall evidence and never changes the final result.
 - Xiaohongshu App and website shares are distinct valid inputs: App copy text commonly carries an `xhslink.cn` or `xhslink.com` short link, while website sharing commonly carries a full `xiaohongshu.com` note URL. Do not ask the user to convert one form into the other.
 - Input behavior is channel-neutral: the same App share text, short link, or website URL must select the same `download` action from the UI, WeChat, WhatsApp, Telegram, Feishu/Lark, or any other host channel.
 - All actions in this resource-heavy skill share one host-enforced FIFO execution slot. A new media task waits before any runner process is spawned. Completion, structured failure, timeout, cancellation, or abnormal task exit releases the slot so the next queued media task can continue; unrelated skills keep their normal concurrency.
-- Media operations have no skill-internal runtime deadline by default. Omit `operation_timeout_seconds` unless the current user explicitly requests a deadline; never invent one from an estimated item count. The host task and skill-runner lifecycle limits remain authoritative.
+- Media operations have no runtime deadline by default. Omit `operation_timeout_seconds` unless the current user explicitly requests a deadline; never invent one from an estimated item count. Durable background execution has no host-imposed runtime cutoff, while polling retention remains renewable and separate.
 - When the user wants the images/video themselves, prefer `media_download.download` over a general browser capability. Use a browser only when the requested output is page text, comments, navigation, or a page summary rather than the media files.
 - These are semantic capability rules for the planner, not runtime phrase matching. Select by the current request shape and the newest concrete target.
 - Ordinary media download requests must stop after `media_download.download`. Video posts return original video media. Image-article posts from Douyin or Xiaohongshu return the original images and the platform-provided title/body by default. A body shorter than 200 characters is included directly in the skill's conversation response and its temporary `_article.txt` is removed; a body of 200 or more characters is delivered as `_article.txt`. This media-download-only rule does not change delivery behavior for any other skill. The article is first-party post content, not OCR; never recognize text inside images or transcribe video/audio unless the current user explicitly asks for that conversion.
@@ -97,7 +97,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `prepare_x` | `force` | no | boolean | `false` | Transcode even when already compatible. |
 | `prepare_x` | `crf` | no | integer | `23` | H.264 quality value, 16-35. |
 | mutating actions | `overwrite` | no | boolean | `false` | Replace an existing output in the task artifact directory. |
-| non-capability actions | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-3500 seconds. Omit it for normal execution. |
+| non-capability actions | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. Omit it for normal execution. |
 
 ## Dependencies and Configuration
 

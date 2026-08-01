@@ -69,8 +69,8 @@ fn poll_returns_exact_cursor_pages() {
         rows: 24,
         cols: 80,
         created_at: 1,
-        expires_at: i64::MAX,
-        idle_timeout_seconds: 300,
+        expires_at: None,
+        idle_timeout_seconds: Some(300),
         max_output_bytes: 1024 * 1024,
     };
     let metadata = json!({
@@ -130,8 +130,8 @@ fn owner_binding_uses_actor_chat_and_channel() {
         rows: 24,
         cols: 80,
         created_at: 1,
-        expires_at: 2,
-        idle_timeout_seconds: 30,
+        expires_at: Some(2),
+        idle_timeout_seconds: Some(30),
         max_output_bytes: 1024 * 1024,
     };
     let matching = crate::ClaimedTask {
@@ -153,6 +153,28 @@ fn owner_binding_uses_actor_chat_and_channel() {
     assert!(ensure_owner(Some(&mismatched), &spec).is_err());
 }
 
+#[test]
+fn terminal_session_has_no_hard_runtime_deadline_by_default() {
+    let workspace = TestWorkspace::new();
+    let mut command = tokio::process::Command::new("/bin/bash");
+    command.current_dir(&workspace.root);
+    let spec = launch_spec_from_command(
+        &command,
+        None,
+        "session-no-deadline".to_string(),
+        24,
+        80,
+        100,
+        None,
+        None,
+        1024 * 1024,
+    )
+    .expect("launch spec");
+
+    assert_eq!(spec.expires_at, None);
+    assert_eq!(spec.idle_timeout_seconds, None);
+}
+
 #[tokio::test]
 async fn durable_runner_accepts_input_and_exposes_resumable_output() {
     let workspace = TestWorkspace::new();
@@ -162,9 +184,18 @@ async fn durable_runner_accepts_input_and_exposes_resumable_output() {
         .arg("printf 'ready\\n'; read line; printf 'got:%s\\n' \"$line\"")
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 30, 15, 1024 * 1024)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(30),
+        Some(15),
+        1024 * 1024,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
 
@@ -258,9 +289,18 @@ async fn durable_runner_can_be_terminated_through_machine_control() {
         .arg("printf 'waiting\\n'; sleep 30")
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 30, 15, 1024 * 1024)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(30),
+        Some(15),
+        1024 * 1024,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
 
@@ -321,9 +361,18 @@ async fn durable_runner_delivers_signals_to_the_terminal_process_group() {
         )
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 30, 15, 1024 * 1024)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(30),
+        Some(15),
+        1024 * 1024,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
     let mut ready = false;
@@ -392,9 +441,18 @@ async fn durable_runner_enforces_hard_expiry_independently() {
         .arg("while :; do printf '.'; sleep 0.1; done")
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 1, 30, 1024 * 1024)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(1),
+        Some(30),
+        1024 * 1024,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
 
@@ -426,9 +484,18 @@ async fn durable_runner_enforces_the_total_output_budget() {
         .arg("yes bounded-output")
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 30, 15, 4_096)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(30),
+        Some(15),
+        4_096,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
 
@@ -468,9 +535,18 @@ async fn durable_runner_rejects_tampered_control_request_ids() {
         .arg("sleep 30")
         .current_dir(&workspace.root);
 
-    let started = start_session(&workspace.root, None, &command, 24, 80, 30, 15, 1024 * 1024)
-        .await
-        .expect("start session");
+    let started = start_session(
+        &workspace.root,
+        None,
+        &command,
+        24,
+        80,
+        Some(30),
+        Some(15),
+        1024 * 1024,
+    )
+    .await
+    .expect("start session");
     let started: Value = serde_json::from_str(&started).unwrap();
     let session_id = started["session_id"].as_str().unwrap().to_string();
     let dir = session_dir(&workspace.root, &session_id).unwrap();

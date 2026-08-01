@@ -217,6 +217,49 @@ subprocess = false
     .expect("local API mapping")
 }
 
+fn async_mapping(adapter_kind: &str, execution_mode: &str) -> PlannerCapabilityMapping {
+    toml::from_str(&format!(
+        r#"
+name = "test.background"
+action = "run"
+effect = "mutate"
+execution_mode = "{execution_mode}"
+async_adapter_kind = "{adapter_kind}"
+"#
+    ))
+    .expect("async mapping")
+}
+
+#[test]
+fn only_local_process_async_capabilities_use_the_durable_runner_supervisor() {
+    assert!(local_process_durable_background_requested(Some(
+        &async_mapping("local_process_poll", "async_preferred")
+    )));
+    assert!(local_process_durable_background_requested(Some(
+        &async_mapping("local_process_poll", "async_required")
+    )));
+    assert!(!local_process_durable_background_requested(Some(
+        &async_mapping("media_job_poll", "async_preferred")
+    )));
+    assert!(!local_process_durable_background_requested(Some(
+        &async_mapping("local_process_poll", "sync_short")
+    )));
+    assert!(!local_process_durable_background_requested(None));
+}
+
+#[test]
+fn durable_skill_endpoint_tokens_cover_the_retention_window() {
+    assert_eq!(
+        skill_secret_token_ttl(false, 86_400),
+        Duration::from_secs(300)
+    );
+    assert_eq!(skill_secret_token_ttl(true, 60), Duration::from_secs(300));
+    assert_eq!(
+        skill_secret_token_ttl(true, 86_400),
+        Duration::from_secs(86_400)
+    );
+}
+
 #[test]
 fn read_only_preview_removes_network_write_execution_and_credentials() {
     let capabilities = vec![

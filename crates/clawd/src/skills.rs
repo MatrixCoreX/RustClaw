@@ -148,7 +148,7 @@ mod dispatch_concurrency_tests;
 mod error_contract;
 mod memory_context;
 mod result_enrichment;
-mod runner;
+pub(crate) mod runner;
 pub(crate) mod runner_pool;
 
 pub(crate) use builtin::execute_builtin_skill_for_task;
@@ -577,7 +577,6 @@ struct SkillExecutionIsolation {
 
 fn prepare_builtin_run_cmd_async_start_args(
     workspace_root: &Path,
-    default_runtime_timeout_seconds: u64,
     default_retention_seconds: u64,
     terminate_grace_seconds: u64,
     args: &mut Value,
@@ -608,29 +607,15 @@ fn prepare_builtin_run_cmd_async_start_args(
         .unwrap_or(default_retention_seconds)
         .max(1);
     let action = obj.get("action").and_then(Value::as_str);
-    let disable_timeout = action == Some("exec_without_deadline")
-        || obj
-            .get("disable_timeout")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
     let runtime_timeout_seconds = match action {
-        // Planner-facing capabilities use distinct actions so a provider cannot
-        // turn an ordinary command into a short-deadline command by filling an
-        // optional field. Direct/legacy calls without an action keep the
-        // existing configurable policy default.
-        Some("exec") => Some(default_runtime_timeout_seconds.max(1)),
+        // A background runtime deadline is opt-in. Planner-facing capabilities
+        // use a distinct action so filling an optional timeout field cannot
+        // turn an ordinary durable command into a deadline-bound command.
         Some("exec_with_deadline") => obj
             .get("timeout_seconds")
             .and_then(Value::as_u64)
             .map(|seconds| seconds.max(1)),
-        Some("exec_without_deadline") => None,
-        _ if disable_timeout => None,
-        _ => Some(
-            obj.get("timeout_seconds")
-                .and_then(Value::as_u64)
-                .unwrap_or(default_runtime_timeout_seconds)
-                .max(1),
-        ),
+        _ => None,
     };
     let now_ts = crate::now_ts_u64() as i64;
     let retention_seconds_i64 = retention_seconds.min(i64::MAX as u64) as i64;
@@ -1789,7 +1774,6 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             if skill_name == "run_cmd" {
                 prepare_builtin_run_cmd_async_start_args(
                     &execution_state.skill_rt.workspace_root,
-                    execution_state.skill_rt.cmd_async_timeout_seconds,
                     execution_state.skill_rt.cmd_async_retention_seconds,
                     execution_state.skill_rt.cmd_terminate_grace_seconds,
                     &mut args,

@@ -12,9 +12,35 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "configs/config.toml": (
-        "cmd_async_timeout_seconds =",
+        "Durable background jobs have no default runtime deadline",
         "cmd_async_retention_seconds =",
         "cmd_terminate_grace_seconds =",
+    ),
+    "docker/config/config.toml": (
+        "Durable background jobs have no default runtime deadline",
+        "cmd_async_retention_seconds =",
+        "cmd_terminate_grace_seconds =",
+    ),
+    "crates/clawd/src/skills/runner.rs": (
+        '"runtime_deadline_at": null',
+        '"APP_DURABLE_BACKGROUND", "1"',
+        '"expected_execution_binding.json"',
+        '"durable_background"',
+        "skill_secret_token_ttl(",
+    ),
+    "crates/skill-runner/src/main.rs": (
+        "runtime_deadline_enabled = false",
+        'command.env_remove("SKILL_TIMEOUT_SECONDS")',
+        "acquire_durable_slots",
+        "mark_lease_ready",
+    ),
+    "crates/clawd/src/skills/builtin_pty_session.rs": (
+        "expires_at: Option<i64>",
+        "idle_timeout_seconds: Option<u64>",
+    ),
+    "crates/clawd/src/bin/pty-session-runner.rs": (
+        "expires_at: Option<i64>",
+        "idle_timeout_seconds: Option<u64>",
     ),
     "crates/clawd/src/task_lifecycle.rs": (
         "runtime_deadline_at: Option<i64>",
@@ -81,6 +107,21 @@ REQUIRED_FRAGMENTS: dict[str, tuple[str, ...]] = {
 }
 
 FORBIDDEN_FRAGMENTS: dict[str, tuple[str, ...]] = {
+    "configs/config.toml": (
+        "cmd_async_timeout_seconds",
+    ),
+    "docker/config/config.toml": (
+        "cmd_async_timeout_seconds",
+    ),
+    "optional_skills/media_download/skill.toml": (
+        "timeout_seconds = 3600",
+    ),
+    "crates/clawd/src/runtime/state.rs": (
+        "cmd_async_timeout_seconds",
+    ),
+    "crates/clawd/src/skills/builtin.rs": (
+        "unwrap_or(3_600)",
+    ),
     "crates/clawd/src/async_job_contract.rs": (
         '"max_runtime_seconds"',
         '"max_runtime_deadline_ts"',

@@ -874,7 +874,7 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             args,
             "operation_timeout_seconds",
             minimum=5,
-            maximum=3_500,
+            maximum=2_592_000,
         )
         if action == "download":
             command = _build_download_command(args, output_dir, resolve_only=False)

@@ -43,8 +43,8 @@ struct PtyLaunchSpec {
     rows: u16,
     cols: u16,
     created_at: i64,
-    expires_at: i64,
-    idle_timeout_seconds: u64,
+    expires_at: Option<i64>,
+    idle_timeout_seconds: Option<u64>,
     max_output_bytes: u64,
 }
 
@@ -85,8 +85,8 @@ pub(super) async fn start_session(
     prepared: &Command,
     rows: u16,
     cols: u16,
-    expires_in_seconds: u64,
-    idle_timeout_seconds: u64,
+    expires_in_seconds: Option<u64>,
+    idle_timeout_seconds: Option<u64>,
     max_output_bytes: u64,
 ) -> Result<String, PtySessionError> {
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -101,8 +101,9 @@ pub(super) async fn start_session(
         rows.clamp(2, 500),
         cols.clamp(2, 1000),
         now,
-        now.saturating_add(expires_in_seconds.clamp(1, 7 * 24 * 3600) as i64),
-        idle_timeout_seconds.clamp(5, 24 * 3600),
+        expires_in_seconds
+            .map(|seconds| now.saturating_add(seconds.clamp(1, 7 * 24 * 3600) as i64)),
+        idle_timeout_seconds.map(|seconds| seconds.clamp(5, 24 * 3600)),
         max_output_bytes.clamp(MIN_SESSION_OUTPUT_BYTES, MAX_SESSION_OUTPUT_BYTES),
     )?;
     atomic_write_json(&session_dir.join("launch.json"), &spec)
@@ -194,8 +195,8 @@ fn launch_spec_from_command(
     rows: u16,
     cols: u16,
     created_at: i64,
-    expires_at: i64,
-    idle_timeout_seconds: u64,
+    expires_at: Option<i64>,
+    idle_timeout_seconds: Option<u64>,
     max_output_bytes: u64,
 ) -> Result<PtyLaunchSpec, PtySessionError> {
     let command = command.as_std();

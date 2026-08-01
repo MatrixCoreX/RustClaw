@@ -12,9 +12,11 @@
 
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use fs2::FileExt;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +30,70 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
+
+const DURABLE_BACKGROUND_ENV: &str = "APP_DURABLE_BACKGROUND";
+const DURABLE_JOB_DIR_ENV: &str = "APP_DURABLE_JOB_DIR";
+const DURABLE_GLOBAL_SLOT_ROOT_ENV: &str = "APP_DURABLE_GLOBAL_SLOT_ROOT";
+const DURABLE_GLOBAL_MAX_CONCURRENCY_ENV: &str = "APP_DURABLE_GLOBAL_MAX_CONCURRENCY";
+const DURABLE_SKILL_SLOT_ROOT_ENV: &str = "APP_DURABLE_SKILL_SLOT_ROOT";
+const DURABLE_SKILL_MAX_CONCURRENCY_ENV: &str = "APP_DURABLE_SKILL_MAX_CONCURRENCY";
+
+struct DurableJobRuntime {
+    directory: PathBuf,
+}
+
+impl DurableJobRuntime {
+    fn from_env() -> Result<Option<Self>, String> {
+        if std::env::var(DURABLE_BACKGROUND_ENV).ok().as_deref() != Some("1") {
+            return Ok(None);
+        }
+        let directory = std::env::var_os(DURABLE_JOB_DIR_ENV)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && path.is_dir())
+            .ok_or_else(|| "durable_job_directory_invalid".to_string())?;
+        Ok(Some(Self { directory }))
+    }
+
+    fn write_marker(&self, name: &str, value: &str) -> Result<(), String> {
+        let path = self.directory.join(name);
+        let temporary = self.directory.join(format!(".{name}.tmp"));
+        std::fs::write(&temporary, value)
+            .and_then(|_| std::fs::rename(&temporary, &path))
+            .map_err(|error| {
+                format!("durable_job_marker_write_failed: marker={name} error={error}")
+            })
+    }
+
+    fn mark_started(&self) -> Result<(), String> {
+        self.write_marker("started_at", &unix_timestamp().to_string())
+    }
+
+    fn mark_lease_ready(&self) -> Result<(), String> {
+        self.write_marker("lease_ready", &unix_timestamp().to_string())
+    }
+
+    fn mark_queue_waiting(&self) -> Result<(), String> {
+        self.write_marker("queue_state", "waiting")
+    }
+
+    fn mark_slots_acquired(&self, global_slot: usize, skill_slot: usize) -> Result<(), String> {
+        self.write_marker("queue_state", "acquired")?;
+        self.write_marker("global_concurrency_slot", &global_slot.to_string())?;
+        self.write_marker("skill_concurrency_slot", &skill_slot.to_string())
+    }
+
+    fn mark_finished(&self, exit_code: i32) -> Result<(), String> {
+        self.write_marker("finished_at", &unix_timestamp().to_string())?;
+        self.write_marker("exit_code", &exit_code.to_string())
+    }
+}
+
+fn unix_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
 
 #[derive(Debug, Deserialize)]
 struct SkillRequest {
@@ -166,6 +232,20 @@ struct ResponseParseFailure {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
+    let durable = DurableJobRuntime::from_env().map_err(anyhow::Error::msg)?;
+    if let Some(durable) = durable.as_ref() {
+        durable.mark_started().map_err(anyhow::Error::msg)?;
+    }
+    let result = run_server(durable.as_ref()).await;
+    if let Some(durable) = durable.as_ref() {
+        durable
+            .mark_finished(if result.is_ok() { 0 } else { 1 })
+            .map_err(anyhow::Error::msg)?;
+    }
+    result
+}
+
+async fn run_server(durable: Option<&DurableJobRuntime>) -> anyhow::Result<()> {
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin);
     let mut stdout = tokio::io::stdout();
@@ -186,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
         let resp = match parsed {
             Ok(req) => {
                 let (progress_tx, mut progress_rx) = mpsc::channel::<String>(32);
-                let execution = execute_skill(req, progress_tx);
+                let execution = execute_skill(req, progress_tx, durable);
                 tokio::pin!(execution);
                 let response = loop {
                     tokio::select! {
@@ -231,8 +311,15 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn execute_skill(req: SkillRequest, progress_tx: mpsc::Sender<String>) -> SkillResponse {
-    let configured_timeout_limit = match configured_timeout_limit_from_env() {
+async fn execute_skill(
+    req: SkillRequest,
+    progress_tx: mpsc::Sender<String>,
+    durable: Option<&DurableJobRuntime>,
+) -> SkillResponse {
+    let configured_timeout_limit = match durable
+        .map(|_| Ok(None))
+        .unwrap_or_else(configured_timeout_limit_from_env)
+    {
         Ok(limit) => limit,
         Err(detail) => {
             return SkillResponse {
@@ -301,6 +388,47 @@ async fn execute_skill(req: SkillRequest, progress_tx: mpsc::Sender<String>) -> 
     binding.policy_digest = req.expected_policy_digest.clone();
     binding.admission_receipt_digest = req.expected_admission_receipt_digest.clone();
 
+    let _version_lease = match acquire_installed_version_lease(&req, &child_launch) {
+        Ok(lease) => lease,
+        Err(detail) => {
+            return runner_error_response(
+                req.request_id,
+                "runner_version_lease_failed",
+                "skill_runner.version_lease_failed",
+                detail,
+            );
+        }
+    };
+    if let Err(detail) = materialize_child_secret_references(&mut child_launch) {
+        return runner_error_response(
+            req.request_id,
+            "runner_secret_materialization_failed",
+            "skill_runner.secret_materialization_failed",
+            detail,
+        );
+    }
+    if let Some(durable) = durable {
+        if let Err(detail) = durable.mark_lease_ready() {
+            return runner_error_response(
+                req.request_id,
+                "durable_job_lease_marker_failed",
+                "skill_runner.durable_start_failed",
+                detail,
+            );
+        }
+    }
+    let _durable_slots = match acquire_durable_slots(durable).await {
+        Ok(slot) => slot,
+        Err(detail) => {
+            return runner_error_response(
+                req.request_id,
+                "durable_skill_slot_failed",
+                "skill_runner.durable_slot_failed",
+                detail,
+            );
+        }
+    };
+
     let child_req = serde_json::json!({
         "request_id": req.request_id,
         "args": req.args,
@@ -310,10 +438,15 @@ async fn execute_skill(req: SkillRequest, progress_tx: mpsc::Sender<String>) -> 
         "user_key": req.user_key,
     });
 
-    let timeout_seconds =
-        effective_timeout_seconds(child_launch.timeout_seconds, configured_timeout_limit);
-    child_launch.timeout_seconds = timeout_seconds;
-    let timeout = Duration::from_secs(timeout_seconds);
+    let timeout_seconds = durable
+        .is_none()
+        .then(|| effective_timeout_seconds(child_launch.timeout_seconds, configured_timeout_limit));
+    if let Some(timeout_seconds) = timeout_seconds {
+        child_launch.timeout_seconds = timeout_seconds;
+    } else {
+        child_launch.runtime_deadline_enabled = false;
+    }
+    let timeout = timeout_seconds.map(Duration::from_secs);
     let execution = if child_launch.launcher == LauncherKind::HttpJson {
         run_http_json_skill(&child_launch, &child_req, timeout)
             .await
@@ -480,6 +613,148 @@ fn effective_timeout_seconds(manifest_timeout_seconds: u64, configured_limit: Op
         .unwrap_or(manifest_timeout_seconds)
 }
 
+fn runner_error_response(
+    request_id: String,
+    error_code: &str,
+    message_key: &str,
+    detail: String,
+) -> SkillResponse {
+    SkillResponse {
+        request_id,
+        status: "error".to_string(),
+        text: String::new(),
+        buttons: None,
+        error_code: Some(error_code.to_string()),
+        platform: Some(std::env::consts::OS.to_string()),
+        exit_code: None,
+        validation: None,
+        extra: Some(serde_json::json!({
+            "schema_version": 1,
+            "source_skill": "skill_runner",
+            "status": "error",
+            "error_code": error_code,
+            "message_key": message_key,
+            "retryable": false,
+        })),
+        error_text: Some(detail),
+    }
+}
+
+fn acquire_installed_version_lease(
+    request: &SkillRequest,
+    launch: &ChildLaunch,
+) -> Result<Option<skill_sdk::receipt::SkillVersionLease>, String> {
+    if !launch.installed {
+        return Ok(None);
+    }
+    let install_root = launch
+        .install_root
+        .as_deref()
+        .ok_or_else(|| "runner_install_root_missing".to_string())?;
+    let package_root = std::env::var_os("APP_SKILL_PACKAGES_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/skill-packages"));
+    skill_sdk::InstallReceiptStore::new(package_root)
+        .acquire_version_lease(&request.skill_name, install_root)
+        .map(Some)
+        .map_err(|error| {
+            format!(
+                "runner_version_lease_failed: code={} detail={}",
+                error.code, error.detail
+            )
+        })
+}
+
+fn materialize_child_secret_references(launch: &mut ChildLaunch) -> Result<(), String> {
+    const ENDPOINT_REDEEMED_TOKENS: [&str; 2] =
+        ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_ADMISSION_TOKEN"];
+    let keys = launch.environment_allowlist.clone();
+    for key in keys {
+        if ENDPOINT_REDEEMED_TOKENS.contains(&key.as_str()) {
+            continue;
+        }
+        let Some(raw) = std::env::var(&key).ok() else {
+            continue;
+        };
+        if !raw.starts_with(claw_core::secrets::SECRET_TOKEN_REFERENCE_PREFIX) {
+            continue;
+        }
+        let value = claw_core::secrets::redeem_secret_token_reference(&raw)
+            .map_err(|error| {
+                format!("runner_secret_materialization_failed: env={key} error={error}")
+            })?
+            .ok_or_else(|| format!("runner_secret_materialization_missing: env={key}"))?;
+        launch.environment.insert(key, value);
+    }
+    Ok(())
+}
+
+struct DurableSlotLeases {
+    _global: File,
+    _skill: File,
+}
+
+async fn acquire_durable_slots(
+    durable: Option<&DurableJobRuntime>,
+) -> Result<Option<DurableSlotLeases>, String> {
+    let Some(durable) = durable else {
+        return Ok(None);
+    };
+    let global_root = durable_slot_root(DURABLE_GLOBAL_SLOT_ROOT_ENV)?;
+    let global_limit = durable_slot_limit(DURABLE_GLOBAL_MAX_CONCURRENCY_ENV)?;
+    let skill_root = durable_slot_root(DURABLE_SKILL_SLOT_ROOT_ENV)?;
+    let skill_limit = durable_slot_limit(DURABLE_SKILL_MAX_CONCURRENCY_ENV)?;
+    std::fs::create_dir_all(&global_root)
+        .map_err(|error| format!("durable_global_slot_root_create_failed: {error}"))?;
+    std::fs::create_dir_all(&skill_root)
+        .map_err(|error| format!("durable_skill_slot_root_create_failed: {error}"))?;
+    durable.mark_queue_waiting()?;
+    let (global_slot, global_lease) = acquire_durable_slot(&global_root, global_limit).await?;
+    let (skill_slot, skill_lease) = acquire_durable_slot(&skill_root, skill_limit).await?;
+    durable.mark_slots_acquired(global_slot, skill_slot)?;
+    Ok(Some(DurableSlotLeases {
+        _global: global_lease,
+        _skill: skill_lease,
+    }))
+}
+
+fn durable_slot_root(env_name: &str) -> Result<PathBuf, String> {
+    std::env::var_os(env_name)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| format!("durable_slot_root_invalid: env={env_name}"))
+}
+
+fn durable_slot_limit(env_name: &str) -> Result<usize, String> {
+    std::env::var(env_name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| format!("durable_slot_limit_invalid: env={env_name}"))
+}
+
+async fn acquire_durable_slot(slot_root: &Path, limit: usize) -> Result<(usize, File), String> {
+    loop {
+        for slot in 0..limit {
+            let path = slot_root.join(format!("slot-{slot}.lock"));
+            let file = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&path)
+                .map_err(|error| format!("durable_skill_slot_open_failed: {error}"))?;
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok((slot, file)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => {
+                    return Err(format!("durable_skill_slot_lock_failed: {error}"));
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ChildLaunch {
     program: PathBuf,
@@ -492,8 +767,10 @@ struct ChildLaunch {
     remote_endpoint: Option<String>,
     runtime_network: bool,
     timeout_seconds: u64,
+    runtime_deadline_enabled: bool,
     progress_frames: bool,
     installed: bool,
+    install_root: Option<PathBuf>,
     sandbox_profile: SandboxProfile,
     execution_binding: Option<ExecutionBinding>,
 }
@@ -524,8 +801,10 @@ impl ChildLaunch {
             remote_endpoint: None,
             runtime_network: false,
             timeout_seconds: 86_400,
+            runtime_deadline_enabled: true,
             progress_frames: false,
             installed: false,
+            install_root: None,
             sandbox_profile: SandboxProfile::Required,
             execution_binding: None,
         }
@@ -555,8 +834,10 @@ impl ChildLaunch {
             remote_endpoint: spec.remote_endpoint,
             runtime_network: spec.runtime_network,
             timeout_seconds: spec.timeout_seconds,
+            runtime_deadline_enabled: true,
             progress_frames: spec.progress_frames,
             installed: true,
+            install_root: Some(spec.install_root),
             sandbox_profile: spec.sandbox_profile,
             execution_binding: Some(execution_binding),
         }
@@ -653,7 +934,7 @@ async fn run_child_skill(
     input_line: &str,
     timeout: Duration,
 ) -> Result<Vec<u8>, ExecutionFailure> {
-    run_child_skill_streaming(launch, input_line, "ignored", timeout, None)
+    run_child_skill_streaming(launch, input_line, "ignored", Some(timeout), None)
         .await
         .map(|execution| execution.final_output)
 }
@@ -662,13 +943,15 @@ async fn run_child_skill_streaming(
     launch: &ChildLaunch,
     input_line: &str,
     expected_request_id: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     progress_tx: Option<mpsc::Sender<String>>,
 ) -> Result<ChildExecution, ExecutionFailure> {
     let mut command = child_process_command(launch)
         .map_err(|detail| ExecutionFailure::new("child_launch_invalid", detail))?;
     #[cfg(unix)]
-    command.process_group(0);
+    if launch.runtime_deadline_enabled {
+        command.process_group(0);
+    }
     let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -713,22 +996,31 @@ async fn run_child_skill_streaming(
         })
     };
     let stderr_reader = tokio::spawn(read_bounded_output(stderr));
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(err)) => return Err(ExecutionFailure::new("child_wait_failed", err.to_string())),
-        Err(_) => {
-            terminate_child_process_group(child_pid).await;
-            let _ = child.wait().await;
-            stdout_reader.abort();
-            stderr_reader.abort();
-            let mut failure = ExecutionFailure::new("child_timeout", "child skill timeout");
-            failure.timed_out = true;
-            failure.retryable = true;
-            if launch.progress_frames {
-                failure.progress_diagnostics = Some(ProgressFrameDiagnostics::declared());
+    let status = if let Some(timeout) = timeout {
+        match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(Ok(status)) => status,
+            Ok(Err(err)) => {
+                return Err(ExecutionFailure::new("child_wait_failed", err.to_string()));
             }
-            return Err(failure);
+            Err(_) => {
+                terminate_child_process_group(child_pid).await;
+                let _ = child.wait().await;
+                stdout_reader.abort();
+                stderr_reader.abort();
+                let mut failure = ExecutionFailure::new("child_timeout", "child skill timeout");
+                failure.timed_out = true;
+                failure.retryable = true;
+                if launch.progress_frames {
+                    failure.progress_diagnostics = Some(ProgressFrameDiagnostics::declared());
+                }
+                return Err(failure);
+            }
         }
+    } else {
+        child
+            .wait()
+            .await
+            .map_err(|err| ExecutionFailure::new("child_wait_failed", err.to_string()))?
     };
     let execution = stdout_reader
         .await
@@ -912,18 +1204,26 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
     command.env_clear();
     command.envs(&launch.environment);
     for key in &launch.environment_allowlist {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
+        if !launch.environment.contains_key(key) {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
         }
     }
     for key in RUNTIME_CHILD_ENV_ALLOWLIST {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
+        if !launch.environment.contains_key(key) {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
         }
     }
-    // The runner owns the final deadline. Propagate the effective value after
-    // inherited environment handling so the child cannot observe a looser cap.
-    command.env("SKILL_TIMEOUT_SECONDS", launch.timeout_seconds.to_string());
+    if launch.runtime_deadline_enabled {
+        // Foreground execution keeps the manifest/host deadline. Durable
+        // background execution intentionally removes the inherited deadline.
+        command.env("SKILL_TIMEOUT_SECONDS", launch.timeout_seconds.to_string());
+    } else {
+        command.env_remove("SKILL_TIMEOUT_SECONDS");
+    }
     command.args(&launch.args);
     Ok(command)
 }
@@ -1003,7 +1303,7 @@ async fn read_bounded_output(
 async fn run_http_json_skill(
     launch: &ChildLaunch,
     request: &Value,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<Vec<u8>, ExecutionFailure> {
     if !unrestricted_admin_authority() && !launch.runtime_network {
         return Err(ExecutionFailure::new(
@@ -1017,10 +1317,13 @@ async fn run_http_json_skill(
             "http_json endpoint is missing from the verified launch spec",
         )
     })?;
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
+    let mut client_builder = reqwest::Client::builder()
         .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(timeout) = timeout {
+        client_builder = client_builder.timeout(timeout);
+    }
+    let client = client_builder
         .build()
         .map_err(|error| ExecutionFailure::new("http_client_failed", error.to_string()))?;
     let mut request_builder = client.post(endpoint).json(request);

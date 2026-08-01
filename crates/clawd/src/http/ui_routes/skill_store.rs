@@ -521,7 +521,11 @@ async fn get_skill_store_catalog(
     };
     let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
     let admission_snapshot = admission_service(&state)
-        .and_then(|service| service.snapshot().map_err(|error| error.to_string()))
+        .and_then(|service| {
+            service
+                .catalog_snapshot()
+                .map_err(|error| error.to_string())
+        })
         .ok();
     if let Some(snapshot) = &admission_snapshot {
         for name in snapshot
@@ -553,6 +557,7 @@ async fn get_skill_store_catalog(
         .collect::<Vec<_>>();
     let mut names = registry.all_names();
     names.sort_unstable();
+    let package_resolver = skill_sdk::SkillRuntimeResolver::new(skill_package_root(&state));
     let items = names
         .into_iter()
         .filter(|name| !hide_skill_in_ui(&state, name))
@@ -566,12 +571,14 @@ async fn get_skill_store_catalog(
                     admission_state != skill_sdk::AdmissionState::Tombstoned
                 })
                 .unwrap_or_else(|| !uninstalled.contains(&name));
-            let package_available = if matches!(entry.kind, SkillKind::Runner | SkillKind::External)
+            let installed_launch = if matches!(entry.kind, SkillKind::Runner | SkillKind::External)
             {
-                skill_store_package_available(&state, &registry, &name)
+                package_resolver.inspect_current(&name).ok()
             } else {
-                true
+                None
             };
+            let package_available = !matches!(entry.kind, SkillKind::Runner | SkillKind::External)
+                || installed_launch.is_some();
             let installed = configured_installed && package_available;
             let installation_issue = if configured_installed && !package_available {
                 Some("package_missing")
@@ -591,10 +598,6 @@ async fn get_skill_store_catalog(
                 .ok()
                 .flatten();
             let manifest = skill_store_manifest_metadata(&state, &registry, &name);
-            let installed_launch =
-                skill_sdk::SkillRuntimeResolver::new(skill_package_root(&state))
-                    .resolve(&name)
-                    .ok();
             Some(json!({
                 "name": name,
                 "description": entry.description,

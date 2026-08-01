@@ -153,6 +153,23 @@ fn identity_mismatch_waits_for_a_terminal_record_grace_window() {
 
 #[cfg(unix)]
 #[test]
+fn process_identity_accepts_a_persisted_non_shell_command_marker() {
+    let root = TempDirGuard::new("durable_runner_identity_marker");
+    let executable = std::env::current_exe().expect("current test executable");
+    std::fs::write(
+        root.path().join("process_command_marker"),
+        executable.display().to_string(),
+    )
+    .expect("write process marker");
+
+    assert_eq!(
+        process_identity_state(root.path(), std::process::id()),
+        ProcessIdentityState::AliveVerified
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn durable_cancellation_escalates_a_verified_process_group() {
     use std::os::unix::process::CommandExt;
     use std::process::Command;

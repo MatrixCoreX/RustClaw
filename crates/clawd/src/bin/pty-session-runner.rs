@@ -26,8 +26,8 @@ struct LaunchSpec {
     rows: u16,
     cols: u16,
     created_at: i64,
-    expires_at: i64,
-    idle_timeout_seconds: u64,
+    expires_at: Option<i64>,
+    idle_timeout_seconds: Option<u64>,
     max_output_bytes: u64,
 }
 
@@ -201,11 +201,14 @@ fn main() -> Result<()> {
                 let _ = terminate_process_group(child.as_mut(), child_pid);
                 runtime.status = "failed";
                 runtime.reason_code = Some("pty_output_limit");
-            } else if now >= spec.expires_at {
+            } else if spec.expires_at.is_some_and(|deadline| now >= deadline) {
                 let _ = terminate_process_group(child.as_mut(), child_pid);
                 runtime.status = "expired";
                 runtime.reason_code = Some("pty_hard_timeout");
-            } else if idle_for >= spec.idle_timeout_seconds as i64 {
+            } else if spec
+                .idle_timeout_seconds
+                .is_some_and(|timeout| idle_for >= timeout as i64)
+            {
                 let _ = terminate_process_group(child.as_mut(), child_pid);
                 runtime.status = "expired";
                 runtime.reason_code = Some("pty_idle_timeout");

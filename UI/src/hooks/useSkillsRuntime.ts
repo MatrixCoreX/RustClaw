@@ -56,6 +56,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const fileImportInputRef = useRef<HTMLInputElement | null>(null);
   const previousSkillStoreOperationRef = useRef<SkillStoreResponse["active_operation"]>(null);
+  const skillStoreFetchRef = useRef<Promise<void> | null>(null);
+  const skillStoreFetchedAtRef = useRef(0);
   const skillStoreActionName = resolveSkillStoreActionName(localSkillStoreActionName, skillStoreData);
 
   const fetchSkills = async () => {
@@ -94,70 +96,81 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const fetchSkillStore = async () => {
-    setSkillStoreLoading(true);
-    setSkillStoreError(null);
-    try {
-      const res = await apiFetch(`/v1/skills/store`);
-      const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(skillStoreErrorMessage(body.error, t));
-      }
-      const previousOperation = previousSkillStoreOperationRef.current;
-      const activeOperation = body.data.active_operation ?? null;
-      previousSkillStoreOperationRef.current = activeOperation;
-      setSkillStoreData(body.data);
-      if (previousOperation && !activeOperation) {
-        const completedOperation = body.data.recent_operations?.find(
-          (operation) => operation.operation_id === previousOperation.operation_id,
-        );
-        if (completedOperation?.status === "failure") {
-          setSkillStoreError(skillStoreErrorMessage(completedOperation.failure?.error_code, t));
-        } else if (completedOperation?.status === "cancelled") {
-          setSkillStoreMessage(
-            t(
-              `${previousOperation.skill_name} 的操作已取消，没有继续执行。`,
-              `The operation for ${previousOperation.skill_name} was cancelled.`,
-            ),
+  const fetchSkillStore = (force = false): Promise<void> => {
+    const freshEnough = Date.now() - skillStoreFetchedAtRef.current < 3_000;
+    if (!force && freshEnough) return Promise.resolve();
+    if (skillStoreFetchRef.current) return skillStoreFetchRef.current;
+    const request = (async () => {
+      setSkillStoreLoading(true);
+      setSkillStoreError(null);
+      try {
+        const res = await apiFetch(`/v1/skills/store`);
+        const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(skillStoreErrorMessage(body.error, t));
+        }
+        skillStoreFetchedAtRef.current = Date.now();
+        const previousOperation = previousSkillStoreOperationRef.current;
+        const activeOperation = body.data.active_operation ?? null;
+        previousSkillStoreOperationRef.current = activeOperation;
+        setSkillStoreData(body.data);
+        if (previousOperation && !activeOperation) {
+          const completedOperation = body.data.recent_operations?.find(
+            (operation) => operation.operation_id === previousOperation.operation_id,
           );
-        } else {
-          const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
-          const operationSucceeded = previousOperation.action === "remove" ? item?.configured_installed === false : item?.installed === true;
-          const installOrigin =
-            completedOperation?.result && typeof completedOperation.result === "object"
-              ? completedOperation.result.install_origin
-              : null;
-          setSkillStoreMessage(
-            operationSucceeded
-              ? previousOperation.action !== "remove"
-                ? installOrigin === "platform_precompiled"
-                  ? t(
-                      `${previousOperation.skill_name} 已使用当前平台的预编译版本安装完成，可以直接使用。`,
-                      `${previousOperation.skill_name} was installed from the precompiled package for this platform and is ready to use.`,
-                    )
+          if (completedOperation?.status === "failure") {
+            setSkillStoreError(skillStoreErrorMessage(completedOperation.failure?.error_code, t));
+          } else if (completedOperation?.status === "cancelled") {
+            setSkillStoreMessage(
+              t(
+                `${previousOperation.skill_name} 的操作已取消，没有继续执行。`,
+                `The operation for ${previousOperation.skill_name} was cancelled.`,
+              ),
+            );
+          } else {
+            const item = body.data.items.find((candidate) => candidate.name === previousOperation.skill_name);
+            const operationSucceeded = previousOperation.action === "remove" ? item?.configured_installed === false : item?.installed === true;
+            const installOrigin =
+              completedOperation?.result && typeof completedOperation.result === "object"
+                ? completedOperation.result.install_origin
+                : null;
+            setSkillStoreMessage(
+              operationSucceeded
+                ? previousOperation.action !== "remove"
+                  ? installOrigin === "platform_precompiled"
+                    ? t(
+                        `${previousOperation.skill_name} 已使用当前平台的预编译版本安装完成，可以直接使用。`,
+                        `${previousOperation.skill_name} was installed from the precompiled package for this platform and is ready to use.`,
+                      )
+                    : t(
+                        `${previousOperation.skill_name} 已完成安装并可以使用。`,
+                        `${previousOperation.skill_name} finished installing and is ready to use.`,
+                      )
                   : t(
-                      `${previousOperation.skill_name} 已完成安装并可以使用。`,
-                      `${previousOperation.skill_name} finished installing and is ready to use.`,
+                      `${previousOperation.skill_name} 已完成删除。`,
+                      `${previousOperation.skill_name} finished removing.`,
                     )
                 : t(
-                    `${previousOperation.skill_name} 已完成删除。`,
-                    `${previousOperation.skill_name} finished removing.`,
-                  )
-              : t(
-                  `${previousOperation.skill_name} 的操作已经结束，但未达到预期状态，请重试或查看服务日志。`,
-                  `${previousOperation.skill_name} finished processing but did not reach the expected state. Retry or check the service log.`,
-                ),
-          );
+                    `${previousOperation.skill_name} 的操作已经结束，但未达到预期状态，请重试或查看服务日志。`,
+                    `${previousOperation.skill_name} finished processing but did not reach the expected state. Retry or check the service log.`,
+                  ),
+            );
+          }
+          await fetchSkillsConfig();
+          await fetchSkills();
         }
-        await fetchSkillsConfig();
-        await fetchSkills();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+        setSkillStoreError(message);
+      } finally {
+        setSkillStoreLoading(false);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setSkillStoreError(message);
-    } finally {
-      setSkillStoreLoading(false);
-    }
+    })();
+    skillStoreFetchRef.current = request;
+    void request.finally(() => {
+      if (skillStoreFetchRef.current === request) skillStoreFetchRef.current = null;
+    });
+    return request;
   };
 
   const scrollToSkillRow = (skillName: string) => {
@@ -269,7 +282,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     const activeOperation = skillStoreData?.active_operation;
     if (!activeOperation) return;
     const timer = window.setInterval(() => {
-      void fetchSkillStore();
+      void fetchSkillStore(true);
     }, 1_500);
     return () => window.clearInterval(timer);
     // The operation identity is the server-owned polling boundary.
@@ -387,7 +400,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setSkillsSearchQuery(body.data.skill_name);
       await fetchSkillsConfig();
       await fetchSkills();
-      await fetchSkillStore();
+      await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -448,7 +461,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       setSkillsSearchQuery(body.data.skill_name);
       await fetchSkillsConfig();
       await fetchSkills();
-      await fetchSkillStore();
+      await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -495,7 +508,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           ? t(`${skillName} 已进入安装队列。`, `${skillName} was added to the install queue.`)
           : t(`${skillName} 已进入删除队列。`, `${skillName} was added to the removal queue.`),
       );
-      await fetchSkillStore();
+      await fetchSkillStore(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setSkillStoreError(message);

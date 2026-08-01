@@ -457,10 +457,6 @@ pub(super) fn default_tool_cmd_idle_timeout_seconds() -> u64 {
     60
 }
 
-pub(super) fn default_tool_cmd_async_timeout_seconds() -> u64 {
-    3_600
-}
-
 pub(super) fn default_tool_cmd_async_retention_seconds() -> u64 {
     86_400
 }

@@ -426,7 +426,8 @@ allow_path_outside_workspace = false
 allow_sudo = false
 cmd_timeout_seconds = 60
 cmd_idle_timeout_seconds = 60
-cmd_async_timeout_seconds = 3600
+# Durable background jobs have no default runtime deadline. Use an explicit
+# caller/host deadline only when the operation contract requires one.
 cmd_async_retention_seconds = 86400
 cmd_terminate_grace_seconds = 5
 cmd_max_output_bytes = 8000
