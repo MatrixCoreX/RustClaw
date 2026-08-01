@@ -106,10 +106,20 @@ fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_to
         fs::read(service.root().join("current-generation.json")).expect("reread pointer")
     );
 
+    let repair_inputs = service
+        .current_repair_inputs()
+        .expect("read complete generation repair inputs");
+    assert_eq!(repair_inputs.len(), 1);
+    let repaired = service
+        .repair_current_generation(repair_inputs)
+        .expect("atomically rewrite complete generation");
+    assert_eq!(repaired.generation, snapshot.generation + 1);
+    assert_eq!(repaired.state(&skill_name), Some(AdmissionState::Enabled));
+
     let disabled = service
         .set_state(&skill_name, AdmissionState::InstalledDisabled, None)
         .expect("disable skill");
-    assert_eq!(disabled.generation, 2);
+    assert_eq!(disabled.generation, repaired.generation + 1);
     assert_eq!(
         disabled.state(&skill_name),
         Some(AdmissionState::InstalledDisabled)

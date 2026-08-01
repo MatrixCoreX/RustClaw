@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -170,6 +170,52 @@ impl SkillAdmissionService {
         })
     }
 
+    pub(crate) fn current_repair_inputs(&self) -> Result<Vec<AdmissionMutation>> {
+        let Some((_, record, generation_root)) = self.read_current_generation()? else {
+            return Err(error(
+                "skill_admission_generation_missing",
+                "skill_admission_generation_missing",
+            ));
+        };
+        record
+            .skills
+            .iter()
+            .map(|(name, skill)| {
+                let metadata = read_json(
+                    &generation_root
+                        .join("metadata")
+                        .join(format!("{name}.json")),
+                )?;
+                let prompt =
+                    fs::read_to_string(generation_root.join("prompts").join(format!("{name}.md")))
+                        .map_err(|source| {
+                            error(
+                                "skill_admission_prompt_read_failed",
+                                format!("skill={name} error={source}"),
+                            )
+                        })?;
+                let grant = read_optional_json::<HostPolicyGrant>(
+                    &generation_root
+                        .join("policy.d")
+                        .join(format!("{name}.json")),
+                )?;
+                Ok(AdmissionMutation {
+                    metadata,
+                    prompt,
+                    state: skill.state,
+                    grant,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn repair_current_generation(
+        &self,
+        mutations: Vec<AdmissionMutation>,
+    ) -> Result<OverlaySnapshot> {
+        self.commit_mutations(mutations, true)
+    }
+
     pub(crate) fn rollback_generation(&self, expected_generation: u64) -> Result<OverlaySnapshot> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         let lock = OpenOptions::new()
@@ -237,6 +283,14 @@ impl SkillAdmissionService {
     }
 
     fn commit_mutation(&self, mutation: AdmissionMutation) -> Result<OverlaySnapshot> {
+        self.commit_mutations(vec![mutation], false)
+    }
+
+    fn commit_mutations(
+        &self,
+        mutations: Vec<AdmissionMutation>,
+        require_complete_current_generation: bool,
+    ) -> Result<OverlaySnapshot> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
         let lock_path = self.root.join("mutation.lock");
@@ -247,61 +301,99 @@ impl SkillAdmissionService {
             .open(&lock_path)
             .map_err(io_error("skill_admission_lock_open_failed"))?;
         FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
-        let result = self.commit_mutation_locked(mutation);
+        let result = self.commit_mutations_locked(mutations, require_complete_current_generation);
         let _ = FileExt::unlock(&lock);
         result
     }
 
-    fn commit_mutation_locked(&self, mutation: AdmissionMutation) -> Result<OverlaySnapshot> {
-        let name = mutation.metadata.name.trim().to_ascii_lowercase();
-        if name.is_empty() || name != mutation.metadata.name {
+    fn commit_mutations_locked(
+        &self,
+        mutations: Vec<AdmissionMutation>,
+        require_complete_current_generation: bool,
+    ) -> Result<OverlaySnapshot> {
+        if mutations.is_empty() {
             return Err(error(
-                "skill_admission_name_invalid",
-                format!("name={:?}", mutation.metadata.name),
+                "skill_admission_repair_empty",
+                "skill_admission_repair_empty",
             ));
         }
-        validate_relative_path(
-            &mutation.metadata.package_manifest_path,
-            "skill_admission_source_manifest_invalid",
-        )?;
         let current = self.read_current_generation()?;
-        let base = SkillsRegistry::load_from_path(&self.base_registry_path)
-            .map_err(|detail| error("skill_registry_invalid", detail))?;
-        match (mutation.metadata.source, base.get(&name)) {
-            (SkillAdmissionSource::ExternalOverlay, Some(_)) => {
-                return Err(error(
-                    "skill_admission_builtin_override_forbidden",
-                    format!("skill={name}"),
-                ));
-            }
-            (SkillAdmissionSource::BundledBase, None) => {
-                return Err(error(
-                    "skill_admission_base_entry_missing",
-                    format!("skill={name}"),
-                ));
-            }
-            _ => {}
-        }
-        let verified = InstallReceiptStore::new(&self.package_root)
-            .verified_current_install(&name)
-            .map_err(|source| {
+        if require_complete_current_generation {
+            let (_, current_record, _) = current.as_ref().ok_or_else(|| {
                 error(
-                    "skill_install_receipt_invalid",
-                    format!("skill={name} error={source}"),
+                    "skill_admission_generation_missing",
+                    "skill_admission_generation_missing",
                 )
             })?;
-        verified
-            .manifest
-            .validate_for_platform(&skill_sdk::HostPlatform::current())
-            .map_err(|source| error("skill_platform_incompatible", source.to_string()))?;
-        if verified.manifest.package.name != name {
-            return Err(error(
-                "skill_admission_identity_mismatch",
-                format!(
-                    "metadata={} manifest={}",
-                    name, verified.manifest.package.name
-                ),
-            ));
+            let requested = mutations
+                .iter()
+                .map(|mutation| (mutation.metadata.name.clone(), mutation.metadata.source))
+                .collect::<BTreeMap<_, _>>();
+            let expected = current_record
+                .skills
+                .iter()
+                .map(|(name, skill)| (name.clone(), skill.source))
+                .collect::<BTreeMap<_, _>>();
+            if requested != expected || requested.len() != mutations.len() {
+                return Err(error(
+                    "skill_admission_repair_scope_mismatch",
+                    format!("expected={} requested={}", expected.len(), mutations.len()),
+                ));
+            }
+        }
+        let base = SkillsRegistry::load_from_path(&self.base_registry_path)
+            .map_err(|detail| error("skill_registry_invalid", detail))?;
+        let mut names = BTreeSet::new();
+        let mut verified_mutations = Vec::with_capacity(mutations.len());
+        for mutation in mutations {
+            let name = mutation.metadata.name.trim().to_ascii_lowercase();
+            if name.is_empty() || name != mutation.metadata.name || !names.insert(name.clone()) {
+                return Err(error(
+                    "skill_admission_name_invalid",
+                    format!("name={:?}", mutation.metadata.name),
+                ));
+            }
+            validate_relative_path(
+                &mutation.metadata.package_manifest_path,
+                "skill_admission_source_manifest_invalid",
+            )?;
+            match (mutation.metadata.source, base.get(&name)) {
+                (SkillAdmissionSource::ExternalOverlay, Some(_)) => {
+                    return Err(error(
+                        "skill_admission_builtin_override_forbidden",
+                        format!("skill={name}"),
+                    ));
+                }
+                (SkillAdmissionSource::BundledBase, None) => {
+                    return Err(error(
+                        "skill_admission_base_entry_missing",
+                        format!("skill={name}"),
+                    ));
+                }
+                _ => {}
+            }
+            let verified = InstallReceiptStore::new(&self.package_root)
+                .verified_current_install(&name)
+                .map_err(|source| {
+                    error(
+                        "skill_install_receipt_invalid",
+                        format!("skill={name} error={source}"),
+                    )
+                })?;
+            verified
+                .manifest
+                .validate_for_platform(&skill_sdk::HostPlatform::current())
+                .map_err(|source| error("skill_platform_incompatible", source.to_string()))?;
+            if verified.manifest.package.name != name {
+                return Err(error(
+                    "skill_admission_identity_mismatch",
+                    format!(
+                        "metadata={} manifest={}",
+                        name, verified.manifest.package.name
+                    ),
+                ));
+            }
+            verified_mutations.push((mutation, verified));
         }
 
         let generation = self.next_generation(current.as_ref().map(|(pointer, _, _)| pointer))?;
@@ -328,14 +420,16 @@ impl SkillAdmissionService {
                 skills: BTreeMap::new(),
             }
         };
-        self.write_mutated_skill(
-            staging.path(),
-            generation,
-            &mutation,
-            &verified.manifest,
-            &verified.receipt,
-            &mut record,
-        )?;
+        for (mutation, verified) in &verified_mutations {
+            self.write_mutated_skill(
+                staging.path(),
+                generation,
+                mutation,
+                &verified.manifest,
+                &verified.receipt,
+                &mut record,
+            )?;
+        }
         self.refresh_admission_generations(staging.path(), &mut record)?;
         let generation_digest = digest_json(&record)?;
         atomic_write_json(&staging.path().join("generation.json"), &record)?;

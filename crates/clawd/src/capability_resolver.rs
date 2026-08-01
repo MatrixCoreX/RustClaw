@@ -178,7 +178,9 @@ fn resolve_registry_capability_action(
     };
     let mut candidates = Vec::new();
     let mut blocked = Vec::new();
-    for skill in registry.enabled_names() {
+    let mut resolver_skills = registry.all_names();
+    resolver_skills.sort_unstable();
+    for skill in resolver_skills {
         let Some(mapping) =
             registry_mapping_for_capability(&registry, &skill, normalized_capability)
         else {
@@ -245,7 +247,9 @@ fn skill_resolution_block_reason(
     skill: &str,
 ) -> Option<&'static str> {
     let enabled_skills = state.get_skills_list();
-    if !enabled_skills.is_empty() && !enabled_skills.contains(skill) {
+    if (!enabled_skills.is_empty() && !enabled_skills.contains(skill))
+        || (enabled_skills.is_empty() && registry.get(skill).is_some_and(|entry| !entry.enabled))
+    {
         return Some("capability_disabled");
     }
     if !registry.is_planner_visible(skill) {
