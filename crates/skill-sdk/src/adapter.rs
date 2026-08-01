@@ -255,6 +255,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         "python",
     )?;
     remove_python_bytecode_caches(context.staging_root.join("runtime").as_path())?;
+    rewrite_python_console_scripts_for_relocation(&venv)?;
     materialize_file_symlink(&venv_python)?;
     let relative_python = relative_string(context.staging_root, &venv_python)?;
     let entrypoint = context.staging_root.join(&context.manifest.run.entrypoint);
@@ -1416,6 +1417,73 @@ fn remove_python_bytecode_caches(root: &Path) -> SkillSdkResult<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn rewrite_python_console_scripts_for_relocation(venv: &Path) -> SkillSdkResult<usize> {
+    let bin = venv.join("bin");
+    let bin_text = bin.to_string_lossy();
+    let shebang_prefix = format!("#!{bin_text}");
+    let portable_header =
+        b"#!/bin/sh\n'''exec' \"$(dirname \"$0\")/python\" \"$0\" \"$@\"\n' '''\n";
+    let mut rewritten_count = 0;
+
+    for entry in fs::read_dir(&bin)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        let Some(line_end) = bytes.iter().position(|byte| *byte == b'\n') else {
+            continue;
+        };
+        let Ok(first_line) = std::str::from_utf8(&bytes[..line_end]) else {
+            continue;
+        };
+        let body_start = if first_line.starts_with(&shebang_prefix) {
+            Some(line_end + 1)
+        } else if first_line == "#!/bin/sh" {
+            let remaining = &bytes[line_end + 1..];
+            let Some(second_line_end) = remaining.iter().position(|byte| *byte == b'\n') else {
+                continue;
+            };
+            let second_line = &remaining[..second_line_end];
+            let third_and_body = &remaining[second_line_end + 1..];
+            let Some(third_line_end) = third_and_body.iter().position(|byte| *byte == b'\n') else {
+                continue;
+            };
+            let Ok(second_line) = std::str::from_utf8(second_line) else {
+                continue;
+            };
+            let Ok(third_line) = std::str::from_utf8(&third_and_body[..third_line_end]) else {
+                continue;
+            };
+            (second_line.starts_with("'''exec' ")
+                && second_line.contains(bin_text.as_ref())
+                && third_line == "' '''")
+                .then_some(line_end + second_line_end + third_line_end + 3)
+        } else {
+            None
+        };
+        let Some(body_start) = body_start else {
+            continue;
+        };
+
+        let mut relocated = Vec::with_capacity(portable_header.len() + bytes.len() - body_start);
+        relocated.extend_from_slice(portable_header);
+        relocated.extend_from_slice(&bytes[body_start..]);
+        fs::write(&path, relocated)?;
+        rewritten_count += 1;
+    }
+
+    Ok(rewritten_count)
+}
+
+#[cfg(not(unix))]
+fn rewrite_python_console_scripts_for_relocation(_venv: &Path) -> SkillSdkResult<usize> {
+    Ok(0)
 }
 
 #[cfg(test)]

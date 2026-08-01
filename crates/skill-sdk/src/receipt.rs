@@ -233,7 +233,7 @@ impl InstallReceipt {
             true,
         )?;
         for key in self.launch.environment.keys() {
-            if sensitive_environment_key(key) {
+            if is_sensitive_runtime_environment_name(key) {
                 return Err(SkillSdkError::new(
                     "receipt_secret_forbidden",
                     format!("environment_key={key}"),
@@ -887,7 +887,7 @@ fn validate_pointer(pointer: &CurrentInstallPointer) -> SkillSdkResult<()> {
     validate_sha256(&pointer.receipt_digest, "current.receipt_digest")
 }
 
-fn sensitive_environment_key(key: &str) -> bool {
+pub fn is_sensitive_runtime_environment_name(key: &str) -> bool {
     let upper = key.to_ascii_uppercase();
     [
         "SECRET",
@@ -895,6 +895,10 @@ fn sensitive_environment_key(key: &str) -> bool {
         "PASSWORD",
         "CREDENTIAL",
         "API_KEY",
+        "ACCESS_KEY",
+        "PRIVATE_KEY",
+        "COOKIE",
+        "BEARER",
         "AUTH",
     ]
     .iter()

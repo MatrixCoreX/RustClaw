@@ -597,6 +597,10 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         .expect("inspect current package metadata");
     assert_eq!(inspected.version, receipt.version);
     assert_eq!(
+        inspected.environment_allowlist,
+        vec!["WORKSPACE_ROOT".to_string()]
+    );
+    assert_eq!(
         launch.program,
         fs::canonicalize(binary).expect("canonical bin")
     );

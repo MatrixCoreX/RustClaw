@@ -87,6 +87,35 @@ fn whitelist_does_not_invent_keys_for_missing_source() {
 }
 
 #[test]
+fn pinned_receipt_environment_passes_only_declared_non_sensitive_values() {
+    let declared = vec![
+        "WHISPER_BIN".to_string(),
+        "WHISPER_MODEL".to_string(),
+        "MEDIA_API_KEY".to_string(),
+    ];
+    let source = vec![
+        ("WHISPER_BIN", "/opt/whisper/whisper-cli"),
+        ("WHISPER_MODEL", "/opt/whisper/ggml-small.bin"),
+        ("MEDIA_API_KEY", "must-not-reach-runner"),
+        ("UNDECLARED_SETTING", "must-not-reach-runner"),
+    ];
+
+    assert_eq!(
+        collect_declared_skill_env_pairs(&declared, source),
+        vec![
+            (
+                "WHISPER_BIN".to_string(),
+                "/opt/whisper/whisper-cli".to_string(),
+            ),
+            (
+                "WHISPER_MODEL".to_string(),
+                "/opt/whisper/ggml-small.bin".to_string(),
+            ),
+        ]
+    );
+}
+
+#[test]
 fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() {
     let banned = [
         "OPENAI_API_KEY",

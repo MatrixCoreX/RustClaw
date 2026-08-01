@@ -58,9 +58,10 @@ pub use protocol::{
     SKILL_PROGRESS_FRAME_RECORD_TYPE, SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
 };
 pub use receipt::{
-    digest_file, ArtifactReceipt, CurrentInstallPointer, InstallReceipt, InstallReceiptStore,
-    ProtocolSmokeReceipt, VerifiedInstall, CURRENT_INSTALL_POINTER_SCHEMA_VERSION,
-    INSTALL_RECEIPT_SCHEMA_VERSION, LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION,
+    digest_file, is_sensitive_runtime_environment_name, ArtifactReceipt, CurrentInstallPointer,
+    InstallReceipt, InstallReceiptStore, ProtocolSmokeReceipt, VerifiedInstall,
+    CURRENT_INSTALL_POINTER_SCHEMA_VERSION, INSTALL_RECEIPT_SCHEMA_VERSION,
+    LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 pub use runtime::{
     SkillLaunchSpec, SkillRuntimeResolver, SkillVersionPin, SKILL_LAUNCH_SCHEMA_VERSION,
