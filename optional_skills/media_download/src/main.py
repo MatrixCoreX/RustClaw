@@ -184,6 +184,20 @@ def _artifact_output_directory(request: dict[str, Any]) -> Path:
     return path
 
 
+def _skill_storage_directory(request: dict[str, Any]) -> Path | None:
+    context = request.get("context")
+    if not isinstance(context, dict):
+        return None
+    storage = context.get("skill_storage")
+    if not isinstance(storage, dict) or storage.get("storage_kind") != "directory":
+        return None
+    raw = storage.get("directory_path")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw).expanduser()
+    return path if path.is_absolute() else None
+
+
 def _input_path(request: dict[str, Any], raw: str) -> Path:
     context = request.get("context")
     workspace_root = None
@@ -655,10 +669,18 @@ def _failure_from_process(
     )
 
 
-def _run_tool(action: str, command: list[str], output_dir: Path, timeout_seconds: int) -> tuple[str, str, list[dict[str, Any]]]:
+def _run_tool(
+    action: str,
+    command: list[str],
+    output_dir: Path,
+    timeout_seconds: int,
+    storage_directory: Path | None = None,
+) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    if storage_directory is not None:
+        environment["MODELSCOPE_CACHE"] = str(storage_directory / "modelscope")
     try:
         completed = subprocess.run(
             command,
@@ -735,7 +757,13 @@ def _capabilities_extra() -> dict[str, Any]:
             "media_processing": ["ffmpeg", "ffprobe"],
             "ocr": ["tesseract", "chi_sim"],
             "browser_fallback": ["chromium_or_chrome"],
-            "transcription_alternative": ["funasr", "modelscope", "torch"],
+            "transcription_alternative": [
+                "funasr",
+                "modelscope",
+                "torch",
+                "modelscope_sensevoice_small",
+                "modelscope_fsmn_vad",
+            ],
         },
         "host_integrated_dependencies": {
             "default_transcription": ["whisper.cpp"],
@@ -842,7 +870,13 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
     except SkillFailure as failure:
         raise _mark_not_applied(failure, "pre_dispatch")
 
-    stdout, stderr, artifacts = _run_tool(action, command, output_dir, operation_timeout)
+    stdout, stderr, artifacts = _run_tool(
+        action,
+        command,
+        output_dir,
+        operation_timeout,
+        _skill_storage_directory(request),
+    )
     if action == "ocr":
         for artifact in artifacts:
             artifact["recognition_source"] = "local_ocr"

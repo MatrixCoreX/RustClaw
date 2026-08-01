@@ -555,6 +555,7 @@ export interface SkillStoreItem {
   build_adapter?: "cargo" | "python" | "node" | "go" | "prebuilt" | "generic_process" | "http_json" | null;
   build_network_policy?: "deny" | "approval_required" | null;
   host_dependencies?: string[] | null;
+  runtime_assets?: string[] | null;
   supported_os?: string[] | null;
   supported_arch?: string[] | null;
   package_version?: string | null;

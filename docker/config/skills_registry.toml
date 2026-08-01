@@ -97,13 +97,14 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "media_download"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "video"
 supported_os = ["linux", "macos"]
 install_mode = "on_demand"
 package_manifest = "optional_skills/media_download/skill.toml"
+storage = { kind = "directory", schema_version = 1, migration_owner = "media_download" }
 aliases = ["media_downloader", "download_media", "video_download"]
 timeout_seconds = 3600
 max_concurrency = 1
@@ -547,7 +548,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "x"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "publishing"
@@ -1348,7 +1349,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "crypto"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "market/data"
@@ -1386,7 +1387,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "stock"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "market/data"
@@ -1414,7 +1415,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "chinese_almanac"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "daily/lifestyle"
@@ -1441,7 +1442,7 @@ output_schema = { type = "object", required = ["text", "extra"], properties = { 
 
 [[skills]]
 name = "weather"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
@@ -1469,7 +1470,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "map_merchant"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
@@ -1862,7 +1863,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "invest_copy"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "publishing"
@@ -1981,7 +1982,7 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 [[skills]]
 name = "photo_organize"
-enabled = true
+enabled = false
 kind = "runner"
 planner_kind = "skill"
 group = "image"

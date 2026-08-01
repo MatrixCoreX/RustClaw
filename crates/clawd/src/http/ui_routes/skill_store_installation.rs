@@ -5,6 +5,7 @@ struct SkillStoreInstallSpec {
     adapter: skill_sdk::BuildAdapter,
     network_policy: skill_sdk::BuildNetworkPolicy,
     host_dependencies: Vec<String>,
+    runtime_assets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -24,6 +25,8 @@ enum SkillStoreErrorCode {
     HostDependencyAdminRequired,
     HostDependencyUnknown,
     HostDependencyInstallFailed,
+    RuntimeAssetUnknown,
+    RuntimeAssetInstallFailed,
     ResourceInsufficient,
     UnsafeConfigPath,
     #[cfg(not(test))]
@@ -56,6 +59,8 @@ impl SkillStoreErrorCode {
             Self::HostDependencyAdminRequired => "skill_store_host_dependency_admin_required",
             Self::HostDependencyUnknown => "skill_store_host_dependency_unknown",
             Self::HostDependencyInstallFailed => "skill_store_host_dependency_install_failed",
+            Self::RuntimeAssetUnknown => "skill_store_runtime_asset_unknown",
+            Self::RuntimeAssetInstallFailed => "skill_store_runtime_asset_install_failed",
             Self::ResourceInsufficient => "skill_store_resource_insufficient",
             Self::UnsafeConfigPath => "skill_store_unsafe_config_path",
             #[cfg(not(test))]
@@ -388,6 +393,7 @@ fn skill_store_install_spec(
         adapter: manifest.build.adapter,
         network_policy: manifest.build.network,
         host_dependencies: manifest.install.host_dependencies,
+        runtime_assets: manifest.install.runtime_assets,
     }))
 }
 

@@ -95,6 +95,11 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/name" }
         },
+        "runtime_assets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/name" }
+        },
         "resources": {
           "type": "object",
           "additionalProperties": false,
@@ -110,7 +115,7 @@
       "additionalProperties": false,
       "required": ["kind", "schema_version", "migration_owner"],
       "properties": {
-        "kind": { "type": "string" },
+        "kind": { "enum": ["none", "sqlite", "directory"] },
         "schema_version": { "type": "integer", "minimum": 1 },
         "migration_owner": { "type": "string" }
       }

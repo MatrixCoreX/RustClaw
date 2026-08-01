@@ -92,6 +92,30 @@ class AdapterTest(unittest.TestCase):
         self.assertNotIn("--extract-audio", command)
         self.assertNotIn("--whisper-translate", command)
 
+    def test_private_directory_storage_routes_modelscope_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            storage = root / "private-storage"
+            artifacts.mkdir()
+            storage.mkdir()
+            request = {
+                "context": {
+                    "skill_storage": {
+                        "storage_kind": "directory",
+                        "directory_path": str(storage),
+                    }
+                }
+            }
+            self.assertEqual(self.skill._skill_storage_directory(request), storage)
+            completed = subprocess.CompletedProcess(["tool"], 0, stdout="ok", stderr="")
+            with mock.patch.object(self.skill.subprocess, "run", return_value=completed) as run:
+                self.skill._run_tool("transcribe", ["tool"], artifacts, 30, storage)
+            self.assertEqual(
+                run.call_args.kwargs["env"]["MODELSCOPE_CACHE"],
+                str(storage / "modelscope"),
+            )
+
     def test_transcribe_command_defaults_to_local_whisper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -127,6 +127,11 @@ pub struct PackageManifest {
 pub struct InstallSpec {
     #[serde(default)]
     pub host_dependencies: Vec<String>,
+    /// Host-resolved, skill-private runtime resources such as local model
+    /// snapshots. Manifests name catalog IDs only; they never provide a URL or
+    /// installer command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_assets: Vec<String>,
     #[serde(default)]
     pub resources: InstallResourceRequirements,
 }
@@ -478,8 +483,31 @@ impl PackageManifest {
         for config in &self.lifecycle.config_files {
             validate_relative_path(config, "lifecycle.config_files", false)?;
         }
+        if !matches!(self.storage.kind.as_str(), "none" | "sqlite" | "directory")
+            || self.storage.schema_version == 0
+        {
+            return Err(SkillSdkError::new(
+                "manifest_storage_invalid",
+                format!(
+                    "kind={} schema_version={}",
+                    self.storage.kind, self.storage.schema_version
+                ),
+            ));
+        }
+        if self.storage.kind != "none" && self.storage.migration_owner != self.package.name {
+            return Err(SkillSdkError::new(
+                "manifest_storage_owner_invalid",
+                format!(
+                    "skill={} migration_owner={}",
+                    self.package.name, self.storage.migration_owner
+                ),
+            ));
+        }
         for dependency in &self.install.host_dependencies {
             validate_safe_name(dependency, "install.host_dependencies")?;
+        }
+        for asset in &self.install.runtime_assets {
+            validate_safe_name(asset, "install.runtime_assets")?;
         }
         if self
             .install
@@ -494,12 +522,39 @@ impl PackageManifest {
                 "field=install.host_dependencies constraint=unique",
             ));
         }
+        if self
+            .install
+            .runtime_assets
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != self.install.runtime_assets.len()
+        {
+            return Err(SkillSdkError::new(
+                "manifest_runtime_asset_duplicate",
+                "field=install.runtime_assets constraint=unique",
+            ));
+        }
         if !self.install.host_dependencies.is_empty()
             && self.build.network != BuildNetworkPolicy::ApprovalRequired
         {
             return Err(SkillSdkError::new(
                 "manifest_host_dependency_network_policy_invalid",
                 "install.host_dependencies requires build.network=approval_required",
+            ));
+        }
+        if !self.install.runtime_assets.is_empty()
+            && self.build.network != BuildNetworkPolicy::ApprovalRequired
+        {
+            return Err(SkillSdkError::new(
+                "manifest_runtime_asset_network_policy_invalid",
+                "install.runtime_assets requires build.network=approval_required",
+            ));
+        }
+        if !self.install.runtime_assets.is_empty() && self.storage.kind != "directory" {
+            return Err(SkillSdkError::new(
+                "manifest_runtime_asset_storage_invalid",
+                "install.runtime_assets requires storage.kind=directory",
             ));
         }
         if self.install.resources.min_memory_mb > 1_048_576

@@ -18,6 +18,8 @@ const SKILL_STORE_ERROR_MESSAGES: Record<string, readonly [string, string]> = {
   skill_store_host_dependency_admin_required: ["这个技能需要安装系统依赖，请使用管理员账号操作。", "This skill needs system dependencies. Sign in with an administrator account to install it."],
   skill_store_host_dependency_unknown: ["安装清单声明了宿主不认识的系统依赖，已安全停止。", "The manifest declares a system dependency this host does not recognize, so installation stopped safely."],
   skill_store_host_dependency_install_failed: ["系统依赖没有安装完成，请展开诊断信息检查包管理器、网络或管理员权限。", "A system dependency could not be installed. Open diagnostics and check the package manager, network, or administrator privileges."],
+  skill_store_runtime_asset_unknown: ["安装清单声明了宿主不认识的本地资源，已安全停止。", "The manifest declares a local resource this host does not recognize, so installation stopped safely."],
+  skill_store_runtime_asset_install_failed: ["本地资源没有准备完成，技能未启用。请展开诊断信息检查网络和可用磁盘后重试。", "A local resource could not be prepared, so the skill was not enabled. Open diagnostics, check the network and free disk space, then try again."],
   skill_store_resource_insufficient: ["这台机器当前的内存或可用磁盘不足，无法完整安装这个技能。", "This machine does not currently have enough memory or free disk space to install the complete skill."],
   skill_store_unsafe_config_path: ["这个技能声明了不安全的配置路径，已停止操作。", "This skill declares an unsafe configuration path, so the operation was stopped."],
   skill_store_install_start_failed: ["无法启动技能安装，请检查服务状态后重试。", "{product_name} could not start the skill installation. Check the service status and try again."],

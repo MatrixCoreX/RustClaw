@@ -824,6 +824,11 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
         );
         for name in &actual {
             let entry = registry.get(name).expect("on-demand entry");
+            assert!(
+                !entry.enabled,
+                "{}: `{name}` must default disabled in the authoritative registry",
+                registry_path.display()
+            );
             let manifest_relative = entry
                 .package_manifest
                 .as_deref()
@@ -870,7 +875,11 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
             .filter_map(toml::Value::as_str)
             .map(str::to_string)
             .collect::<BTreeSet<_>>();
-        assert_eq!(uninstalled, expected, "{}", config_path.display());
+        assert!(
+            uninstalled.is_subset(&expected),
+            "{}: legacy startup uninstall defaults must not contain non-on-demand skills",
+            config_path.display()
+        );
         let baseline = skills["skills_list"]
             .as_array()
             .expect("skills list")
@@ -878,14 +887,16 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
             .filter_map(toml::Value::as_str)
             .collect::<BTreeSet<_>>();
         for name in &expected {
-            assert_eq!(
-                skills["skill_switches"]
-                    .get(name.as_str())
-                    .and_then(toml::Value::as_bool),
-                Some(false),
-                "{}: `{name}` must default disabled",
-                config_path.display()
-            );
+            if let Some(value) = skills["skill_switches"]
+                .get(name.as_str())
+                .and_then(toml::Value::as_bool)
+            {
+                assert!(
+                    !value,
+                    "{}: legacy override must not enable on-demand `{name}`",
+                    config_path.display()
+                );
+            }
             assert!(
                 !baseline.contains(name.as_str()),
                 "{}: `{name}` must not be in the proactive baseline",

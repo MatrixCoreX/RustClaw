@@ -121,6 +121,8 @@ fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() 
         .into_current()
         .expect("current manifest");
     manifest.install.host_dependencies = vec!["ffmpeg".into(), "tesseract_chi_sim".into()];
+    manifest.install.runtime_assets = vec!["modelscope_sensevoice_small".into()];
+    manifest.storage.kind = "directory".into();
     manifest.install.resources.min_memory_mb = 4096;
     manifest.install.resources.min_free_disk_mb = 6144;
     manifest.build.network = crate::manifest::BuildNetworkPolicy::ApprovalRequired;
@@ -131,6 +133,10 @@ fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() 
     );
     assert_eq!(manifest.install.resources.min_memory_mb, 4096);
     assert_eq!(manifest.install.resources.min_free_disk_mb, 6144);
+    assert_eq!(
+        manifest.install.runtime_assets,
+        ["modelscope_sensevoice_small"]
+    );
 
     let mut unsafe_id = manifest.clone();
     unsafe_id.install.host_dependencies[1] = "../../package".into();
@@ -147,6 +153,28 @@ fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() 
             .code,
         "manifest_host_dependency_duplicate"
     );
+    let mut duplicate_asset = manifest.clone();
+    duplicate_asset
+        .install
+        .runtime_assets
+        .push("modelscope_sensevoice_small".into());
+    assert_eq!(
+        duplicate_asset
+            .validate()
+            .expect_err("duplicate runtime asset ID")
+            .code,
+        "manifest_runtime_asset_duplicate"
+    );
+    let mut denied_asset_network = manifest.clone();
+    denied_asset_network.build.network = crate::manifest::BuildNetworkPolicy::Deny;
+    denied_asset_network.install.host_dependencies.clear();
+    assert_eq!(
+        denied_asset_network
+            .validate()
+            .expect_err("runtime assets require explicit install-network approval")
+            .code,
+        "manifest_runtime_asset_network_policy_invalid"
+    );
 
     let mut legacy = manifest;
     legacy.schema_version = LEGACY_SKILL_MANIFEST_SCHEMA_VERSION;
@@ -158,6 +186,19 @@ fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() 
             .code,
         "manifest_install_requires_schema_v2"
     );
+}
+
+#[test]
+fn absent_runtime_assets_preserve_the_existing_manifest_digest_surface() {
+    let manifest = PackageManifest::from_toml_str(manifest_source())
+        .expect("legacy-compatible manifest")
+        .into_current()
+        .expect("current manifest");
+    assert!(manifest.install.runtime_assets.is_empty());
+    assert!(!manifest
+        .to_toml_string()
+        .expect("canonical manifest")
+        .contains("runtime_assets"));
 }
 
 #[test]
@@ -484,6 +525,24 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         manifest.to_toml_string().expect("manifest text"),
     )
     .expect("manifest file");
+    let mut artifacts = vec![ArtifactReceipt {
+        path: "runtime/bin/sample-weather-skill".to_string(),
+        sha256: digest_file(&binary).expect("binary digest"),
+        size_bytes: fs::metadata(&binary).expect("metadata").len(),
+        executable: true,
+    }];
+    let data_dir = runtime_dir.join("data");
+    fs::create_dir_all(&data_dir).expect("artifact data directory");
+    for index in 0..31 {
+        let path = data_dir.join(format!("fixture-{index:02}.bin"));
+        fs::write(&path, format!("artifact-{index}")).expect("fixture artifact");
+        artifacts.push(ArtifactReceipt {
+            path: format!("runtime/data/fixture-{index:02}.bin"),
+            sha256: digest_file(&path).expect("artifact digest"),
+            size_bytes: fs::metadata(&path).expect("artifact metadata").len(),
+            executable: false,
+        });
+    }
     let receipt = InstallReceipt {
         schema_version: INSTALL_RECEIPT_SCHEMA_VERSION,
         skill_name: manifest.package.name.clone(),
@@ -499,12 +558,7 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         adapter: BuildAdapter::Cargo,
         adapter_version: "cargo fixture".to_string(),
         platform: HostPlatform::current(),
-        artifacts: vec![ArtifactReceipt {
-            path: "runtime/bin/sample-weather-skill".to_string(),
-            sha256: digest_file(&binary).expect("binary digest"),
-            size_bytes: fs::metadata(&binary).expect("metadata").len(),
-            executable: true,
-        }],
+        artifacts,
         launch: ReceiptLaunch {
             launcher: LauncherKind::Native,
             program: "runtime/bin/sample-weather-skill".to_string(),
@@ -552,13 +606,15 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         )
         .expect("resolve exact pinned launch");
     assert_eq!(pinned.receipt_digest, launch.receipt_digest);
-    fs::remove_file(
-        store
-            .skill_root("sample_weather")
-            .expect("skill root")
-            .join("current.json"),
-    )
-    .expect("remove mutable current pointer");
+    let deactivated = store
+        .deactivate_current("sample_weather")
+        .expect("deactivate mutable current pointer")
+        .expect("active pointer");
+    assert_eq!(deactivated.receipt_digest, launch.receipt_digest);
+    assert!(store
+        .deactivate_current("sample_weather")
+        .expect("repeated deactivation is idempotent")
+        .is_none());
     let pinned_without_current = SkillRuntimeResolver::new(store.root())
         .resolve_pinned(
             "sample_weather",

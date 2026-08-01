@@ -32,3 +32,16 @@ fn descriptor_preserves_the_declared_schema_version() {
     let descriptor = resolver.descriptor("kb", 3).expect("KB descriptor");
     assert_eq!(descriptor.schema_version, 3);
 }
+
+#[test]
+fn directory_descriptor_is_private_and_skill_scoped() {
+    let resolver = SkillStorageResolver::test_default();
+    let descriptor = resolver
+        .directory_descriptor("media_download", 2)
+        .expect("directory descriptor");
+    assert_eq!(descriptor.storage_kind, "directory");
+    assert_eq!(descriptor.schema_version, 2);
+    let directory = PathBuf::from(descriptor.directory_path.expect("directory path"));
+    assert!(directory.is_dir());
+    assert!(directory.starts_with(resolver.root()));
+}

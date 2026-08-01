@@ -154,10 +154,14 @@ fn map_storage_descriptor_to_sandbox(
     let Some(sandbox_directory) = sandbox_directory else {
         return Err("skill storage sandbox target unavailable".to_string());
     };
-    let file_name = std::path::Path::new(&storage_descriptor.database_path)
-        .file_name()
-        .ok_or_else(|| "skill storage database path has no file name".to_string())?;
-    storage_descriptor.database_path = sandbox_directory.join(file_name).display().to_string();
+    if storage_descriptor.storage_kind == "directory" {
+        storage_descriptor.directory_path = Some(sandbox_directory.display().to_string());
+    } else {
+        let file_name = std::path::Path::new(&storage_descriptor.database_path)
+            .file_name()
+            .ok_or_else(|| "skill_storage_database_filename_missing".to_string())?;
+        storage_descriptor.database_path = sandbox_directory.join(file_name).display().to_string();
+    }
     Ok(descriptor)
 }
 
@@ -241,10 +245,18 @@ pub(crate) async fn run_skill_with_runner_once(
         .map(Value::String)
         .unwrap_or(Value::Null);
     let storage_descriptor = storage_descriptor_for_skill(state, canonical_skill_name)?;
-    let storage_writable_directory = storage_descriptor
-        .as_ref()
-        .and_then(|descriptor| std::path::Path::new(&descriptor.database_path).parent())
-        .map(std::path::Path::to_path_buf);
+    let storage_writable_directory = storage_descriptor.as_ref().and_then(|descriptor| {
+        if descriptor.storage_kind == "directory" {
+            descriptor
+                .directory_path
+                .as_deref()
+                .map(std::path::PathBuf::from)
+        } else {
+            std::path::Path::new(&descriptor.database_path)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        }
+    });
     let artifact_output_directory = invocation_artifact_output_directory(
         &state.skill_rt.workspace_root,
         &task.task_id,
@@ -1254,7 +1266,7 @@ fn storage_descriptor_for_skill(
     else {
         return Ok(None);
     };
-    if declaration.kind != "sqlite"
+    if !matches!(declaration.kind.as_str(), "sqlite" | "directory")
         || declaration.schema_version == 0
         || declaration.migration_owner != canonical_skill_name
     {
@@ -1262,12 +1274,18 @@ fn storage_descriptor_for_skill(
             "invalid skill storage declaration: skill={canonical_skill_name}"
         ));
     }
-    state
-        .core
-        .skill_storage
-        .descriptor(canonical_skill_name, declaration.schema_version)
-        .map(Some)
-        .map_err(|error| {
-            format!("skill storage unavailable: skill={canonical_skill_name} error={error}")
-        })
+    let descriptor = if declaration.kind == "directory" {
+        state
+            .core
+            .skill_storage
+            .directory_descriptor(canonical_skill_name, declaration.schema_version)
+    } else {
+        state
+            .core
+            .skill_storage
+            .descriptor(canonical_skill_name, declaration.schema_version)
+    };
+    descriptor.map(Some).map_err(|error| {
+        format!("skill storage unavailable: skill={canonical_skill_name} error={error}")
+    })
 }

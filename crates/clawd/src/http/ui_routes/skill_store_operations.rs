@@ -4,7 +4,7 @@ fn skill_store_operation_stage(phase: &str) -> skill_sdk::OperationStage {
         "preflight" | "manifest" | "toolchain" | "precompiled_verify" => {
             OperationStage::Preflight
         }
-        "dependencies" | "prepare_environment" => OperationStage::Dependencies,
+        "dependencies" | "prepare_environment" | "runtime_assets" => OperationStage::Dependencies,
         "build" | "artifact" | "copy_source" | "source_digest" | "precompiled_copy" => {
             OperationStage::Build
         }
@@ -205,9 +205,23 @@ async fn start_skill_store_install(
         Ok(spec) => spec,
         Err(error) => return skill_store_error_response(error),
     };
+    if let Some(spec) = spec.as_ref() {
+        if let Err(error) = resolve_declared_runtime_assets(&spec.runtime_assets) {
+            return skill_store_error_response(SkillStoreOperationError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SkillStoreErrorCode::RuntimeAssetUnknown,
+                format!(
+                    "skill={} asset={} code={} detail={}",
+                    skill_name, error.asset_id, error.code, error.detail
+                ),
+            ));
+        }
+    }
     if spec
         .as_ref()
-        .is_some_and(|value| !value.host_dependencies.is_empty())
+        .is_some_and(|value| {
+            !value.host_dependencies.is_empty() || !value.runtime_assets.is_empty()
+        })
         && !identity.role.eq_ignore_ascii_case("admin")
     {
         return skill_store_error_response(SkillStoreOperationError::new(
@@ -264,7 +278,7 @@ async fn run_skill_store_install_operation(
     state: AppState,
     operation_id: String,
     spec: Option<SkillStoreInstallSpec>,
-    action: skill_sdk::OperationAction,
+    _action: skill_sdk::OperationAction,
     control: skill_sdk::InstallControl,
     allow_network: bool,
     _mutation_guard: SkillStoreMutationGuard,
@@ -295,19 +309,26 @@ async fn run_skill_store_install_operation(
             None,
             Some(data),
         ),
-        Err(error) => {
-            let pointer_changed = pointer_before.as_ref().is_some_and(|before| {
-                receipt_store
-                    .current_pointer(&skill_name)
-                    .map(|current| current != *before)
-                    .unwrap_or(false)
-            });
-            if matches!(
-                action,
-                skill_sdk::OperationAction::Update | skill_sdk::OperationAction::Repair
-            ) && pointer_changed
-            {
-                let _ = receipt_store.rollback(&skill_name);
+        Err(mut error) => {
+            let pointer_after = receipt_store.current_pointer(&skill_name).ok();
+            if pointer_after.as_ref() != pointer_before.as_ref() {
+                let rollback = if pointer_before.is_some() {
+                    receipt_store.rollback(&skill_name).map(|_| ())
+                } else {
+                    receipt_store.deactivate_current(&skill_name).map(|_| ())
+                };
+                if let Err(rollback_error) = rollback {
+                    tracing::error!(
+                        skill_name,
+                        error_code = %rollback_error.code,
+                        diagnostic = %rollback_error.detail,
+                        "skill_store_install_pointer_rollback_failed"
+                    );
+                    error.diagnostic.push_str(&format!(
+                        "; pointer_rollback_code={} pointer_rollback_detail={}",
+                        rollback_error.code, rollback_error.detail
+                    ));
+                }
             }
             finish_skill_store_failure(
                 &store,
@@ -416,7 +437,45 @@ async fn run_skill_store_install_operation_inner(
                 .with_phase(Some("dependencies".to_string()))
             })?;
         }
-        Some(install_skill_store_package(state, spec, control.clone(), allow_network).await?)
+        let outcome = install_skill_store_package(state, spec, control.clone(), allow_network).await?;
+        if !cfg!(test) && !spec.runtime_assets.is_empty() {
+            let storage_directory = state
+                .core
+                .skill_storage
+                .directory_path(&spec.skill_name)
+                .map_err(|error| {
+                    SkillStoreOperationError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        SkillStoreErrorCode::RuntimeAssetInstallFailed,
+                        error,
+                    )
+                    .with_phase(Some("runtime_assets".to_string()))
+                })?;
+            install_declared_runtime_assets(
+                &spec.runtime_assets,
+                &outcome,
+                &storage_directory,
+                control,
+            )
+            .await
+            .map_err(|error| {
+                let code = if error.code == "runtime_asset_unknown" {
+                    SkillStoreErrorCode::RuntimeAssetUnknown
+                } else {
+                    SkillStoreErrorCode::RuntimeAssetInstallFailed
+                };
+                SkillStoreOperationError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    code,
+                    format!(
+                        "skill={} asset={} code={} detail={}",
+                        spec.skill_name, error.asset_id, error.code, error.detail
+                    ),
+                )
+                .with_phase(Some("runtime_assets".to_string()))
+            })?;
+        }
+        Some(outcome)
     } else {
         None
     };
@@ -640,17 +699,19 @@ async fn run_skill_store_remove_operation(
         } else {
             delete_declared_skill_configs(&state, &operation.skill_name)?
         };
+        let storage_kind = state.get_skills_registry().and_then(|registry| {
+            registry
+                .storage(&operation.skill_name)
+                .map(|storage| storage.kind.clone())
+        });
         let deleted_data = if preserve_data {
             None
-        } else if state
-            .get_skills_registry()
-            .is_some_and(|registry| registry.storage(&operation.skill_name).is_some())
-        {
+        } else if let Some(storage_kind) = storage_kind {
             Some(
                 state
                     .core
                     .skill_storage
-                    .clear_skill_data(&operation.skill_name)
+                    .clear_skill_data(&operation.skill_name, &storage_kind)
                     .map_err(|error| {
                         SkillStoreOperationError::new(
                             StatusCode::INTERNAL_SERVER_ERROR,

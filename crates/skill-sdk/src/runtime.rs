@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::manifest::{
     BuildAdapter, ExecutionProfile, LauncherKind, PackageManifest, SandboxProfile,
 };
-use crate::receipt::{digest_file, InstallReceipt, InstallReceiptStore, LaunchProgramScope};
+use crate::receipt::{
+    digest_file, ArtifactReceipt, InstallReceipt, InstallReceiptStore, LaunchProgramScope,
+};
 use crate::{SkillSdkError, SkillSdkResult};
 
 pub const SKILL_LAUNCH_SCHEMA_VERSION: u32 = 1;
@@ -413,15 +415,70 @@ impl SkillRuntimeResolver {
 }
 
 fn verify_artifacts(install_root: &Path, receipt: &InstallReceipt) -> SkillSdkResult<()> {
-    for artifact in &receipt.artifacts {
-        let path = confined_existing_path(install_root, &artifact.path, true)?;
-        let metadata = fs::metadata(&path)?;
-        if metadata.len() != artifact.size_bytes || digest_file(&path)? != artifact.sha256 {
-            return Err(SkillSdkError::new(
-                "launch_artifact_digest_mismatch",
-                format!("path={}", path.display()),
-            ));
+    let worker_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(8)
+        .min(receipt.artifacts.len());
+    if worker_count <= 1 || receipt.artifacts.len() < 32 {
+        return receipt
+            .artifacts
+            .iter()
+            .try_for_each(|artifact| verify_artifact(install_root, artifact));
+    }
+
+    // Balance both byte hashing and per-file open/stat overhead. The receipt
+    // remains fully verified; this only uses the host's available CPU and I/O
+    // concurrency instead of serially walking large private environments.
+    let mut ordered = receipt.artifacts.iter().collect::<Vec<_>>();
+    ordered.sort_unstable_by_key(|artifact| std::cmp::Reverse(artifact.size_bytes));
+    let mut buckets = vec![Vec::new(); worker_count];
+    let mut loads = vec![0_u64; worker_count];
+    for artifact in ordered {
+        let bucket = loads
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, load)| *load)
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        buckets[bucket].push(artifact);
+        loads[bucket] = loads[bucket].saturating_add(artifact.size_bytes.saturating_add(64 * 1024));
+    }
+
+    std::thread::scope(|scope| {
+        let workers = buckets
+            .into_iter()
+            .map(|bucket| {
+                scope.spawn(move || {
+                    bucket
+                        .into_iter()
+                        .try_for_each(|artifact| verify_artifact(install_root, artifact))
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            match worker.join() {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(SkillSdkError::new(
+                        "launch_artifact_verify_worker_panicked",
+                        "artifact verification worker panicked",
+                    ));
+                }
+            }
         }
+        Ok(())
+    })
+}
+
+fn verify_artifact(install_root: &Path, artifact: &ArtifactReceipt) -> SkillSdkResult<()> {
+    let path = confined_existing_path(install_root, &artifact.path, true)?;
+    let metadata = fs::metadata(&path)?;
+    if metadata.len() != artifact.size_bytes || digest_file(&path)? != artifact.sha256 {
+        return Err(SkillSdkError::new(
+            "launch_artifact_digest_mismatch",
+            format!("path={}", path.display()),
+        ));
     }
     Ok(())
 }

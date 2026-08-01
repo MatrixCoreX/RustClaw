@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -403,7 +404,7 @@ impl InstallReceiptStore {
                     canonical_install.display().to_string(),
                 )
             })?;
-        let current_path = skill_root.join("current.json");
+        let current_path = self.active_install_path(&receipt.skill_name)?;
         let previous_path = skill_root.join("previous.json");
         let obsolete_pointer = if previous_path.is_file() {
             let pointer: CurrentInstallPointer =
@@ -453,7 +454,7 @@ impl InstallReceiptStore {
 
     pub fn rollback(&self, skill_name: &str) -> SkillSdkResult<CurrentInstallPointer> {
         let skill_root = self.skill_root(skill_name)?;
-        let current_path = skill_root.join("current.json");
+        let current_path = self.active_install_path(skill_name)?;
         let previous_path = skill_root.join("previous.json");
         let previous: CurrentInstallPointer = serde_json::from_slice(&fs::read(&previous_path)?)?;
         validate_pointer(&previous)?;
@@ -462,6 +463,28 @@ impl InstallReceiptStore {
         atomic_write_json(&current_path, &previous)?;
         atomic_write(&previous_path, &current)?;
         Ok(previous)
+    }
+
+    /// Remove the mutable current pointer without deleting an immutable
+    /// installed version. This is used to roll back a failed first-time
+    /// installation after activation but before the surrounding host
+    /// transaction completes.
+    pub fn deactivate_current(
+        &self,
+        skill_name: &str,
+    ) -> SkillSdkResult<Option<CurrentInstallPointer>> {
+        let skill_root = self.skill_root(skill_name)?;
+        let current_path = skill_root.join("current.json");
+        let raw = match fs::read(&current_path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let current: CurrentInstallPointer = serde_json::from_slice(&raw)?;
+        validate_pointer(&current)?;
+        self.verify_pointer_install(skill_name, &current)?;
+        fs::remove_file(current_path)?;
+        Ok(Some(current))
     }
 
     pub fn acquire_version_lease(
@@ -512,6 +535,10 @@ impl InstallReceiptStore {
             skill_name: skill_name.to_string(),
             install_dir,
         })
+    }
+
+    fn active_install_path(&self, skill_name: &str) -> SkillSdkResult<PathBuf> {
+        Ok(self.skill_root(skill_name)?.join("current.json"))
     }
 
     fn verify_pointer_install(
@@ -666,13 +693,27 @@ impl InstallReceiptStore {
 }
 
 pub fn digest_file(path: &Path) -> SkillSdkResult<String> {
-    let bytes = fs::read(path).map_err(|error| {
+    let mut file = File::open(path).map_err(|error| {
         SkillSdkError::new(
             "artifact_read_failed",
             format!("path={} error={error}", path.display()),
         )
     })?;
-    Ok(hex::encode(Sha256::digest(bytes)))
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| {
+            SkillSdkError::new(
+                "artifact_read_failed",
+                format!("path={} error={error}", path.display()),
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn validate_pointer(pointer: &CurrentInstallPointer) -> SkillSdkResult<()> {
