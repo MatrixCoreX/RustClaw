@@ -187,9 +187,6 @@ fn structured_read_request_path<'a>(normalized_skill: &str, args: &'a Value) -> 
 }
 
 fn path_stays_within_workspace(workspace_root: &Path, input: &str) -> bool {
-    let normalized_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
     let raw = Path::new(input);
     if raw
         .components()
@@ -197,15 +194,38 @@ fn path_stays_within_workspace(workspace_root: &Path, input: &str) -> bool {
     {
         return false;
     }
+    let Some(normalized_root) = normalize_through_existing_ancestor(workspace_root) else {
+        return false;
+    };
     let candidate = if raw.is_absolute() {
         PathBuf::from(raw)
     } else {
-        normalized_root.join(raw)
+        workspace_root.join(raw)
     };
-    let normalized_candidate = candidate
-        .canonicalize()
-        .unwrap_or_else(|_| candidate.clone());
+    let Some(normalized_candidate) = normalize_through_existing_ancestor(&candidate) else {
+        return false;
+    };
     normalized_candidate.starts_with(normalized_root)
+}
+
+fn normalize_through_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut ancestor = absolute.as_path();
+    let mut missing_suffix = Vec::new();
+    loop {
+        if let Ok(mut normalized) = ancestor.canonicalize() {
+            for component in missing_suffix.iter().rev() {
+                normalized.push(component);
+            }
+            return Some(normalized);
+        }
+        missing_suffix.push(ancestor.file_name()?.to_os_string());
+        ancestor = ancestor.parent()?;
+    }
 }
 
 fn auto_sudo_structured_read_targets_outside_workspace(
@@ -660,5 +680,51 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
                 "auto_sudo_retry_failed_user_visible".to_string(),
             )))
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod path_tests {
+    use super::path_stays_within_workspace;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "auto-sudo-path-{label}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&root).expect("create path test root");
+        root
+    }
+
+    #[test]
+    fn missing_target_under_symlinked_workspace_is_still_inside() {
+        let parent = temp_root("workspace-alias");
+        let real_workspace = parent.join("real");
+        let workspace_alias = parent.join("alias");
+        fs::create_dir_all(&real_workspace).expect("create real workspace");
+        symlink(&real_workspace, &workspace_alias).expect("create workspace alias");
+
+        assert!(path_stays_within_workspace(
+            &workspace_alias,
+            &workspace_alias.join("missing.log").to_string_lossy()
+        ));
+        fs::remove_dir_all(parent).ok();
+    }
+
+    #[test]
+    fn missing_target_below_symlink_escape_is_rejected() {
+        let workspace = temp_root("workspace-escape");
+        let outside = temp_root("outside");
+        symlink(&outside, workspace.join("escape")).expect("create escape alias");
+
+        assert!(!path_stays_within_workspace(
+            &workspace,
+            &workspace.join("escape/missing.log").to_string_lossy()
+        ));
+        fs::remove_dir_all(workspace).ok();
+        fs::remove_dir_all(outside).ok();
     }
 }
