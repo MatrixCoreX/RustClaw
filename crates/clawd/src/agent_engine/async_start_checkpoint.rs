@@ -162,15 +162,40 @@ fn build_pending_async_job_checkpoint_progress_payload(
         .get(step_in_round..)
         .unwrap_or_default();
     let continuation_action_count = continuation_actions.len();
+    let pending_delivery_intent = loop_state
+        .capability_results
+        .iter()
+        .rev()
+        .find(|result| {
+            result.status == claw_core::capability_result::CapabilityResultStatus::Waiting
+                && result.continuation.as_ref().is_some_and(|continuation| {
+                    continuation.kind == claw_core::capability_result::ContinuationKind::Poll
+                        && continuation.reference.as_deref() == Some(job.job_id.as_str())
+                })
+        })
+        .map(|result| result.delivery.intent);
+    let requires_model_synthesis = pending_delivery_intent.is_some_and(|intent| {
+        intent == claw_core::capability_result::CapabilityDeliveryIntent::ModelSynthesis
+    });
+    let continue_planning = !continuation_actions.is_empty() || requires_model_synthesis;
     boundary_context["async_completion_policy"] = json!({
         "schema_version": 1,
-        "mode": if continuation_actions.is_empty() {
-            "direct_terminal"
-        } else {
+        "mode": if continue_planning {
             "continue_planning"
+        } else {
+            "direct_terminal"
         },
         "continuation_action_count": continuation_action_count,
         "continuation_actions": continuation_actions,
+        "delivery_intent": pending_delivery_intent.map(|intent| intent.as_token()),
+        "requires_model_synthesis": requires_model_synthesis,
+        "decision_reason_code": if !continuation_actions.is_empty() {
+            "verified_action_tail_present"
+        } else if requires_model_synthesis {
+            "capability_result_requires_model_synthesis"
+        } else {
+            "terminal_delivery_contract"
+        },
     });
     if let (Some(obj), Some(adapter)) = (
         boundary_context.as_object_mut(),

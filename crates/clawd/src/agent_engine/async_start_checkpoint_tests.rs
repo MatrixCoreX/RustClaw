@@ -7,6 +7,10 @@ use super::{
 use crate::agent_engine::LoopState;
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::task_lifecycle::{CheckpointBudgetCounters, ResumeEntrypoint};
+use claw_core::capability_result::{
+    CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus, Continuation,
+    ContinuationKind,
+};
 
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
@@ -206,6 +210,104 @@ fn pending_async_job_checkpoint_preserves_unexecuted_plan_tail() {
         policy["continuation_actions"][0]["capability"],
         "system.health_check"
     );
+}
+
+#[test]
+fn pending_model_synthesis_job_resumes_planner_without_verified_action_tail() {
+    let mut loop_state = LoopState::new();
+    let mut pending = CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        json!({}),
+    );
+    pending.status = CapabilityResultStatus::Waiting;
+    pending.continuation = Some(Continuation {
+        kind: ContinuationKind::Poll,
+        reference: Some("job-model-synthesis".to_string()),
+        poll_after_ms: Some(2_000),
+        state: json!({}),
+    });
+    loop_state.capability_results.push(pending);
+    let job = pending_async_job_ref_from_extra(Some(&json!({
+        "pending_async_job": {
+            "job_id": "job-model-synthesis",
+            "status": "accepted",
+            "poll_after_seconds": 2,
+            "expires_at": 3000,
+            "cancel_ref": "cancel:job-model-synthesis",
+            "message_key": "clawd.task.async_job_pending"
+        }
+    })))
+    .expect("parse")
+    .expect("job");
+
+    let payload = build_pending_async_job_checkpoint_progress_payload(
+        &test_task(),
+        &loop_state,
+        "media_download",
+        1,
+        1,
+        &job,
+        None,
+        1000,
+        test_budget(&loop_state, 1),
+    );
+    let policy = &payload["task_checkpoint"]["boundary_context"]["async_completion_policy"];
+
+    assert_eq!(policy["mode"], "continue_planning");
+    assert_eq!(policy["continuation_action_count"], 0);
+    assert_eq!(policy["delivery_intent"], "model_synthesis");
+    assert_eq!(policy["requires_model_synthesis"], true);
+    assert_eq!(
+        policy["decision_reason_code"],
+        "capability_result_requires_model_synthesis"
+    );
+}
+
+#[test]
+fn pending_exact_machine_job_keeps_direct_terminal_without_action_tail() {
+    let mut loop_state = LoopState::new();
+    let mut pending =
+        CapabilityResultEnvelope::ok("machine.snapshot", Some("snapshot".to_string()), json!({}));
+    pending.status = CapabilityResultStatus::Waiting;
+    pending.delivery.intent = CapabilityDeliveryIntent::ExactMachine;
+    pending.continuation = Some(Continuation {
+        kind: ContinuationKind::Poll,
+        reference: Some("job-exact-machine".to_string()),
+        poll_after_ms: Some(2_000),
+        state: json!({}),
+    });
+    loop_state.capability_results.push(pending);
+    let job = pending_async_job_ref_from_extra(Some(&json!({
+        "pending_async_job": {
+            "job_id": "job-exact-machine",
+            "status": "accepted",
+            "poll_after_seconds": 2,
+            "expires_at": 3000,
+            "cancel_ref": "cancel:job-exact-machine",
+            "message_key": "clawd.task.async_job_pending"
+        }
+    })))
+    .expect("parse")
+    .expect("job");
+
+    let payload = build_pending_async_job_checkpoint_progress_payload(
+        &test_task(),
+        &loop_state,
+        "machine_snapshot",
+        1,
+        1,
+        &job,
+        None,
+        1000,
+        test_budget(&loop_state, 1),
+    );
+    let policy = &payload["task_checkpoint"]["boundary_context"]["async_completion_policy"];
+
+    assert_eq!(policy["mode"], "direct_terminal");
+    assert_eq!(policy["delivery_intent"], "exact_machine");
+    assert_eq!(policy["requires_model_synthesis"], false);
+    assert_eq!(policy["decision_reason_code"], "terminal_delivery_contract");
 }
 
 #[test]
