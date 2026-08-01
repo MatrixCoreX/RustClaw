@@ -2,6 +2,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::OnceLock;
 
 use chrono::{Datelike, Local, NaiveDate};
 use lunar_rust::{
@@ -12,8 +13,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 const SKILL_NAME: &str = "chinese_almanac";
-const DISCLAIMER: &str =
-    "老黄历内容属于传统民俗信息，仅供文化参考，不应替代医疗、法律、财务、安全或其他专业决策。";
+const LOCALE_SOURCE: &str = include_str!("../locales/zh-CN.json");
+static LOCALE_MESSAGES: OnceLock<Map<String, Value>> = OnceLock::new();
+
+fn locale_message(key: &str) -> String {
+    LOCALE_MESSAGES
+        .get_or_init(|| {
+            serde_json::from_str::<Map<String, Value>>(LOCALE_SOURCE)
+                .expect("locale_resource_invalid")
+        })
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or(key)
+        .to_string()
+}
+
+fn render_message(key: &str, params: &[(&str, String)]) -> String {
+    let mut rendered = locale_message(key);
+    for (name, value) in params {
+        rendered = rendered.replace(&format!("{{{name}}}"), value);
+    }
+    rendered
+}
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -83,7 +104,10 @@ fn handle_line(line: &str) -> Response {
         },
         Err(error) => error_response(
             "unknown".to_string(),
-            SkillError::new("invalid_input", format!("输入不是有效的请求 JSON：{error}")),
+            SkillError::new(
+                "invalid_input",
+                render_message("error.invalid_input", &[("error", error.to_string())]),
+            ),
         ),
     }
 }
@@ -106,14 +130,14 @@ fn error_response(request_id: String, error: SkillError) -> Response {
 }
 
 fn execute(args: &Value) -> Result<(String, Value), SkillError> {
-    let object = args
-        .as_object()
-        .ok_or_else(|| SkillError::new("invalid_arguments", "args 必须是 JSON object"))?;
+    let object = args.as_object().ok_or_else(|| {
+        SkillError::new("invalid_arguments", locale_message("error.args_not_object"))
+    })?;
     let action = optional_string(object, "action")?.unwrap_or("query");
     if !matches!(action, "query" | "lookup") {
         return Err(SkillError::new(
             "unsupported_action",
-            "不支持该 action；请使用 query",
+            locale_message("error.unsupported_action"),
         ));
     }
 
@@ -123,7 +147,7 @@ fn execute(args: &Value) -> Result<(String, Value), SkillError> {
         _ => {
             return Err(SkillError::new(
                 "invalid_detail",
-                "detail 只能是 summary 或 full",
+                locale_message("error.invalid_detail"),
             ))
         }
     };
@@ -131,16 +155,13 @@ fn execute(args: &Value) -> Result<(String, Value), SkillError> {
     if !matches!(sect, 1 | 2) {
         return Err(SkillError::new(
             "invalid_yi_ji_sect",
-            "yi_ji_sect 只能是 1 或 2",
+            locale_message("error.invalid_yi_ji_sect"),
         ));
     }
     let date = resolve_date(object)?;
 
     catch_unwind(AssertUnwindSafe(|| build_result(date, detail, sect))).map_err(|_| {
-        SkillError::new(
-            "unsupported_date",
-            "底层历法库无法可靠计算该日期，请换一个日期后重试",
-        )
+        SkillError::new("unsupported_date", locale_message("error.unsupported_date"))
     })?
 }
 
@@ -153,40 +174,41 @@ fn resolve_date(args: &Map<String, Value>) -> Result<NaiveDate, SkillError> {
     if date_text.is_some() && components_present > 0 {
         return Err(SkillError::new(
             "ambiguous_date",
-            "date 与 year/month/day 不能同时提供",
+            locale_message("error.ambiguous_date"),
         ));
     }
 
     let base = if let Some(raw) = date_text {
         NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-            .map_err(|_| SkillError::new("invalid_date", "date 必须是有效的 YYYY-MM-DD 日期"))?
+            .map_err(|_| SkillError::new("invalid_date", locale_message("error.invalid_date")))?
     } else if components_present > 0 {
         if components_present != 3 {
             return Err(SkillError::new(
                 "incomplete_date",
-                "使用日期分量时必须同时提供 year、month、day",
+                locale_message("error.incomplete_date"),
             ));
         }
         let year = required_i64(args, "year")?;
         let month = required_i64(args, "month")?;
         let day = required_i64(args, "day")?;
         let year = i32::try_from(year)
-            .map_err(|_| SkillError::new("invalid_date", "year 超出可表示范围"))?;
+            .map_err(|_| SkillError::new("invalid_date", locale_message("error.invalid_year")))?;
         let month = u32::try_from(month)
-            .map_err(|_| SkillError::new("invalid_date", "month 必须是有效月份"))?;
+            .map_err(|_| SkillError::new("invalid_date", locale_message("error.invalid_month")))?;
         let day = u32::try_from(day)
-            .map_err(|_| SkillError::new("invalid_date", "day 必须是有效日期"))?;
-        NaiveDate::from_ymd_opt(year, month, day)
-            .ok_or_else(|| SkillError::new("invalid_date", "year/month/day 不是有效日期"))?
+            .map_err(|_| SkillError::new("invalid_date", locale_message("error.invalid_day")))?;
+        NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
+            SkillError::new("invalid_date", locale_message("error.invalid_components"))
+        })?
     } else {
         Local::now().date_naive()
     };
 
     let offset = optional_i64(args, "offset_days")?.unwrap_or(0);
     let delta = chrono::Duration::try_days(offset)
-        .ok_or_else(|| SkillError::new("invalid_date", "offset_days 超出可表示范围"))?;
+        .ok_or_else(|| SkillError::new("invalid_date", locale_message("error.invalid_offset")))?;
     base.checked_add_signed(delta)
-        .ok_or_else(|| SkillError::new("invalid_date", "offset_days 使日期超出可表示范围"))
+        .ok_or_else(|| SkillError::new("invalid_date", locale_message("error.offset_out_of_range")))
 }
 
 fn optional_string<'a>(
@@ -198,11 +220,11 @@ fn optional_string<'a>(
         Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.trim())),
         Some(Value::String(_)) => Err(SkillError::new(
             "invalid_arguments",
-            format!("{key} 不能为空"),
+            render_message("error.empty_string", &[("key", key.to_string())]),
         )),
         Some(_) => Err(SkillError::new(
             "invalid_arguments",
-            format!("{key} 必须是字符串"),
+            render_message("error.not_string", &[("key", key.to_string())]),
         )),
     }
 }
@@ -210,16 +232,22 @@ fn optional_string<'a>(
 fn optional_i64(args: &Map<String, Value>, key: &str) -> Result<Option<i64>, SkillError> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value
-            .as_i64()
-            .map(Some)
-            .ok_or_else(|| SkillError::new("invalid_arguments", format!("{key} 必须是整数"))),
+        Some(value) => value.as_i64().map(Some).ok_or_else(|| {
+            SkillError::new(
+                "invalid_arguments",
+                render_message("error.not_integer", &[("key", key.to_string())]),
+            )
+        }),
     }
 }
 
 fn required_i64(args: &Map<String, Value>, key: &str) -> Result<i64, SkillError> {
-    optional_i64(args, key)?
-        .ok_or_else(|| SkillError::new("incomplete_date", format!("缺少 {key}")))
+    optional_i64(args, key)?.ok_or_else(|| {
+        SkillError::new(
+            "incomplete_date",
+            render_message("error.missing_field", &[("key", key.to_string())]),
+        )
+    })
 }
 
 fn build_result(
@@ -235,7 +263,10 @@ fn build_result(
     let lunar = solar.get_lunar();
 
     let date_text = date.format("%Y-%m-%d").to_string();
-    let weekday = format!("星期{}", solar.clone().get_week_in_chinese());
+    let weekday = render_message(
+        "value.weekday",
+        &[("value", solar.clone().get_week_in_chinese())],
+    );
     let lunar_text = lunar.to_string();
     let lunar_year = lunar.get_year();
     let lunar_month_raw = lunar.get_month();
@@ -275,11 +306,28 @@ fn build_result(
 
     let mut lines = vec![
         format!("{date_text} {weekday}"),
-        format!("农历：{lunar_text}（{year_ganzhi}年，生肖{zodiac}）"),
-        format!("干支：{year_ganzhi}年 {month_ganzhi}月 {day_ganzhi}日"),
+        render_message(
+            "line.lunar",
+            &[
+                ("lunar_text", lunar_text.clone()),
+                ("year_ganzhi", year_ganzhi.clone()),
+                ("zodiac", zodiac.clone()),
+            ],
+        ),
+        render_message(
+            "line.ganzhi",
+            &[
+                ("year_ganzhi", year_ganzhi.clone()),
+                ("month_ganzhi", month_ganzhi.clone()),
+                ("day_ganzhi", day_ganzhi.clone()),
+            ],
+        ),
     ];
     if let Some(term) = &solar_term {
-        lines.push(format!("节气：{term}"));
+        lines.push(render_message(
+            "line.solar_term",
+            &[("value", term.clone())],
+        ));
     }
     let all_festivals = combine_festivals(&[
         &solar_festivals,
@@ -288,24 +336,60 @@ fn build_result(
         &lunar_other_festivals,
     ]);
     if !all_festivals.is_empty() {
-        lines.push(format!("节日：{}", all_festivals.join("、")));
+        lines.push(render_message(
+            "line.festivals",
+            &[(
+                "value",
+                all_festivals.join(&locale_message("separator.list")),
+            )],
+        ));
     }
     lines.extend([
-        format!("宜：{}", join_or_none(&yi)),
-        format!("忌：{}", join_or_none(&ji)),
-        format!("值日：{day_officer}日，{day_god}（{day_god_type}，{day_god_luck}）"),
-        format!("冲煞：冲{clash}，煞{sha}"),
+        render_message("line.yi", &[("value", join_or_none(&yi))]),
+        render_message("line.ji", &[("value", join_or_none(&ji))]),
+        render_message(
+            "line.day_officer",
+            &[
+                ("day_officer", day_officer.clone()),
+                ("day_god", day_god.clone()),
+                ("day_god_type", day_god_type.clone()),
+                ("day_god_luck", day_god_luck.clone()),
+            ],
+        ),
+        render_message(
+            "line.clash",
+            &[("clash", clash.clone()), ("sha", sha.clone())],
+        ),
     ]);
     if detail == DetailLevel::Full {
         lines.extend([
-            format!("吉神宜趋：{}", join_or_none(&auspicious_spirits)),
-            format!("凶煞宜忌：{}", join_or_none(&inauspicious_spirits)),
-            format!("彭祖百忌：{}", pengzu.join("；")),
-            format!("二十八宿：{lunar_mansion}（{lunar_mansion_luck}）"),
-            format!("胎神：{fetal_god}"),
+            render_message(
+                "line.auspicious_spirits",
+                &[("value", join_or_none(&auspicious_spirits))],
+            ),
+            render_message(
+                "line.inauspicious_spirits",
+                &[("value", join_or_none(&inauspicious_spirits))],
+            ),
+            render_message(
+                "line.pengzu",
+                &[("value", pengzu.join(&locale_message("separator.semicolon")))],
+            ),
+            render_message(
+                "line.lunar_mansion",
+                &[
+                    ("lunar_mansion", lunar_mansion.clone()),
+                    ("lunar_mansion_luck", lunar_mansion_luck.clone()),
+                ],
+            ),
+            render_message("line.fetal_god", &[("value", fetal_god.clone())]),
         ]);
     }
-    lines.push(format!("说明：{DISCLAIMER}"));
+    let disclaimer = locale_message("disclaimer");
+    lines.push(render_message(
+        "line.disclaimer",
+        &[("value", disclaimer.clone())],
+    ));
 
     let extra = json!({
         "schema_version": 1,
@@ -359,7 +443,7 @@ fn build_result(
             "library_version": "1.0.1",
             "offline": true,
         },
-        "disclaimer": DISCLAIMER,
+        "disclaimer": disclaimer,
     });
     Ok((lines.join("\n"), extra))
 }
@@ -380,83 +464,11 @@ fn combine_festivals(groups: &[&Vec<String>]) -> Vec<String> {
 
 fn join_or_none(values: &[String]) -> String {
     if values.is_empty() {
-        "无".to_string()
+        locale_message("value.none")
     } else {
-        values.join("、")
+        values.join(&locale_message("separator.list"))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn request(args: Value) -> String {
-        json!({
-            "request_id": "test-1",
-            "args": args,
-            "context": null,
-            "user_id": 1,
-            "chat_id": 1
-        })
-        .to_string()
-    }
-
-    #[test]
-    fn spring_festival_2024_has_expected_lunar_date() {
-        let response = handle_line(&request(json!({"date": "2024-02-10"})));
-        assert_eq!(response.status, "ok");
-        assert_eq!(response.extra["lunar"]["year"], 2024);
-        assert_eq!(response.extra["lunar"]["month"], 1);
-        assert_eq!(response.extra["lunar"]["day"], 1);
-        assert_eq!(response.extra["lunar"]["is_leap_month"], false);
-        assert_eq!(response.extra["ganzhi"]["year"], "甲辰");
-        assert_eq!(response.extra["zodiac"], "龙");
-        assert!(response.extra["festivals"]["lunar"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|value| value == "春节"));
-    }
-
-    #[test]
-    fn offset_days_resolves_relative_date() {
-        let response = handle_line(&request(json!({
-            "date": "2024-02-09",
-            "offset_days": 1,
-            "detail": "summary"
-        })));
-        assert_eq!(response.status, "ok");
-        assert_eq!(response.extra["date"], "2024-02-10");
-        assert_eq!(response.extra["detail"], "summary");
-    }
-
-    #[test]
-    fn full_result_contains_structured_almanac_and_disclaimer() {
-        let response = handle_line(&request(json!({"date": "2026-08-01"})));
-        assert_eq!(response.status, "ok");
-        assert!(response.extra["almanac"]["yi"].is_array());
-        assert!(response.extra["almanac"]["ji"].is_array());
-        assert_eq!(response.extra["basis"]["offline"], true);
-        assert!(response.text.contains("传统民俗信息"));
-    }
-
-    #[test]
-    fn invalid_date_returns_canonical_error_contract() {
-        let response = handle_line(&request(json!({"date": "2024-02-30"})));
-        assert_eq!(response.status, "error");
-        assert_eq!(response.extra["status"], "error");
-        assert_eq!(response.extra["error_code"], "invalid_date");
-        assert_eq!(
-            response.extra["message_key"],
-            "skill.chinese_almanac.invalid_date"
-        );
-        assert_eq!(response.extra["retryable"], false);
-    }
-
-    #[test]
-    fn component_date_requires_all_three_fields() {
-        let response = handle_line(&request(json!({"year": 2024, "month": 2})));
-        assert_eq!(response.status, "error");
-        assert_eq!(response.extra["error_code"], "incomplete_date");
-    }
-}
+mod main_tests;
