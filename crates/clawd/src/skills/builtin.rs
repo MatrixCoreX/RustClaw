@@ -29,7 +29,7 @@ mod builtin_workspace_replace;
 use builtin_child_task_patch::execute_child_task_patch;
 #[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
 use builtin_run_cmd::{
     command_has_shell_background_operator, looks_detached_background_command,

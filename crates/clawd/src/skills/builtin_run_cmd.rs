@@ -450,7 +450,7 @@ pub(crate) async fn run_safe_command(
     .map_err(RunSafeCommandError::into_text)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) async fn run_safe_command_with_sandbox(
     cwd: &Path,
     command: &str,

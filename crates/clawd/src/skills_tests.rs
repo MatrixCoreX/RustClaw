@@ -129,7 +129,9 @@ mod receipt_support;
 
 #[path = "skills_test_runner_support.rs"]
 mod runner_support;
-use runner_support::{make_echo_skill_runner, make_sandbox_probe_skill_runner};
+use runner_support::make_echo_skill_runner;
+#[cfg(target_os = "linux")]
+use runner_support::make_sandbox_probe_skill_runner;
 
 struct TempDirGuard {
     path: PathBuf,

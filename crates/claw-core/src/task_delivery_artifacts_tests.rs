@@ -107,9 +107,10 @@ fn structured_image_replaces_legacy_token_and_keeps_caption() {
     );
 
     assert_eq!(messages.len(), 1);
+    let canonical_path = path.canonicalize().expect("canonical artifact path");
     assert_eq!(
         messages[0],
-        format!("下载完成\nIMAGE_FILE:{}", path.display())
+        format!("下载完成\nIMAGE_FILE:{}", canonical_path.display())
     );
     fs::remove_dir_all(workspace).ok();
 }
@@ -137,9 +138,13 @@ fn structured_image_is_added_when_model_only_returns_prose() {
         vec!["已下载并发送。".to_string()],
     );
 
+    let canonical_path = path.canonicalize().expect("canonical artifact path");
     assert_eq!(
         messages,
-        vec![format!("已下载并发送。\nIMAGE_FILE:{}", path.display())]
+        vec![format!(
+            "已下载并发送。\nIMAGE_FILE:{}",
+            canonical_path.display()
+        )]
     );
     fs::remove_dir_all(workspace).ok();
 }
