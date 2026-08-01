@@ -4,6 +4,7 @@ struct SkillStoreInstallSpec {
     manifest_path: PathBuf,
     adapter: skill_sdk::BuildAdapter,
     network_policy: skill_sdk::BuildNetworkPolicy,
+    host_dependencies: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -20,6 +21,10 @@ enum SkillStoreErrorCode {
     ManifestMissing,
     ManifestInvalid,
     NetworkApprovalRequired,
+    HostDependencyAdminRequired,
+    HostDependencyUnknown,
+    HostDependencyInstallFailed,
+    ResourceInsufficient,
     UnsafeConfigPath,
     #[cfg(not(test))]
     InstallStartFailed,
@@ -48,6 +53,10 @@ impl SkillStoreErrorCode {
             Self::ManifestMissing => "skill_store_manifest_missing",
             Self::ManifestInvalid => "skill_store_manifest_invalid",
             Self::NetworkApprovalRequired => "skill_store_network_approval_required",
+            Self::HostDependencyAdminRequired => "skill_store_host_dependency_admin_required",
+            Self::HostDependencyUnknown => "skill_store_host_dependency_unknown",
+            Self::HostDependencyInstallFailed => "skill_store_host_dependency_install_failed",
+            Self::ResourceInsufficient => "skill_store_resource_insufficient",
             Self::UnsafeConfigPath => "skill_store_unsafe_config_path",
             #[cfg(not(test))]
             Self::InstallStartFailed => "skill_store_install_start_failed",
@@ -378,6 +387,7 @@ fn skill_store_install_spec(
         manifest_path,
         adapter: manifest.build.adapter,
         network_policy: manifest.build.network,
+        host_dependencies: manifest.install.host_dependencies,
     }))
 }
 
@@ -483,9 +493,20 @@ async fn install_skill_store_package(
         })?
         .map_err(|error| {
             let phase = error.phase.clone();
+            let (status, code) = if error.code == "install_resource_insufficient" {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    SkillStoreErrorCode::ResourceInsufficient,
+                )
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    SkillStoreErrorCode::InstallFailed,
+                )
+            };
             SkillStoreOperationError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                SkillStoreErrorCode::InstallFailed,
+                status,
+                code,
                 format!(
                     "skill={} adapter={} phase={:?} code={} detail={}",
                     spec.skill_name,

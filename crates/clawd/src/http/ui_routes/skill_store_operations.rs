@@ -190,9 +190,10 @@ async fn start_skill_store_install(
     request: SkillStoreMutationRequest,
     requested_action: Option<skill_sdk::OperationAction>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_identity(&state, &headers) {
-        return response;
-    }
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(response) => return response,
+    };
     if let Err(error) = initialize_skill_store_operations(&state) {
         return skill_store_error_response(error);
     }
@@ -204,6 +205,17 @@ async fn start_skill_store_install(
         Ok(spec) => spec,
         Err(error) => return skill_store_error_response(error),
     };
+    if spec
+        .as_ref()
+        .is_some_and(|value| !value.host_dependencies.is_empty())
+        && !identity.role.eq_ignore_ascii_case("admin")
+    {
+        return skill_store_error_response(SkillStoreOperationError::new(
+            StatusCode::FORBIDDEN,
+            SkillStoreErrorCode::HostDependencyAdminRequired,
+            format!("skill={skill_name}"),
+        ));
+    }
     let allow_network = request.allow_network.unwrap_or(false);
     if spec.as_ref().is_some_and(|value| {
         value.network_policy == skill_sdk::BuildNetworkPolicy::ApprovalRequired
@@ -345,6 +357,64 @@ async fn run_skill_store_install_operation_inner(
                 SkillStoreErrorCode::OperationStateFailed,
                 "cancelled_while_queued",
             ));
+        }
+        // The test build below uses the existing synthetic package installer;
+        // it must not mutate the developer/CI host or require production-sized
+        // disk. Production builds always execute this branch.
+        if !cfg!(test) {
+            let package_root = skill_package_root(state);
+            fs::create_dir_all(&package_root).map_err(|error| {
+                SkillStoreOperationError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    SkillStoreErrorCode::OperationStateFailed,
+                    error,
+                )
+            })?;
+            let manifest =
+                skill_sdk::PackageManifest::load(&spec.manifest_path).map_err(|error| {
+                    SkillStoreOperationError::new(
+                        StatusCode::CONFLICT,
+                        SkillStoreErrorCode::ManifestInvalid,
+                        error,
+                    )
+                })?;
+            skill_sdk::validate_install_resources(&manifest, &package_root).map_err(|error| {
+                let code = if error.code == "install_resource_insufficient" {
+                    SkillStoreErrorCode::ResourceInsufficient
+                } else {
+                    SkillStoreErrorCode::InstallFailed
+                };
+                SkillStoreOperationError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    code,
+                    format!(
+                        "skill={} code={} detail={}",
+                        spec.skill_name, error.code, error.detail
+                    ),
+                )
+                .with_phase(Some("preflight".to_string()))
+            })?;
+            install_declared_host_dependencies(
+                &spec.host_dependencies,
+                &state.skill_rt.workspace_root,
+                control,
+            )
+            .await
+            .map_err(|error| {
+                let code = match error.code {
+                    "dependency_unknown" => SkillStoreErrorCode::HostDependencyUnknown,
+                    _ => SkillStoreErrorCode::HostDependencyInstallFailed,
+                };
+                SkillStoreOperationError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    code,
+                    format!(
+                        "skill={} dependency={} code={} detail={}",
+                        spec.skill_name, error.dependency_id, error.code, error.detail
+                    ),
+                )
+                .with_phase(Some("dependencies".to_string()))
+            })?;
         }
         Some(install_skill_store_package(state, spec, control.clone(), allow_network).await?)
     } else {

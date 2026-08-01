@@ -15,6 +15,14 @@ they never contain a shell command. Build network is denied by default,
 dependencies are private to the package install root, and missing sandbox
 support must fail closed.
 
+`install.host_dependencies` may contain only IDs from the host-owned dependency
+catalog. The host checks measurable `install.resources` capacity before any
+mutation, then installs missing system packages through its platform-specific
+Linux/macOS package-manager mapping. A supported but slow CPU is not a reason
+to omit dependencies. Only an unsupported platform or a measured memory/disk
+shortfall may stop a complete installation. System toolchains and shared tools
+remain installed when a skill is removed.
+
 Every local process uses `agent-jsonl-v1`: one JSON request record on stdin
 and exactly one JSON response record on stdout. Diagnostics belong on stderr.
 The response must echo `request_id`; errors require `error_text` plus stable
@@ -94,7 +102,11 @@ protocol smoke must have a supported emulator and otherwise fails closed.
 - Rust: `init rust`; keep `Cargo.lock`, add the package to the workspace only
   when it is repository-bundled, and set exact Cargo package/binary identities.
 - Python: `init python`; keep a declared `requirements.lock`. Installation
-  creates a private virtual environment and never uses user/global site packages.
+  creates a private virtual environment, verifies every locked hash, and never
+  uses user/global site packages. A `build.options.python = ">=X.Y"` minimum is
+  validated before virtual-environment creation; `APP_PYTHON_BIN` may select an
+  absolute compatible interpreter. Platform markers in one universal lock or
+  explicit target release packages must cover every advertised OS/architecture.
 - Node: `init node`; commit `package-lock.json`. Installation uses the private
   package root. Dependency lifecycle scripts are disabled and rejected by
   every supported schema version.

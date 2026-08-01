@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.2.0"
+version = "0.3.0"
 description = "For any supported public copied App share payload, short link, or website share URL, default immediately to downloading and returning the original media without asking which operation is wanted; Douyin and Xiaohongshu image-article posts return all extracted original images plus platform-provided article text by default, while image OCR remains explicit. This skill delivers article or OCR text inline below 200 characters and as a text artifact at 200 characters or more."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -18,9 +18,16 @@ capability_policy_source = "registry"
 adapter = "python"
 source_root = "optional_skills/media_download"
 lockfile = "requirements.lock"
-network = "deny"
+network = "approval_required"
 lifecycle_scripts = false
-options = { python = ">=3.10" }
+options = { python = ">=3.13" }
+
+[install]
+host_dependencies = ["ffmpeg", "tesseract", "tesseract_chi_sim", "chromium"]
+
+[install.resources]
+min_memory_mb = 4096
+min_free_disk_mb = 6144
 
 [run]
 launcher = "python"

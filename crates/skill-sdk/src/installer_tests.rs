@@ -9,6 +9,19 @@ use crate::installer::{
 use crate::runtime::SkillRuntimeResolver;
 
 #[test]
+fn install_resource_preflight_returns_a_stable_insufficient_code() {
+    let temp = tempdir().expect("tempdir");
+    let mut manifest =
+        crate::PackageManifest::from_toml_str(crate::tests::manifest_source()).expect("manifest");
+    manifest.install.resources.min_free_disk_mb = u64::MAX;
+    let error = super::validate_install_resources(&manifest, temp.path())
+        .expect_err("impossible disk requirement must fail");
+    assert_eq!(error.code, "install_resource_insufficient");
+    assert_eq!(error.phase.as_deref(), Some("preflight"));
+    assert!(error.detail.contains("resource=free_disk"));
+}
+
+#[test]
 fn prebuilt_adapter_installs_smokes_activates_and_resolves() {
     if !sandbox_backend_present() {
         return;

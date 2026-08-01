@@ -82,7 +82,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `download`, `resolve` | `browser_fallback` | no | boolean | `true` | Allow local Chromium fallback without browser-profile cookies. |
 | `download` | `save_meta` | no | boolean | `false` | Save extraction metadata JSON. |
 | `download` | `show_info` | no | boolean | `false` | Probe downloaded media information. |
-| `transcribe` | `engine` | no | string | `whisper` | `whisper` or `funasr`. |
+| `transcribe` | `engine` | no | string | `whisper` | Uses the configured local whisper.cpp CLI/model by default. `funasr` is the privately installed alternative. |
 | `transcribe`, `ocr` | `language` | no | string | action-specific | Spoken language or Tesseract language list. |
 | `transcribe` | `input_path` | yes | string | - | Existing local video/audio file. |
 | `transcribe` | `extract_audio_only` | no | boolean | `false` | Extract WAV without ASR. |
@@ -100,13 +100,12 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 
 ## Dependencies and Configuration
 
-- Base Douyin/Kuaishou/Xiaohongshu/TikTok download and URL resolution: Python 3.10+ standard library.
-- YouTube download/resolve: `yt-dlp` in `PATH`.
-- Media information, audio extraction, and X conversion: `ffmpeg` and `ffprobe` in `PATH`.
-- OCR: `tesseract` plus requested language packs; Pillow only improves preprocessing.
+- Skill Store installation requires a supported x86_64/aarch64 Linux or macOS host, Python 3.13+, at least 4 GiB physical memory, and at least 6 GiB free space in the skill package filesystem. A slower CPU is allowed and only affects elapsed time.
+- Installation creates a private, hash-locked Python environment containing FunASR, ModelScope, CPU PyTorch, Pillow and `yt-dlp`; the private executable directory is placed first in the skill subprocess `PATH`.
+- The same installation transaction verifies or installs host-owned `ffmpeg`/`ffprobe`, Tesseract with Simplified Chinese data, and Chromium/Chrome through the detected Linux or macOS package manager. These shared tools remain installed after this skill is removed.
 - Whisper transcription: `whisper-cli` in `PATH` (or `WHISPER_BIN`/`WHISPER_CPP_BIN`/`WHISPER_CLI`) and a compatible local model selected through `WHISPER_MODEL`/`WHISPER_MODEL_PATH`/`WHISPER_CPP_MODEL`.
-- FunASR transcription: an environment where the bundled Python runtime can import FunASR and its models.
-- No raw cookies, cookie files, API tokens, credential environment variables, or package-install actions are accepted.
+- Local whisper.cpp remains the default transcription engine, following the system audio-transcription setting. FunASR is a private alternative; its selected speech model is local runtime data and may be populated in the ModelScope cache on first use when it is not already present.
+- Runtime requests accept no raw cookies, cookie files, API tokens, credential environment variables, or package-install actions; dependency installation is an admin-only Skill Store operation.
 
 ## Success Contract
 

@@ -71,7 +71,10 @@ manifest 声明 `network = "approval_required"` 且人工明确审查后才增�
 - Rust：使用 `init rust`；保留 `Cargo.lock`。只有仓内 bundled Cargo 包加入
   workspace，并明确声明 Cargo package/binary 身份。
 - Python：使用 `init python`；保留声明的 `requirements.lock`。安装创建技能
-  私有 venv，禁止用户级或全局 site-packages。
+  私有 venv、校验每个锁定哈希，禁止用户级或全局 site-packages。若声明
+  `build.options.python = ">=X.Y"`，会在创建 venv 前校验最低版本；
+  `APP_PYTHON_BIN` 可选择兼容的绝对解释器路径。一个带平台 marker 的通用锁
+  或明确的目标发行包必须覆盖 manifest 声明的每个 OS/架构。
 - Node：使用 `init node`；提交 `package-lock.json`。依赖安装在技能私有根，
   所有受支持 schema 都会禁用并拒绝依赖生命周期脚本。
 - Go：使用 `init go`；提交 `go.mod` 与 `go.sum`。adapter 使用隔离缓存并产出
@@ -106,6 +109,12 @@ configure、success/failure/cancel 阶段。禁用保留安装包和私有数据
 回滚前重新验证 previous 指针、回执、manifest 与每个产物摘要。
 卸载技能不得删除共享 Rust/Cargo、Python、Node、Go、JVM/.NET 运行环境或可复用构建
 缓存；工具链清理由独立管理员操作负责。
+
+manifest 的 `install.host_dependencies` 只能填写宿主依赖目录中的受控 ID，不能
+携带 shell 或包管理器命令。宿主在任何修改前检查 `install.resources` 中可测量的
+内存和磁盘需求，然后按 Linux/macOS 平台映射安装缺失系统包。受支持但速度较慢的
+CPU 不能成为少装依赖的理由；只有不支持的平台或确实不足的内存/磁盘容量可以阻止
+完整安装。卸载技能仍不得删除这些共享系统工具。
 
 普通用户界面使用稳定 phase/code/message key；脱敏且有上限的诊断放在二级详情。
 manifest、回执、操作记录与协议 fixture 都不得包含凭据、原始 provider 响应、

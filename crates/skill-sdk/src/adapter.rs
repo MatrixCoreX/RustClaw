@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::installer::InstallControl;
 use crate::manifest::{
-    BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest, PlatformArtifact,
+    parse_minimum_runtime_version, BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest,
+    PlatformArtifact,
 };
 use crate::process::{run_command, run_command_controlled, ProcessOutput};
 use crate::receipt::{digest_file, ArtifactReceipt, LaunchProgramScope, ReceiptLaunch};
@@ -179,6 +180,15 @@ fn prepare_cargo(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage
 fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
     require_native_target(context, "python")?;
     let python = find_program_with_override("python3", "APP_PYTHON_BIN")?;
+    validate_python_requirement(
+        &python,
+        context
+            .manifest
+            .build
+            .options
+            .get("python")
+            .map(String::as_str),
+    )?;
     let source_root = source_root(context)?;
     let runtime_source = context.staging_root.join("runtime/src");
     copy_source_tree(&source_root, &runtime_source)?;
@@ -205,6 +215,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         "build_environment_failed",
         "python",
     )?;
+    remove_redundant_python_venv_aliases(&venv)?;
     let venv_python = venv_python_path(&venv);
     let lockfile = confined_source_path(
         &source_root,
@@ -222,6 +233,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         .arg("pip")
         .arg("install")
         .arg("--require-hashes")
+        .arg("--no-compile")
         .arg("--disable-pip-version-check")
         .arg("-r")
         .arg(lockfile);
@@ -242,6 +254,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         "dependency_install_failed",
         "python",
     )?;
+    remove_python_bytecode_caches(context.staging_root.join("runtime").as_path())?;
     materialize_file_symlink(&venv_python)?;
     let relative_python = relative_string(context.staging_root, &venv_python)?;
     let entrypoint = context.staging_root.join(&context.manifest.run.entrypoint);
@@ -256,6 +269,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
     args.extend(context.manifest.run.args.clone());
     let mut environment = BTreeMap::new();
     environment.insert("PYTHONNOUSERSITE".to_string(), "1".to_string());
+    environment.insert("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string());
     Ok(PreparedPackage {
         adapter_version: tool_version(&python, &["--version"])?,
         artifacts: collect_runtime_artifacts(context.staging_root)?,
@@ -278,6 +292,38 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
             "artifact".to_string(),
         ],
     })
+}
+
+fn validate_python_requirement(program: &Path, requirement: Option<&str>) -> SkillSdkResult<()> {
+    let Some(requirement) = requirement else {
+        return Ok(());
+    };
+    let minimum = parse_minimum_runtime_version(requirement, "build.options.python")?;
+    let actual_version = tool_version(program, &["--version"])?;
+    let actual_text = actual_version
+        .strip_prefix("Python ")
+        .unwrap_or(actual_version.as_str());
+    let actual =
+        parse_minimum_runtime_version(&format!(">={actual_text}"), "python.detected_version")
+            .map_err(|error| {
+                SkillSdkError::new(
+                    "toolchain_version_failed",
+                    format!("program={} detail={}", program.display(), error.detail),
+                )
+                .phase("preflight")
+            })?;
+    if actual < minimum {
+        return Err(SkillSdkError::new(
+            "toolchain_version_unsupported",
+            format!(
+                "program={} required={} actual={actual_text}",
+                program.display(),
+                requirement
+            ),
+        )
+        .phase("preflight"));
+    }
+    Ok(())
 }
 
 fn prepare_node(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
@@ -1324,6 +1370,52 @@ fn venv_python_path(venv: &Path) -> PathBuf {
     {
         venv.join("bin/python")
     }
+}
+
+fn remove_redundant_python_venv_aliases(venv: &Path) -> SkillSdkResult<()> {
+    #[cfg(not(windows))]
+    {
+        // Python creates `lib64 -> lib` on many 64-bit Unix hosts even though
+        // the interpreter's venv sys.path uses `lib`. Keeping that alias would
+        // make the receipt hardening pass duplicate every dependency before it
+        // can remove symlinks, which is especially wasteful for ML runtimes.
+        let alias = venv.join("lib64");
+        if fs::symlink_metadata(&alias)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let target = fs::canonicalize(&alias)?;
+            let canonical_lib = fs::canonicalize(venv.join("lib"))?;
+            if target == canonical_lib {
+                fs::remove_file(alias)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remove_python_bytecode_caches(root: &Path) -> SkillSdkResult<()> {
+    let mut entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            if entry.file_name() == "__pycache__" {
+                fs::remove_dir_all(path)?;
+            } else {
+                remove_python_bytecode_caches(&path)?;
+            }
+        } else if metadata.is_file()
+            && path
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|extension| matches!(extension, "pyc" | "pyo"))
+        {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

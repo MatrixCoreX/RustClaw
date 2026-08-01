@@ -150,6 +150,61 @@ fn toolchain_override_requires_an_absolute_executable() {
 }
 
 #[test]
+fn python_requirement_is_enforced_before_environment_creation() {
+    assert!(validate_python_requirement(Path::new("/usr/bin/python3"), None).is_ok());
+    assert_eq!(
+        parse_minimum_runtime_version(">=3.13", "build.options.python").expect("minimum version"),
+        [3, 13, 0]
+    );
+    assert_eq!(
+        parse_minimum_runtime_version("3.13", "build.options.python")
+            .expect_err("operator is required")
+            .code,
+        "manifest_adapter_option_invalid"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn redundant_python_lib64_alias_is_removed_without_touching_other_links() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let venv = temp.path().join("venv");
+    let lib = venv.join("lib");
+    let other = venv.join("other");
+    fs::create_dir_all(&lib).expect("lib");
+    fs::create_dir_all(&other).expect("other");
+    symlink("lib", venv.join("lib64")).expect("lib64 alias");
+    symlink("other", venv.join("other-alias")).expect("unrelated alias");
+
+    remove_redundant_python_venv_aliases(&venv).expect("normalize venv aliases");
+
+    assert!(!venv.join("lib64").exists());
+    assert!(fs::symlink_metadata(venv.join("other-alias"))
+        .expect("unrelated alias")
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+fn python_bytecode_caches_are_removed_without_touching_sources() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = temp.path().join("runtime");
+    let cache = runtime.join("package/__pycache__");
+    fs::create_dir_all(&cache).expect("cache");
+    fs::write(runtime.join("module.py"), b"value = 1\n").expect("source");
+    fs::write(cache.join("module.cpython-313.pyc"), b"cache").expect("cache file");
+    fs::write(runtime.join("legacy.pyo"), b"legacy cache").expect("legacy cache");
+
+    remove_python_bytecode_caches(&runtime).expect("remove bytecode caches");
+
+    assert!(runtime.join("module.py").is_file());
+    assert!(!cache.exists());
+    assert!(!runtime.join("legacy.pyo").exists());
+}
+
+#[test]
 fn http_json_adapter_prepares_a_pinned_https_launch_without_local_toolchains() {
     let source = crate::tests::manifest_source()
         .replace("adapter = \"cargo\"", "adapter = \"http_json\"")

@@ -48,6 +48,7 @@
         "options": { "type": "object", "additionalProperties": { "type": "string" } }
       }
     },
+    "install": { "$ref": "#/$defs/install" },
     "run": {
       "type": "object",
       "additionalProperties": false,
@@ -85,6 +86,25 @@
     "relativePath": { "type": "string", "minLength": 1, "not": { "pattern": "(^/|(^|/)\\.\\.(/|$)|\\u0000)" } },
     "environmentName": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
     "adapter": { "enum": ["cargo", "python", "node", "go", "prebuilt", "generic_process", "http_json"] },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host_dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min_memory_mb": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+            "min_free_disk_mb": { "type": "integer", "minimum": 0, "maximum": 16777216 }
+          }
+        }
+      }
+    },
     "storage": {
       "type": "object",
       "additionalProperties": false,

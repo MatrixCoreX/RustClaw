@@ -577,6 +577,9 @@ async fn get_skill_store_catalog(
                     skill_sdk::BuildNetworkPolicy::Deny => "deny",
                     skill_sdk::BuildNetworkPolicy::ApprovalRequired => "approval_required",
                 }),
+                "host_dependencies": manifest
+                    .as_ref()
+                    .map(|value| &value.install.host_dependencies),
                 "supported_os": manifest.as_ref().map(|value| &value.package.supported_os),
                 "supported_arch": manifest.as_ref().map(|value| &value.package.supported_arch),
                 "package_version": manifest.as_ref().map(|value| value.package.version.as_str()),

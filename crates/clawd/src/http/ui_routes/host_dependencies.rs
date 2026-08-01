@@ -74,6 +74,13 @@ struct DependencyInstallCommand {
     current_dir: Option<PathBuf>,
 }
 
+#[derive(Debug)]
+struct DeclaredHostDependencyError {
+    dependency_id: String,
+    code: &'static str,
+    detail: String,
+}
+
 static DEPENDENCY_INSTALL_OPERATIONS: OnceLock<
     Arc<Mutex<HashMap<String, DependencyInstallOperation>>>,
 > = OnceLock::new();
@@ -225,6 +232,132 @@ fn prepare_dependency_install(
     let commands = dependency_install_commands(definition, &package_manager)
         .ok_or("dependency_install_unsupported")?;
     Ok((package_manager, commands))
+}
+
+async fn install_declared_host_dependencies(
+    dependency_ids: &[String],
+    workspace_root: &Path,
+    control: &skill_sdk::InstallControl,
+) -> Result<Vec<String>, DeclaredHostDependencyError> {
+    if dependency_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    control
+        .phase("dependencies")
+        .map_err(|error| DeclaredHostDependencyError {
+            dependency_id: String::new(),
+            code: "dependency_install_cancelled",
+            detail: error.detail,
+        })?;
+
+    let _permit = loop {
+        if control.is_cancelled() {
+            return Err(DeclaredHostDependencyError {
+                dependency_id: String::new(),
+                code: "dependency_install_cancelled",
+                detail: "state=cancelled phase=host_dependency_installer_wait".to_string(),
+            });
+        }
+        match dependency_install_semaphore().try_acquire_owned() {
+            Ok(permit) => break permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => {
+                return Err(DeclaredHostDependencyError {
+                    dependency_id: String::new(),
+                    code: "dependency_install_queue_closed",
+            detail: "state=unavailable component=host_dependency_installer".to_string(),
+                });
+            }
+        }
+    };
+
+    let catalog = host_dependency_catalog();
+    let mut installed = Vec::with_capacity(dependency_ids.len());
+    let mut package_index_refreshed = false;
+    for dependency_id in dependency_ids {
+        if control.is_cancelled() {
+            return Err(DeclaredHostDependencyError {
+                dependency_id: dependency_id.clone(),
+                code: "dependency_install_cancelled",
+                detail: "state=cancelled phase=host_dependency_iteration".to_string(),
+            });
+        }
+        let definition = catalog
+            .iter()
+            .find(|definition| definition.id == dependency_id)
+            .ok_or_else(|| DeclaredHostDependencyError {
+                dependency_id: dependency_id.clone(),
+                code: "dependency_unknown",
+                detail: "reason=unknown_host_dependency_id".to_string(),
+            })?;
+        if detect_dependency(definition, workspace_root).is_some() {
+            installed.push(dependency_id.clone());
+            continue;
+        }
+        let (package_manager, commands) = prepare_dependency_install(definition, workspace_root)
+            .map_err(|code| DeclaredHostDependencyError {
+                dependency_id: dependency_id.clone(),
+                code,
+                detail: format!("reason=install_plan_unavailable dependency_id={dependency_id}"),
+            })?;
+        for command in commands {
+            let refresh_command = package_manager == "apt"
+                && command.args.last().is_some_and(|arg| arg == "-qq")
+                && command.args.iter().any(|arg| arg == "update");
+            if refresh_command && package_index_refreshed {
+                continue;
+            }
+            if control.is_cancelled() {
+                return Err(DeclaredHostDependencyError {
+                    dependency_id: dependency_id.clone(),
+                    code: "dependency_install_cancelled",
+                detail: "state=cancelled phase=package_manager_launch".to_string(),
+                });
+            }
+            let mut process = Command::new(&command.program);
+            process.args(&command.args).kill_on_drop(true);
+            if let Some(current_dir) = &command.current_dir {
+                process.current_dir(current_dir);
+            }
+            process.env("PATH", dependency_install_path());
+            let output = process
+                .output()
+                .await
+                .map_err(|error| DeclaredHostDependencyError {
+                    dependency_id: dependency_id.clone(),
+                    code: "package_manager_launch_failed",
+                    detail: error.to_string(),
+                })?;
+            if !output.status.success() {
+                let mut diagnostic = String::new();
+                append_dependency_log(&mut diagnostic, &output.stdout);
+                append_dependency_log(&mut diagnostic, &output.stderr);
+                return Err(DeclaredHostDependencyError {
+                    dependency_id: dependency_id.clone(),
+                    code: "package_install_failed",
+                    detail: format!(
+                        "package_manager={package_manager} exit_code={:?} log_tail={}",
+                        output.status.code(),
+                        bounded_tail(&diagnostic, DEPENDENCY_INSTALL_LOG_LIMIT)
+                    ),
+                });
+            }
+            package_index_refreshed |= refresh_command;
+        }
+        if detect_dependency(definition, workspace_root).is_none() {
+            return Err(DeclaredHostDependencyError {
+                dependency_id: dependency_id.clone(),
+                code: "dependency_still_missing",
+                detail: format!(
+                    "reason=dependency_probe_failed_after_install package_manager={package_manager}"
+                ),
+            });
+        }
+        installed.push(dependency_id.clone());
+    }
+    Ok(installed)
 }
 
 async fn get_dependency_install_operation(
@@ -486,6 +619,19 @@ fn detect_dependency(
     definition: &HostDependencyDefinition,
     workspace_root: &Path,
 ) -> Option<(String, String)> {
+    if definition.id == "tesseract_chi_sim" {
+        let executable = dependency_command_candidates("tesseract")
+            .into_iter()
+            .find(|candidate| candidate.is_file())?;
+        let output = StdCommand::new(&executable)
+            .arg("--list-langs")
+            .stdin(StdProcessStdio::null())
+            .output()
+            .ok()?;
+        let languages = String::from_utf8_lossy(&output.stdout);
+        return (output.status.success() && languages.lines().any(|line| line.trim() == "chi_sim"))
+            .then(|| (executable.display().to_string(), "chi_sim".to_string()));
+    }
     if definition.id == "browser_playwright" {
         return detect_browser_playwright(workspace_root);
     }
@@ -903,6 +1049,14 @@ fn linux_dependency_package(
         ("libclang", "zypper") => Some("llvm-clang-devel"),
         ("libclang", "pacman") => Some("clang"),
         ("libclang", "apk") => Some("clang-extra-tools"),
+        ("tesseract", "apt" | "zypper") => Some("tesseract-ocr"),
+        ("tesseract", "dnf" | "yum" | "pacman") => Some("tesseract"),
+        ("tesseract", "apk") => Some("tesseract-ocr"),
+        ("tesseract_chi_sim", "apt") => Some("tesseract-ocr-chi-sim"),
+        ("tesseract_chi_sim", "dnf" | "yum") => Some("tesseract-langpack-chi_sim"),
+        ("tesseract_chi_sim", "zypper") => Some("tesseract-ocr-traineddata"),
+        ("tesseract_chi_sim", "pacman") => Some("tesseract-data-chi_sim"),
+        ("tesseract_chi_sim", "apk") => Some("tesseract-ocr-data-chi_sim"),
         _ => definition.linux_package,
     }
 }
@@ -1239,6 +1393,28 @@ fn host_dependency_catalog() -> Vec<HostDependencyDefinition> {
             Some("ffmpeg"),
             false,
             &["audio_transcribe", "video_generate", "music_generate"],
+        ),
+        dependency(
+            "tesseract",
+            "skill",
+            false,
+            &["tesseract"],
+            &["--version"],
+            Some("tesseract-ocr"),
+            Some("tesseract"),
+            false,
+            &["local_ocr", "image_text_extraction"],
+        ),
+        dependency(
+            "tesseract_chi_sim",
+            "skill",
+            false,
+            &[],
+            &[],
+            Some("tesseract-ocr-chi-sim"),
+            Some("tesseract-lang"),
+            false,
+            &["local_ocr", "image_text_extraction"],
         ),
         dependency(
             "docker",
