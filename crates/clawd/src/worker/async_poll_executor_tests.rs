@@ -704,6 +704,25 @@ fn async_poll_adapter_running_after_poll_window_renews_retention() {
 }
 
 #[test]
+fn async_poll_virtual_multi_day_runtime_keeps_deadline_empty() {
+    let virtual_now = 1_000 + 14 * 86_400;
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "running",
+        "poll_after_seconds": 13,
+        "expires_at": 999
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, virtual_now, 30)
+        .expect("multi-day running observation remains resumable");
+    assert_eq!(payload["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(payload["retention_renewed"], true);
+    assert_eq!(payload["next_check_after"], virtual_now + 13);
+    assert_eq!(payload["expires_at"], virtual_now + 60);
+    assert!(payload.get("runtime_deadline_at").is_none());
+}
+
+#[test]
 fn explicit_async_adapter_expired_status_is_terminal() {
     let claimed = async_poll_claimed_dispatch(Some(json!({
         "job_id": "job-async-poll-adapter",

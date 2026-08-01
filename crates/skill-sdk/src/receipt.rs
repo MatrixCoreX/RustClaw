@@ -29,6 +29,14 @@ struct BackgroundVersionLeaseRecord {
     expires_at_unix: u64,
 }
 
+fn background_version_lease_active(
+    record: &BackgroundVersionLeaseRecord,
+    now_unix: u64,
+) -> Option<bool> {
+    (record.schema_version == BACKGROUND_VERSION_LEASE_SCHEMA_VERSION)
+        .then_some(record.expires_at_unix > now_unix)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactReceipt {
@@ -658,19 +666,15 @@ impl InstallReceiptStore {
             let record = fs::read(entry.path())
                 .ok()
                 .and_then(|raw| serde_json::from_slice::<BackgroundVersionLeaseRecord>(&raw).ok());
-            match record {
-                Some(record)
-                    if record.schema_version == BACKGROUND_VERSION_LEASE_SCHEMA_VERSION
-                        && record.expires_at_unix > now_unix =>
-                {
-                    active = true;
-                }
-                Some(record)
-                    if record.schema_version == BACKGROUND_VERSION_LEASE_SCHEMA_VERSION =>
-                {
+            match record
+                .as_ref()
+                .and_then(|record| background_version_lease_active(record, now_unix))
+            {
+                Some(true) => active = true,
+                Some(false) => {
                     let _ = fs::remove_file(entry.path());
                 }
-                _ => active = true,
+                None => active = true,
             }
         }
         if !active {
@@ -937,4 +941,33 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> SkillSdkResult<()> {
             format!("path={} error={error}", path.display()),
         )
     })
+}
+
+#[cfg(test)]
+mod background_version_lease_tests {
+    use super::*;
+
+    #[test]
+    fn multi_day_lease_uses_explicit_expiry_and_unknown_schema_fails_safe() {
+        let start = 10_000;
+        let record = BackgroundVersionLeaseRecord {
+            schema_version: BACKGROUND_VERSION_LEASE_SCHEMA_VERSION,
+            job_ref_digest: "a".repeat(64),
+            expires_at_unix: start + 14 * 86_400,
+        };
+        assert_eq!(
+            background_version_lease_active(&record, start + 13 * 86_400),
+            Some(true)
+        );
+        assert_eq!(
+            background_version_lease_active(&record, start + 15 * 86_400),
+            Some(false)
+        );
+
+        let unknown = BackgroundVersionLeaseRecord {
+            schema_version: BACKGROUND_VERSION_LEASE_SCHEMA_VERSION + 1,
+            ..record
+        };
+        assert_eq!(background_version_lease_active(&unknown, start), None);
+    }
 }

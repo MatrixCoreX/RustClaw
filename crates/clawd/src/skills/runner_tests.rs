@@ -632,3 +632,31 @@ fn pinned_poll_binding_rejects_skill_drift_and_unknown_fields() {
             .contains("unknown fields")
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn durable_job_metadata_write_failure_removes_partial_job_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "agent_durable_job_fault_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&root).expect("create tempdir");
+    let plan = DurableRunnerJobPlan::new(&root, "fixture_skill", 600);
+    plan.create_directories().expect("create durable job paths");
+    let guard = DurableRunnerJobSetupGuard::new(&plan.job_dir);
+    std::fs::write(plan.job_dir.join("partial"), "before-fault").expect("write partial metadata");
+    std::fs::set_permissions(&plan.job_dir, std::fs::Permissions::from_mode(0o500))
+        .expect("make metadata directory read-only");
+
+    let error = write_durable_job_metadata(&plan.job_dir, "pid", "123")
+        .expect_err("injected metadata write failure");
+
+    std::fs::set_permissions(&plan.job_dir, std::fs::Permissions::from_mode(0o700))
+        .expect("restore directory permissions for cleanup");
+    drop(guard);
+    assert!(error.contains("durable_skill_job_metadata_write_failed"));
+    assert!(!plan.job_dir.exists());
+    std::fs::remove_dir_all(root).expect("remove tempdir");
+}
