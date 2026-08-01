@@ -9,6 +9,8 @@ use crate::{AppState, ClaimedTask};
 
 #[path = "builtin_workspace_patch_transaction.rs"]
 mod transaction;
+#[path = "builtin_workspace_unified_diff.rs"]
+mod unified_diff;
 
 const MAX_PATCH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -121,11 +123,33 @@ fn apply_patch(
         ));
     }
 
-    let stats = match inspect_patch(&root, &patch_file) {
-        Ok(stats) => stats,
-        Err(err) => {
-            remove_checkpoint_dir(&checkpoint_dir);
-            return Err(err);
+    let git_workspace = is_git_workspace(&root);
+    let mut pure_patch = None;
+    let stats = if git_workspace {
+        match inspect_patch(&root, &patch_file) {
+            Ok(stats) => stats,
+            Err(err) => {
+                remove_checkpoint_dir(&checkpoint_dir);
+                return Err(err);
+            }
+        }
+    } else {
+        match unified_diff::inspect(&root, patch) {
+            Ok((parsed, pure_stats)) => {
+                pure_patch = Some(parsed);
+                pure_stats
+                    .into_iter()
+                    .map(|stat| PatchStat {
+                        path: stat.path,
+                        additions: Some(stat.additions),
+                        deletions: Some(stat.deletions),
+                    })
+                    .collect()
+            }
+            Err(err) => {
+                remove_checkpoint_dir(&checkpoint_dir);
+                return Err(err);
+            }
         }
     };
     if stats.is_empty() {
@@ -154,27 +178,40 @@ fn apply_patch(
             return Err(err);
         }
     };
-    let check = git_apply(&root, &patch_file, true)
-        .map_err(|err| patch_io_error("patch_check_failed", "workspace.patch.check_failed", err))?;
-    if !check.status.success() {
-        remove_checkpoint_dir(&checkpoint_dir);
-        return Err(command_error(
-            "patch_context_mismatch",
-            "workspace.patch.context_mismatch",
-            &check,
-        ));
-    }
+    if git_workspace {
+        let check = git_apply(&root, &patch_file, true).map_err(|err| {
+            patch_io_error("patch_check_failed", "workspace.patch.check_failed", err)
+        })?;
+        if !check.status.success() {
+            remove_checkpoint_dir(&checkpoint_dir);
+            return Err(command_error(
+                "patch_context_mismatch",
+                "workspace.patch.context_mismatch",
+                &check,
+            ));
+        }
 
-    let applied = git_apply(&root, &patch_file, false)
-        .map_err(|err| patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", err))?;
-    if !applied.status.success() {
+        let applied = git_apply(&root, &patch_file, false).map_err(|err| {
+            patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", err)
+        })?;
+        if !applied.status.success() {
+            restore_snapshot(&root, &checkpoint_dir, &files);
+            remove_checkpoint_dir(&checkpoint_dir);
+            return Err(command_error(
+                "patch_apply_failed",
+                "workspace.patch.apply_failed",
+                &applied,
+            ));
+        }
+    } else if let Err(err) = unified_diff::apply(
+        &root,
+        pure_patch
+            .as_ref()
+            .expect("pure_patch_present_for_non_git_workspace"),
+    ) {
         restore_snapshot(&root, &checkpoint_dir, &files);
         remove_checkpoint_dir(&checkpoint_dir);
-        return Err(command_error(
-            "patch_apply_failed",
-            "workspace.patch.apply_failed",
-            &applied,
-        ));
+        return Err(err);
     }
 
     if let Err(err) = capture_after_hashes(&root, &mut files) {
@@ -224,6 +261,7 @@ fn apply_patch(
         "deletions": deletions,
         "hunk_count": patch.lines().filter(|line| line.starts_with("@@ ")).count(),
         "changed_hunks": patch.lines().filter(|line| line.starts_with("@@ ")).count(),
+        "patch_engine": if git_workspace { "git" } else { "pure_rust" },
         "files": manifest.files,
         "artifact_refs": [
             {"kind": "workspace_patch", "ref": format!("workspace_patch:{patch_id}")},
@@ -712,6 +750,17 @@ fn git_apply(root: &Path, patch_file: &Path, check: bool) -> std::io::Result<Out
     command.arg(patch_file).output()
 }
 
+fn is_git_workspace(root: &Path) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+        })
+}
+
 pub(super) fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
     root.canonicalize().map_err(|err| {
         patch_io_error(
@@ -1103,3 +1152,7 @@ pub(super) fn restrict_directory_permissions(_path: &Path) {}
 #[cfg(test)]
 #[path = "builtin_workspace_patch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_unified_diff_tests.rs"]
+mod unified_diff_tests;

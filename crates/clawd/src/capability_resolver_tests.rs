@@ -1101,6 +1101,40 @@ fn workspace_replace_text_resolves_with_exact_machine_arguments() {
 }
 
 #[test]
+fn workspace_edit_text_resolves_batch_without_a_second_runtime_action() {
+    let state = state_with_workspace_registry();
+    let edits = json!([
+        {
+            "old_text": "old_value",
+            "new_text": "middle_value",
+        },
+        {
+            "old_text": "middle_value",
+            "new_text": "new_value",
+            "replace_all": true,
+            "expected_occurrences": 2,
+        }
+    ]);
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "workspace.edit_text",
+        json!({"path": "src/lib.rs", "edits": edits}),
+    );
+
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected fs_basic tool action");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(args["action"], "replace_text");
+    assert_eq!(args["edits"], edits);
+    assert_eq!(record.capability_ref, "workspace.edit_text");
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+}
+
+#[test]
 fn local_git_mutations_resolve_from_registry_while_remote_push_is_absent() {
     let state = state_with_workspace_registry();
     for (capability, action_name, input) in [

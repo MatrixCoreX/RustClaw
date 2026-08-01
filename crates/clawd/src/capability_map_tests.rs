@@ -278,7 +278,7 @@ fn native_capability_groups_expose_distinct_registry_tools() {
     assert_eq!(doc_parse.tool_name, "call_doc_parse");
     assert!(doc_parse.description.contains("document_summary"));
     assert_ne!(doc_parse.tool_name, filesystem.tool_name);
-    assert_eq!(filesystem.capability_names.len(), 21);
+    assert_eq!(filesystem.capability_names.len(), 23);
     assert!(filesystem
         .capability_names
         .contains(&"filesystem.read_text_range".to_string()));
@@ -294,6 +294,12 @@ fn native_capability_groups_expose_distinct_registry_tools() {
     assert!(filesystem
         .capability_names
         .contains(&"workspace.replace_text".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"workspace.preview_edit_text".to_string()));
+    assert!(filesystem
+        .capability_names
+        .contains(&"workspace.edit_text".to_string()));
     assert!(!filesystem
         .capability_names
         .contains(&"fs.count_entries".to_string()));
