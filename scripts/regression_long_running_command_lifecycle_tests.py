@@ -117,6 +117,10 @@ class SummaryContractTest(unittest.TestCase):
                 summary = {
                     "status": "pass",
                     "submission_mode": "direct_run_skill",
+                    "source_commit": "candidate-commit",
+                    "source_commit_pushed": True,
+                    "worktree": {"status": "clean", "changed_path_count": 0},
+                    "binary": {"path": "candidate-clawd", "sha256": "candidate-digest"},
                     "cases": {"case": {"status": "pass"}},
                 }
 
@@ -132,9 +136,11 @@ class SummaryContractTest(unittest.TestCase):
                 )
 
             self.assertEqual(persisted["schema_version"], 1)
-            self.assertTrue(persisted["source_commit"])
-            self.assertIn(persisted["worktree"]["status"], {"clean", "dirty"})
-            self.assertTrue(persisted["binary"]["sha256"])
+            self.assertEqual(persisted["source_commit"], "candidate-commit")
+            self.assertTrue(persisted["source_commit_pushed"])
+            self.assertEqual(persisted["worktree"]["status"], "clean")
+            self.assertEqual(persisted["binary"]["sha256"], "candidate-digest")
+            self.assertIn(persisted["finalization_worktree"]["status"], {"clean", "dirty"})
             self.assertIn("tree_sha256", persisted["ui"])
             self.assertEqual(
                 persisted["case_counts"],
