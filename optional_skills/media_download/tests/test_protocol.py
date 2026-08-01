@@ -116,6 +116,64 @@ class AdapterTest(unittest.TestCase):
                 str(storage / "modelscope"),
             )
 
+    def test_media_operation_has_no_internal_deadline_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            request = {
+                "request_id": "download-no-internal-deadline",
+                "args": {
+                    "action": "download",
+                    "share": "https://example.test/public-post",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            completed = subprocess.CompletedProcess(["tool"], 0, stdout="ok", stderr="")
+            with mock.patch.object(self.skill.subprocess, "run", return_value=completed) as run:
+                self.skill.respond(request)
+
+        self.assertIsNone(run.call_args.kwargs["timeout"])
+
+    def test_media_operation_honors_only_an_explicit_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            request = {
+                "request_id": "download-explicit-deadline",
+                "args": {
+                    "action": "download",
+                    "share": "https://example.test/public-post",
+                    "operation_timeout_seconds": 3_000,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            completed = subprocess.CompletedProcess(["tool"], 0, stdout="ok", stderr="")
+            with mock.patch.object(self.skill.subprocess, "run", return_value=completed) as run:
+                self.skill.respond(request)
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 3_000)
+
+    def test_media_operation_rejects_a_deadline_beyond_the_host_lifecycle(self) -> None:
+        with self.assertRaisesRegex(self.skill.SkillFailure, "between 5 and 3500"):
+            self.skill._optional_integer(
+                {"operation_timeout_seconds": 3_501},
+                "operation_timeout_seconds",
+                minimum=5,
+                maximum=3_500,
+            )
+
     def test_transcribe_command_defaults_to_local_whisper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

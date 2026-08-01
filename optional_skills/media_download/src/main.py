@@ -128,6 +128,25 @@ def _integer(
     return value
 
 
+def _optional_integer(
+    args: dict[str, Any],
+    name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int | None:
+    if name not in args:
+        return None
+    value = args[name]
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise SkillFailure(
+            f"{name} must be an integer between {minimum} and {maximum}",
+            error_code="invalid_args",
+            message_key=f"media_download.error.invalid_{name}",
+        )
+    return value
+
+
 def _number(
     args: dict[str, Any],
     name: str,
@@ -673,7 +692,7 @@ def _run_tool(
     action: str,
     command: list[str],
     output_dir: Path,
-    timeout_seconds: int,
+    timeout_seconds: int | None,
     storage_directory: Path | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
@@ -697,8 +716,9 @@ def _run_tool(
         changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
         artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
         not_applied = _rollback_output_changes(output_dir, before, after)
+        configured_timeout = timeout_seconds if timeout_seconds is not None else error.timeout
         raise SkillFailure(
-            f"{action} timed out after {timeout_seconds} seconds",
+            f"{action} timed out after {configured_timeout} seconds",
             error_code="timeout",
             message_key="media_download.error.timeout",
             retryable=True,
@@ -850,10 +870,9 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             )
 
         output_dir = _artifact_output_directory(request)
-        operation_timeout = _integer(
+        operation_timeout = _optional_integer(
             args,
             "operation_timeout_seconds",
-            default=900,
             minimum=5,
             maximum=3_500,
         )
