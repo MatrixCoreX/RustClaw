@@ -229,52 +229,49 @@ fn read_only_preview_forces_read_only_process_sandbox() {
 }
 
 #[test]
-fn warm_reuse_requires_every_host_side_readonly_guard() {
+fn warm_reuse_requires_exact_readonly_package_and_action_guards() {
     let mapping = preview_mapping();
     assert!(stateless_readonly_reuse_allowed(
         skill_sdk::ExecutionProfile::StatelessReadonly,
+        skill_sdk::SandboxProfile::ReadOnly,
         &[Capability::FsRead],
         Some(&mapping),
-        ToolSandboxMode::ReadOnly,
-        false,
-        false,
-        false,
         false,
         false,
         false,
     ));
     assert!(!stateless_readonly_reuse_allowed(
         skill_sdk::ExecutionProfile::PerRequest,
+        skill_sdk::SandboxProfile::ReadOnly,
         &[Capability::FsRead],
         Some(&mapping),
-        ToolSandboxMode::ReadOnly,
-        false,
-        false,
-        false,
         false,
         false,
         false,
     ));
     assert!(!stateless_readonly_reuse_allowed(
         skill_sdk::ExecutionProfile::StatelessReadonly,
+        skill_sdk::SandboxProfile::ReadOnly,
         &[Capability::FsRead, Capability::Net],
         Some(&mapping),
-        ToolSandboxMode::ReadOnly,
-        false,
-        false,
-        false,
         false,
         false,
         false,
     ));
     assert!(!stateless_readonly_reuse_allowed(
         skill_sdk::ExecutionProfile::StatelessReadonly,
+        skill_sdk::SandboxProfile::ReadOnly,
         &[Capability::FsRead],
         Some(&mapping),
-        ToolSandboxMode::ReadOnly,
         true,
         false,
         false,
+    ));
+    assert!(!stateless_readonly_reuse_allowed(
+        skill_sdk::ExecutionProfile::StatelessReadonly,
+        skill_sdk::SandboxProfile::WorkspaceWrite,
+        &[Capability::FsRead],
+        Some(&mapping),
         false,
         false,
         false,

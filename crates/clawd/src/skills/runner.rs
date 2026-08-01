@@ -495,15 +495,12 @@ pub(crate) async fn run_skill_with_runner_once(
         || !tokenized_secret_envs.is_empty();
     let warm_reuse_allowed = stateless_readonly_reuse_allowed(
         installed_launch.execution_profile,
+        installed_launch.sandbox_profile,
         &caps,
         action_mapping.as_ref(),
-        sandbox_mode,
         storage_descriptor.is_some(),
         has_secrets,
         admission_capable,
-        unrestricted_admin,
-        allow_path_outside_workspace,
-        allow_sudo,
     );
     let additional_writable_paths = runner_additional_writable_paths(
         secret_token_scope.as_ref().map(|scope| scope.store_dir()),
@@ -623,17 +620,28 @@ pub(crate) async fn run_skill_with_runner_once(
         .env("CLAWD_BASE_URL", &local_clawd_base_url)
         .env(
             "APP_UNRESTRICTED_ADMIN",
-            if unrestricted_admin { "1" } else { "0" },
-        )
-        .env(
-            "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
-            if allow_path_outside_workspace {
+            if unrestricted_admin && !warm_reuse_allowed {
                 "1"
             } else {
                 "0"
             },
         )
-        .env("APP_ALLOW_SUDO", if allow_sudo { "1" } else { "0" })
+        .env(
+            "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
+            if allow_path_outside_workspace && !warm_reuse_allowed {
+                "1"
+            } else {
+                "0"
+            },
+        )
+        .env(
+            "APP_ALLOW_SUDO",
+            if allow_sudo && !warm_reuse_allowed {
+                "1"
+            } else {
+                "0"
+            },
+        )
         .env(
             "APP_SKILL_PACKAGES_ROOT",
             package_root.display().to_string(),
@@ -1042,15 +1050,12 @@ fn action_scoped_runner_sandbox_mode(
 
 fn stateless_readonly_reuse_allowed(
     execution_profile: skill_sdk::ExecutionProfile,
+    sandbox_profile: skill_sdk::SandboxProfile,
     capabilities: &[Capability],
     mapping: Option<&PlannerCapabilityMapping>,
-    sandbox_mode: ToolSandboxMode,
     has_storage: bool,
     has_secrets: bool,
     admission_capable: bool,
-    unrestricted_admin: bool,
-    allow_path_outside_workspace: bool,
-    allow_sudo: bool,
 ) -> bool {
     let Some(mapping) = mapping else {
         return false;
@@ -1069,16 +1074,13 @@ fn stateless_readonly_reuse_allowed(
         && mapping.subprocess != Some(true)
         && mapping.package_install != Some(true)
         && mapping.privilege_escalation != Some(true)
-        && sandbox_mode == ToolSandboxMode::ReadOnly
+        && sandbox_profile == skill_sdk::SandboxProfile::ReadOnly
         && capabilities
             .iter()
             .all(|capability| matches!(capability, Capability::FsRead))
         && !has_storage
         && !has_secrets
         && !admission_capable
-        && !unrestricted_admin
-        && !allow_path_outside_workspace
-        && !allow_sudo
 }
 
 fn add_runner_dispatch_metadata(
