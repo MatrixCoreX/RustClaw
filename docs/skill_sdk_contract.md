@@ -34,6 +34,15 @@ receipt, manifest and every artifact, then produces `SkillLaunchSpec`. Planner
 arguments cannot change the program, entrypoint, working directory,
 environment, sandbox profile or receipt identity.
 
+`run.execution_profile="stateless_readonly"` is a host-verified performance
+hint, not a permission grant. It is valid only for observe/validate actions
+with a read-only sandbox, no private storage, and no network, credential,
+subprocess, write, publish, install, privilege, or LLM request. The runtime
+rechecks the admitted registry mapping and effective capabilities before reusing
+an outer runner. Any generation, grant, version, manifest, or receipt change
+invalidates idle instances; low memory and every ineligible request use the
+ordinary one-process-per-request path.
+
 Machine schemas live under `docs/schemas/`. The `skillctl` binary emits
 one JSON result for CI-friendly validation and receipt inspection.
 

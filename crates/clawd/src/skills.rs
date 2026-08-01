@@ -1,4 +1,6 @@
-use claw_core::skill_registry::{CapabilityIsolationProfile, SkillKind, SkillRiskLevel};
+use claw_core::skill_registry::{
+    CapabilityIsolationProfile, PlannerCapabilityEffect, SkillKind, SkillRiskLevel,
+};
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
 use std::sync::Arc;
@@ -140,10 +142,14 @@ pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
 
 mod builtin;
 mod credential_fallback;
+#[cfg(test)]
+#[path = "skills/skills_dispatch_concurrency_tests.rs"]
+mod dispatch_concurrency_tests;
 mod error_contract;
 mod memory_context;
 mod result_enrichment;
 mod runner;
+pub(crate) mod runner_pool;
 
 pub(crate) use builtin::execute_builtin_skill_for_task;
 #[cfg(test)]
@@ -169,10 +175,12 @@ const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
 
 struct SkillDispatchPermits {
+    _serialization: Option<OwnedSemaphorePermit>,
     _skill: Option<OwnedSemaphorePermit>,
     _global: OwnedSemaphorePermit,
 }
 
+#[cfg(test)]
 async fn acquire_skill_dispatch_permits(
     gates: &Arc<crate::runtime::state::SkillConcurrencyGates>,
     global: &Arc<Semaphore>,
@@ -180,6 +188,33 @@ async fn acquire_skill_dispatch_permits(
     skill_name: &str,
     skill_limit: Option<usize>,
 ) -> Result<SkillDispatchPermits, String> {
+    acquire_skill_dispatch_permits_with_serialization(
+        gates,
+        global,
+        task_id,
+        skill_name,
+        skill_limit,
+        None,
+    )
+    .await
+}
+
+async fn acquire_skill_dispatch_permits_with_serialization(
+    gates: &Arc<crate::runtime::state::SkillConcurrencyGates>,
+    global: &Arc<Semaphore>,
+    task_id: &str,
+    skill_name: &str,
+    skill_limit: Option<usize>,
+    serialization_key: Option<&str>,
+) -> Result<SkillDispatchPermits, String> {
+    let serialization_permit = if let Some(key) = serialization_key {
+        let semaphore = gates.semaphore(key, 1);
+        Some(semaphore.acquire_owned().await.map_err(|error| {
+            format!("skill serialization semaphore closed for {skill_name}: {error}")
+        })?)
+    } else {
+        None
+    };
     // The skill-specific permit is intentionally acquired first. A queued
     // resource-heavy skill therefore cannot consume one of the shared runner
     // slots before its own FIFO slot is available.
@@ -211,6 +246,7 @@ async fn acquire_skill_dispatch_permits(
         .await
         .map_err(|error| format!("skill semaphore closed: {error}"))?;
     Ok(SkillDispatchPermits {
+        _serialization: serialization_permit,
         _skill: skill_permit,
         _global: global_permit,
     })
@@ -1401,6 +1437,20 @@ fn action_scoped_planner_mapping(
     })
 }
 
+fn skill_dispatch_serialization_key(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> Option<String> {
+    let mapping = action_scoped_planner_mapping(state, skill_name, args)?;
+    (mapping.once_per_task == Some(true)
+        || matches!(
+            mapping.effect,
+            Some(PlannerCapabilityEffect::Mutate | PlannerCapabilityEffect::External)
+        ))
+    .then(|| format!("__serial_skill__{skill_name}"))
+}
+
 fn action_scoped_isolation_profile(
     state: &AppState,
     skill_name: &str,
@@ -1790,12 +1840,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         "skill_timeout_resolved"
     );
 
-    let _dispatch_permits = acquire_skill_dispatch_permits(
+    let serialization_key = skill_dispatch_serialization_key(state, &skill_name, &args);
+    let _dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
         &state.skill_rt.skill_concurrency_gates,
         &state.skill_rt.skill_semaphore,
         &task.task_id,
         &skill_name,
         state.skill_max_concurrency_for_dispatch(&skill_name),
+        serialization_key.as_deref(),
     )
     .await?;
 

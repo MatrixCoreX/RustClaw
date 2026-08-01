@@ -6,6 +6,18 @@ pub(super) fn default_skill_max_concurrency() -> usize {
     1
 }
 
+pub(super) fn default_runner_warm_pool_max_idle_per_skill() -> usize {
+    1
+}
+
+pub(super) fn default_runner_warm_pool_min_available_memory_mib() -> u64 {
+    512
+}
+
+pub(super) fn default_runner_warm_pool_idle_timeout_seconds() -> u64 {
+    60
+}
+
 pub(super) fn default_uninstalled_skills() -> Vec<String> {
     Vec::new()
 }

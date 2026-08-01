@@ -84,7 +84,7 @@ pub(crate) struct OverlaySnapshot {
     pub(crate) tombstoned: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AdmissionExecutionBinding {
     pub(crate) version: String,
     pub(crate) manifest_digest: String,

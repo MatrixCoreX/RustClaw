@@ -16,7 +16,7 @@ pub const LEGACY_SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const AGENT_JSONL_PROTOCOL: &str = "agent-jsonl-v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildAdapter {
     Cargo,
@@ -87,6 +87,16 @@ impl Default for SandboxProfile {
     fn default() -> Self {
         Self::Required
     }
+}
+
+/// Requested process lifecycle. This is only an optimization hint; the host
+/// still checks the admitted capability set before allowing process reuse.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionProfile {
+    #[default]
+    PerRequest,
+    StatelessReadonly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +208,8 @@ pub struct RunSpec {
     /// contract.
     #[serde(default, skip_serializing_if = "is_false")]
     pub progress_frames: bool,
+    #[serde(default, skip_serializing_if = "is_per_request_execution")]
+    pub execution_profile: ExecutionProfile,
 }
 
 fn working_directory_root() -> String {
@@ -214,6 +226,10 @@ fn empty_object() -> serde_json::Value {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_per_request_execution(value: &ExecutionProfile) -> bool {
+    *value == ExecutionProfile::PerRequest
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,6 +467,32 @@ impl PackageManifest {
                 "manifest_progress_frames_transport_unsupported",
                 "run.progress_frames requires a process launcher",
             ));
+        }
+        if self.run.execution_profile == ExecutionProfile::StatelessReadonly {
+            let capability_request = self.effective_capability_request()?;
+            let permissions = &capability_request.permissions;
+            if self.security.sandbox != SandboxProfile::ReadOnly
+                || self.storage.kind != "none"
+                || self.requested_runtime_network()?
+                || capability_request.capabilities.iter().any(|capability| {
+                    !matches!(
+                        capability.effect,
+                        RequestedEffect::Observe | RequestedEffect::Validate
+                    )
+                })
+                || permissions.llm_gateway
+                || permissions.filesystem_write
+                || permissions.subprocess
+                || permissions.package_install
+                || permissions.privilege_escalation
+                || permissions.external_publish
+                || !permissions.credential_refs.is_empty()
+            {
+                return Err(SkillSdkError::new(
+                    "manifest_execution_profile_unsafe",
+                    "stateless_readonly requires observe/validate actions, read_only sandbox, no storage, and no privileged runtime permission requests",
+                ));
+            }
         }
         if self.security.inherit_credentials {
             return Err(SkillSdkError::new(

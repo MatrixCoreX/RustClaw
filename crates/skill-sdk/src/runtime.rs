@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{BuildAdapter, LauncherKind, PackageManifest, SandboxProfile};
+use crate::manifest::{
+    BuildAdapter, ExecutionProfile, LauncherKind, PackageManifest, SandboxProfile,
+};
 use crate::receipt::{digest_file, InstallReceipt, InstallReceiptStore, LaunchProgramScope};
 use crate::{SkillSdkError, SkillSdkResult};
 
@@ -28,6 +30,8 @@ pub struct SkillLaunchSpec {
     pub timeout_seconds: u64,
     #[serde(default, skip_serializing_if = "is_false")]
     pub progress_frames: bool,
+    #[serde(default)]
+    pub execution_profile: ExecutionProfile,
     pub sandbox_profile: SandboxProfile,
     pub runtime_network: bool,
     pub install_root: PathBuf,
@@ -39,12 +43,13 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SkillVersionPin {
     pub skill_name: String,
     pub version: String,
     pub adapter: BuildAdapter,
     pub progress_frames: bool,
+    pub execution_profile: ExecutionProfile,
     pub install_root: PathBuf,
     pub manifest_digest: String,
     pub receipt_digest: String,
@@ -269,6 +274,7 @@ impl SkillRuntimeResolver {
             version: receipt.version,
             adapter: receipt.adapter,
             progress_frames: manifest.run.progress_frames,
+            execution_profile: manifest.run.execution_profile,
             install_root: canonical_install,
             manifest_digest: manifest.digest()?,
             receipt_digest,
@@ -329,6 +335,7 @@ impl SkillRuntimeResolver {
             remote_endpoint: receipt.launch.remote_endpoint,
             timeout_seconds: manifest.run.timeout_seconds,
             progress_frames: manifest.run.progress_frames,
+            execution_profile: manifest.run.execution_profile,
             sandbox_profile: receipt.sandbox_profile,
             runtime_network: receipt.runtime_network,
             install_root: canonical_install,

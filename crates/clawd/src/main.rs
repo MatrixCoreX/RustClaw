@@ -847,6 +847,12 @@ async fn run() -> anyhow::Result<()> {
             skill_concurrency_gates: Arc::new(
                 crate::runtime::state::SkillConcurrencyGates::default(),
             ),
+            runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::new(
+                config.skills.runner_warm_pool_enabled,
+                config.skills.runner_warm_pool_max_idle_per_skill,
+                config.skills.runner_warm_pool_min_available_memory_mib,
+                config.skills.runner_warm_pool_idle_timeout_seconds,
+            )),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
             cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
