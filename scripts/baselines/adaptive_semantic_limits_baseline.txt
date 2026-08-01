@@ -10,11 +10,14 @@ UI/src/components/TaskLlmTracePanel.tsx	slice	.slice(0, 8)
 UI/src/hooks/useChatRuntime.ts	slice	.slice(2, 8)
 UI/src/hooks/useChatRuntime.ts	slice	.slice(2, 8)
 UI/src/lib/model-config.ts	slice	.slice(0, 4)
+UI/src/lib/task-artifact-content.ts	hard_count	MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES
 UI/src/lib/task-llm-trace.ts	slice	.slice(0, limit)
 UI/src/lib/task-llm-trace.ts	slice	.slice(0, limit)
 UI/src/lib/task-llm-trace.ts	slice	.slice(0, limit)
 UI/src/lib/task-llm-trace.ts	slice	.slice(0, limit)
 crates/claw-core/src/prompt_layers.rs	take	.take(80)
+crates/claw-core/src/task_delivery_artifacts.rs	take	.take(180)
+crates/claw-core/src/task_delivery_artifacts.rs	take	.take(MAX_TASK_ARTIFACTS)
 crates/clawcli/src/chat_attachments.rs	hard_count	MAX_ATTACHMENTS
 crates/clawcli/src/chat_attachments.rs	hard_count	MAX_ATTACHMENT_BYTES
 crates/clawcli/src/chat_attachments.rs	hard_count	MAX_TOTAL_ATTACHMENT_BYTES
@@ -67,6 +70,7 @@ crates/clawd/src/agent_engine/context_compaction.rs	take	.take(max_chars)
 crates/clawd/src/agent_engine/context_compaction.rs	take	.take(max_chars)
 crates/clawd/src/agent_engine/dispatch_synthesis.rs	take	.take(2)
 crates/clawd/src/agent_engine/dispatch_synthesis.rs	take	.take(4)
+crates/clawd/src/agent_engine/execution_loop.rs	take	.take(32)
 crates/clawd/src/agent_engine/loop_control.rs	clamp	.clamp(1, 30)
 crates/clawd/src/agent_engine/observed_output.rs	hard_count	MAX_COMPACT_OBSERVED_BLOCK_BYTES
 crates/clawd/src/agent_engine/observed_output_entries.rs	hard_count	MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH
@@ -119,9 +123,13 @@ crates/clawd/src/agent_hooks/shared.rs	hard_count	MAX_HOOK_INPUT_BYTES
 crates/clawd/src/agent_hooks/shared.rs	hard_count	MAX_HOOK_OUTPUT_BYTES
 crates/clawd/src/answer_verifier.rs	hard_count	MAX_EXACT_LITERAL_CHARS
 crates/clawd/src/answer_verifier_runtime/compacted_machine_ref_gap.rs	hard_count	MIN_BARE_MACHINE_REF_VALUE_CHARS
+crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	hard_count	MAX_DEPTH
 crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	hard_count	MAX_PROJECTION_CHARS
 crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	hard_count	MAX_STRUCTURED_RESULT_CHARS
+crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	hard_count	MAX_TOTAL_CHARS
+crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	hard_count	MAX_VALUE_CHARS
 crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	take	.take(MAX_PROJECTION_CHARS)
+crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	take	.take(max_chars)
 crates/clawd/src/answer_verifier_runtime/prompt_evidence_blocks.rs	truncate	.truncate(32)
 crates/clawd/src/app_helpers.rs	take	.take(4)
 crates/clawd/src/app_helpers.rs	take	.take(4)
@@ -149,6 +157,7 @@ crates/clawd/src/capability_map.rs	take	.take(NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET
 crates/clawd/src/capability_map.rs	take	.take(prefix_budget)
 crates/clawd/src/child_task_contract.rs	take	.take(160)
 crates/clawd/src/clarify_state.rs	truncate	.truncate(crate::followup_frame::MAX_ORDERED_ENTRIES)
+crates/clawd/src/conversation_state.rs	hard_count	MAX_CONVERSATION_ID_BYTES
 crates/clawd/src/delivery_utils/directory_lookup.rs	take	.take(3)
 crates/clawd/src/delivery_utils/directory_lookup.rs	take	.take(3)
 crates/clawd/src/delivery_utils/file_delivery.rs	take	.take(3)
@@ -171,6 +180,10 @@ crates/clawd/src/followup_frame.rs	take	.take(MAX_ORDERED_ENTRIES)
 crates/clawd/src/followup_frame.rs	take	.take(MAX_ORDERED_ENTRIES)
 crates/clawd/src/followup_frame.rs	take	.take(MAX_ORDERED_ENTRIES)
 crates/clawd/src/followup_frame.rs	truncate	.truncate(MAX_ORDERED_ENTRIES)
+crates/clawd/src/http/task_artifacts.rs	hard_count	MAX_VIDEO_BROWSER_PREVIEW_BYTES
+crates/clawd/src/http/task_artifacts.rs	hard_count	MAX_VIDEO_POSTER_BYTES
+crates/clawd/src/http/task_artifacts.rs	take	.take(300)
+crates/clawd/src/http/task_artifacts.rs	take	.take(300)
 crates/clawd/src/http/task_artifacts.rs	take	.take(content_length)
 crates/clawd/src/http/ui_routes/host_dependencies.rs	take	.take(512)
 crates/clawd/src/http/ui_routes/host_dependencies.rs	take	.take(DEPENDENCY_VERSION_LIMIT)
@@ -234,7 +247,14 @@ crates/clawd/src/repo/conversation_history.rs	hard_count	MAX_ERROR_TEXT_BYTES
 crates/clawd/src/repo/conversation_history.rs	hard_count	MAX_PAGE_LIMIT
 crates/clawd/src/repo/conversation_history.rs	hard_count	MAX_USER_TEXT_BYTES
 crates/clawd/src/repo/conversation_history.rs	truncate	.truncate(limit)
+crates/clawd/src/repo/pending_channel_requests.rs	clamp	.clamp(MIN_TTL_SECONDS, MAX_TTL_SECONDS)
+crates/clawd/src/repo/pending_channel_requests.rs	hard_count	MAX_IDEMPOTENCY_KEY_CHARS
+crates/clawd/src/repo/pending_channel_requests.rs	hard_count	MAX_REQUEST_JSON_BYTES
+crates/clawd/src/repo/submit.rs	take	.take(1_024)
 crates/clawd/src/repo/task_admin.rs	hard_count	MAX_RESUME_USER_MESSAGE_CHARS
+crates/clawd/src/repo/task_plan.rs	hard_count	MAX_PLAN_STEPS
+crates/clawd/src/repo/task_plan.rs	hard_count	MAX_STEP_ID_CHARS
+crates/clawd/src/repo/task_plan.rs	hard_count	MAX_STEP_TITLE_CHARS
 crates/clawd/src/routing_context.rs	take	.take(limit)
 crates/clawd/src/runtime/state.rs	take	.take(remaining)
 crates/clawd/src/schedule_service.rs	take	.take(6)
@@ -264,7 +284,6 @@ crates/clawd/src/skills/builtin_read_file.rs	clamp	.clamp(MIN_READ_BYTES, MAX_RE
 crates/clawd/src/skills/builtin_read_file.rs	hard_count	DEFAULT_READ_BYTES
 crates/clawd/src/skills/builtin_read_file.rs	hard_count	MAX_READ_BYTES
 crates/clawd/src/skills/builtin_read_file.rs	hard_count	MIN_READ_BYTES
-crates/clawd/src/skills/builtin_run_cmd.rs	clamp	.clamp(1, 86_400)
 crates/clawd/src/skills/builtin_run_cmd_artifact.rs	clamp	.clamp(MIN_HARD_LIMIT_BYTES, MAX_HARD_LIMIT_BYTES)
 crates/clawd/src/skills/builtin_run_cmd_artifact.rs	hard_count	HARD_LIMIT_MULTIPLIER
 crates/clawd/src/skills/builtin_run_cmd_artifact.rs	hard_count	MAX_HARD_LIMIT_BYTES
@@ -275,8 +294,14 @@ crates/clawd/src/skills/builtin_workspace_mutation.rs	hard_count	MAX_SNAPSHOT_EN
 crates/clawd/src/skills/builtin_workspace_patch.rs	hard_count	MAX_DIFF_BYTES
 crates/clawd/src/skills/builtin_workspace_patch.rs	hard_count	MAX_PATCH_BYTES
 crates/clawd/src/skills/builtin_workspace_replace.rs	hard_count	MAX_FILE_BYTES
-crates/clawd/src/skills/builtin_workspace_replace.rs	hard_count	MAX_FRAGMENT_BYTES
 crates/clawd/src/skills/builtin_workspace_replace.rs	hard_count	MAX_PREVIEW_BYTES
+crates/clawd/src/skills/builtin_workspace_replace_edit.rs	hard_count	MAX_FRAGMENT_BYTES
+crates/clawd/src/skills/builtin_workspace_replace_edit.rs	take	.take(MAX_REPORTED_RANGES)
+crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_PATCH_FILES
+crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_TARGET_FILE_BYTES
+crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_TOTAL_TARGET_BYTES
+crates/clawd/src/skills/runner.rs	take	.take(96)
+crates/clawd/src/skills/runner_pool.rs	clamp	.clamp(1, 3_600)
 crates/clawd/src/task_artifacts.rs	hard_count	DEFAULT_MAX_ARTIFACT_BYTES
 crates/clawd/src/task_artifacts.rs	take	.take(180)
 crates/clawd/src/task_artifacts.rs	take	.take(MAX_TASK_ARTIFACTS * 2)
@@ -331,7 +356,8 @@ crates/clawd/src/ui_attachments.rs	hard_count	MAX_UI_ATTACHMENT_BYTES
 crates/clawd/src/ui_attachments.rs	hard_count	MAX_UI_TOTAL_ATTACHMENT_BYTES
 crates/clawd/src/verifier_creation_targets.rs	take	.take(8)
 crates/clawd/src/visible_text.rs	take	.take(max_chars)
-crates/clawd/src/worker/async_poll_executor.rs	take	.take(max_bytes as u64)
+crates/clawd/src/worker/async_poll_executor.rs	take	.take(read_limit as u64)
+crates/clawd/src/worker/async_poll_executor.rs	truncate	.truncate(visible_len)
 crates/clawd/src/worker/conversation_compaction.rs	hard_count	MAX_REF_BYTES
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
@@ -339,6 +365,7 @@ crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
 crates/clawd/src/worker/runtime_support/recovery_flow.rs	take	.take(10)
+crates/clawd/src/worker/workspace_instructions/discovery/source_io.rs	take	.take(read_limit)
 crates/fs-discovery/src/ripgrep.rs	hard_count	MAX_CAPTURE_BYTES
 crates/fs-discovery/src/ripgrep_process.rs	hard_count	MAX_DIAGNOSTIC_BYTES
 crates/fs-discovery/src/text_backend.rs	clamp	.clamp(4 * 1024, 64 * 1024 * 1024)
@@ -354,6 +381,7 @@ crates/skill-sdk/src/prebuilt.rs	hard_count	MAX_ARCHIVE_EXPANDED_BYTES
 crates/skill-sdk/src/prebuilt.rs	hard_count	MAX_PREBUILT_DOWNLOAD_BYTES
 crates/skill-sdk/src/process.rs	hard_count	MAX_CAPTURE_BYTES
 crates/skill-sdk/src/process.rs	take	.take(MAX_CAPTURE_BYTES + 1)
+crates/skill-sdk/src/protocol.rs	hard_count	MAX_PROGRESS_FRAME_LINE_BYTES
 crates/skill-sdk/src/protocol.rs	hard_count	MAX_PROTOCOL_LINE_BYTES
 crates/skill-sdk/src/safe_archive.rs	clamp	.clamp(100_000, 2_000_000)
 crates/skill-sdk/src/secret_scan.rs	hard_count	MAX_SCAN_BYTES
@@ -1246,7 +1274,11 @@ crates/skills/browser_web/node_modules/playwright/lib/utilsBundleImpl.js	slice	.
 crates/skills/browser_web/node_modules/playwright/lib/utilsBundleImpl.js	slice	.slice(u+1)
 crates/skills/browser_web/node_modules/playwright/lib/utilsBundleImpl.js	slice	.slice(v[f],v[f+1])
 crates/skills/browser_web/node_modules/playwright/lib/worker/testTracing.js	slice	.slice(1)
+crates/skills/browser_web/src/main.rs	hard_count	MAX_MODEL_OBSERVATION_ITEMS
+crates/skills/browser_web/src/main.rs	hard_count	MAX_MODEL_OBSERVATION_ITEM_CHARS
 crates/skills/browser_web/src/main.rs	hard_count	MAX_URL_BYTES
+crates/skills/browser_web/src/main.rs	take	.take(max_chars)
+crates/skills/browser_web/src/main.rs	take	.take(selected_items)
 crates/skills/browser_web/src/main.rs	truncate	.truncate(max_pages as usize)
 crates/skills/doc_parse/src/main.rs	take	.take(max_chars)
 crates/skills/doc_parse/src/main.rs	take	.take(opts.max_chars)
@@ -1383,7 +1415,7 @@ crates/skills/web_search_extract/src/main.rs	hard_count	MAX_TITLE_CHARS
 crates/skills/web_search_extract/src/main.rs	hard_count	MAX_URL_BYTES
 crates/skills/web_search_extract/src/main.rs	take	.take(max_chars)
 crates/skills/web_search_extract/src/main.rs	truncate	.truncate(input.top_k)
-crates/telegramd/src/telegram_formatting.rs	take	.take(max_chars)
+crates/telegramd/src/task_delivery_format.rs	take	.take(max_chars)
 crates/webd/src/session_store.rs	hard_count	MAX_SESSION_STORE_BYTES
 crates/webd/src/session_store.rs	truncate	.truncate(true)
 crates/wechat-ilink/src/crypto.rs	take	.take(pad_len)

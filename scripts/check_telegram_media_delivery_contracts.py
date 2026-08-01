@@ -21,32 +21,28 @@ REQUIRED_TOKENS_BY_PATH = {
         '.join("artifacts")',
         '.join("delivery")',
     ),
-    "crates/telegramd/src/telegram_media_delivery.rs": (
-        "preflight_local_media_file",
-        "is_managed_task_delivery_artifact_path",
-        "TelegramUploadMethod::Document",
-        "telegram.msg.delivery_media_failed_ui_fallback",
-        "telegram.msg.delivery_media_failed_retry",
-        "deliver_missing_telegram_media_path",
-        "telegram_request_error(\"send_media\"",
-        "telegram_request_error(\"send_document\"",
+    "crates/clawd/src/channel_send.rs": (
+        "materialize_channel_outbound_media",
+        "validate_local_media_file",
+        "telegram_image_max_bytes",
+        '"sendPhoto"',
+        '"sendDocument"',
+        'provider_transport_error("telegram_bot", "send_media"',
+        'telegram_message_id("send_media"',
     ),
-    "crates/telegramd/src/telegram_formatting.rs": (
-        "deliver_missing_telegram_media_path",
-        "TelegramMediaKind::Image",
-        "TelegramMediaKind::Video",
-        "TelegramMediaKind::File",
-        "TelegramMediaKind::Voice",
-        "TelegramMediaKind::Audio",
+    "crates/clawd/src/channel_send_tests.rs": (
+        "telegram_success_response_projects_stable_provider_message_id",
+        "telegram_http_rate_limit_keeps_retry_after_without_response_prose",
+        "telegram_success_without_message_id_is_a_redacted_invalid_response",
     ),
-    "crates/telegramd/src/telegram_media_delivery_tests.rs": (
-        "image_uses_photo_with_document_fallback_until_photo_limit",
-        "oversized_managed_artifact_points_to_ui_without_exposing_path",
-        "unmanaged_file_failure_requests_retry_instead_of_claiming_ui_copy",
+    "crates/telegramd/src/task_delivery.rs": (
+        "request_terminal_delivery",
+        "request_terminal_delivery_with_content",
+        "ChannelTaskDeliveryContent::MediaOnly",
     ),
 }
 FORBIDDEN_TOKENS_BY_PATH = {
-    "crates/telegramd/src/telegram_formatting.rs": (
+    "crates/telegramd/src/task_delivery.rs": (
         "validate_local_media_file(",
         ".send_photo(",
         ".send_video(",
@@ -96,11 +92,11 @@ def run_self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="telegram-media-contract-") as tmp:
         root = Path(tmp)
         write_complete_fixture(root)
-        target = root / "crates/telegramd/src/telegram_media_delivery.rs"
-        target.write_text("preflight_local_media_file\n", encoding="utf-8")
+        target = root / "crates/clawd/src/channel_send.rs"
+        target.write_text("materialize_channel_outbound_media\n", encoding="utf-8")
         findings = scan(root)
         if not any(
-            finding.path == "crates/telegramd/src/telegram_media_delivery.rs"
+            finding.path == "crates/clawd/src/channel_send.rs"
             and finding.kind == "contract_token_missing"
             for finding in findings
         ):
@@ -108,9 +104,10 @@ def run_self_test() -> int:
             return 1
 
         write_complete_fixture(root)
-        formatting = root / "crates/telegramd/src/telegram_formatting.rs"
-        formatting.write_text(
-            formatting.read_text(encoding="utf-8") + "\nvalidate_local_media_file(\n",
+        daemon_delivery = root / "crates/telegramd/src/task_delivery.rs"
+        daemon_delivery.write_text(
+            daemon_delivery.read_text(encoding="utf-8")
+            + "\nvalidate_local_media_file(\n",
             encoding="utf-8",
         )
         findings = scan(root)
