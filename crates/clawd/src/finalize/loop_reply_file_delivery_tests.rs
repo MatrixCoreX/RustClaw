@@ -71,7 +71,10 @@ fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
     let (token, summary) = direct_file_token_from_observed_inventory(&loop_state, Some(&ctx))
         .expect("ranked inventory should recover file token");
 
-    assert_eq!(token, format!("FILE:{}", newest.display()));
+    assert_eq!(
+        token,
+        format!("FILE:{}", newest.canonicalize().unwrap_or(newest).display())
+    );
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -574,7 +577,10 @@ fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() 
     let (token, summary) = direct_file_token_from_observed_inventory(&loop_state, Some(&ctx))
         .expect("explicit last selection over deterministic inventory should recover token");
 
-    assert_eq!(token, format!("FILE:{}", last.display()));
+    assert_eq!(
+        token,
+        format!("FILE:{}", last.canonicalize().unwrap_or(last).display())
+    );
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -842,7 +848,10 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
     .expect("finalize should return file token");
 
     assert!(!reply.should_fail_task);
-    assert_eq!(reply.text, format!("FILE:{}", file.display()));
+    assert_eq!(
+        reply.text,
+        format!("FILE:{}", file.canonicalize().unwrap_or(file).display())
+    );
     assert_eq!(reply.messages.last(), Some(&reply.text));
     assert_eq!(
         reply
