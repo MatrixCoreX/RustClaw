@@ -134,7 +134,7 @@ fn execute(args: &Value) -> Result<(String, Value), SkillError> {
         SkillError::new("invalid_arguments", locale_message("error.args_not_object"))
     })?;
     let action = optional_string(object, "action")?.unwrap_or("query");
-    if !matches!(action, "query" | "lookup") {
+    if action != "query" {
         return Err(SkillError::new(
             "unsupported_action",
             locale_message("error.unsupported_action"),
