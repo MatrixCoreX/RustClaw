@@ -116,6 +116,87 @@ class AdapterTest(unittest.TestCase):
                 str(storage / "modelscope"),
             )
 
+    def test_download_routes_profile_checkpoints_to_private_skill_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = root / "private-storage"
+            storage.mkdir()
+            command = self.skill._build_download_command(
+                {"share": "https://example.test/public-profile"},
+                root / "artifacts",
+                resolve_only=False,
+                storage_directory=storage,
+            )
+            resolve_command = self.skill._build_download_command(
+                {"share": "https://example.test/public-profile"},
+                root / "artifacts",
+                resolve_only=True,
+                storage_directory=storage,
+            )
+
+        checkpoint_index = command.index("--profile-checkpoint-dir")
+        self.assertEqual(
+            command[checkpoint_index + 1],
+            str(storage / "profile_checkpoints"),
+        )
+        self.assertNotIn("--profile-checkpoint-dir", resolve_command)
+
+    def test_partial_profile_checkpoint_is_reported_as_a_persisted_side_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            storage = root / "private-storage"
+            artifacts.mkdir()
+            storage.mkdir()
+
+            def failed_profile_run(*_args, **_kwargs):
+                pointer = (
+                    storage
+                    / "profile_checkpoints"
+                    / "douyin"
+                    / "profile-id"
+                    / "current.json"
+                )
+                pointer.parent.mkdir(parents=True)
+                pointer.write_text(
+                    json.dumps(
+                        {
+                            "state": "partial",
+                            "sequence": 3,
+                            "sha256": "a" * 64,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(
+                    ["tool"],
+                    1,
+                    stdout="",
+                    stderr="profile collection failed",
+                )
+
+            with mock.patch.object(
+                self.skill.subprocess,
+                "run",
+                side_effect=failed_profile_run,
+            ):
+                with self.assertRaises(self.skill.SkillFailure) as raised:
+                    self.skill._run_tool(
+                        "download",
+                        ["tool"],
+                        artifacts,
+                        None,
+                        storage,
+                    )
+
+        details = raised.exception.details
+        self.assertEqual(details["failure_phase"], "execution_partial")
+        self.assertTrue(details["side_effect_applied"])
+        self.assertEqual(details["profile_collection"]["state"], "partial")
+        self.assertTrue(
+            details["profile_collection"]["resumable_checkpoint_preserved"]
+        )
+
     def test_media_operation_has_no_internal_deadline_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -221,7 +302,7 @@ class AdapterTest(unittest.TestCase):
             1,
             "no downloadable media was exposed by the public page",
             [],
-            not_applied=True,
+            output_rollback_ok=True,
         )
 
         self.assertEqual(failure.error_code, "media_not_found")

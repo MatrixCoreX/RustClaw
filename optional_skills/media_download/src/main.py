@@ -286,7 +286,13 @@ def _tool(script: str) -> list[str]:
     return [sys.executable, str(entrypoint)]
 
 
-def _build_download_command(args: dict[str, Any], output_dir: Path, *, resolve_only: bool) -> list[str]:
+def _build_download_command(
+    args: dict[str, Any],
+    output_dir: Path,
+    *,
+    resolve_only: bool,
+    storage_directory: Path | None = None,
+) -> list[str]:
     share = _string(args, "share", required=True)
     assert share is not None
     platform = _choice(args, "platform", SUPPORTED_PLATFORMS, "auto")
@@ -335,6 +341,14 @@ def _build_download_command(args: dict[str, Any], output_dir: Path, *, resolve_o
     )
     if not _bool(args, "browser_fallback", True):
         command.append("--no-browser-fallback")
+
+    if not resolve_only and storage_directory is not None:
+        command.extend(
+            [
+                "--profile-checkpoint-dir",
+                str(storage_directory / "profile_checkpoints"),
+            ]
+        )
 
     if resolve_only:
         command.extend(["--print-url", "--no-ocr-images"])
@@ -479,7 +493,9 @@ def _artifact(path: Path) -> dict[str, Any]:
         "mime_type": mime_type or "application/octet-stream",
         "size_bytes": path.stat().st_size,
     }
-    if path.suffix.lower() == ".txt" and re.search(r"_article(?:\.\d+)?$", path.stem):
+    if path.name == "profile_downloads.json":
+        artifact["artifact_role"] = "profile_manifest"
+    elif path.suffix.lower() == ".txt" and re.search(r"_article(?:\.\d+)?$", path.stem):
         artifact.update(
             {
                 "artifact_role": "article_text",
@@ -493,6 +509,48 @@ def _artifact(path: Path) -> dict[str, Any]:
     elif path.suffix.lower() == ".json":
         artifact["artifact_role"] = "metadata"
     return artifact
+
+
+def _changed_artifact_paths(
+    before: dict[Path, tuple[int, int]],
+    after: dict[Path, tuple[int, int]],
+) -> list[Path]:
+    changed = [path for path, signature in after.items() if before.get(path) != signature]
+    return sorted(
+        changed,
+        key=lambda path: (path.name != "profile_downloads.json", str(path)),
+    )
+
+
+def _profile_collection_summary(
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    manifest = next(
+        (item for item in artifacts if item.get("artifact_role") == "profile_manifest"),
+        None,
+    )
+    if manifest is None:
+        return None
+    try:
+        payload = json.loads(Path(str(manifest["path"])).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    collection = payload.get("collection")
+    if not isinstance(collection, dict):
+        return None
+    return {
+        "schema_version": 1,
+        "state": payload.get("state"),
+        "platform": payload.get("platform"),
+        "item_count": payload.get("item_count"),
+        "completed_count": payload.get("completed_count"),
+        "failed_count": payload.get("failed_count"),
+        "cursor": collection.get("cursor"),
+        "checkpoint_sequence": payload.get("checkpoint_sequence"),
+        "checkpoint_digest": payload.get("checkpoint_digest"),
+    }
 
 
 def _content_bundle(
@@ -650,7 +708,8 @@ def _failure_from_process(
     stderr: str,
     artifacts: list[dict[str, Any]],
     *,
-    not_applied: bool = False,
+    output_rollback_ok: bool = False,
+    profile_checkpoint: dict[str, Any] | None = None,
 ) -> SkillFailure:
     lowered = stderr.lower()
     if any(
@@ -675,10 +734,16 @@ def _failure_from_process(
     details: dict[str, Any] = {
         "exit_code": returncode,
         "diagnostics": readable,
-        "artifacts": [] if not_applied else artifacts,
-        "failure_phase": "execution_no_effect" if not_applied else "execution_partial",
-        "side_effect_applied": not not_applied,
+        "artifacts": [] if output_rollback_ok else artifacts,
+        "failure_phase": (
+            "execution_no_effect"
+            if output_rollback_ok and profile_checkpoint is None
+            else "execution_partial"
+        ),
+        "side_effect_applied": not output_rollback_ok or profile_checkpoint is not None,
     }
+    if profile_checkpoint is not None:
+        details["profile_collection"] = profile_checkpoint
     return SkillFailure(
         readable,
         error_code=error_code,
@@ -686,6 +751,53 @@ def _failure_from_process(
         retryable=retryable,
         details=details,
     )
+
+
+def _profile_checkpoint_pointers(
+    storage_directory: Path | None,
+) -> dict[str, dict[str, Any]]:
+    if storage_directory is None:
+        return {}
+    root = storage_directory / "profile_checkpoints"
+    if not root.is_dir():
+        return {}
+    pointers: dict[str, dict[str, Any]] = {}
+    for path in root.glob("*/*/current.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            relative = path.relative_to(root).as_posix()
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        pointers[relative] = {
+            "state": payload.get("state"),
+            "sequence": payload.get("sequence"),
+            "sha256": payload.get("sha256"),
+        }
+    return pointers
+
+
+def _changed_profile_checkpoint(
+    before: dict[str, dict[str, Any]],
+    after: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    changed = [value for key, value in after.items() if before.get(key) != value]
+    if not changed:
+        return None
+    latest = max(
+        changed,
+        key=lambda value: value.get("sequence")
+        if isinstance(value.get("sequence"), int)
+        else -1,
+    )
+    return {
+        "schema_version": 1,
+        "state": latest.get("state"),
+        "checkpoint_sequence": latest.get("sequence"),
+        "checkpoint_digest": latest.get("sha256"),
+        "resumable_checkpoint_preserved": True,
+    }
 
 
 def _run_tool(
@@ -696,6 +808,7 @@ def _run_tool(
     storage_directory: Path | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
+    checkpoint_before = _profile_checkpoint_pointers(storage_directory)
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     if storage_directory is not None:
@@ -713,9 +826,13 @@ def _run_tool(
     except subprocess.TimeoutExpired as error:
         stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
         after = _snapshot(output_dir)
-        changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
+        changed = _changed_artifact_paths(before, after)
         artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
-        not_applied = _rollback_output_changes(output_dir, before, after)
+        output_rollback_ok = _rollback_output_changes(output_dir, before, after)
+        profile_checkpoint = _changed_profile_checkpoint(
+            checkpoint_before,
+            _profile_checkpoint_pointers(storage_directory),
+        )
         configured_timeout = timeout_seconds if timeout_seconds is not None else error.timeout
         raise SkillFailure(
             f"{action} timed out after {configured_timeout} seconds",
@@ -724,22 +841,38 @@ def _run_tool(
             retryable=True,
             details={
                 "diagnostics": _diagnostics(stderr),
-                "artifacts": [] if not_applied else artifacts,
-                "failure_phase": "execution_no_effect" if not_applied else "execution_partial",
-                "side_effect_applied": not not_applied,
+                "artifacts": [] if output_rollback_ok else artifacts,
+                "failure_phase": (
+                    "execution_no_effect"
+                    if output_rollback_ok and profile_checkpoint is None
+                    else "execution_partial"
+                ),
+                "side_effect_applied": (
+                    not output_rollback_ok or profile_checkpoint is not None
+                ),
+                **(
+                    {"profile_collection": profile_checkpoint}
+                    if profile_checkpoint is not None
+                    else {}
+                ),
             },
         ) from error
     after = _snapshot(output_dir)
-    changed = sorted(path for path, signature in after.items() if before.get(path) != signature)
+    changed = _changed_artifact_paths(before, after)
     artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
     if completed.returncode != 0:
-        not_applied = _rollback_output_changes(output_dir, before, after)
+        output_rollback_ok = _rollback_output_changes(output_dir, before, after)
+        profile_checkpoint = _changed_profile_checkpoint(
+            checkpoint_before,
+            _profile_checkpoint_pointers(storage_directory),
+        )
         raise _failure_from_process(
             action,
             completed.returncode,
             completed.stderr,
             artifacts,
-            not_applied=not_applied,
+            output_rollback_ok=output_rollback_ok,
+            profile_checkpoint=profile_checkpoint,
         )
     return completed.stdout, completed.stderr, artifacts
 
@@ -876,8 +1009,14 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             minimum=5,
             maximum=2_592_000,
         )
+        storage_directory = _skill_storage_directory(request)
         if action == "download":
-            command = _build_download_command(args, output_dir, resolve_only=False)
+            command = _build_download_command(
+                args,
+                output_dir,
+                resolve_only=False,
+                storage_directory=storage_directory,
+            )
         elif action == "resolve":
             command = _build_download_command(args, output_dir, resolve_only=True)
         elif action == "transcribe":
@@ -894,7 +1033,7 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
         command,
         output_dir,
         operation_timeout,
-        _skill_storage_directory(request),
+        storage_directory,
     )
     if action == "ocr":
         for artifact in artifacts:
@@ -951,6 +1090,9 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
     }
     if action == "download":
         extra["content_bundle"] = _content_bundle(artifacts, inline_article)
+        profile_collection = _profile_collection_summary(artifacts)
+        if profile_collection is not None:
+            extra["profile_collection"] = profile_collection
         if inline_article is not None:
             extra["article_delivery"] = inline_article
     if delivery is not None:

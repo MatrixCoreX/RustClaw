@@ -96,7 +96,33 @@ def check_timeouts(skills: list[dict[str, Any]]) -> list[str]:
     for skill in skills:
         name = skill.get("name", "<unknown>")
         timeout = skill.get("timeout_seconds")
-        if not isinstance(timeout, int) or timeout <= 0:
+        capabilities = skill.get("planner_capabilities") or []
+        durable_local_process = any(
+            capability.get("execution_mode") in ASYNC_EXECUTION_MODES
+            and capability.get("async_adapter_kind") == "local_process_poll"
+            for capability in capabilities
+            if isinstance(capability, dict)
+        )
+        sync_capabilities = [
+            capability
+            for capability in capabilities
+            if isinstance(capability, dict)
+            and capability.get("execution_mode") == "sync_short"
+        ]
+        durable_nullable_timeout = (
+            timeout is None
+            and durable_local_process
+            and bool(sync_capabilities)
+            and all(
+                isinstance(capability.get("timeout_seconds"), int)
+                and not isinstance(capability.get("timeout_seconds"), bool)
+                and capability["timeout_seconds"] > 0
+                for capability in sync_capabilities
+            )
+        )
+        if durable_nullable_timeout:
+            continue
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
             findings.append(f"{name}: timeout_seconds must be a positive integer")
     return findings
 
@@ -357,6 +383,44 @@ def run_self_test() -> int:
     bad_timeout = [{"name": "bad_timeout", "timeout_seconds": 0}]
     if not check_timeouts(bad_timeout):
         print("SELF_TEST_FAIL missing_timeout_finding", file=sys.stderr)
+        return 1
+
+    good_durable_nullable_timeout = [
+        {
+            "name": "good_durable_nullable_timeout",
+            "planner_capabilities": [
+                {
+                    "name": "good.capabilities",
+                    "execution_mode": "sync_short",
+                    "timeout_seconds": 15,
+                },
+                {
+                    "name": "good.run",
+                    "execution_mode": "async_preferred",
+                    "async_adapter_kind": "local_process_poll",
+                },
+            ],
+        }
+    ]
+    if check_timeouts(good_durable_nullable_timeout):
+        print("SELF_TEST_FAIL durable_nullable_timeout_false_positive", file=sys.stderr)
+        return 1
+
+    bad_durable_missing_sync_timeout = [
+        {
+            "name": "bad_durable_missing_sync_timeout",
+            "planner_capabilities": [
+                {"name": "bad.capabilities", "execution_mode": "sync_short"},
+                {
+                    "name": "bad.run",
+                    "execution_mode": "async_preferred",
+                    "async_adapter_kind": "local_process_poll",
+                },
+            ],
+        }
+    ]
+    if not check_timeouts(bad_durable_missing_sync_timeout):
+        print("SELF_TEST_FAIL missing_sync_timeout_finding", file=sys.stderr)
         return 1
 
     good_sync = [
