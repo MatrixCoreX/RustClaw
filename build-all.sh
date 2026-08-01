@@ -356,7 +356,7 @@ append_unique_target() {
 }
 
 append_unique_target "$PRIMARY_TARGET"
-for extra_target in "${EXTRA_TARGETS[@]}"; do
+for extra_target in "${EXTRA_TARGETS[@]:-}"; do
 	append_unique_target "$(resolve_requested_target "$extra_target")"
 done
 

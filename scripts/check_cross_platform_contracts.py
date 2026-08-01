@@ -115,6 +115,10 @@ REQUIRED_FILE_TOKENS = {
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
     ),
+    "build-all.sh": (
+        'for extra_target in "${EXTRA_TARGETS[@]:-}"',
+        'for existing in "${TARGETS_TO_BUILD[@]:-}"',
+    ),
     "install-agent-cmd.sh": (
         "ensure_python_runtime()",
         "brew install python",
