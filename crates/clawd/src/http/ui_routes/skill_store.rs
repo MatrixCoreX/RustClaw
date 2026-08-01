@@ -278,37 +278,80 @@ pub(crate) fn repair_bundled_skill_admission_offline(
             "offline admission repair requires an on-demand bundled skill: {skill_name}"
         ));
     }
-    let verified = skill_sdk::InstallReceiptStore::new(
-        workspace_root.join("data/skill-packages"),
-    )
-    .verified_current_install(skill_name)
-    .map_err(|error| format!("current install is not verified: {error}"))?;
-    let grant = bundled_host_policy_grant_for_entry(entry, skill_name, &verified.manifest)?;
-    let prompt_path = workspace_root.join(&entry.prompt_file);
-    let prompt = fs::read_to_string(&prompt_path)
-        .map_err(|error| format!("prompt read failed: path={} error={error}", prompt_path.display()))?;
-    let manifest_path = registry
-        .package_manifest_path(skill_name)
-        .ok_or_else(|| format!("package manifest is missing: {skill_name}"))?;
-    crate::skill_admission::SkillAdmissionService::from_config(workspace_root, config)
-        .map_err(|error| error.to_string())?
-        .admit_bundled(crate::skill_admission::AdmissionMutation {
-            metadata: crate::skill_admission::ExternalSkillMetadata {
-                name: skill_name.to_string(),
-                source: crate::skill_admission::SkillAdmissionSource::BundledBase,
-                package_manifest_path: manifest_path.to_string(),
-                description: entry.description.clone().unwrap_or_default(),
-                aliases: entry.aliases.clone(),
-                group: entry
-                    .group
-                    .clone()
-                    .unwrap_or_else(|| "extensions".to_string()),
-            },
-            prompt,
-            state: skill_sdk::AdmissionState::Enabled,
-            grant: Some(grant),
-        })
+    let service = crate::skill_admission::SkillAdmissionService::from_config(workspace_root, config)
+        .map_err(|error| error.to_string())?;
+    let mut mutations = service
+        .current_repair_inputs()
+        .map_err(|error| error.to_string())?;
+    if !mutations.iter().any(|mutation| {
+        mutation.metadata.name.as_str().eq(skill_name)
+            && mutation.metadata.source
+                == crate::skill_admission::SkillAdmissionSource::BundledBase
+    }) {
+        return Err(format!(
+            "skill_admission_repair_target_missing: skill={skill_name}"
+        ));
+    }
+    let package_store =
+        skill_sdk::InstallReceiptStore::new(workspace_root.join("data/skill-packages"));
+    for mutation in &mut mutations {
+        if mutation.metadata.source
+            != crate::skill_admission::SkillAdmissionSource::BundledBase
+        {
+            continue;
+        }
+        let name = mutation.metadata.name.as_str();
+        let entry = registry
+            .get(name)
+            .ok_or_else(|| format!("skill_admission_base_entry_missing: skill={name}"))?;
+        if entry.install_mode.as_deref() != Some("on_demand") {
+            return Err(format!(
+                "skill_admission_install_mode_invalid: skill={name} expected=on_demand"
+            ));
+        }
+        let verified = package_store
+            .verified_current_install(name)
+            .map_err(|error| format!("current install is not verified: skill={name} {error}"))?;
+        let grant = bundled_host_policy_grant_for_entry(entry, name, &verified.manifest)?;
+        let prompt = bundled_prompt_for_offline_repair(workspace_root, &entry.prompt_file)?;
+        let manifest_path = registry
+            .package_manifest_path(name)
+            .ok_or_else(|| format!("skill_admission_manifest_missing: skill={name}"))?;
+        mutation.metadata = crate::skill_admission::ExternalSkillMetadata {
+            name: name.to_string(),
+            source: crate::skill_admission::SkillAdmissionSource::BundledBase,
+            package_manifest_path: manifest_path.to_string(),
+            description: entry.description.clone().unwrap_or_default(),
+            aliases: entry.aliases.clone(),
+            group: entry
+                .group
+                .clone()
+                .unwrap_or_else(|| "extensions".to_string()),
+        };
+        mutation.prompt = prompt;
+        mutation.grant = Some(grant);
+    }
+    service
+        .repair_current_generation(mutations)
         .map_err(|error| error.to_string())
+}
+
+fn bundled_prompt_for_offline_repair(
+    workspace_root: &Path,
+    logical_path: &str,
+) -> Result<String, String> {
+    let (prompt, resolved_source) = claw_core::prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        "default",
+        logical_path,
+        "",
+    );
+    if prompt.trim().is_empty() {
+        return Err(format!(
+            "prompt resolution failed: logical_path={logical_path} resolved_source={resolved_source}"
+        ));
+    }
+    Ok(prompt)
 }
 
 fn update_skill_store_installation(

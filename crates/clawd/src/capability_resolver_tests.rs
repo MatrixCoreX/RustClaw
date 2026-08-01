@@ -13,7 +13,7 @@ fn state_with_workspace_registry_excluding(disabled: &[&str]) -> crate::AppState
     let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
         .expect("load workspace skills registry");
     let enabled = registry
-        .enabled_names()
+        .all_names()
         .into_iter()
         .filter(|skill| !disabled.iter().any(|disabled| skill.as_str() == *disabled))
         .collect::<std::collections::HashSet<_>>();
@@ -62,6 +62,14 @@ fn state_with_registry_toml(toml: &str) -> crate::AppState {
 #[test]
 fn media_download_routes_raw_share_text_to_autonomous_download() {
     let state = state_with_workspace_registry();
+    assert_eq!(
+        state
+            .get_skills_registry()
+            .and_then(|registry| registry.get("media_download").cloned())
+            .map(|entry| entry.enabled),
+        Some(false),
+        "the resolver fixture must prove runtime enablement overrides the on-demand base default"
+    );
     let share = "复制这条消息，打开快手看看 https://v.kuaishou.com/AbCdEf 更多内容";
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,

@@ -8,14 +8,30 @@ use tower::ServiceExt;
 
 use super::{
     activate_imported_bundle, admission_service, begin_skill_store_mutation, build_ui_router,
-    finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
-    precompiled_skill_package_root_for, precompiled_source_fallback_allowed,
-    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
-    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
+    bundled_prompt_for_offline_repair, finish_imported_bundle_activation,
+    imported_bundle_staging_dir, imported_skill_machine_alias, precompiled_skill_package_root_for,
+    precompiled_source_fallback_allowed, remove_skill_registry_block, render_skill_store_config,
+    skill_store_install_spec, skill_store_operation_store, transition_skill_store_operation,
+    write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
+
+#[test]
+fn offline_bundled_repair_resolves_logical_skill_prompt() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    assert!(!repository.join("prompts/skills/crypto.md").is_file());
+
+    let prompt = bundled_prompt_for_offline_repair(repository, "prompts/skills/crypto.md")
+        .expect("resolve layered crypto prompt");
+
+    assert!(prompt.contains("Shared skill prompt contract:"));
+    assert!(prompt.contains("You are the `crypto` skill planner."));
+}
 
 #[test]
 fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
