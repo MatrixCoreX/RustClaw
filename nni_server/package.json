@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs",
+    "check": "node --check server.mjs && node --check storage.mjs && node --check legacy_migration.mjs",
     "test": "node --test server.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5.0"
   }
 }

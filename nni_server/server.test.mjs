@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -54,12 +55,13 @@ async function freePort() {
   return port;
 }
 
-async function startServer({ publicKeyWhitelist = "", initialState = null } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), "agent-runtime-nni-server-test-"));
+async function startServer({ publicKeyWhitelist = "", initialState = null, dataDir = null } = {}) {
+  const dir = dataDir || (await mkdtemp(path.join(tmpdir(), "agent-runtime-nni-server-test-")));
   const statePath = path.join(dir, "state.json");
   if (initialState) {
     await writeFile(statePath, `${JSON.stringify(initialState, null, 2)}\n`, "utf8");
   }
+  const databasePath = path.join(dir, "nni-server.sqlite3");
   const port = await freePort();
   const logPath = path.join(dir, "nni-server.log");
   const child = spawn(process.execPath, ["server.mjs"], {
@@ -68,6 +70,7 @@ async function startServer({ publicKeyWhitelist = "", initialState = null } = {}
       ...process.env,
       NNI_SERVER_HOST: "127.0.0.1",
       NNI_SERVER_PORT: String(port),
+      NNI_SERVER_DATABASE_PATH: databasePath,
       NNI_SERVER_STATE_PATH: statePath,
       NNI_SERVER_LOG_PATH: logPath,
       NNI_SERVER_PUBLIC_KEY_WHITELIST: publicKeyWhitelist,
@@ -96,6 +99,8 @@ async function startServer({ publicKeyWhitelist = "", initialState = null } = {}
       if (res.ok) {
         return {
           baseUrl,
+          dataDir: dir,
+          databasePath,
           statePath,
           logPath,
           async stop() {
@@ -147,6 +152,58 @@ async function readLogLines(logPath) {
     .map((line) => JSON.parse(line));
 }
 
+function readDatabaseSnapshot(databasePath) {
+  const database = new DatabaseSync(databasePath);
+  try {
+    return {
+      tasks: database.prepare("SELECT * FROM tasks ORDER BY created_at_ts, task_id").all(),
+      devices: database.prepare("SELECT * FROM devices ORDER BY device_pubkey, user_key").all(),
+      requests: database.prepare("SELECT * FROM request_records ORDER BY id").all(),
+      heartbeats: database
+        .prepare(`
+          SELECT
+            heartbeat_records.id,
+            devices.user_key,
+            devices.device_pubkey,
+            heartbeat_records.heartbeat_at_unix
+          FROM heartbeat_records
+          JOIN devices ON devices.id = heartbeat_records.device_id
+          ORDER BY heartbeat_records.id
+        `)
+        .all(),
+      whitelist: database
+        .prepare("SELECT device_pubkey FROM public_key_whitelist ORDER BY device_pubkey")
+        .all()
+        .map((row) => row.device_pubkey),
+      integrityCheck: database.prepare("PRAGMA integrity_check").get().integrity_check,
+      journalMode: database.prepare("PRAGMA journal_mode").get().journal_mode,
+      heartbeatIndexes: database
+        .prepare("PRAGMA index_list('heartbeat_records')")
+        .all()
+        .map((row) => row.name),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+async function sendSignedHeartbeat(baseUrl, fixture, userKey = "clawd-nni-heartbeat") {
+  const request = await postJson(baseUrl, "/v1/nni/server/heartbeat/request", {
+    device_pubkey: fixture.pubkey,
+    client_user_key: userKey,
+  });
+  assert.equal(request.status, 200);
+  assert.equal(request.body.ok, true);
+  const signature = fixture.signChallenge(request.body.data.challenge);
+  const verify = await postJson(baseUrl, "/v1/nni/server/heartbeat/verify", {
+    task_id: request.body.data.task_id,
+    signature,
+  });
+  assert.equal(verify.status, 200);
+  assert.equal(verify.body.ok, true);
+  return verify.body.data;
+}
+
 test("join request rejects public keys when the whitelist is empty", async (t) => {
   const server = await startServer();
   t.after(() => server.stop());
@@ -167,7 +224,9 @@ test("server writes nni events to configured log file", async (t) => {
   const server = await startServer();
   t.after(() => server.stop());
 
-  await getJson(server.baseUrl, "/v1/health");
+  const health = await getJson(server.baseUrl, "/v1/health");
+  assert.equal(health.status, 200);
+  assert.equal(health.body.data.storage, "sqlite");
 
   let lines = [];
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -216,8 +275,8 @@ test("join request accepts public keys injected through the whitelist env", asyn
   assert.equal(res.body.data.device_pubkey, VALID_PUBKEY);
   assert.match(res.body.data.challenge, /^[0-9a-f]{64}$/);
 
-  const state = JSON.parse(await readFile(server.statePath, "utf8"));
-  assert.deepEqual(state.public_key_whitelist, [VALID_PUBKEY]);
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  assert.deepEqual(snapshot.whitelist, [VALID_PUBKEY]);
 });
 
 test("join request retry interval is one minute", async (t) => {
@@ -275,47 +334,177 @@ test("join verify rejects tasks whose public key is no longer whitelisted", asyn
   assert.equal(res.body.error, "nni_pubkey_not_allowlisted");
   assert.equal(res.body.data.status, "public_key_not_allowlisted");
 
-  const state = JSON.parse(await readFile(server.statePath, "utf8"));
-  assert.equal(state.tasks[taskId].status, "rejected");
-  assert.equal(state.tasks[taskId].error_code, "nni_pubkey_not_allowlisted");
-  assert.equal(state.requests[0].status, "blocked");
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  assert.equal(snapshot.tasks[0].status, "rejected");
+  assert.equal(snapshot.tasks[0].error_code, "nni_pubkey_not_allowlisted");
+  assert.equal(snapshot.requests[0].status, "blocked");
 });
 
 test("heartbeat verify records public key request time and count", async (t) => {
   const fixture = generateSigningFixture();
   const server = await startServer({ publicKeyWhitelist: fixture.pubkey });
   t.after(() => server.stop());
+  const beforeUnix = Math.floor(Date.now() / 1000);
 
-  const request = await postJson(server.baseUrl, "/v1/nni/server/heartbeat/request", {
-    device_pubkey: fixture.pubkey,
-    client_user_key: "clawd-nni-heartbeat",
-  });
-  assert.equal(request.status, 200);
-  assert.equal(request.body.ok, true);
-  assert.equal(request.body.data.status, "heartbeat_challenge_created");
-  assert.equal(request.body.data.device_pubkey, fixture.pubkey);
+  const heartbeat = await sendSignedHeartbeat(server.baseUrl, fixture);
+  const afterUnix = Math.floor(Date.now() / 1000);
+  assert.equal(heartbeat.status, "heartbeat_accepted");
+  assert.equal(heartbeat.device_pubkey, fixture.pubkey);
+  assert.equal(heartbeat.heartbeat_count, 1);
+  assert.equal(Number.isSafeInteger(heartbeat.heartbeat_at_unix), true);
+  assert.equal(heartbeat.heartbeat_at_unix >= beforeUnix, true);
+  assert.equal(heartbeat.heartbeat_at_unix <= afterUnix, true);
+  assert.equal(heartbeat.request_time_ts, heartbeat.heartbeat_at_unix);
 
-  const signature = fixture.signChallenge(request.body.data.challenge);
-  const verify = await postJson(server.baseUrl, "/v1/nni/server/heartbeat/verify", {
-    task_id: request.body.data.task_id,
-    signature,
-  });
-  assert.equal(verify.status, 200);
-  assert.equal(verify.body.ok, true);
-  assert.equal(verify.body.data.status, "heartbeat_accepted");
-  assert.equal(verify.body.data.device_pubkey, fixture.pubkey);
-  assert.equal(verify.body.data.heartbeat_count, 1);
-  assert.equal(typeof verify.body.data.request_time_ts, "number");
-
-  const state = JSON.parse(await readFile(server.statePath, "utf8"));
-  const device = state.devices[`clawd-nni-heartbeat:${fixture.pubkey}`];
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  const device = snapshot.devices[0];
   assert.equal(device.device_pubkey, fixture.pubkey);
   assert.equal(device.heartbeat_count, 1);
-  assert.equal(device.last_heartbeat_ts, verify.body.data.request_time_ts);
-  assert.equal(state.requests[0].request_kind, "nni_heartbeat");
-  assert.equal(state.requests[0].device_pubkey, fixture.pubkey);
-  assert.equal(state.requests[0].created_at_ts, verify.body.data.request_time_ts);
-  assert.equal(state.requests[0].status, "accepted");
+  assert.equal(device.first_heartbeat_ts, heartbeat.heartbeat_at_unix);
+  assert.equal(device.last_heartbeat_ts, heartbeat.heartbeat_at_unix);
+  assert.equal(snapshot.heartbeats.length, 1);
+  assert.equal(snapshot.heartbeats[0].device_pubkey, fixture.pubkey);
+  assert.equal(snapshot.heartbeats[0].heartbeat_at_unix, heartbeat.heartbeat_at_unix);
+  assert.equal(snapshot.requests[0].request_kind, "nni_heartbeat");
+  assert.equal(snapshot.requests[0].device_pubkey, fixture.pubkey);
+  assert.equal(snapshot.requests[0].created_at_ts, heartbeat.heartbeat_at_unix);
+  assert.equal(snapshot.requests[0].status, "accepted");
+  assert.equal(snapshot.integrityCheck, "ok");
+  assert.equal(snapshot.journalMode, "wal");
+  assert(snapshot.heartbeatIndexes.includes("idx_heartbeat_records_device_time"));
+});
+
+test("every concurrent heartbeat is retained per device public key as UNIX seconds", async (t) => {
+  const firstDevice = generateSigningFixture();
+  const secondDevice = generateSigningFixture();
+  const server = await startServer({
+    publicKeyWhitelist: `${firstDevice.pubkey},${secondDevice.pubkey}`,
+  });
+  t.after(() => server.stop());
+  const beforeUnix = Math.floor(Date.now() / 1000);
+
+  const heartbeats = await Promise.all([
+    sendSignedHeartbeat(server.baseUrl, firstDevice),
+    sendSignedHeartbeat(server.baseUrl, firstDevice),
+    sendSignedHeartbeat(server.baseUrl, secondDevice),
+  ]);
+  const afterUnix = Math.floor(Date.now() / 1000);
+
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  const first = snapshot.devices.find((device) => device.device_pubkey === firstDevice.pubkey);
+  const second = snapshot.devices.find((device) => device.device_pubkey === secondDevice.pubkey);
+  assert.equal(first.device_pubkey, firstDevice.pubkey);
+  assert.equal(first.heartbeat_count, 2);
+  assert.equal(second.device_pubkey, secondDevice.pubkey);
+  assert.equal(second.heartbeat_count, 1);
+  assert.equal(snapshot.heartbeats.length, 3);
+  assert.equal(snapshot.requests.filter((record) => record.request_kind === "nni_heartbeat").length, 3);
+  for (const timestamp of snapshot.heartbeats.map((record) => record.heartbeat_at_unix)) {
+    assert.equal(Number.isSafeInteger(timestamp), true);
+    assert.equal(timestamp >= beforeUnix, true);
+    assert.equal(timestamp <= afterUnix, true);
+  }
+  assert.deepEqual(
+    heartbeats.map((heartbeat) => heartbeat.heartbeat_at_unix).sort(),
+    snapshot.heartbeats.map((record) => record.heartbeat_at_unix).sort(),
+  );
+});
+
+test("SQLite keeps one indexed heartbeat row for each of many devices", async (t) => {
+  const devices = Array.from({ length: 16 }, () => generateSigningFixture());
+  const server = await startServer({
+    publicKeyWhitelist: devices.map((device) => device.pubkey).join(","),
+  });
+  t.after(() => server.stop());
+
+  await Promise.all(devices.map((device) => sendSignedHeartbeat(server.baseUrl, device)));
+
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  assert.equal(snapshot.devices.length, devices.length);
+  assert.equal(snapshot.heartbeats.length, devices.length);
+  assert.deepEqual(
+    snapshot.heartbeats.map((record) => record.device_pubkey).sort(),
+    devices.map((device) => device.pubkey).sort(),
+  );
+  assert(snapshot.devices.every((device) => device.heartbeat_count === 1));
+});
+
+test("heartbeat rows survive an NNI server restart", async (t) => {
+  const fixture = generateSigningFixture();
+  const firstServer = await startServer({ publicKeyWhitelist: fixture.pubkey });
+  await sendSignedHeartbeat(firstServer.baseUrl, fixture);
+  await firstServer.stop();
+
+  const restartedServer = await startServer({
+    publicKeyWhitelist: fixture.pubkey,
+    dataDir: firstServer.dataDir,
+  });
+  t.after(() => restartedServer.stop());
+  const secondHeartbeat = await sendSignedHeartbeat(restartedServer.baseUrl, fixture);
+
+  const snapshot = readDatabaseSnapshot(restartedServer.databasePath);
+  assert.equal(snapshot.heartbeats.length, 2);
+  assert.equal(snapshot.devices[0].heartbeat_count, 2);
+  assert.equal(snapshot.devices[0].last_heartbeat_ts, secondHeartbeat.heartbeat_at_unix);
+});
+
+test("legacy accepted heartbeat requests backfill the per-device UNIX history", async (t) => {
+  const fixture = generateSigningFixture();
+  const userKey = "clawd-nni-heartbeat";
+  const legacyUnixTimes = [1_700_000_001, 1_700_000_002];
+  const legacyRequests = legacyUnixTimes.map((createdAtTs, index) => ({
+    id: index + 1,
+    request_kind: "nni_heartbeat",
+    task_id: `legacy-heartbeat-${index + 1}`,
+    user_key: userKey,
+    device_pubkey: fixture.pubkey,
+    challenge: "00".repeat(32),
+    signature: "11".repeat(64),
+    compliant: true,
+    status: "accepted",
+    error_code: null,
+    created_at_ts: createdAtTs,
+  }));
+  const server = await startServer({
+    publicKeyWhitelist: fixture.pubkey,
+    initialState: {
+      tasks: {},
+      devices: {
+        [`${userKey}:${fixture.pubkey}`]: {
+          user_key: userKey,
+          device_pubkey: fixture.pubkey,
+          heartbeat_count: 2,
+          last_heartbeat_ts: legacyUnixTimes.at(-1),
+          status: "heartbeat",
+        },
+      },
+      requests: legacyRequests,
+      public_key_whitelist: [fixture.pubkey],
+    },
+  });
+  t.after(() => server.stop());
+
+  const heartbeat = await sendSignedHeartbeat(server.baseUrl, fixture, userKey);
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  const device = snapshot.devices[0];
+  assert.equal(device.heartbeat_count, 3);
+  assert.deepEqual(
+    snapshot.heartbeats.map((record) => record.heartbeat_at_unix),
+    [...legacyUnixTimes, heartbeat.heartbeat_at_unix],
+  );
+  assert.equal(device.first_heartbeat_ts, legacyUnixTimes[0]);
+  assert.equal(device.last_heartbeat_ts, heartbeat.heartbeat_at_unix);
+
+  await server.stop();
+  const restartedServer = await startServer({
+    publicKeyWhitelist: fixture.pubkey,
+    dataDir: server.dataDir,
+  });
+  t.after(() => restartedServer.stop());
+  const afterRestart = readDatabaseSnapshot(restartedServer.databasePath);
+  assert.equal(afterRestart.heartbeats.length, 3);
+  assert.equal(afterRestart.requests.length, 3);
+  assert.equal(afterRestart.integrityCheck, "ok");
 });
 
 test("request records are stored but not exposed through public query endpoints", async (t) => {
@@ -354,7 +543,7 @@ test("request records are stored but not exposed through public query endpoints"
   assert.equal(legacyRecords.body.ok, false);
   assert.equal(legacyRecords.body.error, "not_found");
 
-  const state = JSON.parse(await readFile(server.statePath, "utf8"));
-  assert.equal(state.requests.length, 1);
-  assert.equal(state.requests[0].task_id, "join-visible");
+  const snapshot = readDatabaseSnapshot(server.databasePath);
+  assert.equal(snapshot.requests.length, 1);
+  assert.equal(snapshot.requests[0].task_id, "join-visible");
 });
