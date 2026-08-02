@@ -512,7 +512,9 @@ pub(super) fn skill_progress_message(
         .pointer("/frame/detail_key")
         .and_then(serde_json::Value::as_str)?;
     let message_key = match detail_key {
-        "media_download.precheck.starting" => "telegram.progress.skill_media_precheck",
+        // The typing heartbeat is the queue/working acknowledgement. Preserve
+        // media progress as machine data instead of emitting a canned message.
+        "media_download.precheck.starting" => return None,
         "kb.operation.starting" => "telegram.progress.skill_kb",
         "package_manager.operation.starting" => "telegram.progress.skill_package",
         _ => "telegram.progress.skill_generic",

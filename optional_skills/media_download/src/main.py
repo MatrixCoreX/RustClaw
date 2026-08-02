@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -31,6 +32,18 @@ SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "y
 MAX_ARTIFACTS = 32
 MAX_DIAGNOSTIC_CHARS = 4_000
 INLINE_TEXT_MAX_CHARS = 200
+SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
+OCR_IMAGE_EXTENSIONS = {
+    ".avif",
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
 
 
 class SkillFailure(Exception):
@@ -421,7 +434,15 @@ def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir
                 error_code="invalid_args",
                 message_key="media_download.error.invalid_input_paths",
             )
-        paths.append(_input_path(request, raw.strip()))
+        path = _input_path(request, raw.strip())
+        if path.suffix.lower() not in OCR_IMAGE_EXTENSIONS:
+            raise SkillFailure(
+                "ocr accepts image files only; video and audio files must remain media outputs",
+                error_code="invalid_input_media_type",
+                message_key="media_download.error.ocr_requires_image",
+                details={"input_extension": path.suffix.lower()},
+            )
+        paths.append(path)
 
     language = _string(args, "language", default="chi_sim+eng", max_length=64) or "chi_sim+eng"
     psm = _integer(args, "psm", default=6, minimum=0, maximum=13)
@@ -582,12 +603,20 @@ def _content_bundle(
         kind = "video"
     else:
         kind = "files"
-    return {
+    bundle = {
         "schema_version": 1,
         "kind": kind,
         **counts,
         "inline_article_count": inline_article_count,
     }
+    if kind == "video":
+        bundle["followup_policy"] = {
+            "text_conversion_action": "transcribe_audio",
+            "capability": "media_download.transcribe",
+            "input_field": "input_path",
+            "never_use_image_ocr": True,
+        }
+    return bundle
 
 
 def _consume_short_text_artifact(
@@ -815,15 +844,7 @@ def _run_tool(
     if storage_directory is not None:
         environment["MODELSCOPE_CACHE"] = str(storage_directory / "modelscope")
     try:
-        completed = subprocess.run(
-            command,
-            cwd=TOOL_DIR,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+        completed = _run_process(command, environment, timeout_seconds)
     except subprocess.TimeoutExpired as error:
         stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
         after = _snapshot(output_dir)
@@ -876,6 +897,56 @@ def _run_tool(
             profile_checkpoint=profile_checkpoint,
         )
     return completed.stdout, completed.stderr, artifacts
+
+
+def _run_process(
+    command: list[str],
+    environment: dict[str, str],
+    timeout_seconds: int | None,
+) -> subprocess.CompletedProcess[str]:
+    if timeout_seconds is None or timeout_seconds <= SUBPROCESS_TIMEOUT_SLICE_SECONDS:
+        return subprocess.run(
+            command,
+            cwd=TOOL_DIR,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+
+    process = subprocess.Popen(
+        command,
+        cwd=TOOL_DIR,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout_seconds,
+                output=stdout,
+                stderr=stderr,
+            )
+        try:
+            stdout, stderr = process.communicate(
+                timeout=min(remaining, SUBPROCESS_TIMEOUT_SLICE_SECONDS)
+            )
+            return subprocess.CompletedProcess(
+                command,
+                process.returncode,
+                stdout,
+                stderr,
+            )
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _urls(stdout: str) -> list[str]:

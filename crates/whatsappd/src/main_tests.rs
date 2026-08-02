@@ -1,6 +1,6 @@
 use super::{
-    extract_bind_key_candidate, is_unbound_allowed_command, WA_BIND_REQUIRED_FALLBACK,
-    WA_I18N_BIND_REQUIRED_KEY,
+    extract_bind_key_candidate, is_unbound_allowed_command, whatsapp_typing_indicator_payload,
+    WA_BIND_REQUIRED_FALLBACK, WA_I18N_BIND_REQUIRED_KEY,
 };
 use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::channel_i18n::text_from_path;
@@ -21,10 +21,13 @@ fn whatsapp_cloud_media_specs_reject_unsupported_formats_and_oversize_files() {
     file.set_len(max_bytes + 1)
         .expect("set sparse video length");
     assert_eq!(mime, "video/mp4");
-    assert!(
-        validate_local_media_file(&video, "WhatsApp Cloud", label, max_bytes)
-            .unwrap_err()
-            .contains("16 MiB")
+    assert_eq!(
+        validate_local_media_file(&video, "WhatsApp Cloud", label, max_bytes).unwrap_err(),
+        format!(
+            "channel_media_preflight_failed:channel_media_too_large:{}:{}",
+            max_bytes + 1,
+            max_bytes
+        )
     );
     assert!(
         whatsapp_cloud_upload_spec(Path::new("clip.webm"), WhatsappCloudMediaKind::Video)
@@ -46,6 +49,18 @@ fn unbound_allowed(text: &str) -> bool {
 fn unbound_plain_text_requires_binding_prompt() {
     assert!(!unbound_allowed("hello"));
     assert_eq!(extract_bind_key_candidate("hello", false), None);
+}
+
+#[test]
+fn queued_task_feedback_uses_native_typing_payload_not_chat_text() {
+    let payload = whatsapp_typing_indicator_payload("wamid.inbound-1");
+
+    assert_eq!(payload["messaging_product"], "whatsapp");
+    assert_eq!(payload["status"], "read");
+    assert_eq!(payload["message_id"], "wamid.inbound-1");
+    assert_eq!(payload["typing_indicator"]["type"], "text");
+    assert!(payload.get("to").is_none());
+    assert!(payload.get("text").is_none());
 }
 
 #[test]
