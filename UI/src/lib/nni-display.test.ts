@@ -87,11 +87,11 @@ test("finds nested NNI join error codes", () => {
 test("formats NNI join errors from structured codes", () => {
   assert.match(
     nniJoinErrorMessage(undefined, { status: "public_key_not_allowlisted" }, "fallback", "en"),
-    /whitelist/,
+    /not allowed/,
   );
   assert.match(
     nniJoinErrorMessage("nni_public_key_whitelist_empty", null, "fallback", "zh"),
-    /白名单/,
+    /尚未允许任何设备/,
   );
   assert.equal(nniJoinErrorMessage(undefined, null, "fallback", "en"), "fallback");
 });
