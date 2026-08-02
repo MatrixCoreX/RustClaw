@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 import { createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
 import { createServer } from "node:http";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { NniStore } from "./storage.mjs";
 
 const JOIN_REQUEST_INTERVAL_SECONDS = 60;
 const JOIN_TASK_TTL_SECONDS = 600;
 
 const HOST = process.env.NNI_SERVER_HOST || "0.0.0.0";
 const PORT = Number.parseInt(process.env.NNI_SERVER_PORT || "8797", 10);
-const STATE_PATH = process.env.NNI_SERVER_STATE_PATH || "data/nni-server-state.json";
+const DATABASE_PATH = process.env.NNI_SERVER_DATABASE_PATH || "data/nni-server.sqlite3";
+const LEGACY_STATE_PATH = process.env.NNI_SERVER_STATE_PATH || "data/nni-server-state.json";
 const LOG_PATH = process.env.NNI_SERVER_LOG_PATH || "logs/nni-server.log";
 const LOG_TO_STDOUT = /^(1|true|yes)$/i.test(process.env.NNI_SERVER_LOG_STDOUT || "");
 const PUBLIC_KEY_WHITELIST_ENV = "NNI_SERVER_PUBLIC_KEY_WHITELIST";
@@ -18,13 +20,15 @@ function nowTs() {
   return Math.floor(Date.now() / 1000);
 }
 
-function emptyState() {
-  return {
-    tasks: {},
-    devices: {},
-    requests: [],
-    public_key_whitelist: configuredPublicKeyWhitelist(),
-  };
+let stateMutationTail = Promise.resolve();
+
+function serializeStateMutation(operation) {
+  const pending = stateMutationTail.then(operation, operation);
+  stateMutationTail = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  return pending;
 }
 
 async function appendNniServerLog(eventKind, payload = {}) {
@@ -41,28 +45,6 @@ async function appendNniServerLog(eventKind, payload = {}) {
 
 function logNniServerEvent(eventKind, payload = {}) {
   void appendNniServerLog(eventKind, payload).catch(() => {});
-}
-
-async function loadState() {
-  try {
-    const raw = await readFile(STATE_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      tasks: parsed.tasks && typeof parsed.tasks === "object" ? parsed.tasks : {},
-      devices: parsed.devices && typeof parsed.devices === "object" ? parsed.devices : {},
-      requests: Array.isArray(parsed.requests) ? parsed.requests : [],
-      public_key_whitelist: loadPublicKeyWhitelist(parsed),
-    };
-  } catch (error) {
-    if (error && error.code === "ENOENT") return emptyState();
-    throw error;
-  }
-}
-
-async function saveState(state) {
-  const parent = path.dirname(path.resolve(STATE_PATH));
-  await mkdir(parent, { recursive: true });
-  await writeFile(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
 function sendJson(res, status, payload) {
@@ -139,28 +121,14 @@ function configuredPublicKeyWhitelist() {
   return parsePublicKeyWhitelistEnv();
 }
 
-function loadPublicKeyWhitelist(parsed) {
-  let rawStateList = [];
-  if (Object.hasOwn(parsed, "public_key_whitelist")) {
-    if (!Array.isArray(parsed.public_key_whitelist)) {
-      throw new Error("nni_public_key_whitelist_invalid");
-    }
-    rawStateList = parsed.public_key_whitelist;
-  } else if (Object.hasOwn(parsed, "public_key_allowlist")) {
-    if (!Array.isArray(parsed.public_key_allowlist)) {
-      throw new Error("nni_public_key_whitelist_invalid");
-    }
-    rawStateList = parsed.public_key_allowlist;
-  }
-  return normalizePublicKeyWhitelist([
-    ...rawStateList,
-    ...configuredPublicKeyWhitelist(),
-  ]);
-}
+const store = new NniStore({
+  databasePath: DATABASE_PATH,
+  legacyStatePath: LEGACY_STATE_PATH,
+  configuredPublicKeys: configuredPublicKeyWhitelist(),
+});
 
-function publicKeyWhitelistDecision(state, devicePubkey) {
-  const whitelist = Array.isArray(state.public_key_whitelist) ? state.public_key_whitelist : [];
-  if (whitelist.length === 0) {
+function publicKeyWhitelistDecision(devicePubkey) {
+  if (store.publicKeyWhitelistCount() === 0) {
     return {
       allowed: false,
       error_code: "nni_public_key_whitelist_empty",
@@ -168,7 +136,7 @@ function publicKeyWhitelistDecision(state, devicePubkey) {
       message_key: "nni.join.public_key_whitelist_empty",
     };
   }
-  if (!whitelist.includes(devicePubkey)) {
+  if (!store.isPublicKeyAllowed(devicePubkey)) {
     return {
       allowed: false,
       error_code: "nni_pubkey_not_allowlisted",
@@ -185,11 +153,9 @@ function publicKeyWhitelistDecision(state, devicePubkey) {
 }
 
 function recordWhitelistBlock(
-  state,
   { task = null, userKey, devicePubkey, signature = null, ts, errorCode, requestKind = task?.task_kind || "nni_join" },
 ) {
-  state.requests.push({
-    id: state.requests.length + 1,
+  store.recordRequest({
     request_kind: requestKind,
     task_id: task?.task_id || null,
     user_key: userKey,
@@ -257,21 +223,6 @@ function verifyJoinSignature(pubkeyHex, challenge, signatureHex) {
   }
 }
 
-function latestTaskTs(state, userKey, devicePubkey) {
-  let latest = null;
-  for (const task of Object.values(state.tasks)) {
-    const taskKind = task.task_kind || "nni_join";
-    if (taskKind === "nni_join" && task.user_key === userKey && task.device_pubkey === devicePubkey) {
-      latest = latest == null ? task.created_at_ts : Math.max(latest, task.created_at_ts);
-    }
-  }
-  return latest;
-}
-
-function deviceKey(userKey, devicePubkey) {
-  return `${userKey}:${devicePubkey}`;
-}
-
 async function handleJoinRequest(res, body) {
   let devicePubkey;
   try {
@@ -282,22 +233,20 @@ async function handleJoinRequest(res, body) {
   }
 
   const userKey = String(body.client_user_key || "anonymous").trim() || "anonymous";
-  const state = await loadState();
   const ts = nowTs();
-  const whitelistDecision = publicKeyWhitelistDecision(state, devicePubkey);
+  const whitelistDecision = publicKeyWhitelistDecision(devicePubkey);
   if (!whitelistDecision.allowed) {
-    recordWhitelistBlock(state, {
+    recordWhitelistBlock({
       userKey,
       devicePubkey,
       ts,
       errorCode: whitelistDecision.error_code,
     });
-    await saveState(state);
     sendWhitelistBlock(res, whitelistDecision, devicePubkey);
     return;
   }
 
-  const lastTs = latestTaskTs(state, userKey, devicePubkey);
+  const lastTs = store.latestJoinTaskTs(userKey, devicePubkey);
   if (lastTs != null && ts - lastTs < JOIN_REQUEST_INTERVAL_SECONDS) {
     const nextAllowedTs = lastTs + JOIN_REQUEST_INTERVAL_SECONDS;
     sendJson(
@@ -318,7 +267,7 @@ async function handleJoinRequest(res, body) {
   const taskId = `nni-join-${randomBytes(16).toString("hex")}`;
   const challenge = randomBytes(32).toString("hex");
   const expiresAtTs = ts + JOIN_TASK_TTL_SECONDS;
-  state.tasks[taskId] = {
+  store.createTask({
     task_id: taskId,
     user_key: userKey,
     device_pubkey: devicePubkey,
@@ -329,8 +278,7 @@ async function handleJoinRequest(res, body) {
     expires_at_ts: expiresAtTs,
     verified_at_ts: null,
     error_code: null,
-  };
-  await saveState(state);
+  });
 
   sendJson(
     res,
@@ -364,27 +312,24 @@ async function handleJoinVerify(res, body) {
     return;
   }
 
-  const state = await loadState();
-  const task = state.tasks[taskId];
-  if (!task) {
+  const task = store.getTask(taskId);
+  if (!task || task.task_kind !== "nni_join") {
     sendJson(res, 404, fail("nni_join_task_not_found", { status: "task_not_found" }));
     return;
   }
 
   const ts = nowTs();
-  const whitelistDecision = publicKeyWhitelistDecision(state, task.device_pubkey);
+  const whitelistDecision = publicKeyWhitelistDecision(task.device_pubkey);
   if (!whitelistDecision.allowed) {
-    task.status = "rejected";
-    task.error_code = whitelistDecision.error_code;
-    recordWhitelistBlock(state, {
+    store.finishTaskWithRequest(
       task,
-      userKey: task.user_key,
-      devicePubkey: task.device_pubkey,
       signature,
       ts,
-      errorCode: whitelistDecision.error_code,
-    });
-    await saveState(state);
+      "rejected",
+      false,
+      "blocked",
+      whitelistDecision.error_code,
+    );
     sendWhitelistBlock(res, whitelistDecision, task.device_pubkey);
     return;
   }
@@ -403,10 +348,15 @@ async function handleJoinVerify(res, body) {
   }
 
   if (ts > task.expires_at_ts) {
-    task.status = "expired";
-    task.error_code = "task_expired";
-    recordRequest(state, task, signature, ts, false, "expired", "task_expired");
-    await saveState(state);
+    store.finishTaskWithRequest(
+      task,
+      signature,
+      ts,
+      "expired",
+      false,
+      "expired",
+      "task_expired",
+    );
     sendJson(
       res,
       410,
@@ -422,14 +372,12 @@ async function handleJoinVerify(res, body) {
   try {
     verifyJoinSignature(task.device_pubkey, task.challenge, signature);
   } catch (error) {
-    task.status = "rejected";
-    task.error_code = error.message || "nni_signature_verify_failed";
-    recordRequest(state, task, signature, ts, false, "rejected", task.error_code);
-    await saveState(state);
+    const errorCode = error.message || "nni_signature_verify_failed";
+    store.finishTaskWithRequest(task, signature, ts, "rejected", false, "rejected", errorCode);
     sendJson(
       res,
       401,
-      fail(task.error_code, {
+      fail(errorCode, {
         status: "signature_rejected",
         task_id: task.task_id,
         device_pubkey: task.device_pubkey,
@@ -440,22 +388,7 @@ async function handleJoinVerify(res, body) {
     return;
   }
 
-  task.status = "verified";
-  task.verified_at_ts = ts;
-  task.error_code = null;
-  const key = deviceKey(task.user_key, task.device_pubkey);
-  const currentDevice = state.devices[key];
-  state.devices[key] = {
-    ...currentDevice,
-    user_key: task.user_key,
-    device_pubkey: task.device_pubkey,
-    first_joined_at_ts: currentDevice?.first_joined_at_ts || ts,
-    last_compliant_request_ts: ts,
-    join_count: (currentDevice?.join_count || 0) + 1,
-    status: "joined",
-  };
-  recordRequest(state, task, signature, ts, true, "accepted", null);
-  await saveState(state);
+  store.acceptJoin(task, signature, ts);
 
   sendJson(
     res,
@@ -484,18 +417,16 @@ async function handleHeartbeatRequest(res, body) {
   }
 
   const userKey = String(body.client_user_key || "clawd-nni-heartbeat").trim() || "clawd-nni-heartbeat";
-  const state = await loadState();
   const ts = nowTs();
-  const whitelistDecision = publicKeyWhitelistDecision(state, devicePubkey);
+  const whitelistDecision = publicKeyWhitelistDecision(devicePubkey);
   if (!whitelistDecision.allowed) {
-    recordWhitelistBlock(state, {
+    recordWhitelistBlock({
       userKey,
       devicePubkey,
       ts,
       errorCode: whitelistDecision.error_code,
       requestKind: "nni_heartbeat",
     });
-    await saveState(state);
     sendWhitelistBlock(res, whitelistDecision, devicePubkey);
     return;
   }
@@ -503,7 +434,7 @@ async function handleHeartbeatRequest(res, body) {
   const taskId = `nni-heartbeat-${randomBytes(16).toString("hex")}`;
   const challenge = randomBytes(32).toString("hex");
   const expiresAtTs = ts + JOIN_TASK_TTL_SECONDS;
-  state.tasks[taskId] = {
+  store.createTask({
     task_id: taskId,
     user_key: userKey,
     device_pubkey: devicePubkey,
@@ -514,8 +445,7 @@ async function handleHeartbeatRequest(res, body) {
     expires_at_ts: expiresAtTs,
     verified_at_ts: null,
     error_code: null,
-  };
-  await saveState(state);
+  });
 
   sendJson(
     res,
@@ -548,28 +478,24 @@ async function handleHeartbeatVerify(res, body) {
     return;
   }
 
-  const state = await loadState();
-  const task = state.tasks[taskId];
+  const task = store.getTask(taskId);
   if (!task || task.task_kind !== "nni_heartbeat") {
     sendJson(res, 404, fail("nni_heartbeat_task_not_found", { status: "task_not_found" }));
     return;
   }
 
   const ts = nowTs();
-  const whitelistDecision = publicKeyWhitelistDecision(state, task.device_pubkey);
+  const whitelistDecision = publicKeyWhitelistDecision(task.device_pubkey);
   if (!whitelistDecision.allowed) {
-    task.status = "rejected";
-    task.error_code = whitelistDecision.error_code;
-    recordWhitelistBlock(state, {
+    store.finishTaskWithRequest(
       task,
-      userKey: task.user_key,
-      devicePubkey: task.device_pubkey,
       signature,
       ts,
-      errorCode: whitelistDecision.error_code,
-      requestKind: "nni_heartbeat",
-    });
-    await saveState(state);
+      "rejected",
+      false,
+      "blocked",
+      whitelistDecision.error_code,
+    );
     sendWhitelistBlock(res, whitelistDecision, task.device_pubkey);
     return;
   }
@@ -588,10 +514,15 @@ async function handleHeartbeatVerify(res, body) {
   }
 
   if (ts > task.expires_at_ts) {
-    task.status = "expired";
-    task.error_code = "task_expired";
-    recordRequest(state, task, signature, ts, false, "expired", "task_expired", "nni_heartbeat");
-    await saveState(state);
+    store.finishTaskWithRequest(
+      task,
+      signature,
+      ts,
+      "expired",
+      false,
+      "expired",
+      "task_expired",
+    );
     sendJson(
       res,
       410,
@@ -607,14 +538,12 @@ async function handleHeartbeatVerify(res, body) {
   try {
     verifyJoinSignature(task.device_pubkey, task.challenge, signature);
   } catch (error) {
-    task.status = "rejected";
-    task.error_code = error.message || "nni_signature_verify_failed";
-    recordRequest(state, task, signature, ts, false, "rejected", task.error_code, "nni_heartbeat");
-    await saveState(state);
+    const errorCode = error.message || "nni_signature_verify_failed";
+    store.finishTaskWithRequest(task, signature, ts, "rejected", false, "rejected", errorCode);
     sendJson(
       res,
       401,
-      fail(task.error_code, {
+      fail(errorCode, {
         status: "signature_rejected",
         task_id: task.task_id,
         device_pubkey: task.device_pubkey,
@@ -624,23 +553,7 @@ async function handleHeartbeatVerify(res, body) {
     return;
   }
 
-  task.status = "verified";
-  task.verified_at_ts = ts;
-  task.error_code = null;
-  const key = deviceKey(task.user_key, task.device_pubkey);
-  const currentDevice = state.devices[key];
-  const heartbeatCount = (currentDevice?.heartbeat_count || 0) + 1;
-  state.devices[key] = {
-    ...currentDevice,
-    user_key: task.user_key,
-    device_pubkey: task.device_pubkey,
-    last_compliant_request_ts: ts,
-    last_heartbeat_ts: ts,
-    heartbeat_count: heartbeatCount,
-    status: currentDevice?.status || "heartbeat",
-  };
-  recordRequest(state, task, signature, ts, true, "accepted", null, "nni_heartbeat");
-  await saveState(state);
+  const heartbeatCount = store.acceptHeartbeat(task, signature, ts);
 
   sendJson(
     res,
@@ -652,26 +565,11 @@ async function handleHeartbeatVerify(res, body) {
       device_pubkey: task.device_pubkey,
       compliant: true,
       heartbeat_count: heartbeatCount,
+      heartbeat_at_unix: ts,
       request_time_ts: ts,
       verified_at_ts: ts,
     }),
   );
-}
-
-function recordRequest(state, task, signature, ts, compliant, status, errorCode, requestKind = task?.task_kind || "nni_join") {
-  state.requests.push({
-    id: state.requests.length + 1,
-    request_kind: requestKind,
-    task_id: task.task_id,
-    user_key: task.user_key,
-    device_pubkey: task.device_pubkey,
-    challenge: task.challenge,
-    signature,
-    compliant,
-    status,
-    error_code: errorCode,
-    created_at_ts: ts,
-  });
 }
 
 const server = createServer(async (req, res) => {
@@ -682,7 +580,7 @@ const server = createServer(async (req, res) => {
       path: url.pathname,
     };
     if (req.method === "GET" && url.pathname === "/v1/health") {
-      sendJson(res, 200, ok({ service: "nni-server", status: "ok" }));
+      sendJson(res, 200, ok({ service: "nni-server", status: "ok", storage: "sqlite" }));
       return;
     }
     if (req.method !== "POST") {
@@ -691,19 +589,19 @@ const server = createServer(async (req, res) => {
     }
     const body = await readJson(req);
     if (url.pathname === "/v1/nni/server/join/request") {
-      await handleJoinRequest(res, body);
+      await serializeStateMutation(() => handleJoinRequest(res, body));
       return;
     }
     if (url.pathname === "/v1/nni/server/join/verify") {
-      await handleJoinVerify(res, body);
+      await serializeStateMutation(() => handleJoinVerify(res, body));
       return;
     }
     if (url.pathname === "/v1/nni/server/heartbeat/request") {
-      await handleHeartbeatRequest(res, body);
+      await serializeStateMutation(() => handleHeartbeatRequest(res, body));
       return;
     }
     if (url.pathname === "/v1/nni/server/heartbeat/verify") {
-      await handleHeartbeatVerify(res, body);
+      await serializeStateMutation(() => handleHeartbeatVerify(res, body));
       return;
     }
     sendJson(res, 404, fail("not_found", { status: "not_found" }));
@@ -716,7 +614,18 @@ server.listen(PORT, HOST, () => {
   logNniServerEvent("server_listening", {
     host: HOST,
     port: PORT,
-    state_path: STATE_PATH,
+    database_path: DATABASE_PATH,
+    legacy_state_path: LEGACY_STATE_PATH,
     log_path: LOG_PATH,
   });
 });
+
+function shutdown() {
+  server.close(() => {
+    store.close();
+    process.exit(0);
+  });
+}
+
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
