@@ -175,7 +175,7 @@ export function NniPage({
   onActionErrorChange,
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
-  const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("rewards");
+  const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
   const [nniDetectionSecondsLeft, setNniDetectionSecondsLeft] = useState(NNI_SIGNATURE_DETECTION_SECONDS);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
@@ -340,7 +340,22 @@ export function NniPage({
         </p>
       ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      <NniHistoryTabs
+        activeView={nniHistoryView}
+        recordsTotal={nniHeartbeatRecordsTotal}
+        errorsTotal={nniHeartbeatErrorsTotal}
+        rewardsTotal={nniRewards?.reward_grant_count ?? 0}
+        t={t}
+        onChange={setNniHistoryView}
+      />
+
+      {nniHistoryView === "overview" ? (
+        <section
+          id="nni-overview-primary-panel"
+          role="tabpanel"
+          aria-labelledby="nni-overview-tab"
+          className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]"
+        >
         <div className="theme-panel-soft p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -614,18 +629,11 @@ export function NniPage({
                   )}
           </p>
         </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section className="order-last theme-panel-soft p-5">
-        <NniHistoryTabs
-          activeView={nniHistoryView}
-          recordsTotal={nniHeartbeatRecordsTotal}
-          errorsTotal={nniHeartbeatErrorsTotal}
-          rewardsTotal={nniRewards?.reward_grant_count ?? 0}
-          t={t}
-          onChange={setNniHistoryView}
-        />
-
+      {nniHistoryView !== "overview" ? (
+        <section className="theme-panel-soft p-5">
         {nniHistoryView === "rewards" ? (
           <NniRewardsPanel
             rewards={nniRewards}
@@ -951,9 +959,16 @@ export function NniPage({
         </div>
         </div>
         ) : null}
-      </section>
+        </section>
+      ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      {nniHistoryView === "overview" ? (
+        <section
+          id="nni-overview-actions-panel"
+          role="tabpanel"
+          aria-labelledby="nni-overview-tab"
+          className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]"
+        >
         <div className="theme-panel-soft p-5">
           <div className="flex items-start gap-3">
             <Fingerprint className="mt-0.5 h-5 w-5 shrink-0 theme-icon-soft" />
@@ -1055,7 +1070,8 @@ export function NniPage({
             </details>
           ) : null}
         </div>
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-export type NniHistoryView = "rewards" | "records" | "errors";
+export type NniHistoryView = "overview" | "rewards" | "records" | "errors";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -21,10 +21,21 @@ export function NniHistoryTabs({
 }: NniHistoryTabsProps) {
   return (
     <div
-      className="flex w-full flex-col gap-2 rounded-2xl border border-white/10 bg-black/20 p-1.5 sm:w-fit sm:flex-row"
+      className="grid w-full grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/20 p-1.5 lg:grid-cols-4"
       role="tablist"
-      aria-label={t("NNI 记录类型", "NNI record type")}
+      aria-label={t("NNI 页面", "NNI pages")}
     >
+      <button
+        id="nni-overview-tab"
+        type="button"
+        role="tab"
+        aria-selected={activeView === "overview"}
+        aria-controls="nni-overview-primary-panel nni-overview-actions-panel"
+        onClick={() => onChange("overview")}
+        className={`${activeView === "overview" ? "theme-accent-btn" : "theme-secondary-btn"} justify-center px-4 py-2 text-sm`}
+      >
+        <span>{t("设备与运行", "Device & runtime")}</span>
+      </button>
       <button
         id="nni-history-rewards-tab"
         type="button"
