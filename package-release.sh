@@ -12,6 +12,12 @@ configure_python3_with_tomllib
 source "${SCRIPT_DIR}/scripts/version_info.sh"
 cd "$SCRIPT_DIR"
 
+# Keep macOS resource forks and Finder metadata out of portable release
+# archives. Apple tools honor these variables during copies and tar creation;
+# they are harmless on other Unix hosts.
+export COPYFILE_DISABLE=1
+export COPY_EXTENDED_ATTRIBUTES_DISABLE=1
+
 EXPLICIT_RELEASE_BIN_DIR="${APP_RELEASE_BIN_DIR:-}"
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
 BUILD_RELEASE_DIR="${APP_BUILD_RELEASE_DIR:-$SCRIPT_DIR/target/release}"
@@ -130,6 +136,61 @@ copy_if_exists() {
   fi
 }
 
+prune_staged_receipt_versions() {
+  local receipt_root="$1"
+  STAGED_RECEIPT_ROOT="$receipt_root" python3 - <<'PY'
+import json
+import os
+import shutil
+from pathlib import Path
+
+root = Path(os.environ["STAGED_RECEIPT_ROOT"])
+for skill_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+    current_path = skill_dir / "current.json"
+    if not current_path.is_file():
+        raise SystemExit(f"missing receipt pointer: {current_path}")
+    try:
+        current = json.loads(current_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid receipt pointer: {current_path}: {error}") from error
+    install_dir = current.get("install_dir")
+    if (
+        not isinstance(install_dir, str)
+        or not install_dir
+        or Path(install_dir).name != install_dir
+        or install_dir in {".", ".."}
+    ):
+        raise SystemExit(f"unsafe receipt install_dir: {current_path}")
+    versions_dir = skill_dir / "versions"
+    selected_dir = versions_dir / install_dir
+    if not selected_dir.is_dir() or selected_dir.is_symlink():
+        raise SystemExit(f"missing selected receipt version: {selected_dir}")
+    for candidate in versions_dir.iterdir():
+        if candidate.name == install_dir:
+            continue
+        if candidate.is_dir() and not candidate.is_symlink():
+            shutil.rmtree(candidate)
+        else:
+            candidate.unlink()
+PY
+}
+
+remove_macos_archive_metadata() {
+  local stage_root="$1"
+  STAGE_ARCHIVE_ROOT="$stage_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+root = Path(os.environ["STAGE_ARCHIVE_ROOT"])
+for path in root.rglob("._*"):
+    if path.is_file() or path.is_symlink():
+        path.unlink()
+PY
+  if [[ "$(detect_host_os || true)" == "macos" ]] && command -v xattr >/dev/null 2>&1; then
+    xattr -cr "$stage_root"
+  fi
+}
+
 copy_if_exists "configs"
 copy_if_exists "prompts"
 copy_if_exists "migrations"
@@ -190,6 +251,7 @@ if [[ ! -d "$RECEIPT_SOURCE_DIR" ]]; then
 fi
 mkdir -p "$STAGE_PROJECT_DIR/data/skill-packages"
 cp -R "$RECEIPT_SOURCE_DIR/." "$STAGE_PROJECT_DIR/data/skill-packages/"
+prune_staged_receipt_versions "$STAGE_PROJECT_DIR/data/skill-packages"
 
 PRECOMPILED_SOURCE_DIR="${APP_PRECOMPILED_SKILLS_DIR:-$SCRIPT_DIR/target/prebuilt-skill-packages/$APP_PACKAGE_TARGET}"
 SKILL_VERIFY_CLI="${APP_SKILL_VERIFY_CLI:-$SCRIPT_DIR/target/release/skillctl}"
@@ -215,6 +277,7 @@ if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
   done
   mkdir -p "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
   cp -R "$PRECOMPILED_SOURCE_DIR/." "$STAGE_PROJECT_DIR/prebuilt/skill-packages/"
+  prune_staged_receipt_versions "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
   echo "Included platform Skill Store precompiles: ${PLATFORM_PRECOMPILED_SKILLS[*]}"
 fi
 
@@ -282,6 +345,7 @@ mkdir -p "$BUNDLE_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 PACKAGE_BASENAME="${APP_PACKAGE_BASENAME:-${APP_RELEASE_ARTIFACT_ID}-runtime-release-${TS}.tar.gz}"
 OUT="$BUNDLE_DIR/$PACKAGE_BASENAME"
+remove_macos_archive_metadata "$STAGE_ROOT"
 tar -czf "$OUT" -C "$STAGE_ROOT" "$APP_RELEASE_ARTIFACT_ID"
 LOCAL_OUT="$SCRIPT_DIR/$(basename "$OUT")"
 if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
