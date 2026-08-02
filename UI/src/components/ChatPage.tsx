@@ -1096,6 +1096,8 @@ function ChatWorkingIndicator({
 }) {
   const activityTitle = (() => {
     switch (activity.stage) {
+      case "queued":
+        return t("任务已进入队列，正在等待执行", "The task is queued and waiting to run");
       case "llm_request":
         return activity.llmCallCount > 0
           ? t(
@@ -1145,7 +1147,7 @@ function ChatWorkingIndicator({
       data-testid="chat-working-indicator"
       className="space-y-1"
     >
-      <div className="text-[11px] text-white/50">assistant</div>
+      <div className="text-[11px] text-white/50">{t("任务状态", "Task status")}</div>
       <div className="chat-activity-sweep min-h-12 max-w-xl rounded-xl border border-emerald-300/20 bg-emerald-500/12 px-3 py-2.5 text-sm text-white">
         <div className="relative z-[1] flex items-center gap-2">
           <Loader2

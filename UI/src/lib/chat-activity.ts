@@ -1,6 +1,7 @@
 import type { TaskEventEnvelope } from "../types/api";
 
 export type ChatActivityStage =
+  | "queued"
   | "analyzing"
   | "llm_request"
   | "llm_response"
@@ -85,6 +86,15 @@ export function reduceChatActivity(
       ? Math.max(current.llmCallCount, reportedLlmCalls)
       : current.llmCallCount,
   };
+
+  if (eventType === "task_submitted") {
+    return {
+      ...next,
+      stage: "queued",
+      activeName: null,
+      commandPreview: null,
+    };
+  }
 
   if (eventType === "model_turn") {
     if (phase === "started") {

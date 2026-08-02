@@ -3,6 +3,20 @@ import test from "node:test";
 
 import { emptyChatActivity, reduceChatActivity } from "./chat-activity";
 
+test("projects task submission as queue status instead of assistant text", () => {
+  const activity = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 1,
+    task_id: "task-queued",
+    event_kind: "task_submitted",
+    payload: { task_status: "queued", execution_mode: "foreground" },
+  });
+
+  assert.equal(activity.stage, "queued");
+  assert.equal(activity.activeName, null);
+  assert.equal(activity.commandPreview, null);
+});
+
 test("counts LLM starts without counting streamed fragments", () => {
   const started = reduceChatActivity(emptyChatActivity(), {
     schema_version: 1,

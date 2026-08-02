@@ -582,6 +582,9 @@ fn parse_images(
     obj: &Map<String, Value>,
     workspace_root: &Path,
 ) -> Result<Vec<ImageSource>, String> {
+    if obj.contains_key("images") && obj.contains_key("image") {
+        return Err("provide either images or image, not both".to_string());
+    }
     let mut out = Vec::new();
     if let Some(arr) = obj.get("images").and_then(|v| v.as_array()) {
         for item in arr {

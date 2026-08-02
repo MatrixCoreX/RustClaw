@@ -2,7 +2,6 @@ use super::*;
 
 const WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "wechat.msg.task_failed_fallback_error";
 const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout_retry_later";
-const WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY: &str = "wechat.msg.skill_progress_media_precheck";
 const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
 const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
 const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
@@ -103,7 +102,10 @@ pub(super) fn skill_progress_message(
         .pointer("/frame/detail_key")
         .and_then(Value::as_str)?;
     let message_key = match detail_key {
-        "media_download.precheck.starting" => WECHAT_SKILL_PROGRESS_MEDIA_PRECHECK_KEY,
+        // Media tasks already use the pinned typing/generating state. Keep the
+        // machine progress event for UI/observability without turning it into
+        // an extra fixed chat reply.
+        "media_download.precheck.starting" => return None,
         "kb.operation.starting" => WECHAT_SKILL_PROGRESS_KB_KEY,
         "package_manager.operation.starting" => WECHAT_SKILL_PROGRESS_PACKAGE_KEY,
         _ => WECHAT_SKILL_PROGRESS_GENERIC_KEY,
