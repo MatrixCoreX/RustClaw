@@ -149,6 +149,8 @@ def _load_state(path=None):
             value = int(state[field], 16)
             if not 1 <= value < N:
                 raise ValueError(f"invalid {field}")
+        if "enabled" in state and not isinstance(state["enabled"], bool):
+            raise ValueError("invalid enabled flag")
         return state
     except FileNotFoundError:
         return None
@@ -159,7 +161,29 @@ def _load_state(path=None):
 
 
 def simulation_enabled():
-    return _load_state() is not None
+    state = _load_state()
+    return state is not None and state.get("enabled", True)
+
+
+def _write_state(path, state):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    temporary = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        if os.name == "posix":
+            os.chmod(path, 0o600)
+    finally:
+        try:
+            os.remove(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def _state_private_key(state, field):
@@ -180,39 +204,19 @@ def _metadata():
 
 def enable_simulation():
     path = simulation_state_path()
-    try:
-        state = _load_state(path)
-    except SignatureSimulationError as exc:
-        if exc.error_code != "signature_simulator_state_invalid":
-            raise
-        state = None
+    state = _load_state(path)
     if state is None:
         state = {
             "schema_version": SCHEMA_VERSION,
             "created_at": int(time.time()),
+            "enabled": True,
             "device_private_key": f"{_new_private_key():064x}",
             "signer_private_key": f"{_new_private_key():064x}",
             "root_private_key": f"{_new_private_key():064x}",
         }
-        directory = os.path.dirname(path)
-        os.makedirs(directory, mode=0o700, exist_ok=True)
-        temporary = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
-        try:
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, separators=(",", ":"))
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-            os.chmod(path, 0o600)
-        finally:
-            try:
-                os.remove(temporary)
-            except FileNotFoundError:
-                pass
-    if os.name == "posix":
-        os.chmod(path, 0o600)
+    else:
+        state["enabled"] = True
+    _write_state(path, state)
     pubkey = _public_key_bytes(_state_private_key(state, "device_private_key")).hex()
     return {
         "signature_chip_present": True,
@@ -223,10 +227,11 @@ def enable_simulation():
 
 
 def disable_simulation():
-    try:
-        os.remove(simulation_state_path())
-    except FileNotFoundError:
-        pass
+    path = simulation_state_path()
+    state = _load_state(path)
+    if state is not None:
+        state["enabled"] = False
+        _write_state(path, state)
     return {
         "signature_chip_present": False,
         "simulation_enabled": False,
@@ -237,7 +242,7 @@ def disable_simulation():
 
 def run_simulated_action(action, action_arg=None):
     state = _load_state()
-    if state is None:
+    if state is None or not state.get("enabled", True):
         raise SignatureSimulationError("simulated signature chip is not enabled", "signature_simulator_disabled")
     device_key = _state_private_key(state, "device_private_key")
     signer_key = _state_private_key(state, "signer_private_key")
