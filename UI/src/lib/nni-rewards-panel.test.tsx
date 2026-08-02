@@ -51,6 +51,7 @@ test("renders the signed device reward total and period record", () => {
   );
 
   assert.match(markup, /id="nni-history-rewards-panel"/);
+  assert.match(markup, /原生智能奖励/);
   assert.match(markup, /7500\.0000/);
   assert.match(markup, /\+5000\.0000/);
   assert.match(markup, /3 次，按 1 台设备计奖/);

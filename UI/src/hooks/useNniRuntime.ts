@@ -47,6 +47,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniJoined, setNniJoined] = useState(false);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
+  const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
   const [nniHeartbeatRequestCount, setNniHeartbeatRequestCount] = useState(0);
   const [nniHeartbeatRetryLimit, setNniHeartbeatRetryLimit] = useState(3);
   const [nniLastHeartbeatAtTs, setNniLastHeartbeatAtTs] = useState<number | null>(null);
@@ -80,6 +81,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
+    setNniHeartbeatIntervalSeconds(config.heartbeat_interval_seconds ?? null);
     setNniHeartbeatRequestCount(config.heartbeat_request_count ?? 0);
     setNniHeartbeatRetryLimit(config.heartbeat_network_retry_limit ?? 3);
     setNniLastHeartbeatAtTs(config.last_heartbeat_at_ts ?? null);
@@ -584,6 +586,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniJoined,
     nniRemoteNodes,
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
+    nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
     nniHeartbeatRetryLimit,
     nniLastHeartbeatAtTs,

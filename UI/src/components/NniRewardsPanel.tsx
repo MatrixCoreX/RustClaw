@@ -40,7 +40,7 @@ export function NniRewardsPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-            {t("NNI 心跳奖励", "NNI heartbeat rewards")}
+            {t("原生智能奖励", "Native intelligence rewards")}
           </p>
           <h4 className="mt-2 text-lg font-semibold">{t("本设备奖励账本", "This device's reward ledger")}</h4>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
@@ -117,7 +117,7 @@ export function NniRewardsPanel({
           <p className="px-4 py-5 text-sm text-white/55">
             {loading
               ? t("正在验证设备并读取奖励...", "Verifying the device and loading rewards...")
-              : t("当前设备还没有奖励记录。完成结算后的心跳奖励会显示在这里。", "This device has no reward records yet. Settled heartbeat rewards will appear here.")}
+              : t("当前设备还没有奖励记录。完成结算后的原生智能奖励会显示在这里。", "This device has no reward records yet. Settled native intelligence rewards will appear here.")}
           </p>
         ) : (
           records.map((record) => (

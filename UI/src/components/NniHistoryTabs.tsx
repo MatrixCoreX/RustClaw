@@ -45,7 +45,7 @@ export function NniHistoryTabs({
         onClick={() => onChange("rewards")}
         className={`${activeView === "rewards" ? "theme-accent-btn" : "theme-secondary-btn"} justify-center px-4 py-2 text-sm`}
       >
-        <span>{t("心跳奖励", "Heartbeat rewards")}</span>
+        <span>{t("原生智能奖励", "Native intelligence rewards")}</span>
         <span className="rounded-full border border-current/20 bg-black/15 px-2 py-0.5 text-[11px] font-semibold">
           {rewardsTotal}
         </span>

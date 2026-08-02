@@ -289,6 +289,7 @@ export default function App() {
     nniJoined,
     nniRemoteNodes,
     nniRemoteNodeCount,
+    nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
     nniHeartbeatRetryLimit,
     nniLastHeartbeatAtTs,
@@ -1687,6 +1688,7 @@ export default function App() {
               nniJoined={nniJoined}
               nniRemoteNodes={nniRemoteNodes}
               nniRemoteNodeCount={nniRemoteNodeCount}
+              nniHeartbeatIntervalSeconds={nniHeartbeatIntervalSeconds}
               nniHeartbeatRequestCount={nniHeartbeatRequestCount}
               nniHeartbeatRetryLimit={nniHeartbeatRetryLimit}
               nniLastHeartbeatAtTs={nniLastHeartbeatAtTs}
