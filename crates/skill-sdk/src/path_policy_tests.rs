@@ -70,7 +70,8 @@ fn create_target_canonicalizes_existing_parent() {
     let target = policy
         .resolve_create_target("new/deep/file.txt")
         .expect("create target");
-    assert_eq!(target, workspace.path().join("new/deep/file.txt"));
+    let canonical_workspace = workspace.path().canonicalize().expect("canonical workspace");
+    assert_eq!(target, canonical_workspace.join("new/deep/file.txt"));
 }
 
 #[test]
@@ -83,9 +84,9 @@ fn create_target_preserves_existing_file_path() {
     let resolved = policy
         .resolve_create_target("existing.zip")
         .expect("resolve existing target");
+    let canonical_target = target.canonicalize().expect("canonical target");
 
-    assert_eq!(resolved, target);
-    assert_eq!(resolved.to_string_lossy(), target.to_string_lossy());
+    assert_eq!(resolved, canonical_target);
 }
 
 #[cfg(unix)]

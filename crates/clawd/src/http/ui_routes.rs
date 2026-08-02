@@ -251,6 +251,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/records/clear", post(nni_clear_request_records))
         .route("/nni/heartbeat/records", get(nni_request_records))
         .route("/nni/heartbeat/errors", get(nni_heartbeat_errors))
+        .route("/nni/rewards", get(nni_rewards))
         .route(
             "/nni/heartbeat/errors/clear",
             post(nni_clear_heartbeat_errors),
@@ -435,6 +436,7 @@ include!("ui_routes/nni_internal_llm.rs");
 mod agent_config_unit_tests;
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
+include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");

@@ -62,12 +62,7 @@ fn write_nni_request_record(state: &AppState, mut record: NniRequestRecord) -> a
 }
 
 fn read_nni_request_records(state: &AppState) -> anyhow::Result<Vec<NniRequestRecord>> {
-    let path = state.skill_rt.workspace_root.join("configs/config.toml");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
-    let parsed: toml::Value =
-        toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
-    let mut records = parse_nni_request_records(&parsed);
-    records.extend(read_nni_request_records_from_log(state)?);
+    let mut records = read_nni_request_records_from_log(state)?;
     records.sort_by(|left, right| {
         let ts_order = right
             .created_at_ts
@@ -81,86 +76,20 @@ fn read_nni_request_records(state: &AppState) -> anyhow::Result<Vec<NniRequestRe
 
 fn clear_nni_request_records(state: &AppState) -> anyhow::Result<Value> {
     let existing_count = read_nni_request_records(state)?.len();
-    let path = state.skill_rt.workspace_root.join("configs/config.toml");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
-    let output = upsert_section_key_line(&raw, "nni", "request_records", "[]");
-    write_runtime_config_file(state, &output)?;
     rewrite_nni_log_without_event_kinds(state, &["request_record"])?;
     Ok(json!({
         "status": "nni_request_records_cleared",
         "deleted_records": existing_count,
-        "config_path": path.display().to_string(),
         "log_path": nni_log_path(state).display().to_string(),
     }))
 }
 
-fn parse_nni_request_records(parsed: &toml::Value) -> Vec<NniRequestRecord> {
-    parsed
-        .get("nni")
-        .and_then(|value| value.get("request_records"))
-        .and_then(toml::Value::as_array)
-        .map(|records| records.iter().filter_map(parse_nni_request_record).collect())
-        .unwrap_or_default()
-}
-
-fn parse_nni_request_record(value: &toml::Value) -> Option<NniRequestRecord> {
-    let table = value.as_table()?;
-    let request_kind = table
-        .get("request_kind")
-        .and_then(toml::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("nni_join")
-        .to_string();
-    let status = table
-        .get("status")
-        .and_then(toml::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown")
-        .to_string();
-    let id = table
-        .get("id")
-        .and_then(toml::Value::as_integer)
-        .and_then(|value| u64::try_from(value).ok())
-        .unwrap_or(0);
-    let optional_string = |key: &str| {
-        table
-            .get(key)
-            .and_then(toml::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let created_at_ts = table
-        .get("created_at_ts")
-        .and_then(toml::Value::as_integer)
-        .and_then(|value| u64::try_from(value).ok())
-        .filter(|value| *value > 0);
-    Some(NniRequestRecord {
-        id,
-        request_kind,
-        task_id: optional_string("task_id"),
-        user_key: optional_string("user_key"),
-        device_pubkey: optional_string("device_pubkey"),
-        node_url: optional_string("node_url"),
-        compliant: table.get("compliant").and_then(toml::Value::as_bool),
-        status,
-        error_code: optional_string("error_code"),
-        created_at_ts,
-        signature_present: table
-            .get("signature_present")
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(false),
-        challenge_present: table
-            .get("challenge_present")
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(false),
-    })
-}
-
 fn nni_log_path(state: &AppState) -> PathBuf {
-    state.skill_rt.workspace_root.join("logs").join(NNI_LOG_FILE_NAME)
+    state
+        .skill_rt
+        .workspace_root
+        .join("logs")
+        .join(NNI_LOG_FILE_NAME)
 }
 
 fn append_nni_log_event(state: &AppState, event_kind: &str, payload: Value) -> anyhow::Result<()> {

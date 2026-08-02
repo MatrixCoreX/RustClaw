@@ -1041,6 +1041,38 @@ export interface NniHeartbeatErrorsResponse {
   records: NniHeartbeatErrorRecord[];
 }
 
+export interface NniRewardRecord {
+  id: number;
+  period_start_unix: number;
+  period_end_unix: number;
+  heartbeat_count_in_period: number;
+  eligibility_units: 1;
+  reward_points_units: string;
+  reward_point_scale: 10000;
+  reward_points: string;
+  rounding_adjustment_units: 0 | 1;
+  awarded_at_unix: number;
+}
+
+export interface NniRewardsResponse {
+  schema_version: 1;
+  status: string;
+  device_pubkey: string;
+  node_url?: string;
+  reward_point_scale: 10000;
+  reward_decimal_places: 4;
+  total_reward_units: string;
+  total_reward_points: string;
+  reward_grant_count: number;
+  first_period_start_unix?: number | null;
+  latest_period_end_unix?: number | null;
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  records: NniRewardRecord[];
+}
+
 export interface WechatConfigResponse {
   config_path: string;
   enabled: boolean;

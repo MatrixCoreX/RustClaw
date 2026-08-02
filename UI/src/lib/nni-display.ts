@@ -181,15 +181,15 @@ export function nniJoinErrorMessage(
   if (code === "nni_pubkey_not_allowlisted" || code === "nni_public_key_not_allowlisted" || code === "public_key_not_allowlisted") {
     return copy(
       lang,
-      "本机公钥必须是白名单合规公钥。请读取并复制本机公钥，确认远程 NNI 服务端白名单已允许该公钥后再重试。",
-      "The local public key must be compliant with the whitelist. Read and copy this device public key, confirm the remote NNI server allows it, then retry.",
+      "这台设备尚未获远程 NNI 服务端允许。请联系管理员添加设备后再重试。",
+      "This device is not allowed by the remote NNI server yet. Ask an administrator to add it, then retry.",
     );
   }
   if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
     return copy(
       lang,
-      "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请确定你是合法设备以后再重试。",
-      "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; confirm this is an authorized device, then retry.",
+      "远程 NNI 服务端尚未允许任何设备。请联系管理员完成设备授权后再重试。",
+      "The remote NNI server does not allow any devices yet. Ask an administrator to authorize this device, then retry.",
     );
   }
   return error || fallback;

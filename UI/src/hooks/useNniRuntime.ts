@@ -20,10 +20,12 @@ import type {
   NniHeartbeatRecordsResponse,
   NniJoinTaskResponse,
   NniJoinVerifyResponse,
+  NniRewardsResponse,
 } from "../types/api";
 
 export const NNI_HEARTBEAT_RECORDS_PAGE_SIZE = 10;
 export const NNI_HEARTBEAT_ERRORS_PAGE_SIZE = 10;
+export const NNI_REWARDS_PAGE_SIZE = 10;
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -45,6 +47,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniJoined, setNniJoined] = useState(false);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
+  const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
   const [nniHeartbeatRequestCount, setNniHeartbeatRequestCount] = useState(0);
   const [nniHeartbeatRetryLimit, setNniHeartbeatRetryLimit] = useState(3);
   const [nniLastHeartbeatAtTs, setNniLastHeartbeatAtTs] = useState<number | null>(null);
@@ -65,6 +68,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniHeartbeatErrorsClearing, setNniHeartbeatErrorsClearing] = useState(false);
   const [nniHeartbeatErrorsError, setNniHeartbeatErrorsError] = useState<string | null>(null);
   const [nniHeartbeatErrorsMessage, setNniHeartbeatErrorsMessage] = useState<string | null>(null);
+  const [nniRewards, setNniRewards] = useState<NniRewardsResponse | null>(null);
+  const [nniRewardsLoading, setNniRewardsLoading] = useState(false);
+  const [nniRewardsError, setNniRewardsError] = useState<string | null>(null);
   const [nniConfigLoading, setNniConfigLoading] = useState(false);
   const [nniConfigSaving, setNniConfigSaving] = useState(false);
   const [nniConfigError, setNniConfigError] = useState<string | null>(null);
@@ -75,6 +81,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
+    setNniHeartbeatIntervalSeconds(config.heartbeat_interval_seconds ?? null);
     setNniHeartbeatRequestCount(config.heartbeat_request_count ?? 0);
     setNniHeartbeatRetryLimit(config.heartbeat_network_retry_limit ?? 3);
     setNniLastHeartbeatAtTs(config.last_heartbeat_at_ts ?? null);
@@ -449,6 +456,32 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
+  const fetchNniRewards = async (page = nniRewards?.page ?? 1, silent = false) => {
+    const safePage = Math.max(1, page);
+    if (!silent) {
+      setNniRewardsLoading(true);
+      setNniRewardsError(null);
+    }
+    try {
+      const params = new URLSearchParams({
+        page: String(safePage),
+        per_page: String(NNI_REWARDS_PAGE_SIZE),
+      });
+      const res = await apiFetch(`/v1/nni/rewards?${params.toString()}`);
+      const body = (await res.json()) as ApiResponse<NniRewardsResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI reward records load failed (${res.status})`);
+      }
+      setNniRewards(body.data);
+      setNniRewardsError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      if (!silent) setNniRewardsError(message);
+    } finally {
+      if (!silent) setNniRewardsLoading(false);
+    }
+  };
+
   const saveNniConfig = async () => {
     setNniConfigSaving(true);
     setNniConfigError(null);
@@ -526,6 +559,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
       await fetchNniHeartbeatRecords(1, true);
+      await fetchNniRewards(1, true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniActionError(message);
@@ -552,6 +586,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniJoined,
     nniRemoteNodes,
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
+    nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
     nniHeartbeatRetryLimit,
     nniLastHeartbeatAtTs,
@@ -572,6 +607,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniHeartbeatErrorsClearing,
     nniHeartbeatErrorsError,
     nniHeartbeatErrorsMessage,
+    nniRewards,
+    nniRewardsLoading,
+    nniRewardsError,
     nniConfigLoading,
     nniConfigSaving,
     nniConfigError,
@@ -589,6 +627,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
+    fetchNniRewards,
     runNniDeviceAction,
     setNniDeviceSimulation,
   };

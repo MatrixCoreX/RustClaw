@@ -15,6 +15,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
+import { NniHistoryTabs, type NniHistoryView } from "./NniHistoryTabs";
+import { NniRewardsPanel } from "./NniRewardsPanel";
 import {
   NNI_RUNTIME_TILES,
   nniActionLabel,
@@ -31,6 +33,7 @@ import type {
   NniDeviceStatusResponse,
   NniHeartbeatErrorRecord,
   NniHeartbeatRecord,
+  NniRewardsResponse,
 } from "../types/api";
 
 type UiLanguage = "zh" | "en";
@@ -49,6 +52,7 @@ export interface NniPageProps {
   nniJoined: boolean;
   nniRemoteNodes: string;
   nniRemoteNodeCount: number;
+  nniHeartbeatIntervalSeconds: number | null;
   nniHeartbeatRequestCount: number;
   nniHeartbeatRetryLimit: number;
   nniLastHeartbeatAtTs: number | null;
@@ -71,6 +75,10 @@ export interface NniPageProps {
   nniHeartbeatErrorsError: string | null;
   nniHeartbeatErrorsMessage: string | null;
   nniHeartbeatErrorsPageSize: number;
+  nniRewards: NniRewardsResponse | null;
+  nniRewardsLoading: boolean;
+  nniRewardsError: string | null;
+  nniRewardsPageSize: number;
   nniConfigLoading: boolean;
   nniConfigSaving: boolean;
   nniConfigError: string | null;
@@ -87,6 +95,7 @@ export interface NniPageProps {
   onClearHeartbeatRecords: () => unknown | Promise<unknown>;
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
+  onFetchRewards: (page: number) => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onActionMessageChange: (message: string | null) => void;
@@ -118,6 +127,7 @@ export function NniPage({
   nniJoined,
   nniRemoteNodes,
   nniRemoteNodeCount,
+  nniHeartbeatIntervalSeconds,
   nniHeartbeatRequestCount,
   nniHeartbeatRetryLimit,
   nniLastHeartbeatAtTs,
@@ -140,6 +150,10 @@ export function NniPage({
   nniHeartbeatErrorsError,
   nniHeartbeatErrorsMessage,
   nniHeartbeatErrorsPageSize,
+  nniRewards,
+  nniRewardsLoading,
+  nniRewardsError,
+  nniRewardsPageSize,
   nniConfigLoading,
   nniConfigSaving,
   nniConfigError,
@@ -156,12 +170,14 @@ export function NniPage({
   onClearHeartbeatRecords,
   onFetchHeartbeatErrors,
   onClearHeartbeatErrors,
+  onFetchRewards,
   onRunDeviceAction,
   onSetDeviceSimulation,
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
+  const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
   const [nniDetectionSecondsLeft, setNniDetectionSecondsLeft] = useState(NNI_SIGNATURE_DETECTION_SECONDS);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
@@ -173,6 +189,20 @@ export function NniPage({
   const nniHeartbeatRecordsCanNext = nniHeartbeatRecordsPage < nniHeartbeatRecordsTotalPages;
   const nniHeartbeatErrorsCanPrev = nniHeartbeatErrorsPage > 1;
   const nniHeartbeatErrorsCanNext = nniHeartbeatErrorsPage < nniHeartbeatErrorsTotalPages;
+  const nniHeartbeatIntervalMinutes =
+    nniHeartbeatIntervalSeconds !== null && nniHeartbeatIntervalSeconds % 60 === 0
+      ? nniHeartbeatIntervalSeconds / 60
+      : null;
+  const nniHeartbeatIntervalZh = nniHeartbeatIntervalMinutes !== null
+    ? `${nniHeartbeatIntervalMinutes} 分钟`
+    : nniHeartbeatIntervalSeconds !== null
+      ? `${nniHeartbeatIntervalSeconds} 秒`
+      : "系统设定的周期";
+  const nniHeartbeatIntervalEn = nniHeartbeatIntervalMinutes !== null
+    ? `${nniHeartbeatIntervalMinutes} minutes`
+    : nniHeartbeatIntervalSeconds !== null
+      ? `${nniHeartbeatIntervalSeconds} seconds`
+      : "the configured interval";
   const actionLabel = (action: string) => nniActionLabel(action, lang);
   const nniRuntimeActivity =
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
@@ -254,8 +284,8 @@ export function NniPage({
             </h3>
             <p className="mt-3 text-sm leading-7 text-white/70">
               {t(
-                "这里管理 Pi App 里的 NNI 入口和设备签名能力。普通设备可以只查看状态；带安全芯片的设备可以读取公钥、生成时间戳签名，并查看 TNG 证书链。加入时，本机公钥必须是白名单合规公钥。",
-                "This page manages the NNI entry from the Pi App and device signing. Regular devices can simply check status; devices with a secure chip can read the public key, create timestamp signatures, and inspect the TNG certificate chain. To join, the local public key must be compliant with the whitelist.",
+                "这里管理 Pi App 里的 NNI 入口和设备签名能力。",
+                "This page manages the NNI entry from the Pi App and device signing.",
               )}
             </p>
           </div>
@@ -326,7 +356,22 @@ export function NniPage({
         </p>
       ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      <NniHistoryTabs
+        activeView={nniHistoryView}
+        recordsTotal={nniHeartbeatRecordsTotal}
+        errorsTotal={nniHeartbeatErrorsTotal}
+        rewardsTotal={nniRewards?.reward_grant_count ?? 0}
+        t={t}
+        onChange={setNniHistoryView}
+      />
+
+      {nniHistoryView === "overview" ? (
+        <section
+          id="nni-overview-primary-panel"
+          role="tabpanel"
+          aria-labelledby="nni-overview-tab"
+          className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]"
+        >
         <div className="theme-panel-soft p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -528,8 +573,8 @@ export function NniPage({
             />
             <p className="mt-2 text-xs leading-5 text-white/50">
               {t(
-                "远程节点会保存到 configs/config.toml；加入成功后运行状态也会保存，clawd 重启或页面重开后会自动载入。远程节点负责下发 challenge、验签并记录合规请求。本机公钥必须是白名单合规公钥。",
-                "Remote nodes are saved to configs/config.toml. After Join succeeds, the runtime state is saved too and loads automatically after clawd restarts or the page reopens. Remote nodes issue challenges, verify signatures, and record compliant requests. The local public key must be compliant with the whitelist.",
+                "远程节点和加入状态会自动保存，Agent 重启或页面重开后会自动载入。",
+                "Remote nodes and Join status are saved automatically and restored after the Agent restarts or the page reopens.",
               )}
             </p>
             {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
@@ -591,62 +636,83 @@ export function NniPage({
                 )
               : nniJoined
                 ? t(
-                    "服务端已验证设备签名，NNI 运行入口已开启。clawd 会每 15 分钟向服务器发送一次硬件签名心跳。",
-                    "The server verified the device signature, and the NNI runtime entry is active. clawd will send a hardware-signed heartbeat to the server every 15 minutes.",
+                    `服务端已验证设备签名，NNI 运行入口已开启。Agent 会每 ${nniHeartbeatIntervalZh} 向服务器发送一次硬件签名心跳。`,
+                    `The server verified the device signature, and the NNI runtime entry is active. The Agent will send a hardware-signed heartbeat to the server every ${nniHeartbeatIntervalEn}.`,
                   )
                 : t(
-                    "点击加入会向远程服务端请求一次随机挑战。本机公钥必须是白名单合规公钥，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
-                    "Click Join to request a random challenge from the remote server. The local public key must be compliant with the whitelist, and the runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
+                    "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
+                    "Click Join to request a random challenge from the remote server. The runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
                   )}
           </p>
         </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section className="order-last theme-panel-soft p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-              {t("NNI 心跳错误", "NNI heartbeat errors")}
-            </p>
-            <h4 className="mt-2 text-lg font-semibold">{t("本机心跳错误记录", "Local heartbeat error history")}</h4>
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              {t(
-                `共 ${nniHeartbeatErrorsTotal} 条错误记录，每页 ${nniHeartbeatErrorsPageSize} 条。`,
-                `${nniHeartbeatErrorsTotal} error records total, ${nniHeartbeatErrorsPageSize} per page.`,
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void onFetchHeartbeatErrors(nniHeartbeatErrorsPage)}
-              disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing}
-              className="theme-secondary-btn px-3 py-2 text-xs"
-            >
-              {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {t("刷新错误", "Refresh errors")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void onClearHeartbeatErrors()}
-              disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing || nniHeartbeatErrorsTotal === 0}
-              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              title={t(
-                "只清理本机保存的心跳错误历史，不会修改远程服务端请求记录。",
-                "Only clears local heartbeat error history. Remote server request records are not changed.",
-              )}
-            >
-              {nniHeartbeatErrorsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              {t("清理错误", "Clear errors")}
-            </button>
-          </div>
-        </div>
+      {nniHistoryView !== "overview" ? (
+        <section className="theme-panel-soft p-5">
+        {nniHistoryView === "rewards" ? (
+          <NniRewardsPanel
+            rewards={nniRewards}
+            loading={nniRewardsLoading}
+            error={nniRewardsError}
+            pageSize={nniRewardsPageSize}
+            t={t}
+            formatUnixDateTime={formatUnixDateTime}
+            onFetch={onFetchRewards}
+          />
+        ) : null}
 
-        {nniHeartbeatErrorsError ? (
-          <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-            {t("NNI 心跳错误暂时无法载入：", "NNI heartbeat errors could not be loaded: ")}
-            {nniHeartbeatErrorsError}
-          </p>
+        {nniHistoryView === "errors" ? (
+          <div
+            id="nni-history-errors-panel"
+            role="tabpanel"
+            aria-labelledby="nni-history-errors-tab"
+            className="mt-5"
+          >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
+                {t("NNI 心跳错误", "NNI heartbeat errors")}
+              </p>
+              <h4 className="mt-2 text-lg font-semibold">{t("本机心跳错误记录", "Local heartbeat error history")}</h4>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                {t(
+                  `共 ${nniHeartbeatErrorsTotal} 条错误记录，每页 ${nniHeartbeatErrorsPageSize} 条。`,
+                  `${nniHeartbeatErrorsTotal} error records total, ${nniHeartbeatErrorsPageSize} per page.`,
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onFetchHeartbeatErrors(nniHeartbeatErrorsPage)}
+                disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing}
+                className="theme-secondary-btn px-3 py-2 text-xs"
+              >
+                {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {t("刷新错误", "Refresh errors")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onClearHeartbeatErrors()}
+                disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing || nniHeartbeatErrorsTotal === 0}
+                className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                title={t(
+                  "只清理本机保存的心跳错误历史，不会修改远程服务端请求记录。",
+                  "Only clears local heartbeat error history. Remote server request records are not changed.",
+                )}
+              >
+                {nniHeartbeatErrorsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {t("清理错误", "Clear errors")}
+              </button>
+            </div>
+          </div>
+
+          {nniHeartbeatErrorsError ? (
+            <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+              {t("NNI 心跳错误暂时无法载入：", "NNI heartbeat errors could not be loaded: ")}
+              {nniHeartbeatErrorsError}
+            </p>
         ) : null}
         {nniHeartbeatErrorsMessage ? (
           <p className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
@@ -710,55 +776,62 @@ export function NniPage({
             </button>
           </div>
         </div>
-      </section>
-
-      <section className="order-last theme-panel-soft p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-              {t("NNI 请求记录", "NNI request records")}
-            </p>
-            <h4 className="mt-2 text-lg font-semibold">{t("本机请求记录", "Local request records")}</h4>
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              {t(
-                `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${nniHeartbeatRecordsPageSize} 条。`,
-                `${nniHeartbeatRecordsTotal} records total, ${nniHeartbeatRecordsPageSize} per page.`,
-              )}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-white/45">
-              {t(
-                "这里保存本机看到的手动加入和自动心跳结果；远端服务端记录不再从 UI 拉取。",
-                "This stores manual Join and automatic Heartbeat results seen by this device. Remote server records are no longer fetched in the UI.",
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void onClearHeartbeatRecords()}
-              disabled={nniHeartbeatRecordsTotal === 0 || nniHeartbeatRecordsLoading || nniHeartbeatRecordsClearing}
-              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {nniHeartbeatRecordsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              {t("清理记录", "Clear records")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void onFetchHeartbeatRecords(nniHeartbeatRecordsPage)}
-              disabled={nniHeartbeatRecordsLoading}
-              className="theme-secondary-btn px-3 py-2 text-xs"
-            >
-              {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {t("刷新记录", "Refresh records")}
-            </button>
-          </div>
         </div>
+        ) : null}
 
-        {nniHeartbeatRecordsError ? (
-          <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-            {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
-            {nniHeartbeatRecordsError}
-          </p>
+        {nniHistoryView === "records" ? (
+          <div
+            id="nni-history-records-panel"
+            role="tabpanel"
+            aria-labelledby="nni-history-records-tab"
+            className="mt-5"
+          >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
+                {t("NNI 请求记录", "NNI request records")}
+              </p>
+              <h4 className="mt-2 text-lg font-semibold">{t("本机请求记录", "Local request records")}</h4>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                {t(
+                  `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${nniHeartbeatRecordsPageSize} 条。`,
+                  `${nniHeartbeatRecordsTotal} records total, ${nniHeartbeatRecordsPageSize} per page.`,
+                )}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-white/45">
+                {t(
+                  "这里保存本机看到的手动加入和自动心跳结果；远端服务端记录不再从 UI 拉取。",
+                  "This stores manual Join and automatic Heartbeat results seen by this device. Remote server records are no longer fetched in the UI.",
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onClearHeartbeatRecords()}
+                disabled={nniHeartbeatRecordsTotal === 0 || nniHeartbeatRecordsLoading || nniHeartbeatRecordsClearing}
+                className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {nniHeartbeatRecordsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {t("清理记录", "Clear records")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onFetchHeartbeatRecords(nniHeartbeatRecordsPage)}
+                disabled={nniHeartbeatRecordsLoading}
+                className="theme-secondary-btn px-3 py-2 text-xs"
+              >
+                {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {t("刷新记录", "Refresh records")}
+              </button>
+            </div>
+          </div>
+
+          {nniHeartbeatRecordsError ? (
+            <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+              {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
+              {nniHeartbeatRecordsError}
+            </p>
         ) : null}
         {nniHeartbeatRecordsMessage ? (
           <p className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs leading-5 text-emerald-100">
@@ -900,9 +973,18 @@ export function NniPage({
             </button>
           </div>
         </div>
-      </section>
+        </div>
+        ) : null}
+        </section>
+      ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      {nniHistoryView === "overview" ? (
+        <section
+          id="nni-overview-actions-panel"
+          role="tabpanel"
+          aria-labelledby="nni-overview-tab"
+          className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]"
+        >
         <div className="theme-panel-soft p-5">
           <div className="flex items-start gap-3">
             <Fingerprint className="mt-0.5 h-5 w-5 shrink-0 theme-icon-soft" />
@@ -1004,7 +1086,8 @@ export function NniPage({
             </details>
           ) : null}
         </div>
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }
