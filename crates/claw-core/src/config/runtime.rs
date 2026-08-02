@@ -10,8 +10,6 @@ impl AppConfig {
             .add_source(config::File::with_name(path))
             // Optional split channel configs.
             .add_source(config::File::from(base_dir.join("channels/telegram.toml")).required(false))
-            // Legacy mixed WhatsApp config (kept for backward compatibility).
-            .add_source(config::File::from(base_dir.join("channels/whatsapp.toml")).required(false))
             // Split WhatsApp configs.
             .add_source(
                 config::File::from(base_dir.join("channels/whatsapp-cloud.toml")).required(false),

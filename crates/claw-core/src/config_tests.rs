@@ -114,6 +114,67 @@ fn whatsapp_web_defaults_keep_proactive_delivery_off_and_local_limits_explicit()
 }
 
 #[test]
+fn app_config_loads_whatsapp_cloud_and_web_from_separate_files() {
+    let dir = unique_temp_config_dir("split-whatsapp");
+    fs::create_dir_all(dir.join("channels")).expect("create temp channel config dir");
+    let config_path = dir.join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[server]
+request_timeout_seconds = 30
+
+[database]
+sqlite_path = "data/test.db"
+busy_timeout_ms = 2000
+
+[worker]
+"#,
+    )
+    .expect("write base config");
+    fs::write(
+        dir.join("channels/whatsapp-cloud.toml"),
+        r#"
+[whatsapp]
+enabled = false
+webhook_path = "/split-cloud"
+image_inbox_dir = "image/split-cloud"
+
+[whatsapp_cloud]
+enabled = true
+webhook_path = "/split-cloud-capability"
+"#,
+    )
+    .expect("write WhatsApp Cloud config");
+    fs::write(
+        dir.join("channels/whatsapp-web.toml"),
+        r#"
+[whatsapp_web]
+enabled = true
+bridge_listen = "127.0.0.1:18092"
+auth_dir = "data/split-wa-web-auth"
+allow_proactive_send = false
+"#,
+    )
+    .expect("write WhatsApp Web config");
+
+    let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
+        .expect("split WhatsApp configs should load together");
+
+    assert!(!cfg.whatsapp.enabled);
+    assert_eq!(cfg.whatsapp.webhook_path, "/split-cloud");
+    assert_eq!(cfg.whatsapp.image_inbox_dir, "image/split-cloud");
+    assert!(cfg.whatsapp_cloud.enabled);
+    assert_eq!(cfg.whatsapp_cloud.webhook_path, "/split-cloud-capability");
+    assert!(cfg.whatsapp_web.enabled);
+    assert_eq!(cfg.whatsapp_web.bridge_listen, "127.0.0.1:18092");
+    assert_eq!(cfg.whatsapp_web.auth_dir, "data/split-wa-web-auth");
+    assert!(!cfg.whatsapp_web.allow_proactive_send);
+
+    fs::remove_dir_all(dir).expect("remove temp config dir");
+}
+
+#[test]
 fn agents_toml_is_the_canonical_agent_source() {
     let dir = unique_temp_config_dir("canonical-agents");
     fs::create_dir_all(dir.join("channels")).expect("create temp config dir");
