@@ -143,6 +143,44 @@ class ShareTextTest(unittest.TestCase):
                     expected_id,
                     )
 
+    def test_douyin_netlog_pairs_each_adaptive_video_with_its_own_audio(self) -> None:
+        video_a = (
+            "https://v3-dy.example/6a7091f7/video/tos/cn/tos-cn-ve-15/"
+            "media-video-avc1/?mime_type=video_mp4&br=1200000"
+        )
+        audio_a = (
+            "https://v3-dy.example/6a7091f7/video/tos/cn/tos-cn-ve-15/"
+            "media-audio-und-mp4a/?mime_type=video_mp4"
+        )
+        video_b = (
+            "https://v3-dy.example/other-group/video/tos/cn/tos-cn-ve-15/"
+            "media-video-avc1/?mime_type=video_mp4&br=800000"
+        )
+        payload = {"events": [{"url": video_a}, {"url": video_b}, {"url": audio_a}]}
+
+        candidates = self.downloader.extract_browser_candidates_from_netlog_payload(
+            payload,
+            "douyin",
+        )
+        by_url = {candidate.url: candidate for candidate in candidates}
+
+        self.assertEqual(by_url[video_a].separate_audio_url, audio_a)
+        self.assertIsNone(by_url[video_b].separate_audio_url)
+        self.assertTrue(
+            self.downloader.browser_candidates_are_sufficient(
+                [by_url[video_a]],
+                [],
+                require_audio=True,
+            )
+        )
+        self.assertFalse(
+            self.downloader.browser_candidates_are_sufficient(
+                [by_url[video_b]],
+                [],
+                require_audio=True,
+            )
+        )
+
     def test_douyin_image_post_extracts_platform_article(self) -> None:
         payload = {
             "aweme_id": "7658893225607908651",
@@ -330,6 +368,181 @@ class ShareTextTest(unittest.TestCase):
             self.assertEqual(calls, ["first", "second"])
             self.assertEqual((output_dir / "clip.mp4").read_bytes(), b"second")
             handled.assert_called_once_with(output_dir / "clip.mp4", args)
+
+    def test_adaptive_video_combines_matched_audio_before_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            candidate = self.downloader.Candidate(
+                "https://v3-dy.example/group/video/tos/cn/tos-cn-ve-15/"
+                "media-video-avc1/?mime_type=video_mp4",
+                "douyin.browser-netlog",
+                1,
+                separate_audio_url=(
+                    "https://v3-dy.example/group/video/tos/cn/tos-cn-ve-15/"
+                    "media-audio-und-mp4a/?mime_type=video_mp4"
+                ),
+            )
+
+            def fake_download(_candidate, output_path, **_kwargs):
+                output_path.write_bytes(b"video-only")
+                return output_path
+
+            def fake_mux(path, _candidate, **_kwargs):
+                path.write_bytes(b"video-with-audio")
+                return path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="adaptive.mp4",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+            )
+            with (
+                mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
+                mock.patch.object(self.downloader, "mux_separate_audio_stream", side_effect=fake_mux) as muxed,
+                mock.patch.object(
+                    self.downloader.video_transcriber,
+                    "probe_audio_stream",
+                    side_effect=[False, True],
+                ),
+                mock.patch.object(self.downloader, "handle_downloaded_video") as handled,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://v.douyin.com/adaptive/",
+                    None,
+                    "douyin",
+                    "item-adaptive",
+                    [candidate],
+                    [],
+                    [],
+                )
+
+            self.assertEqual(result, 0)
+            muxed.assert_called_once()
+            self.assertEqual((output_dir / "adaptive.mp4").read_bytes(), b"video-with-audio")
+            handled.assert_called_once_with(output_dir / "adaptive.mp4", args)
+
+    def test_adaptive_video_without_matched_audio_is_not_reported_as_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            candidate = self.downloader.Candidate(
+                "https://v3-dy.example/group/video/tos/cn/tos-cn-ve-15/"
+                "media-video-avc1/?mime_type=video_mp4",
+                "douyin.browser-netlog",
+                1,
+            )
+
+            def fake_download(_candidate, output_path, **_kwargs):
+                output_path.write_bytes(b"video-only")
+                return output_path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="incomplete.mp4",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+            )
+            with (
+                mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
+                mock.patch.object(
+                    self.downloader.video_transcriber,
+                    "probe_audio_stream",
+                    return_value=False,
+                ),
+                mock.patch.object(self.downloader, "handle_downloaded_video") as handled,
+            ):
+                with self.assertRaisesRegex(
+                    self.downloader.DouyinDownloadError,
+                    "video-only adaptive stream",
+                ):
+                    self.downloader.handle_resolved_media(
+                        args,
+                        "https://v.douyin.com/incomplete/",
+                        None,
+                        "douyin",
+                        "item-incomplete",
+                        [candidate],
+                        [],
+                        [],
+                    )
+
+            self.assertFalse((output_dir / "incomplete.mp4").exists())
+            handled.assert_not_called()
+
+    def test_live_photo_composition_keeps_its_existing_audio_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            candidate = self.downloader.Candidate(
+                "https://www.douyin.com/aweme/v1/play/?video_id=live-photo",
+                "douyin.browser-item.live-photo[0]",
+                1,
+                live_photo_audio_url="https://audio.test/live-photo",
+                live_photo_duration=8.0,
+            )
+
+            def fake_download(_candidate, output_path, **_kwargs):
+                output_path.write_bytes(b"short-live-photo-clip")
+                return output_path
+
+            def fake_compose(path, _candidate, **_kwargs):
+                path.write_bytes(b"complete-live-photo-with-audio")
+                return path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="live-photo.mp4",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+            )
+            with (
+                mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
+                mock.patch.object(self.downloader, "compose_live_photo_video", side_effect=fake_compose) as composed,
+                mock.patch.object(self.downloader, "mux_separate_audio_stream") as adaptive_mux,
+                mock.patch.object(
+                    self.downloader.video_transcriber,
+                    "probe_audio_stream",
+                    return_value=True,
+                ),
+                mock.patch.object(self.downloader, "handle_downloaded_video") as handled,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://www.douyin.com/note/1234567890123456789",
+                    None,
+                    "douyin",
+                    "1234567890123456789",
+                    [candidate],
+                    [],
+                    [],
+                )
+
+            self.assertEqual(result, 0)
+            composed.assert_called_once()
+            adaptive_mux.assert_not_called()
+            self.assertEqual(
+                (output_dir / "live-photo.mp4").read_bytes(),
+                b"complete-live-photo-with-audio",
+            )
+            handled.assert_called_once_with(output_dir / "live-photo.mp4", args)
 
     def test_genuinely_silent_video_keeps_best_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
