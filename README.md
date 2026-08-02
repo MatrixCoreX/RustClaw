@@ -613,9 +613,9 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `POST /v1/skills/store/remove`: removes an optional skill from runtime and planner visibility while retaining its bundled or imported package for reinstallation; always-on core and tool skills reject this action
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
-- NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` stores the current NNI state.
-- The standalone `nni_server` stores each verified device/public-key heartbeat as one indexed SQLite row with a server-generated UNIX-second timestamp. `NNI_SERVER_DATABASE_PATH` selects the database; an old `NNI_SERVER_STATE_PATH` JSON file is imported once for migration only.
-- The standalone `nni_server` writes runtime events to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) instead of `clawd.log`; enable `NNI_SERVER_LOG_STDOUT=1` only when an external supervisor intentionally captures those logs.
+- Agent Runtime is an NNI client only: request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`, while `configs/config.toml` stores client-side NNI state. It does not package, start, configure, or persist the NNI server.
+- The independently deployed [NNI server](https://github.com/MatrixCoreX/NNI) owns its executable, configuration, database, logs, heartbeat ledger, and reward settlement.
+- The authenticated client route `GET /v1/nni/rewards` signs a fresh remote challenge with the local device and returns only that public key's four-decimal reward total and paginated period ledger; the remote NNI server exposes no unauthenticated all-device reward listing.
 
 Machine-local API example (`8787` must not be exposed or port-forwarded):
 
