@@ -7,6 +7,28 @@ use super::{
 };
 use crate::agent_engine::skill_execution::tests::{install_test_registry, test_state};
 
+fn state_with_workspace_registry() -> crate::AppState {
+    let state = test_state();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skills registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(),
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    state
+}
+
 #[test]
 fn validates_nested_required_fields_and_array_items() {
     let schema = json!({
@@ -219,6 +241,68 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
         &state,
         "closed_fixture",
         &json!({ "items": [{ "path": "README.md", "invented": true }] }),
+    )
+    .is_some());
+}
+
+#[test]
+fn workspace_contract_routes_video_text_conversion_away_from_image_ocr() {
+    let state = state_with_workspace_registry();
+
+    assert!(skill_input_contract_error(
+        &state,
+        "media_download",
+        &json!({
+            "action": "ocr",
+            "input_paths": ["tmp/current-task-frame.webp"]
+        }),
+    )
+    .is_none());
+
+    let error = skill_input_contract_error(
+        &state,
+        "media_download",
+        &json!({
+            "action": "ocr",
+            "input_paths": ["tmp/current-task-video.mp4"]
+        }),
+    )
+    .expect("video must be rejected before the OCR runner is spawned");
+    let structured = crate::skills::parse_structured_skill_error(&error).expect("structured error");
+    let extra = structured.extra.expect("machine error payload");
+    assert_eq!(extra["error_code"], "contract_arg_rejected");
+    assert_eq!(
+        extra["message_key"],
+        "clawd.contract.input_contract_violation"
+    );
+    assert!(extra["contract_error"]
+        .as_str()
+        .expect("contract detail")
+        .contains("pattern"));
+}
+
+#[test]
+fn workspace_contract_rejects_ambiguous_image_vision_inputs() {
+    let state = state_with_workspace_registry();
+
+    assert!(skill_input_contract_error(
+        &state,
+        "image_vision",
+        &json!({
+            "action": "extract_text",
+            "image": "tmp/current-task-frame.webp"
+        }),
+    )
+    .is_none());
+
+    assert!(skill_input_contract_error(
+        &state,
+        "image_vision",
+        &json!({
+            "action": "extract_text",
+            "image": "tmp/current-task-frame.webp",
+            "images": [{}]
+        }),
     )
     .is_some());
 }

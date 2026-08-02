@@ -297,7 +297,7 @@ fn wechat_i18n_binding_keys_are_locale_specific_with_safe_fallback() {
 }
 
 #[test]
-fn wechat_skill_progress_uses_the_shared_task_event_and_local_copy() {
+fn wechat_media_progress_stays_transport_state_instead_of_chat_text() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let zh = test_wechat_section(
         "zh-CN",
@@ -330,10 +330,7 @@ fn wechat_skill_progress_uses_the_shared_task_event_and_local_copy() {
         lifecycle: None,
     };
 
-    let (seq, message) = skill_progress_message(&task, &zh).expect("progress message");
-    assert_eq!(seq, 9);
-    assert_eq!(message, "正在检查媒体任务所需条件…");
-    assert!(!message.contains("must not render"));
+    assert!(skill_progress_message(&task, &zh).is_none());
 }
 
 #[test]

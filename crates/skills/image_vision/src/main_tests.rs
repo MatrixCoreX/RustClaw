@@ -101,6 +101,20 @@ fn parse_one_image_rejects_text_wrapper_with_extra_fields() {
 }
 
 #[test]
+fn parse_images_rejects_ambiguous_singular_and_plural_inputs() {
+    let workspace = Path::new("/tmp/image-vision-workspace");
+    let obj = json!({
+        "image": "/tmp/image-vision-workspace/downloaded.webp",
+        "images": [{}],
+    });
+
+    let error = parse_images(obj.as_object().expect("object"), workspace)
+        .expect_err("ambiguous image inputs must fail before provider dispatch");
+
+    assert_eq!(error, "provide either images or image, not both");
+}
+
+#[test]
 fn strip_think_blocks_removes_model_reasoning() {
     assert_eq!(
         strip_think_blocks("<think>hidden</think>\n可见内容").trim(),

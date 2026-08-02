@@ -24,6 +24,7 @@ const {
   resolveIdentity,
   stableUserId,
   submitTask,
+  updateTaskPresence,
   updateLoginState,
   validateOutboundFile,
   shouldProcessUpsertMessage,
@@ -88,6 +89,7 @@ assert.strictEqual(extractBindKeyCandidate("rk-admin", true), "rk-admin");
 assert.strictEqual(extractBindKeyCandidate("hello", false), null);
 assert.strictEqual(extractBindKeyCandidate("/key", true), null);
 assert.strictEqual(extractTextContent({ extendedTextMessage: { text: " hello " } }), "hello");
+
 assert.strictEqual(isGroupJid("group@g.us"), true);
 assert.strictEqual(isGroupJid("user@s.whatsapp.net"), false);
 assert.deepStrictEqual(parseListenAddress("127.0.0.1:8092", 1), { host: "127.0.0.1", port: 8092 });
@@ -181,6 +183,24 @@ assert.throws(
 );
 
 (async () => {
+  const presenceCalls = [];
+  const fakeSocket = {
+    sendPresenceUpdate: async (state, jid) => {
+      presenceCalls.push({ state, jid });
+    },
+  };
+  assert.strictEqual(
+    await updateTaskPresence(fakeSocket, "user@s.whatsapp.net", "composing"),
+    true
+  );
+  assert.deepStrictEqual(presenceCalls, [
+    { state: "composing", jid: "user@s.whatsapp.net" },
+  ]);
+  assert.strictEqual(
+    await updateTaskPresence(null, "user@s.whatsapp.net", "composing"),
+    false
+  );
+
   const calls = [];
   global.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
