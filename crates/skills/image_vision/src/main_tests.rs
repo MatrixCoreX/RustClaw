@@ -458,6 +458,28 @@ fn extract_text_merges_pages_in_input_order_without_source_labels() {
 }
 
 #[test]
+fn extract_text_converts_double_escaped_newline_markers_to_real_line_breaks() {
+    let raw = r#"{
+        "pages":[{"text":"第一行\\n第二行\\r\\n第三行\\r第四行"}],
+        "uncertainties":[]
+    }"#;
+    let parsed =
+        parse_structured_narrative_action_output("extract_text", raw).expect("extract text parse");
+    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"));
+
+    assert_eq!(rendered, "第一行\n第二行\n第三行\n第四行");
+    assert!(!rendered.contains("\\n"));
+    assert!(!rendered.contains("\\r"));
+}
+
+#[test]
+fn extract_text_normalizes_platform_line_endings_without_changing_other_escapes() {
+    let normalized = normalize_extracted_text_newlines("第一行\r\n第二行\r第三行\\t保留");
+
+    assert_eq!(normalized, "第一行\n第二行\n第三行\\t保留");
+}
+
+#[test]
 fn extract_text_rejects_structured_output_without_visible_text() {
     let output = StructuredNarrativeActionOutput::ExtractText(ImageTextExtractionOut {
         pages: vec![ImageTextPageOut {
@@ -495,6 +517,26 @@ fn extract_text_writes_delivery_artifact_by_default() {
         fs::read_to_string(path).expect("artifact text"),
         "识别结果\n"
     );
+}
+
+#[test]
+fn extract_text_artifact_contains_real_newlines_instead_of_visible_markers() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let context = json!({"artifact_output_directory": directory.path()});
+    let args = Map::new();
+    let mut extra = json!({});
+    let text = normalize_extracted_text_newlines("第一行\\n第二行");
+
+    attach_text_artifact(Some(&context), &args, &text, &mut extra).expect("write text artifact");
+
+    let path = PathBuf::from(
+        extra["artifacts"][0]["path"]
+            .as_str()
+            .expect("artifact path"),
+    );
+    let artifact_text = fs::read_to_string(path).expect("artifact text");
+    assert_eq!(artifact_text, "第一行\n第二行\n");
+    assert!(!artifact_text.contains("\\n"));
 }
 
 #[test]

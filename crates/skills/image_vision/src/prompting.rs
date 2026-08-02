@@ -216,9 +216,22 @@ pub(super) fn parse_structured_narrative_action_output(
         "extract_text" => serde_json::from_value::<ImageTextExtractionOut>(candidate)
             .ok()
             .filter(|output| !output.pages.is_empty())
-            .map(StructuredNarrativeActionOutput::ExtractText),
+            .map(|mut output| {
+                for page in &mut output.pages {
+                    page.text = normalize_extracted_text_newlines(&page.text);
+                }
+                StructuredNarrativeActionOutput::ExtractText(output)
+            }),
         _ => None,
     }
+}
+
+pub(super) fn normalize_extracted_text_newlines(text: &str) -> String {
+    text.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
 }
 
 pub(super) fn render_structured_narrative_action_output(

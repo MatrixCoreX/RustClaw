@@ -368,6 +368,11 @@ fn execute(
                     timeout_seconds,
                 );
                 let text = strip_think_blocks(&text).trim().to_string();
+                let text = if action == "extract_text" {
+                    normalize_extracted_text_newlines(&text)
+                } else {
+                    text
+                };
                 if action == "extract_text"
                     && !image_text_output_has_visible_text(structured.as_ref(), &text)
                 {
