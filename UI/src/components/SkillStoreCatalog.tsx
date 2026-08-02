@@ -68,6 +68,55 @@ const SKILL_ICONS: Record<string, LucideIcon> = {
   x: Code2,
 };
 
+const HOST_DEPENDENCY_NAMES: Record<string, readonly [string, string]> = {
+  chromium: ["Chromium 浏览器", "Chromium browser"],
+  ffmpeg: ["FFmpeg 音视频处理", "FFmpeg media processing"],
+  git: ["Git 版本管理", "Git version control"],
+  tesseract: ["Tesseract OCR", "Tesseract OCR"],
+  tesseract_chi_sim: ["Tesseract 简体中文识别包", "Tesseract Simplified Chinese language data"],
+};
+
+const RUNTIME_ASSET_NAMES: Record<string, readonly [string, string]> = {
+  modelscope_fsmn_vad: ["FSMN 语音活动检测模型", "FSMN voice activity detection model"],
+  modelscope_sensevoice_small: ["SenseVoice Small 语音识别模型", "SenseVoice Small speech recognition model"],
+};
+
+function installDependencyLabel(
+  token: string,
+  labels: Record<string, readonly [string, string]>,
+  t: Translate,
+): string {
+  const label = labels[token];
+  return label ? t(label[0], label[1]) : token.replaceAll("_", " ");
+}
+
+function DependencyList({
+  values,
+  labels,
+  emptyLabel,
+  t,
+}: {
+  values: readonly string[];
+  labels: Record<string, readonly [string, string]>;
+  emptyLabel: string;
+  t: Translate;
+}) {
+  if (values.length === 0) return <span className="text-white/55">{emptyLabel}</span>;
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {values.map((dependency) => (
+        <li
+          key={dependency}
+          title={dependency}
+          className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/75"
+        >
+          {installDependencyLabel(dependency, labels, t)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function skillStoreIcon(name: string): LucideIcon {
   if (SKILL_ICONS[name]) return SKILL_ICONS[name];
   if (name.startsWith("audio_")) return Volume2;
@@ -212,6 +261,24 @@ export function SkillStoreCatalog({
               {item.build_network_policy === "approval_required"
                 ? t("需要你确认", "Requires your approval")
                 : t("不联网", "Offline")}
+            </dd>
+            <dt>{t("系统工具", "System tools")}</dt>
+            <dd>
+              <DependencyList
+                values={item.host_dependencies ?? []}
+                labels={HOST_DEPENDENCY_NAMES}
+                emptyLabel={t("无需额外安装", "No additional installation")}
+                t={t}
+              />
+            </dd>
+            <dt>{t("本地模型/资源", "Local models/assets")}</dt>
+            <dd>
+              <DependencyList
+                values={item.runtime_assets ?? []}
+                labels={RUNTIME_ASSET_NAMES}
+                emptyLabel={t("无需额外下载", "No additional download")}
+                t={t}
+              />
             </dd>
           </dl>
         </details>
