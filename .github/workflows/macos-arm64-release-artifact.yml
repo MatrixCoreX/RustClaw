@@ -1,0 +1,166 @@
+name: Build macOS arm64 Release Artifact
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Exact commit or tag to package."
+        required: true
+        type: string
+      release_version:
+        description: "Release version used in the package filename."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-arm64:
+    name: Build verified macOS arm64 package
+    runs-on: macos-14
+    env:
+      RUST_TARGET: aarch64-apple-darwin
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: always
+      APP_REQUIRE_REFERENCE_ADAPTERS: "1"
+
+    steps:
+      - name: Checkout requested source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Verify native architecture and release metadata
+        id: meta
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          source scripts/product_identity.sh
+          host_target="$(rustc -vV | sed -n 's/^host: //p')"
+          if [[ "${host_target}" != "${RUST_TARGET}" || "$(uname -m)" != "arm64" ]]; then
+            echo "native macOS arm64 runner required: host_target=${host_target} uname=$(uname -m)" >&2
+            exit 1
+          fi
+          if [[ ! "${RELEASE_VERSION}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "release version must contain only letters, numbers, dot, underscore, and hyphen" >&2
+            exit 1
+          fi
+          resolved_commit="$(git rev-parse HEAD)"
+          expected_commit="$(git rev-parse "${SOURCE_REF}^{commit}")"
+          if [[ "${resolved_commit}" != "${expected_commit}" ]]; then
+            echo "checked out commit does not match requested source ref" >&2
+            exit 1
+          fi
+          package_name="${APP_RELEASE_ARTIFACT_ID}-macos-aarch64-${RELEASE_VERSION}.tar.gz"
+          {
+            echo "commit=${resolved_commit}"
+            echo "package_name=${package_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build and test UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd UI
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Verify release and skill contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          python3 scripts/check_polyglot_skill_contracts.py --self-test
+          python3 scripts/check_polyglot_skill_contracts.py --require-all
+          python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_cross_platform_contracts.py
+
+      - name: Build native runtime and proactive skill receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build-all.sh no-ui --target host
+
+      - name: Precompile platform Skill Store packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
+
+      - name: Verify native skill receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target/release/skillctl receipt-verify \
+            "target/skill-packages/${RUST_TARGET}" \
+            health_check
+          while IFS= read -r skill_name; do
+            [[ -n "${skill_name}" ]] || continue
+            target/release/skillctl receipt-verify \
+              "target/prebuilt-skill-packages/${RUST_TARGET}" \
+              "${skill_name}" >/dev/null
+          done < <(
+            python3 scripts/skill_store_packages.py \
+              --scope platform-precompiled --target "${RUST_TARGET}" --format skills
+          )
+
+      - name: Package runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          APP_RELEASE_BIN_DIR="$PWD/target/release" \
+            APP_PACKAGE_TARGET="${RUST_TARGET}" \
+            APP_BUNDLE_DIR="$PWD/dist-release" \
+            APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
+            APP_SKIP_LOCAL_PACKAGE_COPY=1 \
+            ./package-release.sh
+          (
+            cd dist-release
+            shasum -a 256 "${{ steps.meta.outputs.package_name }}" \
+              > "${{ steps.meta.outputs.package_name }}.sha256"
+          )
+
+      - name: Upload verified release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-runtime-macos-aarch64-${{ inputs.release_version }}
+          path: |
+            dist-release/${{ steps.meta.outputs.package_name }}
+            dist-release/${{ steps.meta.outputs.package_name }}.sha256
+          if-no-files-found: error
+          retention-days: 7
