@@ -248,7 +248,7 @@ class AdapterTest(unittest.TestCase):
 
         self.assertIsNone(run.call_args.kwargs["timeout"])
 
-    def test_media_operation_honors_only_an_explicit_deadline(self) -> None:
+    def test_download_ignores_an_explicit_operation_deadline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
@@ -268,6 +268,36 @@ class AdapterTest(unittest.TestCase):
                 "chat_id": 1,
             }
             completed = subprocess.CompletedProcess(["tool"], 0, stdout="ok", stderr="")
+            with mock.patch.object(self.skill.subprocess, "run", return_value=completed) as run:
+                self.skill.respond(request)
+
+        self.assertIsNone(run.call_args.kwargs["timeout"])
+
+    def test_non_download_operation_honors_an_explicit_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            request = {
+                "request_id": "resolve-explicit-deadline",
+                "args": {
+                    "action": "resolve",
+                    "share": "https://example.test/public-post",
+                    "operation_timeout_seconds": 3_000,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            completed = subprocess.CompletedProcess(
+                ["tool"],
+                0,
+                stdout="https://example.test/media.mp4\n",
+                stderr="",
+            )
             with mock.patch.object(self.skill.subprocess, "run", return_value=completed) as run:
                 self.skill.respond(request)
 

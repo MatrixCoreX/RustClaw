@@ -23,7 +23,7 @@
 - Xiaohongshu App and website shares are distinct valid inputs: App copy text commonly carries an `xhslink.cn` or `xhslink.com` short link, while website sharing commonly carries a full `xiaohongshu.com` note URL. Do not ask the user to convert one form into the other.
 - Input behavior is channel-neutral: the same App share text, short link, or website URL must select the same `download` action from the UI, WeChat, WhatsApp, Telegram, Feishu/Lark, or any other host channel.
 - All actions in this resource-heavy skill share one host-enforced FIFO execution slot. A new media task waits before any runner process is spawned. Completion, structured failure, timeout, cancellation, or abnormal task exit releases the slot so the next queued media task can continue; unrelated skills keep their normal concurrency.
-- Media operations have no runtime deadline by default. Omit `operation_timeout_seconds` unless the current user explicitly requests a deadline; never invent one from an estimated item count. Durable background execution has no host-imposed runtime cutoff, while polling retention remains renewable and separate.
+- `media_download.download` has no whole-operation deadline, including for large files and slow links. A compatibility `operation_timeout_seconds` value is ignored for this action and is not exposed to the planner. Per-request network timeouts, explicit cancellation, durable background polling, and renewable retention remain active.
 - Profile collection uses the platform work ID as its stable item identity. After every completed or failed item it atomically advances a monotonic cursor and writes an immutable `partial` checkpoint snapshot in private skill storage. A safe retry restores verified completed artifacts by SHA-256 and processes only remaining IDs; it writes a distinct immutable `complete` snapshot only after every currently listed item and its artifact manifest verify successfully.
 - When the user wants the images/video themselves, prefer `media_download.download` over a general browser capability. Use a browser only when the requested output is page text, comments, navigation, or a page summary rather than the media files.
 - These are semantic capability rules for the planner, not runtime phrase matching. Select by the current request shape and the newest concrete target.
@@ -101,7 +101,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `prepare_x` | `force` | no | boolean | `false` | Transcode even when already compatible. |
 | `prepare_x` | `crf` | no | integer | `23` | H.264 quality value, 16-35. |
 | mutating actions | `overwrite` | no | boolean | `false` | Replace an existing output in the task artifact directory. |
-| non-capability actions | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. Omit it for normal execution. Large explicit values are enforced through bounded wait slices so platform poll limits cannot overflow. |
+| `resolve`, `transcribe`, `ocr`, `prepare_x` | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. It is not available for `download`; downloads have no whole-operation deadline. Large explicit values are enforced through bounded wait slices so platform poll limits cannot overflow. |
 
 ## Error Contract (from interface)
 - Errors return `status=error`, non-empty `error_text`, and canonical `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.

@@ -1106,11 +1106,19 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
             )
 
         output_dir = _artifact_output_directory(request)
-        operation_timeout = _optional_integer(
-            args,
-            "operation_timeout_seconds",
-            minimum=5,
-            maximum=2_592_000,
+        # Downloads may legitimately take a long time for large files or slow
+        # links.  Keep their per-request network timeout, cancellation, and
+        # durable background polling, but never impose a whole-operation
+        # deadline supplied by a planner or an older client.
+        operation_timeout = (
+            None
+            if action == "download"
+            else _optional_integer(
+                args,
+                "operation_timeout_seconds",
+                minimum=5,
+                maximum=2_592_000,
+            )
         )
         storage_directory = _skill_storage_directory(request)
         if action == "download":
