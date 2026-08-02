@@ -714,7 +714,33 @@ async function runTaskFlow(
     identity,
     messageId
   );
-  await runExistingTaskFlow(jid, taskId, identity, quickWait);
+  let presenceStarted = false;
+  try {
+    presenceStarted = await updateTaskPresence(sock, jid, "composing");
+  } catch {
+    console.error("queued task presence failed", {
+      error_code: "channel_task_presence_failed",
+    });
+  }
+  try {
+    await runExistingTaskFlow(jid, taskId, identity, quickWait);
+  } finally {
+    if (presenceStarted) {
+      try {
+        await updateTaskPresence(sock, jid, "paused");
+      } catch {
+        console.error("clear task presence failed", {
+          error_code: "channel_task_presence_failed",
+        });
+      }
+    }
+  }
+}
+
+async function updateTaskPresence(socket, jid, state) {
+  if (!socket || typeof socket.sendPresenceUpdate !== "function") return false;
+  await socket.sendPresenceUpdate(state, jid);
+  return true;
 }
 
 async function runExistingTaskFlow(
@@ -1213,6 +1239,7 @@ module.exports = {
   resolveIdentity,
   stableUserId,
   submitTask,
+  updateTaskPresence,
   updateLoginState,
   validateOutboundFile,
   shouldProcessUpsertMessage,

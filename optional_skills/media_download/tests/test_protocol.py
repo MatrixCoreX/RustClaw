@@ -284,6 +284,16 @@ class AdapterTest(unittest.TestCase):
             7_200,
         )
 
+    def test_media_operation_accepts_max_deadline_without_platform_overflow(self) -> None:
+        completed = self.skill._run_process(
+            [sys.executable, "-c", "print('ok')"],
+            dict(self.skill.os.environ),
+            2_592_000,
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout.strip(), "ok")
+
     def test_media_operation_rejects_an_unreasonable_explicit_deadline(self) -> None:
         with self.assertRaisesRegex(self.skill.SkillFailure, "between 5 and 2592000"):
             self.skill._optional_integer(
@@ -296,8 +306,8 @@ class AdapterTest(unittest.TestCase):
     def test_transcribe_command_defaults_to_local_whisper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            input_path = root / "sample.wav"
-            input_path.write_bytes(b"audio")
+            input_path = root / "sample.mp4"
+            input_path.write_bytes(b"video")
             request = {
                 "context": {
                     "workspace_root": str(root),
@@ -306,11 +316,13 @@ class AdapterTest(unittest.TestCase):
             }
             command = self.skill._build_transcribe_command(
                 request,
-                {"input_path": "sample.wav"},
+                {"input_path": "sample.mp4"},
                 root / "artifacts",
             )
 
         self.assertEqual(command[command.index("--engine") + 1], "whisper")
+        self.assertNotIn("--extract-only", command)
+        self.assertEqual(command[-1], str(input_path))
 
     def test_download_command_preserves_complete_share_text(self) -> None:
         share_text = "复制这条消息，打开快手看看 https://v.kuaishou.com/example/ 更多内容"
@@ -458,6 +470,31 @@ class AdapterTest(unittest.TestCase):
             "image_text_ocr.txt",
         )
 
+    def test_ocr_rejects_video_input_before_process_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            video = workspace / "downloaded.mp4"
+            video.write_bytes(b"video")
+            request = {
+                "context": {
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                }
+            }
+
+            with self.assertRaises(self.skill.SkillFailure) as raised:
+                self.skill._build_ocr_command(
+                    request,
+                    {"input_paths": [str(video)]},
+                    workspace / "artifacts",
+                )
+
+        self.assertEqual(raised.exception.error_code, "invalid_input_media_type")
+        self.assertEqual(
+            raised.exception.message_key,
+            "media_download.error.ocr_requires_image",
+        )
+
     def test_short_ocr_result_is_delivered_inline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -544,6 +581,15 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(
             response["extra"]["delivery"],
             {"intent": "artifact", "deliver_to_user": True},
+        )
+        self.assertEqual(
+            response["extra"]["content_bundle"]["followup_policy"],
+            {
+                "text_conversion_action": "transcribe_audio",
+                "capability": "media_download.transcribe",
+                "input_field": "input_path",
+                "never_use_image_ocr": True,
+            },
         )
         command = runner.call_args.args[0]
         self.assertIn("--no-system-browser-cookies", command)

@@ -33,9 +33,10 @@ this frame is only progress/stall evidence and never changes the final result.
 - Default download delivery is `deliver_to_user=true`: send the downloaded media back to the originating communication channel and expose it in the UI.
 - If the user explicitly says not to send the media back (for example, “不要发我”), set `deliver_to_user=false`. Do not remove that phrase from `share`; the downloader still extracts the URL from the complete text. Reply with the saved local path only and do not emit a delivery artifact.
 - “只解析这个分享链接的媒体直链，不要下载” -> `resolve`
-- “把这个视频转成文字/提取音频” -> `transcribe`
+- “把这个视频转成文字/提取音频” -> `transcribe`. When a share post is downloaded first, branch on the returned artifact type: a video plus a text-conversion request must pass that current video path to `media_download.transcribe`; it must never be sent to image OCR.
 - Only when the user explicitly requests image text recognition, prefer the host `image_vision.extract_text` multimodal capability and pass the downloaded/local image paths as `images`. It generates one UTF-8 `.txt` artifact and delivers it by default. Use this skill's `ocr` action only when multimodal vision is unavailable, returns a structured failure, or the user explicitly asks for offline/local OCR.
-- When one request explicitly asks both to download images and read their text, run `media_download.download` first, then pass its successful image artifact paths to `image_vision.extract_text`; do not enable the downloader's legacy automatic OCR flag. When this skill's local `ocr` fallback is used, recognized text shorter than 200 characters is returned inline and text of 200 or more characters remains a `.txt` artifact.
+- When one request explicitly asks both to download media and convert it to text, run `media_download.download` first and branch on `extra.content_bundle.kind`: pass current-task image artifacts to `image_vision.extract_text`, or pass the current-task video artifact to `media_download.transcribe` for audio extraction and speech recognition. Never send video/audio paths to image OCR. Use artifacts returned by the successful download step in this task; do not substitute a path recalled from an older task unless the user explicitly refers to that older artifact.
+- When this skill's local `ocr` fallback is used, recognized text shorter than 200 characters is returned inline and text of 200 or more characters remains a `.txt` artifact.
 - “检查或转换成可以发到 X/Twitter 的视频” -> `prepare_x`
 - Prefer a dedicated built-in media skill when the request is unrelated to this package's supported actions.
 
@@ -49,7 +50,9 @@ Return supported actions, platforms, security defaults, and optional dependencie
 
 Extract the supported URL from `share` and download public media. `share` may be a URL by itself or complete copied App share text from any supported platform. App short links and full website share URLs are equally valid, and the complete input must be preserved across UI and communication-channel entry points. Xiaohongshu accepts both App share text containing `xhslink.cn`/`xhslink.com` and website share URLs under `xiaohongshu.com`. Do not require the user to clean the copied message or resend only the URL. A profile URL can download multiple recent works with `profile_limit`; use `"all"` only when the user explicitly requests every accessible item.
 
-The `download` action produces original image/video media. For a Douyin or Xiaohongshu image-article post, it also extracts the exact platform-provided title/body without requiring a separate request. If the normalized body has fewer than 200 characters and normal delivery is enabled, return it inline through `text` and `extra.article_delivery`; otherwise deliver `<output-stem>_article.txt` with the images. At exactly 200 characters the text-file path is used. It never treats the copied share-message preview as the full article and never adds OCR text, extracted audio, or a video transcript. When the user explicitly asks to recognize text inside images, prefer the host `image_vision.extract_text` capability after download and use this skill's separate `ocr` action only as the local fallback. For video/audio transcription, use `transcribe` only when explicitly requested.
+The `download` action produces original image/video media. For a Douyin or Xiaohongshu image-article post, it also extracts the exact platform-provided title/body without requiring a separate request. If the normalized body has fewer than 200 characters and normal delivery is enabled, return it inline through `text` and `extra.article_delivery`; otherwise deliver `<output-stem>_article.txt` with the images. At exactly 200 characters the text-file path is used. It never treats the copied share-message preview as the full article and never adds OCR text, extracted audio, or a video transcript by itself. When the same request explicitly asks to convert the downloaded work to text, inspect `extra.content_bundle.kind`: images go to `image_vision.extract_text`, while video goes to `media_download.transcribe`, which extracts audio and recognizes speech. Video must never go to `ocr`.
+
+For a video bundle, `extra.content_bundle.followup_policy` exposes this type-directed continuation as structured data: `text_conversion_action=transcribe_audio`, `capability=media_download.transcribe`, `input_field=input_path`, and `never_use_image_ocr=true`.
 
 After success, expose every generated artifact through the task artifact contract when `deliver_to_user` is omitted or `true`. Profile collection also emits `profile_downloads.json` with `artifact_role=profile_manifest`, stable IDs, high-water cursor, per-file sizes/SHA-256 values, and explicit `state=complete`; a partial run remains an error and cannot masquerade as successful completion. The originating communication adapter can send the file back, and the UI can render its preview/download URL. Host channel size limits still apply. When `deliver_to_user=false`, return generated files under `extra.saved_files`, keep `extra.artifacts` empty, and report the saved path without sending the media.
 
@@ -63,7 +66,7 @@ Transcribe `input_path`, or only extract WAV audio when `extract_audio_only=true
 
 ### `ocr`
 
-Run Tesseract OCR for `input_paths`. This action is never automatic: the user must explicitly request image text recognition. It is the deterministic local/offline fallback; normal image text recognition should first use the Agent's multimodal `image_vision.extract_text` capability. Multiple inputs are merged in input order into one continuous document without image numbers, filenames, source paths, or per-image headings. With normal delivery enabled, recognized text shorter than 200 characters is returned inline through `text` and `extra.recognition_delivery`, while text of 200 or more characters is delivered as `image_text_ocr.txt`. This threshold is local to this skill.
+Run Tesseract OCR for image-only `input_paths` (`avif`, `bmp`, `gif`, `jpeg`/`jpg`, `png`, `tif`/`tiff`, or `webp`). Video/audio inputs are rejected before process dispatch so the planner can use `transcribe` instead. This action is never automatic: the user must explicitly request image text recognition. It is the deterministic local/offline fallback; normal image text recognition should first use the Agent's multimodal `image_vision.extract_text` capability. Multiple inputs are merged in input order into one continuous document without image numbers, filenames, source paths, or per-image headings. With normal delivery enabled, recognized text shorter than 200 characters is returned inline through `text` and `extra.recognition_delivery`, while text of 200 or more characters is delivered as `image_text_ocr.txt`. This threshold is local to this skill.
 
 ### `prepare_x`
 
@@ -88,7 +91,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `transcribe`, `ocr` | `language` | no | string | action-specific | Spoken language or Tesseract language list. |
 | `transcribe` | `input_path` | yes | string | - | Existing local video/audio file. |
 | `transcribe` | `extract_audio_only` | no | boolean | `false` | Extract WAV without ASR. |
-| `ocr` | `input_paths` | yes | string[] | - | 1-32 existing local image paths. |
+| `ocr` | `input_paths` | yes | string[] | - | 1-32 existing local image paths with a supported image extension. Video/audio paths are invalid and must use `transcribe`. |
 | `ocr` | `output_name` | no | string | `image_text_ocr.txt` | Plain `.txt` filename. The default name identifies local OCR output. |
 | `ocr` | `deliver_to_user` | no | boolean | `true` | Send the generated text file to the originating channel/UI. Set false only when the user explicitly asks not to receive it. |
 | `ocr` | `preprocess` | no | boolean | `true` | Try enhanced image variants when Pillow is available. |
@@ -98,7 +101,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `prepare_x` | `force` | no | boolean | `false` | Transcode even when already compatible. |
 | `prepare_x` | `crf` | no | integer | `23` | H.264 quality value, 16-35. |
 | mutating actions | `overwrite` | no | boolean | `false` | Replace an existing output in the task artifact directory. |
-| non-capability actions | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. Omit it for normal execution. |
+| non-capability actions | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. Omit it for normal execution. Large explicit values are enforced through bounded wait slices so platform poll limits cannot overflow. |
 
 ## Dependencies and Configuration
 

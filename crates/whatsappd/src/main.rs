@@ -1054,6 +1054,14 @@ async fn submit_task_only(
         .data
         .ok_or_else(|| anyhow!("submit task missing task_id"))?
         .task_id;
+    if let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Err(error) = send_whatsapp_typing_indicator(state, message_id).await {
+            warn!(
+                "whatsappd: typing indicator failed task_id={} error={}",
+                task_id, error
+            );
+        }
+    }
     Ok(task_id.to_string())
 }
 
@@ -1352,6 +1360,44 @@ async fn send_whatsapp_text(
         provider_message_ids.extend(ids);
     }
     Ok(provider_message_ids)
+}
+
+fn whatsapp_typing_indicator_payload(message_id: &str) -> Value {
+    json!({
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": { "type": "text" }
+    })
+}
+
+async fn send_whatsapp_typing_indicator(state: &AppState, message_id: &str) -> anyhow::Result<()> {
+    let url = format!(
+        "{}/v23.0/{}/messages",
+        state.api_base,
+        state.phone_number_id.trim()
+    );
+    let response = state
+        .client
+        .post(&url)
+        .bearer_auth(state.access_token.trim())
+        .json(&whatsapp_typing_indicator_payload(message_id))
+        .send()
+        .await
+        .context("whatsapp_typing_indicator_request_failed")?;
+    let status = response.status();
+    let response_body = response
+        .text()
+        .await
+        .context("whatsapp_typing_indicator_response_read_failed")?;
+    if !status.is_success() {
+        return Err(whatsapp_provider_http_error(
+            "send_typing_indicator",
+            status,
+            &response_body,
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
