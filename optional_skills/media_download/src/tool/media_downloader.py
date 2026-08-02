@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -249,6 +249,7 @@ class Candidate:
     referer: str | None = None
     live_photo_audio_url: str | None = None
     live_photo_duration: float | None = None
+    separate_audio_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -752,6 +753,27 @@ def looks_like_video_only_stream_url(url: str) -> bool:
     return "media-video-" in path
 
 
+def looks_like_douyin_browser_audio_url(url: str) -> bool:
+    normalized = unwrap_url(url).lower()
+    if not normalized.startswith(("http://", "https://", "//")):
+        return False
+    parsed = urllib.parse.urlsplit(normalized)
+    return (
+        "/video/tos/" in parsed.path
+        and "media-audio" in parsed.path
+        and "mp4a" in parsed.path
+    )
+
+
+def douyin_adaptive_stream_group_key(url: str) -> str | None:
+    """Return the CDN path group shared by one adaptive video/audio pair."""
+    path_parts = [part for part in urllib.parse.urlsplit(unwrap_url(url)).path.split("/") if part]
+    for index in range(1, len(path_parts) - 1):
+        if path_parts[index].lower() == "video" and path_parts[index + 1].lower() == "tos":
+            return path_parts[index - 1]
+    return None
+
+
 def looks_like_kuaishou_video_url(url: str) -> bool:
     lowered = unwrap_url(url).lower()
     if not lowered.startswith(("http://", "https://", "//")):
@@ -1008,6 +1030,7 @@ def add_candidate(
     referer: str | None = None,
     live_photo_audio_url: str | None = None,
     live_photo_duration: float | None = None,
+    separate_audio_url: str | None = None,
 ) -> None:
     normalized = prefer_no_watermark_url(url)
     if not looks_like_play_url(normalized):
@@ -1024,6 +1047,7 @@ def add_candidate(
             referer,
             live_photo_audio_url,
             live_photo_duration,
+            separate_audio_url,
         )
     )
 
@@ -1040,6 +1064,7 @@ def add_platform_candidate(
     referer: str | None = None,
     live_photo_audio_url: str | None = None,
     live_photo_duration: float | None = None,
+    separate_audio_url: str | None = None,
 ) -> None:
     normalized = unwrap_url(url)
     if not looks_like_platform_video_url(normalized, platform):
@@ -1056,7 +1081,41 @@ def add_platform_candidate(
             referer,
             live_photo_audio_url,
             live_photo_duration,
+            separate_audio_url,
         )
+    )
+
+
+def merge_platform_candidate(
+    candidates: list[Candidate],
+    seen: set[str],
+    candidate: Candidate,
+    platform: str,
+) -> None:
+    """Merge late browser metadata without duplicating an already-seen media URL."""
+    normalized = unwrap_url(candidate.url)
+    if normalized in seen:
+        if candidate.separate_audio_url:
+            for index, existing in enumerate(candidates):
+                if existing.url == normalized and not existing.separate_audio_url:
+                    candidates[index] = replace(
+                        existing,
+                        separate_audio_url=candidate.separate_audio_url,
+                    )
+                    break
+        return
+    add_platform_candidate(
+        candidates,
+        seen,
+        normalized,
+        candidate.source,
+        candidate.priority,
+        platform,
+        cookie=candidate.cookie,
+        referer=candidate.referer,
+        live_photo_audio_url=candidate.live_photo_audio_url,
+        live_photo_duration=candidate.live_photo_duration,
+        separate_audio_url=candidate.separate_audio_url,
     )
 
 
@@ -1930,7 +1989,17 @@ def extract_browser_candidates_from_netlog_payload(
     platform = normalize_platform(platform)
     candidates: list[Candidate] = []
     seen: set[str] = set()
-    for index, raw_url in enumerate(iter_netlog_urls(payload)):
+    captured_urls = [unwrap_url(raw_url) for raw_url in iter_netlog_urls(payload)]
+    douyin_audio_by_group: dict[str, str] = {}
+    if platform == "douyin":
+        for raw_url in captured_urls:
+            if not looks_like_douyin_browser_audio_url(raw_url):
+                continue
+            group_key = douyin_adaptive_stream_group_key(raw_url)
+            if group_key and group_key not in douyin_audio_by_group:
+                douyin_audio_by_group[group_key] = raw_url
+
+    for index, raw_url in enumerate(captured_urls):
         if looks_like_platform_video_url(raw_url, platform):
             item_match = browser_candidate_matches_item(raw_url, item_id)
             if require_item_match and not item_match:
@@ -1938,6 +2007,11 @@ def extract_browser_candidates_from_netlog_payload(
             priority = browser_candidate_priority(raw_url, platform, index)
             if item_match and platform != "douyin":
                 priority = max(0, priority - 2_000_000)
+            separate_audio_url = None
+            if platform == "douyin" and looks_like_video_only_stream_url(raw_url):
+                group_key = douyin_adaptive_stream_group_key(raw_url)
+                if group_key:
+                    separate_audio_url = douyin_audio_by_group.get(group_key)
             add_platform_candidate(
                 candidates,
                 seen,
@@ -1945,6 +2019,7 @@ def extract_browser_candidates_from_netlog_payload(
                 f"{platform}.browser-netlog",
                 priority,
                 platform,
+                separate_audio_url=separate_audio_url,
             )
     return sorted(candidates, key=lambda candidate: candidate.priority)
 
@@ -1999,7 +2074,11 @@ def browser_candidates_are_sufficient(
     if (
         require_audio
         and candidates
-        and all(looks_like_video_only_stream_url(candidate.url) for candidate in candidates)
+        and all(
+            looks_like_video_only_stream_url(candidate.url)
+            and not candidate.separate_audio_url
+            for candidate in candidates
+        )
     ):
         return False
     return True
@@ -2323,8 +2402,19 @@ def gather_browser_candidates(
             use_system_browser_cookies=use_system_browser_cookies,
         )
         logs.extend(exact_logs)
-        if exact_candidates or exact_images:
+        if browser_candidates_are_sufficient(
+            exact_candidates,
+            exact_images,
+            require_audio=require_audio,
+        ):
             return item_id, exact_candidates, exact_images, richer_article(article, exact_article), logs
+        for candidate in exact_candidates:
+            merge_platform_candidate(candidates, seen, candidate, platform)
+        for candidate in exact_images:
+            if candidate.url not in seen_image_urls:
+                seen_image_urls.add(candidate.url)
+                image_candidates.append(candidate)
+        article = richer_article(article, exact_article)
 
     for target_url in target_urls:
         with tempfile.TemporaryDirectory(prefix="media_downloader_chrome_", ignore_cleanup_errors=True) as tmpdir:
@@ -2448,7 +2538,7 @@ def gather_browser_candidates(
             )
             logs.append(f"{platform}: browser fallback found {len(netlog_candidates)} network video candidate(s)")
             for candidate in netlog_candidates:
-                add_platform_candidate(candidates, seen, candidate.url, candidate.source, candidate.priority, platform)
+                merge_platform_candidate(candidates, seen, candidate, platform)
             if candidates and not browser_candidates_are_sufficient(
                 candidates,
                 image_candidates,
@@ -3634,6 +3724,7 @@ def gather_candidates(
                         referer=candidate.referer,
                         live_photo_audio_url=candidate.live_photo_audio_url,
                         live_photo_duration=candidate.live_photo_duration,
+                        separate_audio_url=candidate.separate_audio_url,
                     )
                 for image_candidate in exact_images:
                     if image_candidate.url in seen_image_urls:
@@ -3697,6 +3788,7 @@ def gather_candidates(
                             referer=candidate.referer,
                             live_photo_audio_url=candidate.live_photo_audio_url,
                             live_photo_duration=candidate.live_photo_duration,
+                            separate_audio_url=candidate.separate_audio_url,
                         )
                     for image_candidate in exact_images:
                         if image_candidate.url in seen_image_urls:
@@ -4122,6 +4214,154 @@ def download_live_photo_audio(
             f"Network error while downloading live-photo audio: {exc.reason}"
         ) from exc
     return output_path
+
+
+def download_separate_audio_stream(
+    url: str,
+    output_path: Path,
+    *,
+    cookie: str | None,
+    timeout: float,
+    referer: str,
+) -> Path:
+    headers = build_headers(
+        cookie,
+        {
+            "Accept": "audio/*,*/*;q=0.8",
+            "Referer": referer,
+        },
+    )
+    request = urllib.request.Request(url, headers=headers)
+    print("adaptive_audio_download: downloading matched audio stream", file=sys.stderr, flush=True)
+    temporary_path = output_path.with_suffix(output_path.suffix + ".part")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            with temporary_path.open("wb") as fp:
+                while True:
+                    raise_if_task_cancelled()
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    fp.write(chunk)
+        if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
+            raise DouyinDownloadError("Matched adaptive audio stream was empty.")
+        temporary_path.replace(output_path)
+    except OperationCancelled:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    except urllib.error.HTTPError as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise DouyinDownloadError(
+            f"HTTP {exc.code} while downloading matched adaptive audio"
+        ) from exc
+    except urllib.error.URLError as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise DouyinDownloadError(
+            f"Network error while downloading matched adaptive audio: {exc.reason}"
+        ) from exc
+    return output_path
+
+
+def mux_separate_audio_stream(
+    clip_path: Path,
+    candidate: Candidate,
+    *,
+    cookie: str | None,
+    timeout: float,
+    referer: str,
+    verbose: bool,
+) -> Path:
+    audio_url = candidate.separate_audio_url
+    if not audio_url:
+        return clip_path
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise DouyinDownloadError(
+            "ffmpeg is required to combine a Douyin adaptive video and its audio stream."
+        )
+
+    audio_path: Path | None = None
+    muxed_path: Path | None = None
+    try:
+        audio_descriptor, raw_audio_path = tempfile.mkstemp(
+            prefix=f".{clip_path.stem}_",
+            suffix=".adaptive-audio.mp4",
+            dir=clip_path.parent,
+        )
+        os.close(audio_descriptor)
+        audio_path = Path(raw_audio_path)
+        download_separate_audio_stream(
+            audio_url,
+            audio_path,
+            cookie=candidate.cookie or cookie,
+            timeout=timeout,
+            referer=candidate.referer or referer,
+        )
+
+        output_descriptor, raw_muxed_path = tempfile.mkstemp(
+            prefix=f".{clip_path.stem}_",
+            suffix=".adaptive-mux.mp4",
+            dir=clip_path.parent,
+        )
+        os.close(output_descriptor)
+        muxed_path = Path(raw_muxed_path)
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(clip_path),
+            "-i",
+            str(audio_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            str(muxed_path),
+        ]
+        print("adaptive_audio_mux: combining video and matched audio", file=sys.stderr, flush=True)
+        if verbose:
+            print("adaptive_audio_ffmpeg: " + shlex.join(command), file=sys.stderr, flush=True)
+        completed = run_task_subprocess(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise DouyinDownloadError(
+                "ffmpeg could not combine the adaptive video and audio streams"
+                + (f": {detail}" if detail else "")
+            )
+        if not muxed_path.is_file() or muxed_path.stat().st_size == 0:
+            raise DouyinDownloadError(
+                "ffmpeg completed without creating the combined adaptive video."
+            )
+        if video_transcriber.probe_audio_stream(muxed_path) is False:
+            raise DouyinDownloadError(
+                "The combined adaptive video still contains no audio stream."
+            )
+        muxed_path.replace(clip_path)
+        muxed_path = None
+        print(f"adaptive_audio_completed: path={clip_path}", file=sys.stderr, flush=True)
+        return clip_path
+    finally:
+        if audio_path is not None:
+            audio_path.unlink(missing_ok=True)
+            audio_path.with_suffix(audio_path.suffix + ".part").unlink(missing_ok=True)
+        if muxed_path is not None:
+            muxed_path.unlink(missing_ok=True)
 
 
 def compose_live_photo_video(
@@ -4587,6 +4827,8 @@ def candidate_metadata(candidate: Candidate) -> dict[str, Any]:
             "audio_url": candidate.live_photo_audio_url,
             "duration": candidate.live_photo_duration,
         }
+    if candidate.separate_audio_url:
+        metadata["separate_audio"] = {"url": candidate.separate_audio_url}
     return metadata
 
 
@@ -7526,6 +7768,7 @@ def handle_resolved_media(
     missing_audio_candidate = False
     browser_audio_retry_attempted = False
     silent_fallback_path: Path | None = None
+    silent_fallback_candidate: Candidate | None = None
 
     while True:
         if not pending_candidates:
@@ -7552,15 +7795,39 @@ def handle_resolved_media(
                 if args.verbose:
                     for line in browser_logs:
                         print(line, file=sys.stderr)
-                new_candidates = [
-                    browser_candidate
-                    for browser_candidate in browser_candidates
-                    if browser_candidate.url not in known_candidate_urls
-                ]
-                for browser_candidate in new_candidates:
-                    known_candidate_urls.add(browser_candidate.url)
+                new_candidates: list[Candidate] = []
+                for browser_candidate in browser_candidates:
+                    if browser_candidate.url not in known_candidate_urls:
+                        known_candidate_urls.add(browser_candidate.url)
+                        new_candidates.append(browser_candidate)
+                        continue
+                    if not browser_candidate.separate_audio_url:
+                        continue
+                    existing_index = next(
+                        (
+                            index
+                            for index, existing in enumerate(all_video_candidates)
+                            if existing.url == browser_candidate.url
+                            and not existing.separate_audio_url
+                        ),
+                        None,
+                    )
+                    if existing_index is None:
+                        continue
+                    enriched_candidate = replace(
+                        all_video_candidates[existing_index],
+                        separate_audio_url=browser_candidate.separate_audio_url,
+                    )
+                    all_video_candidates[existing_index] = enriched_candidate
+                    new_candidates.append(enriched_candidate)
                 if new_candidates:
-                    all_video_candidates.extend(new_candidates)
+                    all_video_candidates.extend(
+                        candidate
+                        for candidate in new_candidates
+                        if candidate.url not in {
+                            existing.url for existing in all_video_candidates
+                        }
+                    )
                     pending_candidates.extend(new_candidates)
                     missing_audio_candidate = False
                     continue
@@ -7584,6 +7851,18 @@ def handle_resolved_media(
                     referer=platform_referer(platform),
                     verbose=args.verbose,
                 )
+            if (
+                candidate.separate_audio_url
+                and video_transcriber.probe_audio_stream(saved_path) is False
+            ):
+                saved_path = mux_separate_audio_stream(
+                    saved_path,
+                    candidate,
+                    cookie=cookie,
+                    timeout=args.timeout,
+                    referer=platform_referer(platform),
+                    verbose=args.verbose,
+                )
         except DouyinDownloadError as exc:
             last_error = exc
             if args.verbose:
@@ -7600,6 +7879,7 @@ def handle_resolved_media(
                 file=sys.stderr,
             )
             if silent_fallback_path is None:
+                silent_fallback_candidate = candidate
                 silent_fallback_path = output_path.with_name(
                     f".{output_path.stem}.silent-fallback{output_path.suffix}"
                 )
@@ -7612,6 +7892,7 @@ def handle_resolved_media(
         if silent_fallback_path is not None:
             silent_fallback_path.unlink(missing_ok=True)
             silent_fallback_path = None
+            silent_fallback_candidate = None
         if args.save_meta:
             save_metadata(
                 saved_path.with_suffix(".json"),
@@ -7623,6 +7904,17 @@ def handle_resolved_media(
             )
         handle_downloaded_video(saved_path, args)
         return 0
+
+    if (
+        silent_fallback_path is not None
+        and silent_fallback_candidate is not None
+        and looks_like_video_only_stream_url(silent_fallback_candidate.url)
+    ):
+        silent_fallback_path.unlink(missing_ok=True)
+        silent_fallback_path = None
+        last_error = DouyinDownloadError(
+            "A video-only adaptive stream was found, but no matching audio stream could be combined."
+        )
 
     if silent_fallback_path is not None and not audio_text_processing_requested(args):
         output_path.unlink(missing_ok=True)
