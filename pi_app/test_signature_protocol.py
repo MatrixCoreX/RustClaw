@@ -93,13 +93,48 @@ class SignatureProtocolTests(unittest.TestCase):
             result, disabled = self.run_helper(state_path, "simulation_disable")
             self.assertEqual(result.returncode, 0)
             self.assertFalse(disabled["signature_chip_present"])
-            self.assertFalse(state_path.exists())
+            self.assertTrue(state_path.exists())
+            disabled_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertFalse(disabled_state["enabled"])
+            private_key_fields = (
+                "device_private_key",
+                "signer_private_key",
+                "root_private_key",
+            )
+            saved_private_keys = tuple(disabled_state[field] for field in private_key_fields)
+
+            result, unavailable = self.run_helper(state_path, "pubkey")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(unavailable["ok"])
+
+            result, reenabled = self.run_helper(state_path, "simulation_enable")
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(reenabled["pubkey"], enabled["pubkey"])
+            reenabled_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertTrue(reenabled_state["enabled"])
+            self.assertEqual(
+                tuple(reenabled_state[field] for field in private_key_fields),
+                saved_private_keys,
+            )
 
             state_path.write_text("not-json\n", encoding="utf-8")
-            result, repaired = self.run_helper(state_path, "simulation_enable")
+            result, invalid = self.run_helper(state_path, "simulation_enable")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(invalid["ok"])
+            self.assertEqual(invalid["error_code"], "signature_simulator_state_invalid")
+            self.assertEqual(state_path.read_text(encoding="utf-8"), "not-json\n")
+
+    def test_legacy_state_without_enabled_flag_remains_enabled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "signature-simulator.json"
+            _, enabled = self.run_helper(state_path, "simulation_enable")
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state.pop("enabled")
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+
+            result, pubkey = self.run_helper(state_path, "pubkey")
             self.assertEqual(result.returncode, 0)
-            self.assertTrue(repaired["ok"])
-            self.assertEqual(len(repaired["pubkey"]), 128)
+            self.assertEqual(pubkey["pubkey"], enabled["pubkey"])
 
 
 if __name__ == "__main__":
