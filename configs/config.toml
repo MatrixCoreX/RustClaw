@@ -466,7 +466,6 @@ config_path = "configs/config.toml"
 # - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
 # - configs/channels/whatsapp-cloud.toml（WhatsApp Cloud / webhook）/ WhatsApp Cloud settings
 # - configs/channels/whatsapp-web.toml（WhatsApp Web / QR login）/ WhatsApp Web settings
-# - configs/channels/whatsapp.toml 仅作为旧混合配置兼容入口，建议不要再写实际配置
 
 # 用途/Purpose: 预留 Slack 适配器配置（当前占位）.
 # 建议修改/Recommended change: 未接入前可保持默认.

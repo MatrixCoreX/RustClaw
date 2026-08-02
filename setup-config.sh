@@ -223,7 +223,11 @@ import tomllib
 from pathlib import Path
 
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-for extra in ("configs/channels/telegram.toml", "configs/channels/whatsapp.toml"):
+for extra in (
+    "configs/channels/telegram.toml",
+    "configs/channels/whatsapp-cloud.toml",
+    "configs/channels/whatsapp-web.toml",
+):
     p = Path(extra)
     if p.exists():
         cfg.update(tomllib.loads(p.read_text(encoding="utf-8")))
@@ -233,7 +237,6 @@ skills_list = skills.get("skills_list", [])
 if not isinstance(skills_list, list):
     skills_list = []
 skills_list = [str(v).strip() for v in skills_list if str(v).strip()]
-wa_web_enabled = bool((cfg.get("whatsapp_web", {}) or {}).get("enabled", False))
 x_cfg_path = Path("configs/x.toml")
 xurl_bin = "xurl"
 if x_cfg_path.exists():
@@ -241,15 +244,18 @@ if x_cfg_path.exists():
     xurl_bin = str(x_cfg.get("xurl_bin", "xurl") or "xurl").strip() or "xurl"
 
 print(f"SKILLS_LIST={','.join(skills_list)}")
-print(f"WA_WEB_ENABLED={'1' if wa_web_enabled else '0'}")
 print(f"XURL_BIN={xurl_bin}")
 PY
+)"
+
+WA_WEB_ENABLED="$(
+  python3 "$SCRIPT_DIR/scripts/whatsapp_web_config_state.py" \
+    "$SCRIPT_DIR/configs/channels/whatsapp-web.toml"
 )"
 
 while IFS='=' read -r key value; do
   case "$key" in
     SKILLS_LIST) SKILLS_LIST="$value" ;;
-    WA_WEB_ENABLED) WA_WEB_ENABLED="$value" ;;
     XURL_BIN) XURL_BIN="$value" ;;
   esac
 done <<< "$CONFIG_META"

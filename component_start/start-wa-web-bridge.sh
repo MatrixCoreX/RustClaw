@@ -11,18 +11,8 @@ configure_python3_with_tomllib
 component_start_init "$SCRIPT_DIR" release "./component_start/start-wa-web-bridge.sh"
 
 enabled="$(
-python3 - <<'PY'
-import os
-import tomllib
-from pathlib import Path
-cfg = tomllib.loads(Path(os.environ["APP_CONFIG_PATH"]).read_text(encoding="utf-8"))
-channel_dir = Path(os.environ["APP_CHANNEL_CONFIG_DIR"])
-for name in ("whatsapp.toml", "whatsapp-web.toml"):
-    extra = channel_dir / name
-    if extra.exists():
-        cfg.update(tomllib.loads(extra.read_text(encoding="utf-8")))
-print("1" if bool(cfg.get("whatsapp_web", {}).get("enabled", False)) else "0")
-PY
+python3 "$SCRIPT_DIR/scripts/whatsapp_web_config_state.py" \
+  "$APP_CHANNEL_CONFIG_DIR/whatsapp-web.toml"
 )"
 
 if [[ "$enabled" != "1" ]]; then
