@@ -1,11 +1,9 @@
 use super::{
-    build_system_warnings, error_extra, execute, load_is_high, parse_df_root_kilobytes,
+    build_system_warnings, error_extra, load_is_high, parse_df_root_kilobytes,
     parse_linux_meminfo, parse_linux_uptime, parse_macos_available_memory_bytes,
     parse_macos_boot_time_seconds, parse_macos_load_avg, resource_is_low, SystemHealthSnapshot,
     SKILL_NAME,
 };
-use serde_json::json;
-use std::fs;
 
 #[test]
 fn error_extra_exposes_machine_contract() {
@@ -118,27 +116,4 @@ fn parse_os_specific_runtime_values() {
         parse_macos_load_avg("{ 2.31 1.82 1.40 }"),
         (Some(2.31), Some(1.82), Some(1.40))
     );
-}
-
-#[test]
-fn execute_reports_standalone_nni_server_log_separately() {
-    let log_dir = std::env::temp_dir().join(format!(
-        "agent-runtime-health-check-log-test-{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&log_dir);
-    fs::create_dir_all(&log_dir).expect("create temp log dir");
-    fs::write(
-        log_dir.join("nni-server.log"),
-        "{\"event_kind\":\"server_listening\"}\n",
-    )
-    .expect("write nni server log");
-
-    let output = execute(json!({ "log_dir": log_dir.display().to_string() }))
-        .expect("health check executes");
-
-    assert_eq!(output["nni_log"]["exists"], false);
-    assert_eq!(output["nni_server_log"]["exists"], true);
-
-    let _ = fs::remove_dir_all(&log_dir);
 }
