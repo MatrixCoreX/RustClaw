@@ -573,8 +573,8 @@ export function NniPage({
             />
             <p className="mt-2 text-xs leading-5 text-white/50">
               {t(
-                "远程节点会保存到 configs/config.toml；加入成功后运行状态也会保存，clawd 重启或页面重开后会自动载入。远程节点负责下发 challenge、验签并记录合规请求。本机公钥必须是白名单合规公钥。",
-                "Remote nodes are saved to configs/config.toml. After Join succeeds, the runtime state is saved too and loads automatically after clawd restarts or the page reopens. Remote nodes issue challenges, verify signatures, and record compliant requests. The local public key must be compliant with the whitelist.",
+                "远程节点和加入状态会自动保存，Agent 重启或页面重开后会自动载入。",
+                "Remote nodes and Join status are saved automatically and restored after the Agent restarts or the page reopens.",
               )}
             </p>
             {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
