@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   filterSkillStoreItems,
+  latestUnresolvedSkillStoreFailure,
   removableSkillNames,
   resolveSkillStoreActionName,
   skillStoreErrorMessage,
@@ -97,6 +98,45 @@ test("restores the active skill action from server catalog state after refresh",
   assert.equal(resolveSkillStoreActionName(null, store), "weather");
   assert.equal(resolveSkillStoreActionName("stock", store), "stock");
   assert.equal(resolveSkillStoreActionName(null, { ...store, active_operation: null }), null);
+});
+
+test("hides a historical diagnostic after a newer operation for that skill succeeds", () => {
+  const base = {
+    schema_version: 1 as const,
+    action: "update" as const,
+    stage: "success" as const,
+    created_at_unix: 10,
+    updated_at_unix: 10,
+    heartbeat_at_unix: 10,
+    cancel_requested: false,
+    stages: [],
+  };
+  const operations = [
+    {
+      ...base,
+      operation_id: "new-success",
+      skill_name: "media_download",
+      status: "success" as const,
+    },
+    {
+      ...base,
+      operation_id: "old-failure",
+      skill_name: "media_download",
+      status: "failure" as const,
+      failure: {
+        error_code: "skill_store_config_write_failed",
+        message_key: "skill_store.skill_store_config_write_failed",
+        retryable: true,
+        diagnostic: "launch_pinned_version_missing",
+      },
+    },
+  ];
+
+  assert.equal(latestUnresolvedSkillStoreFailure(operations), undefined);
+  assert.equal(
+    latestUnresolvedSkillStoreFailure([operations[1], operations[0]])?.operation_id,
+    "old-failure",
+  );
 });
 
 test("lets imported skills be removed regardless of their display group", () => {

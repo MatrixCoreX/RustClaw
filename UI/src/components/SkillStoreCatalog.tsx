@@ -35,8 +35,17 @@ import {
 } from "lucide-react";
 
 import { skillDescription, skillRiskLabel, skillRuntimeIssue, type UiLanguage } from "../lib/skill-display";
-import { filterSkillStoreItems, skillStoreInstallState } from "../lib/skill-store";
-import type { SkillStoreItem, SkillStoreResponse } from "../types/api";
+import {
+  filterSkillStoreItems,
+  latestUnresolvedSkillStoreFailure,
+  skillStoreInstallState,
+} from "../lib/skill-store";
+import type {
+  SkillStoreDependencyResponse,
+  SkillStoreDependencyStatus,
+  SkillStoreItem,
+  SkillStoreResponse,
+} from "../types/api";
 import { SkillRemovalDialog } from "./SkillRemovalDialog";
 
 type Translate = (zh: string, en: string) => string;
@@ -90,29 +99,78 @@ function installDependencyLabel(
   return label ? t(label[0], label[1]) : token.replaceAll("_", " ");
 }
 
-function DependencyList({
+interface DependencyCheckState {
+  loading: boolean;
+  data: SkillStoreDependencyResponse | null;
+  error: string | null;
+}
+
+export function DependencyList({
   values,
+  kind,
   labels,
   emptyLabel,
+  check,
   t,
 }: {
   values: readonly string[];
+  kind: SkillStoreDependencyStatus["kind"];
   labels: Record<string, readonly [string, string]>;
   emptyLabel: string;
+  check: DependencyCheckState | null;
   t: Translate;
 }) {
-  if (values.length === 0) return <span className="text-white/55">{emptyLabel}</span>;
+  if (values.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-emerald-200/80">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {emptyLabel}
+      </span>
+    );
+  }
+  const statuses = new Map(
+    (check?.data?.dependencies ?? [])
+      .filter((dependency) => dependency.kind === kind)
+      .map((dependency) => [dependency.id, dependency]),
+  );
   return (
-    <ul className="flex flex-wrap gap-1.5">
-      {values.map((dependency) => (
-        <li
-          key={dependency}
-          title={dependency}
-          className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/75"
-        >
-          {installDependencyLabel(dependency, labels, t)}
-        </li>
-      ))}
+    <ul className="space-y-1.5">
+      {values.map((dependency) => {
+        const status = statuses.get(dependency);
+        const installed = status?.installed === true;
+        const unknown = Boolean(check?.data) && (!status || status.status_code === "unknown");
+        const statusLabel = check?.loading
+          ? t("检查中", "Checking")
+          : check?.error || unknown
+            ? t("无法确认", "Unknown")
+            : installed
+              ? t("已正确安装", "Installed correctly")
+              : check?.data
+                ? t("未安装", "Not installed")
+                : t("等待检查", "Not checked");
+        return (
+          <li
+            key={dependency}
+            title={dependency}
+            className="flex items-start gap-2 rounded border border-white/10 bg-white/5 px-2 py-1.5"
+          >
+            {check?.loading ? (
+              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-cyan-200" aria-hidden="true" />
+            ) : installed ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
+            ) : (
+              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
+            )}
+            <span className="min-w-0 flex-1 text-white/75">
+              {installDependencyLabel(dependency, labels, t)}
+              {status?.version ? <span className="ml-1 text-white/40">· {status.version}</span> : null}
+            </span>
+            <span className={installed ? "shrink-0 text-emerald-200/80" : "shrink-0 text-amber-200/80"}>
+              {statusLabel}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -135,6 +193,7 @@ export interface SkillStoreCatalogProps {
   message: string | null;
   actionName: string | null;
   onRefresh: () => unknown | Promise<unknown>;
+  onCheckDependencies: (name: string) => Promise<SkillStoreDependencyResponse>;
   onInstall: (name: string) => unknown | Promise<unknown>;
   onRemove: (name: string, preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
   onCancel: (operationId: string) => unknown | Promise<unknown>;
@@ -149,20 +208,20 @@ export function SkillStoreCatalog({
   message,
   actionName,
   onRefresh,
+  onCheckDependencies,
   onInstall,
   onRemove,
   onCancel,
 }: SkillStoreCatalogProps) {
   const [query, setQuery] = useState("");
   const [pendingRemoval, setPendingRemoval] = useState<SkillStoreItem | null>(null);
+  const [dependencyChecks, setDependencyChecks] = useState<Record<string, DependencyCheckState>>({});
   const items = useMemo(() => {
     return filterSkillStoreItems(data?.items ?? [], query);
   }, [data?.items, query]);
   const mutationRunning = actionName !== null;
   const activeOperation = data?.active_operation ?? null;
-  const recentFailure = data?.recent_operations?.find(
-    (operation) => operation.status === "failure" && operation.failure?.diagnostic,
-  );
+  const recentFailure = latestUnresolvedSkillStoreFailure(data?.recent_operations);
 
   const operationStageLabel = (stage: string) => {
     const labels: Record<string, readonly [string, string]> = {
@@ -185,6 +244,29 @@ export function SkillStoreCatalog({
     const name = pendingRemoval.name;
     setPendingRemoval(null);
     await onRemove(name, preserveConfig, preserveData);
+  };
+
+  const checkDependencies = async (skillName: string) => {
+    setDependencyChecks((current) => ({
+      ...current,
+      [skillName]: { loading: true, data: current[skillName]?.data ?? null, error: null },
+    }));
+    try {
+      const checked = await onCheckDependencies(skillName);
+      setDependencyChecks((current) => ({
+        ...current,
+        [skillName]: { loading: false, data: checked, error: null },
+      }));
+    } catch (error) {
+      setDependencyChecks((current) => ({
+        ...current,
+        [skillName]: {
+          loading: false,
+          data: current[skillName]?.data ?? null,
+          error: error instanceof Error ? error.message : t("依赖状态检查失败", "Dependency check failed"),
+        },
+      }));
+    }
   };
 
   const renderItem = (item: SkillStoreItem) => {
@@ -245,7 +327,12 @@ export function SkillStoreCatalog({
             )}
           </p>
         ) : null}
-        <details className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/50">
+        <details
+          className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/50"
+          onToggle={(event) => {
+            if (event.currentTarget.open) void checkDependencies(item.name);
+          }}
+        >
           <summary className="cursor-pointer text-white/60">{t("安装信息", "Install details")}</summary>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt>{t("安装适配器", "Install adapter")}</dt>
@@ -266,8 +353,10 @@ export function SkillStoreCatalog({
             <dd>
               <DependencyList
                 values={item.host_dependencies ?? []}
+                kind="host"
                 labels={HOST_DEPENDENCY_NAMES}
                 emptyLabel={t("无需额外安装", "No additional installation")}
+                check={dependencyChecks[item.name] ?? null}
                 t={t}
               />
             </dd>
@@ -275,12 +364,17 @@ export function SkillStoreCatalog({
             <dd>
               <DependencyList
                 values={item.runtime_assets ?? []}
+                kind="runtime_asset"
                 labels={RUNTIME_ASSET_NAMES}
                 emptyLabel={t("无需额外下载", "No additional download")}
+                check={dependencyChecks[item.name] ?? null}
                 t={t}
               />
             </dd>
           </dl>
+          {dependencyChecks[item.name]?.error ? (
+            <p className="mt-2 text-amber-200/80">{dependencyChecks[item.name].error}</p>
+          ) : null}
         </details>
         {!item.installed && item.build_network_policy === "approval_required" ? (
           <p className="mt-3 text-xs leading-5 text-amber-200/85">

@@ -16,6 +16,7 @@ import type {
   BrowserFileWithPath,
   ImportedSkillResponse,
   SkillListItem,
+  SkillStoreDependencyResponse,
   SkillStoreOperationResponse,
   SkillStoreResponse,
   SkillsConfigResponse,
@@ -171,6 +172,15 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       if (skillStoreFetchRef.current === request) skillStoreFetchRef.current = null;
     });
     return request;
+  };
+
+  const fetchSkillStoreDependencies = async (skillName: string): Promise<SkillStoreDependencyResponse> => {
+    const res = await apiFetch(`/v1/skills/store/${encodeURIComponent(skillName)}/dependencies`);
+    const body = (await res.json()) as ApiResponse<SkillStoreDependencyResponse>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(skillStoreErrorMessage(body.error, t));
+    }
+    return body.data;
   };
 
   const scrollToSkillRow = (skillName: string) => {
@@ -621,6 +631,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     fetchSkills,
     fetchSkillsConfig,
     fetchSkillStore,
+    fetchSkillStoreDependencies,
     saveSkillSwitches,
     importExternalSkill,
     uploadImportedSkillFiles,

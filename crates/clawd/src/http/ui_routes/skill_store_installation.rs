@@ -27,6 +27,7 @@ enum SkillStoreErrorCode {
     HostDependencyInstallFailed,
     RuntimeAssetUnknown,
     RuntimeAssetInstallFailed,
+    DependencyStatusFailed,
     ResourceInsufficient,
     UnsafeConfigPath,
     #[cfg(not(test))]
@@ -61,6 +62,7 @@ impl SkillStoreErrorCode {
             Self::HostDependencyInstallFailed => "skill_store_host_dependency_install_failed",
             Self::RuntimeAssetUnknown => "skill_store_runtime_asset_unknown",
             Self::RuntimeAssetInstallFailed => "skill_store_runtime_asset_install_failed",
+            Self::DependencyStatusFailed => "skill_store_dependency_status_failed",
             Self::ResourceInsufficient => "skill_store_resource_insufficient",
             Self::UnsafeConfigPath => "skill_store_unsafe_config_path",
             #[cfg(not(test))]

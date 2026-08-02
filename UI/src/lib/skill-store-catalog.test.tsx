@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SkillStoreCatalog } from "../components/SkillStoreCatalog";
+import { DependencyList, SkillStoreCatalog } from "../components/SkillStoreCatalog";
 import type { SkillStoreItem } from "../types/api";
 
 function storeItem(overrides: Partial<SkillStoreItem> = {}): SkillStoreItem {
@@ -31,6 +31,13 @@ const renderCatalog = (item: SkillStoreItem) =>
       message={null}
       actionName={null}
       onRefresh={() => undefined}
+      onCheckDependencies={async () => ({
+        schema_version: 1,
+        skill_name: item.name,
+        checked_at_unix: 1,
+        all_installed: false,
+        dependencies: [],
+      })}
       onInstall={() => undefined}
       onRemove={() => undefined}
       onCancel={() => undefined}
@@ -54,4 +61,35 @@ test("makes the absence of extra dependencies explicit", () => {
 
   assert.match(markup, /无需额外安装/);
   assert.match(markup, /无需额外下载/);
+});
+
+test("renders every dependency with its observed installation state", () => {
+  const markup = renderToStaticMarkup(
+    <DependencyList
+      values={["git", "ffmpeg"]}
+      kind="host"
+      labels={{ git: ["Git 版本管理", "Git version control"], ffmpeg: ["FFmpeg", "FFmpeg"] }}
+      emptyLabel="无需额外安装"
+      check={{
+        loading: false,
+        error: null,
+        data: {
+          schema_version: 1,
+          skill_name: "media_download",
+          checked_at_unix: 1,
+          all_installed: false,
+          dependencies: [
+            { id: "git", kind: "host", installed: true, status_code: "installed", version: "2.0" },
+            { id: "ffmpeg", kind: "host", installed: false, status_code: "missing" },
+          ],
+        },
+      }}
+      t={(zh) => zh}
+    />,
+  );
+
+  assert.match(markup, /Git 版本管理/);
+  assert.match(markup, /已正确安装/);
+  assert.match(markup, /FFmpeg/);
+  assert.match(markup, /未安装/);
 });

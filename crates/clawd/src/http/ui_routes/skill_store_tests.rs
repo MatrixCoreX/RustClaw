@@ -231,6 +231,55 @@ async fn call_skill_store_api_raw(
     (status, payload)
 }
 
+#[tokio::test]
+async fn dependency_status_checks_declared_items_without_creating_private_storage() {
+    let (state, workspace) = isolated_skill_store_state();
+    let storage = state
+        .core
+        .skill_storage
+        .resolved_directory_path("media_download")
+        .expect("resolve media storage");
+    assert!(
+        !storage.exists(),
+        "status reads must not create private storage"
+    );
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+
+    let (status, payload) = call_skill_store_api(
+        router,
+        Method::GET,
+        "/v1/skills/store/media_download/dependencies",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let dependencies = payload["data"]["dependencies"]
+        .as_array()
+        .expect("dependency array");
+    assert_eq!(dependencies.len(), 7);
+    let git = dependencies
+        .iter()
+        .find(|dependency| dependency["id"] == "git")
+        .expect("git status");
+    assert_eq!(git["kind"], "host");
+    assert_eq!(git["installed"], true);
+    let model = dependencies
+        .iter()
+        .find(|dependency| dependency["id"] == "modelscope_sensevoice_small")
+        .expect("model status");
+    assert_eq!(model["kind"], "runtime_asset");
+    assert_eq!(model["installed"], false);
+    assert_eq!(model["status_code"], "missing");
+    assert!(
+        !storage.exists(),
+        "status reads must remain side-effect free"
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
 fn store_item<'a>(payload: &'a Value, name: &str) -> &'a Value {
     payload["data"]["items"]
         .as_array()

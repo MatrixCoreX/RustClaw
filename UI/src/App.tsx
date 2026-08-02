@@ -559,6 +559,7 @@ export default function App() {
     fetchSkills,
     fetchSkillsConfig,
     fetchSkillStore,
+    fetchSkillStoreDependencies,
     saveSkillSwitches,
     importExternalSkill,
     uploadImportedSkillFiles,
@@ -1973,6 +1974,7 @@ export default function App() {
               message={skillStoreMessage}
               actionName={skillStoreActionName}
               onRefresh={() => fetchSkillStore(true)}
+              onCheckDependencies={fetchSkillStoreDependencies}
               onInstall={installSkillFromStore}
               onRemove={removeSkillFromStore}
               onCancel={cancelSkillStoreOperation}

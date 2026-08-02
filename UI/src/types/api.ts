@@ -575,6 +575,22 @@ export interface SkillStoreResponse {
   recent_operations?: SkillStoreOperation[];
 }
 
+export interface SkillStoreDependencyStatus {
+  id: string;
+  kind: "host" | "runtime_asset";
+  installed: boolean;
+  status_code: "installed" | "missing" | "unknown" | string;
+  version?: string | null;
+}
+
+export interface SkillStoreDependencyResponse {
+  schema_version: 1;
+  skill_name: string;
+  checked_at_unix: number;
+  all_installed: boolean;
+  dependencies: SkillStoreDependencyStatus[];
+}
+
 export type SkillStoreOperationAction = "install" | "update" | "repair" | "rollback" | "remove";
 export type SkillStoreOperationStatus = "queued" | "running" | "success" | "failure" | "cancelled";
 export type SkillStoreOperationStage =
