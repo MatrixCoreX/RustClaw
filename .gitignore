@@ -11,6 +11,7 @@
 /logs/
 /run/
 /data/
+/nni_server/data/
 /release-bin/
 /skills_output/
 /.agent-runtime/
