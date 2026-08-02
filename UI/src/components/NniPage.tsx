@@ -52,6 +52,7 @@ export interface NniPageProps {
   nniJoined: boolean;
   nniRemoteNodes: string;
   nniRemoteNodeCount: number;
+  nniHeartbeatIntervalSeconds: number | null;
   nniHeartbeatRequestCount: number;
   nniHeartbeatRetryLimit: number;
   nniLastHeartbeatAtTs: number | null;
@@ -126,6 +127,7 @@ export function NniPage({
   nniJoined,
   nniRemoteNodes,
   nniRemoteNodeCount,
+  nniHeartbeatIntervalSeconds,
   nniHeartbeatRequestCount,
   nniHeartbeatRetryLimit,
   nniLastHeartbeatAtTs,
@@ -187,6 +189,20 @@ export function NniPage({
   const nniHeartbeatRecordsCanNext = nniHeartbeatRecordsPage < nniHeartbeatRecordsTotalPages;
   const nniHeartbeatErrorsCanPrev = nniHeartbeatErrorsPage > 1;
   const nniHeartbeatErrorsCanNext = nniHeartbeatErrorsPage < nniHeartbeatErrorsTotalPages;
+  const nniHeartbeatIntervalMinutes =
+    nniHeartbeatIntervalSeconds !== null && nniHeartbeatIntervalSeconds % 60 === 0
+      ? nniHeartbeatIntervalSeconds / 60
+      : null;
+  const nniHeartbeatIntervalZh = nniHeartbeatIntervalMinutes !== null
+    ? `${nniHeartbeatIntervalMinutes} 分钟`
+    : nniHeartbeatIntervalSeconds !== null
+      ? `${nniHeartbeatIntervalSeconds} 秒`
+      : "系统设定的周期";
+  const nniHeartbeatIntervalEn = nniHeartbeatIntervalMinutes !== null
+    ? `${nniHeartbeatIntervalMinutes} minutes`
+    : nniHeartbeatIntervalSeconds !== null
+      ? `${nniHeartbeatIntervalSeconds} seconds`
+      : "the configured interval";
   const actionLabel = (action: string) => nniActionLabel(action, lang);
   const nniRuntimeActivity =
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
@@ -268,8 +284,8 @@ export function NniPage({
             </h3>
             <p className="mt-3 text-sm leading-7 text-white/70">
               {t(
-                "这里管理 Pi App 里的 NNI 入口和设备签名能力。普通设备可以只查看状态；带安全芯片的设备可以读取公钥、生成时间戳签名，并查看 TNG 证书链。加入时，本机公钥必须是白名单合规公钥。",
-                "This page manages the NNI entry from the Pi App and device signing. Regular devices can simply check status; devices with a secure chip can read the public key, create timestamp signatures, and inspect the TNG certificate chain. To join, the local public key must be compliant with the whitelist.",
+                "这里管理 Pi App 里的 NNI 入口和设备签名能力。",
+                "This page manages the NNI entry from the Pi App and device signing.",
               )}
             </p>
           </div>
@@ -620,12 +636,12 @@ export function NniPage({
                 )
               : nniJoined
                 ? t(
-                    "服务端已验证设备签名，NNI 运行入口已开启。clawd 会每 15 分钟向服务器发送一次硬件签名心跳。",
-                    "The server verified the device signature, and the NNI runtime entry is active. clawd will send a hardware-signed heartbeat to the server every 15 minutes.",
+                    `服务端已验证设备签名，NNI 运行入口已开启。Agent 会每 ${nniHeartbeatIntervalZh} 向服务器发送一次硬件签名心跳。`,
+                    `The server verified the device signature, and the NNI runtime entry is active. The Agent will send a hardware-signed heartbeat to the server every ${nniHeartbeatIntervalEn}.`,
                   )
                 : t(
-                    "点击加入会向远程服务端请求一次随机挑战。本机公钥必须是白名单合规公钥，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
-                    "Click Join to request a random challenge from the remote server. The local public key must be compliant with the whitelist, and the runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
+                    "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
+                    "Click Join to request a random challenge from the remote server. The runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
                   )}
           </p>
         </div>

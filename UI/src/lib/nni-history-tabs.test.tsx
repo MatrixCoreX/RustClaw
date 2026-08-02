@@ -27,7 +27,7 @@ test("shows the device overview and three record pages as accessible tabs", () =
   assert.match(markup, /id="nni-history-errors-tab"[^>]*aria-selected="false"/);
   assert.match(markup, />请求记录<\/span><span[^>]*>12<\/span>/);
   assert.match(markup, />心跳错误<\/span><span[^>]*>3<\/span>/);
-  assert.match(markup, />心跳奖励<\/span><span[^>]*>7<\/span>/);
+  assert.match(markup, />原生智能奖励<\/span><span[^>]*>7<\/span>/);
   assert.match(markup, />设备与运行<\/span>/);
 });
 
@@ -51,7 +51,7 @@ test("shows the four device containers on the overview page", () => {
   assert.match(markup, /id="nni-history-errors-tab"[^>]*aria-selected="false"/);
 });
 
-test("marks heartbeat rewards active", () => {
+test("marks native intelligence rewards active", () => {
   const markup = renderTabs("rewards");
 
   assert.match(markup, /id="nni-history-rewards-tab"[^>]*aria-selected="true"/);

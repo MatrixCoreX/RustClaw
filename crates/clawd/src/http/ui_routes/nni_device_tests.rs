@@ -17,6 +17,11 @@ fn nni_hardware_detection_uses_a_twelve_second_retry_window() {
 }
 
 #[test]
+fn nni_agent_sends_heartbeats_every_eight_minutes() {
+    assert_eq!(NNI_HEARTBEAT_INTERVAL_SECONDS, 8 * 60);
+}
+
+#[test]
 fn nni_simulation_controls_are_accepted_but_not_advertised_as_chip_operations() {
     assert!(nni_accepted_actions().contains(&NNI_SIMULATION_ENABLE_ACTION));
     assert!(nni_accepted_actions().contains(&NNI_SIMULATION_DISABLE_ACTION));
