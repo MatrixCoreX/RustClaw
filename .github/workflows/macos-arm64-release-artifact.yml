@@ -21,6 +21,7 @@ jobs:
     runs-on: macos-14
     env:
       RUST_TARGET: aarch64-apple-darwin
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "4"
       CARGO_TERM_COLOR: always
       APP_REQUIRE_REFERENCE_ADAPTERS: "1"
