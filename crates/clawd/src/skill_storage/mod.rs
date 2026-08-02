@@ -106,6 +106,10 @@ impl SkillStorageRuntime {
         self.resolver.directory_path(skill_name)
     }
 
+    pub(crate) fn resolved_directory_path(&self, skill_name: &str) -> anyhow::Result<PathBuf> {
+        self.resolver.resolved_directory_path(skill_name)
+    }
+
     pub(crate) fn take_kb_user_data(&self, user_key: &str) -> anyhow::Result<KbUserDataSnapshot> {
         ownership::take_user_data(self.pool_for("kb")?, Some(user_key))
     }

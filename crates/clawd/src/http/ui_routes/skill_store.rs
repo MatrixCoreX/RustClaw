@@ -9,6 +9,174 @@ struct SkillStoreMutationRequest {
     preserve_data: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SkillStoreDependencyStatus {
+    id: String,
+    kind: &'static str,
+    installed: bool,
+    status_code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+}
+
+fn inspect_declared_host_dependencies(
+    dependency_ids: &[String],
+    workspace_root: &Path,
+) -> Vec<SkillStoreDependencyStatus> {
+    let catalog = host_dependency_catalog();
+    dependency_ids
+        .iter()
+        .map(|dependency_id| {
+            let Some(definition) = catalog
+                .iter()
+                .find(|definition| definition.id == dependency_id)
+            else {
+                return SkillStoreDependencyStatus {
+                    id: dependency_id.clone(),
+                    kind: "host",
+                    installed: false,
+                    status_code: "unknown",
+                    version: None,
+                };
+            };
+            let detected = detect_dependency(definition, workspace_root);
+            SkillStoreDependencyStatus {
+                id: dependency_id.clone(),
+                kind: "host",
+                installed: detected.is_some(),
+                status_code: if detected.is_some() {
+                    "installed"
+                } else {
+                    "missing"
+                },
+                version: detected.map(|(_, version)| version),
+            }
+        })
+        .collect()
+}
+
+fn inspect_declared_runtime_assets(
+    asset_ids: &[String],
+    storage_directory: &Path,
+) -> Vec<SkillStoreDependencyStatus> {
+    let catalog = managed_runtime_asset_catalog();
+    let marker_directory = storage_directory.join("runtime-assets");
+    let cache_directory = storage_directory.join("modelscope");
+    asset_ids
+        .iter()
+        .map(|asset_id| {
+            let Some(definition) = catalog
+                .iter()
+                .find(|definition| definition.id == asset_id)
+            else {
+                return SkillStoreDependencyStatus {
+                    id: asset_id.clone(),
+                    kind: "runtime_asset",
+                    installed: false,
+                    status_code: "unknown",
+                    version: None,
+                };
+            };
+            let marker = marker_directory.join(format!("{}.json", definition.id));
+            let installed =
+                runtime_asset_marker_is_valid(&marker, definition, &cache_directory);
+            SkillStoreDependencyStatus {
+                id: asset_id.clone(),
+                kind: "runtime_asset",
+                installed,
+                status_code: if installed { "installed" } else { "missing" },
+                version: None,
+            }
+        })
+        .collect()
+}
+
+async fn get_skill_store_dependency_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(raw_skill_name): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_identity(&state, &headers) {
+        return response;
+    }
+    let skill_name = match validate_skill_store_mutation(&state, &raw_skill_name) {
+        Ok(skill_name) => skill_name,
+        Err(error) => return skill_store_error_response(error),
+    };
+    let install_spec = skill_store_install_spec(&state, &skill_name);
+    let spec = match install_spec {
+        Ok(spec) => spec,
+        Err(error) => return skill_store_error_response(error),
+    };
+    let Some(spec) = spec else {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "schema_version": 1,
+                    "skill_name": skill_name,
+                    "checked_at_unix": now_unix_seconds(),
+                    "all_installed": true,
+                    "dependencies": [],
+                })),
+                error: None,
+            }),
+        );
+    };
+    let storage_directory = match state
+        .core
+        .skill_storage
+        .resolved_directory_path(&skill_name)
+    {
+        Ok(path) => path,
+        Err(error) => {
+            return skill_store_error_response(SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::DependencyStatusFailed,
+                error,
+            ));
+        }
+    };
+    let workspace_root = state.skill_rt.workspace_root.clone();
+    let checked_skill_name = skill_name.clone();
+    let checked = tokio::task::spawn_blocking(move || {
+        let mut dependencies =
+            inspect_declared_host_dependencies(&spec.host_dependencies, &workspace_root);
+        dependencies.extend(inspect_declared_runtime_assets(
+            &spec.runtime_assets,
+            &storage_directory,
+        ));
+        dependencies
+    })
+    .await;
+    let dependencies = match checked {
+        Ok(dependencies) => dependencies,
+        Err(error) => {
+            return skill_store_error_response(SkillStoreOperationError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                SkillStoreErrorCode::DependencyStatusFailed,
+                format!("skill={checked_skill_name} join_error={error}"),
+            ));
+        }
+    };
+    let all_installed = dependencies.iter().all(|dependency| dependency.installed);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "schema_version": 1,
+                "skill_name": skill_name,
+                "checked_at_unix": now_unix_seconds(),
+                "all_installed": all_installed,
+                "dependencies": dependencies,
+            })),
+            error: None,
+        }),
+    )
+}
+
 fn collect_uninstalled_skills(value: &toml::Value, state: &AppState) -> BTreeSet<String> {
     let configured = value
         .get("skills")

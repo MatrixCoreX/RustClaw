@@ -201,6 +201,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_skills_config).post(update_skills_config),
         )
         .route("/skills/store", get(get_skill_store_catalog))
+        .route(
+            "/skills/store/:skill_name/dependencies",
+            get(get_skill_store_dependency_status),
+        )
         .route("/skills/store/install", post(install_skill_store_item))
         .route("/skills/store/update", post(update_skill_store_item))
         .route("/skills/store/repair", post(repair_skill_store_item))

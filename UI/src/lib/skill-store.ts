@@ -1,4 +1,4 @@
-import type { SkillStoreItem, SkillStoreResponse } from "../types/api";
+import type { SkillStoreItem, SkillStoreOperation, SkillStoreResponse } from "../types/api";
 import { productCopy } from "./product-identity";
 
 type Translate = (zh: string, en: string) => string;
@@ -20,6 +20,7 @@ const SKILL_STORE_ERROR_MESSAGES: Record<string, readonly [string, string]> = {
   skill_store_host_dependency_install_failed: ["系统依赖没有安装完成，请展开诊断信息检查包管理器、网络或管理员权限。", "A system dependency could not be installed. Open diagnostics and check the package manager, network, or administrator privileges."],
   skill_store_runtime_asset_unknown: ["安装清单声明了宿主不认识的本地资源，已安全停止。", "The manifest declares a local resource this host does not recognize, so installation stopped safely."],
   skill_store_runtime_asset_install_failed: ["本地资源没有准备完成，技能未启用。请展开诊断信息检查网络和可用磁盘后重试。", "A local resource could not be prepared, so the skill was not enabled. Open diagnostics, check the network and free disk space, then try again."],
+  skill_store_dependency_status_failed: ["暂时无法检查依赖状态，请稍后重新展开安装信息。", "Dependency status could not be checked. Close and reopen the install details shortly."],
   skill_store_resource_insufficient: ["这台机器当前的内存或可用磁盘不足，无法完整安装这个技能。", "This machine does not currently have enough memory or free disk space to install the complete skill."],
   skill_store_unsafe_config_path: ["这个技能声明了不安全的配置路径，已停止操作。", "This skill declares an unsafe configuration path, so the operation was stopped."],
   skill_store_install_start_failed: ["无法启动技能安装，请检查服务状态后重试。", "{product_name} could not start the skill installation. Check the service status and try again."],
@@ -54,6 +55,18 @@ export function resolveSkillStoreActionName(
   store: SkillStoreResponse | null,
 ): string | null {
   return localActionName || store?.active_operation?.skill_name || null;
+}
+
+export function latestUnresolvedSkillStoreFailure(
+  operations: readonly SkillStoreOperation[] | undefined,
+): SkillStoreOperation | undefined {
+  const latestSkills = new Set<string>();
+  for (const operation of operations ?? []) {
+    if (latestSkills.has(operation.skill_name)) continue;
+    latestSkills.add(operation.skill_name);
+    if (operation.status === "failure" && operation.failure?.diagnostic) return operation;
+  }
+  return undefined;
 }
 
 export function removableSkillNames(
