@@ -46,6 +46,7 @@ import {
 import {
   NNI_HEARTBEAT_ERRORS_PAGE_SIZE,
   NNI_HEARTBEAT_RECORDS_PAGE_SIZE,
+  NNI_REWARDS_PAGE_SIZE,
   useNniRuntime,
 } from "./hooks/useNniRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
@@ -308,6 +309,9 @@ export default function App() {
     nniHeartbeatErrorsClearing,
     nniHeartbeatErrorsError,
     nniHeartbeatErrorsMessage,
+    nniRewards,
+    nniRewardsLoading,
+    nniRewardsError,
     nniConfigLoading,
     nniConfigSaving,
     nniConfigError,
@@ -325,6 +329,7 @@ export default function App() {
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
+    fetchNniRewards,
     runNniDeviceAction,
     setNniDeviceSimulation,
   } = useNniRuntime({ apiFetch, t, lang });
@@ -1418,6 +1423,14 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage]);
 
   useEffect(() => {
+    if (!uiAuthReady || currentPage !== "nni" || !nniJoined) return;
+    void fetchNniRewards(1);
+    // Reward reads require a fresh device signature, so load on page entry/join
+    // and leave subsequent refreshes or pagination to an explicit user action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, nniJoined]);
+
+  useEffect(() => {
     if (!uiAuthReady) return;
     if (currentPage !== "memory") return;
     void fetchMemoryData();
@@ -1696,6 +1709,10 @@ export default function App() {
               nniHeartbeatErrorsError={nniHeartbeatErrorsError}
               nniHeartbeatErrorsMessage={nniHeartbeatErrorsMessage}
               nniHeartbeatErrorsPageSize={NNI_HEARTBEAT_ERRORS_PAGE_SIZE}
+              nniRewards={nniRewards}
+              nniRewardsLoading={nniRewardsLoading}
+              nniRewardsError={nniRewardsError}
+              nniRewardsPageSize={NNI_REWARDS_PAGE_SIZE}
               nniConfigLoading={nniConfigLoading}
               nniConfigSaving={nniConfigSaving}
               nniConfigError={nniConfigError}
@@ -1712,6 +1729,7 @@ export default function App() {
               onClearHeartbeatRecords={clearNniHeartbeatRecords}
               onFetchHeartbeatErrors={fetchNniHeartbeatErrors}
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
+              onFetchRewards={fetchNniRewards}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
               onActionMessageChange={setNniActionMessage}

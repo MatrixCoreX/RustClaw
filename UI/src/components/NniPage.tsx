@@ -15,6 +15,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
+import { NniHistoryTabs, type NniHistoryView } from "./NniHistoryTabs";
+import { NniRewardsPanel } from "./NniRewardsPanel";
 import {
   NNI_RUNTIME_TILES,
   nniActionLabel,
@@ -31,6 +33,7 @@ import type {
   NniDeviceStatusResponse,
   NniHeartbeatErrorRecord,
   NniHeartbeatRecord,
+  NniRewardsResponse,
 } from "../types/api";
 
 type UiLanguage = "zh" | "en";
@@ -71,6 +74,10 @@ export interface NniPageProps {
   nniHeartbeatErrorsError: string | null;
   nniHeartbeatErrorsMessage: string | null;
   nniHeartbeatErrorsPageSize: number;
+  nniRewards: NniRewardsResponse | null;
+  nniRewardsLoading: boolean;
+  nniRewardsError: string | null;
+  nniRewardsPageSize: number;
   nniConfigLoading: boolean;
   nniConfigSaving: boolean;
   nniConfigError: string | null;
@@ -87,6 +94,7 @@ export interface NniPageProps {
   onClearHeartbeatRecords: () => unknown | Promise<unknown>;
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
+  onFetchRewards: (page: number) => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onActionMessageChange: (message: string | null) => void;
@@ -140,6 +148,10 @@ export function NniPage({
   nniHeartbeatErrorsError,
   nniHeartbeatErrorsMessage,
   nniHeartbeatErrorsPageSize,
+  nniRewards,
+  nniRewardsLoading,
+  nniRewardsError,
+  nniRewardsPageSize,
   nniConfigLoading,
   nniConfigSaving,
   nniConfigError,
@@ -156,12 +168,14 @@ export function NniPage({
   onClearHeartbeatRecords,
   onFetchHeartbeatErrors,
   onClearHeartbeatErrors,
+  onFetchRewards,
   onRunDeviceAction,
   onSetDeviceSimulation,
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
+  const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("rewards");
   const [nniDetectionSecondsLeft, setNniDetectionSecondsLeft] = useState(NNI_SIGNATURE_DETECTION_SECONDS);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
@@ -243,8 +257,8 @@ export function NniPage({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="theme-panel p-5 sm:p-6">
+    <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 xl:grid-cols-4">
+      <section className="theme-panel col-span-full p-5 sm:p-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">Network Native Intelligence</p>
@@ -321,17 +335,17 @@ export function NniPage({
       </section>
 
       {nniStatusError ? (
-        <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+        <p className="col-span-full rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
           {nniStatusError}
         </p>
       ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="theme-panel-soft p-5">
+      <section className="contents">
+        <div className="theme-panel-soft p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("设备状态", "Device status")}</p>
-              <h4 className="mt-2 text-lg font-semibold">{t("芯片", "Chip")}</h4>
+              <h4 className="mt-1 text-base font-semibold">{t("芯片", "Chip")}</h4>
             </div>
             <div className="flex flex-col items-end gap-2">
               {nniSimulationControl ? (
@@ -398,10 +412,10 @@ export function NniPage({
           <div
             className={
               nniStatusLoading
-                ? "mt-4 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-3 text-sm text-sky-50"
+                ? "mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-sm text-sky-50"
                 : nniChipPresent && !nniSimulated
-                  ? "mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100"
-                  : "mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100"
+                  ? "mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-100"
+                  : "mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
             }
             role={nniStatusLoading ? "status" : undefined}
             aria-live="polite"
@@ -442,19 +456,19 @@ export function NniPage({
             )}
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
               <p className="text-[11px] tracking-[0.14em] text-white/45">slot</p>
               <p className="mt-2 text-sm font-semibold text-white/90">{nniStatus?.meta?.slot ?? "--"}</p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
               <p className="text-[11px] tracking-[0.14em] text-white/45">I2C</p>
               <p className="mt-2 text-sm font-semibold text-white/90">
                 {nniStatus?.meta?.i2c_address || "--"}
                 {nniStatus?.meta?.i2c_bus != null ? ` / bus ${nniStatus?.meta?.i2c_bus}` : ""}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3 sm:col-span-2">
+            <div className="col-span-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
               <p className="text-[11px] tracking-[0.14em] text-white/45">{t("公钥指纹", "Public key fingerprint")}</p>
               <p className="mt-2 break-all font-mono text-sm font-semibold text-white/90">
                 {nniStatus?.pubkey_fingerprint || nniStatus?.pubkey_preview || "--"}
@@ -463,11 +477,11 @@ export function NniPage({
           </div>
         </div>
 
-        <div className="theme-panel-soft p-5">
+        <div className="theme-panel-soft p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("加入状态", "Join state")}</p>
-              <h4 className="mt-2 text-lg font-semibold">{t("NNI 运行入口", "NNI runtime entry")}</h4>
+              <h4 className="mt-1 text-base font-semibold">{t("NNI 运行入口", "NNI runtime entry")}</h4>
             </div>
             <span
               className={
@@ -491,7 +505,7 @@ export function NniPage({
             </span>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
                 {t("远程 NNI 节点", "Remote NNI nodes")}
@@ -518,7 +532,7 @@ export function NniPage({
               </div>
             </div>
             <textarea
-              className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
+              className="theme-input mt-2 min-h-16 resize-y font-mono text-xs"
               placeholder={t(
                 "例如：https://nni-node.example.com\n多个节点可以一行一个，系统会按顺序尝试。",
                 "Example: https://nni-node.example.com\nUse one node per line. The system will try them in order.",
@@ -537,11 +551,11 @@ export function NniPage({
           </div>
 
           <div
-            className={`nni-runtime-board mt-4 min-h-[180px] rounded-2xl border p-4 ${
+            className={`nni-runtime-board mt-3 min-h-[112px] rounded-xl border p-3 ${
               nniRuntimeActivity ? "nni-runtime-board-active" : "nni-runtime-board-idle"
             }`}
           >
-            <div className="grid h-full min-h-[148px] grid-cols-6 gap-2 sm:grid-cols-8">
+            <div className="grid h-full min-h-[86px] grid-cols-6 gap-1.5 sm:grid-cols-8 xl:grid-cols-6 2xl:grid-cols-8">
               {NNI_RUNTIME_TILES.map((tile, index) => (
                 <div
                   key={index}
@@ -558,24 +572,24 @@ export function NniPage({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-3">
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/10 pt-3">
             <div>
               <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
                 {t("心跳请求次数", "Heartbeat requests")}
               </p>
-              <p className="mt-1 text-xl font-semibold text-white/90">{nniHeartbeatRequestCount}</p>
+              <p className="mt-1 text-lg font-semibold text-white/90">{nniHeartbeatRequestCount}</p>
             </div>
             <div>
               <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
                 {t("最近请求", "Latest request")}
               </p>
-              <p className="mt-1 text-sm font-medium text-white/75">{formatUnixDateTime(nniLastHeartbeatAtTs)}</p>
+              <p className="mt-1 break-words text-xs font-medium text-white/75">{formatUnixDateTime(nniLastHeartbeatAtTs)}</p>
             </div>
             <div>
               <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
                 {t("最近网络重试", "Latest network retries")}
               </p>
-              <p className="mt-1 text-sm font-medium text-white/75">
+              <p className="mt-1 text-xs font-medium text-white/75">
                 {nniLastHeartbeatNetworkFailures > 0
                   ? `${nniLastHeartbeatNetworkFailures} / ${nniHeartbeatRetryLimit}`
                   : `0 / ${nniHeartbeatRetryLimit}`}
@@ -583,7 +597,7 @@ export function NniPage({
             </div>
           </div>
 
-          <p className="mt-4 text-sm leading-7 text-white/65">
+          <p className="mt-3 text-xs leading-5 text-white/65">
             {nniChipMissing
               ? t(
                   "当前设备缺少芯片，因此不会显示为已加入。你仍可以继续使用 {product_name} 的其它功能。",
@@ -602,51 +616,79 @@ export function NniPage({
         </div>
       </section>
 
-      <section className="order-last theme-panel-soft p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-              {t("NNI 心跳错误", "NNI heartbeat errors")}
-            </p>
-            <h4 className="mt-2 text-lg font-semibold">{t("本机心跳错误记录", "Local heartbeat error history")}</h4>
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              {t(
-                `共 ${nniHeartbeatErrorsTotal} 条错误记录，每页 ${nniHeartbeatErrorsPageSize} 条。`,
-                `${nniHeartbeatErrorsTotal} error records total, ${nniHeartbeatErrorsPageSize} per page.`,
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void onFetchHeartbeatErrors(nniHeartbeatErrorsPage)}
-              disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing}
-              className="theme-secondary-btn px-3 py-2 text-xs"
-            >
-              {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {t("刷新错误", "Refresh errors")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void onClearHeartbeatErrors()}
-              disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing || nniHeartbeatErrorsTotal === 0}
-              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              title={t(
-                "只清理本机保存的心跳错误历史，不会修改远程服务端请求记录。",
-                "Only clears local heartbeat error history. Remote server request records are not changed.",
-              )}
-            >
-              {nniHeartbeatErrorsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              {t("清理错误", "Clear errors")}
-            </button>
-          </div>
-        </div>
+      <section className="order-last col-span-full theme-panel-soft p-5">
+        <NniHistoryTabs
+          activeView={nniHistoryView}
+          recordsTotal={nniHeartbeatRecordsTotal}
+          errorsTotal={nniHeartbeatErrorsTotal}
+          rewardsTotal={nniRewards?.reward_grant_count ?? 0}
+          t={t}
+          onChange={setNniHistoryView}
+        />
 
-        {nniHeartbeatErrorsError ? (
-          <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-            {t("NNI 心跳错误暂时无法载入：", "NNI heartbeat errors could not be loaded: ")}
-            {nniHeartbeatErrorsError}
-          </p>
+        {nniHistoryView === "rewards" ? (
+          <NniRewardsPanel
+            rewards={nniRewards}
+            loading={nniRewardsLoading}
+            error={nniRewardsError}
+            pageSize={nniRewardsPageSize}
+            t={t}
+            formatUnixDateTime={formatUnixDateTime}
+            onFetch={onFetchRewards}
+          />
+        ) : null}
+
+        {nniHistoryView === "errors" ? (
+          <div
+            id="nni-history-errors-panel"
+            role="tabpanel"
+            aria-labelledby="nni-history-errors-tab"
+            className="mt-5"
+          >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
+                {t("NNI 心跳错误", "NNI heartbeat errors")}
+              </p>
+              <h4 className="mt-2 text-lg font-semibold">{t("本机心跳错误记录", "Local heartbeat error history")}</h4>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                {t(
+                  `共 ${nniHeartbeatErrorsTotal} 条错误记录，每页 ${nniHeartbeatErrorsPageSize} 条。`,
+                  `${nniHeartbeatErrorsTotal} error records total, ${nniHeartbeatErrorsPageSize} per page.`,
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onFetchHeartbeatErrors(nniHeartbeatErrorsPage)}
+                disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing}
+                className="theme-secondary-btn px-3 py-2 text-xs"
+              >
+                {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {t("刷新错误", "Refresh errors")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onClearHeartbeatErrors()}
+                disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing || nniHeartbeatErrorsTotal === 0}
+                className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                title={t(
+                  "只清理本机保存的心跳错误历史，不会修改远程服务端请求记录。",
+                  "Only clears local heartbeat error history. Remote server request records are not changed.",
+                )}
+              >
+                {nniHeartbeatErrorsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {t("清理错误", "Clear errors")}
+              </button>
+            </div>
+          </div>
+
+          {nniHeartbeatErrorsError ? (
+            <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+              {t("NNI 心跳错误暂时无法载入：", "NNI heartbeat errors could not be loaded: ")}
+              {nniHeartbeatErrorsError}
+            </p>
         ) : null}
         {nniHeartbeatErrorsMessage ? (
           <p className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
@@ -710,55 +752,62 @@ export function NniPage({
             </button>
           </div>
         </div>
-      </section>
-
-      <section className="order-last theme-panel-soft p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-              {t("NNI 请求记录", "NNI request records")}
-            </p>
-            <h4 className="mt-2 text-lg font-semibold">{t("本机请求记录", "Local request records")}</h4>
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              {t(
-                `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${nniHeartbeatRecordsPageSize} 条。`,
-                `${nniHeartbeatRecordsTotal} records total, ${nniHeartbeatRecordsPageSize} per page.`,
-              )}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-white/45">
-              {t(
-                "这里保存本机看到的手动加入和自动心跳结果；远端服务端记录不再从 UI 拉取。",
-                "This stores manual Join and automatic Heartbeat results seen by this device. Remote server records are no longer fetched in the UI.",
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void onClearHeartbeatRecords()}
-              disabled={nniHeartbeatRecordsTotal === 0 || nniHeartbeatRecordsLoading || nniHeartbeatRecordsClearing}
-              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {nniHeartbeatRecordsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              {t("清理记录", "Clear records")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void onFetchHeartbeatRecords(nniHeartbeatRecordsPage)}
-              disabled={nniHeartbeatRecordsLoading}
-              className="theme-secondary-btn px-3 py-2 text-xs"
-            >
-              {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {t("刷新记录", "Refresh records")}
-            </button>
-          </div>
         </div>
+        ) : null}
 
-        {nniHeartbeatRecordsError ? (
-          <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-            {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
-            {nniHeartbeatRecordsError}
-          </p>
+        {nniHistoryView === "records" ? (
+          <div
+            id="nni-history-records-panel"
+            role="tabpanel"
+            aria-labelledby="nni-history-records-tab"
+            className="mt-5"
+          >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
+                {t("NNI 请求记录", "NNI request records")}
+              </p>
+              <h4 className="mt-2 text-lg font-semibold">{t("本机请求记录", "Local request records")}</h4>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                {t(
+                  `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${nniHeartbeatRecordsPageSize} 条。`,
+                  `${nniHeartbeatRecordsTotal} records total, ${nniHeartbeatRecordsPageSize} per page.`,
+                )}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-white/45">
+                {t(
+                  "这里保存本机看到的手动加入和自动心跳结果；远端服务端记录不再从 UI 拉取。",
+                  "This stores manual Join and automatic Heartbeat results seen by this device. Remote server records are no longer fetched in the UI.",
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onClearHeartbeatRecords()}
+                disabled={nniHeartbeatRecordsTotal === 0 || nniHeartbeatRecordsLoading || nniHeartbeatRecordsClearing}
+                className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {nniHeartbeatRecordsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {t("清理记录", "Clear records")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onFetchHeartbeatRecords(nniHeartbeatRecordsPage)}
+                disabled={nniHeartbeatRecordsLoading}
+                className="theme-secondary-btn px-3 py-2 text-xs"
+              >
+                {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {t("刷新记录", "Refresh records")}
+              </button>
+            </div>
+          </div>
+
+          {nniHeartbeatRecordsError ? (
+            <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+              {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
+              {nniHeartbeatRecordsError}
+            </p>
         ) : null}
         {nniHeartbeatRecordsMessage ? (
           <p className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs leading-5 text-emerald-100">
@@ -900,15 +949,17 @@ export function NniPage({
             </button>
           </div>
         </div>
+        </div>
+        ) : null}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <div className="theme-panel-soft p-5">
+      <section className="contents">
+        <div className="theme-panel-soft p-4">
           <div className="flex items-start gap-3">
             <Fingerprint className="mt-0.5 h-5 w-5 shrink-0 theme-icon-soft" />
             <div>
-              <h4 className="text-lg font-semibold">{t("设备签名操作", "Device signing actions")}</h4>
-              <p className="mt-2 text-sm leading-7 text-white/65">
+              <h4 className="text-base font-semibold">{t("设备签名操作", "Device signing actions")}</h4>
+              <p className="mt-1.5 text-xs leading-5 text-white/65">
                 {t(
                   "这些操作对应 Pi App 已预埋的 helper：slot 0 公钥、时间戳签名、TNG 设备公钥和证书链。",
                   "These actions map to the helper already built into the Pi App: Slot 0 public key, timestamp signing, TNG device public key, and certificate chain.",
@@ -917,14 +968,14 @@ export function NniPage({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-2">
+          <div className="mt-3 grid gap-1.5">
             {NNI_DEVICE_ACTIONS.map((action) => (
               <button
                 key={action}
                 type="button"
                 onClick={() => void onRunDeviceAction(action)}
                 disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
-                className="theme-topbar-btn justify-between px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                className="theme-topbar-btn min-w-0 justify-between px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                 title={
                   nniChipMissing
                     ? t("当前设备缺少芯片，不能执行该操作。", "This device has no chip, so this action cannot run.")
@@ -935,17 +986,17 @@ export function NniPage({
                   {nniActionLoading === action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cpu className="h-4 w-4" />}
                   {actionLabel(action)}
                 </span>
-                <span className="font-mono text-xs text-white/45">{action}</span>
+                <span className="ml-2 truncate font-mono text-[10px] text-white/45">{action}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="theme-panel-soft p-5">
+        <div className="theme-panel-soft p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h4 className="text-lg font-semibold">{t("最近一次结果", "Latest result")}</h4>
-              <p className="mt-2 text-sm text-white/60">
+              <h4 className="text-base font-semibold">{t("最近一次结果", "Latest result")}</h4>
+              <p className="mt-1.5 text-xs leading-5 text-white/60">
                 {nniActionResult
                   ? actionLabel(nniActionResult.action)
                   : t("执行一个设备签名操作后，这里会显示返回值。", "Run a device signing action to show its result here.")}

@@ -1,4 +1,7 @@
 use super::*;
+use axum::body::Body;
+use axum::http::Request;
+use tower::ServiceExt;
 
 #[test]
 fn nni_hardware_detection_uses_a_twelve_second_retry_window() {
@@ -64,4 +67,21 @@ fn nni_simulation_actions_have_stable_message_keys() {
         nni_action_message_key("sign_timestamp"),
         "nni.device_action.completed"
     );
+}
+
+#[tokio::test]
+async fn nni_reward_ledger_requires_ui_authentication() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let response = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state)
+        .oneshot(
+            Request::builder()
+                .uri("/v1/nni/rewards?page=1&per_page=10")
+                .body(Body::empty())
+                .expect("reward ledger request"),
+        )
+        .await
+        .expect("reward ledger response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
