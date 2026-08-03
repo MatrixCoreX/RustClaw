@@ -70,6 +70,8 @@ Agent Runtime's main natural-language path uses a Codex / Claude style agent loo
 
 ### Request and Agent Loop Flow
 
+Every request first travels the same intake path, regardless of channel:
+
 ```mermaid
 flowchart TD
     A[Channel / UI / API request] --> B[POST /v1/tasks]
@@ -79,8 +81,17 @@ flowchart TD
     D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
     E0 --> E1[Claim next queued task]
     E1 --> E{Task kind}
-    E -->|run_skill| RS[Direct run_skill path<br/>explicit skill_name only]
-    E -->|ask| F[Materialize text/audio/attachments]
+    E -->|ask| EA[Agent loop path<br/>continued in the next diagram]
+    E -->|run_skill| EB[Direct skill path<br/>continued in the next diagram]
+```
+
+The claimed task then continues below. A `kind=ask` task enters the agent
+loop; a `kind=run_skill` task takes the direct lane and joins the shared
+execution path without planner involvement:
+
+```mermaid
+flowchart TD
+    F0[kind=ask task<br/>from intake queue] --> F[Materialize text/audio/attachments]
     F --> G[TurnBoundaryEnvelope<br/>identity + explicit machine facts + safety/budget profile]
     G --> H[Ask context bundle<br/>memory provenance + recent execution + goal/journal refs]
     H --> J[Agent loop<br/>ordinary semantic authority]
@@ -93,7 +104,7 @@ flowchart TD
     Q -->|synthesize_answer| S[Grounded synthesis]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
     QP --> MG{Non-idempotent mutation?}
-    RS --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
+    RS[kind=run_skill task<br/>from intake queue, explicit skill_name only] --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
     RSG --> MG
     MG -->|yes| MI[Persist intent + deterministic idempotency key<br/>persist attempt before invocation]
     MG -->|no| EX{Execution adapter<br/>sandbox backend diagnostics when process-backed}
