@@ -516,6 +516,27 @@ def structural_assertions(
             }
         )
 
+    forbidden_capabilities = token_tags(tags, "forbid_capability")
+    for forbidden_capability in forbidden_capabilities:
+        matched_steps = [
+            step
+            for step in calls
+            if forbidden_capability
+            in {
+                str(step.get("requested_capability") or ""),
+                str(step.get("resolved_capability") or ""),
+            }
+        ]
+        details.append(
+            {
+                "kind": "tag",
+                "tag": "forbid_capability",
+                "expected_absent": forbidden_capability,
+                "matched_call_count": len(matched_steps),
+                "ok": not matched_steps,
+            }
+        )
+
     for required_capability, minimum_count in counted_capability_tags(
         tags,
         "min_successful_capability_calls",

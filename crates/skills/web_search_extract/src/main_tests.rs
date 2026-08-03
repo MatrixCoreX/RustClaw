@@ -12,8 +12,28 @@ fn input_for_test() -> SearchInput {
         domains_allow: Vec::new(),
         domains_deny: Vec::new(),
         backend: Some("duckduckgo_html".to_string()),
+        backend_policy: BackendPolicy::Auto,
         include_snippet: true,
     }
+}
+
+fn provider_config_for_test() -> SearchProviderConfig {
+    parse_provider_config(
+        r#"
+schema_version = 1
+auto_provider_limit = 2
+auto_order = ["duckduckgo_html", "bing_html"]
+
+[providers.duckduckgo_html]
+enabled = true
+auto_enabled = true
+
+[providers.bing_html]
+enabled = true
+auto_enabled = true
+"#,
+    )
+    .expect("test provider config")
 }
 
 #[test]
@@ -116,6 +136,124 @@ fn parse_bing_html_results_extracts_title_url_and_snippet() {
 }
 
 #[test]
+fn embedded_provider_config_registers_every_supported_general_backend() {
+    let config = parse_provider_config(EMBEDDED_PROVIDER_CONFIG).expect("embedded provider config");
+    let expected = [
+        "serpapi",
+        "baidu_ai",
+        "brave",
+        "searxng",
+        "tavily",
+        "perplexity",
+        "exa",
+        "you",
+        "mojeek",
+        "kagi",
+        "duckduckgo_html",
+        "bing_html",
+    ];
+    for name in expected {
+        let backend = Backend::from_name(name).expect("registered backend");
+        assert!(backend.is_general());
+        assert!(config.providers.contains_key(backend.as_str()));
+        assert!(config.auto_order.iter().any(|item| item == name));
+    }
+    assert!(config.providers["duckduckgo_html"].auto_enabled);
+    assert!(!config.providers["kagi"].auto_enabled);
+}
+
+#[test]
+fn typed_json_provider_parsers_normalize_documented_response_shapes() {
+    let fixtures: Vec<(Vec<SearchItem>, &str, &str)> = vec![
+        (
+            parse_baidu_ai_response(&json!({"references":[{"title":"Baidu","url":"https://baidu.example/a","snippet":"one"}]})),
+            "Baidu",
+            "one",
+        ),
+        (
+            parse_brave_response(&json!({"web":{"results":[{"title":"Brave","url":"https://brave.example/a","description":"two"}]}})),
+            "Brave",
+            "two",
+        ),
+        (
+            parse_searxng_response(&json!({"results":[{"title":"SearXNG","url":"https://searx.example/a","content":"three"}]})),
+            "SearXNG",
+            "three",
+        ),
+        (
+            parse_tavily_response(&json!({"results":[{"title":"Tavily","url":"https://tavily.example/a","content":"four"}]})),
+            "Tavily",
+            "four",
+        ),
+        (
+            parse_perplexity_response(&json!({"results":[{"title":"Perplexity","url":"https://perplexity.example/a","snippet":"five"}]})),
+            "Perplexity",
+            "five",
+        ),
+        (
+            parse_exa_response(&json!({"results":[{"title":"Exa","url":"https://exa.example/a","highlights":["six", "continued"]}]})),
+            "Exa",
+            "six continued",
+        ),
+        (
+            parse_you_response(&json!({"results":{"web":[{"title":"You","url":"https://you.example/a","snippets":["seven"]}],"news":[]}})),
+            "You",
+            "seven",
+        ),
+        (
+            parse_mojeek_response(&json!({"response":{"status":"OK","results":[{"title":"Mojeek","url":"https://mojeek.example/a","desc":"eight"}]}})).expect("mojeek response"),
+            "Mojeek",
+            "eight",
+        ),
+        (
+            parse_kagi_response(&json!({"data":[{"t":1,"list":["ignored"]},{"t":0,"title":"Kagi","url":"https://kagi.example/a","snippet":"nine"}]})),
+            "Kagi",
+            "nine",
+        ),
+    ];
+
+    for (items, title, snippet) in fixtures {
+        assert_eq!(items.len(), 1, "{title}");
+        assert_eq!(items[0].title, title);
+        assert_eq!(items[0].snippet.as_deref(), Some(snippet));
+        assert!(items[0].source.ends_with(".example"));
+    }
+}
+
+#[test]
+fn provider_config_rejects_duplicate_or_unknown_automatic_sources() {
+    for raw in [
+        r#"
+schema_version = 1
+auto_provider_limit = 1
+auto_order = ["unknown"]
+[providers.unknown]
+enabled = true
+auto_enabled = true
+"#,
+        r#"
+schema_version = 1
+auto_provider_limit = 2
+auto_order = ["bing_html", "bing"]
+[providers.bing_html]
+enabled = true
+auto_enabled = true
+"#,
+    ] {
+        let error = parse_provider_config(raw).expect_err("invalid provider config");
+        assert_eq!(error.code, "SEARCH_CONFIG_INVALID");
+    }
+}
+
+#[test]
+fn mojeek_error_status_is_not_treated_as_an_empty_success() {
+    assert!(parse_mojeek_response(&json!({
+        "response": {"status": "ERROR: Daily Limit Reached", "results": []}
+    }))
+    .is_err());
+}
+
+#[test]
 fn duckduckgo_parser_accepts_multi_class_result_body_and_redirects() {
     let input = SearchInput {
         query: "Agent Runtime GitHub".to_string(),
@@ -135,16 +273,89 @@ fn duckduckgo_parser_accepts_multi_class_result_body_and_redirects() {
 
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].title, "Agent Runtime - GitHub");
-    assert_eq!(items[0].url, "https://github.com/Adaimade/Agent Runtime");
+    assert_eq!(items[0].url, "https://github.com/Adaimade/Agent%20Runtime");
     assert_eq!(items[0].source, "github.com");
     assert_eq!(items[0].snippet.as_deref(), Some("Agent Runtime repo."));
 }
 
 #[test]
-fn missing_backend_defaults_to_duckduckgo_html() {
-    let backend = resolve_backend(None).expect("default backend");
+fn automatic_backend_plan_uses_multiple_sources_without_serpapi() {
+    let plan = build_backend_plan(None, BackendPolicy::Auto, &provider_config_for_test())
+        .expect("backend plan");
 
-    assert!(matches!(backend, Backend::DuckDuckGoHtml));
+    assert_eq!(plan, vec![Backend::DuckDuckGoHtml, Backend::BingHtml]);
+}
+
+#[test]
+fn preferred_backend_stays_first_but_does_not_disable_other_sources() {
+    let plan = build_backend_plan(
+        Some("bing_html"),
+        BackendPolicy::Auto,
+        &provider_config_for_test(),
+    )
+    .expect("preferred backend plan");
+
+    assert_eq!(plan, vec![Backend::BingHtml, Backend::DuckDuckGoHtml]);
+}
+
+#[test]
+fn strict_backend_plan_honors_an_explicit_source_boundary() {
+    let plan = build_backend_plan(
+        Some("bing_html"),
+        BackendPolicy::Strict,
+        &provider_config_for_test(),
+    )
+    .expect("strict backend plan");
+
+    assert_eq!(plan, vec![Backend::BingHtml]);
+}
+
+#[test]
+fn disabled_preference_falls_back_in_auto_but_fails_in_strict_mode() {
+    let mut config = provider_config_for_test();
+    config.providers.get_mut("bing_html").unwrap().enabled = false;
+
+    let auto = build_backend_plan(Some("bing_html"), BackendPolicy::Auto, &config)
+        .expect("automatic policy may ignore a disabled preference");
+    assert_eq!(auto, vec![Backend::DuckDuckGoHtml]);
+
+    let strict = build_backend_plan(Some("bing_html"), BackendPolicy::Strict, &config)
+        .expect_err("strict source boundary must report a disabled provider");
+    assert_eq!(strict.code, "SEARCH_PROVIDER_UNAVAILABLE");
+}
+
+#[test]
+fn explicit_domain_sources_join_auto_plan_but_not_strict_plan() {
+    let auto_input = SearchInput {
+        domains_allow: vec!["docs.rs".to_string(), "github.com".to_string()],
+        ..input_for_test()
+    };
+    let mut auto_plan = build_backend_plan(None, BackendPolicy::Auto, &provider_config_for_test())
+        .expect("auto plan");
+    append_explicit_domain_backends(&auto_input, &mut auto_plan);
+    assert_eq!(
+        auto_plan,
+        vec![
+            Backend::DuckDuckGoHtml,
+            Backend::BingHtml,
+            Backend::DocsRsSearch,
+            Backend::GitHubRepositories,
+        ]
+    );
+
+    let strict_input = SearchInput {
+        backend_policy: BackendPolicy::Strict,
+        domains_allow: vec!["docs.rs".to_string()],
+        ..input_for_test()
+    };
+    let mut strict_plan = build_backend_plan(
+        Some("bing_html"),
+        BackendPolicy::Strict,
+        &provider_config_for_test(),
+    )
+    .expect("strict plan");
+    append_explicit_domain_backends(&strict_input, &mut strict_plan);
+    assert_eq!(strict_plan, vec![Backend::BingHtml]);
 }
 
 #[test]
@@ -180,8 +391,57 @@ fn parse_input_treats_blank_optional_string_selectors_as_absent() {
     assert_eq!(input.lang, None);
     assert_eq!(input.time_range, None);
     assert_eq!(input.backend, None);
+    assert_eq!(input.backend_policy, BackendPolicy::Auto);
     assert!(input.domains_allow.is_empty());
     assert!(input.domains_deny.is_empty());
+}
+
+#[test]
+fn parse_input_requires_explicit_strict_policy_for_single_source_search() {
+    let preferred = parse_input(&json!({
+        "request_id": "preferred-backend",
+        "args": {
+            "action": "search_extract",
+            "query": "financial news",
+            "backend": "bing_html"
+        }
+    }))
+    .expect("a backend alone is only a preference");
+    assert_eq!(preferred.backend_policy, BackendPolicy::Auto);
+
+    let strict = parse_input(&json!({
+        "request_id": "strict-backend",
+        "args": {
+            "action": "search_extract",
+            "query": "financial news",
+            "backend": "bing_html",
+            "backend_policy": "strict"
+        }
+    }))
+    .expect("explicit strict source boundary");
+    assert_eq!(strict.backend_policy, BackendPolicy::Strict);
+
+    let invalid = parse_input(&json!({
+        "request_id": "invalid-policy",
+        "args": {
+            "action": "search_extract",
+            "query": "financial news",
+            "backend_policy": "single"
+        }
+    }))
+    .expect_err("unknown source policy must not be guessed");
+    assert_eq!(invalid.code, "INVALID_INPUT");
+
+    let missing_backend = parse_input(&json!({
+        "request_id": "strict-without-backend",
+        "args": {
+            "action": "search_extract",
+            "query": "financial news",
+            "backend_policy": "strict"
+        }
+    }))
+    .expect_err("strict source policy requires an exact backend");
+    assert_eq!(missing_backend.code, "INVALID_INPUT");
 }
 
 #[test]
@@ -218,6 +478,18 @@ fn docs_rs_fallback_requires_explicit_domain_scope() {
 
     assert!(!domain_explicitly_allowed(&generic, "docs.rs"));
     assert!(domain_explicitly_allowed(&docs_scoped, "docs.rs"));
+}
+
+#[test]
+fn github_fallback_requires_explicit_domain_scope() {
+    let generic = input_for_test();
+    let github_scoped = SearchInput {
+        domains_allow: vec!["github.com".to_string()],
+        ..input_for_test()
+    };
+
+    assert!(!domain_explicitly_allowed(&generic, "github.com"));
+    assert!(domain_explicitly_allowed(&github_scoped, "github.com"));
 }
 
 #[test]
@@ -308,6 +580,76 @@ fn backend_page_payload_continues_after_former_cursor_100() {
         .is_some_and(|token| token.starts_with("web_search_v1:103:")));
 }
 
+fn backend_item(title: &str, url: &str) -> SearchItem {
+    SearchItem {
+        title: title.to_string(),
+        url: url.to_string(),
+        snippet: None,
+        source: String::new(),
+        rank: 0,
+        field_truncations: None,
+    }
+}
+
+#[test]
+fn aggregation_keeps_working_results_when_another_backend_fails() {
+    let input = input_for_test();
+    let aggregated = aggregate_backend_outcomes(
+        &input,
+        vec![
+            BackendOutcome {
+                backend: Backend::BingHtml,
+                result: Err("bing request failed".to_string()),
+            },
+            BackendOutcome {
+                backend: Backend::DuckDuckGoHtml,
+                result: Ok(vec![backend_item(
+                    "Financial News",
+                    "https://example.com/finance",
+                )]),
+            },
+        ],
+    );
+
+    assert_eq!(aggregated.items.len(), 1);
+    assert_eq!(aggregated.backends_used, vec!["duckduckgo_html"]);
+    assert_eq!(aggregated.backend_attempts[0].status, "error");
+    assert_eq!(aggregated.backend_attempts[1].status, "ok");
+}
+
+#[test]
+fn aggregation_round_robins_sources_and_deduplicates_urls() {
+    let input = input_for_test();
+    let aggregated = aggregate_backend_outcomes(
+        &input,
+        vec![
+            BackendOutcome {
+                backend: Backend::DuckDuckGoHtml,
+                result: Ok(vec![
+                    backend_item("DDG One", "https://one.example/item"),
+                    backend_item("Shared", "https://shared.example/item"),
+                ]),
+            },
+            BackendOutcome {
+                backend: Backend::BingHtml,
+                result: Ok(vec![
+                    backend_item("Bing One", "https://two.example/item"),
+                    backend_item("Shared Duplicate", "https://shared.example/item"),
+                ]),
+            },
+        ],
+    );
+
+    assert_eq!(aggregated.items.len(), 3);
+    assert_eq!(aggregated.items[0].title, "DDG One");
+    assert_eq!(aggregated.items[1].title, "Bing One");
+    assert_eq!(aggregated.items[2].title, "Shared");
+    assert_eq!(
+        aggregated.backends_used,
+        vec!["duckduckgo_html", "bing_html"]
+    );
+}
+
 #[test]
 fn error_response_uses_outer_skill_error_contract() {
     let response = error_response(
@@ -335,6 +677,55 @@ fn error_response_uses_outer_skill_error_contract() {
             .and_then(Value::as_bool),
         Some(false)
     );
+    assert_eq!(
+        response
+            .pointer("/extra/side_effect_applied")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        response
+            .pointer("/extra/failure_phase")
+            .and_then(Value::as_str),
+        Some("pre_dispatch")
+    );
+}
+
+#[test]
+fn automatic_search_failure_requests_bounded_source_replan() {
+    let response = error_response(
+        "request-8",
+        &SearchError::new("SEARCH_FAILED", "all sources failed").execution_failure(
+            vec![BackendAttempt {
+                backend: "bing_html".to_string(),
+                status: "error",
+                result_count: 0,
+                error: Some("bing request failed".to_string()),
+            }],
+            true,
+        ),
+    );
+
+    assert_eq!(response["extra"]["retryable"], true);
+    assert_eq!(response["extra"]["side_effect_applied"], false);
+    assert_eq!(response["extra"]["failure_phase"], "execution_no_effect");
+    assert_eq!(response["extra"]["recovery_action"], "replan_arguments");
+    assert_eq!(
+        response["extra"]["backend_attempts"][0]["backend"],
+        "bing_html"
+    );
+}
+
+#[test]
+fn strict_source_failure_does_not_authorize_switching_sources() {
+    let response = error_response(
+        "request-9",
+        &SearchError::new("SEARCH_FAILED", "selected source failed")
+            .execution_failure(vec![], false),
+    );
+
+    assert_eq!(response["extra"]["retryable"], true);
+    assert_eq!(response["extra"]["recovery_action"], Value::Null);
 }
 
 #[test]

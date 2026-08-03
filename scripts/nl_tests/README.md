@@ -45,6 +45,10 @@ Runner output prints each user instruction and assistant answer as `PROMPT` / `R
 blocks by default. Use `--prompt-reply-only` when you want to suppress most
 diagnostic output and keep only those dialog blocks.
 
+Manual-case tags may require an observed call with `capability:<token>` or
+assert a source boundary with `forbid_capability:<token>`. The latter passes
+only when no actual call step resolves to that capability.
+
 Static runtime hard-match guard:
 
 - `python3 scripts/check_no_nl_hardmatch.py`

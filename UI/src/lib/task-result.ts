@@ -910,6 +910,10 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     const knownDetail =
       detailKey === "media_download.precheck.starting"
         ? tLocal("正在检查媒体任务所需条件。", "Checking the media task requirements.")
+        : detailKey === "skill_dispatch.queue.waiting"
+          ? tLocal("当前任务已进入队列，将按顺序处理。", "This task is queued and will run in order.")
+          : detailKey === "skill_dispatch.queue.started"
+            ? tLocal("前一个任务已结束，正在开始处理。", "The previous task finished; processing is starting.")
         : detailKey === "kb.operation.starting"
           ? tLocal("正在准备知识库操作。", "Preparing the knowledge-base operation.")
           : detailKey === "package_manager.operation.starting"

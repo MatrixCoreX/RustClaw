@@ -1,0 +1,70 @@
+# Central provider policy for the web_search_extract skill.
+# Credentials stay in environment variables; this file only controls admission
+# to automatic aggregation. A provider with auto_enabled = false remains
+# available when the user explicitly selects it with backend_policy = "strict".
+schema_version = 1
+auto_provider_limit = 8
+auto_order = [
+  "duckduckgo_html",
+  "bing_html",
+  "serpapi",
+  "baidu_ai",
+  "brave",
+  "searxng",
+  "tavily",
+  "perplexity",
+  "exa",
+  "you",
+  "mojeek",
+  "kagi",
+]
+
+[providers.duckduckgo_html]
+enabled = true
+auto_enabled = true
+
+[providers.bing_html]
+enabled = true
+auto_enabled = true
+
+[providers.serpapi]
+enabled = true
+auto_enabled = true
+
+[providers.baidu_ai]
+enabled = true
+auto_enabled = true
+
+[providers.brave]
+enabled = true
+auto_enabled = true
+
+[providers.searxng]
+enabled = true
+auto_enabled = true
+
+[providers.tavily]
+enabled = true
+auto_enabled = true
+
+# These metered providers are integrated and can be selected explicitly. They
+# are opt-in for automatic fan-out to avoid surprising API charges.
+[providers.perplexity]
+enabled = true
+auto_enabled = false
+
+[providers.exa]
+enabled = true
+auto_enabled = false
+
+[providers.you]
+enabled = true
+auto_enabled = false
+
+[providers.mojeek]
+enabled = true
+auto_enabled = false
+
+[providers.kagi]
+enabled = true
+auto_enabled = false

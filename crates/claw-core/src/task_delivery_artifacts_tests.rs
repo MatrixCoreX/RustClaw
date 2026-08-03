@@ -50,6 +50,30 @@ fn result_with_artifact(
     result
 }
 
+fn append_artifact(
+    result: &mut Value,
+    task_id: &str,
+    artifact_id: &str,
+    filename: &str,
+    kind: &str,
+    mime_type: &str,
+    size_bytes: u64,
+) {
+    result["artifacts"]
+        .as_array_mut()
+        .expect("artifacts array")
+        .push(serde_json::json!({
+            "schema_version": 1,
+            "id": artifact_id,
+            "filename": filename,
+            "kind": kind,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "sha256": "b".repeat(64),
+            "download_url": format!("/v1/tasks/{task_id}/artifacts/{artifact_id}/content")
+        }));
+}
+
 fn write_delivery_artifact(
     workspace: &Path,
     task_id: &str,
@@ -146,6 +170,99 @@ fn structured_image_is_added_when_model_only_returns_prose() {
             canonical_path.display()
         )]
     );
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn explicit_user_file_excludes_internal_skill_output_artifact() {
+    let workspace = temp_workspace("task_delivery_explicit_selection");
+    let task_id = "task-explicit-selection";
+    let internal_id = "skill-output:search-result";
+    let user_id = "transcript-result";
+    write_delivery_artifact(
+        &workspace,
+        task_id,
+        internal_id,
+        "search-results.json",
+        b"internal-json",
+    );
+    let user_path = write_delivery_artifact(
+        &workspace,
+        task_id,
+        user_id,
+        "image_text_ai.txt",
+        b"user transcript",
+    );
+    let mut result = result_with_artifact(
+        task_id,
+        internal_id,
+        "search-results.json",
+        "file",
+        "application/json",
+        13,
+        None,
+    );
+    append_artifact(
+        &mut result,
+        task_id,
+        user_id,
+        "image_text_ai.txt",
+        "file",
+        "text/plain",
+        15,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["转写完成\nFILE:/source/image_text_ai.txt".to_string()],
+    );
+
+    assert_eq!(
+        messages,
+        vec![format!(
+            "转写完成\nFILE:{}",
+            user_path
+                .canonicalize()
+                .expect("canonical user file")
+                .display()
+        )]
+    );
+    assert!(!messages[0].contains("search-results.json"));
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn internal_skill_output_is_not_auto_delivered_with_prose() {
+    let workspace = temp_workspace("task_delivery_internal_default");
+    let task_id = "task-internal-default";
+    let artifact_id = "skill-output:search-result";
+    write_delivery_artifact(
+        &workspace,
+        task_id,
+        artifact_id,
+        "search-results.json",
+        b"internal-json",
+    );
+    let result = result_with_artifact(
+        task_id,
+        artifact_id,
+        "search-results.json",
+        "file",
+        "application/json",
+        13,
+        None,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["检索已完成。".to_string()],
+    );
+
+    assert_eq!(messages, vec!["检索已完成。"]);
     fs::remove_dir_all(workspace).ok();
 }
 

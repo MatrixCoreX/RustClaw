@@ -106,7 +106,7 @@ install_mode = "on_demand"
 package_manifest = "optional_skills/media_download/skill.toml"
 storage = { kind = "directory", schema_version = 1, migration_owner = "media_download" }
 aliases = ["media_downloader", "download_media", "video_download"]
-max_concurrency = 1
+dispatch_queue = { scope = "user", actions = ["download", "resolve", "transcribe", "ocr", "prepare_x"] }
 progress_frames = true
 prompt_file = "prompts/layers/generated/skills/media_download.md"
 output_kind = "file"
@@ -948,8 +948,8 @@ package_manifest = "crates/skills/rss_fetch/skill.toml"
 supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "rss_fetch" }
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
-description = "Fetch configured RSS/Atom feeds and maintain a verified source-candidate lifecycle. The model may propose evidence-backed candidates, but deterministic URL/feed validation and explicit confirmed promotion control active configuration."
-description_zh = "获取已配置的 RSS/Atom 订阅，并通过验证、预览和明确确认管理候选订阅源。"
+description = "Fetch configured RSS/Atom feeds and maintain a verified source-candidate lifecycle. For source-unspecified current-information research, pair the RSS category catalog and matching feed evidence with web_search_extract; honor explicit RSS-only or web-only boundaries."
+description_zh = "获取已配置的 RSS/Atom 订阅；未指定来源的时效信息检索应与网页搜索配合，明确指定 RSS 或网页时严格遵守来源边界。"
 semantic_tags = ["rss.fetch_entries", "rss.latest", "rss.feed_fetch", "rss.source_health", "rss.source_discovery", "external_news"]
 capabilities = ["net", "fs.write"]
 risk_level = "low"
@@ -959,7 +959,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
 output_kind = "text"
 planner_capabilities = [
-  { name = "rss.latest_news", action = "latest", description = "Fetch current entries from one configured RSS category. If the category catalog is unknown, call rss.list_categories instead of inventing a category token.", semantic_tags = ["rss.latest", "news.by_configured_category"], effect = "observe", optional = ["category", "limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll" },
+  { name = "rss.latest_news", action = "latest", description = "Fetch current entries from one configured RSS category. If the category catalog is unknown, call rss.list_categories instead of inventing a category token. For source-unspecified current-information research, combine matching RSS evidence with web.search_results; do not add web when the user explicitly requests RSS only.", semantic_tags = ["rss.latest", "news.by_configured_category", "research.multi_source_evidence"], effect = "observe", optional = ["category", "limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll" },
   { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll" },
   { name = "rss.list_categories", action = "list_categories", description = "List configured category tokens, the default category, and pending model-proposed categories without network access.", semantic_tags = ["rss.category_catalog", "rss.category_discovery"], effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "rss.source_health", action = "source_health", description = "Inspect active source counts and discovery health for one configured category or all categories.", semantic_tags = ["rss.source_health"], effect = "observe", optional = ["category"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1896,21 +1896,34 @@ package_manifest = "crates/skills/web_search_extract/skill.toml"
 aliases = ["search_extract", "web_search", "web_extract"]
 timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
+config_files = ["configs/web_search_providers.toml"]
 output_kind = "text"
-description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
-description_zh = "搜索网页并返回规范化结果、摘要、引用和可继续提取的链接。"
-semantic_tags = ["web.search_results", "search_results", "external_web_search", "url_discovery"]
-capabilities = ["net"]
+description = "Search multiple available web backends by default, merge normalized result metadata, snippets, citations, and extract-ready URLs, and honor explicit user source restrictions. For source-unspecified current-information research, pair web evidence with a matching configured RSS category."
+description_zh = "默认使用多个网页搜索源并合并结果；用户指定搜索引擎或站点时严格遵守，未指定来源的时效信息检索同时结合匹配的 RSS 分类。"
+semantic_tags = ["web.search_results", "search_results", "external_web_search", "url_discovery", "research.multi_source_evidence"]
+capabilities = [
+  "net",
+  "secrets.serpapi_api_key",
+  "secrets.baidu_ai_search_api_key",
+  "secrets.brave_search_api_key",
+  "secrets.searxng_api_key",
+  "secrets.tavily_api_key",
+  "secrets.perplexity_api_key",
+  "secrets.exa_api_key",
+  "secrets.you_search_api_key",
+  "secrets.mojeek_api_key",
+  "secrets.kagi_api_token",
+]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
 supported_os = ["linux", "macos"]
 platform_notes = ["Search backend requires network and backend/API configuration."]
 planner_capabilities = [
-  { name = "web.search_results", action = "search_extract", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
-  { name = "web.search", action = "search", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "web.search_results", action = "search_extract", description = "Search all available web backends and merge results by default. Omit backend for ordinary searches. Use backend_policy=strict only when the user explicitly names a search engine; use domains_allow for a user-named website. For source-unspecified current-information research, also use rss.list_categories and matching rss.latest_news evidence.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "web.search", action = "search", description = "Search all available web backends and merge results by default. Preserve an explicit user source boundary with backend_policy=strict or domains_allow; do not select a single backend for an ordinary search.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
 ]
-input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, cursor = { type = "integer", minimum = 0 }, continuation = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 20 }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string", enum = ["serpapi", "duckduckgo_html", "bing_html"] }, include_snippet = { type = "boolean" } } }
+input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, cursor = { type = "integer", minimum = 0 }, continuation = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 20 }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string", enum = ["serpapi", "baidu_ai", "brave", "searxng", "tavily", "perplexity", "exa", "you", "mojeek", "kagi", "duckduckgo_html", "bing_html"] }, backend_policy = { type = "string", enum = ["auto", "strict"] }, include_snippet = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]

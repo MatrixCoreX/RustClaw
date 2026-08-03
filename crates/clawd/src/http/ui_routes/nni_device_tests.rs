@@ -91,6 +91,46 @@ async fn nni_reward_ledger_requires_ui_authentication() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn nni_bancor_routes_require_ui_authentication() {
+    for (method, uri, body) in [
+        ("GET", "/v1/nni/bancor/market", ""),
+        (
+            "GET",
+            "/v1/nni/bancor/candles?interval_seconds=3600&limit=120",
+            "",
+        ),
+        ("GET", "/v1/nni/bancor/account?page=1&per_page=20", ""),
+        (
+            "POST",
+            "/v1/nni/bancor/quote",
+            r#"{"side":"sell","input_amount":"1.0000"}"#,
+        ),
+        (
+            "POST",
+            "/v1/nni/bancor/trade",
+            r#"{"side":"sell","input_amount":"1.0000","min_output":"0.0001"}"#,
+        ),
+    ] {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        let mut builder = Request::builder().method(method).uri(uri);
+        if method == "POST" {
+            builder = builder.header("content-type", "application/json");
+        }
+        let response = axum::Router::new()
+            .nest("/v1", build_ui_router())
+            .with_state(state)
+            .oneshot(builder.body(Body::from(body)).expect("Bancor request"))
+            .await
+            .expect("Bancor response");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {uri}"
+        );
+    }
+}
+
 struct NniRuntimeStateTestWorkspace {
     root: PathBuf,
 }

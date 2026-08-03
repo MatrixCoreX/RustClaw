@@ -567,6 +567,19 @@ fn provider_backed_media_actions_keep_required_runtime_capabilities() {
 fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
+    const WEB_SEARCH_CAPABILITIES: &[&str] = &[
+        "net",
+        "secrets.baidu_ai_search_api_key",
+        "secrets.brave_search_api_key",
+        "secrets.exa_api_key",
+        "secrets.kagi_api_token",
+        "secrets.mojeek_api_key",
+        "secrets.perplexity_api_key",
+        "secrets.searxng_api_key",
+        "secrets.serpapi_api_key",
+        "secrets.tavily_api_key",
+        "secrets.you_search_api_key",
+    ];
     let main_expected_with_caps: &[(&str, &[&str])] = &[
         // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用
         // secrets capability；image_generate 仍显式要求专用生成 key。
@@ -622,7 +635,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("task_control", &["net"]),
         ("video_generate", &["fs.read", "fs.write", "llm", "net"]),
         ("weather", &["net"]),
-        ("web_search_extract", &["net"]),
+        ("web_search_extract", WEB_SEARCH_CAPABILITIES),
         ("workspace_patch", &["fs.read", "fs.write"]),
         ("write_file", &["fs.write"]),
     ];
@@ -679,7 +692,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("task_control", &["net"]),
         ("video_generate", &["fs.read", "fs.write", "llm", "net"]),
         ("weather", &["net"]),
-        ("web_search_extract", &["net"]),
+        ("web_search_extract", WEB_SEARCH_CAPABILITIES),
         ("workspace_patch", &["fs.read", "fs.write"]),
         ("write_file", &["fs.write"]),
     ];
@@ -974,6 +987,18 @@ fn provision_secret_envs_matches_manifest_expectation() {
     // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）。
     // image_edit / image_vision 通过 provider-neutral 主模型桥获取短期凭据，
     // 因此两份 manifest 都不再声明 vendor 专属 secret。
+    const WEB_SEARCH_SECRET_ENVS: &[&str] = &[
+        "BAIDU_AI_SEARCH_API_KEY",
+        "BRAVE_SEARCH_API_KEY",
+        "EXA_API_KEY",
+        "KAGI_API_TOKEN",
+        "MOJEEK_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "SEARXNG_API_KEY",
+        "SERPAPI_API_KEY",
+        "TAVILY_API_KEY",
+        "YOU_SEARCH_API_KEY",
+    ];
     let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
@@ -985,6 +1010,7 @@ fn provision_secret_envs_matches_manifest_expectation() {
                 "GOOGLE_PLACES_API_KEY",
             ],
         ),
+        ("web_search_extract", WEB_SEARCH_SECRET_ENVS.to_vec()),
     ]);
     let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
@@ -996,6 +1022,7 @@ fn provision_secret_envs_matches_manifest_expectation() {
                 "GOOGLE_PLACES_API_KEY",
             ],
         ),
+        ("web_search_extract", WEB_SEARCH_SECRET_ENVS.to_vec()),
     ]);
 
     let registry_paths = [

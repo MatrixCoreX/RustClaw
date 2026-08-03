@@ -44,6 +44,28 @@ test("renders audited skill progress keys without displaying arbitrary params", 
   assert.equal(JSON.stringify(view).includes("do not render me"), false);
 });
 
+test("renders user-scoped skill queue progress", () => {
+  const view = buildTaskTraceEventView(
+    {
+      seq: 10,
+      event_type: "skill_progress",
+      payload: {
+        skill_name: "media_download",
+        frame: {
+          kind: "progress",
+          detail_key: "skill_dispatch.queue.waiting",
+          params: { queue_scope: "user" },
+          current: 0,
+          total: 1,
+        },
+      },
+    },
+    "zh",
+  );
+
+  assert.equal(view.detail, "当前任务已进入队列，将按顺序处理。 进度 0/1。");
+});
+
 test("restores the latest skill progress event from the task query projection", () => {
   const result: TaskQueryResponse = {
     task_id: "task-progress",

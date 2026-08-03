@@ -36,6 +36,7 @@
   --theme-primary-btn-end-hover: #ff7440;
   --theme-panel-shadow: 0 14px 36px rgba(6, 10, 18, 0.16);
   --theme-panel-shadow-soft: 0 8px 20px rgba(6, 10, 18, 0.1);
+  --theme-block-shadow: 0 18px 42px rgba(3, 6, 12, 0.34), 0 3px 10px rgba(3, 6, 12, 0.2);
   --theme-sidebar-bg: rgba(255, 255, 255, 0.04);
   --theme-sidebar-item-bg: rgba(255, 255, 255, 0.025);
   --theme-sidebar-item-hover: rgba(255, 255, 255, 0.06);
@@ -80,6 +81,7 @@
   --theme-primary-btn-end-hover: #506179;
   --theme-panel-shadow: 0 14px 30px rgba(42, 46, 52, 0.1);
   --theme-panel-shadow-soft: 0 8px 18px rgba(42, 46, 52, 0.06);
+  --theme-block-shadow: 0 18px 38px rgba(42, 46, 52, 0.16), 0 3px 10px rgba(42, 46, 52, 0.1);
   --theme-sidebar-bg: rgba(215, 219, 223, 0.98);
   --theme-sidebar-item-bg: rgba(227, 230, 233, 0.94);
   --theme-sidebar-item-hover: rgba(207, 210, 213, 0.96);
@@ -173,6 +175,12 @@
     border-color: var(--theme-border);
     background: var(--theme-card-strong);
     box-shadow: none;
+  }
+
+  .theme-shadow-card {
+    @apply rounded-[22px];
+    background: var(--theme-card);
+    box-shadow: var(--theme-block-shadow);
   }
 
   .theme-shell {

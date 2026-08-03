@@ -252,6 +252,11 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/heartbeat/records", get(nni_request_records))
         .route("/nni/heartbeat/errors", get(nni_heartbeat_errors))
         .route("/nni/rewards", get(nni_rewards))
+        .route("/nni/bancor/market", get(nni_bancor_market))
+        .route("/nni/bancor/candles", get(nni_bancor_candles))
+        .route("/nni/bancor/quote", post(nni_bancor_quote))
+        .route("/nni/bancor/account", get(nni_bancor_account))
+        .route("/nni/bancor/trade", post(nni_bancor_trade))
         .route(
             "/nni/heartbeat/errors/clear",
             post(nni_clear_heartbeat_errors),
@@ -437,6 +442,7 @@ mod agent_config_unit_tests;
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
+include!("ui_routes/nni_bancor.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");

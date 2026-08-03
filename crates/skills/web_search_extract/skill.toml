@@ -4,7 +4,7 @@ schema_version = 2
 [package]
 name = "web_search_extract"
 version = "0.1.8"
-description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
+description = "Search multiple available web backends by default, merge normalized result metadata, snippets, citations, and extract-ready URLs, and honor explicit user source restrictions. For source-unspecified current-information research, pair web evidence with a matching configured RSS category."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/web-search-extract-skill"
 working_directory = "."
 timeout_seconds = 25
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SERPAPI_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WEB_SEARCH_BACKEND", "WORKSPACE_ROOT"]
+environment_allowlist = ["BAIDU_AI_SEARCH_API_KEY", "BRAVE_SEARCH_API_KEY", "EXA_API_KEY", "HOME", "KAGI_API_TOKEN", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MOJEEK_API_KEY", "PATH", "PERPLEXITY_API_KEY", "SEARXNG_API_KEY", "SEARXNG_SEARCH_URL", "SERPAPI_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TAVILY_API_KEY", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WEB_SEARCH_BACKEND", "WEB_SEARCH_BACKEND_POLICY", "WEB_SEARCH_PROVIDER_CONFIG", "WORKSPACE_ROOT", "YOU_SEARCH_API_KEY"]
 smoke_args = {}
 
 [security]
@@ -44,16 +44,16 @@ schema_version = 1
 migration_owner = "web_search_extract"
 
 [lifecycle]
-config_files = []
+config_files = ["configs/web_search_providers.toml"]
 preserve_data_on_uninstall = true
 update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "required" = ["action", "query"], "properties" = { "action" = { "type" = "string", "enum" = ["search", "search_extract"] }, "query" = { "type" = "string" }, "cursor" = { "type" = "integer", "minimum" = 0 }, "continuation" = { "type" = "string" }, "top_k" = { "type" = "integer", "minimum" = 1, "maximum" = 20 }, "lang" = { "type" = "string" }, "time_range" = { "type" = "string" }, "domains_allow" = { "type" = "array", "items" = { "type" = "string" } }, "domains_deny" = { "type" = "array", "items" = { "type" = "string" } }, "backend" = { "type" = "string", "enum" = ["serpapi", "duckduckgo_html", "bing_html"] }, "include_snippet" = { "type" = "boolean" } } }
+input_schema = { "type" = "object", "required" = ["action", "query"], "properties" = { "action" = { "type" = "string", "enum" = ["search", "search_extract"] }, "query" = { "type" = "string" }, "cursor" = { "type" = "integer", "minimum" = 0 }, "continuation" = { "type" = "string" }, "top_k" = { "type" = "integer", "minimum" = 1, "maximum" = 20 }, "lang" = { "type" = "string" }, "time_range" = { "type" = "string" }, "domains_allow" = { "type" = "array", "items" = { "type" = "string" } }, "domains_deny" = { "type" = "array", "items" = { "type" = "string" } }, "backend" = { "type" = "string", "enum" = ["serpapi", "baidu_ai", "brave", "searxng", "tavily", "perplexity", "exa", "you", "mojeek", "kagi", "duckduckgo_html", "bing_html"] }, "backend_policy" = { "type" = "string", "enum" = ["auto", "strict"] }, "include_snippet" = { "type" = "boolean" } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
-config_entry_points = []
-capabilities = [{ "name" = "web.search_results", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], "timeout_seconds" = 25, "action" = "search_extract" }, { "name" = "web.search", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], "timeout_seconds" = 25, "action" = "search" }]
+config_entry_points = [{ "kind" = "file", "reference" = "configs/web_search_providers.toml", "required" = false }]
+capabilities = [{ "name" = "web.search_results", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], "timeout_seconds" = 25, "action" = "search_extract", "description" = "Search all available web backends and merge results by default. Omit backend for ordinary searches. Use backend_policy=strict only when the user explicitly names a search engine; use domains_allow for a user-named website. For source-unspecified current-information research, also use rss.list_categories and matching rss.latest_news evidence." }, { "name" = "web.search", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["query"], "optional" = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], "timeout_seconds" = 25, "action" = "search", "description" = "Search all available web backends and merge results by default. Preserve an explicit user source boundary with backend_policy=strict or domains_allow; do not select a single backend for an ordinary search." }]
 
 [capability_request.permissions]
 llm_gateway = false
@@ -64,7 +64,7 @@ subprocess = false
 package_install = false
 privilege_escalation = false
 external_publish = false
-credential_refs = []
+credential_refs = ["baidu_ai_search_api_key", "brave_search_api_key", "exa_api_key", "kagi_api_token", "mojeek_api_key", "perplexity_api_key", "searxng_api_key", "serpapi_api_key", "tavily_api_key", "you_search_api_key"]
 
 [capability_request.artifact_contract]
 kinds = []

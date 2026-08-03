@@ -20,6 +20,13 @@
 - **Discovery ownership**: The model may propose evidence-backed `url` + `discovered_from` pairs, but deterministic public-network/feed validation stores them only as candidates; the skill never calls an LLM.
 - **Candidate lifecycle**: `candidate` becomes `eligible` after repeated `refresh_candidates` success, `quarantined` after repeated failure, and active only through confirmed `promote_sources`. Trigger model discovery only when scheduled/user-requested `source_health` returns `needs_discovery=true`.
 
+## Planner Selection Notes (from interface)
+- For general current-information or news research when the user does not name a source type, load both `rss_fetch` and `web_search_extract`. Call `list_categories`, fetch a matching configured category when one exists, run normal multi-source web search, then synthesize and deduplicate across both evidence sets.
+- If the user explicitly requests RSS-only retrieval, stay within `rss_fetch`.
+- If the user explicitly requests web-only search, a named search engine, or a specific website/domain, stay within web capabilities and do not add RSS.
+- Never invent a category token merely to satisfy the dual-source policy. If `list_categories` has no matching category, preserve that observation and continue with web evidence only.
+
+
 ## Config Entry Points (from interface)
 - Main RSS config: `configs/rss.toml`.
 - Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.

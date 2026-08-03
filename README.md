@@ -15,7 +15,8 @@ Current repository highlights:
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
-- local browser UI in `UI/`, including a standalone NNI device-signing page
+- local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
+  Tools/Skills, Skill Store, and Learning / Maintenance pages
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
   Seatbelt process isolation selected through a machine-configured backend
@@ -608,14 +609,12 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-Agent-Key`
 - `GET /v1/models/catalog`: returns the secret-free model/provider capability catalog used by the UI Models page and teaching-mode `model_catalog_trace`
+- `GET/POST /v1/admin/model-config`: reads or updates the independently selected provider, model, endpoint, and managed credential for each multimodal module
+- `GET/POST /v1/skills/config`: reads or updates skill enablement; each multimodal skill can be switched independently without discarding its model settings
 - `GET /v1/skills/store`: returns the registry-driven catalog for optional bundled and imported skills, including separate `installed` and `enabled` states
+- `GET /v1/skills/store/{skill_name}/dependencies`: reports the manifest-declared dependencies and their observed installed, missing, or not-applicable state
 - `POST /v1/skills/store/install`: installs and enables an optional catalog skill, then reloads runtime skill views
 - `POST /v1/skills/store/remove`: removes an optional skill from runtime and planner visibility while retaining its bundled or imported package for reinstallation; always-on core and tool skills reject this action
-- `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
-- `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
-- Agent Runtime is an NNI client only: request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`, while `configs/config.toml` stores client-side NNI state. It does not package, start, configure, or persist the NNI server.
-- The independently deployed [NNI server](https://github.com/MatrixCoreX/NNI) owns its executable, configuration, database, logs, heartbeat ledger, and reward settlement.
-- The authenticated client route `GET /v1/nni/rewards` signs a fresh remote challenge with the local device and returns only that public key's four-decimal reward total and paginated period ledger; the remote NNI server exposes no unauthenticated all-device reward listing.
 
 Machine-local API example (`8787` must not be exposed or port-forwarded):
 
@@ -779,8 +778,10 @@ UI notes:
   paths or environment values; missing Linux/macOS facts remain partial data
   rather than breaking the page
 - build progress is only shown for a real build/deploy session, and full build/deploy, UI-only, and clawd-only modes refresh the page once after successful completion
-- the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
+- the login page and navigation show the UI build version, making it easy to compare an nginx-hosted page with the page served directly by `webd` on port `8788`
+- the Models page keeps text-model selection separate from seven multimodal modules: image editing, image generation, image understanding, speech synthesis, speech transcription, video generation, and music generation. Each module has its own provider/model settings and its own enable switch; disabling a module preserves those settings
 - `工具/技能 / Tools/Skills` manages switches for installed skills; the adjacent `Skill Store` page owns optional-skill install, remove, reinstall, configuration retention, and third-party import flows
+- Skill Store install details show every declared dependency as a checked or missing item from backend-observed state before the user installs or repairs a skill
 - service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
 - `webd` is the only browser-facing Agent Runtime service; nginx is an optional outer TLS/static layer, and `clawd` remains loopback-only
 
@@ -822,19 +823,22 @@ by default, and shared Cargo/Python/Node/Go toolchains and caches are never remo
 Agent Runtime currently ships a broad skill set. Representative groups:
 
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
-- files, config, and developer tools: `run_cmd`, `fs_basic`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
-- network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
+- runtime and workspace primitives: `run_cmd`, `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `workspace_patch`, `task_plan`, `subagent`
+- files, config, and developer tools: `fs_basic`, `code_index`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
+- network and content: `http_basic`, `rss_fetch`, `browser_web`, `media_download`, `web_search_extract`
+- documents and office work: `doc_parse`, `office_workspace`, `transform`
 - multimodal and media generation: `image_generate` (`image.preview_generate` / `image.generate` / `image.poll` / `image.cancel`), `image_edit`, `image_vision`, `audio_transcribe` (`audio.preview_transcribe` / `audio.transcribe`), `audio_synthesize` (`audio.preview_synthesize` / `audio.synthesize` / `audio.poll` / `audio.cancel`), `video_generate` (`video.preview_generate` / `video.generate` / `video.poll` / `video.cancel`), `music_generate` (`music.preview_generate` / `music.generate` / `music.poll` / `music.cancel`)
 - workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
-- domain and knowledge skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`
+- domain and knowledge skills: `crypto`, `stock`, `weather`, `chinese_almanac`, `map_merchant`, `kb`
 
 Skill installation and enablement are separate states. `skill_switches=false` keeps
 an installed skill available in the normal inventory but disables it.
 `uninstalled_skills` removes an optional skill from runtime, planner visibility,
 and the normal Tools/Skills inventory while keeping it discoverable in Skill Store.
 Bundled entries marked `install_mode="on_demand"` are excluded from the normal
-`build-all.sh` release build. The default on-demand set is `crypto`, `invest_copy`,
-`map_merchant`, `photo_organize`, `stock`, `weather`, and `x`; clicking Install
+`build-all.sh` release build. The current on-demand set is `chinese_almanac`,
+`crypto`, `invest_copy`, `map_merchant`, `media_download`, `photo_organize`,
+`stock`, `weather`, and `x`; clicking Install
 reads that skill's `skill.toml`, runs only its declared adapter, performs a
 protocol smoke test, writes a verified receipt, and only then enables/reloads it.
 Normal source, cross-target, Docker, and release-package flows use the registry's
@@ -952,8 +956,6 @@ cd pi_app && ./open-small-screen.sh
 ```
 
 It reads health status from `clawd`, so start the backend first.
-
-The Pi App also carries the NNI device-signing helper used by the backend and browser UI. `pi_app/signature.py` supports Slot 0 public-key reads, timestamp signing, and TNG device/signer/root certificate reads when supported hardware and `cryptoauthlib` are present; see `pi_app/TNG_SERVER_GUIDE.md`. Devices without that chip are valid deployments and are reported as a missing-signature-chip state. After real-hardware detection completes and a short grace period passes, the Device signature chip card offers a clearly labeled software simulator for local protocol testing; it is never offered when a real chip is detected and does not provide a trusted hardware identity.
 
 ## Developer Notes
 
