@@ -4,7 +4,7 @@
   "private": true,
   "description": "Playwright helper for browser_web skill",
   "scripts": {
-    "test": "node --test browser_web_tests.js",
+    "test": "node --test browser_web_tests.js browser_session_bridge_tests.js",
     "regression": "node regression_check.js"
   },
   "dependencies": {

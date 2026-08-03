@@ -66,6 +66,22 @@ test("renders user-scoped skill queue progress", () => {
   assert.equal(view.detail, "当前任务已进入队列，将按顺序处理。 进度 0/1。");
 });
 
+test("renders browser page progress from machine counts", () => {
+  const view = buildTaskTraceEventView({
+    event_type: "skill_progress",
+    payload: {
+      skill_name: "browser_web",
+      frame: {
+        kind: "progress",
+        detail_key: "browser_web.pages.completed",
+        current: 4,
+        total: 4,
+      },
+    },
+  }, "en");
+  assert.equal(view.detail, "Web page reading is complete. Progress 4/4.");
+});
+
 test("restores the latest skill progress event from the task query projection", () => {
   const result: TaskQueryResponse = {
     task_id: "task-progress",
@@ -129,6 +145,24 @@ test("appends progressive model events into the live task trace", () => {
     events[0].payload && (events[0].payload as Record<string, unknown>).tool_name,
     "call_capability",
   );
+});
+
+test("projects browser session events without exposing raw page content", () => {
+  const view = buildTaskTraceEventView({
+    event_type: "browser_session",
+    payload: {
+      schema_version: 1,
+      source: "browser_session",
+      data_only: true,
+      action: "snapshot",
+      current_url: "https://example.com/docs",
+      postcondition_status: "observed",
+      untrusted_page_content_included: false,
+    },
+  }, "en");
+  assert.equal(view.title, "Browser page updated");
+  assert.match(view.detail, /snapshot.*example\.com/);
+  assert.equal(view.detail.includes("page content"), false);
 });
 
 test("builds a beginner-facing task plan from the persisted API projection", () => {

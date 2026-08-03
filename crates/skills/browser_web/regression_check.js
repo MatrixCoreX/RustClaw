@@ -54,7 +54,14 @@ function runHelper(payload) {
 
 function summarizeOpenExtract(outcome) {
     if (!outcome.ok) {
-        return { ok: false, success: 0, total: 0, navTimeout: 0, blocked: 0 };
+        return {
+            ok: false,
+            success: 0,
+            total: 0,
+            navTimeout: 0,
+            blocked: 0,
+            error: outcome.error || 'helper_failed',
+        };
     }
     const items = outcome.result.items || [];
     const success = items.filter((x) => x.fetch_method === 'browser').length;
@@ -81,6 +88,7 @@ async function main() {
         maxTextChars: 12000,
         failFast: false,
         saveScreenshot: false,
+        allowProxySyntheticDns: true,
     };
 
     const openOutcome = await runHelper(openPayload);

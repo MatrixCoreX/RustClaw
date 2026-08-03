@@ -90,7 +90,6 @@ crates/claw-core/src/skill_registry.rs	vendor-唯一	/// image / text / vision �
 crates/claw-core/src/skill_registry.rs	vendor-唯一	/// 跨用途的"vendor-唯一"命名，否则会把 image_generate 的 key 误注入到
 crates/claw-core/src/skill_registry.rs	vendor-唯一 key	// 隐含"vendor-唯一 key"，会让 §P4.4 的 token 注入跨域串货。
 crates/claw-core/src/skill_registry.rs	{error} for skill `{}` in {}	.map_err(|error| format!("{error} for skill `{}` in {}", entry.name, path.display()))?;
-crates/claw-core/src/skill_registry.rs	{label} name must match [a-z0-9_]: `{token}`	return Err(format!("{label} name must match [a-z0-9_]: `{token}`"));
 crates/claw-core/src/skill_registry.rs	声明顺序	// 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
 crates/claw-core/src/skill_registry.rs	未声明任何能力	/// 未注册的技能返回空切片（与"未声明任何能力"语义同 — 都不应放行任何
 crates/claw-core/src/skill_registry.rs	纯计算 + 标准库	/// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
@@ -105,6 +104,7 @@ crates/claw-core/src/skill_registry_overlay.rs	read base registry failed: {}: {e
 crates/claw-core/src/skill_registry_overlay.rs	read overlay registry directory failed: {}: {error}	"read overlay registry directory failed: {}: {error}",
 crates/claw-core/src/skill_registry_overlay.rs	read overlay registry entry failed: {error}	.map_err(|error| format!("read overlay registry entry failed: {error}"))?;
 crates/claw-core/src/skill_registry_overlay.rs	read overlay registry failed: {}: {error}	format!("read overlay registry failed: {}: {error}", path.display())
+crates/claw-core/src/skill_registry_validation.rs	{label} name must match [a-z0-9_]: `{token}`	return Err(format!("{label} name must match [a-z0-9_]: `{token}`"));
 crates/clawcli/src/auth.rs	key_required: {}; {reason_code}: {}	"key_required: {}; {reason_code}: {}",
 crates/clawcli/src/commands/common.rs	parse {context_label} response	.with_context(|| format!("parse {context_label} response"))?;
 crates/clawcli/src/commands/common.rs	request {context_label} failed	.with_context(|| format!("request {context_label} failed"))?;
@@ -198,6 +198,8 @@ crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confir
 crates/clawd/src/agent_engine/prepare_round.rs	verification_issue_kind: {first_issue_kind}	format!("verification_issue_kind: {first_issue_kind}"),
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
+crates/clawd/src/agent_engine/skill_execution_auto_sudo.rs	auto-sudo-path-{label}-{}-{}	"auto-sudo-path-{label}-{}-{}",
+crates/clawd/src/agent_engine/skill_execution_auto_sudo.rs	create path test root	fs::create_dir_all(&root).expect("create path test root");
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline	"execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline",
 crates/clawd/src/agent_engine/skill_execution_preflight.rs	path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist	"path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist",
 crates/clawd/src/agent_engine/skill_output_contract.rs	schema `type` array must contain only strings	.ok_or_else(|| "schema `type` array must contain only strings".to_string())
@@ -230,6 +232,7 @@ crates/clawd/src/agent_engine/skill_output_contract.rs	{path}[{index}]: duplicat
 crates/clawd/src/agent_engine/subagent_runtime_model.rs	child returned every required result-contract key	"summary": "child returned every required result-contract key"
 crates/clawd/src/agent_engine/support.rs	agent-loop:{}:round-{}:step-{}:{}	"agent-loop:{}:round-{}:step-{}:{}",
 crates/clawd/src/app_helpers.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
+crates/clawd/src/async_job_contract.rs	validated poll adapter object	.expect("validated poll adapter object")
 crates/clawd/src/bootstrap/config_loaders.rs	An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}	"An identical scheduled job already exists: {job_id}\\nType: {type}\\nTimezone: {timezone}\\nNext run: {next_run_human}\\nTask content: {task_content}".to_string()
 crates/clawd/src/bootstrap/config_loaders.rs	Create failed: cannot compute next run time; please check the time format.	"Create failed: cannot compute next run time; please check the time format.".to_string()
 crates/clawd/src/bootstrap/config_loaders.rs	Create failed: execution time must be later than now.	.or_insert_with(|| "Create failed: execution time must be later than now.".to_string());
@@ -609,6 +612,9 @@ crates/clawd/src/http/ui_routes/logs_usage_debug.rs	read usage chain failed: {er
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record access denied	error: Some("usage record access denied".to_string()),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record detail not found	error: Some("usage record detail not found".to_string()),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	usage record not found	error: Some("usage record not found".to_string()),
+crates/clawd/src/http/ui_routes/managed_runtime_assets.rs	create asset test directory	fs::create_dir_all(&path).expect("create asset test directory");
+crates/clawd/src/http/ui_routes/managed_runtime_assets.rs	managed-runtime-asset-test-{}	"managed-runtime-asset-test-{}",
+crates/clawd/src/http/ui_routes/managed_runtime_assets.rs	unknown asset must be rejected	.expect_err("unknown asset must be rejected");
 crates/clawd/src/http/ui_routes/messaging_login.rs	decode wechat QR start failed: {err}	error: Some(format!("decode wechat QR start failed: {err}")),
 crates/clawd/src/http/ui_routes/messaging_login.rs	decode wechat QR wait failed: {err}	error: Some(format!("decode wechat QR wait failed: {err}")),
 crates/clawd/src/http/ui_routes/messaging_login.rs	decode wechat login status failed: {err}	error: Some(format!("decode wechat login status failed: {err}")),
@@ -654,6 +660,7 @@ crates/clawd/src/http/ui_routes/nni_remote_join.rs	heartbeat_verify_network_fail
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_config_read_failed: {err}	error: Some(format!("nni_config_read_failed: {err}")),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_config_write_failed: {err}	error: Some(format!("nni_config_write_failed: {err}")),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_heartbeat_all_nodes_failed: {}	message: format!("nni_heartbeat_all_nodes_failed: {}", Value::Array(attempts)),
+crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_heartbeat_runtime_state_schema_unsupported:{}	"nni_heartbeat_runtime_state_schema_unsupported:{}",
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_bad_response: {err}	"error": format!("nni_remote_bad_response: {err}"),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_request_failed: {err}	"error": format!("nni_remote_request_failed: {err}"),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	signature helper returned error	.unwrap_or_else(|| "signature helper returned error".to_string())
@@ -686,11 +693,9 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	skill source must be a ca
 crates/clawd/src/http/ui_routes/skill_import_config.rs	validate staged skill manifest failed: {error}	.map_err(|error| format!("validate staged skill manifest failed: {error}"))?;
 crates/clawd/src/http/ui_routes/skill_import_config.rs	verify installed receipt failed: {error}	error: Some(format!("verify installed receipt failed: {error}")),
 crates/clawd/src/http/ui_routes/skill_store.rs	bundled registry entry is missing: {skill_name}	.ok_or_else(|| format!("bundled registry entry is missing: {skill_name}"))?;
-crates/clawd/src/http/ui_routes/skill_store.rs	current install is not verified: {error}	.map_err(|error| format!("current install is not verified: {error}"))?;
 crates/clawd/src/http/ui_routes/skill_store.rs	manifest requests ungranted credential reference: {credential}	"manifest requests ungranted credential reference: {credential}"
 crates/clawd/src/http/ui_routes/skill_store.rs	manifest requests {permission} but bundled registry does not grant it	"manifest requests {permission} but bundled registry does not grant it"
 crates/clawd/src/http/ui_routes/skill_store.rs	offline admission repair requires an on-demand bundled skill: {skill_name}	"offline admission repair requires an on-demand bundled skill: {skill_name}"
-crates/clawd/src/http/ui_routes/skill_store.rs	package manifest is missing: {skill_name}	.ok_or_else(|| format!("package manifest is missing: {skill_name}"))?;
 crates/clawd/src/http/ui_routes/skill_store.rs	registry entry is missing: {skill_name}	.ok_or_else(|| format!("registry entry is missing: {skill_name}"))?;
 crates/clawd/src/http/ui_routes/skill_store.rs	skill name is required	return Err("skill name is required".to_string());
 crates/clawd/src/http/ui_routes/skill_store.rs	skills registry is unavailable	.ok_or_else(|| "skills registry is unavailable".to_string())?;
@@ -1045,6 +1050,7 @@ crates/clawd/src/skill_storage/resolver.rs	skill storage path has no parent	.ok_
 crates/clawd/src/skill_storage/resolver.rs	skill-owned storage is unsupported on this platform	anyhow::bail!("skill-owned storage is unsupported on this platform")
 crates/clawd/src/skill_storage/resolver.rs	skill_data_root contains an unsafe path component	anyhow::bail!("skill_data_root contains an unsafe path component");
 crates/clawd/src/skill_storage/schema.rs	{skill_name} skill storage integrity check failed	anyhow::bail!("{skill_name} skill storage integrity check failed");
+crates/clawd/src/skills.rs	__dispatch_queue__{skill_name}__user__{}	key: format!("__dispatch_queue__{skill_name}__user__{}", task.user_id),
 crates/clawd/src/skills.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills.rs	private exchange account access failed	"private exchange account access failed".to_string()
 crates/clawd/src/skills.rs	private exchange account access failed	.unwrap_or("private exchange account access failed")
@@ -1056,6 +1062,10 @@ crates/clawd/src/skills.rs	skill_name is empty	return Err("skill_name is empty".
 crates/clawd/src/skills.rs	假装 registry 没加载	/// - 直接调本函数等价于"假装 registry 没加载"，会丢掉别名归一化能力。
 crates/clawd/src/skills.rs	双来源真相	/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
 crates/clawd/src/skills.rs	清空 + 白名单注入	/// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
+crates/clawd/src/skills/async_poll.rs	async poll execution binding skill is missing	.ok_or_else(|| "async poll execution binding skill is missing".to_string())?;
+crates/clawd/src/skills/async_poll.rs	async poll execution binding skill mismatch	return Err("async poll execution binding skill mismatch".to_string());
+crates/clawd/src/skills/async_poll.rs	async poll runner arguments are invalid	return Err("async poll runner arguments are invalid".to_string());
+crates/clawd/src/skills/async_poll.rs	async poll runner cannot dispatch a builtin skill	return Err("async poll runner cannot dispatch a builtin skill".to_string());
 crates/clawd/src/skills/builtin.rs	content too large: {} bytes	format!("content too large: {} bytes", content.len()),
 crates/clawd/src/skills/builtin.rs	directory locator matched multiple candidates: {}	"directory locator matched multiple candidates: {}",
 crates/clawd/src/skills/builtin.rs	directory not found under system root and project root: {path}	format!("directory not found under system root and project root: {path}"),
@@ -1073,10 +1083,28 @@ crates/clawd/src/skills/builtin.rs	{key} must be string	.ok_or_else(|| format!("
 crates/clawd/src/skills/builtin.rs	{operation} failed for {target}: {err}	format!("{operation} failed for {target}: {err}"),
 crates/clawd/src/skills/builtin_read_file.rs	start_byte {start_byte} exceeds file size {total_size}	format!("start_byte {start_byte} exceeds file size {total_size}"),
 crates/clawd/src/skills/builtin_schedule.rs	schedule input is incomplete	.unwrap_or("schedule input is incomplete");
+crates/clawd/src/skills/runner.rs	durable skill sandbox paths unavailable	.ok_or_else(|| "durable skill sandbox paths unavailable".to_string())?;
+crates/clawd/src/skills/runner.rs	durable skill {label} sandbox target unavailable	.ok_or_else(|| format!("durable skill {label} sandbox target unavailable"))
+crates/clawd/src/skills/runner.rs	durable_skill_job_output_metadata_failed: {error}	.map_err(|error| format!("durable_skill_job_output_metadata_failed: {error}"))?
+crates/clawd/src/skills/runner.rs	durable_skill_job_output_read_failed: {error}	.map_err(|error| format!("durable_skill_job_output_read_failed: {error}"))?;
+crates/clawd/src/skills/runner.rs	durable_skill_job_output_read_failed: {error}	.map_err(|error| format!("durable_skill_job_output_read_failed: {error}"))?;
+crates/clawd/src/skills/runner.rs	durable_skill_job_output_seek_failed: {error}	.map_err(|error| format!("durable_skill_job_output_seek_failed: {error}"))?;
+crates/clawd/src/skills/runner.rs	durable_skill_job_permissions_failed: {error}	.map_err(|error| format!("durable_skill_job_permissions_failed: {error}"))?;
+crates/clawd/src/skills/runner.rs	durable_skill_job_stdin_close_failed: {error}	return Err(format!("durable_skill_job_stdin_close_failed: {error}"));
+crates/clawd/src/skills/runner.rs	durable_skill_job_stdin_write_failed: {error}	return Err(format!("durable_skill_job_stdin_write_failed: {error}"));
+crates/clawd/src/skills/runner.rs	durable_skill_job_wait_failed: {error}	.map_err(|error| format!("durable_skill_job_wait_failed: {error}"))?
 crates/clawd/src/skills/runner.rs	empty skill-runner output	return Err("empty skill-runner output".to_string());
 crates/clawd/src/skills/runner.rs	empty skill-runner output: {detail}	return Err(format!("empty skill-runner output: {detail}"));
 crates/clawd/src/skills/runner.rs	encode skill progress frame failed: {err}	.map_err(|err| format!("encode skill progress frame failed: {err}"))?;
 crates/clawd/src/skills/runner.rs	invalid skill-runner json: {err}	.map_err(|err| format!("invalid skill-runner json: {err}"))?;
+crates/clawd/src/skills/runner.rs	pending provider job id is missing	.ok_or_else(|| "pending provider job id is missing".to_string())?;
+crates/clawd/src/skills/runner.rs	pending provider job retention deadline is invalid	.ok_or_else(|| "pending provider job retention deadline is invalid".to_string())?;
+crates/clawd/src/skills/runner.rs	pinned skill execution binding field is invalid: {field}	"pinned skill execution binding field is invalid: {field}"
+crates/clawd/src/skills/runner.rs	pinned skill execution binding field is missing: {field}	"pinned skill execution binding field is missing: {field}"
+crates/clawd/src/skills/runner.rs	pinned skill execution binding has unknown fields	return Err("pinned skill execution binding has unknown fields".to_string());
+crates/clawd/src/skills/runner.rs	pinned skill execution binding is not an object	.ok_or_else(|| "pinned skill execution binding is not an object".to_string())?;
+crates/clawd/src/skills/runner.rs	pinned skill execution binding registry generation is missing	"pinned skill execution binding registry generation is missing".to_string()
+crates/clawd/src/skills/runner.rs	pinned skill execution binding skill mismatch	return Err("pinned skill execution binding skill mismatch".to_string());
 crates/clawd/src/skills/runner.rs	read skill-runner stdout failed: {err}	return Err(format!("read skill-runner stdout failed: {err}"));
 crates/clawd/src/skills/runner.rs	required skill credentials are not configured	"required skill credentials are not configured",
 crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue internal LLM token: {err}	"skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
@@ -1084,7 +1112,7 @@ crates/clawd/src/skills/runner.rs	skill `{canonical_skill_name}` failed to issue
 crates/clawd/src/skills/runner.rs	skill artifact sandbox target unavailable	.ok_or_else(|| "skill artifact sandbox target unavailable".to_string())?
 crates/clawd/src/skills/runner.rs	skill credential lookup failed	"skill credential lookup failed",
 crates/clawd/src/skills/runner.rs	skill runner execution binding is missing	.ok_or_else(|| "skill runner execution binding is missing".to_string())?;
-crates/clawd/src/skills/runner.rs	skill storage database path has no file name	.ok_or_else(|| "skill storage database path has no file name".to_string())?;
+crates/clawd/src/skills/runner.rs	skill runner execution binding snapshot mismatch	return Err("skill runner execution binding snapshot mismatch".to_string());
 crates/clawd/src/skills/runner.rs	skill storage sandbox target unavailable	return Err("skill storage sandbox target unavailable".to_string());
 crates/clawd/src/skills/runner.rs	wait skill-runner failed: {err}	.map_err(|err| format!("wait skill-runner failed: {err}"))?;
 crates/clawd/src/skills/runner.rs	write skill-runner stdin failed: {err}	.map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
@@ -1133,6 +1161,8 @@ crates/clawd/src/verifier.rs	unresolved runtime capability before execution	why:
 crates/clawd/src/verifier.rs	unresolved template placeholder in executable step args	why: "unresolved template placeholder in executable step args".to_string(),
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`	"skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
 crates/clawd/src/verifier_creation_targets.rs	skill `{normalized_skill}` relative creation target anchored to `{anchored}`	"skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
+crates/clawd/src/verifier_permission.rs	create verifier path test root	fs::create_dir_all(&root).expect("create verifier path test root");
+crates/clawd/src/verifier_permission.rs	verifier-workspace-path-{label}-{}-{}	"verifier-workspace-path-{label}-{}-{}",
 crates/clawd/src/virtual_tools.rs	{tool} args must be a JSON object	.ok_or_else(|| format!("{tool} args must be a JSON object"))
 crates/clawd/src/visible_text.rs	valid JSON escaped CSI regex	Regex::new(r"\\\\u001[bB]\\[[0-?]*[ -/]*[@-~]").expect("valid JSON escaped CSI regex")
 crates/clawd/src/visible_text.rs	valid JSON string field regex	.expect("valid JSON string field regex")
@@ -1210,6 +1240,10 @@ crates/skill-runner/src/main.rs	child output exceeds {} bytes	"child output exce
 crates/skill-runner/src/main.rs	child stdout is empty	"child stdout is empty",
 crates/skill-runner/src/main.rs	declared skill storage is not a directory	return Err("declared skill storage is not a directory".to_string());
 crates/skill-runner/src/main.rs	declared skill storage unavailable: {error}	.map_err(|error| format!("declared skill storage unavailable: {error}"))?;
+crates/skill-runner/src/main.rs	durable_global_slot_root_create_failed: {error}	.map_err(|error| format!("durable_global_slot_root_create_failed: {error}"))?;
+crates/skill-runner/src/main.rs	durable_skill_slot_lock_failed: {error}	return Err(format!("durable_skill_slot_lock_failed: {error}"));
+crates/skill-runner/src/main.rs	durable_skill_slot_open_failed: {error}	.map_err(|error| format!("durable_skill_slot_open_failed: {error}"))?;
+crates/skill-runner/src/main.rs	durable_skill_slot_root_create_failed: {error}	.map_err(|error| format!("durable_skill_slot_root_create_failed: {error}"))?;
 crates/skill-runner/src/main.rs	execution binding is serializable	serde_json::to_value(binding).expect("execution binding is serializable"),
 crates/skill-runner/src/main.rs	http_json endpoint is missing from the verified launch spec	"http_json endpoint is missing from the verified launch spec",
 crates/skill-runner/src/main.rs	http_json request returned status {status}	format!("http_json request returned status {status}"),
@@ -1286,6 +1320,7 @@ crates/skill-sdk/src/protocol.rs	skill emitted no stdout record	"skill emitted n
 crates/skill-sdk/src/protocol.rs	stdout must contain exactly one JSON record	"stdout must contain exactly one JSON record",
 crates/skill-sdk/src/receipt.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
 crates/skill-sdk/src/receipt.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
+crates/skill-sdk/src/runtime.rs	artifact verification worker panicked	"artifact verification worker panicked",
 crates/skill-sdk/src/runtime.rs	http_json launch requires an HTTPS endpoint	"http_json launch requires an HTTPS endpoint",
 crates/skill-sdk/src/runtime.rs	only http_json launch may declare remote_endpoint	"only http_json launch may declare remote_endpoint",
 crates/skill-sdk/src/safe_archive.rs	archive member path is absolute or contains traversal	"archive member path is absolute or contains traversal",
@@ -1817,6 +1852,7 @@ crates/skills/image_vision/src/main.rs	image text wrapper must contain only path
 crates/skills/image_vision/src/main.rs	image text wrapper must contain only path	.ok_or_else(|| "image text wrapper must contain only path".to_string())?;
 crates/skills/image_vision/src/main.rs	openai-style key redaction regex compiles	.expect("openai-style key redaction regex compiles")
 crates/skills/image_vision/src/main.rs	output_name must be a plain .txt filename	return Err("output_name must be a plain .txt filename".to_string());
+crates/skills/image_vision/src/main.rs	provide either images or image, not both	return Err("provide either images or image, not both".to_string());
 crates/skills/image_vision/src/main.rs	runtime artifact output directory is unavailable	.ok_or_else(|| "runtime artifact output directory is unavailable".to_string())?;
 crates/skills/image_vision/src/main.rs	secret assignment redaction regex compiles	.expect("secret assignment redaction regex compiles")
 crates/skills/image_vision/src/main.rs	unsupported action; use describe|extract|extract_text|compare|screenshot_summary	"unsupported action; use describe|extract|extract_text|compare|screenshot_summary"
@@ -2332,14 +2368,27 @@ crates/skills/video_generate/src/main.rs	{NOT_APPLIED_ERROR_PREFIX}{}	"{NOT_APPL
 crates/skills/video_generate/src/main.rs	{provider_name} config missing	.ok_or_else(|| format!("{provider_name} config missing"))?;
 crates/skills/video_generate/src/main.rs	{provider_name} config missing	.ok_or_else(|| format!("{provider_name} config missing"))?;
 crates/skills/video_generate/src/main.rs	{vendor} api key is not configured	return Err(format!("{vendor} api key is not configured"));
+crates/skills/web_search_extract/src/main.rs	SEARXNG_SEARCH_URL is invalid	let mut url = Url::parse(raw.trim()).context("SEARXNG_SEARCH_URL is invalid")?;
+crates/skills/web_search_extract/src/main.rs	SEARXNG_SEARCH_URL must be an HTTP(S) URL without credentials	"SEARXNG_SEARCH_URL must be an HTTP(S) URL without credentials"
 crates/skills/web_search_extract/src/main.rs	SERPAPI_API_KEY missing for serpapi backend	env::var("SERPAPI_API_KEY").context("SERPAPI_API_KEY missing for serpapi backend")?;
 crates/skills/web_search_extract/src/main.rs	action must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "action must be string"))
 crates/skills/web_search_extract/src/main.rs	args must be object	.ok_or_else(|| SearchError::new("INVALID_INPUT", "args must be object"))?;
+crates/skills/web_search_extract/src/main.rs	auto_provider_limit must be between 1 and auto_order length	"auto_provider_limit must be between 1 and auto_order length",
 crates/skills/web_search_extract/src/main.rs	backend exceeds supported length	"backend exceeds supported length",
+crates/skills/web_search_extract/src/main.rs	backend is required when backend_policy is strict	"backend is required when backend_policy is strict",
 crates/skills/web_search_extract/src/main.rs	backend redirect limit exceeded	return attempt.error("backend redirect limit exceeded");
 crates/skills/web_search_extract/src/main.rs	backend redirect target blocked	attempt.error("backend redirect target blocked")
+crates/skills/web_search_extract/src/main.rs	backend_policy must be auto or strict	SearchError::new("INVALID_INPUT", "backend_policy must be auto or strict")
+crates/skills/web_search_extract/src/main.rs	baidu ai search json parse failed	.context("baidu ai search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	baidu ai search non-success response	.context("baidu ai search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	baidu ai search request failed	.context("baidu ai search request failed")?
 crates/skills/web_search_extract/src/main.rs	bing non-success response	.context("bing non-success response")?;
+crates/skills/web_search_extract/src/main.rs	brave search json parse failed	.context("brave search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	brave search non-success response	.context("brave search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	brave search request failed	.context("brave search request failed")?
 crates/skills/web_search_extract/src/main.rs	build search client failed	.context("build search client failed")
+crates/skills/web_search_extract/src/main.rs	cannot read WEB_SEARCH_PROVIDER_CONFIG {}: {error}	"cannot read WEB_SEARCH_PROVIDER_CONFIG {}: {error}",
+crates/skills/web_search_extract/src/main.rs	cannot read search provider config: {error}	format!("cannot read search provider config: {error}"),
 crates/skills/web_search_extract/src/main.rs	continuation token does not belong to this query	"continuation token does not belong to this query",
 crates/skills/web_search_extract/src/main.rs	continuation token is invalid	"continuation token is invalid",
 crates/skills/web_search_extract/src/main.rs	continuation token is invalid	.ok_or_else(|| SearchError::new("INVALID_CONTINUATION", "continuation token is invalid"))?;
@@ -2348,23 +2397,55 @@ crates/skills/web_search_extract/src/main.rs	docs.rs search non-success response
 crates/skills/web_search_extract/src/main.rs	docs.rs search request failed	.context("docs.rs search request failed")?
 crates/skills/web_search_extract/src/main.rs	domain filter is invalid	"domain filter is invalid",
 crates/skills/web_search_extract/src/main.rs	duckduckgo non-success response	.context("duckduckgo non-success response")?;
+crates/skills/web_search_extract/src/main.rs	exa search json parse failed	.context("exa search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	exa search non-success response	.context("exa search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	exa search request failed	.context("exa search request failed")?
 crates/skills/web_search_extract/src/main.rs	github search json parse failed	serde_json::from_slice(&body).context("github search json parse failed")?;
 crates/skills/web_search_extract/src/main.rs	github search non-success response	.context("github search non-success response")?;
 crates/skills/web_search_extract/src/main.rs	github search request failed	.context("github search request failed")?
 crates/skills/web_search_extract/src/main.rs	include_snippet must be boolean	.ok_or_else(|| SearchError::new("INVALID_INPUT", "include_snippet must be boolean"))
-crates/skills/web_search_extract/src/main.rs	no fallback search source returned candidates	Err(anyhow!("no fallback search source returned candidates"))
+crates/skills/web_search_extract/src/main.rs	invalid or duplicate automatic provider: {name}	format!("invalid or duplicate automatic provider: {name}"),
+crates/skills/web_search_extract/src/main.rs	invalid search provider config: {error}	format!("invalid search provider config: {error}"),
+crates/skills/web_search_extract/src/main.rs	kagi search json parse failed	.context("kagi search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	kagi search non-success response	.context("kagi search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	kagi search request failed	.context("kagi search request failed")?
+crates/skills/web_search_extract/src/main.rs	mojeek search json parse failed	.context("mojeek search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	mojeek search non-success response	.context("mojeek search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	mojeek search provider returned an error status	return Err(anyhow!("mojeek search provider returned an error status"));
+crates/skills/web_search_extract/src/main.rs	mojeek search request failed	.context("mojeek search request failed")?
+crates/skills/web_search_extract/src/main.rs	no enabled search provider is currently available	"no enabled search provider is currently available",
+crates/skills/web_search_extract/src/main.rs	no search source returned candidates ({detail})	format!("no search source returned candidates ({detail})"),
+crates/skills/web_search_extract/src/main.rs	perplexity search json parse failed	.context("perplexity search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	perplexity search non-success response	.context("perplexity search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	perplexity search request failed	.context("perplexity search request failed")?
+crates/skills/web_search_extract/src/main.rs	provider policy is missing for {name}	format!("provider policy is missing for {name}"),
 crates/skills/web_search_extract/src/main.rs	query exceeds supported length	"query exceeds supported length",
 crates/skills/web_search_extract/src/main.rs	query must be string	.ok_or_else(|| SearchError::new("INVALID_INPUT", "query must be string"))
 crates/skills/web_search_extract/src/main.rs	search backend response exceeds byte limit	return Err(anyhow!("search backend response exceeds byte limit"));
 crates/skills/web_search_extract/src/main.rs	search backend response exceeds byte limit	return Err(anyhow!("search backend response exceeds byte limit"));
 crates/skills/web_search_extract/src/main.rs	search backend response read failed	.context("search backend response read failed")?;
+crates/skills/web_search_extract/src/main.rs	search backend worker panicked	result: Err("search backend worker panicked".to_string()),
+crates/skills/web_search_extract/src/main.rs	search provider `{}` is disabled	format!("search provider `{}` is disabled", backend.as_str()),
+crates/skills/web_search_extract/src/main.rs	search provider `{}` is enabled but its runtime configuration is missing	"search provider `{}` is enabled but its runtime configuration is missing",
+crates/skills/web_search_extract/src/main.rs	searxng search json parse failed	.context("searxng search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	searxng search non-success response	.context("searxng search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	searxng search request failed	.context("searxng search request failed")?
 crates/skills/web_search_extract/src/main.rs	serpapi json parse failed	let v: Value = serde_json::from_slice(&body).context("serpapi json parse failed")?;
 crates/skills/web_search_extract/src/main.rs	serpapi non-success response	.map_err(|_| anyhow!("serpapi non-success response"))?;
+crates/skills/web_search_extract/src/main.rs	tavily search json parse failed	.context("tavily search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	tavily search non-success response	.context("tavily search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	tavily search request failed	.context("tavily search request failed")?
+crates/skills/web_search_extract/src/main.rs	unknown provider in auto_order: {name}	format!("unknown provider in auto_order: {name}"),
+crates/skills/web_search_extract/src/main.rs	unsupported search provider config schema_version	"unsupported search provider config schema_version",
+crates/skills/web_search_extract/src/main.rs	you search json parse failed	.context("you search json parse failed")?;
+crates/skills/web_search_extract/src/main.rs	you search non-success response	.context("you search non-success response")?;
+crates/skills/web_search_extract/src/main.rs	you search request failed	.context("you search request failed")?
 crates/skills/web_search_extract/src/main.rs	{field} has too many entries	format!("{field} has too many entries"),
 crates/skills/web_search_extract/src/main.rs	{field} is outside the supported range	format!("{field} is outside the supported range"),
 crates/skills/web_search_extract/src/main.rs	{field} items must be strings	SearchError::new("INVALID_INPUT", format!("{field} items must be strings"))
 crates/skills/web_search_extract/src/main.rs	{field} must be array	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be array")))?;
 crates/skills/web_search_extract/src/main.rs	{field} must be integer	.ok_or_else(|| SearchError::new("INVALID_INPUT", format!("{field} must be integer")))?;
+crates/skills/web_search_extract/src/main.rs	{name} missing for {backend} backend	.with_context(|| format!("{name} missing for {backend} backend"))
 crates/telegramd/src/binding_voice.rs	pending resume lock poisoned	.map_err(|_| anyhow!("pending resume lock poisoned"))?;
 crates/telegramd/src/binding_voice.rs	send key bind required prompt failed	.context("send key bind required prompt failed")?;
 crates/telegramd/src/binding_voice.rs	send resume submit error failed	.context("send resume submit error failed")?;
@@ -2623,6 +2704,7 @@ optional_skills/crypto/src/trade_handlers.rs	trade_history okx {sym_info}: none	
 optional_skills/crypto/src/trade_handlers.rs	trade_history on binance requires symbol	.ok_or("trade_history on binance requires symbol")?;
 optional_skills/invest_copy/src/main.rs	Persona display: {}\nSlug: {}\nOne-liner: {}\nFacets:\n{}\nPreferred wording hints: {}\nChannel preference: {}\nTruncated_input: {}\nFocus_optional: {}\nSource_note_optional: {}\n\nUSER_MATERIAL:\n{}	"Persona display: {}\\nSlug: {}\\nOne-liner: {}\\nFacets:\\n{}\\nPreferred wording hints: {}\\nChannel preference: {}\\nTruncated_input: {}\\nFocus_optional: {}\\nSource_note_optional: {}\\n\\nUSER_MATERIAL:\\n{}",
 optional_skills/invest_copy/src/main.rs	parse embedded personas.toml	toml::from_str(PERSONAS_TOML).context("parse embedded personas.toml")?;
+optional_skills/map_merchant/src/main.rs	GOOGLE_MAPS_API_KEY|GOOGLE_PLACES_API_KEY	MapProvider::Google => "GOOGLE_MAPS_API_KEY|GOOGLE_PLACES_API_KEY",
 optional_skills/map_merchant/src/main.rs	places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri	"places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri",
 optional_skills/photo_organize/src/i18n.rs	No obvious external drive or USB mount points were detected.	"No obvious external drive or USB mount points were detected.".to_string(),
 optional_skills/photo_organize/src/i18n.rs	No photo files were found under `{path}`.	"No photo files were found under `{path}`.".to_string(),

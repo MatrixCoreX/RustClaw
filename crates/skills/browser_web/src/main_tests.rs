@@ -1,6 +1,61 @@
 use super::*;
 
 #[test]
+fn browser_progress_frames_use_requested_and_observed_page_counts() {
+    let request = Request {
+        request_id: "progress-1".to_string(),
+        args: json!({
+            "action": "open_extract",
+            "url": "https://example.com/a",
+            "urls": ["https://example.com/b", "https://example.com/c"],
+            "max_pages": 2
+        }),
+        context: None,
+        _user_id: 1,
+        _chat_id: 1,
+    };
+    assert_eq!(requested_page_count(&request.args), Some(2));
+    let mut output = Vec::new();
+    emit_start_progress(&mut output, &request).expect("start frame");
+    let start =
+        skill_sdk::validate_progress_frame_line(&output, "progress-1").expect("valid start frame");
+    assert_eq!(start.current, Some(0));
+    assert_eq!(start.total, Some(2));
+
+    output.clear();
+    let response = Response {
+        request_id: "progress-1".to_string(),
+        status: "ok".to_string(),
+        text: String::new(),
+        error_text: None,
+        buttons: None,
+        extra: Some(json!({"success_count": 2, "failure_count": 1})),
+    };
+    emit_completion_progress(&mut output, &response).expect("completion frame");
+    let completed = skill_sdk::validate_progress_frame_line(&output, "progress-1")
+        .expect("valid completion frame");
+    assert_eq!(completed.current, Some(3));
+    assert_eq!(completed.total, Some(3));
+
+    output.clear();
+    let partial_failure = Response {
+        request_id: "progress-1".to_string(),
+        status: "error".to_string(),
+        text: String::new(),
+        error_text: Some("all_pages_failed".to_string()),
+        buttons: None,
+        extra: Some(json!({
+            "details": {"cause_details": {"success_count": 0, "failure_count": 2}}
+        })),
+    };
+    emit_completion_progress(&mut output, &partial_failure).expect("failure completion frame");
+    let failed = skill_sdk::validate_progress_frame_line(&output, "progress-1")
+        .expect("valid failure completion frame");
+    assert_eq!(failed.current, Some(2));
+    assert_eq!(failed.total, Some(2));
+}
+
+#[test]
 fn browser_node_candidates_include_platform_service_paths_and_path_fallback() {
     let candidates = browser_node_candidates();
     assert_eq!(candidates.last(), Some(&PathBuf::from("node")));
@@ -192,6 +247,7 @@ fn parses_open_extract_contract_and_domain_policy() {
     assert_eq!(args.max_text_chars, Some(4096));
     assert_eq!(args.min_content_chars, Some(120));
     assert_eq!(args.fail_fast, Some(true));
+    assert_eq!(args.screenshot_dir, None);
     assert_eq!(args.domains_allow, Some(vec!["example.com".to_string()]));
 }
 

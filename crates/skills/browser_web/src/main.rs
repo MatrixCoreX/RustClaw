@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(windows)]
@@ -8,6 +9,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use skill_sdk::{SkillProgressFrame, SkillProgressKind};
 use url::Url;
 
 const SKILL_NAME: &str = "browser_web";
@@ -120,7 +122,10 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Request, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => handle(req),
+            Ok(req) => {
+                emit_start_progress(&mut stdout, &req)?;
+                handle(req)
+            }
             Err(err) => Response {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -130,11 +135,94 @@ fn main() -> anyhow::Result<()> {
                 extra: Some(error_extra("INVALID_INPUT", false, None)),
             },
         };
+        emit_completion_progress(&mut stdout, &resp)?;
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
     }
 
     Ok(())
+}
+
+fn emit_start_progress(stdout: &mut impl Write, request: &Request) -> anyhow::Result<()> {
+    let requested = requested_page_count(&request.args);
+    let frame = SkillProgressFrame {
+        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
+        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
+        request_id: request.request_id.clone(),
+        sequence: 1,
+        kind: SkillProgressKind::Progress,
+        detail_key: "browser_web.pages.starting".to_string(),
+        params: BTreeMap::from([(
+            "action".to_string(),
+            Value::String("open_extract".to_string()),
+        )]),
+        current: Some(0),
+        total: requested,
+        reference: None,
+    };
+    writeln!(stdout, "{}", frame.to_line()?)?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn emit_completion_progress(stdout: &mut impl Write, response: &Response) -> anyhow::Result<()> {
+    let Some(extra) = response.extra.as_ref() else {
+        return Ok(());
+    };
+    let Some((success, failure)) = progress_page_counts(extra) else {
+        return Ok(());
+    };
+    let total = success.saturating_add(failure);
+    let frame = SkillProgressFrame {
+        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
+        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
+        request_id: response.request_id.clone(),
+        sequence: 2,
+        kind: SkillProgressKind::Progress,
+        detail_key: "browser_web.pages.completed".to_string(),
+        params: BTreeMap::new(),
+        current: Some(total),
+        total: Some(total),
+        reference: None,
+    };
+    writeln!(stdout, "{}", frame.to_line()?)?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn progress_page_counts(extra: &Value) -> Option<(u64, u64)> {
+    let candidates = [
+        Some(extra),
+        extra.get("details"),
+        extra
+            .get("details")
+            .and_then(|details| details.get("cause_details")),
+    ];
+    candidates.into_iter().flatten().find_map(|candidate| {
+        Some((
+            candidate.get("success_count")?.as_u64()?,
+            candidate.get("failure_count")?.as_u64()?,
+        ))
+    })
+}
+
+fn requested_page_count(args: &Value) -> Option<u64> {
+    let object = args.as_object()?;
+    let count = u64::from(
+        object
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty()),
+    )
+    .saturating_add(
+        object
+            .get("urls")
+            .and_then(Value::as_array)
+            .map(|values| values.len() as u64)
+            .unwrap_or(0),
+    );
+    let max_pages = object.get("max_pages").and_then(Value::as_u64).unwrap_or(3);
+    (count > 0).then(|| count.min(max_pages))
 }
 
 fn handle(req: Request) -> Response {
@@ -143,6 +231,14 @@ fn handle(req: Request) -> Response {
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let allow_path_outside_workspace = context_allows_path_outside_workspace(req.context.as_ref());
+    let artifact_output_directory = req
+        .context
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|context| context.get("artifact_output_directory"))
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let request_id = req.request_id.clone();
     let obj = match req.args.as_object() {
         Some(o) => o,
         None => {
@@ -172,7 +268,13 @@ fn handle(req: Request) -> Response {
         "open_extract" => parse_open_extract_args(obj)
             .map_err(|message| SkillFailure::with_message("INVALID_INPUT", message))
             .and_then(|args| {
-                open_extract_action(&workspace_root, args, allow_path_outside_workspace)
+                open_extract_action(
+                    &workspace_root,
+                    args,
+                    allow_path_outside_workspace,
+                    artifact_output_directory.as_deref(),
+                    &request_id,
+                )
             }),
         _ => Err(SkillFailure::with_message(
             "INVALID_ACTION",
@@ -422,8 +524,7 @@ fn parse_open_extract_args(
     let capture_images =
         optional_bool(obj.get("capture_images"), "capture_images")?.unwrap_or(false);
 
-    let screenshot_dir = optional_string(obj.get("screenshot_dir"), "screenshot_dir")?
-        .unwrap_or_else(|| "skills_output/browser_web/screenshots".to_string());
+    let screenshot_dir = optional_string(obj.get("screenshot_dir"), "screenshot_dir")?;
     let content_mode = optional_string(obj.get("content_mode"), "content_mode")?
         .unwrap_or_else(|| "clean".to_string());
     if !matches!(content_mode.as_str(), "clean" | "raw") {
@@ -470,7 +571,7 @@ fn parse_open_extract_args(
         wait_until: Some(wait_until),
         save_screenshot: Some(save_screenshot),
         capture_images: Some(capture_images),
-        screenshot_dir: Some(screenshot_dir),
+        screenshot_dir,
         content_mode: Some(content_mode),
         max_text_chars: Some(max_text_chars),
         min_content_chars: Some(min_content_chars),
@@ -543,6 +644,8 @@ fn open_extract_action(
     workspace_root: &Path,
     args: OpenExtractArgs,
     allow_path_outside_workspace: bool,
+    artifact_output_directory: Option<&Path>,
+    request_id: &str,
 ) -> Result<String, SkillFailure> {
     let mut urls = Vec::new();
     if let Some(url) = args.url {
@@ -571,13 +674,14 @@ fn open_extract_action(
         }
     }
 
-    let screenshot_dir = resolve_workspace_directory(
-        workspace_root,
-        &args
-            .screenshot_dir
-            .unwrap_or_else(|| "skills_output/browser_web/screenshots".to_string()),
-        allow_path_outside_workspace,
-    )?;
+    let capture_root = artifact_output_directory
+        .map(|directory| directory.join("capture"))
+        .unwrap_or_else(|| workspace_root.join("skills_output/browser_web/captures"));
+    let screenshot_dir = if let Some(directory) = args.screenshot_dir {
+        resolve_workspace_directory(workspace_root, &directory, allow_path_outside_workspace)?
+    } else {
+        capture_root.join("screenshots")
+    };
     let wait_map_path = args
         .wait_map_path
         .as_deref()
@@ -602,6 +706,9 @@ fn open_extract_action(
         "allowProxySyntheticDns": allow_proxy_synthetic_dns,
         "allowPathOutsideWorkspace": allow_path_outside_workspace,
         "workspaceRoot": workspace_root,
+        "captureRoot": capture_root,
+        "captureSource": "browser_web",
+        "runId": request_id,
     });
 
     call_browser_helper(workspace_root, helper_input)

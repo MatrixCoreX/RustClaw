@@ -12,4 +12,5 @@ path = "src/main.rs"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+skill-sdk = { package = "agent-skill-sdk", path = "../../skill-sdk" }
 url = "2.5"

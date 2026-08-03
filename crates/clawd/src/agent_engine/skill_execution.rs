@@ -1247,7 +1247,16 @@ pub(super) async fn execute_prepared_skill_action(
             .min(administrator_ceiling_seconds.max(1));
         (timeout_seconds, slice.tool_timeout_class.as_str())
     });
-    let tool_cancellation = state.worker.task_cancellation_token(&task.task_id);
+    let execution_owns_cancellation = is_mcp_tool
+        || state
+            .skill_manifest(normalized_skill)
+            .is_some_and(|manifest| {
+                !matches!(manifest.kind, claw_core::skill_registry::SkillKind::Builtin)
+                    || manifest.handles_task_cancellation
+            });
+    let tool_cancellation = (!execution_owns_cancellation)
+        .then(|| state.worker.task_cancellation_token(&task.task_id))
+        .flatten();
     let mut step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);

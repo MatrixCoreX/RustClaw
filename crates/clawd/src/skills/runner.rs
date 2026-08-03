@@ -3,7 +3,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -20,11 +19,18 @@ use crate::{AppState, ClaimedTask};
 
 use super::credential_fallback::provision_skill_secret_envs;
 use super::runner_pool::{WarmPoolCheckout, WarmRunnerKey, WarmRunnerProcess};
+#[path = "runner_support.rs"]
+mod runner_support;
 use super::{
     action_scoped_planner_mapping, apply_skill_runner_env_isolation,
     collect_declared_skill_env_pairs, current_task_auth_role,
     place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
     task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
+};
+use runner_support::{
+    cancelled_capture_projection, inherited_sandbox_backend, invocation_artifact_output_directory,
+    local_clawd_base_url_from_internal_listen, runner_additional_writable_paths,
+    selected_provider_api_key_env_names,
 };
 
 #[cfg(test)]
@@ -55,86 +61,6 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
         model.to_string(),
         model_kind.to_string(),
     ))
-}
-
-fn selected_provider_api_key_env_names(vendor: &str, provider_type: &str) -> Vec<&'static str> {
-    let mut names = match vendor.trim().to_ascii_lowercase().as_str() {
-        "openai" => vec!["OPENAI_API_KEY"],
-        "google" | "gemini" => vec!["GOOGLE_API_KEY"],
-        "anthropic" | "claude" => vec!["ANTHROPIC_API_KEY"],
-        "grok" | "xai" => vec!["GROK_API_KEY"],
-        "deepseek" => vec!["DEEPSEEK_API_KEY"],
-        "qwen" => vec!["QWEN_API_KEY"],
-        "minimax" => vec!["MINIMAX_API_KEY"],
-        "mimo" | "xiaomi" => vec!["MIMO_API_KEY"],
-        "custom" => Vec::new(),
-        _ => Vec::new(),
-    };
-    if provider_type.trim().eq_ignore_ascii_case("openai_compat")
-        && !names.contains(&"OPENAI_API_KEY")
-    {
-        names.push("OPENAI_API_KEY");
-    }
-    names
-}
-
-fn local_clawd_base_url_from_internal_listen(internal_listen: Option<&str>) -> String {
-    let address = internal_listen
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse::<SocketAddr>().ok())
-        .filter(|value| value.ip().is_loopback());
-    address
-        .map(|value| format!("http://{value}"))
-        .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string())
-}
-
-fn inherited_sandbox_backend(backend: &'static str) -> Option<&'static str> {
-    (backend != "direct").then_some(backend)
-}
-
-fn runner_additional_writable_paths(
-    secret_store_directory: Option<&std::path::Path>,
-    skill_storage_directory: Option<&std::path::Path>,
-    artifact_output_directory: Option<&std::path::Path>,
-) -> Vec<std::path::PathBuf> {
-    secret_store_directory
-        .into_iter()
-        .chain(skill_storage_directory)
-        .chain(artifact_output_directory)
-        .map(std::path::Path::to_path_buf)
-        .collect()
-}
-
-fn invocation_artifact_output_directory(
-    workspace_root: &std::path::Path,
-    task_id: &str,
-    skill_name: &str,
-) -> std::path::PathBuf {
-    fn component(value: &str, fallback: &str) -> String {
-        let normalized: String = value
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .take(96)
-            .collect();
-        if normalized.is_empty() {
-            fallback.to_string()
-        } else {
-            normalized
-        }
-    }
-
-    claw_core::workspace_state::workspace_artifacts_root(workspace_root)
-        .join("skill-invocations")
-        .join(component(task_id, "task"))
-        .join(component(skill_name, "skill"))
-        .join(uuid::Uuid::new_v4().to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -1488,10 +1414,44 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
 
     let mut out_line = String::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(skill_timeout_secs.max(1));
+    let task_cancellation = state.worker.task_cancellation_token(&task.task_id);
     let mut observed_frames = 0_u64;
     let mut accepted_times = VecDeque::<Instant>::new();
     loop {
-        let record = match tokio::time::timeout_at(deadline, runner_process.records.next()).await {
+        let read_record = tokio::time::timeout_at(deadline, runner_process.records.next());
+        tokio::pin!(read_record);
+        let read_result = if let Some(cancellation) = task_cancellation.as_ref() {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => {
+                    let _ = terminate_subprocess_group(runner_process.id()).await;
+                    runner_process.kill_and_wait().await;
+                    if let Some(payload) = cancelled_capture_projection(
+                        &artifact_output_directory,
+                        &task.task_id,
+                        canonical_skill_name,
+                    ) {
+                        if let Err(error) = crate::task_event_transport::publish_claimed_event(
+                            state,
+                            task,
+                            "skill_partial_receipts",
+                            payload,
+                        ) {
+                            tracing::warn!(
+                                skill = canonical_skill_name,
+                                error = %error,
+                                "cancelled_skill_receipt_projection_failed"
+                            );
+                        }
+                    }
+                    return Err(crate::agent_engine::TASK_CANCELED_ERR.to_string());
+                }
+                result = &mut read_record => result,
+            }
+        } else {
+            read_record.await
+        };
+        let record = match read_result {
             Ok(Some(Ok(line))) => line,
             Ok(Some(Err(LinesCodecError::MaxLineLengthExceeded))) => {
                 tracing::warn!(

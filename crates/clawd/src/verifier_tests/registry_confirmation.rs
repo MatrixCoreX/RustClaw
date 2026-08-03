@@ -113,3 +113,62 @@ fn archive_and_db_mutating_actions_still_require_confirmation() {
         }))
     ));
 }
+
+#[test]
+fn browser_observation_is_exempt_but_interaction_uses_shared_confirmation() {
+    let state = workspace_registry_state();
+    assert!(!state.skill_invocation_requires_confirmation_policy(
+        "browser_session",
+        Some(&json!({"action": "session_open", "url": "https://example.com"}))
+    ));
+    assert!(!state.skill_invocation_requires_confirmation_policy(
+        "browser_session",
+        Some(&json!({
+            "action": "snapshot", "session_id": "s", "page_id": "p",
+            "expected_page_generation": 1
+        }))
+    ));
+    for args in [
+        json!({
+            "action": "click", "session_id": "s", "page_id": "p",
+            "expected_page_generation": 1, "expected_snapshot_id": "snap", "target_ref": "e1"
+        }),
+        json!({
+            "action": "download", "session_id": "s", "page_id": "p",
+            "expected_page_generation": 1, "expected_snapshot_id": "snap", "target_ref": "e1"
+        }),
+        json!({"action": "observe_debug", "session_id": "s"}),
+    ] {
+        assert!(state.skill_invocation_requires_confirmation_policy("browser_session", Some(&args)));
+    }
+
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "browser-click".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "browser_session".to_string(),
+                args: json!({
+                    "action": "click", "session_id": "s", "page_id": "p",
+                    "expected_page_generation": 1, "expected_snapshot_id": "snap",
+                    "target_ref": "e1"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
