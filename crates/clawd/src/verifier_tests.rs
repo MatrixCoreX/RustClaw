@@ -1912,6 +1912,44 @@ fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() 
     assert!(path.ends_with(".txt"));
 }
 
+#[test]
+fn runtime_owned_write_target_is_not_treated_as_safe_autonomous_creation() {
+    let state = test_state();
+    let task = test_task();
+    let path = state
+        .skill_rt
+        .workspace_root
+        .join(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
+        .join("generated")
+        .join(format!("result-{}.txt", uuid::Uuid::new_v4()));
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: Some("把结果写到文件"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "write_file".to_string(),
+                args: json!({ "path": path, "content": "ok" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
 #[path = "verifier_tests/dangerous_defaults.rs"]
 mod dangerous_defaults;
 

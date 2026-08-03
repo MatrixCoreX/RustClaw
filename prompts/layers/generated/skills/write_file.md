@@ -4,11 +4,12 @@ Independent base skill for writing file contents. Use `{"type":"call_skill","ski
 
 ## Capability
 - Writes or appends text content to a file; creates parent directories if needed.
+- For a new user-deliverable file with no user-named destination, pass a descriptive bare filename. The runtime places it in the configured default output directory. Do not target runtime-owned state, checkpoint, cache, dependency, package-manager, or VCS metadata directories.
 
 ## Parameter contract
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
-| `path` | yes | string(path) | - | Target file path. |
+| `path` | yes | string(path) | - | Target file path. Use a bare filename when the user did not name a destination. |
 | `content` | yes | string | - | Content to write. |
 | `append` | no | bool | `false` | Append `content` to the target instead of replacing the file. |
 

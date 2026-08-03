@@ -166,7 +166,8 @@ use error_contract::structured_skill_error_string;
 #[cfg(test)]
 use error_contract::STRUCTURED_SKILL_ERROR_PREFIX;
 pub(crate) use error_contract::{
-    parse_structured_skill_error, structured_skill_error_from_parts, StructuredSkillError,
+    annotate_structured_skill_error_not_applied, parse_structured_skill_error,
+    structured_skill_error_from_parts, StructuredSkillError,
 };
 pub(crate) use memory_context::inject_skill_memory_context;
 use result_enrichment::enrich_runtime_owned_skill_extra;

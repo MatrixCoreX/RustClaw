@@ -163,6 +163,42 @@ pub(crate) fn structured_skill_error_from_parts(
     format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
 }
 
+pub(crate) fn annotate_structured_skill_error_not_applied(
+    error: &str,
+    failure_phase: &str,
+    retryable: Option<bool>,
+    recovery_action: Option<&str>,
+) -> String {
+    let Some(structured) = parse_structured_skill_error(error) else {
+        return error.to_string();
+    };
+    let mut extra = structured
+        .extra
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    extra.insert(
+        "failure_phase".to_string(),
+        Value::String(failure_phase.to_string()),
+    );
+    extra.insert("side_effect_applied".to_string(), Value::Bool(false));
+    if let Some(retryable) = retryable {
+        extra.insert("retryable".to_string(), Value::Bool(retryable));
+    }
+    if let Some(recovery_action) = recovery_action {
+        extra.insert(
+            "recovery_action".to_string(),
+            Value::String(recovery_action.to_string()),
+        );
+    }
+    structured_skill_error_from_parts(
+        &structured.skill,
+        &structured.error_code,
+        &structured.error_text,
+        structured.platform.as_deref(),
+        Some(Value::Object(extra)),
+    )
+}
+
 pub(crate) fn parse_structured_skill_error(err: &str) -> Option<StructuredSkillError> {
     let payload = err.trim().strip_prefix(STRUCTURED_SKILL_ERROR_PREFIX)?;
     let value = serde_json::from_str::<Value>(payload).ok()?;

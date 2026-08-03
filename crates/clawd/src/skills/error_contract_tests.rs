@@ -1,5 +1,6 @@
 use super::{
-    parse_structured_skill_error, structured_skill_error_from_parts, structured_skill_error_string,
+    annotate_structured_skill_error_not_applied, parse_structured_skill_error,
+    structured_skill_error_from_parts, structured_skill_error_string,
     CURRENT_LEGACY_ERROR_FIELD_PRODUCERS, HISTORICAL_ERROR_FIELD_PRODUCERS,
 };
 use serde_json::json;
@@ -69,4 +70,36 @@ fn historical_persisted_wrapper_is_read_and_normalized() {
         parsed.extra.as_ref().unwrap()["error_code"],
         "permission_denied"
     );
+}
+
+#[test]
+fn not_applied_annotation_preserves_error_identity_and_adds_effect_contract() {
+    let encoded = structured_skill_error_from_parts(
+        "write_file",
+        "invalid_target_path",
+        "workspace.mutation.invalid_target_path",
+        Some("linux"),
+        Some(json!({
+            "message_key": "workspace.mutation.invalid_target_path",
+            "details": {"path": ".agent-runtime/output.txt"}
+        })),
+    );
+
+    let annotated = annotate_structured_skill_error_not_applied(
+        &encoded,
+        "pre_dispatch",
+        Some(true),
+        Some("replan_arguments"),
+    );
+    let parsed = parse_structured_skill_error(&annotated).expect("annotated structured error");
+    let extra = parsed.extra.expect("canonical extra");
+
+    assert_eq!(parsed.skill, "write_file");
+    assert_eq!(parsed.error_code, "invalid_target_path");
+    assert_eq!(parsed.platform.as_deref(), Some("linux"));
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+    assert_eq!(extra["details"]["path"], ".agent-runtime/output.txt");
 }

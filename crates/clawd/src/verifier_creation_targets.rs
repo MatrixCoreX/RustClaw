@@ -48,6 +48,18 @@ fn path_has_parent_dir(path: &Path) -> bool {
         .any(|component| matches!(component, Component::ParentDir))
 }
 
+fn path_has_runtime_owned_component(path: &Path) -> bool {
+    path.components().any(|component| {
+        let Component::Normal(value) = component else {
+            return false;
+        };
+        value == ".git"
+            || claw_core::workspace_state::is_known_workspace_state_dir_name(
+                &value.to_string_lossy(),
+            )
+    })
+}
+
 fn anchor_creation_path_to_workspace(state: &AppState, path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -80,7 +92,7 @@ fn path_is_safe_workspace_creation_target(
         return false;
     }
     let candidate = Path::new(trimmed);
-    if path_has_parent_dir(candidate) {
+    if path_has_parent_dir(candidate) || path_has_runtime_owned_component(candidate) {
         return false;
     }
     let resolved = if candidate.is_absolute() {
