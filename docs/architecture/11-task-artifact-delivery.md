@@ -1,7 +1,7 @@
 # Task Artifact Delivery
 
-<!-- ai-learning-stage: architecture-guide -->
-<!-- ai-learning-audience: operator -->
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
 
 <!-- ai-learning-navigation:start -->
 Previous: [Web entry and core isolation](10-web-entry-security.md) |
@@ -19,6 +19,7 @@ right preview or download control without interpreting assistant prose.
 flowchart LR
     A[Agent loop]
     X[Tool or skill execution]
+    P[Trusted async terminal checkpoint]
     R[Structured task result]
     M[Artifact materializer]
     D[Controlled delivery directory]
@@ -29,6 +30,7 @@ flowchart LR
     U[Browser UI]
 
     A --> X --> R
+    X -->|background completion| P --> R
     R --> M --> D
     M --> J
     R --> C
@@ -49,6 +51,15 @@ Dry-run output, paths outside the workspace, directories, missing files, and
 files above the configured delivery limit are not exposed. Materialization
 failure does not turn an otherwise successful tool or skill execution into a
 failed task; it is logged as a structured delivery warning.
+
+An asynchronous capability may finish after the foreground turn has saved a
+checkpoint. In that case the terminal worker result remains below the trusted
+`async_job_completion_checkpoint` observation instead of being copied into a
+stale pre-resume capability result. Artifact materialization and native-channel
+delivery use the same decoder, accept only the versioned successful observation,
+and then read its structured final result and `deliver_to_user` preference. This
+keeps resumed media jobs downloadable without teaching channels to parse prose
+or guess checkpoint layouts.
 
 ## Browser Access
 
@@ -100,4 +111,5 @@ cd UI && node --import tsx --test src/lib/task-artifacts.test.ts src/lib/chat-hi
 ```
 
 The checks cover containment, authentication, byte ranges, history restoration,
-safe preview policy, the long-running proxy path, and unchanged channel delivery.
+trusted async terminal results, safe preview policy, the long-running proxy path,
+and unchanged channel delivery.

@@ -658,7 +658,7 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
 }
 
 #[test]
-fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
+fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_token() {
     let mut state = state_with_tasks_table();
     let workspace = TempDirGuard::new("seeded_terminal_artifact");
     state.skill_rt.workspace_root = workspace.path.clone();
@@ -760,19 +760,26 @@ fn terminal_seeded_loop_projection_replaces_pre_resume_visible_reply() {
                                 "verification_commands": [],
                                 "verification_status": "not_applicable"
                             },
-                            "capability_results": [{
-                                "status": "ok",
-                                "data": {
-                                    "extra": {
+                            "capability_results": [{"status": "waiting"}],
+                            "task_checkpoint": {"boundary_context": {
+                                "async_job_terminal_observation": {
+                                    "schema_version": 1,
+                                    "source": "async_job_completion_checkpoint",
+                                    "status": "succeeded",
+                                    "final_result_json": {"extra": {
+                                        "delivery": {
+                                            "deliver_to_user": true,
+                                            "intent": "artifact"
+                                        },
                                         "artifacts": [{
                                             "path": source_video,
                                             "filename": "shared-video.mp4",
                                             "mime_type": "video/mp4",
                                             "size_bytes": 13
                                         }]
-                                    }
+                                    }}
                                 }
-                            }]
+                            }}
                         }
                     }
                 }

@@ -174,6 +174,62 @@ fn structured_image_is_added_when_model_only_returns_prose() {
 }
 
 #[test]
+fn async_completion_delivery_flag_controls_model_independent_video_delivery() {
+    let workspace = temp_workspace("task_delivery_async_video");
+    let task_id = "task-async-video";
+    let artifact_id = "artifact-video";
+    let path = write_delivery_artifact(&workspace, task_id, artifact_id, "clip.mp4", b"video");
+    let mut result = result_with_artifact(
+        task_id,
+        artifact_id,
+        "clip.mp4",
+        "video",
+        "video/mp4",
+        5,
+        None,
+    );
+    result["task_journal"] = serde_json::json!({"trace": {
+        "capability_results": [{"status": "waiting"}],
+        "task_checkpoint": {"boundary_context": {
+            "async_job_terminal_observation": {
+                "schema_version": 1,
+                "source": "async_job_completion_checkpoint",
+                "status": "succeeded",
+                "final_result_json": {"extra": {
+                    "delivery": {"deliver_to_user": true, "intent": "artifact"}
+                }}
+            }
+        }}
+    }});
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["download complete".to_string()],
+    );
+    assert_eq!(
+        messages,
+        vec![format!(
+            "download complete\nVIDEO_FILE:{}",
+            path.canonicalize().expect("canonical video").display()
+        )]
+    );
+
+    result["task_journal"]["trace"]["task_checkpoint"]["boundary_context"]
+        ["async_job_terminal_observation"]["final_result_json"]["extra"]["delivery"]
+        ["deliver_to_user"] = serde_json::json!(false);
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["download complete\nVIDEO_FILE:/old/clip.mp4".to_string()],
+    );
+    assert_eq!(messages, vec!["download complete"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn explicit_user_file_excludes_internal_skill_output_artifact() {
     let workspace = temp_workspace("task_delivery_explicit_selection");
     let task_id = "task-explicit-selection";

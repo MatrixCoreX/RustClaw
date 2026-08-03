@@ -1,65 +1,27 @@
-# Telegram channel config.
-# Current primary identity flow is key-based:
-# - Telegram user/chat id is only the external transport identity
-# - Real auth/role/memory identity comes from bound user_key
-# - bindings can be used for static pre-bind seeding
-#
-# [telegram] is the main Telegram Bot config.
-# [telegram_bot] is kept as a compatibility/extension section.
-
 [telegram]
-# Kept for compatibility/old users table seeding; runtime auth now depends on key binding.
-# 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
-ephemeral_image_saved_seconds = 15
-# Legacy allowlist user IDs (integer).
-# Kept for compatibility; runtime access now depends on key binding.
-allowlist = []
-# 访问类型：public=所有 Telegram 用户都能问；specified=只允许下面名单里的账号提问
 access_mode = "public"
-# 当 access_mode = "specified" 时生效。填写 Telegram username，不区分大小写，支持带 @ 或不带 @。
-allowed_usernames = []
-# 图片落盘根目录
-image_inbox_dir = "data/telegramd/image"
-# 视频落盘根目录
-video_inbox_dir = "data/telegramd/video"
-# 文件落盘根目录
-file_inbox_dir = "data/telegramd/file"
-# 音频落盘根目录
-audio_inbox_dir = "data/telegramd/audio"
-# Telegram Bot Token
-bot_token = ""
-# Primary bot 对应哪个 agent；留空时默认 main
 agent_id = "main"
-# 单客户端模式：每个渠道类型仅保留一个 Telegram 客户端实例。
-# 请仅维护 [telegram] 这一组参数，不再配置多 bot 列表。
-# Optional static bindings loaded into channel_bindings on clawd startup.
-# Use this only if you want to pre-bind a Telegram account to a key.
-# Example:
-# bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
+allowed_usernames = []
+allowlist = []
+audio_inbox_dir = "data/telegramd/audio"
 bindings = []
-# i18n 文案路径
+bot_token = ""
+bots = []
+ephemeral_image_saved_seconds = 15
+file_inbox_dir = "data/telegramd/file"
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
-# 默认语言
+image_inbox_dir = "data/telegramd/image"
 language = "zh-CN"
-# 入站更新模式只能二选一：polling 或 webhook。默认 polling 会主动清理旧 webhook。
-update_mode = "polling"
-# webhook 模式只监听本机地址，由反向代理提供公网 HTTPS。
-webhook_listen = "127.0.0.1:8090"
-# webhook 模式必填，例如 https://example.com/telegram/update。
-webhook_public_url = ""
-# webhook secret 只从这个环境变量读取，不写入 TOML。
-webhook_secret_env = "TELEGRAM_WEBHOOK_SECRET"
-# 任务结果投递最长等待秒数（仅 Telegram 通道；不终止后台任务）
-task_delivery_timeout_seconds = 600
-# 最大音频输入字节数
 max_audio_input_bytes = 26214400
-# 默认语音回复模式：voice / text
+task_delivery_timeout_seconds = 600
+update_mode = "polling"
+video_inbox_dir = "data/telegramd/video"
 voice_reply_mode = "voice"
+webhook_listen = "127.0.0.1:8090"
+webhook_public_url = ""
+webhook_secret_env = "TELEGRAM_WEBHOOK_SECRET"
 
 [telegram.voice_reply_mode_by_chat]
-# `/voicemode` 会在这里持久化按 chat_id 设置的 text / voice / both 覆盖。
 
-# 兼容入口（与 [telegram] 共用同一个客户端运行时）。
 [telegram_bot]
-# 是否启用 telegram_bot 兼容入口
 enabled = true

@@ -14,6 +14,15 @@ export interface AiLearningPage {
 
 export type LearningAudience = "beginner" | "operator" | "developer";
 
+export const LEARNING_STAGE_ORDER = [
+  "foundations",
+  "agent-runtime",
+  "context-memory",
+  "safety-operations",
+  "capabilities-artifacts",
+  "development-release",
+] as const;
+
 export interface AiLearningHeading {
   id: string;
   title: string;

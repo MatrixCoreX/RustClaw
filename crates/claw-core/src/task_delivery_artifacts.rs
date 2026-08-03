@@ -17,6 +17,14 @@ use crate::{
 const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const MAX_TASK_ARTIFACTS: usize = 32;
+const ASYNC_JOB_COMPLETION_SOURCE: &str = "async_job_completion_checkpoint";
+const ASYNC_JOB_TERMINAL_OBSERVATION_POINTERS: &[&str] = &[
+    "/task_journal/trace/task_checkpoint/boundary_context/async_job_terminal_observation",
+    "/task_journal/summary/task_checkpoint/boundary_context/async_job_terminal_observation",
+    "/task_checkpoint/boundary_context/async_job_terminal_observation",
+    "/task_lifecycle/resume_executor_result_projection/final_result_json/task_journal/trace/task_checkpoint/boundary_context/async_job_terminal_observation",
+    "/task_lifecycle/resume_executor_result_projection/final_result_json/task_journal/summary/task_checkpoint/boundary_context/async_job_terminal_observation",
+];
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct TaskDeliveryArtifactManifest {
@@ -139,17 +147,39 @@ fn messages_without_delivery_lines(messages: Vec<String>) -> Vec<String> {
 }
 
 fn task_delivery_preference(result_json: Option<&Value>) -> DeliveryPreference {
-    let flags = result_json
-        .and_then(|result| result.pointer("/task_journal/trace/capability_results"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|result| {
+    let Some(result_json) = result_json else {
+        return DeliveryPreference::Default;
+    };
+    let mut flags = Vec::new();
+    for pointer in [
+        "/extra/delivery/deliver_to_user",
+        "/final_result_json/extra/delivery/deliver_to_user",
+    ] {
+        if let Some(flag) = result_json.pointer(pointer).and_then(Value::as_bool) {
+            flags.push(flag);
+        }
+    }
+    for pointer in [
+        "/task_journal/trace/capability_results",
+        "/final_result_json/task_journal/trace/capability_results",
+    ] {
+        let Some(results) = result_json.pointer(pointer).and_then(Value::as_array) else {
+            continue;
+        };
+        flags.extend(results.iter().filter_map(|result| {
             result
                 .pointer("/data/extra/delivery/deliver_to_user")
                 .and_then(Value::as_bool)
-        })
-        .collect::<Vec<_>>();
+        }));
+    }
+    if let Some(final_result) = trusted_async_job_terminal_final_result(result_json) {
+        if let Some(flag) = final_result
+            .pointer("/extra/delivery/deliver_to_user")
+            .and_then(Value::as_bool)
+        {
+            flags.push(flag);
+        }
+    }
     if flags.iter().any(|enabled| *enabled) {
         DeliveryPreference::Enabled
     } else if flags.is_empty() {
@@ -157,6 +187,27 @@ fn task_delivery_preference(result_json: Option<&Value>) -> DeliveryPreference {
     } else {
         DeliveryPreference::Disabled
     }
+}
+
+/// Return the structured result of a trusted, successfully completed async job.
+///
+/// Async execution stores its terminal payload below the task checkpoint instead of
+/// duplicating it into the pre-resume capability result. Artifact materialization and
+/// channel delivery share this decoder so they cannot drift onto different paths.
+pub fn trusted_async_job_terminal_final_result(result: &Value) -> Option<&Value> {
+    ASYNC_JOB_TERMINAL_OBSERVATION_POINTERS
+        .iter()
+        .filter_map(|pointer| result.pointer(pointer))
+        .find_map(|observation| {
+            let trusted = observation.get("schema_version").and_then(Value::as_u64) == Some(1)
+                && observation.get("source").and_then(Value::as_str)
+                    == Some(ASYNC_JOB_COMPLETION_SOURCE)
+                && observation.get("status").and_then(Value::as_str) == Some("succeeded");
+            trusted
+                .then(|| observation.get("final_result_json"))
+                .flatten()
+                .filter(|value| value.is_object())
+        })
 }
 
 fn task_artifact_manifests(

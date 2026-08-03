@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 
@@ -759,6 +760,181 @@ class AdapterTest(unittest.TestCase):
             "platform_post",
         )
         self.assertIn("original_image", artifacts_by_role)
+
+    def test_nine_downloaded_images_remain_individual_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                for index in range(1, 10):
+                    (output_dir / f"note_{index:02d}.jpg").write_bytes(
+                        f"image-{index}".encode()
+                    )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-nine-images-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.douyin.com/note/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["count"], 9)
+        self.assertEqual(
+            [item["artifact_role"] for item in response["extra"]["artifacts"]],
+            ["original_image"] * 9,
+        )
+        self.assertNotIn("image_delivery", response["extra"]["content_bundle"])
+        self.assertNotIn("processing_inputs", response["extra"])
+
+    def test_sixty_five_images_and_long_article_are_preserved_in_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            image_names = [f"note_{index:02d}.webp" for index in range(1, 66)]
+            article_name = "note_article.txt"
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                for index, name in enumerate(image_names, start=1):
+                    (output_dir / name).write_bytes(f"image-{index}".encode())
+                (output_dir / article_name).write_text(
+                    "平台：抖音\n\n正文：\n" + "完整正文" * 80,
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-sixty-five-images-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.douyin.com/note/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+            delivered = response["extra"]["artifacts"]
+            archive = next(item for item in delivered if item["artifact_role"] == "image_archive")
+            article = next(item for item in delivered if item["artifact_role"] == "article_text")
+            with zipfile.ZipFile(archive["path"]) as package:
+                archived_names = package.namelist()
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["count"], 2)
+        self.assertEqual(archived_names, [*image_names, article_name])
+        self.assertEqual(article["filename"], article_name)
+        self.assertEqual(archive["contained_image_count"], 65)
+        self.assertEqual(archive["contained_article_count"], 1)
+        self.assertEqual(
+            response["extra"]["content_bundle"],
+            {
+                "schema_version": 1,
+                "kind": "image_article",
+                "image_count": 65,
+                "video_count": 0,
+                "article_count": 1,
+                "other_file_count": 0,
+                "inline_article_count": 0,
+                "image_delivery": {
+                    "mode": "archive",
+                    "threshold": 9,
+                    "image_count": 65,
+                    "archive_filename": "image_bundle.zip",
+                    "archive_path": archive["path"],
+                    "article_included": True,
+                },
+            },
+        )
+        processing_inputs = response["extra"]["processing_inputs"]
+        self.assertTrue(processing_inputs["ordered"])
+        self.assertEqual(processing_inputs["image_count"], 65)
+        self.assertEqual(
+            [item["filename"] for item in processing_inputs["images"]],
+            image_names,
+        )
+
+    def test_large_image_archive_keeps_short_article_after_inline_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            image_names = [f"short_{index:02d}.jpg" for index in range(1, 11)]
+            article_name = "short_article.txt"
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                for index, name in enumerate(image_names, start=1):
+                    (output_dir / name).write_bytes(f"image-{index}".encode())
+                (output_dir / article_name).write_text(
+                    "平台：抖音\n\n正文：\n短正文不能遗漏。",
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-ten-images-short-article-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.douyin.com/note/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+            archive = response["extra"]["artifacts"][0]
+            self.assertFalse((artifacts / article_name).exists())
+            with zipfile.ZipFile(archive["path"]) as package:
+                archived_names = package.namelist()
+                archived_article = package.read(article_name).decode("utf-8")
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["count"], 1)
+        self.assertEqual(archive["artifact_role"], "image_archive")
+        self.assertEqual(archived_names, [*image_names, article_name])
+        self.assertIn("短正文不能遗漏。", archived_article)
+        self.assertIn("短正文不能遗漏。", response["text"])
+        self.assertEqual(response["extra"]["content_bundle"]["image_count"], 10)
+        self.assertEqual(response["extra"]["content_bundle"]["article_count"], 1)
+        self.assertEqual(
+            response["extra"]["content_bundle"]["inline_article_count"],
+            1,
+        )
 
     def test_short_platform_article_is_delivered_inline_only_for_this_skill(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -16,7 +16,8 @@ Current repository highlights:
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
-  Tools/Skills, Skill Store, and Learning / Maintenance pages
+  Communication Setup, Account Binding, Tools/Skills, Skill Store, Memory,
+  Logs, and Learning / Maintenance pages
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
   Seatbelt process isolation selected through a machine-configured backend
@@ -593,6 +594,9 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
   install by fixed `dependency_id`; arbitrary commands and package names are rejected
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/{task_id}/artifacts`: returns the authenticated task artifact manifest
+- `GET/HEAD /v1/tasks/{task_id}/artifacts/{artifact_id}/content`: previews,
+  downloads, or reads metadata for one controlled artifact
 - `GET /v1/tasks/conversation-history`
 - `PUT /v1/tasks/conversations/{conversation_id}/title`
 - `POST /v1/tasks/active`
@@ -627,6 +631,53 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "X-Agent-Key: rk-xxxx" \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
+
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: developer -->
+## Model Capability Catalog and Chinese Provider Validation
+
+### What the catalog answers
+
+The model capability catalog is configuration-derived machine truth, not a
+runtime guess based on model names. It combines the LLM provider tables in
+`configs/config.toml` with the independently selected modules in
+`configs/image.toml`, `configs/audio.toml`, `configs/video.toml`, and
+`configs/music.toml`. Secret-free entries expose provider/model identity,
+configured choices, input/output modalities, generation and understanding
+capabilities, async and dry-run requirements, timeout, context window, active
+text-provider state, and configuration sources. `credential_state` is one of
+`configured_inline`, `configured_env`, `not_required_local`, or `missing`; it
+never contains the credential value.
+
+`clawcli models catalog` emits `model_catalog_summary` and
+`model_catalog_entry` machine lines. `clawcli models readiness`, task teaching
+traces, and `clawcli llm-trace` project the same selected entry through
+`model_readiness_summary` or `model_catalog_trace.readiness`, so callers do not
+need to parse prose or inspect provider logs.
+
+See [Skills, media, and models](docs/architecture/05-skills-media-models.md) and
+[Release validation](docs/architecture/06-release-validation.md) for the full
+catalog, readiness, and provider-validation flow.
+
+### How providers are validated
+
+`scripts/check_chinese_model_catalog.py` guards MiniMax M3/M2.7, MiMo, Qwen,
+and DeepSeek metadata. Its self-test covers missing or unreadable TOML/env
+files, invalid UTF-8, syntax errors, and other structured findings before the
+release gate trusts configuration-derived metadata. Run
+`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` to validate
+cases and credential state without contacting providers. A live run must use a
+`clawd` process started with the matching provider configuration; use
+`--live-providers <machine-token-csv>` to declare the account scope explicitly.
+
+### How the release gate proves the result
+
+The agent parity gate records the catalog, provider-smoke preflight, structured
+evidence, permission tokens, registry policy, long-tail async contracts, and
+hard-match/fixed-reply checks as portable artifacts. Paths remain
+repository-relative or artifact-relative, and the reports never record
+credential values, env-file locations, or machine-specific absolute paths. This makes provider
+readiness and the absence of new runtime hard replies independently auditable.
 
 <!-- ai-learning-stage: development-release -->
 ## NL Regression Shortcuts
@@ -825,11 +876,24 @@ Agent Runtime currently ships a broad skill set. Representative groups:
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
 - runtime and workspace primitives: `run_cmd`, `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `workspace_patch`, `task_plan`, `subagent`
 - files, config, and developer tools: `fs_basic`, `code_index`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
-- network and content: `http_basic`, `rss_fetch`, `browser_web`, `media_download`, `web_search_extract`
+- network and content: `http_basic`, `rss_fetch`, `browser_web`, `browser_session`, `media_download`, `web_search_extract`
 - documents and office work: `doc_parse`, `office_workspace`, `transform`
 - multimodal and media generation: `image_generate` (`image.preview_generate` / `image.generate` / `image.poll` / `image.cancel`), `image_edit`, `image_vision`, `audio_transcribe` (`audio.preview_transcribe` / `audio.transcribe`), `audio_synthesize` (`audio.preview_synthesize` / `audio.synthesize` / `audio.poll` / `audio.cancel`), `video_generate` (`video.preview_generate` / `video.generate` / `video.poll` / `video.cancel`), `music_generate` (`music.preview_generate` / `music.generate` / `music.poll` / `music.cancel`)
 - workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
 - domain and knowledge skills: `crypto`, `stock`, `weather`, `chinese_almanac`, `map_merchant`, `kb`
+
+Use `browser_web` to extract bounded evidence from exact public URLs. Use the
+separate task-scoped `browser_session` only when the task must navigate, click,
+type, select, download, or verify a page transition; its element references are
+tied to the current snapshot generation and mutating interactions remain
+policy/confirmation gated.
+
+`media_download` returns original media by default. Douyin and Xiaohongshu
+image-article posts also include verified platform text; up to nine images are
+delivered individually and larger sets use one source-ordered ZIP. OCR or speech
+transcription runs only when the user explicitly asks to convert the media to
+text. Image recognition prefers the configured `image_vision` model and may use
+local Tesseract as an explicit fallback; audio/video uses speech transcription.
 
 Skill installation and enablement are separate states. `skill_switches=false` keeps
 an installed skill available in the normal inventory but disables it.
@@ -935,6 +999,7 @@ The empty `api_key` is accepted only for loopback `custom` providers (`localhost
 
 - `configs/`: runtime, channel, model, memory, and skill configuration
 - `crates/`: Rust services, daemons, CLI, and skills
+- `optional_skills/`: bundled Skill Store packages installed on demand
 - `external_skills/`: externally submitted skills and example scaffolds
 - `prompts/`: prompt layers and generated skill prompt files
 - `scripts/`: setup, regression, maintenance, and skill-call helpers

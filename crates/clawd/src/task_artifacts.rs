@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use claw_core::task_delivery_artifacts::trusted_async_job_terminal_final_result;
+
 pub(crate) const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const MAX_TASK_ARTIFACTS: usize = 32;
@@ -266,6 +268,9 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
                 }
             }
         }
+    }
+    if let Some(final_result) = trusted_async_job_terminal_final_result(result) {
+        collect_sources_from_object(final_result, &mut sources, true);
     }
     sources
 }

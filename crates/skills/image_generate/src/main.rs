@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -22,6 +22,7 @@ use response_projection::{build_dry_run_response, build_success_response};
 
 const SKILL_NAME: &str = "image_generate";
 const NOT_APPLIED_ERROR_PREFIX: &str = "__RC_MEDIA_NOT_APPLIED__:";
+const DEFAULT_IMAGE_SIZE: &str = "4:3";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -83,6 +84,18 @@ struct VendorConfig {
     model: String,
     #[serde(default)]
     timeout_seconds: Option<u64>,
+    #[serde(default)]
+    size_policy: Option<ImageSizePolicy>,
+    #[serde(default)]
+    model_size_policies: BTreeMap<String, ImageSizePolicy>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ImageSizePolicy {
+    #[serde(default)]
+    default: String,
+    #[serde(default)]
+    supported: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -313,7 +326,7 @@ fn execute_generate(
     let size = obj
         .get("size")
         .and_then(|v| v.as_str())
-        .unwrap_or("1024x1024");
+        .unwrap_or(DEFAULT_IMAGE_SIZE);
     let style = obj.get("style").and_then(|v| v.as_str());
     let quality = obj.get("quality").and_then(|v| v.as_str());
     let n = obj
@@ -366,6 +379,12 @@ fn execute_generate(
             ))
             .unwrap_or("default");
         let provider = vendor_name(vendor);
+        let normalized_size = resolve_vendor_config(cfg, vendor)
+            .ok()
+            .map(|(_, provider_cfg)| {
+                normalize_provider_size(size, provider_size_policy(provider_cfg, model))
+            })
+            .unwrap_or_else(|| size.to_string());
         let poll_after_seconds = image_poll_after_seconds(obj);
         let expires_at = image_expires_at(obj);
         let dry_run_job_id = provider_image_job_id(provider, "dry_run");
@@ -379,7 +398,7 @@ fn execute_generate(
             provider,
             model,
             prompt,
-            size,
+            &normalized_size,
             style,
             quality,
             n,
@@ -482,9 +501,11 @@ fn call_generate(
     let mode = resolve_adapter_mode(&cfg.image_generation);
     let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &vcfg.api_key)?;
+    let model = requested_model.unwrap_or(&vcfg.model).to_string();
+    let normalized_size = normalize_provider_size(size, provider_size_policy(vcfg, &model));
+    let size = normalized_size.as_str();
     match vendor {
         VendorKind::OpenAI => {
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -506,7 +527,6 @@ fn call_generate(
             Ok((model, "compat"))
         }
         VendorKind::Google => {
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -538,7 +558,6 @@ fn call_generate(
                         .to_string(),
                 );
             }
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -572,7 +591,6 @@ fn call_generate(
                     ),
                 );
             }
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -594,7 +612,6 @@ fn call_generate(
             Ok((model, "compat"))
         }
         VendorKind::MiniMax => {
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -615,7 +632,6 @@ fn call_generate(
             Ok((model, "native"))
         }
         VendorKind::Qwen => {
-            let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(
                     timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
@@ -1082,14 +1098,7 @@ fn minimax_generate(
     output_path: &Path,
 ) -> Result<(), String> {
     let url = format!("{}/image_generation", trim_trailing_slash(&cfg.base_url));
-    let mut body = json!({
-        "model": model,
-        "prompt": prompt,
-        "response_format": "url",
-        "n": n.max(1),
-        "prompt_optimizer": true
-    });
-    body["aspect_ratio"] = Value::String(size_to_minimax_aspect_ratio(size));
+    let body = minimax_request_body(model, prompt, size, n);
 
     let resp = client
         .post(url)
@@ -1164,6 +1173,17 @@ fn minimax_generate(
         "minimax response contains no image payload: {}",
         truncate(&v.to_string(), 400)
     ))
+}
+
+fn minimax_request_body(model: &str, prompt: &str, normalized_size: &str, n: u64) -> Value {
+    json!({
+        "model": model,
+        "prompt": prompt,
+        "response_format": "url",
+        "n": n.max(1),
+        "prompt_optimizer": true,
+        "aspect_ratio": normalized_size
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1548,30 +1568,81 @@ fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
 }
 
-fn size_to_minimax_aspect_ratio(size: &str) -> String {
-    let normalized = size.trim().replace('X', "x");
-    let parts = normalized.split('x').collect::<Vec<_>>();
-    if parts.len() == 2 {
-        if let (Ok(w), Ok(h)) = (
-            parts[0].trim().parse::<u64>(),
-            parts[1].trim().parse::<u64>(),
-        ) {
-            if w > 0 && h > 0 {
-                let g = gcd_u64(w, h);
-                return format!("{}:{}", w / g, h / g);
-            }
-        }
+fn normalize_provider_size(size: &str, policy: Option<&ImageSizePolicy>) -> String {
+    let requested = size.trim();
+    let Some(policy) = policy else {
+        return if requested.is_empty() {
+            DEFAULT_IMAGE_SIZE.to_string()
+        } else {
+            requested.to_string()
+        };
+    };
+    let fallback = if policy.default.trim().is_empty() {
+        DEFAULT_IMAGE_SIZE
+    } else {
+        policy.default.trim()
+    };
+    let requested = if requested.is_empty() {
+        fallback
+    } else {
+        requested
+    };
+    if let Some(exact) = policy
+        .supported
+        .iter()
+        .find(|candidate| candidate.trim().eq_ignore_ascii_case(requested))
+    {
+        return exact.trim().to_string();
     }
-    "1:1".to_string()
+
+    let Some(target_ratio) = parse_size_ratio(requested) else {
+        return configured_size_fallback(policy, fallback);
+    };
+    policy
+        .supported
+        .iter()
+        .filter_map(|candidate| {
+            let ratio = parse_size_ratio(candidate)?;
+            Some((candidate.trim(), (target_ratio.ln() - ratio.ln()).abs()))
+        })
+        .min_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(candidate, _)| candidate.to_string())
+        .unwrap_or_else(|| configured_size_fallback(policy, fallback))
 }
 
-fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
-    while b != 0 {
-        let t = a % b;
-        a = b;
-        b = t;
-    }
-    a.max(1)
+fn provider_size_policy<'a>(
+    provider: &'a VendorConfig,
+    model: &str,
+) -> Option<&'a ImageSizePolicy> {
+    provider
+        .model_size_policies
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(model.trim()))
+        .map(|(_, policy)| policy)
+        .or(provider.size_policy.as_ref())
+}
+
+fn parse_size_ratio(value: &str) -> Option<f64> {
+    let normalized = value.trim().replace(['X', '*'], "x");
+    let separator = if normalized.contains('x') { 'x' } else { ':' };
+    let mut parts = normalized.split(separator).map(str::trim);
+    let (Some(width), Some(height), None) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let width = width.parse::<f64>().ok()?;
+    let height = height.parse::<f64>().ok()?;
+    (width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0)
+        .then_some(width / height)
+}
+
+fn configured_size_fallback(policy: &ImageSizePolicy, fallback: &str) -> String {
+    policy
+        .supported
+        .iter()
+        .find(|candidate| candidate.trim().eq_ignore_ascii_case(fallback))
+        .or_else(|| policy.supported.first())
+        .map(|candidate| candidate.trim().to_string())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn is_qwen_wan26_image(model: &str) -> bool {

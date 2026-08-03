@@ -10,6 +10,8 @@ Next: [Release validation](06-release-validation.md)
 
 <!-- ai-learning-navigation:end -->
 
+## Skill Admission and Execution
+
 The registry is the machine source for skill availability, capabilities,
 effects, risk, schema, install mode, and manifest reference. Natural-language
 phrases do not belong in aliases or runtime dispatch branches.
@@ -45,6 +47,24 @@ projected into receipts by the normal build. Bundled optional skills live under
 receipt verification before registration. No runtime is inferred from a file
 extension, skill name, or `target/release` convention.
 
+## Independent Multimodal Modules
+
+The Models page keeps the main text model separate from seven multimodal
+modules: image editing, image generation, image understanding, speech
+synthesis, speech transcription, video generation, and music generation. Each
+module owns its provider, model, endpoint, credential reference, and enable
+switch. Turning one module off blocks new calls without erasing its settings or
+changing another module. The release defaults select MiniMax for six modules
+and the loopback `local-whisper` custom provider for speech transcription, but
+every module can be configured independently.
+
+Image generation maps a requested aspect ratio or size to the selected
+provider/model's declared size policy before dispatch. This prevents a model
+from receiving a size token it does not support while preserving the user's
+requested shape as closely as the provider allows.
+
+## Media Jobs and Explicit Text Conversion
+
 Long-tail media capabilities use start, poll, and cancel contracts. The
 foreground task can return a checkpoint while provider work continues.
 Preview actions are separate machine capabilities: their registry policy
@@ -77,6 +97,29 @@ issues a distinct one-use token for each required child environment variable,
 and logs variable names only. An OpenAI-compatible MiniMax adapter may receive
 both `MINIMAX_API_KEY` and an `OPENAI_API_KEY` protocol alias, but never the
 parent environment or a reused token.
+
+`media_download.download` returns original media by default. Douyin and
+Xiaohongshu image-article posts also return the verified platform title/body;
+up to nine images are delivered separately, while ten or more are placed in one
+source-ordered ZIP together with the article text. It does not OCR images or
+transcribe video unless the same user request explicitly asks for text. Image
+text first uses `image_vision.extract_text`, with local Tesseract OCR as the
+explicit offline fallback; video/audio text uses speech transcription and
+never sends a ZIP or video to image OCR.
+
+## Browser Extraction and Task-Scoped Interaction
+
+`browser_web` is the bounded extractor for exact public URLs. It returns
+untrusted readable text, metadata, citations, screenshots, and structured
+partial/failure evidence without maintaining a user session. `browser_session`
+is the separate task-scoped interaction tool for navigation, snapshots,
+clicking, typing, selection, downloads, screenshots, and postcondition checks.
+Its element references are valid only for the current page/snapshot generation;
+it never falls back to an unsandboxed browser or a persistent personal profile.
+Read-only observations can run without confirmation, while external or
+mutating interactions still pass the resolver/verifier policy.
+
+## Model Catalog and Readiness
 
 Model capabilities are projected through a catalog rather than inferred from
 model-name phrases. The catalog exposes provider/model identity, API style,
