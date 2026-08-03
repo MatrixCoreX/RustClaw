@@ -41,18 +41,23 @@ test("renders the signed device reward total and period record", () => {
   const markup = renderToStaticMarkup(
     <NniRewardsPanel
       rewards={rewards}
+      currentPointBalance="6250.1250"
+      currentPointBalanceLoading={false}
       loading={false}
       error={null}
       pageSize={10}
       t={(zh) => zh}
       formatUnixDateTime={(value) => (value ? String(value) : "--")}
       onFetch={() => undefined}
+      onRefresh={() => undefined}
     />,
   );
 
   assert.match(markup, /id="nni-history-rewards-panel"/);
   assert.match(markup, /原生智能奖励/);
   assert.match(markup, /7500\.0000/);
+  assert.match(markup, /当前持有/);
+  assert.match(markup, /6250\.1250/);
   assert.match(markup, /\+5000\.0000/);
   assert.match(markup, /3 次，按 1 台设备计奖/);
   assert.match(markup, /每次刷新都会由本机设备签署一次临时挑战/);

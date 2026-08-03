@@ -80,6 +80,8 @@ export interface NniPageProps {
   nniRewardsLoading: boolean;
   nniRewardsError: string | null;
   nniRewardsPageSize: number;
+  nniCurrentPointBalance: string | null;
+  nniCurrentPointBalanceLoading: boolean;
   nniConfigLoading: boolean;
   nniConfigSaving: boolean;
   nniConfigError: string | null;
@@ -97,6 +99,7 @@ export interface NniPageProps {
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
   onFetchRewards: (page: number) => unknown | Promise<unknown>;
+  onFetchCurrentPointBalance: () => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onActionMessageChange: (message: string | null) => void;
@@ -155,6 +158,8 @@ export function NniPage({
   nniRewardsLoading,
   nniRewardsError,
   nniRewardsPageSize,
+  nniCurrentPointBalance,
+  nniCurrentPointBalanceLoading,
   nniConfigLoading,
   nniConfigSaving,
   nniConfigError,
@@ -172,6 +177,7 @@ export function NniPage({
   onFetchHeartbeatErrors,
   onClearHeartbeatErrors,
   onFetchRewards,
+  onFetchCurrentPointBalance,
   onRunDeviceAction,
   onSetDeviceSimulation,
   onActionMessageChange,
@@ -274,9 +280,18 @@ export function NniPage({
   };
 
   const refreshNniPageStatus = async () => {
-    const refreshes = [Promise.resolve(onFetchDeviceStatus())];
-    if (nniJoined) refreshes.push(Promise.resolve(onFetchRewards(1)));
-    await Promise.all(refreshes);
+    await Promise.resolve(onFetchDeviceStatus());
+    if (nniJoined) {
+      // Both private reads use the device signer. Keep them sequential so a
+      // hardware-backed signer never receives overlapping challenges.
+      await Promise.resolve(onFetchRewards(1));
+      await Promise.resolve(onFetchCurrentPointBalance());
+    }
+  };
+
+  const refreshNniRewards = async (page: number) => {
+    await Promise.resolve(onFetchRewards(page));
+    await Promise.resolve(onFetchCurrentPointBalance());
   };
 
   return (
@@ -668,12 +683,15 @@ export function NniPage({
         {nniHistoryView === "rewards" ? (
           <NniRewardsPanel
             rewards={nniRewards}
+            currentPointBalance={nniCurrentPointBalance}
+            currentPointBalanceLoading={nniCurrentPointBalanceLoading}
             loading={nniRewardsLoading}
             error={nniRewardsError}
             pageSize={nniRewardsPageSize}
             t={t}
             formatUnixDateTime={formatUnixDateTime}
             onFetch={onFetchRewards}
+            onRefresh={refreshNniRewards}
           />
         ) : null}
 

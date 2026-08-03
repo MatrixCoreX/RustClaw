@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Coins, Loader2, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
 
 import { shortNniValue } from "../lib/nni-display";
 import type { NniRewardsResponse } from "../types/api";
@@ -7,22 +7,28 @@ type Translate = (zh: string, en: string) => string;
 
 export interface NniRewardsPanelProps {
   rewards: NniRewardsResponse | null;
+  currentPointBalance: string | null;
+  currentPointBalanceLoading: boolean;
   loading: boolean;
   error: string | null;
   pageSize: number;
   t: Translate;
   formatUnixDateTime: (ts: number | null | undefined) => string;
   onFetch: (page: number) => unknown | Promise<unknown>;
+  onRefresh: (page: number) => unknown | Promise<unknown>;
 }
 
 export function NniRewardsPanel({
   rewards,
+  currentPointBalance,
+  currentPointBalanceLoading,
   loading,
   error,
   pageSize,
   t,
   formatUnixDateTime,
   onFetch,
+  onRefresh,
 }: NniRewardsPanelProps) {
   const page = rewards?.page ?? 1;
   const totalPages = Math.max(1, rewards?.total_pages ?? 1);
@@ -52,11 +58,11 @@ export function NniRewardsPanel({
         </div>
         <button
           type="button"
-          onClick={() => void onFetch(page)}
-          disabled={loading}
+          onClick={() => void onRefresh(page)}
+          disabled={loading || currentPointBalanceLoading}
           className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {loading || currentPointBalanceLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {t("刷新奖励", "Refresh rewards")}
         </button>
       </div>
@@ -68,7 +74,7 @@ export function NniRewardsPanel({
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.06] p-4">
           <div className="flex items-center gap-2 text-emerald-100/75">
             <Coins className="h-4 w-4" />
@@ -78,6 +84,16 @@ export function NniRewardsPanel({
             {rewards?.total_reward_points ?? "0.0000"}
           </p>
           <p className="mt-1 text-xs text-white/45">{t("点", "points")}</p>
+        </div>
+        <div className="rounded-2xl border border-sky-300/15 bg-sky-300/[0.06] p-4">
+          <div className="flex items-center gap-2 text-sky-100/75">
+            <WalletCards className="h-4 w-4" />
+            <span className="text-xs font-semibold">{t("当前持有", "Current holdings")}</span>
+          </div>
+          <p className="mt-3 font-mono text-2xl font-semibold text-sky-50">
+            {currentPointBalanceLoading ? "…" : currentPointBalance ?? "—"}
+          </p>
+          <p className="mt-1 text-xs text-white/45">POINT</p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
           <p className="text-xs font-semibold text-white/50">{t("获得奖励的时段", "Rewarded periods")}</p>

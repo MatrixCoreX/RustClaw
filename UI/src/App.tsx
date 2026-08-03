@@ -1435,6 +1435,14 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, nniJoined]);
 
   useEffect(() => {
+    if (!uiAuthReady || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
+    void bancorRuntime.fetchAccount(1);
+    // Current holdings are private account data and require a fresh device
+    // signature. Load them independently from the public reward ledger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, nniJoined, nniStatus?.signature_chip_present]);
+
+  useEffect(() => {
     if (!uiAuthReady || currentPage !== "bancor") return;
     void bancorRuntime.fetchMarket();
     void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
@@ -1759,6 +1767,8 @@ export default function App() {
               nniRewardsLoading={nniRewardsLoading}
               nniRewardsError={nniRewardsError}
               nniRewardsPageSize={NNI_REWARDS_PAGE_SIZE}
+              nniCurrentPointBalance={bancorRuntime.account?.point_balance ?? null}
+              nniCurrentPointBalanceLoading={bancorRuntime.accountLoading}
               nniConfigLoading={nniConfigLoading}
               nniConfigSaving={nniConfigSaving}
               nniConfigError={nniConfigError}
@@ -1776,6 +1786,7 @@ export default function App() {
               onFetchHeartbeatErrors={fetchNniHeartbeatErrors}
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
               onFetchRewards={fetchNniRewards}
+              onFetchCurrentPointBalance={() => bancorRuntime.fetchAccount(1)}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
               onActionMessageChange={setNniActionMessage}
