@@ -54,6 +54,36 @@ async fn queued_durable_skill_does_not_occupy_a_global_slot() {
     drop(leases);
 }
 
+#[tokio::test]
+async fn failed_durable_job_releases_slots_for_the_next_queued_job() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let job_root = root.path().join("job");
+    let skill_root = root.path().join("skill-slots");
+    let global_root = root.path().join("global-slots");
+    std::fs::create_dir_all(&job_root).expect("job root");
+    let durable = DurableJobRuntime {
+        directory: job_root,
+    };
+
+    let failed: Result<(), &'static str> = async {
+        let _leases = acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 1)
+            .await
+            .map_err(|_| "slot acquisition failed")?;
+        Err("fixture job failed")
+    }
+    .await;
+    assert_eq!(failed, Err("fixture job failed"));
+
+    let next = tokio::time::timeout(
+        Duration::from_secs(2),
+        acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 1),
+    )
+    .await
+    .expect("the next job must not remain blocked by the failed job")
+    .expect("the next job should acquire both slots");
+    drop(next);
+}
+
 #[test]
 fn missing_runtime_timeout_limit_uses_manifest_timeout() {
     let configured = parse_configured_timeout_limit(None).expect("missing limit");
