@@ -14,6 +14,9 @@ export interface ChatActivitySummary {
   stage: ChatActivityStage;
   activeName: string | null;
   commandPreview: string | null;
+  progressDetailKey: string | null;
+  progressCurrent: number | null;
+  progressTotal: number | null;
   llmCallCount: number;
   roundNo: number | null;
   lastSeq: number | null;
@@ -24,6 +27,9 @@ export function emptyChatActivity(): ChatActivitySummary {
     stage: "analyzing",
     activeName: null,
     commandPreview: null,
+    progressDetailKey: null,
+    progressCurrent: null,
+    progressTotal: null,
     llmCallCount: 0,
     roundNo: null,
     lastSeq: null,
@@ -93,6 +99,9 @@ export function reduceChatActivity(
       stage: "queued",
       activeName: null,
       commandPreview: null,
+      progressDetailKey: null,
+      progressCurrent: null,
+      progressTotal: null,
     };
   }
 
@@ -103,16 +112,30 @@ export function reduceChatActivity(
         stage: "llm_request",
         activeName: null,
         commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
         llmCallCount: current.llmCallCount + 1,
       };
     } else if (phase === "text_delta" || phase === "usage" || phase === "finished") {
-      next = { ...next, stage: "llm_response", activeName: null, commandPreview: null };
+      next = {
+        ...next,
+        stage: "llm_response",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
     } else if (phase === "tool_call" || phase === "tool_call_delta") {
       next = {
         ...next,
         stage: "choosing_tool",
         activeName: readableName(payload),
         commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
       };
     }
     return next;
@@ -124,9 +147,16 @@ export function reduceChatActivity(
       stage: "running_tool",
       activeName: readableName(payload),
       commandPreview: commandPreview(payload),
+      progressDetailKey: null,
+      progressCurrent: null,
+      progressTotal: null,
     };
   }
   if (eventType === "skill_progress") {
+    const frame =
+      payload.frame && typeof payload.frame === "object" && !Array.isArray(payload.frame)
+        ? payload.frame as Record<string, unknown>
+        : null;
     const skillName =
       typeof payload.skill_name === "string" && payload.skill_name.trim()
         ? payload.skill_name.trim().slice(0, 80)
@@ -136,6 +166,12 @@ export function reduceChatActivity(
       stage: "running_tool",
       activeName: skillName,
       commandPreview: null,
+      progressDetailKey:
+        typeof frame?.detail_key === "string" && frame.detail_key.trim()
+          ? frame.detail_key.trim().slice(0, 128)
+          : null,
+      progressCurrent: positiveInteger(frame?.current),
+      progressTotal: positiveInteger(frame?.total),
     };
   }
   if (eventType === "tool_finished") {
@@ -144,18 +180,45 @@ export function reduceChatActivity(
       stage: "tool_returned",
       activeName: readableName(payload) ?? current.activeName,
       commandPreview: commandPreview(payload) ?? current.commandPreview,
+      progressDetailKey: null,
+      progressCurrent: null,
+      progressTotal: null,
     };
   }
   if (eventType === "assistant_output_started" || eventType === "task_final") {
-    return { ...next, stage: "finalizing", activeName: null, commandPreview: null };
+    return {
+      ...next,
+      stage: "finalizing",
+      activeName: null,
+      commandPreview: null,
+      progressDetailKey: null,
+      progressCurrent: null,
+      progressTotal: null,
+    };
   }
   if (eventType === "state_transition") {
     const stateTo = typeof payload.state_to === "string" ? payload.state_to : "";
     if (stateTo === "finalizing" || stateTo === "completed") {
-      return { ...next, stage: "finalizing", activeName: null, commandPreview: null };
+      return {
+        ...next,
+        stage: "finalizing",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
     }
     if (stateTo === "planning") {
-      return { ...next, stage: "analyzing", activeName: null, commandPreview: null };
+      return {
+        ...next,
+        stage: "analyzing",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
     }
   }
   return next;

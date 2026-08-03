@@ -6,6 +6,7 @@ Extract audio from a local media file and transcribe it with a local ASR engine.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -26,6 +27,7 @@ DEFAULT_LANGUAGE = "auto"
 DEFAULT_MAX_THREADS = 8
 DEFAULT_TRANSCRIBE_ENGINE = "whisper"
 TRANSCRIBE_ENGINES = ("whisper", "funasr")
+PARENT_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
 DEFAULT_FUNASR_MODEL = "iic/SenseVoiceSmall"
 DEFAULT_FUNASR_DEVICE = "cpu"
 DEFAULT_FUNASR_VAD_MODEL = "fsmn-vad"
@@ -82,6 +84,20 @@ WHISPER_PROGRESS_RE = re.compile(r"progress\s*=\s*(-?\d+)%")
 
 class VideoTranscribeError(RuntimeError):
     """Raised when audio extraction or transcription cannot be completed."""
+
+
+def emit_parent_progress(detail_key: str, current: int, total: int) -> None:
+    payload = {
+        "detail_key": detail_key,
+        "current": current,
+        "total": total,
+    }
+    print(
+        PARENT_PROGRESS_PREFIX
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def require_binary(name: str) -> str:
@@ -827,6 +843,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise VideoTranscribeError(f"Input file does not exist: {input_path}")
             saved_audio = input_path
         else:
+            progress_total = 2 if args.extract_only else 3
+            emit_parent_progress(
+                "media_download.transcribe.extracting_audio",
+                1,
+                progress_total,
+            )
             auto_reuse_audio = not args.extract_only and args.audio_output is None and audio_path.exists()
             saved_audio = extract_audio(
                 input_path,
@@ -841,6 +863,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.extract_only:
             return 0
 
+        emit_parent_progress(
+            "media_download.transcribe.recognizing_speech",
+            2,
+            3,
+        )
         whisper_bin = find_whisper_binary(args.whisper_bin) if args.engine == "whisper" else None
         model_path = find_whisper_model(args.model) if args.engine == "whisper" else None
         transcript = transcribe_audio_with_engine(

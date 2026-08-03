@@ -5,11 +5,13 @@ import mimetypes
 import os
 from pathlib import Path
 import platform
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 
@@ -33,6 +35,16 @@ MAX_ARTIFACTS = 32
 MAX_DIAGNOSTIC_CHARS = 4_000
 INLINE_TEXT_MAX_CHARS = 200
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
+CHILD_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
+PROGRESS_STEP_IDS = {
+    "precheck": "media_precheck",
+    "download": "download_media",
+    "resolve": "resolve_media",
+    "extract_audio": "extract_audio",
+    "transcribe": "transcribe_speech",
+    "ocr": "recognize_images",
+    "prepare_x": "prepare_media",
+}
 OCR_IMAGE_EXTENSIONS = {
     ".avif",
     ".bmp",
@@ -61,6 +73,65 @@ class SkillFailure(Exception):
         self.message_key = message_key
         self.retryable = retryable
         self.details = details or {}
+
+
+class ProgressReporter:
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        self.sequence = 0
+
+    def emit(
+        self,
+        detail_key: str,
+        *,
+        params: dict[str, Any] | None = None,
+        current: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        self.sequence += 1
+        progress_params = _progress_metadata(detail_key)
+        if params:
+            progress_params.update(params)
+        frame: dict[str, Any] = {
+            "schema_version": 1,
+            "record_type": "skill_progress",
+            "request_id": self.request_id,
+            "sequence": self.sequence,
+            "kind": "progress",
+            "detail_key": detail_key,
+            "params": progress_params,
+        }
+        if current is not None and total is not None:
+            frame["current"] = current
+            frame["total"] = total
+        sys.stdout.write(
+            json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        sys.stdout.flush()
+
+    def forward_child(self, detail_key: str, current: int, total: int) -> None:
+        self.emit(detail_key, current=current, total=total)
+
+
+def _progress_metadata(detail_key: str) -> dict[str, str]:
+    step_name = ""
+    if detail_key == "media_download.precheck.starting":
+        step_name = "precheck"
+    elif detail_key == "media_download.transcribe.extracting_audio":
+        step_name = "extract_audio"
+    elif detail_key == "media_download.transcribe.recognizing_speech":
+        step_name = "transcribe"
+    else:
+        parts = detail_key.split(".")
+        if len(parts) == 3 and parts[0] == "media_download":
+            step_name = parts[1]
+    step_id = PROGRESS_STEP_IDS.get(step_name)
+    if step_id is None:
+        return {}
+    return {
+        "step_id": step_id,
+        "step_status": "completed" if detail_key.endswith(".completed") else "in_progress",
+    }
 
 
 def _mark_not_applied(failure: SkillFailure, failure_phase: str) -> SkillFailure:
@@ -848,6 +919,7 @@ def _run_tool(
     output_dir: Path,
     timeout_seconds: int | None,
     storage_directory: Path | None = None,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
     checkpoint_before = _profile_checkpoint_pointers(storage_directory)
@@ -856,7 +928,12 @@ def _run_tool(
     if storage_directory is not None:
         environment["MODELSCOPE_CACHE"] = str(storage_directory / "modelscope")
     try:
-        completed = _run_process(command, environment, timeout_seconds)
+        completed = _run_process(
+            command,
+            environment,
+            timeout_seconds,
+            progress_callback=progress_callback,
+        )
     except subprocess.TimeoutExpired as error:
         stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
         after = _snapshot(output_dir)
@@ -915,8 +992,12 @@ def _run_process(
     command: list[str],
     environment: dict[str, str],
     timeout_seconds: int | None,
+    *,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    if timeout_seconds is None or timeout_seconds <= SUBPROCESS_TIMEOUT_SLICE_SECONDS:
+    if progress_callback is None and (
+        timeout_seconds is None or timeout_seconds <= SUBPROCESS_TIMEOUT_SLICE_SECONDS
+    ):
         return subprocess.run(
             command,
             cwd=TOOL_DIR,
@@ -925,6 +1006,14 @@ def _run_process(
             text=True,
             timeout=timeout_seconds,
             check=False,
+        )
+
+    if progress_callback is not None:
+        return _run_process_with_progress(
+            command,
+            environment,
+            timeout_seconds,
+            progress_callback,
         )
 
     process = subprocess.Popen(
@@ -959,6 +1048,126 @@ def _run_process(
             )
         except subprocess.TimeoutExpired:
             continue
+
+
+def _child_progress(
+    line: str,
+    progress_callback: Callable[[str, int, int], None],
+) -> bool:
+    stripped = line.strip()
+    if not stripped.startswith(CHILD_PROGRESS_PREFIX):
+        return False
+    try:
+        payload = json.loads(stripped[len(CHILD_PROGRESS_PREFIX) :])
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    detail_key = payload.get("detail_key")
+    current = payload.get("current")
+    total = payload.get("total")
+    if (
+        not isinstance(detail_key, str)
+        or not detail_key.startswith("media_download.")
+        or isinstance(current, bool)
+        or not isinstance(current, int)
+        or isinstance(total, bool)
+        or not isinstance(total, int)
+        or total <= 0
+        or current < 0
+        or current > total
+    ):
+        return False
+    progress_callback(detail_key, current, total)
+    return True
+
+
+def _run_process_with_progress(
+    command: list[str],
+    environment: dict[str, str],
+    timeout_seconds: int | None,
+    progress_callback: Callable[[str, int, int], None],
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        cwd=TOOL_DIR,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    records: queue.Queue[tuple[str, str | None]] = queue.Queue()
+
+    def drain(name: str, stream: Any) -> None:
+        try:
+            for line in stream:
+                records.put((name, line))
+        finally:
+            records.put((name, None))
+
+    readers = [
+        threading.Thread(
+            target=drain,
+            args=("stdout", process.stdout),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=drain,
+            args=("stderr", process.stderr),
+            daemon=True,
+        ),
+    ]
+    for reader in readers:
+        reader.start()
+
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    closed_streams: set[str] = set()
+    deadline = (
+        time.monotonic() + timeout_seconds
+        if timeout_seconds is not None
+        else None
+    )
+    while len(closed_streams) < 2:
+        if deadline is not None and time.monotonic() >= deadline:
+            process.kill()
+            process.wait()
+            for reader in readers:
+                reader.join(timeout=1)
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout_seconds,
+                output="".join(stdout_parts),
+                stderr="".join(stderr_parts),
+            )
+        wait_seconds = 0.25
+        if deadline is not None:
+            wait_seconds = max(0.01, min(wait_seconds, deadline - time.monotonic()))
+        try:
+            stream_name, line = records.get(timeout=wait_seconds)
+        except queue.Empty:
+            continue
+        if line is None:
+            closed_streams.add(stream_name)
+            continue
+        if stream_name == "stderr":
+            if not _child_progress(line, progress_callback):
+                stderr_parts.append(line)
+        else:
+            stdout_parts.append(line)
+
+    returncode = process.wait()
+    for reader in readers:
+        reader.join(timeout=1)
+    return subprocess.CompletedProcess(
+        command,
+        returncode,
+        "".join(stdout_parts),
+        "".join(stderr_parts),
+    )
 
 
 def _urls(stdout: str) -> list[str]:
@@ -1087,23 +1296,10 @@ def _error(request_id: str, failure: SkillFailure) -> dict[str, Any]:
     }
 
 
-def _emit_precheck_progress(request_id: str, action: str) -> None:
-    frame = {
-        "schema_version": 1,
-        "record_type": "skill_progress",
-        "request_id": request_id,
-        "sequence": 1,
-        "kind": "progress",
-        "detail_key": "media_download.precheck.starting",
-        "params": {"action": action},
-        "current": 0,
-        "total": 1,
-    }
-    sys.stdout.write(json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
-
-
-def respond(request: dict[str, Any]) -> dict[str, Any]:
+def respond(
+    request: dict[str, Any],
+    progress: ProgressReporter | None = None,
+) -> dict[str, Any]:
     try:
         request_id = request.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():
@@ -1163,13 +1359,38 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
     except SkillFailure as failure:
         raise _mark_not_applied(failure, "pre_dispatch")
 
+    if progress is not None and action != "transcribe":
+        progress.emit(
+            f"media_download.{action}.starting",
+            params={"action": action},
+            current=0,
+            total=1,
+        )
+
     stdout, stderr, artifacts = _run_tool(
         action,
         command,
         output_dir,
         operation_timeout,
         storage_directory,
+        progress.forward_child if progress is not None else None,
     )
+    if progress is not None:
+        if action == "transcribe":
+            total = 2 if _bool(args, "extract_audio_only", False) else 3
+            progress.emit(
+                "media_download.transcribe.completed",
+                params={"action": action},
+                current=total,
+                total=total,
+            )
+        else:
+            progress.emit(
+                f"media_download.{action}.completed",
+                params={"action": action},
+                current=1,
+                total=1,
+            )
     if action == "ocr":
         for artifact in artifacts:
             artifact["recognition_source"] = "local_ocr"
@@ -1251,6 +1472,7 @@ def respond(request: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     request_id = "invalid"
+    progress: ProgressReporter | None = None
     try:
         line = sys.stdin.buffer.readline()
         if not line:
@@ -1272,8 +1494,14 @@ def main() -> None:
         raw_args = request.get("args")
         raw_action = raw_args.get("action") if isinstance(raw_args, dict) else None
         if isinstance(raw_action, str) and raw_action in SUPPORTED_ACTIONS:
-            _emit_precheck_progress(request_id, raw_action)
-        response = respond(request)
+            progress = ProgressReporter(request_id)
+            progress.emit(
+                "media_download.precheck.starting",
+                params={"action": raw_action},
+                current=0,
+                total=1,
+            )
+        response = respond(request, progress)
     except SkillFailure as failure:
         response = _error(request_id, failure)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:

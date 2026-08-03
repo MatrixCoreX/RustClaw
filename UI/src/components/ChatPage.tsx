@@ -1094,6 +1094,28 @@ function ChatWorkingIndicator({
   t: Translate;
   activity: ChatActivitySummary;
 }) {
+  const skillProgressTitle = (() => {
+    switch (activity.progressDetailKey) {
+      case "media_download.precheck.starting":
+        return t("正在检查媒体任务所需条件", "Checking the media task requirements");
+      case "media_download.download.starting":
+        return t("正在下载媒体文件", "Downloading the media file");
+      case "media_download.download.completed":
+        return t("媒体下载完成，正在准备后续处理", "The media download is complete; preparing the next step");
+      case "media_download.transcribe.extracting_audio":
+        return t("视频已下载，正在提取音频", "The video is downloaded; extracting its audio");
+      case "media_download.transcribe.recognizing_speech":
+        return t("音频提取完成，正在转写文字", "Audio extraction is complete; transcribing speech");
+      case "media_download.transcribe.completed":
+        return t("文字转写完成，正在整理结果", "Transcription is complete; preparing the result");
+      case "skill_dispatch.queue.waiting":
+        return t("当前任务已进入队列，将按顺序处理", "This task is queued and will run in order");
+      case "skill_dispatch.queue.started":
+        return t("前一个任务已结束，正在开始处理", "The previous task finished; processing is starting");
+      default:
+        return null;
+    }
+  })();
   const activityTitle = (() => {
     switch (activity.stage) {
       case "queued":
@@ -1115,7 +1137,9 @@ function ChatWorkingIndicator({
       case "choosing_tool":
         return t("正在选择下一步工具或技能", "Choosing the next tool or skill");
       case "running_tool":
-        return activity.commandPreview
+        return skillProgressTitle
+          ? skillProgressTitle
+          : activity.commandPreview
           ? t(
               `正在运行系统命令：${activity.commandPreview}`,
               `Running system command: ${activity.commandPreview}`,
@@ -1167,6 +1191,14 @@ function ChatWorkingIndicator({
           {activity.roundNo ? (
             <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
               {t(`第 ${activity.roundNo} 轮`, `Round ${activity.roundNo}`)}
+            </span>
+          ) : null}
+          {activity.progressCurrent !== null && activity.progressTotal !== null ? (
+            <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
+              {t(
+                `步骤 ${activity.progressCurrent}/${activity.progressTotal}`,
+                `Step ${activity.progressCurrent}/${activity.progressTotal}`,
+              )}
             </span>
           ) : null}
           {activity.activeName ? (
