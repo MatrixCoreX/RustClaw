@@ -18,6 +18,12 @@ if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
   # shellcheck source=/dev/null
   source "${RUNTIME_ENV_FILE}"
 fi
+# Match the normal multi-component startup path so a standalone clawd restart
+# preserves the platform command PATH and the selected modern Python runtime.
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 
 CLAWD_BIN="${ROOT_DIR}/target/release/clawd"
 if [[ ! -x "${CLAWD_BIN}" ]]; then
