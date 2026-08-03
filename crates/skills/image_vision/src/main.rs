@@ -105,8 +105,6 @@ struct ImageSkillConfig {
     #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
-    max_images: Option<usize>,
-    #[serde(default)]
     max_input_bytes: Option<usize>,
     #[serde(default)]
     adapter_mode: Option<String>,
@@ -281,19 +279,7 @@ fn execute(
 
     let action = parse_action(obj)?;
     let images = parse_images(obj, workspace_root)?;
-    let max_images = cfg.image_vision.max_images.unwrap_or(6).max(1);
-    if images.is_empty() {
-        return Err("at least one image is required".to_string());
-    }
-    if images.len() > max_images {
-        return Err(format!(
-            "too many images: {}, max={max_images}",
-            images.len()
-        ));
-    }
-    if action == "compare" && images.len() < 2 {
-        return Err("compare requires at least two images".to_string());
-    }
+    validate_image_request(&action, &images)?;
 
     let detail_level = obj
         .get("detail_level")
@@ -574,6 +560,16 @@ fn attach_text_artifact(
     } else {
         extra["artifacts"] = json!([]);
         extra["saved_files"] = json!([artifact]);
+    }
+    Ok(())
+}
+
+fn validate_image_request(action: &str, images: &[ImageSource]) -> Result<(), String> {
+    if images.is_empty() {
+        return Err("at least one image is required".to_string());
+    }
+    if action == "compare" && images.len() < 2 {
+        return Err("compare requires at least two images".to_string());
     }
     Ok(())
 }

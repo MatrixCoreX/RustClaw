@@ -55,7 +55,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported actions; `analyze` is normalized to `describe`. |
-| all | `images` / `image` | yes | array or single image | - | Provide exactly one form. Every array item/object must contain a non-empty `path`, `url`, or `base64` value (or valid string shorthand); empty objects are invalid. |
+| all | `images` / `image` | yes | array or single image | - | Provide exactly one form. `images` has no host-defined item-count ceiling: pass the complete ordered current-task image set in one call instead of splitting it to satisfy an arbitrary count. Every array item/object must contain a non-empty `path`, `url`, or `base64` value (or valid string shorthand); empty objects are invalid. Per-image byte, request timeout, provider context, and runtime cancellation limits still apply. |
 | all | `instruction` / `query` / `text` | no | string | - | Optional user instruction or question to guide the image analysis. |
 | all | `response_language` | no | string | - | Preferred language tag or name for the **final** user-visible text (e.g. `zh-CN`, `English`). |
 | all | `language` | no | string | - | Used only when `response_language` is absent or empty (not a parallel alias on the same tier). |

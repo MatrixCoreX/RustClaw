@@ -115,6 +115,20 @@ fn parse_images_rejects_ambiguous_singular_and_plural_inputs() {
 }
 
 #[test]
+fn image_request_accepts_more_than_six_images_without_a_count_ceiling() {
+    let images = (1..=9)
+        .map(|index| {
+            ImageSource::Path(PathBuf::from(format!(
+                "/tmp/image-vision-workspace/page-{index}.webp"
+            )))
+        })
+        .collect::<Vec<_>>();
+
+    validate_image_request("extract_text", &images)
+        .expect("the complete ordered image set must reach the provider");
+}
+
+#[test]
 fn strip_think_blocks_removes_model_reasoning() {
     assert_eq!(
         strip_think_blocks("<think>hidden</think>\n可见内容").trim(),
