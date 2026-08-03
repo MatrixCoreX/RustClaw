@@ -281,6 +281,26 @@
     background: var(--theme-secondary-btn-bg-hover);
   }
 
+  .bancor-sign-trade-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55;
+    border-color: rgba(254, 240, 138, 0.92);
+    background: linear-gradient(135deg, #fde047 0%, #facc15 100%);
+    color: #302605;
+    box-shadow: 0 10px 24px rgba(250, 204, 21, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
+
+  .bancor-sign-trade-btn:hover:not(:disabled) {
+    border-color: #fef9c3;
+    background: linear-gradient(135deg, #fef08a 0%, #fde047 100%);
+    box-shadow: 0 12px 28px rgba(250, 204, 21, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.58);
+    transform: translateY(-1px);
+  }
+
+  .bancor-sign-trade-btn:focus-visible {
+    outline: 2px solid #fef08a;
+    outline-offset: 3px;
+  }
+
   .theme-topbar-btn {
     @apply inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition;
     border: 1px solid var(--theme-border-strong);
@@ -1063,6 +1083,18 @@
     border: 1px solid rgba(36, 45, 58, 0.58);
     box-shadow: inset 0 1px 0 rgba(232, 234, 236, 0.18);
     color: #ffffff !important;
+  }
+
+  :root[data-theme="light"] .bancor-sign-trade-btn {
+    border-color: #ca8a04;
+    background: linear-gradient(135deg, #facc15 0%, #eab308 100%);
+    color: #2b2100;
+    box-shadow: 0 8px 20px rgba(161, 98, 7, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  }
+
+  :root[data-theme="light"] .bancor-sign-trade-btn:hover:not(:disabled) {
+    border-color: #a16207;
+    background: linear-gradient(135deg, #fde047 0%, #facc15 100%);
   }
 
   :root[data-theme="light"] .theme-topbar-btn:hover {
