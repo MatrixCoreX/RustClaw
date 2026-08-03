@@ -19,6 +19,29 @@ fn audio_tokens_are_media_and_missing_paths_remain_visible_for_delivery_errors()
     assert!(strip_wechat_delivery_lines(&answer).is_empty());
 }
 
+#[test]
+fn numbered_image_tokens_are_extracted_and_removed_from_the_caption() {
+    let first = temp_media_path("wechat_numbered_first.webp");
+    let second = temp_media_path("wechat_numbered_second.webp");
+    fs::write(&first, b"not really an image").expect("write first temp image");
+    fs::write(&second, b"not really an image").expect("write second temp image");
+    let answer = format!(
+        "1. IMAGE_FILE:{}\n2. IMAGE_FILE:{}\n\narticle caption",
+        first.display(),
+        second.display()
+    );
+
+    let media = extract_wechat_outbound_media(&answer, Path::new("/"));
+
+    assert_eq!(media.len(), 2);
+    assert!(media
+        .iter()
+        .all(|item| item.kind == WechatOutboundKind::Image));
+    assert_eq!(strip_wechat_delivery_lines(&answer), "\narticle caption");
+    fs::remove_file(first).ok();
+    fs::remove_file(second).ok();
+}
+
 use std::fs;
 
 fn temp_media_path(name: &str) -> PathBuf {

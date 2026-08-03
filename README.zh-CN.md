@@ -15,7 +15,8 @@ Agent Runtime 面向“消息端或浏览器里就能完成日常使用和管理
 - 由 `clawd` 提供任务运行时、HTTP API、路由、记忆和调度
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
-- 本地浏览器控制台位于 `UI/`，其中包含独立的 NNI 设备签名页面
+- 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、工具/技能、
+  Skill Store 和 AI 学习等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 
 ### 先认识五个概念
@@ -556,8 +557,12 @@ flowchart LR
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`：按当前 `X-Agent-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
 - `GET /v1/models/catalog`：返回不含密钥的模型/厂商能力目录，供 UI Models 页面和教学模式 `model_catalog_trace` 使用
-- `GET /v1/nni/device/status`：返回 NNI helper 状态、支持的操作，以及是否检测到设备签名芯片
-- `POST /v1/nni/device/action`：执行 `pubkey`、`sign_timestamp`、`tng_device_pubkey`、`tng_device_cert`、`tng_signer_cert` 或 `tng_root_cert`
+- `GET/POST /v1/admin/model-config`：读取或更新每个多模态模块独立选择的厂商、模型、接口地址和托管凭据
+- `GET/POST /v1/skills/config`：读取或更新技能开关；每个多模态技能可以独立开关，关闭时保留已有模型配置
+- `GET /v1/skills/store`：返回由 registry 驱动的可选内置技能与导入技能目录，并区分“已安装”和“已启用”状态
+- `GET /v1/skills/store/{skill_name}/dependencies`：返回 manifest 声明的依赖，以及后端实际检查到的已安装、缺失或不适用状态
+- `POST /v1/skills/store/install`：安装并启用可选技能，然后刷新运行时技能视图
+- `POST /v1/skills/store/remove`：从运行时和 planner 可见范围移除可选技能，同时保留可重新安装的内置或导入包；常驻 core/tool 技能会拒绝该操作
 
 本机内部 API 示例（不得暴露或转发 `8787`）：
 
@@ -677,7 +682,10 @@ UI 相关说明：
 - 首页系统信息区显示系统/版本、架构、内存、系统存储、部署类型和运行时长，不暴露主机路径或环境变量；Linux/macOS 缺失的指标会显示为部分数据，不会让整个首页失败
 - 首页依赖区优先展示缺失项；发布包运行依赖、源码构建依赖和按需能力依赖分开标记，未安装的可选能力不会被误报为 Agent Runtime 核心故障
 - 只有真实构建或部署任务才显示进度；完整编译/部署、仅 UI、仅 clawd 成功完成后会自动刷新一次页面
-- 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
+- 登录页和导航会显示界面构建版本，便于直接比较 nginx 托管页面与 `webd` 的 `8788` 端口页面是否使用同一版 UI
+- 模型页把文字主模型与七个多模态模块分开设置：图片编辑、图片生成、图片理解、语音合成、语音转写、视频生成和音乐生成。每个模块都有自己的厂商/模型配置与独立开关；关闭模块不会清空已有设置
+- “工具/技能”管理已安装技能的开关；相邻的 Skill Store 负责可选技能安装、移除、重新安装、配置保留和第三方导入
+- Skill Store 的安装信息会逐项展示 manifest 声明的依赖，并按后端实际检测结果标出已安装或缺失，便于安装或修复前确认
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
 
@@ -717,11 +725,21 @@ Python、Node、Go 等共享工具链和缓存永远不会随技能卸载。
 Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为：
 
 - 系统与运维：`system_basic`、`process_basic`、`service_control`、`health_check`、`log_analyze`、`task_control`
-- 文件与开发工具：`run_cmd`、`fs_basic`、`config_basic`、`config_edit`、`config_guard`、`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
-- 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`doc_parse`、`transform`、`web_search_extract`
+- 运行时与工作区基础工具：`run_cmd`、`read_file`、`write_file`、`list_dir`、`make_dir`、`remove_file`、`workspace_patch`、`task_plan`、`subagent`
+- 文件、配置与开发工具：`fs_basic`、`code_index`、`config_basic`、`config_edit`、`config_guard`、`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
+- 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`media_download`、`web_search_extract`
+- 文档与办公：`doc_parse`、`office_workspace`、`transform`
 - 多模态与媒体生成：`image_generate`（`image.preview_generate` / `image.generate` / `image.poll` / `image.cancel`）、`image_edit`、`image_vision`、`audio_transcribe`（`audio.preview_transcribe` / `audio.transcribe`）、`audio_synthesize`（`audio.preview_synthesize` / `audio.synthesize` / `audio.poll` / `audio.cancel`）、`video_generate`（`video.preview_generate` / `video.generate` / `video.poll` / `video.cancel`）、`music_generate`（`music.preview_generate` / `music.generate` / `music.poll` / `music.cancel`）
 - 工作流与发布类：`schedule`、`extension_manager`、`photo_organize`、`invest_copy`、`x`
-- 业务与知识类：`crypto`、`stock`、`weather`、`map_merchant`、`kb`
+- 业务与知识类：`crypto`、`stock`、`weather`、`chinese_almanac`、`map_merchant`、`kb`
+
+技能“安装”和“启用”是两个独立状态。Skill Store 会从 registry 读取可选技能，
+并在展开安装信息时把该技能声明的宿主、运行时和模型依赖逐条显示为已安装、缺失或
+不适用。安装仍由统一准入服务验证 manifest、协议、receipt 与宿主 policy；关闭技能只
+阻止新调用并保留配置，移除可选技能则让它退出运行时与 planner 可见范围，之后仍可重新安装。
+当前按需安装集合为 `chinese_almanac`、`crypto`、`invest_copy`、`map_merchant`、
+`media_download`、`photo_organize`、`stock`、`weather` 和 `x`；普通 `build-all.sh`
+不会主动编译它们，正式发行包通过对应平台的显式 Skill Store 预编译流程提供兼容产物。
 
 如果要回答“某个 skill 怎么配置、怎么绑定、缺什么前置条件”，优先看：`prompts/references/skill_setup_guide.zh-CN.md`。
 
@@ -801,8 +819,6 @@ cd pi_app && ./open-small-screen.sh
 ```
 
 它会读取 `clawd` 的健康状态，所以需要先启动后端。
-
-Pi App 也包含后端和浏览器 UI 使用的 NNI 设备签名 helper。`pi_app/signature.py` 在硬件和 `cryptoauthlib` 可用时支持读取 Slot 0 公钥、时间戳签名，以及读取 TNG 设备 / signer / root 证书；详细说明见 `pi_app/TNG_SERVER_GUIDE.md`。没有这类芯片的设备也是有效部署，会被显示为“缺失签名芯片”状态。真实硬件检测完成并经过短暂缓冲后，“设备签名芯片”卡片会提供明确标注的软件模拟入口，供本机协议测试使用；检测到真实芯片时不会显示该入口，模拟身份也不具备可信硬件身份。
 
 ## 开发说明
 

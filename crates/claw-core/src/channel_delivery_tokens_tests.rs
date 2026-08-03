@@ -60,3 +60,34 @@ fn empty_tokens_are_not_treated_as_delivery_lines() {
         "before\nafter"
     );
 }
+
+#[test]
+fn compatibility_decoder_accepts_delivery_tokens_wrapped_in_list_markers() {
+    let text = concat!(
+        "caption\n",
+        "1. IMAGE_FILE:/tmp/first.webp\n",
+        "2) IMAGE_FILE:/tmp/second.webp\n",
+        "- FILE:/tmp/article.txt\n",
+        "* IMAGE_URL:https://example.invalid/image.webp\n",
+    );
+
+    let tokens = legacy_delivery_tokens(text);
+
+    assert_eq!(tokens.len(), 4);
+    assert_eq!(tokens[0].reference, "/tmp/first.webp");
+    assert_eq!(tokens[1].reference, "/tmp/second.webp");
+    assert_eq!(tokens[2].kind, LegacyDeliveryKind::Auto);
+    assert_eq!(tokens[3].location, LegacyDeliveryLocation::RemoteUrl);
+    assert_eq!(strip_legacy_delivery_lines(text), "caption");
+}
+
+#[test]
+fn compatibility_decoder_does_not_treat_inline_or_unspaced_examples_as_delivery_tokens() {
+    for text in [
+        "caption 1. IMAGE_FILE:/tmp/example.webp",
+        "1.IMAGE_FILE:/tmp/example.webp",
+        "release-1. IMAGE_FILE:/tmp/example.webp",
+    ] {
+        assert_eq!(parse_legacy_delivery_line(text), None, "{text}");
+    }
+}

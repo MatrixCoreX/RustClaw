@@ -56,6 +56,7 @@ pub(crate) async fn run_pinned_async_poll_skill_with_runner(
         source,
         timeout.seconds,
         None,
+        None,
         Some(execution_binding),
     )
     .await?;

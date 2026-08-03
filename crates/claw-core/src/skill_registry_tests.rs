@@ -493,6 +493,52 @@ input_schema = { type = "object", properties = { action = { type = "string" } } 
 }
 
 #[test]
+fn dispatch_queue_is_opt_in_and_action_scoped() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "queued_fixture"
+enabled = true
+kind = "runner"
+dispatch_queue = { scope = "user", actions = ["Download", "transcribe", "prepare-x"] }
+
+[[skills]]
+name = "parallel_fixture"
+enabled = true
+kind = "runner"
+"#,
+    )
+    .expect("valid dispatch queue registry");
+
+    let queued = registry
+        .dispatch_queue("queued_fixture")
+        .expect("declared queue");
+    assert_eq!(queued.scope, SkillDispatchQueueScope::User);
+    assert!(queued.applies_to(Some("download")));
+    assert!(queued.applies_to(Some("TRANSCRIBE")));
+    assert!(queued.applies_to(Some("prepare_x")));
+    assert!(!queued.applies_to(Some("capabilities")));
+    assert!(!queued.applies_to(None));
+    assert!(registry.dispatch_queue("parallel_fixture").is_none());
+}
+
+#[test]
+fn dispatch_queue_rejects_unknown_policy_fields() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "queued_fixture"
+enabled = true
+kind = "runner"
+dispatch_queue = { scope = "user", actions = ["download"], implicit = true }
+"#,
+    )
+    .expect_err("unknown queue policy fields must fail closed");
+
+    assert!(error.contains("unknown field"), "{error}");
+}
+
+#[test]
 fn capability_parses_closed_set_and_secrets_namespace() {
     // 注意：`secrets.<name>` 用 `<用途>_<vendor>_api_key` 命名，避免把
     // image / chat / vision 三套独立 LLM 配置的 key 串到一起。

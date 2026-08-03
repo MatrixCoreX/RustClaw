@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::wechat_reply_media::strip_wechat_delivery_lines;
+use crate::{
+    channel_delivery_tokens::legacy_delivery_tokens,
+    wechat_reply_media::strip_wechat_delivery_lines,
+};
 
 const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
@@ -57,7 +60,36 @@ pub fn merge_task_artifact_delivery_messages(
     if manifests.is_empty() {
         return messages;
     }
-    let tokens = manifests
+    let explicit_references = messages
+        .iter()
+        .flat_map(|message| legacy_delivery_tokens(message))
+        .map(|token| token.reference)
+        .collect::<Vec<_>>();
+    let selected_manifests = manifests
+        .iter()
+        .filter(|manifest| {
+            if explicit_references.is_empty() {
+                !internal_runtime_artifact(manifest)
+            } else {
+                explicit_references
+                    .iter()
+                    .any(|reference| manifest_matches_reference(manifest, reference))
+            }
+        })
+        .collect::<Vec<_>>();
+    if selected_manifests.is_empty() {
+        return messages;
+    }
+    if !explicit_references.is_empty()
+        && !explicit_references.iter().all(|reference| {
+            selected_manifests
+                .iter()
+                .any(|manifest| manifest_matches_reference(manifest, reference))
+        })
+    {
+        return messages;
+    }
+    let tokens = selected_manifests
         .iter()
         .filter_map(|manifest| {
             validated_task_artifact_path(workspace_root, task_id, manifest)
@@ -67,7 +99,7 @@ pub fn merge_task_artifact_delivery_messages(
 
     // Keep the legacy source-path tokens when even one structured artifact is unavailable.
     // This preserves delivery during rolling upgrades or after a partial artifact cleanup.
-    if tokens.len() != manifests.len() {
+    if tokens.len() != selected_manifests.len() {
         return messages;
     }
 
@@ -82,6 +114,20 @@ pub fn merge_task_artifact_delivery_messages(
         merged.push(token_block);
     }
     merged
+}
+
+fn internal_runtime_artifact(manifest: &TaskDeliveryArtifactManifest) -> bool {
+    manifest.id.starts_with("skill-output:")
+}
+
+fn manifest_matches_reference(manifest: &TaskDeliveryArtifactManifest, reference: &str) -> bool {
+    let reference = reference.trim();
+    reference == manifest.artifact_ref
+        || reference == manifest.id
+        || Path::new(reference)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some(manifest.filename.as_str())
 }
 
 fn messages_without_delivery_lines(messages: Vec<String>) -> Vec<String> {

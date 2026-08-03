@@ -84,7 +84,7 @@ const LEGACY_PREFIXES: &[(&str, LegacyDeliveryKind, LegacyDeliveryLocation)] = &
 ];
 
 pub fn parse_legacy_delivery_line_ref(line: &str) -> Option<LegacyDeliveryTokenRef<'_>> {
-    let line = line.trim();
+    let line = strip_delivery_list_prefix(line.trim());
     for (prefix, kind, location) in LEGACY_PREFIXES {
         let Some(raw_reference) = line.strip_prefix(prefix) else {
             continue;
@@ -96,6 +96,40 @@ pub fn parse_legacy_delivery_line_ref(line: &str) -> Option<LegacyDeliveryTokenR
         });
     }
     None
+}
+
+/// Accept presentation-only list markers that a finalizer may add around an otherwise canonical
+/// delivery-token line. Requiring whitespace after the marker keeps inline prose and filenames
+/// such as `1.IMAGE_FILE:example` outside the protocol boundary.
+fn strip_delivery_list_prefix(line: &str) -> &str {
+    for prefix in ["- ", "* ", "+ ", "• "] {
+        if let Some(remainder) = line.strip_prefix(prefix) {
+            return remainder.trim_start();
+        }
+    }
+
+    let digit_count = line
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return line;
+    }
+
+    let Some(marker) = line.as_bytes().get(digit_count) else {
+        return line;
+    };
+    if !matches!(marker, b'.' | b')') {
+        return line;
+    }
+
+    let remainder = &line[digit_count + 1..];
+    if remainder.chars().next().is_some_and(char::is_whitespace) {
+        remainder.trim_start()
+    } else {
+        line
+    }
 }
 
 pub fn parse_legacy_delivery_line(line: &str) -> Option<LegacyDeliveryToken> {

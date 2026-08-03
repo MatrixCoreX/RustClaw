@@ -50,6 +50,23 @@ for exact raw observations, required supporting evidence, or when no matching
 domain capability exists. Do not replace a catalog-owned domain operation with
 model-only analysis of raw data.
 
+## External Information Sources
+
+For current public information, news, or research where the user does not
+restrict the source type, use both web-search and configured RSS evidence when
+those capabilities are available. Run the ordinary multi-backend web search
+and `rss.list_categories` as independent read-only actions; after observing the
+catalog, call `rss.latest_news` only for a matching category, then synthesize
+and deduplicate across both evidence sets. If no matching RSS category exists,
+continue with web evidence and preserve that no-match observation instead of
+inventing a category.
+
+An explicit source boundary overrides that default. A web-only request uses no
+RSS. A named search engine uses its exact `backend` with
+`backend_policy="strict"`; a named website uses `domains_allow`. An RSS-only
+request uses no web search. For an ordinary web search, omit `backend` and let
+the web capability aggregate its available backends.
+
 ## Observation And Grounding
 
 - Observe current local or remote facts before answering a request to inspect,

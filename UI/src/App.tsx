@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
+import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS, BancorPage } from "./components/BancorPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
@@ -49,6 +50,7 @@ import {
   NNI_REWARDS_PAGE_SIZE,
   useNniRuntime,
 } from "./hooks/useNniRuntime";
+import { useBancorRuntime } from "./hooks/useBancorRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
@@ -87,7 +89,7 @@ const AiLearningPage = lazy(() =>
   })),
 );
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "bancor", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -262,6 +264,7 @@ export default function App() {
 
   const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
+  const bancorRuntime = useBancorRuntime({ apiFetch, t });
   const {
     agentConfig,
     agentConfigLoading,
@@ -1432,6 +1435,47 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, nniJoined]);
 
   useEffect(() => {
+    if (!uiAuthReady || currentPage !== "bancor") return;
+    void bancorRuntime.fetchMarket();
+    void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
+    void fetchNniDeviceStatus(true);
+    void fetchNniConfig(true);
+    const refreshCandlesWhileVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds, true);
+    };
+    const refreshMarketWhileVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void bancorRuntime.fetchMarket(true);
+    };
+    const candleTimer = window.setInterval(
+      refreshCandlesWhileVisible,
+      BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000,
+    );
+    const marketTimer = window.setInterval(refreshMarketWhileVisible, 60_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      refreshMarketWhileVisible();
+      refreshCandlesWhileVisible();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(candleTimer);
+      window.clearInterval(marketTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, bancorRuntime.candleIntervalSeconds]);
+
+  useEffect(() => {
+    if (!uiAuthReady || currentPage !== "bancor" || !nniJoined || !nniStatus?.signature_chip_present) return;
+    void bancorRuntime.fetchAccount(1);
+    // Private account reads require a fresh device signature. Load only after
+    // the NNI join state and signing device have both been confirmed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, nniJoined, nniStatus?.signature_chip_present]);
+
+  useEffect(() => {
     if (!uiAuthReady) return;
     if (currentPage !== "memory") return;
     void fetchMemoryData();
@@ -1736,6 +1780,15 @@ export default function App() {
               onSetDeviceSimulation={setNniDeviceSimulation}
               onActionMessageChange={setNniActionMessage}
               onActionErrorChange={setNniActionError}
+            />
+          ) : null}
+
+          {currentPage === "bancor" ? (
+            <BancorPage
+              t={t}
+              runtime={bancorRuntime}
+              formatUnixDateTime={formatUnixDateTime}
+              nniReady={nniJoined && nniStatus?.signature_chip_present === true}
             />
           ) : null}
 

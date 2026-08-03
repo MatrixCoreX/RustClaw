@@ -3,13 +3,15 @@ use regex::Regex;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::redirect::Policy;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::env;
+use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -23,6 +25,9 @@ const MAX_DOMAIN_FILTERS: usize = 32;
 const MAX_TITLE_CHARS: usize = 300;
 const MAX_SNIPPET_CHARS: usize = 1_000;
 const MAX_URL_BYTES: usize = 4_096;
+const PROVIDER_CONFIG_RELATIVE_PATH: &str = "configs/web_search_providers.toml";
+const EMBEDDED_PROVIDER_CONFIG: &str =
+    include_str!("../../../../configs/web_search_providers.toml");
 
 #[derive(Clone, Debug)]
 struct SearchInput {
@@ -36,6 +41,7 @@ struct SearchInput {
     domains_allow: Vec<String>,
     domains_deny: Vec<String>,
     backend: Option<String>,
+    backend_policy: BackendPolicy,
     include_snippet: bool,
 }
 
@@ -44,6 +50,9 @@ struct SearchError {
     code: &'static str,
     detail: String,
     retryable: bool,
+    failure_phase: &'static str,
+    recovery_action: Option<&'static str>,
+    backend_attempts: Vec<BackendAttempt>,
 }
 
 impl SearchError {
@@ -52,11 +61,21 @@ impl SearchError {
             code,
             detail: detail.into(),
             retryable: false,
+            failure_phase: "pre_dispatch",
+            recovery_action: None,
+            backend_attempts: Vec::new(),
         }
     }
 
-    fn retryable(mut self) -> Self {
+    fn execution_failure(
+        mut self,
+        backend_attempts: Vec<BackendAttempt>,
+        allow_source_replan: bool,
+    ) -> Self {
         self.retryable = true;
+        self.failure_phase = "execution_no_effect";
+        self.recovery_action = allow_source_replan.then_some("replan_arguments");
+        self.backend_attempts = backend_attempts;
         self
     }
 }
@@ -72,17 +91,96 @@ struct SearchItem {
     field_truncations: Option<Value>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Backend {
     SerpApi,
+    BaiduAi,
+    Brave,
+    SearXng,
+    Tavily,
+    Perplexity,
+    Exa,
+    You,
+    Mojeek,
+    Kagi,
     DuckDuckGoHtml,
     BingHtml,
+    DocsRsSearch,
+    GitHubRepositories,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SearchProviderConfig {
+    schema_version: u32,
+    auto_provider_limit: usize,
+    auto_order: Vec<String>,
+    providers: BTreeMap<String, ProviderPolicy>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct ProviderPolicy {
+    enabled: bool,
+    auto_enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackendPolicy {
+    Auto,
+    Strict,
+}
+
+impl BackendPolicy {
+    fn from_name(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "auto" | "multi_source" | "aggregate" => Some(Self::Auto),
+            "strict" => Some(Self::Strict),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Strict => "strict",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BackendAttempt {
+    backend: String,
+    status: &'static str,
+    result_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug)]
+struct BackendOutcome {
+    backend: Backend,
+    result: std::result::Result<Vec<SearchItem>, String>,
+}
+
+#[derive(Debug)]
+struct AggregatedSearch {
+    items: Vec<SearchItem>,
+    backends_used: Vec<String>,
+    backend_attempts: Vec<BackendAttempt>,
 }
 
 impl Backend {
     fn from_name(v: &str) -> Option<Self> {
         match v.to_ascii_lowercase().as_str() {
             "serpapi" => Some(Self::SerpApi),
+            "baidu_ai" | "baidu" | "baidu_search" => Some(Self::BaiduAi),
+            "brave" | "brave_search" => Some(Self::Brave),
+            "searxng" | "searx" => Some(Self::SearXng),
+            "tavily" => Some(Self::Tavily),
+            "perplexity" | "perplexity_search" => Some(Self::Perplexity),
+            "exa" | "exa_search" => Some(Self::Exa),
+            "you" | "you_search" | "you.com" => Some(Self::You),
+            "mojeek" => Some(Self::Mojeek),
+            "kagi" => Some(Self::Kagi),
             "duckduckgo_html" | "duckduckgo" | "ddg" => Some(Self::DuckDuckGoHtml),
             "bing_html" | "bing" => Some(Self::BingHtml),
             _ => None,
@@ -91,8 +189,19 @@ impl Backend {
     fn as_str(&self) -> &'static str {
         match self {
             Self::SerpApi => "serpapi",
+            Self::BaiduAi => "baidu_ai",
+            Self::Brave => "brave",
+            Self::SearXng => "searxng",
+            Self::Tavily => "tavily",
+            Self::Perplexity => "perplexity",
+            Self::Exa => "exa",
+            Self::You => "you",
+            Self::Mojeek => "mojeek",
+            Self::Kagi => "kagi",
             Self::DuckDuckGoHtml => "duckduckgo_html",
             Self::BingHtml => "bing_html",
+            Self::DocsRsSearch => "docs_rs_search",
+            Self::GitHubRepositories => "github_repositories",
         }
     }
 }
@@ -147,6 +256,10 @@ fn error_response(request_id: &str, error: &SearchError) -> Value {
             "error_code": error.code,
             "message_key": format!("skill.{}.{}", SKILL_NAME, error.code.to_ascii_lowercase()),
             "retryable": error.retryable,
+            "failure_phase": error.failure_phase,
+            "side_effect_applied": false,
+            "recovery_action": error.recovery_action,
+            "backend_attempts": error.backend_attempts,
             "items": [],
             "candidates": [],
             "extract_urls": [],
@@ -201,7 +314,16 @@ fn build_response_extra(input: &SearchInput, text_payload: &Value) -> Value {
         "query": input.query,
         "top_k": input.top_k,
         "cursor": input.cursor,
+        "backend_policy": input.backend_policy.as_str(),
         "backend": text_payload.get("backend").cloned().unwrap_or(Value::Null),
+        "backends_used": text_payload
+            .get("backends_used")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+        "backend_attempts": text_payload
+            .get("backend_attempts")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
         "backend_connected": status == "ok",
         "status": status,
         "error_code": text_payload.get("error_code").cloned().unwrap_or(Value::Null),
@@ -228,6 +350,10 @@ fn build_response_extra(input: &SearchInput, text_payload: &Value) -> Value {
         "provenance": {
             "source": "web_search_backend",
             "backend": text_payload.get("backend").cloned().unwrap_or(Value::Null),
+            "backends": text_payload
+                .get("backends_used")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
             "observed_at": unix_ts()
         }
     })
@@ -303,6 +429,21 @@ fn parse_input(req: &Value) -> std::result::Result<SearchInput, SearchError> {
             "backend exceeds supported length",
         ));
     }
+    let backend_policy = optional_string(args.get("backend_policy"), "backend_policy")?
+        .or_else(|| env::var("WEB_SEARCH_BACKEND_POLICY").ok())
+        .map(|value| {
+            BackendPolicy::from_name(&value).ok_or_else(|| {
+                SearchError::new("INVALID_INPUT", "backend_policy must be auto or strict")
+            })
+        })
+        .transpose()?
+        .unwrap_or(BackendPolicy::Auto);
+    if backend_policy == BackendPolicy::Strict && backend.is_none() {
+        return Err(SearchError::new(
+            "INVALID_INPUT",
+            "backend is required when backend_policy is strict",
+        ));
+    }
     let include_snippet = args
         .get("include_snippet")
         .map(|value| {
@@ -324,6 +465,7 @@ fn parse_input(req: &Value) -> std::result::Result<SearchInput, SearchError> {
         domains_allow,
         domains_deny,
         backend,
+        backend_policy,
         include_snippet,
     })
 }
@@ -429,55 +571,336 @@ fn normalize_domain(value: &str) -> std::result::Result<String, SearchError> {
     Ok(domain)
 }
 
-fn handle(input: &SearchInput) -> std::result::Result<Value, SearchError> {
-    let backend = resolve_backend(input.backend.as_deref()).map_err(search_failure)?;
-    let search_result = search_selected_backend(input, &backend);
-    let (mut backend_label, mut items) = match search_result {
-        Ok(result) => result,
-        Err(_) if input.backend.is_none() => {
-            search_fallback_sources(input).map_err(search_failure)?
+fn load_provider_config() -> std::result::Result<SearchProviderConfig, SearchError> {
+    let configured_path = env::var("WEB_SEARCH_PROVIDER_CONFIG")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from);
+    let workspace_path = env::var("WORKSPACE_ROOT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .map(|root| root.join(PROVIDER_CONFIG_RELATIVE_PATH));
+    let raw = match configured_path {
+        Some(path) => fs::read_to_string(&path).map_err(|error| {
+            SearchError::new(
+                "SEARCH_CONFIG_INVALID",
+                format!(
+                    "cannot read WEB_SEARCH_PROVIDER_CONFIG {}: {error}",
+                    path.display()
+                ),
+            )
+        })?,
+        None => match workspace_path.as_ref().filter(|path| path.is_file()) {
+            Some(path) => fs::read_to_string(path).map_err(|error| {
+                SearchError::new(
+                    "SEARCH_CONFIG_INVALID",
+                    format!("cannot read search provider config: {error}"),
+                )
+            })?,
+            None => EMBEDDED_PROVIDER_CONFIG.to_string(),
+        },
+    };
+    parse_provider_config(&raw)
+}
+
+fn parse_provider_config(raw: &str) -> std::result::Result<SearchProviderConfig, SearchError> {
+    let config: SearchProviderConfig = toml::from_str(raw).map_err(|error| {
+        SearchError::new(
+            "SEARCH_CONFIG_INVALID",
+            format!("invalid search provider config: {error}"),
+        )
+    })?;
+    if config.schema_version != 1 {
+        return Err(SearchError::new(
+            "SEARCH_CONFIG_INVALID",
+            "unsupported search provider config schema_version",
+        ));
+    }
+    if config.auto_provider_limit == 0 || config.auto_provider_limit > config.auto_order.len() {
+        return Err(SearchError::new(
+            "SEARCH_CONFIG_INVALID",
+            "auto_provider_limit must be between 1 and auto_order length",
+        ));
+    }
+    let mut seen = HashSet::new();
+    for name in &config.auto_order {
+        let backend = Backend::from_name(name).ok_or_else(|| {
+            SearchError::new(
+                "SEARCH_CONFIG_INVALID",
+                format!("unknown provider in auto_order: {name}"),
+            )
+        })?;
+        if !backend.is_general() || !seen.insert(backend.as_str()) {
+            return Err(SearchError::new(
+                "SEARCH_CONFIG_INVALID",
+                format!("invalid or duplicate automatic provider: {name}"),
+            ));
         }
-        Err(error) => return Err(search_failure(error)),
+        if !config.providers.contains_key(backend.as_str()) {
+            return Err(SearchError::new(
+                "SEARCH_CONFIG_INVALID",
+                format!("provider policy is missing for {name}"),
+            ));
+        }
+    }
+    Ok(config)
+}
+
+impl Backend {
+    fn is_general(self) -> bool {
+        !matches!(self, Self::DocsRsSearch | Self::GitHubRepositories)
+    }
+
+    fn credential_is_available(self) -> bool {
+        let present = |name: &str| {
+            env::var(name)
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty())
+        };
+        match self {
+            Self::SerpApi => present("SERPAPI_API_KEY"),
+            Self::BaiduAi => present("BAIDU_AI_SEARCH_API_KEY"),
+            Self::Brave => present("BRAVE_SEARCH_API_KEY"),
+            Self::SearXng => present("SEARXNG_SEARCH_URL"),
+            Self::Tavily => present("TAVILY_API_KEY"),
+            Self::Perplexity => present("PERPLEXITY_API_KEY"),
+            Self::Exa => present("EXA_API_KEY"),
+            Self::You => present("YOU_SEARCH_API_KEY"),
+            Self::Mojeek => present("MOJEEK_API_KEY"),
+            Self::Kagi => present("KAGI_API_TOKEN"),
+            Self::DuckDuckGoHtml
+            | Self::BingHtml
+            | Self::DocsRsSearch
+            | Self::GitHubRepositories => true,
+        }
+    }
+}
+
+fn handle(input: &SearchInput) -> std::result::Result<Value, SearchError> {
+    let provider_config = load_provider_config()?;
+    let mut backend_plan = build_backend_plan(
+        input.backend.as_deref(),
+        input.backend_policy,
+        &provider_config,
+    )?;
+    append_explicit_domain_backends(input, &mut backend_plan);
+    let outcomes = execute_backend_plan(input, &backend_plan);
+    let aggregated = aggregate_backend_outcomes(input, outcomes);
+
+    if aggregated.items.is_empty() {
+        let detail = aggregated
+            .backend_attempts
+            .iter()
+            .map(|attempt| match attempt.error.as_deref() {
+                Some(error) => format!("{}: {error}", attempt.backend),
+                None => format!("{}: no candidates", attempt.backend),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(SearchError::new(
+            "SEARCH_FAILED",
+            format!("no search source returned candidates ({detail})"),
+        )
+        .execution_failure(
+            aggregated.backend_attempts,
+            input.backend_policy == BackendPolicy::Auto,
+        ));
+    }
+
+    let backend_label = if aggregated.backends_used.len() > 1 {
+        "multi_source".to_string()
+    } else {
+        aggregated
+            .backends_used
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+    let mut payload = build_backend_page_payload(input, &backend_label, aggregated.items);
+    payload["backend_policy"] = json!(input.backend_policy.as_str());
+    payload["backends_used"] = json!(aggregated.backends_used);
+    payload["backend_attempts"] = json!(aggregated.backend_attempts);
+    Ok(payload)
+}
+
+fn build_backend_plan(
+    preferred_backend: Option<&str>,
+    backend_policy: BackendPolicy,
+    config: &SearchProviderConfig,
+) -> std::result::Result<Vec<Backend>, SearchError> {
+    let preferred = preferred_backend
+        .map(|name| {
+            Backend::from_name(name).ok_or_else(|| {
+                SearchError::new("INVALID_INPUT", format!("unsupported backend `{name}`"))
+            })
+        })
+        .transpose()?;
+    let preferred = if let Some(backend) = preferred {
+        let enabled = config
+            .providers
+            .get(backend.as_str())
+            .is_some_and(|policy| policy.enabled);
+        if !enabled && backend_policy == BackendPolicy::Strict {
+            return Err(SearchError::new(
+                "SEARCH_PROVIDER_UNAVAILABLE",
+                format!("search provider `{}` is disabled", backend.as_str()),
+            ));
+        }
+        if enabled && backend_policy == BackendPolicy::Strict && !backend.credential_is_available()
+        {
+            return Err(SearchError::new(
+                "SEARCH_PROVIDER_UNAVAILABLE",
+                format!(
+                    "search provider `{}` is enabled but its runtime configuration is missing",
+                    backend.as_str()
+                ),
+            ));
+        }
+        enabled.then_some(backend)
+    } else {
+        None
     };
 
-    normalize_and_filter(&mut items, input);
-    if items.is_empty() {
-        if let Ok((fallback_backend, mut fallback_items)) = search_fallback_sources(input) {
-            normalize_and_filter(&mut fallback_items, input);
-            if !fallback_items.is_empty() {
-                backend_label = fallback_backend;
-                items = fallback_items;
+    let mut plan = preferred.into_iter().collect::<Vec<_>>();
+    if backend_policy == BackendPolicy::Strict {
+        return Ok(plan);
+    }
+    for name in &config.auto_order {
+        let backend = Backend::from_name(name).expect("validated provider config");
+        let policy = config
+            .providers
+            .get(backend.as_str())
+            .expect("validated provider policy");
+        if policy.enabled
+            && policy.auto_enabled
+            && backend.credential_is_available()
+            && !plan.contains(&backend)
+        {
+            plan.push(backend);
+        }
+        if plan.len() >= config.auto_provider_limit {
+            break;
+        }
+    }
+    if plan.is_empty() {
+        return Err(SearchError::new(
+            "SEARCH_PROVIDER_UNAVAILABLE",
+            "no enabled search provider is currently available",
+        ));
+    }
+    Ok(plan)
+}
+
+fn append_explicit_domain_backends(input: &SearchInput, plan: &mut Vec<Backend>) {
+    if input.backend_policy != BackendPolicy::Auto {
+        return;
+    }
+    for (domain, backend) in [
+        ("docs.rs", Backend::DocsRsSearch),
+        ("github.com", Backend::GitHubRepositories),
+    ] {
+        if domain_explicitly_allowed(input, domain) && !plan.contains(&backend) {
+            plan.push(backend);
+        }
+    }
+}
+
+fn execute_backend_plan(input: &SearchInput, plan: &[Backend]) -> Vec<BackendOutcome> {
+    std::thread::scope(|scope| {
+        let handles = plan
+            .iter()
+            .copied()
+            .map(|backend| {
+                scope.spawn(move || BackendOutcome {
+                    backend,
+                    result: search_one_backend(input, backend).map_err(|error| error.to_string()),
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .zip(plan.iter().copied())
+            .map(|(handle, backend)| {
+                handle.join().unwrap_or_else(|_| BackendOutcome {
+                    backend,
+                    result: Err("search backend worker panicked".to_string()),
+                })
+            })
+            .collect()
+    })
+}
+
+fn search_one_backend(input: &SearchInput, backend: Backend) -> Result<Vec<SearchItem>> {
+    match backend {
+        Backend::SerpApi => search_serpapi(input),
+        Backend::BaiduAi => search_baidu_ai(input),
+        Backend::Brave => search_brave(input),
+        Backend::SearXng => search_searxng(input),
+        Backend::Tavily => search_tavily(input),
+        Backend::Perplexity => search_perplexity(input),
+        Backend::Exa => search_exa(input),
+        Backend::You => search_you(input),
+        Backend::Mojeek => search_mojeek(input),
+        Backend::Kagi => search_kagi(input),
+        Backend::DuckDuckGoHtml => search_duckduckgo_html(input),
+        Backend::BingHtml => search_bing_html(input),
+        Backend::DocsRsSearch => search_docs_rs(input),
+        Backend::GitHubRepositories => search_github_repositories(input),
+    }
+}
+
+fn aggregate_backend_outcomes(
+    input: &SearchInput,
+    outcomes: Vec<BackendOutcome>,
+) -> AggregatedSearch {
+    let mut queues = Vec::new();
+    let mut backends_used = Vec::new();
+    let mut backend_attempts = Vec::new();
+
+    for outcome in outcomes {
+        let backend_name = outcome.backend.as_str().to_string();
+        match outcome.result {
+            Ok(mut items) => {
+                normalize_and_filter(&mut items, input);
+                let result_count = items.len();
+                backend_attempts.push(BackendAttempt {
+                    backend: backend_name.clone(),
+                    status: if result_count == 0 { "empty" } else { "ok" },
+                    result_count,
+                    error: None,
+                });
+                if result_count > 0 {
+                    backends_used.push(backend_name);
+                    queues.push(VecDeque::from(items));
+                }
+            }
+            Err(error) => backend_attempts.push(BackendAttempt {
+                backend: backend_name,
+                status: "error",
+                result_count: 0,
+                error: Some(error),
+            }),
+        }
+    }
+
+    let mut items = Vec::new();
+    let mut seen_urls = HashSet::new();
+    while queues.iter().any(|queue| !queue.is_empty()) {
+        for queue in &mut queues {
+            while let Some(item) = queue.pop_front() {
+                if seen_urls.insert(item.url.clone()) {
+                    items.push(item);
+                    break;
+                }
             }
         }
     }
-    Ok(build_backend_page_payload(input, &backend_label, items))
-}
 
-fn search_selected_backend(
-    input: &SearchInput,
-    backend: &Backend,
-) -> Result<(String, Vec<SearchItem>)> {
-    let exact_backend = input.backend.is_some();
-    match backend {
-        Backend::SerpApi => match search_serpapi(input) {
-            Ok(items) => Ok((Backend::SerpApi.as_str().to_string(), items)),
-            Err(error) if exact_backend => Err(error),
-            Err(_) => match search_bing_html(input) {
-                Ok(items) => Ok((Backend::BingHtml.as_str().to_string(), items)),
-                Err(_) => search_duckduckgo_html(input)
-                    .map(|items| (Backend::DuckDuckGoHtml.as_str().to_string(), items)),
-            },
-        },
-        Backend::DuckDuckGoHtml => match search_duckduckgo_html(input) {
-            Ok(items) => Ok((Backend::DuckDuckGoHtml.as_str().to_string(), items)),
-            Err(error) if exact_backend => Err(error),
-            Err(_) => {
-                search_bing_html(input).map(|items| (Backend::BingHtml.as_str().to_string(), items))
-            }
-        },
-        Backend::BingHtml => {
-            search_bing_html(input).map(|items| (Backend::BingHtml.as_str().to_string(), items))
-        }
+    AggregatedSearch {
+        items,
+        backends_used,
+        backend_attempts,
     }
 }
 
@@ -576,10 +999,6 @@ fn build_backend_page_payload(
     })
 }
 
-fn search_failure(error: anyhow::Error) -> SearchError {
-    SearchError::new("SEARCH_FAILED", error.to_string()).retryable()
-}
-
 fn candidate_window(input: &SearchInput) -> usize {
     input.top_k.saturating_add(1)
 }
@@ -647,19 +1066,6 @@ fn search_snapshot_id(input: &SearchInput, backend: &str, items: &[SearchItem]) 
     format!("sha256:{:x}", digest.finalize())
 }
 
-fn resolve_backend(raw: Option<&str>) -> Result<Backend> {
-    if let Some(name) = raw {
-        if let Some(b) = Backend::from_name(name) {
-            return Ok(b);
-        }
-        return Err(anyhow!("unsupported backend `{}`", name));
-    }
-    if env::var("SERPAPI_API_KEY").is_ok() {
-        return Ok(Backend::SerpApi);
-    }
-    Ok(Backend::DuckDuckGoHtml)
-}
-
 fn backend_client(timeout_seconds: u64, allowed_hosts: &[&str]) -> Result<Client> {
     let allowed_hosts = allowed_hosts
         .iter()
@@ -716,6 +1122,502 @@ fn read_bounded_backend_body(
 
 fn read_backend_text(response: Response) -> Result<String> {
     Ok(String::from_utf8_lossy(&read_backend_response(response)?).into_owned())
+}
+
+fn required_env(
+    value: std::result::Result<String, env::VarError>,
+    name: &str,
+    backend: &str,
+) -> Result<String> {
+    value
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .with_context(|| format!("{name} missing for {backend} backend"))
+}
+
+fn provider_language(input: &SearchInput) -> Option<String> {
+    input.lang.as_deref().and_then(|lang| {
+        let value = lang
+            .split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        (value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic())).then_some(value)
+    })
+}
+
+fn provider_time_range(input: &SearchInput) -> Option<&'static str> {
+    match input
+        .time_range
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "day" | "d" | "24h" => Some("day"),
+        "week" | "w" | "7d" => Some("week"),
+        "month" | "m" | "30d" => Some("month"),
+        "year" | "y" | "365d" => Some("year"),
+        _ => None,
+    }
+}
+
+fn json_text(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(value)) => {
+            Some(value.trim().to_string()).filter(|value| !value.is_empty())
+        }
+        Some(Value::Array(values)) => {
+            let joined = values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        _ => None,
+    }
+}
+
+fn first_json_text(item: &Value, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| json_text(item.get(*field)))
+}
+
+fn parse_json_result_items(
+    items: &[Value],
+    title_fields: &[&str],
+    url_fields: &[&str],
+    snippet_fields: &[&str],
+) -> Vec<SearchItem> {
+    let mut output = Vec::new();
+    for item in items {
+        let Some(title) = first_json_text(item, title_fields) else {
+            continue;
+        };
+        let Some(url) = first_json_text(item, url_fields) else {
+            continue;
+        };
+        output.push(SearchItem {
+            title,
+            source: normalize_source_from_url(&url),
+            url,
+            snippet: first_json_text(item, snippet_fields),
+            rank: output.len() + 1,
+            field_truncations: None,
+        });
+    }
+    output
+}
+
+fn json_items_at<'a>(payload: &'a Value, pointer: &str) -> &'a [Value] {
+    payload
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+fn parse_baidu_ai_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/references"),
+        &["title"],
+        &["url"],
+        &["snippet", "content"],
+    )
+}
+
+fn parse_brave_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/web/results"),
+        &["title"],
+        &["url"],
+        &["description", "snippet"],
+    )
+}
+
+fn parse_searxng_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/results"),
+        &["title"],
+        &["url"],
+        &["content", "snippet"],
+    )
+}
+
+fn parse_tavily_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/results"),
+        &["title"],
+        &["url"],
+        &["content", "snippet"],
+    )
+}
+
+fn parse_perplexity_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/results"),
+        &["title"],
+        &["url"],
+        &["snippet", "content"],
+    )
+}
+
+fn parse_exa_response(payload: &Value) -> Vec<SearchItem> {
+    parse_json_result_items(
+        json_items_at(payload, "/results"),
+        &["title"],
+        &["url"],
+        &["text", "highlights"],
+    )
+}
+
+fn parse_you_response(payload: &Value) -> Vec<SearchItem> {
+    let mut values = Vec::new();
+    for path in ["/results/web", "/results/news"] {
+        values.extend(json_items_at(payload, path).iter().cloned());
+    }
+    parse_json_result_items(&values, &["title"], &["url"], &["description", "snippets"])
+}
+
+fn parse_mojeek_response(payload: &Value) -> Result<Vec<SearchItem>> {
+    let status = payload
+        .pointer("/response/status")
+        .and_then(Value::as_str)
+        .unwrap_or("OK");
+    if status != "OK" {
+        return Err(anyhow!("mojeek search provider returned an error status"));
+    }
+    Ok(parse_json_result_items(
+        json_items_at(payload, "/response/results"),
+        &["title"],
+        &["url"],
+        &["desc", "snippet"],
+    ))
+}
+
+fn parse_kagi_response(payload: &Value) -> Vec<SearchItem> {
+    let values = json_items_at(payload, "/data")
+        .iter()
+        .filter(|item| item.get("t").and_then(Value::as_i64).unwrap_or(0) == 0)
+        .cloned()
+        .collect::<Vec<_>>();
+    parse_json_result_items(&values, &["title"], &["url"], &["snippet"])
+}
+
+fn search_baidu_ai(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(
+        env::var("BAIDU_AI_SEARCH_API_KEY"),
+        "BAIDU_AI_SEARCH_API_KEY",
+        "baidu_ai",
+    )?;
+    let client = backend_client(20, &["qianfan.baidubce.com"])?;
+    let mut body = json!({
+        "messages": [{"role": "user", "content": input.query}],
+        "search_source": "baidu_search_v2",
+        "resource_type_filter": [{"type": "web", "top_k": candidate_window(input)}]
+    });
+    if !input.domains_allow.is_empty() {
+        body["search_filter"] = json!({"match": {"site": input.domains_allow}});
+    }
+    if let Some(range @ ("week" | "month" | "year")) = provider_time_range(input) {
+        body["search_recency_filter"] = json!(range);
+    }
+    let response = client
+        .post("https://qianfan.baidubce.com/v2/ai_search/web_search")
+        .header("X-Appbuilder-Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .context("baidu ai search request failed")?
+        .error_for_status()
+        .context("baidu ai search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("baidu ai search json parse failed")?;
+    Ok(parse_baidu_ai_response(&payload))
+}
+
+fn search_brave(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(
+        env::var("BRAVE_SEARCH_API_KEY"),
+        "BRAVE_SEARCH_API_KEY",
+        "brave",
+    )?;
+    let client = backend_client(20, &["api.search.brave.com"])?;
+    let mut url = Url::parse("https://api.search.brave.com/res/v1/web/search").expect("valid url");
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("q", &input.query);
+        query.append_pair("count", &candidate_window(input).min(20).to_string());
+        query.append_pair("offset", &(input.cursor / 20).min(9).to_string());
+        if let Some(lang) = provider_language(input) {
+            query.append_pair("search_lang", &lang);
+        }
+        if let Some(range) = provider_time_range(input) {
+            query.append_pair(
+                "freshness",
+                match range {
+                    "day" => "pd",
+                    "week" => "pw",
+                    "month" => "pm",
+                    "year" => "py",
+                    _ => unreachable!(),
+                },
+            );
+        }
+    }
+    let response = client
+        .get(url)
+        .header("X-Subscription-Token", api_key)
+        .header("Accept", "application/json")
+        .send()
+        .context("brave search request failed")?
+        .error_for_status()
+        .context("brave search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("brave search json parse failed")?;
+    Ok(parse_brave_response(&payload))
+}
+
+fn searxng_endpoint() -> Result<Url> {
+    let raw = required_env(
+        env::var("SEARXNG_SEARCH_URL"),
+        "SEARXNG_SEARCH_URL",
+        "searxng",
+    )?;
+    let mut url = Url::parse(raw.trim()).context("SEARXNG_SEARCH_URL is invalid")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(anyhow!(
+            "SEARXNG_SEARCH_URL must be an HTTP(S) URL without credentials"
+        ));
+    }
+    if matches!(url.path(), "" | "/") {
+        url.set_path("/search");
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url)
+}
+
+fn search_searxng(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let mut url = searxng_endpoint()?;
+    let host = url.host_str().expect("validated host").to_string();
+    let client = backend_client(20, &[host.as_str()])?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("q", &input.query);
+        query.append_pair("format", "json");
+        query.append_pair(
+            "pageno",
+            &(input.cursor / input.top_k.max(1) + 1).to_string(),
+        );
+        if let Some(lang) = provider_language(input) {
+            query.append_pair("language", &lang);
+        }
+        if let Some(range) = provider_time_range(input) {
+            query.append_pair("time_range", range);
+        }
+    }
+    let mut request = client.get(url).header("Accept", "application/json");
+    if let Ok(api_key) = env::var("SEARXNG_API_KEY") {
+        if !api_key.trim().is_empty() {
+            request = request.bearer_auth(api_key);
+        }
+    }
+    let response = request
+        .send()
+        .context("searxng search request failed")?
+        .error_for_status()
+        .context("searxng search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("searxng search json parse failed")?;
+    Ok(parse_searxng_response(&payload))
+}
+
+fn search_tavily(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(env::var("TAVILY_API_KEY"), "TAVILY_API_KEY", "tavily")?;
+    let client = backend_client(20, &["api.tavily.com"])?;
+    let mut body = json!({
+        "query": input.query,
+        "search_depth": "basic",
+        "max_results": candidate_window(input).min(20),
+        "include_answer": false,
+        "include_raw_content": false
+    });
+    if let Some(range) = provider_time_range(input) {
+        body["time_range"] = json!(range);
+    }
+    if !input.domains_allow.is_empty() {
+        body["include_domains"] = json!(input.domains_allow);
+    }
+    if !input.domains_deny.is_empty() {
+        body["exclude_domains"] = json!(input.domains_deny);
+    }
+    let response = client
+        .post("https://api.tavily.com/search")
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .context("tavily search request failed")?
+        .error_for_status()
+        .context("tavily search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("tavily search json parse failed")?;
+    Ok(parse_tavily_response(&payload))
+}
+
+fn search_perplexity(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(
+        env::var("PERPLEXITY_API_KEY"),
+        "PERPLEXITY_API_KEY",
+        "perplexity",
+    )?;
+    let client = backend_client(20, &["api.perplexity.ai"])?;
+    let mut body = json!({
+        "query": input.query,
+        "max_results": candidate_window(input).min(20)
+    });
+    if let Some(lang) = provider_language(input) {
+        body["search_language_filter"] = json!([lang]);
+    }
+    if !input.domains_allow.is_empty() {
+        body["search_domain_filter"] = json!(input.domains_allow);
+    }
+    if let Some(range) = provider_time_range(input) {
+        body["search_recency_filter"] = json!(range);
+    }
+    let response = client
+        .post("https://api.perplexity.ai/search")
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .context("perplexity search request failed")?
+        .error_for_status()
+        .context("perplexity search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("perplexity search json parse failed")?;
+    Ok(parse_perplexity_response(&payload))
+}
+
+fn search_exa(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(env::var("EXA_API_KEY"), "EXA_API_KEY", "exa")?;
+    let client = backend_client(20, &["api.exa.ai"])?;
+    let mut body = json!({
+        "query": input.query,
+        "type": "auto",
+        "numResults": candidate_window(input).min(20),
+        "contents": {"text": {"maxCharacters": 1000}}
+    });
+    if !input.domains_allow.is_empty() {
+        body["includeDomains"] = json!(input.domains_allow);
+    }
+    if !input.domains_deny.is_empty() {
+        body["excludeDomains"] = json!(input.domains_deny);
+    }
+    let response = client
+        .post("https://api.exa.ai/search")
+        .header("x-api-key", api_key)
+        .json(&body)
+        .send()
+        .context("exa search request failed")?
+        .error_for_status()
+        .context("exa search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("exa search json parse failed")?;
+    Ok(parse_exa_response(&payload))
+}
+
+fn search_you(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(env::var("YOU_SEARCH_API_KEY"), "YOU_SEARCH_API_KEY", "you")?;
+    let client = backend_client(20, &["ydc-index.io"])?;
+    let mut body = json!({
+        "query": input.query,
+        "count": candidate_window(input).min(20),
+        "offset": (input.cursor / input.top_k.max(1)).min(9)
+    });
+    if !input.domains_allow.is_empty() {
+        body["include_domains"] = json!(input.domains_allow);
+    } else if !input.domains_deny.is_empty() {
+        body["exclude_domains"] = json!(input.domains_deny);
+    }
+    if let Some(range) = provider_time_range(input) {
+        body["freshness"] = json!(range);
+    }
+    if let Some(lang) = provider_language(input) {
+        body["language"] = json!(lang);
+    }
+    let response = client
+        .post("https://ydc-index.io/v1/search")
+        .header("X-API-Key", api_key)
+        .json(&body)
+        .send()
+        .context("you search request failed")?
+        .error_for_status()
+        .context("you search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("you search json parse failed")?;
+    Ok(parse_you_response(&payload))
+}
+
+fn search_mojeek(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(env::var("MOJEEK_API_KEY"), "MOJEEK_API_KEY", "mojeek")?;
+    let client = backend_client(20, &["api.mojeek.com"])?;
+    let mut url = Url::parse("https://api.mojeek.com/search").expect("valid url");
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("api_key", &api_key);
+        query.append_pair("q", &input.query);
+        query.append_pair("s", &input.cursor.saturating_add(1).to_string());
+        query.append_pair("t", &candidate_window(input).min(20).to_string());
+        query.append_pair("fmt", "json");
+        query.append_pair("date", "1");
+        query.append_pair("safe", "1");
+        if let Some(lang) = provider_language(input) {
+            query.append_pair("lb", &lang.to_ascii_uppercase());
+            query.append_pair("lbb", "100");
+        }
+        if let Some(range) = provider_time_range(input) {
+            query.append_pair("since", range);
+        }
+        if !input.domains_allow.is_empty() {
+            query.append_pair("fi", &input.domains_allow.join(","));
+        }
+        if !input.domains_deny.is_empty() {
+            query.append_pair("fe", &input.domains_deny.join(","));
+        }
+    }
+    let response = client
+        .get(url)
+        .send()
+        .context("mojeek search request failed")?
+        .error_for_status()
+        .context("mojeek search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("mojeek search json parse failed")?;
+    parse_mojeek_response(&payload)
+}
+
+fn search_kagi(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let api_key = required_env(env::var("KAGI_API_TOKEN"), "KAGI_API_TOKEN", "kagi")?;
+    let client = backend_client(20, &["kagi.com"])?;
+    let mut url = Url::parse("https://kagi.com/api/v1/search").expect("valid url");
+    url.query_pairs_mut().append_pair("q", &input.query);
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bot {api_key}"))
+        .send()
+        .context("kagi search request failed")?
+        .error_for_status()
+        .context("kagi search non-success response")?;
+    let payload: Value = serde_json::from_slice(&read_backend_response(response)?)
+        .context("kagi search json parse failed")?;
+    Ok(parse_kagi_response(&payload))
 }
 
 fn search_serpapi(input: &SearchInput) -> Result<Vec<SearchItem>> {
@@ -872,24 +1774,6 @@ fn parse_duckduckgo_html_results(html: &str, input: &SearchInput) -> Vec<SearchI
     out
 }
 
-fn search_fallback_sources(input: &SearchInput) -> Result<(String, Vec<SearchItem>)> {
-    if domain_explicitly_allowed(input, "docs.rs") {
-        if let Ok(items) = search_docs_rs(input) {
-            if !items.is_empty() {
-                return Ok(("docs_rs_search".to_string(), items));
-            }
-        }
-    }
-    if domain_allowed_by_filter(input, "github.com") {
-        if let Ok(items) = search_github_repositories(input) {
-            if !items.is_empty() {
-                return Ok(("github_repositories".to_string(), items));
-            }
-        }
-    }
-    Err(anyhow!("no fallback search source returned candidates"))
-}
-
 fn domain_explicitly_allowed(input: &SearchInput, domain: &str) -> bool {
     input
         .domains_allow
@@ -897,6 +1781,7 @@ fn domain_explicitly_allowed(input: &SearchInput, domain: &str) -> bool {
         .any(|allowed| domain_matches(domain, allowed))
 }
 
+#[cfg(test)]
 fn domain_allowed_by_filter(input: &SearchInput, domain: &str) -> bool {
     if input
         .domains_deny
@@ -1042,7 +1927,7 @@ fn parse_docs_rs_results(html: &str, max_items: usize) -> Vec<SearchItem> {
 }
 
 fn search_bing_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
-    let client = backend_client(20, &["www.bing.com"])?;
+    let client = backend_client(20, &["www.bing.com", "cn.bing.com"])?;
     let mut url = Url::parse("https://www.bing.com/search").expect("valid url");
     {
         let mut q = url.query_pairs_mut();

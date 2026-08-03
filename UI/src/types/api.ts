@@ -1054,6 +1054,14 @@ export interface NniRewardRecord {
   awarded_at_unix: number;
 }
 
+export interface NniNetworkDeviceStats {
+  registered_device_count: number;
+  active_device_count: number;
+  active_period_start_unix: number | null;
+  active_period_end_unix: number | null;
+  window_seconds: number;
+}
+
 export interface NniRewardsResponse {
   schema_version: 1;
   status: string;
@@ -1066,11 +1074,141 @@ export interface NniRewardsResponse {
   reward_grant_count: number;
   first_period_start_unix?: number | null;
   latest_period_end_unix?: number | null;
+  network_devices?: NniNetworkDeviceStats;
   page: number;
   per_page: number;
   total: number;
   total_pages: number;
   records: NniRewardRecord[];
+}
+
+export interface NniBancorMarketResponse {
+  schema_version: 1;
+  status: "open" | "disabled" | "paused";
+  market_id: string;
+  point_symbol: "POINT";
+  usd_symbol: "USD";
+  point_scale: 10000;
+  usd_scale: 10000;
+  point_reserve_units: string;
+  point_reserve: string;
+  usd_reserve_units: string;
+  usd_reserve: string;
+  marginal_price_usd_per_point: string;
+  fee_bps: number;
+  fee_totals?: {
+    point_fee_units: string;
+    point_fee_amount: string;
+    usd_fee_units: string;
+    usd_fee_amount: string;
+    updated_at_unix: number;
+  };
+  version: number;
+  last_trade_id?: string | null;
+  updated_at_unix: number;
+  node_url?: string;
+}
+
+export interface NniBancorCandle {
+  bucket_start_unix: number;
+  bucket_end_unix: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  point_volume_units: string;
+  point_volume: string;
+  usd_volume_units: string;
+  usd_volume: string;
+  trade_count: number;
+  has_trades?: boolean;
+}
+
+export interface NniBancorCandlesResponse {
+  schema_version: 1;
+  status: string;
+  market_id: string;
+  interval_seconds: number;
+  start_time_unix: number;
+  end_time_unix: number;
+  price_scale: 1000000000000;
+  price_decimal_places: 12;
+  candles: NniBancorCandle[];
+  node_url?: string;
+}
+
+export interface NniBancorQuoteResponse {
+  schema_version: 1;
+  status: string;
+  side: "buy" | "sell";
+  input_asset: "POINT" | "USD";
+  input_units: string;
+  input_amount: string;
+  fee_asset: "POINT" | "USD";
+  fee_units: string;
+  fee_amount: string;
+  curve_input_units: string;
+  curve_input_amount: string;
+  output_asset: "POINT" | "USD";
+  output_units: string;
+  output_amount: string;
+  price_impact_bps: number;
+  fee_bps: number;
+  market_id: string;
+  market_version: number;
+  slippage_bps: number;
+  min_output_units: string;
+  min_output_amount: string;
+  node_url?: string;
+}
+
+export interface NniBancorTradeRecord {
+  trade_id: string;
+  quote_id: string;
+  market_id: string;
+  side: "buy" | "sell";
+  input_asset: "POINT" | "USD";
+  input_units: string;
+  input_amount: string;
+  fee_units: string;
+  fee_amount: string;
+  output_asset: "POINT" | "USD";
+  output_units: string;
+  output_amount: string;
+  market_version: number;
+  created_at_unix: number;
+}
+
+export interface NniBancorAccountResponse {
+  schema_version: 1;
+  status: string;
+  device_pubkey: string;
+  point_balance_units: string;
+  point_balance: string;
+  usd_balance_units: string;
+  usd_balance: string;
+  account_version: number;
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  trades: NniBancorTradeRecord[];
+  node_url?: string;
+}
+
+export interface NniBancorTradeResponse {
+  schema_version: 1;
+  status: string;
+  trade: NniBancorTradeRecord;
+  account: {
+    point_balance_units: string;
+    point_balance: string;
+    usd_balance_units: string;
+    usd_balance: string;
+    version: number;
+  };
+  market: NniBancorMarketResponse;
+  node_url?: string;
 }
 
 export interface WechatConfigResponse {
@@ -1442,4 +1580,4 @@ export interface ServiceActionNotice {
 }
 
 export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";
+export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "bancor" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";

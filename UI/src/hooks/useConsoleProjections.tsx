@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import {
+  ArrowLeftRight,
   BookOpenCheck,
   Brain,
   Database,
@@ -417,6 +418,11 @@ export function useConsoleProjections({
         id: "nni" as const,
         label: "NNI",
         icon: <Network className="h-4 w-4" />,
+      },
+      {
+        id: "bancor" as const,
+        label: "BANCOR",
+        icon: <ArrowLeftRight className="h-4 w-4" />,
       },
       {
         id: "channels" as const,

@@ -643,7 +643,7 @@ fn durable_job_metadata_write_failure_removes_partial_job_directory() {
         uuid::Uuid::new_v4().simple()
     ));
     std::fs::create_dir_all(&root).expect("create tempdir");
-    let plan = DurableRunnerJobPlan::new(&root, "fixture_skill", 600);
+    let plan = DurableRunnerJobPlan::new(&root, "fixture_skill", 600, None);
     plan.create_directories().expect("create durable job paths");
     let guard = DurableRunnerJobSetupGuard::new(&plan.job_dir);
     std::fs::write(plan.job_dir.join("partial"), "before-fault").expect("write partial metadata");
@@ -659,4 +659,36 @@ fn durable_job_metadata_write_failure_removes_partial_job_directory() {
     assert!(error.contains("durable_skill_job_metadata_write_failed"));
     assert!(!plan.job_dir.exists());
     std::fs::remove_dir_all(root).expect("remove tempdir");
+}
+
+#[test]
+fn durable_queue_scope_uses_an_isolated_single_lane_root() {
+    let root = std::env::temp_dir().join(format!(
+        "agent_durable_queue_scope_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let ordinary = DurableRunnerJobPlan::new(&root, "fixture_skill", 600, None);
+    let queued = DurableRunnerJobPlan::new(
+        &root,
+        "fixture_skill",
+        600,
+        Some("__dispatch_queue__fixture_skill__user__7"),
+    );
+
+    assert!(!ordinary.queue_scoped);
+    assert!(queued.queue_scoped);
+    assert!(ordinary.skill_slot_root.ends_with("skills/fixture_skill"));
+    assert!(queued.skill_slot_root.starts_with(
+        claw_core::workspace_state::workspace_state_root(&root)
+            .join("durable_skill_slots/queues/fixture_skill")
+    ));
+    assert_eq!(
+        queued
+            .skill_slot_root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::len),
+        Some(64)
+    );
+    assert_ne!(ordinary.skill_slot_root, queued.skill_slot_root);
 }

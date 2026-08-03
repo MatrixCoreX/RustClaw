@@ -1,5 +1,6 @@
 use claw_core::skill_registry::{
-    CapabilityIsolationProfile, PlannerCapabilityEffect, SkillKind, SkillRiskLevel,
+    CapabilityIsolationProfile, PlannerCapabilityEffect, SkillDispatchQueueScope, SkillKind,
+    SkillRiskLevel,
 };
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
@@ -179,7 +180,7 @@ const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
 
 struct SkillDispatchPermits {
-    _serialization: Option<OwnedSemaphorePermit>,
+    serialization: Option<OwnedSemaphorePermit>,
     _skill: Option<OwnedSemaphorePermit>,
     _global: OwnedSemaphorePermit,
 }
@@ -250,7 +251,7 @@ async fn acquire_skill_dispatch_permits_with_serialization(
         .await
         .map_err(|error| format!("skill semaphore closed: {error}"))?;
     Ok(SkillDispatchPermits {
-        _serialization: serialization_permit,
+        serialization: serialization_permit,
         _skill: skill_permit,
         _global: global_permit,
     })
@@ -1440,6 +1441,125 @@ fn skill_dispatch_serialization_key(
     .then(|| format!("__serial_skill__{skill_name}"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SkillDispatchQueueSelection {
+    key: String,
+    scope: &'static str,
+}
+
+fn skill_dispatch_queue_selection(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &Value,
+) -> Option<SkillDispatchQueueSelection> {
+    let action = skill_action_token(args);
+    let registry = state.get_skills_registry()?;
+    let policy = registry.dispatch_queue(skill_name)?;
+    if !policy.applies_to(action.as_deref()) {
+        return None;
+    }
+    match policy.scope {
+        SkillDispatchQueueScope::User => Some(SkillDispatchQueueSelection {
+            key: format!("__dispatch_queue__{skill_name}__user__{}", task.user_id),
+            scope: "user",
+        }),
+    }
+}
+
+fn publish_skill_dispatch_queue_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    scope: &str,
+    waiting: bool,
+) {
+    let sequence = if waiting { 1 } else { 2 };
+    let detail_key = if waiting {
+        "skill_dispatch.queue.waiting"
+    } else {
+        "skill_dispatch.queue.started"
+    };
+    let payload = json!({
+        "schema_version": 1,
+        "source": "skill_progress",
+        "data_only": true,
+        "render_owner": "ui_cli_channel_projection",
+        "skill_name": skill_name,
+        "frame": {
+            "schema_version": 1,
+            "record_type": "skill_progress",
+            "request_id": task.task_id,
+            "sequence": sequence,
+            "kind": "progress",
+            "detail_key": detail_key,
+            "params": { "queue_scope": scope },
+            "current": if waiting { 0 } else { 1 },
+            "total": 1,
+        },
+    });
+    if let Err(error) =
+        crate::task_event_transport::publish_claimed_event(state, task, "skill_progress", payload)
+    {
+        tracing::warn!(
+            task_id = task.task_id,
+            skill = skill_name,
+            queue_scope = scope,
+            error = %error,
+            "skill_dispatch_queue_progress_publish_failed"
+        );
+    }
+}
+
+fn pending_local_process_job_directory(response: &Value) -> Option<std::path::PathBuf> {
+    let cancel_ref = response
+        .pointer("/extra/pending_async_job/cancel_ref")
+        .and_then(Value::as_str)?
+        .strip_prefix("local_process:")?
+        .trim();
+    let path = std::path::PathBuf::from(cancel_ref);
+    (path.is_absolute() && path.is_dir()).then_some(path)
+}
+
+fn dispatch_queue_job_is_terminal(job_dir: &Path, now_ts: i64) -> bool {
+    if !job_dir.exists()
+        || job_dir.join("exit_code").is_file()
+        || job_dir.join("startup_failed").is_file()
+    {
+        return true;
+    }
+    let Some(pid) = crate::local_process_job::read_pid(job_dir) else {
+        return false;
+    };
+    let identity = crate::local_process_job::process_identity_state(job_dir, pid);
+    crate::local_process_job::process_loss_is_stable(job_dir, identity, now_ts, 5)
+}
+
+fn retain_dispatch_queue_permit_until_job_terminal(
+    permit: OwnedSemaphorePermit,
+    job_dir: std::path::PathBuf,
+    task_id: String,
+    skill_name: String,
+    queue_scope: &'static str,
+) {
+    tokio::spawn(async move {
+        loop {
+            let now_ts = crate::now_ts_u64().min(i64::MAX as u64) as i64;
+            if dispatch_queue_job_is_terminal(&job_dir, now_ts) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        drop(permit);
+        tracing::info!(
+            task_id,
+            skill = skill_name,
+            queue_scope,
+            "skill_dispatch_queue_released"
+        );
+    });
+}
+
 fn action_scoped_isolation_profile(
     state: &AppState,
     skill_name: &str,
@@ -1828,8 +1948,24 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         "skill_timeout_resolved"
     );
 
-    let serialization_key = skill_dispatch_serialization_key(state, &skill_name, &args);
-    let _dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
+    let dispatch_queue = skill_dispatch_queue_selection(state, task, &skill_name, &args);
+    let serialization_key = dispatch_queue
+        .as_ref()
+        .map(|selection| selection.key.clone())
+        .or_else(|| skill_dispatch_serialization_key(state, &skill_name, &args));
+    let queue_was_waiting = dispatch_queue.as_ref().is_some_and(|selection| {
+        state
+            .skill_rt
+            .skill_concurrency_gates
+            .semaphore(&selection.key, 1)
+            .available_permits()
+            == 0
+    });
+    if queue_was_waiting {
+        let selection = dispatch_queue.as_ref().expect("queue selection");
+        publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, true);
+    }
+    let mut dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
         &state.skill_rt.skill_concurrency_gates,
         &state.skill_rt.skill_semaphore,
         &task.task_id,
@@ -1838,6 +1974,10 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         serialization_key.as_deref(),
     )
     .await?;
+    if queue_was_waiting {
+        let selection = dispatch_queue.as_ref().expect("queue selection");
+        publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, false);
+    }
 
     let args = inject_skill_memory_context(execution_state, task, &skill_name, args);
     let source = match task_runtime_channel(execution_state, task) {
@@ -1867,11 +2007,27 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 &source,
                 skill_timeout_secs,
                 execution_context,
+                dispatch_queue
+                    .as_ref()
+                    .map(|selection| selection.key.as_str()),
             )
             .await?
         }
         SkillKind::Builtin => unreachable!(),
     };
+    if let (Some(selection), Some(job_dir), Some(permit)) = (
+        dispatch_queue.as_ref(),
+        pending_local_process_job_directory(&value),
+        dispatch_permits.serialization.take(),
+    ) {
+        retain_dispatch_queue_permit_until_job_terminal(
+            permit,
+            job_dir,
+            task.task_id.clone(),
+            skill_name.clone(),
+            selection.scope,
+        );
+    }
     let status = value
         .get("status")
         .and_then(|v| v.as_str())

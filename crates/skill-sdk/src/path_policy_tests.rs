@@ -70,7 +70,10 @@ fn create_target_canonicalizes_existing_parent() {
     let target = policy
         .resolve_create_target("new/deep/file.txt")
         .expect("create target");
-    let canonical_workspace = workspace.path().canonicalize().expect("canonical workspace");
+    let canonical_workspace = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
     assert_eq!(target, canonical_workspace.join("new/deep/file.txt"));
 }
 

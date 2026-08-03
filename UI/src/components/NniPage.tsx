@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
 import { NniHistoryTabs, type NniHistoryView } from "./NniHistoryTabs";
+import { NniNetworkDeviceStats } from "./NniNetworkDeviceStats";
 import { NniRewardsPanel } from "./NniRewardsPanel";
 import {
   NNI_RUNTIME_TILES,
@@ -272,10 +273,16 @@ export function NniPage({
       .catch((err) => onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed")));
   };
 
+  const refreshNniPageStatus = async () => {
+    const refreshes = [Promise.resolve(onFetchDeviceStatus())];
+    if (nniJoined) refreshes.push(Promise.resolve(onFetchRewards(1)));
+    await Promise.all(refreshes);
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <section className="theme-panel p-5 sm:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(32rem,40rem)] xl:items-start">
           <div className="max-w-3xl">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">Network Native Intelligence</p>
             <h3 className="mt-2 flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
@@ -290,14 +297,21 @@ export function NniPage({
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-3">
+            <NniNetworkDeviceStats
+              stats={nniRewards?.network_devices ?? null}
+              loading={nniRewardsLoading}
+              t={t}
+              formatUnixDateTime={formatUnixDateTime}
+            />
+            <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              onClick={() => void onFetchDeviceStatus()}
-              disabled={nniStatusLoading}
+              onClick={() => void refreshNniPageStatus()}
+              disabled={nniStatusLoading || nniRewardsLoading}
               className="theme-secondary-btn px-3 py-2 text-sm"
             >
-              {nniStatusLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {nniStatusLoading || nniRewardsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {t("刷新状态", "Refresh status")}
             </button>
             <button
@@ -346,6 +360,7 @@ export function NniPage({
                 {t("测试加入", "Test Join")}
               </button>
             ) : null}
+            </div>
           </div>
         </div>
       </section>

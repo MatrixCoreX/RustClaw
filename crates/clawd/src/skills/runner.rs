@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
@@ -145,25 +146,41 @@ struct DurableRunnerJobPlan {
     poll_after_seconds: u64,
     retention_seconds: u64,
     retention_deadline_at: i64,
+    queue_scoped: bool,
 }
 
 impl DurableRunnerJobPlan {
-    fn new(workspace_root: &Path, skill_name: &str, retention_seconds: u64) -> Self {
+    fn new(
+        workspace_root: &Path,
+        skill_name: &str,
+        retention_seconds: u64,
+        dispatch_queue_key: Option<&str>,
+    ) -> Self {
         let job_uuid = uuid::Uuid::new_v4().to_string();
         let state_root = claw_core::workspace_state::workspace_state_root(workspace_root);
         let slot_root = state_root.join("durable_skill_slots");
         let skill_component = safe_path_component(skill_name, "skill");
+        let skill_slot_root = dispatch_queue_key.map_or_else(
+            || slot_root.join("skills").join(&skill_component),
+            |queue_key| {
+                slot_root
+                    .join("queues")
+                    .join(&skill_component)
+                    .join(stable_queue_path_component(queue_key))
+            },
+        );
         let retention_seconds = retention_seconds.max(1);
         let now_ts = crate::now_ts_u64().min(i64::MAX as u64) as i64;
         Self {
             job_id: format!("local_process:{job_uuid}"),
             job_dir: state_root.join("async_jobs").join(job_uuid),
             global_slot_root: slot_root.join("global"),
-            skill_slot_root: slot_root.join("skills").join(skill_component),
+            skill_slot_root,
             poll_after_seconds: 5,
             retention_seconds,
             retention_deadline_at: now_ts
                 .saturating_add(retention_seconds.min(i64::MAX as u64) as i64),
+            queue_scoped: dispatch_queue_key.is_some(),
         }
     }
 
@@ -233,6 +250,10 @@ fn safe_path_component(value: &str, fallback: &str) -> String {
     } else {
         normalized
     }
+}
+
+fn stable_queue_path_component(queue_key: &str) -> String {
+    hex::encode(Sha256::digest(queue_key.as_bytes()))
 }
 
 fn local_process_durable_background_requested(mapping: Option<&PlannerCapabilityMapping>) -> bool {
@@ -739,6 +760,7 @@ pub(crate) async fn run_skill_with_runner_once(
     source: &str,
     skill_timeout_secs: u64,
     execution_context: Option<&super::SkillExecutionContext>,
+    dispatch_queue_key: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     run_skill_with_runner_once_pinned(
         state,
@@ -748,6 +770,7 @@ pub(crate) async fn run_skill_with_runner_once(
         source,
         skill_timeout_secs,
         execution_context,
+        dispatch_queue_key,
         None,
     )
     .await
@@ -761,6 +784,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     source: &str,
     skill_timeout_secs: u64,
     execution_context: Option<&super::SkillExecutionContext>,
+    dispatch_queue_key: Option<&str>,
     pinned_execution_binding: Option<&Value>,
 ) -> Result<serde_json::Value, String> {
     let dispatch_started = std::time::Instant::now();
@@ -864,6 +888,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             &state.skill_rt.workspace_root,
             canonical_skill_name,
             state.skill_rt.cmd_async_retention_seconds,
+            dispatch_queue_key,
         )
     });
     let mut durable_job_setup_guard = if let Some(plan) = durable_job_plan.as_ref() {
@@ -1379,9 +1404,13 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             sandbox_global_slot_root,
             sandbox_skill_slot_root,
             state.skill_rt.skill_global_max_concurrency,
-            state
-                .skill_max_concurrency_for_dispatch(canonical_skill_name)
-                .unwrap_or(state.skill_rt.skill_global_max_concurrency),
+            if plan.queue_scoped {
+                1
+            } else {
+                state
+                    .skill_max_concurrency_for_dispatch(canonical_skill_name)
+                    .unwrap_or(state.skill_rt.skill_global_max_concurrency)
+            },
             state.skill_rt.cmd_terminate_grace_seconds,
         )
         .await?;

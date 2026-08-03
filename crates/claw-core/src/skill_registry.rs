@@ -90,6 +90,40 @@ pub enum CapabilityExecutionMode {
     AsyncRequired,
 }
 
+/// Host-owned queue scope for resource-heavy skill invocations. Missing queue
+/// policy keeps the existing dispatch behavior unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDispatchQueueScope {
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillDispatchQueuePolicy {
+    pub scope: SkillDispatchQueueScope,
+    /// Empty applies the queue to every action. Non-empty values are canonical
+    /// action tokens selected from the registry input schema.
+    #[serde(default)]
+    pub actions: Vec<String>,
+}
+
+impl SkillDispatchQueuePolicy {
+    pub fn applies_to(&self, action: Option<&str>) -> bool {
+        if self.actions.is_empty() {
+            return true;
+        }
+        let Some(action) = action
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(normalize_schema_token)
+        else {
+            return false;
+        };
+        self.actions.iter().any(|candidate| candidate == &action)
+    }
+}
+
 impl CapabilityExecutionMode {
     pub fn as_token(self) -> &'static str {
         match self {
@@ -620,6 +654,10 @@ pub struct SkillRegistryEntry {
     /// scheduling policy, not a permission requested by the package.
     #[serde(default)]
     pub max_concurrency: Option<usize>,
+    /// Optional host-enforced FIFO queue. This is opt-in scheduling policy;
+    /// entries without it retain their existing dispatch behavior.
+    #[serde(default)]
+    pub dispatch_queue: Option<SkillDispatchQueuePolicy>,
     /// Whether the package may emit versioned machine progress records before
     /// its final protocol response. Missing keeps the legacy one-result-line
     /// contract.
@@ -1483,6 +1521,9 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            if let Some(queue) = entry.dispatch_queue.as_mut() {
+                queue.actions = normalize_schema_tokens(&queue.actions);
+            }
             if entry
                 .max_concurrency
                 .is_some_and(|limit| limit == 0 || limit > 1_024)
@@ -1667,6 +1708,10 @@ impl SkillsRegistry {
 
     pub fn max_concurrency(&self, canonical_name: &str) -> Option<usize> {
         self.get(canonical_name)?.max_concurrency
+    }
+
+    pub fn dispatch_queue(&self, canonical_name: &str) -> Option<&SkillDispatchQueuePolicy> {
+        self.get(canonical_name)?.dispatch_queue.as_ref()
     }
 
     /// 所有已注册的 canonical 名称（含未启用）

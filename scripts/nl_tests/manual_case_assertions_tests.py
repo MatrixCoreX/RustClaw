@@ -233,6 +233,19 @@ def main() -> int:
         )
         assert wrong_capability_row["assertion"] == "fail"
 
+        forbidden_capability_absent_row = row_for(
+            capability,
+            "capability:fixture.preview;forbid_capability:rss.latest_news;"
+            "requires_tool_call=true;dry_run",
+        )
+        assert forbidden_capability_absent_row["assertion"] == "pass"
+
+        forbidden_capability_called_row = row_for(
+            capability,
+            "forbid_capability:fixture.preview;requires_tool_call=true;dry_run",
+        )
+        assert forbidden_capability_called_row["assertion"] == "fail"
+
         pre_dispatch_rejection = write_result(
             root,
             "pre-dispatch-rejection.json",
