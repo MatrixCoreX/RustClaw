@@ -28,9 +28,10 @@ lifecycle_scripts = false
 launcher = "native"
 entrypoint = "runtime/bin/browser-web-skill"
 working_directory = "."
-timeout_seconds = 45
+timeout_seconds = 180
 environment_allowlist = ["APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
+progress_frames = true
 
 [security]
 capability_policy_source = "registry"
@@ -53,7 +54,7 @@ schema_version = 1
 input_schema = { "type" = "object", "required" = ["action"], "properties" = { "action" = { "type" = "string", "enum" = ["open_extract"] }, "url" = { "type" = "string" }, "urls" = { "type" = "array", "items" = { "type" = "string" } }, "max_pages" = { "type" = "integer", "minimum" = 1, "maximum" = 10 }, "wait_until" = { "type" = "string", "enum" = ["domcontentloaded", "load", "networkidle"] }, "save_screenshot" = { "type" = "boolean" }, "capture_images" = { "type" = "boolean" }, "screenshot_dir" = { "type" = "string" }, "content_mode" = { "type" = "string", "enum" = ["clean", "raw"] }, "max_text_chars" = { "type" = "integer", "minimum" = 100, "maximum" = 200000 }, "min_content_chars" = { "type" = "integer", "minimum" = 20, "maximum" = 10000 }, "fail_fast" = { "type" = "boolean" }, "wait_map_path" = { "type" = "string" }, "domains_allow" = { "type" = "array", "items" = { "type" = "string" } }, "domains_deny" = { "type" = "array", "items" = { "type" = "string" } } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
-capabilities = [{ "name" = "browser.open_extract", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["url|urls"], "optional" = ["max_pages", "wait_until", "save_screenshot", "capture_images", "screenshot_dir", "content_mode", "max_text_chars", "min_content_chars", "fail_fast", "wait_map_path", "domains_allow", "domains_deny"], "timeout_seconds" = 45, "action" = "open_extract" }]
+capabilities = [{ "name" = "browser.open_extract", "effect" = "observe", "execution_mode" = "async_preferred", "required" = ["url|urls"], "optional" = ["max_pages", "wait_until", "save_screenshot", "capture_images", "screenshot_dir", "content_mode", "max_text_chars", "min_content_chars", "fail_fast", "wait_map_path", "domains_allow", "domains_deny"], "timeout_seconds" = 180, "action" = "open_extract" }]
 
 [capability_request.permissions]
 llm_gateway = false

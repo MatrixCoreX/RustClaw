@@ -86,6 +86,7 @@ use std::collections::BTreeMap;
 fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> SkillManifest {
     SkillManifest {
         progress_frames: false,
+        handles_task_cancellation: false,
         name: "fs_basic".to_string(),
         kind: SkillKind::Builtin,
         planner_kind: PlannerCapabilityKind::Tool,

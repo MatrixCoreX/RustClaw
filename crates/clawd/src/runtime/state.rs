@@ -152,6 +152,9 @@ pub(crate) struct CoreServices {
     pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     pub(crate) active_provider_type: Option<String>,
     pub(crate) mcp_runtime: Arc<crate::mcp_runtime::McpRuntime>,
+    /// Host-owned task-scoped browser contexts. Holding this service in AppState
+    /// keeps sessions alive across agent steps and drops all child handles on shutdown.
+    pub(crate) browser_sessions: crate::browser_session_service::BrowserSessionService,
 }
 
 impl CoreServices {
@@ -180,6 +183,9 @@ impl CoreServices {
             }))),
             active_provider_type: None,
             mcp_runtime: Arc::new(crate::mcp_runtime::McpRuntime::disabled()),
+            browser_sessions: crate::browser_session_service::BrowserSessionService::new(
+                Path::new("."),
+            ),
         }
     }
 

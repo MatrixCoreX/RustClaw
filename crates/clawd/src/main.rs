@@ -31,6 +31,7 @@ mod assistant_presentation;
 mod assistant_presentation_stream;
 mod async_job_contract;
 mod bootstrap;
+mod browser_session_service;
 mod capability_map;
 mod capability_resolver;
 mod capability_result;
@@ -837,6 +838,9 @@ async fn run() -> anyhow::Result<()> {
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
             mcp_runtime,
+            browser_sessions: crate::browser_session_service::BrowserSessionService::new(
+                &workspace_root,
+            ),
         },
         skill_rt: crate::SkillRuntime {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,

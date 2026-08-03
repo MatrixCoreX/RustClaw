@@ -23,6 +23,10 @@ pub struct HostToolDescriptor {
 /// owns it.
 pub const HOST_TOOL_DESCRIPTORS: &[HostToolDescriptor] = &[
     HostToolDescriptor {
+        name: "browser_session",
+        adapter_kind: HostToolAdapterKind::InProcessBuiltin,
+    },
+    HostToolDescriptor {
         name: "run_cmd",
         adapter_kind: HostToolAdapterKind::InProcessBuiltin,
     },

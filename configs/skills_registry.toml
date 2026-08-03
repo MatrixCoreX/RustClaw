@@ -1966,14 +1966,72 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
+name = "browser_session"
+enabled = true
+fixed_on = true
+planner_eager_load = false
+handles_task_cancellation = true
+kind = "builtin"
+planner_kind = "tool"
+group = "news/web"
+aliases = []
+timeout_seconds = 60
+prompt_file = "prompts/skills/browser_session.md"
+output_kind = "mixed"
+description = "Operate one task-scoped isolated browser session through bounded snapshots, current-generation element references, verified actions, downloads, screenshots, and redacted diagnostics."
+description_zh = "在任务级隔离浏览器会话中，通过有界快照、当前代元素引用、动作后验证、下载、截图和脱敏诊断完成网页操作。"
+semantic_tags = ["browser.session", "browser.snapshot", "browser.interaction", "browser.download", "browser.postcondition"]
+capabilities = ["net", "fs.write", "exec"]
+risk_level = "high"
+auto_invocable = true
+requires_confirmation = true
+side_effect = true
+retryable = false
+supported_os = ["linux", "macos"]
+required_bins = ["node"]
+optional_bins = ["chromium", "google-chrome", "playwright"]
+platform_notes = ["Uses a task-scoped Node/Playwright bridge. It never falls back to an unsandboxed Chromium process or a persistent user profile."]
+confirmation_exempt_when = [
+  { action = "session_open" },
+  { action = "navigate" },
+  { action = "snapshot" },
+  { action = "screenshot" },
+  { action = "switch_page" },
+  { action = "scroll" },
+  { action = "wait_for" },
+  { action = "back" },
+  { action = "session_close" },
+]
+planner_capabilities = [
+  { name = "browser.session_open", action = "session_open", effect = "observe", optional = ["url", "profile", "locale", "timezone", "viewport", "domains_allow", "domains_deny", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", preferred = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "browser.navigate", action = "navigate", effect = "observe", required = ["session_id", "page_id", "expected_page_generation", "url"], optional = ["wait_until", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "browser.snapshot", action = "snapshot", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], optional = ["include_screenshot", "max_elements", "max_text_chars", "text_cursor"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "browser.screenshot", action = "screenshot", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], risk_level = "low", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", filesystem_write = true },
+  { name = "browser.switch_page", action = "switch_page", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], optional = ["include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "browser.click", action = "click", effect = "external", required = ["session_id", "page_id", "expected_page_generation", "expected_snapshot_id", "target_ref"], optional = ["expected_postcondition", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "medium", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", network_access = true, external_publish = true },
+  { name = "browser.type", action = "type", effect = "external", required = ["session_id", "page_id", "expected_page_generation", "expected_snapshot_id", "target_ref", "value"], optional = ["expected_postcondition", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "medium", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", external_publish = true },
+  { name = "browser.select", action = "select", effect = "external", required = ["session_id", "page_id", "expected_page_generation", "expected_snapshot_id", "target_ref", "value"], optional = ["expected_postcondition", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "medium", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", external_publish = true },
+  { name = "browser.press_key", action = "press_key", effect = "external", required = ["session_id", "page_id", "expected_page_generation", "key"], optional = ["expected_snapshot_id", "target_ref", "expected_postcondition", "include_screenshot"], risk_level = "medium", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", network_access = true, external_publish = true },
+  { name = "browser.scroll", action = "scroll", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], optional = ["expected_snapshot_id", "target_ref", "delta_y", "include_screenshot"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "browser.wait_for", action = "wait_for", effect = "observe", required = ["session_id", "page_id", "expected_page_generation", "condition"], optional = ["expected_snapshot_id", "target_ref", "timeout_ms", "include_screenshot"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "browser.back", action = "back", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], optional = ["include_screenshot"], risk_level = "low", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true },
+  { name = "browser.download", action = "download", effect = "mutate", required = ["session_id", "page_id", "expected_page_generation", "expected_snapshot_id", "target_ref"], optional = ["expected_postcondition", "include_screenshot"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", network_access = true, filesystem_write = true },
+  { name = "browser.observe_debug", action = "observe_debug", effect = "observe", required = ["session_id"], optional = ["page_id", "expected_page_generation", "limit"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "browser.session_close", action = "session_close", effect = "observe", required = ["session_id"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+]
+input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["session_open", "navigate", "snapshot", "screenshot", "switch_page", "click", "type", "select", "press_key", "scroll", "wait_for", "back", "download", "observe_debug", "session_close"] }, session_id = { type = "string", minLength = 1, maxLength = 128 }, page_id = { type = "string", minLength = 1, maxLength = 128 }, expected_page_generation = { type = "integer", minimum = 1 }, expected_snapshot_id = { type = "string", minLength = 1, maxLength = 256 }, target_ref = { type = "string", minLength = 1, maxLength = 128 }, url = { type = "string", minLength = 1, maxLength = 4096 }, profile = { type = "string", enum = ["desktop", "mobile"] }, locale = { type = "string", minLength = 2, maxLength = 64 }, timezone = { type = "string", minLength = 1, maxLength = 128 }, viewport = { type = "object", additionalProperties = false, required = ["width", "height"], properties = { width = { type = "integer", minimum = 240, maximum = 3840 }, height = { type = "integer", minimum = 240, maximum = 3840 } } }, domains_allow = { type = "array", maxItems = 128, items = { type = "string", minLength = 1, maxLength = 253 } }, domains_deny = { type = "array", maxItems = 128, items = { type = "string", minLength = 1, maxLength = 253 } }, allow_proxy_synthetic_dns = { type = "boolean" }, wait_until = { type = "string", enum = ["domcontentloaded", "load", "networkidle"] }, include_screenshot = { type = "boolean" }, max_elements = { type = "integer", minimum = 1, maximum = 500 }, max_text_chars = { type = "integer", minimum = 100, maximum = 100000 }, text_cursor = { type = "integer", minimum = 0 }, value = { type = "string", maxLength = 100000 }, key = { type = "string", enum = ["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", "Space", "Backspace", "Delete"] }, delta_y = { type = "integer", minimum = -10000, maximum = 10000 }, timeout_ms = { type = "integer", minimum = 1, maximum = 15000 }, condition = { type = "string", enum = ["load", "network_idle", "target_visible", "target_hidden"] }, limit = { type = "integer", minimum = 1, maximum = 200 }, expected_postcondition = { type = "object", additionalProperties = false, required = ["kind"], properties = { kind = { type = "string", enum = ["url_changed", "url_equals", "title_changed", "page_count_changed"] }, url = { type = "string", maxLength = 4096 } } } } }
+output_schema = { type = "object", required = ["schema_version", "session_id", "session_generation", "actor_ref", "task_id", "registry_generation", "policy_digest", "lease_expires_at", "result"], properties = { schema_version = { type = "integer" }, session_id = { type = "string" }, session_generation = { type = "integer" }, actor_ref = { type = "string" }, task_id = { type = "string" }, registry_generation = { type = "integer" }, registry_generation_digest = { type = "string" }, policy_digest = { type = "string" }, created_at = { type = "integer" }, lease_expires_at = { type = "integer" }, max_expires_at = { type = "integer" }, result = { type = "object" } } }
+
+[[skills]]
 name = "browser_web"
 enabled = true
+progress_frames = true
 kind = "runner"
 planner_kind = "tool"
 group = "news/web"
 package_manifest = "crates/skills/browser_web/skill.toml"
 aliases = ["browser_fetch", "page_extract"]
-timeout_seconds = 45
+timeout_seconds = 180
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
 description = "Open exact public URLs through a policy-guarded headless browser and return bounded untrusted page evidence, canonical metadata, citations, screenshots, and structured partial/failure results."

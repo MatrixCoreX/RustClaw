@@ -2,6 +2,8 @@
 # Format: path<TAB>kind<TAB>normalized expression.
 # Removed rows are allowed; new rows require explicit review.
 UI/src/components/ActiveTasksPanel.tsx	slice	.slice(0, 10)
+UI/src/components/BancorPage.tsx	slice	.slice(-8)
+UI/src/components/BancorPage.tsx	slice	.slice(0, 12)
 UI/src/components/SkillSwitchPanel.tsx	slice	.slice(0, 2)
 UI/src/components/SkillSwitchPanel.tsx	slice	.slice(0, 3)
 UI/src/components/SkillSwitchPanel.tsx	slice	.slice(0, 3)
@@ -71,7 +73,6 @@ crates/clawd/src/agent_engine/context_compaction.rs	take	.take(max_chars)
 crates/clawd/src/agent_engine/dispatch_synthesis.rs	take	.take(2)
 crates/clawd/src/agent_engine/dispatch_synthesis.rs	take	.take(4)
 crates/clawd/src/agent_engine/execution_loop.rs	take	.take(32)
-crates/clawd/src/agent_engine/loop_control.rs	clamp	.clamp(1, 30)
 crates/clawd/src/agent_engine/observed_output.rs	hard_count	MAX_COMPACT_OBSERVED_BLOCK_BYTES
 crates/clawd/src/agent_engine/observed_output_entries.rs	hard_count	MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH
 crates/clawd/src/agent_engine/observed_output_entries.rs	hard_count	MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS
@@ -138,6 +139,7 @@ crates/clawd/src/assistant_presentation_stream.rs	hard_count	MAX_RESPOND_ARGUMEN
 crates/clawd/src/bin/pty-session-runner.rs	clamp	.clamp(2, 1000)
 crates/clawd/src/bin/pty-session-runner.rs	clamp	.clamp(2, 500)
 crates/clawd/src/bin/pty-session-runner.rs	hard_count	MAX_CONTROL_BYTES
+crates/clawd/src/browser_session_service.rs	hard_count	MAX_RESPONSE_BYTES
 crates/clawd/src/capability_map.rs	take	.take(12)
 crates/clawd/src/capability_map.rs	take	.take(2)
 crates/clawd/src/capability_map.rs	take	.take(240)
@@ -201,10 +203,14 @@ crates/clawd/src/http/ui_routes/host_system.rs	take	.take(HOST_TEXT_LIMIT_BYTES 
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	clamp	.clamp(1, 50)
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	clamp	.clamp(10, 100)
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	take	.take(page_size)
+crates/clawd/src/http/ui_routes/nni_bancor.rs	clamp	.clamp(1, 100)
+crates/clawd/src/http/ui_routes/nni_bancor.rs	clamp	.clamp(1, 1_000_000)
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	clamp	.clamp(1, 100)
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	clamp	.clamp(1, 100)
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	truncate	.truncate(NNI_HEARTBEAT_ERROR_HISTORY_LIMIT)
 crates/clawd/src/http/ui_routes/nni_request_records.rs	truncate	.truncate(NNI_REQUEST_RECORD_HISTORY_LIMIT)
+crates/clawd/src/http/ui_routes/nni_rewards.rs	clamp	.clamp(1, 100)
+crates/clawd/src/http/ui_routes/nni_rewards.rs	clamp	.clamp(1, 1_000_000)
 crates/clawd/src/http/ui_routes/skill_store.rs	take	.take(20)
 crates/clawd/src/http/ui_routes/skill_store_operations.rs	take	.take(8 * 1024)
 crates/clawd/src/http/ui_routes/slo_metrics.rs	clamp	.clamp(1, 10_000)
@@ -300,8 +306,13 @@ crates/clawd/src/skills/builtin_workspace_replace_edit.rs	take	.take(MAX_REPORTE
 crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_PATCH_FILES
 crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_TARGET_FILE_BYTES
 crates/clawd/src/skills/builtin_workspace_unified_diff.rs	hard_count	MAX_TOTAL_TARGET_BYTES
+crates/clawd/src/skills/runner.rs	hard_count	MAX_TAIL_BYTES
 crates/clawd/src/skills/runner.rs	take	.take(96)
 crates/clawd/src/skills/runner_pool.rs	clamp	.clamp(1, 3_600)
+crates/clawd/src/skills/runner_support.rs	take	.take(10)
+crates/clawd/src/skills/runner_support.rs	take	.take(16)
+crates/clawd/src/skills/runner_support.rs	take	.take(96)
+crates/clawd/src/skills/runner_support.rs	take	.take(96)
 crates/clawd/src/task_artifacts.rs	hard_count	DEFAULT_MAX_ARTIFACT_BYTES
 crates/clawd/src/task_artifacts.rs	take	.take(180)
 crates/clawd/src/task_artifacts.rs	take	.take(MAX_TASK_ARTIFACTS * 2)
@@ -355,6 +366,7 @@ crates/clawd/src/ui_attachments.rs	hard_count	MAX_UI_ATTACHMENTS
 crates/clawd/src/ui_attachments.rs	hard_count	MAX_UI_ATTACHMENT_BYTES
 crates/clawd/src/ui_attachments.rs	hard_count	MAX_UI_TOTAL_ATTACHMENT_BYTES
 crates/clawd/src/verifier_creation_targets.rs	take	.take(8)
+crates/clawd/src/visible_text.rs	hard_count	MAX_TASK_FAILURE_REASON_CHARS
 crates/clawd/src/visible_text.rs	take	.take(max_chars)
 crates/clawd/src/worker/async_poll_executor.rs	take	.take(read_limit as u64)
 crates/clawd/src/worker/async_poll_executor.rs	truncate	.truncate(visible_len)
@@ -391,6 +403,17 @@ crates/skills/archive_basic/src/main.rs	clamp	.clamp(64 * 1024, MAX_PROTOCOL_LIN
 crates/skills/archive_basic/src/main.rs	take	.take(240)
 crates/skills/audio_synthesize/src/main.rs	take	.take(max)
 crates/skills/audio_transcribe/src/main.rs	take	.take(max)
+crates/skills/browser_web/browser_session_bridge.js	hard_count	DEFAULT_TEXT_CHARS
+crates/skills/browser_web/browser_session_bridge.js	hard_count	MAX_ARIA_CHARS
+crates/skills/browser_web/browser_session_bridge.js	hard_count	MAX_DOWNLOAD_BYTES
+crates/skills/browser_web/browser_session_bridge.js	hard_count	MAX_REQUEST_BYTES
+crates/skills/browser_web/browser_session_bridge.js	hard_count	MAX_TEXT_CHARS
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(0, 100)
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(0, 50)
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(0, 8)
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(0, MAX_ARIA_CHARS)
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(0, max)
+crates/skills/browser_web/browser_session_bridge.js	slice	.slice(textCursor, textEnd)
 crates/skills/browser_web/browser_web.js	hard_count	DEFAULT_CHUNK_CHARS
 crates/skills/browser_web/browser_web.js	hard_count	DEFAULT_IMAGE_FETCH_MAX_BYTES
 crates/skills/browser_web/browser_web.js	hard_count	DEFAULT_MAX_TEXT_CHARS

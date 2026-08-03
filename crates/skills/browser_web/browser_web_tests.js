@@ -7,14 +7,99 @@ const {
     SkillError,
     classifyError,
     classifyNavigationFailure,
+    deriveExecutionBudget,
+    detectPageConcurrency,
     isReadableDocumentContentType,
     isRetryableFailure,
     isPrivateIp,
+    navigateWithFallback,
     partialExtractionItem,
     resolvedAddressAllowed,
     sanitizeExtractedText,
     validateNetworkUrl,
 } = require('./browser_web.js');
+
+test('derives one work deadline with cleanup reserve from the runner budget', () => {
+    const budget = deriveExecutionBudget('180', 1_000);
+
+    assert.equal(budget.runtimeBudgetMs, 180_000);
+    assert.equal(budget.cleanupReserveMs, 10_000);
+    assert.equal(budget.workDeadlineAt, 171_000);
+    assert.equal(deriveExecutionBudget('90seconds', 1_000).runtimeBudgetMs, 180_000);
+});
+
+test('page concurrency is bounded by cpu, memory, architecture, and url count', () => {
+    const gib = 1024 ** 3;
+    assert.equal(detectPageConcurrency(10, {
+        cpuCount: 16,
+        totalMemory: 32 * gib,
+        freeMemory: 16 * gib,
+        arch: 'x64',
+    }), 4);
+    assert.equal(detectPageConcurrency(2, {
+        cpuCount: 16,
+        totalMemory: 32 * gib,
+        freeMemory: 16 * gib,
+        arch: 'x64',
+    }), 2);
+    assert.equal(detectPageConcurrency(10, {
+        cpuCount: 8,
+        totalMemory: 4 * gib,
+        freeMemory: 3 * gib,
+        arch: 'arm64',
+    }), 1);
+    assert.equal(detectPageConcurrency(10, {
+        cpuCount: 8,
+        totalMemory: 16 * gib,
+        freeMemory: 700 * 1024 ** 2,
+        arch: 'x64',
+    }), 1);
+});
+
+test('deadline failures remain structured and retryable', () => {
+    for (const code of ['PAGE_DEADLINE_EXCEEDED', 'BATCH_DEADLINE_EXCEEDED']) {
+        const { item } = partialExtractionItem(
+            'https://example.com',
+            new SkillError(code, code.toLowerCase()),
+            null,
+            { restricted: false },
+        );
+        assert.equal(item.error_code, code);
+        assert.equal(item.retryable, true);
+        assert.equal(item.fetch_method, 'unavailable');
+    }
+});
+
+test('navigation fallback derives bounded attempts from one page deadline', async () => {
+    const calls = [];
+    const page = {
+        async goto(url, options) {
+            calls.push({ url, ...options });
+            if (options.waitUntil === 'networkidle') {
+                const error = new Error('fixture timeout');
+                error.name = 'TimeoutError';
+                throw error;
+            }
+            return {
+                status: () => 200,
+                headers: () => ({ 'content-type': 'text/html' }),
+            };
+        },
+        url: () => 'https://example.com/final',
+    };
+    const result = await navigateWithFallback(
+        page,
+        'https://example.com/start',
+        'networkidle',
+        Date.now() + 3_000,
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.waitUntil, 'domcontentloaded');
+    assert.deepEqual(calls.map((call) => call.waitUntil), ['networkidle', 'domcontentloaded']);
+    assert.equal(calls.every((call) => call.timeout > 0 && call.timeout <= 3_000), true);
+    assert.equal(result.trace[0].status, 'error');
+    assert.equal(result.trace[1].status, 'ok');
+});
 
 test('preserves extracted title when readability threshold rejects short body text', () => {
     const error = new SkillError('SELECTOR_MISS', 'page readability below threshold', {

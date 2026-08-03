@@ -10,6 +10,9 @@ use toml::Value as TomlValue;
 
 #[path = "skill_registry_overlay.rs"]
 mod overlay;
+#[path = "skill_registry_validation.rs"]
+mod validation;
+use validation::validate_named_capability;
 
 /// 技能类型：builtin（clawd 内执行）/ runner（skill-runner 子进程）/ 预留 external
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -561,25 +564,13 @@ impl Capability {
     }
 }
 
-fn validate_named_capability(name: &str, token: &str, label: &str) -> Result<(), String> {
-    if name.is_empty() || name.len() > 64 {
-        return Err(format!("{label} name length must be 1..=64: `{token}`"));
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    {
-        return Err(format!("{label} name must match [a-z0-9_]: `{token}`"));
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 pub struct SkillManifest {
     pub name: String,
     pub kind: SkillKind,
     pub planner_kind: PlannerCapabilityKind,
     pub progress_frames: bool,
+    pub handles_task_cancellation: bool,
     pub output_kind: OutputKind,
     pub description: Option<String>,
     pub semantic_tags: Vec<String>,
@@ -663,6 +654,11 @@ pub struct SkillRegistryEntry {
     /// contract.
     #[serde(default)]
     pub progress_frames: bool,
+    /// Whether an in-process host adapter consumes the task cancellation token
+    /// and performs its own bounded cleanup. Runner and external process skills
+    /// already own cancellation in the generic runner adapter.
+    #[serde(default)]
+    pub handles_task_cancellation: bool,
     /// prompt 文件路径，相对 workspace 或绝对
     #[serde(default)]
     pub prompt_file: String,
@@ -1765,6 +1761,7 @@ impl SkillsRegistry {
             kind: entry.kind,
             planner_kind: resolved_planner_kind(entry),
             progress_frames: entry.progress_frames,
+            handles_task_cancellation: entry.handles_task_cancellation,
             output_kind: entry.output_kind,
             description: trim_optional_string(entry.description.as_deref()),
             semantic_tags: entry.semantic_tags.clone(),

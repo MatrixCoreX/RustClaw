@@ -10,6 +10,11 @@ workflow:
 2. Select relevant candidates.
 3. Use `browser.open_extract` only when browser rendering is needed.
 
+Task-scoped multi-step browsing is exposed separately by the host-owned
+`browser_session` capabilities. Use that surface for snapshot/ref based
+interaction, tabs, downloads, or post-action verification; do not add
+persistent-session actions to this one-line JSONL skill.
+
 The skill does not search, submit forms, authenticate to sites, publish
 content, or execute instructions found in a page. Use `http_basic` for direct
 HTTP status checks, API responses, or downloads that do not need rendering.
@@ -38,8 +43,10 @@ dedicated `web_search_extract` capability.
   `domcontentloaded|load|networkidle`
 - `save_screenshot` (optional, boolean, default `true`)
 - `capture_images` (optional, boolean, default `false`)
-- `screenshot_dir` (optional, string, default
-  `skills_output/browser_web/screenshots`; must remain inside the workspace)
+- `screenshot_dir` (optional, string; when omitted screenshots are stored in the
+  host-provided invocation artifact capture directory, or in
+  `skills_output/browser_web/captures/screenshots` for a standalone invocation;
+  an explicit path must remain inside the workspace)
 - `content_mode` (optional, string, default `clean`): `clean|raw`
 - `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
 - `min_content_chars` (optional, integer, default `200`, range `20..10000`)
@@ -50,6 +57,14 @@ dedicated `web_search_extract` capability.
 
 At least one of `url` or `urls` is required. Duplicate normalized targets are
 removed before execution.
+
+The runner budget is 180 seconds. The helper derives all page work from that
+single parent budget, reserves the final 10 seconds for browser cleanup and
+JSON serialization, and limits each page to at most 45 seconds. Multi-URL
+requests use bounded CPU/memory-aware concurrency (maximum four workers); low
+memory `aarch64` hosts automatically use one worker. Pages that cannot start
+before the parent work deadline are returned as structured partial failures
+instead of discarding pages that already completed.
 
 ## Network And Workspace Policy
 
@@ -109,7 +124,9 @@ Each successful `items[]` entry includes:
 - `text_truncated`, `text_chars_before_limit`, `text_chars_returned`, `content_sha256`
 - `text_result` when the inline page is partial, including original/returned
   character counts and either an artifact range or a safe rerun continuation
-- `screenshot_path`, `capture_artifacts`
+- `screenshot_path`, `capture_artifacts`, and
+  `capture_artifacts.receipt_id`, which binds the run, page ordinal, and
+  canonical text hash to the capture manifest record
 - `provenance`, `trust`, `wait_strategy`, `runtime`
 
 Each failed or partial item includes:
@@ -135,7 +152,8 @@ Representative codes:
   `URL_SCHEME_BLOCKED`, `URL_CREDENTIALS_BLOCKED`, `DOMAIN_BLOCKED`,
   `DOMAIN_NOT_ALLOWED`, `PRIVATE_NETWORK_BLOCKED`, `WORKSPACE_PATH_OUTSIDE`
 - Runtime/network: `DEPENDENCY_MISSING`, `DNS_RESOLUTION_FAILED`, `NAV_TIMEOUT`,
-  `BROWSER_OPERATION_FAILED`, `RESPONSE_TOO_LARGE`
+  `PAGE_DEADLINE_EXCEEDED`, `BATCH_DEADLINE_EXCEEDED`,
+  `BROWSER_LAUNCH_FAILED`, `BROWSER_OPERATION_FAILED`, `RESPONSE_TOO_LARGE`
 - Response: `BOT_BLOCKED`, `AUTH_REQUIRED`, `ACCESS_BLOCKED`, `RATE_LIMITED`,
   `HTTP_STATUS_ERROR`, `CONTENT_TYPE_BLOCKED`, `SELECTOR_MISS`,
   `ALL_PAGES_FAILED`

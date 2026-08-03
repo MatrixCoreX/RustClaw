@@ -95,6 +95,49 @@ fn artifact_paths_are_scoped_per_invocation_and_remapped_to_the_host() {
 }
 
 #[test]
+fn cancelled_capture_projection_keeps_only_machine_receipts_and_safe_artifacts() {
+    let root = std::env::temp_dir().join(format!(
+        "agent_browser_cancel_receipts_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let run_root = root.join("capture/browser_web/2026-08-03/task-1");
+    std::fs::create_dir_all(run_root.join("meta")).expect("metadata directory");
+    std::fs::create_dir_all(run_root.join("processed/text")).expect("text directory");
+    std::fs::write(run_root.join("processed/text/page.txt"), "evidence").expect("text artifact");
+    std::fs::write(
+        run_root.join("meta/manifest.jsonl"),
+        concat!(
+            "{\"receipt_id\":\"browser_page:task-1:1:abc\",\"ordinal\":1,",
+            "\"status\":\"ok\",\"url\":\"https://example.com/?token=secret\",",
+            "\"content_hash_sha256\":\"abc\",\"image_hash_sha256\":\"def\",",
+            "\"text_path\":\"processed/text/page.txt\",",
+            "\"html_path\":\"../../escape.html\"}\n",
+            "not-json\n"
+        ),
+    )
+    .expect("manifest");
+
+    let projection = cancelled_capture_projection(&root, "task-1", "fixture_skill")
+        .expect("completed page receipt projection");
+    assert_eq!(projection["source"], "fixture_skill");
+    assert_eq!(projection["status"], "cancelled_partial");
+    assert_eq!(projection["hard_termination"], true);
+    assert_eq!(projection["final_partial_generated"], false);
+    assert_eq!(projection["completed_page_count"], 1);
+    assert_eq!(
+        projection["receipts"][0]["receipt_id"],
+        "browser_page:task-1:1:abc"
+    );
+    assert_eq!(projection["receipts"][0]["image_hash_sha256"], "def");
+    let encoded = projection.to_string();
+    assert!(!encoded.contains("token=secret"));
+    assert!(!encoded.contains("escape.html"));
+    assert!(encoded.contains("page.txt"));
+
+    std::fs::remove_dir_all(root).expect("cleanup projection fixture");
+}
+
+#[test]
 fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
     let secret_directory = std::path::PathBuf::from("/runtime/secret-tokens");
     let storage_directory = std::path::PathBuf::from("/runtime/skill-data/fs_search");

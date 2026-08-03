@@ -460,7 +460,7 @@ fn browser_web_open_extract_numeric_ranges_normalize_to_skill_contract() {
 }
 
 #[test]
-fn browser_web_search_aliases_normalize_to_skill_contract() {
+fn browser_web_removed_search_action_is_not_normalized() {
     let mut args = json!({
         "action": "search_extract",
         "query": "agent-runtime",
@@ -469,14 +469,11 @@ fn browser_web_search_aliases_normalize_to_skill_contract() {
         "min_content_chars": "0"
     });
 
-    assert!(normalize_skill_arg_aliases("browser_web", &mut args));
-
-    assert_eq!(args.get("top_k").and_then(|v| v.as_i64()), Some(1));
-    assert_eq!(args.get("extract_top_n").and_then(|v| v.as_i64()), Some(10));
-    assert_eq!(
-        args.get("min_content_chars").and_then(|v| v.as_i64()),
-        Some(20)
-    );
+    assert!(!normalize_skill_arg_aliases("browser_web", &mut args));
+    assert!(args.get("top_k").is_none());
+    assert!(args.get("extract_top_n").is_none());
+    assert_eq!(args.get("max_results").and_then(|v| v.as_i64()), Some(0));
+    assert_eq!(args.get("max_pages").and_then(|v| v.as_i64()), Some(99));
 }
 
 #[test]

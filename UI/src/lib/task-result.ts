@@ -891,6 +891,23 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     };
   }
 
+  if (eventType === "browser_session") {
+    const action = field("action");
+    const currentUrl = field("current_url");
+    const postcondition = field("postcondition_status");
+    return {
+      eventType,
+      title: tLocal("浏览器页面已更新", "Browser page updated"),
+      detail: [action, currentUrl].filter(Boolean).join(" · ")
+        || tLocal("浏览器已返回新的页面状态。", "The browser returned a new page state."),
+      tone: postcondition === "not_observed" ? "attention" : tone,
+      meta: [
+        ...meta,
+        ...(postcondition ? [`postcondition=${postcondition}`] : []),
+      ].slice(0, 8),
+    };
+  }
+
   if (eventType === "skill_progress") {
     const frame =
       payload?.frame && typeof payload.frame === "object" && !Array.isArray(payload.frame)
@@ -910,6 +927,10 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
     const knownDetail =
       detailKey === "media_download.precheck.starting"
         ? tLocal("正在检查媒体任务所需条件。", "Checking the media task requirements.")
+        : detailKey === "browser_web.pages.starting"
+          ? tLocal("正在打开并读取网页。", "Opening and reading web pages.")
+          : detailKey === "browser_web.pages.completed"
+            ? tLocal("网页读取已完成。", "Web page reading is complete.")
         : detailKey === "skill_dispatch.queue.waiting"
           ? tLocal("当前任务已进入队列，将按顺序处理。", "This task is queued and will run in order.")
           : detailKey === "skill_dispatch.queue.started"

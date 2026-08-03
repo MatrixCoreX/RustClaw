@@ -466,6 +466,7 @@ dependencies = [
 name = "browser-web-skill"
 version = "0.1.8"
 dependencies = [
+ "agent-skill-sdk",
  "anyhow",
  "serde",
  "serde_json",

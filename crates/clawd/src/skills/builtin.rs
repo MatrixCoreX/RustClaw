@@ -4,6 +4,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::{AppState, ClaimedTask};
 
+#[path = "builtin_browser_session.rs"]
+mod builtin_browser_session;
 #[path = "builtin_child_task_patch.rs"]
 mod builtin_child_task_patch;
 #[path = "builtin_code_index.rs"]
@@ -179,6 +181,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
 
     let map = ensure_args_object(args)?;
     match skill_name {
+        "browser_session" => builtin_browser_session::execute(state, task, map).await,
         "code_index" => {
             let workspace_root = state.skill_rt.workspace_root.clone();
             let args = args.clone();

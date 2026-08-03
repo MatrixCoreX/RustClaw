@@ -585,6 +585,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // secrets capability；image_generate 仍显式要求专用生成 key。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
         ("audio_transcribe", &["fs.read", "llm", "net"]),
+        ("browser_session", &["exec", "fs.write", "net"]),
         ("browser_web", &["fs.write", "net"]),
         ("code_index", &["fs.read"]),
         ("config_guard", &["fs.read"]),
@@ -644,6 +645,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // image_vision 凭据；只有 image_generate 保留独立生成凭据。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
         ("audio_transcribe", &["fs.read", "llm", "net"]),
+        ("browser_session", &["exec", "fs.write", "net"]),
         ("browser_web", &["fs.write", "net"]),
         ("code_index", &["fs.read"]),
         ("config_guard", &["fs.read"]),

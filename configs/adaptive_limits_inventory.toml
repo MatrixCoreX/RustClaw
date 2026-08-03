@@ -23,7 +23,7 @@ locations = [
 migration_tests = [
   "crates/clawd/src/task_budget_contract_tests.rs::productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption",
   "crates/clawd/src/task_budget_contract_tests.rs::allocation_ledger_reclaims_unused_units_and_survives_checkpoint",
-  "crates/claw-core/src/config_tests.rs::removed_worker_model_budget_fields_are_ignored_without_becoming_runtime_authority",
+  "crates/claw-core/src/config_tests.rs::removed_worker_timeout_and_model_budget_fields_are_ignored_without_runtime_authority",
 ]
 
 [[limits]]

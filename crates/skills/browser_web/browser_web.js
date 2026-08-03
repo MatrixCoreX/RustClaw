@@ -4,9 +4,17 @@ const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
+const os = require('os');
 const { execFileSync } = require('child_process');
 
 const PAGE_TIMEOUT_MS = 45000;
+const DEFAULT_RUNTIME_BUDGET_MS = 180000;
+const RESULT_CLEANUP_RESERVE_MS = 10000;
+const MIN_PAGE_START_BUDGET_MS = 2000;
+const NAVIGATION_ATTEMPT_CAP_MS = 20000;
+const PAGE_WORKER_MEMORY_BYTES = 512 * 1024 * 1024;
+const PAGE_WORKER_MEMORY_RESERVE_BYTES = 512 * 1024 * 1024;
+const MAX_PAGE_CONCURRENCY = 4;
 const EXTRACT_SETTLE_MS = 1200;
 const EXCERPT_LIMIT = 500;
 const VALID_WAIT_UNTIL = new Set(['domcontentloaded', 'load', 'networkidle']);
@@ -23,6 +31,51 @@ const MAX_CAPTURE_HTML_CHARS = 4 * 1024 * 1024;
 const MAX_NETWORK_POLICY_EVENTS = 200;
 const MAX_NETWORK_REDIRECTS = 5;
 const DNS_POLICY_CACHE = new Map();
+
+function deriveExecutionBudget(rawSeconds, now = Date.now()) {
+    const raw = String(rawSeconds || '').trim();
+    const parsedSeconds = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+    const runtimeBudgetMs = Number.isFinite(parsedSeconds) && parsedSeconds > 0
+        ? parsedSeconds * 1000
+        : DEFAULT_RUNTIME_BUDGET_MS;
+    const cleanupReserveMs = Math.min(
+        RESULT_CLEANUP_RESERVE_MS,
+        Math.max(1000, Math.floor(runtimeBudgetMs / 5)),
+    );
+    return {
+        runtimeBudgetMs,
+        cleanupReserveMs,
+        workDeadlineAt: now + Math.max(1, runtimeBudgetMs - cleanupReserveMs),
+    };
+}
+
+function detectPageConcurrency(urlCount, signals = {}) {
+    const cpuCount = Math.max(1, Number(signals.cpuCount || os.cpus().length || 1));
+    const totalMemory = Math.max(0, Number(signals.totalMemory || os.totalmem() || 0));
+    const freeMemory = Math.max(0, Number(signals.freeMemory || os.freemem() || 0));
+    const arch = String(signals.arch || os.arch()).toLowerCase();
+    if ((arch === 'arm64' || arch === 'aarch64') && totalMemory > 0 && totalMemory <= 4 * 1024 ** 3) {
+        return 1;
+    }
+    const cpuLimit = Math.max(1, Math.floor(cpuCount / 2));
+    const memoryLimit = Math.max(
+        1,
+        Math.floor(Math.max(0, freeMemory - PAGE_WORKER_MEMORY_RESERVE_BYTES) / PAGE_WORKER_MEMORY_BYTES),
+    );
+    return Math.max(1, Math.min(Number(urlCount) || 1, MAX_PAGE_CONCURRENCY, cpuLimit, memoryLimit));
+}
+
+function remainingBudgetMs(deadlineAt) {
+    return Math.max(0, Number(deadlineAt || 0) - Date.now());
+}
+
+function requireRemainingBudget(deadlineAt, minimumMs = 1, code = 'PAGE_DEADLINE_EXCEEDED') {
+    const remainingMs = remainingBudgetMs(deadlineAt);
+    if (remainingMs < minimumMs) {
+        throw new SkillError(code, code.toLowerCase(), { remaining_ms: remainingMs });
+    }
+    return remainingMs;
+}
 
 class SkillError extends Error {
     constructor(code, message, meta = null) {
@@ -303,6 +356,16 @@ async function appendJsonl(filePath, obj) {
     await fs.appendFile(filePath, `${JSON.stringify(obj)}\n`, 'utf8');
 }
 
+async function writeFileAtomic(filePath, content, encoding = undefined) {
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+    try {
+        await fs.writeFile(temporaryPath, content, encoding);
+        await fs.rename(temporaryPath, filePath);
+    } finally {
+        await fs.rm(temporaryPath, { force: true }).catch(() => {});
+    }
+}
+
 function sha256Hex(text) {
     return crypto.createHash('sha256').update(text || '', 'utf8').digest('hex');
 }
@@ -342,9 +405,18 @@ async function readResponseBytes(response, maxBytes) {
     return Buffer.concat(chunks, total);
 }
 
-async function downloadImageToFile(url, outputPath, networkPolicy = {}) {
+async function downloadImageToFile(url, outputPath, networkPolicy = {}, deadlineAt = null) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
+    const availableMs = deadlineAt
+        ? remainingBudgetMs(deadlineAt)
+        : DEFAULT_IMAGE_FETCH_TIMEOUT_MS;
+    if (availableMs <= 0) {
+        return { ok: false, error: 'page_deadline_exceeded' };
+    }
+    const timer = setTimeout(
+        () => controller.abort(),
+        Math.max(1, Math.min(DEFAULT_IMAGE_FETCH_TIMEOUT_MS, availableMs)),
+    );
     try {
         let current = (await validateNetworkUrl(url, networkPolicy, false)).url;
         let response = null;
@@ -385,7 +457,7 @@ async function downloadImageToFile(url, outputPath, networkPolicy = {}) {
         const body = await readResponseBytes(response, DEFAULT_IMAGE_FETCH_MAX_BYTES);
         const ext = guessExtFromContentType(contentType);
         const finalPath = outputPath.endsWith(ext) ? outputPath : `${outputPath}${ext}`;
-        await fs.writeFile(finalPath, body);
+        await writeFileAtomic(finalPath, body);
         return {
             ok: true,
             path: finalPath,
@@ -525,7 +597,9 @@ function isRetryableFailure(error) {
     if (new Set([
         'BROWSER_OPERATION_FAILED',
         'DNS_RESOLUTION_FAILED',
+        'BATCH_DEADLINE_EXCEEDED',
         'NAV_TIMEOUT',
+        'PAGE_DEADLINE_EXCEEDED',
         'RATE_LIMITED',
         'RESPONSE_READ_FAILED',
     ]).has(classified.code)) {
@@ -624,15 +698,28 @@ async function loadWaitMap(customPath, workspaceRoot = process.cwd(), allowPathO
     return { map: { domains: {} }, path: null };
 }
 
-async function navigateWithFallback(page, url, preferredWaitUntil) {
+async function navigateWithFallback(page, url, preferredWaitUntil, deadlineAt) {
     const attempts = buildWaitOrder(preferredWaitUntil);
     const trace = [];
     let lastError = null;
 
-    for (const waitUntil of attempts) {
+    for (let index = 0; index < attempts.length; index += 1) {
+        const waitUntil = attempts[index];
+        const remainingMs = remainingBudgetMs(deadlineAt);
+        if (remainingMs <= 0) {
+            lastError = new SkillError('PAGE_DEADLINE_EXCEEDED', 'page_deadline_exceeded', {
+                nav_trace: trace,
+            });
+            break;
+        }
+        const attemptsLeft = attempts.length - index;
+        const attemptBudgetMs = Math.max(
+            1,
+            Math.min(NAVIGATION_ATTEMPT_CAP_MS, Math.floor(remainingMs / attemptsLeft)),
+        );
         const started = Date.now();
         try {
-            const response = await page.goto(url, { waitUntil, timeout: PAGE_TIMEOUT_MS });
+            const response = await page.goto(url, { waitUntil, timeout: attemptBudgetMs });
             const responseStatus = response ? response.status() : null;
             const responseHeaders = response ? response.headers() : {};
             const contentType = responseHeaders['content-type'] || '';
@@ -643,6 +730,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
                 content_type: normalizeContentType(contentType) || null,
                 final_url: page.url(),
                 latency_ms: Date.now() - started,
+                budget_ms: attemptBudgetMs,
             });
             return {
                 ok: true,
@@ -659,6 +747,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
                 wait_until: waitUntil,
                 status: 'error',
                 latency_ms: Date.now() - started,
+                budget_ms: attemptBudgetMs,
                 error: compactErrorMessage(err),
             });
         }
@@ -673,7 +762,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil) {
     };
 }
 
-async function createBrowserContext(networkPolicy = {}) {
+async function createBrowserContext(networkPolicy = {}, contextOptions = {}) {
     if (!playwright) {
         try {
             playwright = require('playwright');
@@ -713,21 +802,31 @@ async function createBrowserContext(networkPolicy = {}) {
             env: launchEnv,
             args: [
                 '--headless=new',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
             ],
         });
     } catch (error) {
-        throw new SkillError('DEPENDENCY_MISSING', compactErrorMessage(error));
+        throw new SkillError('BROWSER_LAUNCH_FAILED', 'browser_launch_failed', {
+            launch_error: compactErrorMessage(error),
+            runtime_restriction: runtimeCheck,
+        });
     }
 
-    const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        viewport: { width: 1440, height: 1024 },
-        locale: 'en-US',
-    });
+    const browserContextOptions = {
+        viewport: contextOptions.viewport || { width: 1440, height: 1024 },
+        locale: contextOptions.locale || 'en-US',
+        acceptDownloads: contextOptions.acceptDownloads === true,
+        isMobile: contextOptions.isMobile === true,
+        hasTouch: contextOptions.hasTouch === true,
+    };
+    if (contextOptions.userAgent) {
+        browserContextOptions.userAgent = contextOptions.userAgent;
+    }
+    if (contextOptions.timezoneId) {
+        browserContextOptions.timezoneId = contextOptions.timezoneId;
+    }
+    const context = await browser.newContext(browserContextOptions);
 
     context.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS);
     context.setDefaultTimeout(PAGE_TIMEOUT_MS);
@@ -831,14 +930,21 @@ async function readRuntimeRestrictionSignals() {
 
 async function extractPage(page, url, waitUntil, options = {}) {
     const pageStart = Date.now();
-    const nav = await navigateWithFallback(page, url, waitUntil);
+    const deadlineAt = options.deadlineAt || (pageStart + PAGE_TIMEOUT_MS);
+    const nav = await navigateWithFallback(page, url, waitUntil, deadlineAt);
     if (!nav.ok) {
+        if (nav.error instanceof SkillError && nav.error.code === 'PAGE_DEADLINE_EXCEEDED') {
+            nav.error.meta = { ...(nav.error.meta || {}), nav_trace: nav.trace };
+            throw nav.error;
+        }
         throw new SkillError('NAV_TIMEOUT', `navigation failed after ${nav.attempts} attempts: ${compactErrorMessage(nav.error)}`, {
             nav_trace: nav.trace,
         });
     }
 
-    await page.waitForTimeout(EXTRACT_SETTLE_MS);
+    const settleBudgetMs = requireRemainingBudget(deadlineAt);
+    await page.waitForTimeout(Math.min(EXTRACT_SETTLE_MS, settleBudgetMs));
+    requireRemainingBudget(deadlineAt);
     const fullRawHtml = await page.content();
     const rawHtmlTruncated = fullRawHtml.length > MAX_CAPTURE_HTML_CHARS;
     const rawHtmlPreview = rawHtmlTruncated
@@ -1128,8 +1234,20 @@ async function extractPage(page, url, waitUntil, options = {}) {
 
     let screenshotPath = null;
     if (options.saveScreenshot && options.screenshotPath) {
+        const screenshotBudgetMs = requireRemainingBudget(deadlineAt);
         await fs.mkdir(path.dirname(options.screenshotPath), { recursive: true });
-        await page.screenshot({ path: options.screenshotPath, fullPage: true });
+        const temporaryScreenshotPath = `${options.screenshotPath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+        try {
+            await page.screenshot({
+                path: temporaryScreenshotPath,
+                type: 'png',
+                fullPage: true,
+                timeout: screenshotBudgetMs,
+            });
+            await fs.rename(temporaryScreenshotPath, options.screenshotPath);
+        } finally {
+            await fs.rm(temporaryScreenshotPath, { force: true }).catch(() => {});
+        }
         screenshotPath = options.screenshotPath;
     }
 
@@ -1194,6 +1312,7 @@ async function openExtract(input) {
         allowPathOutsideWorkspace = false,
         workspaceRoot = process.cwd(),
     } = input;
+    const executionBudget = deriveExecutionBudget(process.env.SKILL_TIMEOUT_SECONDS);
 
     if (!urls || !Array.isArray(urls) || urls.length === 0) {
         throw new SkillError('EMPTY_CONTENT', 'urls array is required and must not be empty');
@@ -1236,13 +1355,28 @@ async function openExtract(input) {
         executablePath,
         networkPolicyEvents,
     } = await createBrowserContext(networkPolicy);
-    const items = [];
+    const items = new Array(validatedUrls.length);
+    const pageConcurrency = detectPageConcurrency(validatedUrls.length);
+    let nextPageIndex = 0;
+    let stopScheduling = false;
+    let stopReason = null;
 
     try {
-        for (const url of validatedUrls) {
-            const page = await context.newPage();
+        const processPage = async (url, pageIndex) => {
+            const pageOrdinal = pageIndex + 1;
+            const pageDeadlineAt = Math.min(
+                executionBudget.workDeadlineAt,
+                Date.now() + PAGE_TIMEOUT_MS,
+            );
+            let page = null;
             try {
-                const screenshotPath = buildScreenshotPath(effectiveScreenshotDir, url, items.length + 1);
+                requireRemainingBudget(
+                    pageDeadlineAt,
+                    MIN_PAGE_START_BUDGET_MS,
+                    'BATCH_DEADLINE_EXCEEDED',
+                );
+                page = await context.newPage();
+                const screenshotPath = buildScreenshotPath(effectiveScreenshotDir, url, pageOrdinal);
                 const effectiveWait = chooseWaitUntilForUrl(url, waitUntil, waitMap);
                 const item = await extractPage(page, url, effectiveWait, {
                     saveScreenshot,
@@ -1250,18 +1384,24 @@ async function openExtract(input) {
                     contentMode,
                     maxTextChars,
                     minContentChars,
+                    deadlineAt: pageDeadlineAt,
                 });
-                const pageOrdinal = items.length + 1;
                 if (capture.enabled) {
                     const baseName = `${String(pageOrdinal).padStart(4, '0')}_${sanitizeForFilename(parseDomain(item.final_url || url))}`;
                     const htmlPath = path.join(capture.dirs.rawHtml, `${baseName}.html`);
                     const textPath = path.join(capture.dirs.processedText, `${baseName}.txt`);
 
-                    await fs.writeFile(htmlPath, item.raw_html || '', 'utf8');
-                    await fs.writeFile(textPath, item.canonical_text || item.text || '', 'utf8');
+                    await writeFileAtomic(htmlPath, item.raw_html || '', 'utf8');
+                    await writeFileAtomic(textPath, item.canonical_text || item.text || '', 'utf8');
 
                     const contentHash = sha256Hex(item.canonical_text || item.text || '');
                     const htmlHash = sha256Hex(item.raw_html || '');
+                    const screenshotHash = item.screenshot_path
+                        ? crypto.createHash('sha256')
+                            .update(await fs.readFile(item.screenshot_path))
+                            .digest('hex')
+                        : null;
+                    const receiptId = `browser_page:${capture.runId}:${pageOrdinal}:${contentHash}`;
                     let imageRel = item.screenshot_path ? toPosixRel(capture.runRoot, item.screenshot_path) : null;
                     const capturedImages = [];
                     const imageCaptureErrors = [];
@@ -1277,7 +1417,19 @@ async function openExtract(input) {
                             for (let i = 0; i < candidates.length; i += 1) {
                                 const img = candidates[i];
                                 const stem = path.join(capture.dirs.images, `${baseName}_img_${String(i + 1).padStart(2, '0')}`);
-                                const dl = await downloadImageToFile(img.src, stem, networkPolicy);
+                                if (remainingBudgetMs(pageDeadlineAt) <= 0) {
+                                    imageCaptureErrors.push({
+                                        url: img.src,
+                                        error: 'page_deadline_exceeded',
+                                    });
+                                    break;
+                                }
+                                const dl = await downloadImageToFile(
+                                    img.src,
+                                    stem,
+                                    networkPolicy,
+                                    pageDeadlineAt,
+                                );
                                 if (!dl.ok) {
                                     imageCaptureErrors.push({ url: img.src, error: dl.error });
                                     continue;
@@ -1301,6 +1453,7 @@ async function openExtract(input) {
                     await appendJsonl(capture.files.manifest, {
                         run_id: capture.runId,
                         source: capture.source,
+                        receipt_id: receiptId,
                         ordinal: pageOrdinal,
                         status: 'ok',
                         url,
@@ -1314,7 +1467,9 @@ async function openExtract(input) {
                         html_path: toPosixRel(capture.runRoot, htmlPath),
                         text_path: toPosixRel(capture.runRoot, textPath),
                         image_path: imageRel,
+                        image_hash_sha256: screenshotHash,
                         image_paths: capturedImages.map((x) => x.path),
+                        images: capturedImages,
                         image_capture_errors: imageCaptureErrors,
                         error_code: null,
                         error: null,
@@ -1340,11 +1495,17 @@ async function openExtract(input) {
                     }
 
                     item.capture_artifacts = {
+                        receipt_id: receiptId,
                         run_root: capture.runRoot,
                         html_path: htmlPath,
                         text_path: textPath,
                         image_path: item.screenshot_path || null,
+                        image_sha256: screenshotHash,
                         image_paths: capturedImages.map((x) => path.join(capture.runRoot, x.path)),
+                        images: capturedImages.map((image) => ({
+                            ...image,
+                            path: path.join(capture.runRoot, image.path),
+                        })),
                         image_capture_errors: imageCaptureErrors,
                         manifest_path: capture.files.manifest,
                         chunks_path: capture.files.chunks,
@@ -1412,12 +1573,12 @@ async function openExtract(input) {
                 item.runtime = {
                     chromium_executable_path: executablePath || 'playwright-default',
                     runtime_restriction_signals: runtimeCheck,
+                    page_deadline_at: new Date(pageDeadlineAt).toISOString(),
                 };
-                items.push(item);
+                items[pageIndex] = item;
             } catch (err) {
                 const { classified, item } = partialExtractionItem(url, err, executablePath, runtimeCheck);
-                const pageOrdinal = items.length + 1;
-                items.push(item);
+                items[pageIndex] = item;
                 if (capture.enabled) {
                     await appendJsonl(capture.files.manifest, {
                         run_id: capture.runId,
@@ -1435,16 +1596,80 @@ async function openExtract(input) {
                         html_path: null,
                         text_path: null,
                         image_path: null,
+                        image_hash_sha256: null,
                         image_paths: [],
+                        images: [],
                         error_code: classified.code,
                         error: classified.message,
                     });
                 }
                 if (failFast) {
-                    throw classified;
+                    stopScheduling = true;
+                    stopReason = 'fail_fast';
                 }
             } finally {
-                await page.close().catch(() => {});
+                if (page) {
+                    await page.close().catch(() => {});
+                }
+            }
+        };
+
+        const worker = async () => {
+            while (!stopScheduling) {
+                if (remainingBudgetMs(executionBudget.workDeadlineAt) < MIN_PAGE_START_BUDGET_MS) {
+                    stopScheduling = true;
+                    stopReason = stopReason || 'batch_deadline';
+                    return;
+                }
+                const pageIndex = nextPageIndex;
+                nextPageIndex += 1;
+                if (pageIndex >= validatedUrls.length) {
+                    return;
+                }
+                await processPage(validatedUrls[pageIndex], pageIndex);
+            }
+        };
+
+        await Promise.all(Array.from({ length: pageConcurrency }, () => worker()));
+
+        for (let pageIndex = 0; pageIndex < validatedUrls.length; pageIndex += 1) {
+            if (items[pageIndex]) {
+                continue;
+            }
+            const url = validatedUrls[pageIndex];
+            const code = stopReason === 'fail_fast'
+                ? 'SKIPPED_FAIL_FAST'
+                : 'BATCH_DEADLINE_EXCEEDED';
+            const { classified, item } = partialExtractionItem(
+                url,
+                new SkillError(code, code.toLowerCase()),
+                executablePath,
+                runtimeCheck,
+            );
+            items[pageIndex] = item;
+            if (capture.enabled) {
+                await appendJsonl(capture.files.manifest, {
+                    run_id: capture.runId,
+                    source: capture.source,
+                    ordinal: pageIndex + 1,
+                    status: 'error',
+                    url,
+                    final_url: item.final_url,
+                    title: item.title,
+                    fetched_at: item.extracted_at,
+                    fetch_method: item.fetch_method,
+                    text_chars: item.text.length,
+                    content_hash_sha256: null,
+                    html_hash_sha256: null,
+                    html_path: null,
+                    text_path: null,
+                    image_path: null,
+                    image_hash_sha256: null,
+                    image_paths: [],
+                    images: [],
+                    error_code: classified.code,
+                    error: classified.message,
+                });
             }
         }
     } finally {
@@ -1482,6 +1707,13 @@ async function openExtract(input) {
         network_policy: {
             decisions: networkPolicyEvents,
             decisions_truncated: networkPolicyEvents.length >= MAX_NETWORK_POLICY_EVENTS,
+        },
+        execution_policy: {
+            runtime_budget_ms: executionBudget.runtimeBudgetMs,
+            cleanup_reserve_ms: executionBudget.cleanupReserveMs,
+            page_budget_ms: PAGE_TIMEOUT_MS,
+            page_concurrency: pageConcurrency,
+            work_deadline_at: new Date(executionBudget.workDeadlineAt).toISOString(),
         },
         capture: capture.enabled ? {
             run_root: capture.runRoot,
@@ -1615,11 +1847,18 @@ module.exports = {
     SkillError,
     classifyError,
     classifyNavigationFailure,
+    compactErrorMessage,
+    createBrowserContext,
+    deriveExecutionBudget,
+    detectPageConcurrency,
+    ensureWithinRoot,
     isReadableDocumentContentType,
     isRetryableFailure,
     isPrivateIp,
+    navigateWithFallback,
     partialExtractionItem,
     resolvedAddressAllowed,
+    sha256Hex,
     sanitizeExtractedText,
     validateNetworkUrl,
 };

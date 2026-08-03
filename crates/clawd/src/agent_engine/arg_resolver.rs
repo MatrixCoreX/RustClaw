@@ -342,18 +342,8 @@ fn normalize_browser_web_arg_aliases(args: &mut Value) -> bool {
         .unwrap_or_default()
         .to_string();
     let mut changed = false;
-    if matches!(action.as_str(), "search_page" | "search_extract") {
-        changed |= move_value_alias_if_missing(obj, "top_k", &["max_results"]);
-        changed |= normalize_integer_range_field(obj, "top_k", 1, 20);
-    }
-    if action == "search_extract" {
-        changed |= move_value_alias_if_missing(obj, "extract_top_n", &["max_pages"]);
-        changed |= normalize_integer_range_field(obj, "extract_top_n", 1, 10);
-    }
     if action == "open_extract" {
         changed |= normalize_integer_range_field(obj, "max_pages", 1, 10);
-    }
-    if matches!(action.as_str(), "open_extract" | "search_extract") {
         changed |= normalize_integer_range_field(obj, "max_text_chars", 100, 200_000);
         changed |= normalize_integer_range_field(obj, "min_content_chars", 20, 10_000);
         changed |= normalize_browser_web_content_mode(obj);
