@@ -2,12 +2,12 @@
 
 英文版：`README.md`
 
-Agent Runtime 是一个以 `clawd` 为核心的本地 Rust Agent Runtime。它把多通道接入、任务执行、技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
+Agent Runtime 是一个用 Rust 编写、以 `clawd` 守护进程为核心的本地部署 Agent 平台。它把多通道聊天接入、任务执行、工具与技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
 
 <!-- ai-learning-stage: foundations -->
 ## 项目概览
 
-Agent Runtime 面向“消息端或浏览器里就能完成日常使用和管理”的场景，而不是只给命令行使用者。
+Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的场景，而不是命令行优先的工作流。
 
 当前仓库的主要能力包括：
 
@@ -18,6 +18,8 @@ Agent Runtime 面向“消息端或浏览器里就能完成日常使用和管理
 - 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
   工具/技能、Skill Store、记忆、日志和 AI 学习等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
+- Linux 与 macOS 共享同一套运行时合同；进程隔离由机器配置的后端选择
+  fail-closed 的 Bubblewrap 或 Seatbelt 实现
 
 ### 先认识五个概念
 
@@ -61,7 +63,7 @@ bash scripts/product_identity_tests.sh --with-ui
 <!-- ai-learning-stage: agent-runtime -->
 ## Agent Loop 架构
 
-Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由 planner 决定回复、澄清或执行，并可调用能力、按证据合成、修复、继续、checkpoint 或停止。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，不解析用户语言短语。
+Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由它决定回答、澄清还是执行。原生模型回合要么输出 `call_capability` 获取下一个观测或副作用，要么输出 `respond` 作为模型生成的终态回答；使用结构化 plan 协议的 provider 以等价的、经过验证的步骤表达同样的决策。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，而不是匹配用户语言短语。
 
 ### 请求与 Agent Loop 流程
 
@@ -80,10 +82,9 @@ flowchart TD
     G --> H[Ask 上下文包<br/>记忆 provenance + 最近执行 + goal/journal refs]
     H --> J[Agent loop<br/>普通语义权威]
     J --> L{循环轮次}
-    L --> N[Planner LLM<br/>回复 / 澄清 / call_capability / 合成]
+    L --> N[Planner LLM<br/>原生 call_capability / respond<br/>必要时输出经校验的结构化 plan]
     N -.-> PS[已识别的 respond/free_text 字节<br/>用户可见输出策略 + 公开呈现事件]
-    N --> O
-    O --> P[PlanVerifier<br/>permission_decision + 风险 + 效果 + 契约]
+    N --> P[PlanVerifier<br/>permission_decision + 风险 + 效果 + 契约]
     P --> Q{已验证步骤}
     Q -->|respond| R[结构化终端回复<br/>自由文本、精确列表、模型对象<br/>或观察对象投影]
     Q -->|synthesize_answer| S[基于证据合成]
@@ -92,7 +93,7 @@ flowchart TD
     RS --> RSG[不经过 planner / resolver 选择<br/>不做 verifier 语义选择]
     RSG --> MG
     MG -->|是| MI[调用前持久化 intent + 确定性 idempotency key<br/>再持久化 attempt]
-    MG -->|否| EX{执行 adapter}
+    MG -->|否| EX{执行 adapter<br/>进程型执行附带沙箱后端诊断}
     MI --> EX
     EX -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
     AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
@@ -120,12 +121,13 @@ flowchart TD
     Y --> Z[输出契约护栏 + 任务结果]
     Z --> AA[通道交付]
     Z --> AB[Journal + 会话更新]
-    AB --> AD[Task event stream<br/>状态迁移 + checkpoint + 工具生命周期 + coding checkpoint/evidence]
+    AB --> AD[Task event stream<br/>goal + 上下文 + 状态迁移 + checkpoint + 工具/coding/team 事件]
     PS --> AD
     ASP --> AA
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    AD --> AF[教学模式时间线<br/>按轮次选择 trace + 原始 JSON 详情]
     Z -. 可选 .-> AC[后台记忆刷新]
 ```
 
@@ -156,7 +158,7 @@ flowchart TD
 操作上：用户给自然语言请求时使用 `kind=ask`，让 Agent Runtime 自己判断回答、澄清、规划或执行。API 调用方已经知道明确技能和参数时使用 `kind=run_skill`，只把 Agent Runtime 当作任务队列、鉴权、生命周期和结果投影层来运行该技能。
 
 - `Planner-owned front door`：物化文本/语音/附件，并根据 task 身份、显式 API 字段、结构化 locator facts 和安全/预算 profile 构造 `TurnBoundaryEnvelope`。它不做语义 LLM 调用，也没有普通 respond/clarify/execute 分支。
-- `Agent-loop 语义权威`：每个普通自然语言任务都会进入循环，由 planner 决定回复、澄清、调用能力、执行工具或技能、按证据合成、修复、checkpoint 或停止。
+- `Agent-loop 语义权威`：每个普通自然语言任务都会进入循环。原生回合选择 `call_capability` 或结构化 `respond`；结构化 plan 回合可以表达等价的工具、技能、合成、澄清、修复、checkpoint 或停止步骤。
 - `CapabilityResolver / PlanVerifier`：把 `call_capability` 解析到当前 tool 或 skill 实现，再检查可见性、必填参数、allowed action、risk/effect、confirmation 和输出契约。
 - `permission_decision`：verifier 和 preflight blocker 输出 `allowed`、`needs_confirmation`、`denied_by_policy`、`dry_run_required`、`external_provider_blocked`、`risk_level`、`action_effect`、registry dedup/idempotency 等机器字段。UI、API、finalizer 和 i18n 应消费这些字段渲染说明，而不是解析 runtime prose。
 - `Side-effect outbox`：planner-owned 执行与显式 `kind=run_skill` 的非幂等变更都会在调用前依次持久化 `intent_recorded` 和 `attempt_started`。由 task 与规范 action fingerprint 推导的确定性 key 会进入 runner context、外部 HTTP `Idempotency-Key`，或受支持本地 adapter 的环境变量。Receipt、verification、reconciliation 和 commit 都由精确 worker claim 隔离；已有 receipt 的状态禁止重放原动作，timeout/crash 结果不确定时建立 `mutation_reconciliation` checkpoint，并且只接受 fingerprint 绑定的结构化 `applied|not_applied|still_unknown` resume constraint。
@@ -183,11 +185,11 @@ flowchart TD
 - `Exact machine output`：planner 使用 `response_shape=strict` 和经过验证的 `structured_field_selector`（例如 `command_output`）提出精确输出要求；runtime 只从 `CapabilityResultEnvelope` 投影该字段。自由回答和一句话回答继续由模型合成。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
-- `Task journal event`：executor observation 会投影为稳定的 `tool_started`、`tool_step`、`tool_finished`，以及可选 `coding_checkpoint` / `coding_evidence` 事件，带 step refs、evidence refs、artifact 计数、coding 计数、checkpoint kind、验证命令计数/token、验证状态/失败类别 token、验证风险 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
-- `subagent tool`：planner 授权的 child 工作必须显式。Explorer 保持有界只读；隔离 writer/tester 只能在自己的 task-scoped Git worktree 中工作并返回 patch/evidence refs。父任务会检查冲突、dirty-parent 状态和 precondition hash 后再接纳或拒绝 patch。Child 不得直接写父 worktree，也不得外部发布。
+- `Task journal event`：executor observation 会投影为稳定的 `task_goal`、`context_budget`、`context_compaction`、`tool_started`、`tool_step`、`tool_finished`，以及可选 `coding_checkpoint`、`coding_task_contract`、`coding_evidence` 和 team 生命周期事件，带 refs、计数、状态 token、验证 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
+- `agent.subagent` / `agent.subagent_batch` / `agent.subagent_persistent`：planner 授权的 child 工作与其他 runtime 动作一样，走同一条原生 `call_capability` -> registry resolver -> verifier 路径。第一个能力运行单个只读内联 child，第二个运行有界只读批量，第三个调度显式高风险、可恢复的 child 工作。可信 role 定义与隔离/权限策略来自 registry 加 `agent_guard.toml`；planner 提交的策略字段会被丢弃。队列只认领 ready 节点，重叠 writer 所有权串行化，工作区互不相交的隔离 worktree writer 可以并发。父任务会检查持久化的 ownership、冲突、dirty-parent 状态和 precondition hash 后再接纳或拒绝 patch。Child 永远不做外部发布；只有显式准入的 local-current-workspace role 才能写隔离 worktree 之外的内容。
 - `Skill dispatcher`：直接 `run_skill` 和 planner skill call 复用同一调度层。直接 `run_skill` 不让 planner 选择技能，只派发显式的 `payload.skill_name`。Builtin 在进程内运行，external 走 adapter，runner 才启动 `skill-runner` 和具体二进制。
 - `Runner credential bridge`：runner 子进程不会继承父进程的完整环境。只有经过验证且声明凭据访问的 action，`clawd` 才会根据当前结构化 provider connection 分别签发一次性 secret token，注入规范 vendor 变量和必要的协议别名；例如 OpenAI-compatible MiniMax adapter 获得 `MINIMAX_API_KEY` 与独立的 `OPENAI_API_KEY` token。离线 preview action 不会获得这些 token。
-- `Skill process protocol`：runner 技能通过 stdin/stdout 交换单行 JSON；运行时需要判断时，技能应在 `extra` 返回稳定机器字段。
+- `Skill process protocol`：runner 技能收到一行请求 JSON，并以一行最终响应 JSON 结束。显式声明 `run.progress_frames=true` 的技能可以先输出有界、带版本的机器进度记录；稳定的决策字段仍必须放在最终 `extra` 中。
 - `synthesize_answer`：在循环内需要自然语言合成时调度，不是每个任务固定最后再调用一次 LLM。
 - `RepairEnvelope`：verifier、executor、permission、provider 和 checkpoint recovery 路径会把结构化 repair context 暴露给下一轮循环；用户可见 fallback prose 应来自 i18n、finalizer、UI 或模型，不应来自 runtime 模板。
 - `Output-contract finalization`：只保留精确机器字段与 artifact 传输的确定性边界，其余回答发布模型基于证据的合成结果；它不选择技能，也不渲染领域专属 prose。
@@ -202,9 +204,6 @@ flowchart TD
 - 显式用户命令用 `_clawd_literal_command` 表达；否则 `run_cmd` 作为 planner 结构化命令参数处理，继续受 contract 与媒体产物 blocker 约束。
 - 有风险的本地代码或文件变更能力应在 registry metadata 中声明 isolation profile。`local_temp_workspace` 用于一次性预览、dry-run 和可通过 artifact refs 清理的生成产物；`local_worktree` 用于明确写入当前工作区的开发任务，必须通过 task evidence、changed-file refs 和 verification commands 展示。UI 和 CLI 渲染 `permission_decision.steps[].sandbox`、`workspace_scope` 与 `registry_policy` 机器字段，不从本地化文本里推断权限状态。
 - 确认决策使用闭合机器协议 `approve_once|always_for_scope|deny`。只有 registry 声明的本地工作区变更能力才能提供 `always_for_scope`，且作用域必须精确绑定 capability、effect 和资源；`run_cmd`、网络访问、外部发布、凭据访问、包安装和提权操作不得使用持久作用域授权。授权由 `clawd` 使用 HMAC 签名，绑定已认证 actor 与 channel/chat 会话，最长一小时失效，并由服务端负责存储、匹配、列出和撤销；CLI 或 UI 的本地状态本身不产生授权。
-
-权限与策略决策流程：
-
 
 详细流程见：[安全与执行](docs/architecture/02-security-execution.zh-CN.md)。
 
@@ -253,6 +252,31 @@ python3 scripts/check_no_nl_hardmatch.py
 
 Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事实卡和检索索引。目标是让记忆能帮助当前任务，同时避免旧助手输出变成新的隐藏指令。
 
+### 核心边界
+
+记忆首先按已认证身份划定范围，其次才是当前会话。Telegram、微信、飞书、浏览器 UI 等 adapter 的渠道 ID 会归一化到同一套任务身份模型，因此绑定后的 `user_key` 可以跨渠道保持记忆一致，同时仍保留 `user_id` / `chat_id` 级别的会话状态。最近会话状态单独存放活跃任务锚点、别名绑定和后续追问上下文，与长期事实分开；它可以帮助解析“那个文件”“上一个结果”这类指代，但不会被当作新的用户指令。
+
+记忆层有三条硬边界：
+
+- 当前用户输入永远优先于召回的记忆
+- 记忆文本只是背景上下文，除非当前任务/会话状态显式把它绑定到本轮
+- 运行时通过结构化字段、source kind、评分、安全标记和 use-policy 决策消费记忆，而不是按语言维护短语分支
+
+这样可以避免旧助手输出、任务日志和知识片段悄悄影响执行。当召回的上下文与当前请求冲突时，planner prompt 和记忆使用策略都要求以当前请求为准。
+
+### 存储模型
+
+主要的持久化记忆存储包括：
+
+- `memories`：短期对话记录和任务可见片段，行内保留角色、记忆类型、显著性、安全状态、时间戳、成功状态和来源元数据。
+- `conversation_states`：按会话保存的活跃状态，例如别名绑定、活跃任务锚点和后续追问状态。这是会话状态，不是长期知识。
+- `user_preferences`：结构化用户偏好，例如回复语言、回复风格、回复格式和 agent 显示名。
+- `memory_facts`：长期事实卡，包含 `fact_key`、`fact_value`、`fact_text`、来源引用、置信度、状态、过期时间和冲突组元数据。
+- `long_term_memories`：补充摘要行，只在当前记忆策略允许摘要召回的场景使用。
+- `memory_retrieval_index`：覆盖短期记录、偏好、事实卡和知识快照的混合检索索引。
+
+`configs/memory.toml` 控制预算、保留期、长期刷新间隔、写入过滤、偏好提取、检索上限和 embedding/索引行为。默认值偏保守：简短的应答消息可以被过滤，助手回复会被标记，LLM 写入的偏好必须先通过置信度和运行时校验才会存储。
+
 ### 写入路径
 
 `ask` 任务收尾后，Agent Runtime 可以持久化：
@@ -265,6 +289,8 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 
 长期摘要刷新仍作为兜底摘要路径存在，但优先把可复用知识写成事实卡。事实卡保留 `fact_key`、`fact_value`、`fact_text`、`source_ref`、`source_memory_ids_json`、`reason`、`confidence`、`expires_at_ts`、`conflict_group` 和 `status`。同一冲突组的新 active fact 会 supersede 旧 fact；过期或删除的 fact 不再进入召回。
 
+记忆写入被刻意安排在回答之后：系统先保存用户可见回复，配置允许时再运行后台记忆刷新。这样记忆提取的耗时不会阻塞正常回复，记忆写入失败也不会影响已经完成的任务。
+
 ### 召回与使用策略
 
 记忆召回会先构造成结构化上下文，再按当前消费者套用 memory use policy：
@@ -274,6 +300,13 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 - skill：`_memory` 会按技能 registry 的 `memory_policy` 裁剪；没有显式策略的技能使用安全默认配置
 
 例如 `photo_organize` 技能声明了自己的 memory policy：允许 preferences、relevant facts 和 knowledge docs，但排除 long-term summaries、recent events、assistant results、similar triggers、unfinished goals 和 raw recent snippets。
+
+每个 use-policy 决策都会记录它包含了什么以及原因。Prompt builder 收到的是已经过滤好的结构化上下文，而不是原始数据库行。通用策略是：
+
+- 新的独立任务只使用稳定事实和偏好，不使用旧的助手结果
+- 只有会话状态表明用户在继续同一任务时，后续轮次才能使用最近观测和活跃别名
+- planner prompt 可以看到足够的记忆来避免重复劳动，但记忆始终是背景，不能覆盖当前请求
+- 技能 `_memory` payload 按技能 registry 策略裁剪，专用技能只收到它应当使用的记忆来源
 
 ### 检索索引
 
@@ -325,7 +358,23 @@ POST   /v1/memory/settings
 
 ### 追踪与排障
 
-Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板、`clawcli llm-trace` 和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略、`model_catalog_trace`、`model_catalog_trace.readiness` 和 `resume_trace` 放在原始请求/响应细节旁边。浏览器只保存轻量的 task/轮次索引，不保存原始 provider 请求与返回；刷新后会从服务端当前日志及最近 7 天的按日归档重新加载。接口会明确返回完整详情可用、仅有元数据、任务仍在运行，或因当时未记录/超过保留期而不可用。教学模式里，当前选中的对话轮次会展示 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、当前模型 readiness 决策、后台续跑/checkpoint 决策，并基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号生成 agent 过程时间线。
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。
+
+浏览器教学模式的 trace 面板、`clawcli llm-trace` 和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略、`model_catalog_trace`、`model_catalog_trace.readiness` 和 `resume_trace` 放在原始请求/响应细节旁边。浏览器只保存轻量的 task/轮次索引，不保存原始 provider 请求与返回；刷新后会从服务端当前日志及最近 7 天的按日归档重新加载。接口会明确返回完整详情可用、仅有元数据、任务仍在运行，或因当时未记录/超过保留期而不可用。
+
+选中教学模式时，点击用户提问或助手回复会选中该轮次，并展示对应的 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、当前模型 readiness 决策、后台续跑/checkpoint 决策，以及基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号的原始 LLM 请求/响应详情。未选中教学模式时，点击消息不会改变教学 trace。
+
+执行边界以机器字段而不是纯文字说明暴露。教学模式、subagent review、`clawcli report` 和 replay 工具应消费 `workspace_root`、`current_process_cwd`、`current_workspace_scope`、`write_enabled`、`external_publish_enabled`、`allowed_roles`、`runtime_config.max_parallel_readonly`、`hook_stages`、`hook_decisions`、`handler_id`、`handler_kind`、`trust_status`、`failure_policy`、`permission_decision`、`policy_decision`、`risk_level`、`dry_run`、`checkpoint_id`、`poll_ref`、`next_check_after`、`provider_blocker` 等字段。Subagent 批量聚合还携带 `aggregation.execution_mode`，消费方不需要从 finalizer 文案推断执行方式。
+
+排查记忆行为时，按顺序确认这些问题：
+
+- 这次请求是新任务，还是绑定活跃会话的后续追问？
+- 记忆上下文由哪个阶段构建：route、planner、chat、schedule、image 还是 skill？
+- `memory_trace` 是否包含预期的 `source_kind` / `source_ref`？
+- use policy 是否按设计排除了最近助手输出或长期摘要？
+- 是否因为 embedding 元数据变化且 `reindex_on_startup` 为 false，索引已经过期？
+- 事实冲突组是否已经 supersede 旧事实？
+- 条目是否因为过期、删除、低置信度或安全风险标记而被隐藏？
 
 常用代码和配置入口：
 
@@ -347,8 +396,8 @@ Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use 
 - 前台 HTTP/通道等待时间默认较短。调用方停止等待后应继续轮询同一个 `task_id`，不要重新创建重复任务，也不要把后台任务误判为失败。
 - `task_lifecycle` 是机器可读的状态投影。查询 API 暴露 `state`、`db_status`、`can_poll`、`can_cancel`、`checkpoint_id`、`resume_due`、`resume_wait_seconds` 和 heartbeat 字段，供 UI 渲染。
 - 状态来源：`crates/clawd/src/task_lifecycle.rs` 负责生命周期投影，`repo::get_task_query_record()` 会把该投影挂到 `GET /v1/tasks/{task_id}`。UI、CLI 和通道应渲染这些结构化字段，不从 `text` 或 `error_text` 推断状态。
-- `clawcli get` 和 `clawcli watch` 渲染 lifecycle 机器字段；`clawcli cancel-task <task_id>` 按 task ID 取消，`clawcli cancel-index` 按 active-list 中选定的序号取消。
-- `clawcli resume-task <task_id>` 会把已有 checkpoint 标记为到期恢复；`clawcli pause-task <task_id> --pause-seconds N` 只延迟已有 waiting/background checkpoint，不会重启没有 checkpoint 的任务。
+- `clawcli get`、`clawcli watch` 和 `clawcli wait <task_id> --until terminal|completed|background|needs-user` 渲染或等待 lifecycle 机器字段；`clawcli cancel-task <task_id>` 按 task ID 取消，`clawcli cancel-index` 按 active-list 中选定的序号取消。
+- `clawcli resume-task <task_id>` 会把已有 checkpoint 标记为到期恢复；`clawcli continue <task_id> [message]` 是更简短的结构化恢复入口；`clawcli pause-task <task_id> --pause-seconds N` 只延迟已有 waiting/background checkpoint。这些命令不会重启没有 checkpoint 状态的任务。
 - `clawcli submit --detach` 快速返回 `task_id`；`clawcli submit --wait` 轮询到终态；`--json` 保持 submit/watch 输出适合脚本消费。
 - `clawcli --yolo submit|exec|code|chat|run-skill ...` 为新任务请求 `approval_policy=never` 与 `sandbox_mode=danger_full`，后端只接受当前仍启用的管理员密钥。这是高风险模式：会取消本地确认和进程沙箱隔离，但 registry、schema、外部发布、取消、预算、脱敏与审计控制仍然有效。
 - `clawcli exec` 是面向 CI/脚本的执行入口：提交或恢复 ask 任务，默认等待，返回稳定 exit class/code，支持 `--profile quick|coding|release-gate|long-tail`，可在后台 checkpoint 停下，非 JSON 输出会用 `exec_compact_*` 机器行展示预算、代码变更、验证、resume 与残余风险；artifact 目录会写 `summary.json`、`task.json`、`events.jsonl`、`verification.json`、`diff_summary.json`、`llm_summary.json`、`resume.json` 和 `index.json`。`clawcli code` 是 `exec --profile coding` 的简写。
@@ -584,14 +633,20 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ### 能力目录回答什么
 
-模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env`、`not_required_local` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness` 会为当前选中的 provider/model 渲染 compact 的 `model_readiness_summary`，task debug/教学 trace 和 `clawcli llm-trace` 也会用 `model_catalog_trace.readiness` 暴露同一组选中模型投影，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`，同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
+模型能力目录是配置派生的机器事实，不是运行时按模型名临时猜测。它由 `configs/config.toml` 的 LLM provider 表，加上 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 独立选择的多模态模块生成。不含密钥的条目会暴露 provider/model 身份、已配置选择、输入/输出 modality、生成与理解能力、async 和 dry-run 要求、timeout、context window、当前激活文本 provider 状态，以及配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env`、`not_required_local` 或 `missing`），永远不包含密钥值。
+
+`clawcli models catalog` 输出 `model_catalog_summary` 和 `model_catalog_entry` 机器行，脚本不需要解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness`、task 教学 trace 和 `clawcli llm-trace` 通过 `model_readiness_summary` 或 `model_catalog_trace.readiness` 投影同一个选中条目，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`；这些字段同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
 
 
 模型目录、readiness 与 provider 验证流程见[技能、多媒体与模型](docs/architecture/05-skills-media-models.zh-CN.md)和[发布验证](docs/architecture/06-release-validation.zh-CN.md)。
 
 ### 如何验证 Provider
 
-MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；它的 `--self-test` 会覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`，之后 gate 才信任配置派生的元数据。`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `APP_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守护。它的 `--self-test` 覆盖 TOML 和 env-file 缺失、读取失败、坏 UTF-8、语法错误等结构化 finding，并在 agent parity gate 中写入 `chinese_model_catalog_self_test.txt`；通过后 gate 才信任配置派生的元数据。
+
+`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 只验证 case 与凭据状态，不调用 provider；它会把 `check_chinese_provider_smoke_matrix.py --self-test`、`check_chinese_provider_smoke_summary.py --self-test` 和生成 summary 的主检查结果写入 `chinese_provider_smoke.txt`。需要 live 验证时，必须确保当前运行的 `clawd` 已按对应 provider 配置启动；runner 的 `APP_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会改写已经运行的进程。
+
+如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确本次验收范围；范围外的 provider 会记录为 `provider_not_in_live_scope`，不会被当成代码未完成。默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
 
 ### 发布门禁如何证明结果
 
@@ -689,7 +744,7 @@ UI 相关说明：
 - “工具/技能”管理已安装技能的开关；相邻的 Skill Store 负责可选技能安装、移除、重新安装、配置保留和第三方导入
 - Skill Store 的安装信息会逐项展示 manifest 声明的依赖，并按后端实际检测结果标出已安装或缺失，便于安装或修复前确认
 - 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
-- `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
+- `webd` 是唯一面向浏览器的 Agent Runtime 服务；nginx 只是可选的外层 TLS/静态资源层，`clawd` 始终只监听 loopback
 
 <!-- ai-learning-stage: capabilities-artifacts -->
 ## 技能体系

@@ -2,7 +2,7 @@
 
 Chinese version: `README.zh-CN.md`
 
-Agent Runtime is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
+Agent Runtime is a self-hosted agent platform written in Rust and centered on the `clawd` daemon. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, a browser UI, and `user_key`-based identity in one deployable stack.
 
 <!-- ai-learning-stage: foundations -->
 ## Overview
@@ -87,8 +87,7 @@ flowchart TD
     J --> L{Loop round}
     L --> N[Planner LLM<br/>native call_capability / respond<br/>validated structured plan when required]
     N -.-> PS[Recognized respond/free_text bytes<br/>public-output policy + presentation events]
-    N --> O
-    O --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
+    N --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
     P --> Q{Verified step}
     Q -->|respond| R[Structured terminal response<br/>free_text, exact list, authored object,<br/>or observed object projection]
     Q -->|synthesize_answer| S[Grounded synthesis]
@@ -212,11 +211,16 @@ The permission plane is a structured execution boundary. Registry metadata from 
 
 ### Sandbox and Cross-Platform Execution
 
-`[tools].sandbox_backend` is independent from `sandbox_mode`. The default
-backend is `auto`: it resolves to Bubblewrap on Linux and macOS Seatbelt
-(`/usr/bin/sandbox-exec`) on macOS. Selecting a backend does not grant access;
-the verifier still applies capability effect, risk, confirmation, workspace,
-network, credential, and privilege policy before an adapter starts.
+`sandbox_mode` defines the permission scope; `[tools].sandbox_backend` selects
+the platform mechanism that enforces that scope. The two settings never
+substitute for each other. The default backend is `auto`: it resolves to
+Bubblewrap on Linux and Seatbelt (`/usr/bin/sandbox-exec`) on macOS. Selecting
+a backend does not grant access; the verifier still applies capability effect,
+risk, confirmation, workspace, network, credential, and privilege policy before
+an adapter starts. When a restricted mode cannot find its backend, the platform
+does not match, or the remote executor is unconfigured, execution is rejected
+with a structured result instead of silently falling back to an unsandboxed
+process.
 
 
 Detailed flow: [Security and execution](docs/architecture/02-security-execution.md).
@@ -245,6 +249,15 @@ process observation. An incompatible explicit manager returns a structured
 and release scripts use `scripts/shell_compat.sh` instead of GNU-only file/date
 commands or Bash 4-only collection syntax. See
 [`docs/cross_platform_contract.md`](docs/cross_platform_contract.md).
+
+Trusted lifecycle hooks are configured in `configs/agent_guard.toml` and stay
+disabled by default. Administrators can inspect a redacted status projection
+through `GET /v1/admin/hooks/status` or the browser Models page: it reports
+setup state, enabled/valid/invalid counts, trust and hash readiness, and every
+supported stage, without returning handler arguments, endpoint URLs,
+environment references, or credentials. Enabling or trusting a hook still
+requires reviewed repository configuration; the UI cannot promote an unreviewed
+script into an execution boundary.
 
 ## Natural Language Contract Boundary
 
@@ -375,7 +388,11 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace and Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace, `clawcli llm-trace`, and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts, structured memory/KB policy, `model_catalog_trace`, `model_catalog_trace.readiness`, and `resume_trace` next to raw request/response details. Each browser chat turn keeps only a lightweight task/trace index; raw provider requests and responses are reloaded from the current server log or its retained seven-day dated archives and are never copied into browser storage. The trace response reports whether full detail is available, metadata-only, still pending, or unavailable because it was not recorded or has expired. When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, model/provider capability decision, selected-model readiness decision, resume/checkpoint decision, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content.
+
+The browser teaching-mode trace, `clawcli llm-trace`, and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts, structured memory/KB policy, `model_catalog_trace`, `model_catalog_trace.readiness`, and `resume_trace` next to raw request/response details. Each browser chat turn keeps only a lightweight task/trace index; raw provider requests and responses are reloaded from the current server log or its retained seven-day dated archives and are never copied into browser storage. The trace response reports whether full detail is available, metadata-only, still pending, or unavailable because it was not recorded or has expired.
+
+When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, model/provider capability decision, selected-model readiness decision, resume/checkpoint decision, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
 
 Execution boundaries are exposed as machine fields instead of prose-only notes. Teaching mode, subagent review, `clawcli report`, and replay tooling should consume fields such as `workspace_root`, `current_process_cwd`, `current_workspace_scope`, `write_enabled`, `external_publish_enabled`, `allowed_roles`, `runtime_config.max_parallel_readonly`, `hook_stages`, `hook_decisions`, `handler_id`, `handler_kind`, `trust_status`, `failure_policy`, `permission_decision`, `policy_decision`, `risk_level`, `dry_run`, `checkpoint_id`, `poll_ref`, `next_check_after`, and `provider_blocker`. Subagent batch aggregation also carries `aggregation.execution_mode` so consumers do not need to infer the execution style from finalizer wording.
 
@@ -444,13 +461,14 @@ clawcli goal clear task-123
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted `recorded_only` replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage, `replay run --view llm|tools|checkpoints|summary` filters recorded evidence, and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
 
-CLI lifecycle and its persisted teaching evidence are documented in [Task state and context](docs/architecture/03-task-state-context.md) and [Coding and observability](docs/architecture/04-coding-observability.md).
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
 - Seeded resume restores the persisted `TaskBudgetSlice`, cumulative model/tool/token/cost/elapsed counters, continuation index, observations, artifact refs, repair state, and completed side-effect fingerprints before re-entering the agent loop. A healthy task continues while it produces structured progress; repeat/stagnation, cancellation, policy, or administrator hard ceilings stop it.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
+
+CLI lifecycle and its persisted teaching evidence are documented in [Task state and context](docs/architecture/03-task-state-context.md) and [Coding and observability](docs/architecture/04-coding-observability.md).
 
 <!-- ai-learning-exclude:start -->
 ## Detailed Architecture Guide
@@ -571,7 +589,7 @@ flowchart LR
 - cloud/server: nginx may serve `UI/dist` and proxy `/v1` and `/webd` to `webd`; nginx never proxies to `clawd`
 - `webd` is the browser security boundary and provides password login, session persistence, credential injection, request limits, and API proxying
 - `clawd` does not serve browser assets and cannot bind a non-loopback address; local channel daemons and `clawcli` may use its internal API
-- The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep the webd public port open when local use omits nginx. Closing direct webd access does not interrupt a configured native nginx deployment because nginx continues proxying over loopback.
+- The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep direct webd access open when running locally without nginx. Closing it does not interrupt a configured native nginx deployment, because nginx keeps proxying over loopback.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the Agent Runtime host itself.
 - The `Learning / Maintenance` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
@@ -818,7 +836,7 @@ UI notes:
 - source lives in `UI/`
 - built assets live in `UI/dist`
 - `build-ui-nginx.sh` builds `UI/dist` by default; pass `--deploy` only for an explicit nginx deployment
-- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when a Agent Runtime nginx site already exists, which keeps local updates free of system configuration
+- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when an Agent Runtime nginx site already exists, so local updates never touch system configuration
 - the full `build-all.sh` flow uses that conditional deployment mode: without nginx it only refreshes `UI/dist`; with nginx already deployed it syncs the latest UI to the site's existing `root`
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-agent-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment

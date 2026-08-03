@@ -133,6 +133,44 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
 }
 
 #[tokio::test]
+async fn late_failure_after_six_steps_never_becomes_machine_status_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-late-failure-no-machine-status");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    for step_no in 1..=7 {
+        loop_state.executed_step_results.push(ok_step_result(
+            &format!("step_{step_no}"),
+            "media_download",
+            r#"{"status":"ok"}"#,
+        ));
+    }
+    loop_state.executed_step_results.push(err_step_result(
+        "step_8",
+        "media_download",
+        "repeat action guard stopped the repeated request",
+    ));
+
+    let reply = observed_execution_without_publishable_delivery_reply(
+        &state,
+        &task,
+        "下载这条图文内容",
+        &loop_state,
+        None,
+        None,
+        "no publishable final answer was produced",
+    )
+    .await
+    .expect("observed execution reply");
+
+    assert!(!reply.text.contains("reason_code=observed_execution_status"));
+    assert!(!reply.text.contains("step.1.status="));
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::looks_like_internal_trace_artifact(message)));
+}
+
+#[tokio::test]
 async fn observed_execution_without_delivery_uses_exact_scalar_path_projection() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-dry-run-projection");
@@ -216,63 +254,6 @@ async fn observed_execution_without_delivery_does_not_reuse_route_fixed_question
             .and_then(|journal| journal.final_status),
         Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
     );
-}
-
-#[test]
-fn structured_failure_message_is_grounded_in_failed_step() {
-    let mut loop_state = crate::agent_engine::LoopState::new();
-    loop_state
-        .round_traces
-        .push(crate::task_journal::TaskJournalRoundTrace {
-            round_no: 1,
-            goal: "identify failed command step".to_string(),
-            execution_recipe_summary: None,
-            plan_result: Some(plan_result_with_steps(vec![
-                crate::PlanStep {
-                    step_id: "step_1".to_string(),
-                    action_type: "call_skill".to_string(),
-                    skill: "run_cmd".to_string(),
-                    args: serde_json::json!({"command": "echo RC_RENDER_ZH_OK"}),
-                    depends_on: Vec::new(),
-                    why: String::new(),
-                },
-                crate::PlanStep {
-                    step_id: "step_2".to_string(),
-                    action_type: "call_skill".to_string(),
-                    skill: "run_cmd".to_string(),
-                    args: serde_json::json!({
-                        "command": "definitely_missing_command_agent_render_zh_0605"
-                    }),
-                    depends_on: vec!["step_1".to_string()],
-                    why: String::new(),
-                },
-            ])),
-            verify_result: None,
-        });
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_1", "run_cmd", "RC_RENDER_ZH_OK\n"));
-    loop_state.executed_step_results.push(err_step_result(
-        "step_2",
-        "run_cmd",
-        "__RC_SKILL_ERROR__:{\"error_kind\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_agent_render_zh_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
-    ));
-    let message =
-        "step_2: definitely_missing_command_agent_render_zh_0605 failed with exit code 127";
-
-    assert!(planned_delivery_identifies_failed_observed_step(
-        message,
-        &loop_state
-    ));
-    let summary = deterministic_observed_execution_status_summary(&loop_state);
-
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-    assert_eq!(summary.completion_ok, Some(true));
-    assert_eq!(summary.grounded_ok, Some(true));
-    assert_eq!(summary.format_ok, Some(true));
 }
 
 #[test]

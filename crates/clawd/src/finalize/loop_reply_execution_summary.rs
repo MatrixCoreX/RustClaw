@@ -143,17 +143,6 @@ pub(super) fn plan_step_for_execution<'a>(
         })
 }
 
-pub(super) fn exact_observation_arg_from_plan_step(
-    plan_step: Option<&crate::PlanStep>,
-) -> Option<&str> {
-    let args = &plan_step?.args;
-    args.get("command")
-        .or_else(|| args.get("cmd"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
 pub(super) fn output_text_from_execution_result(
     step: &crate::executor::StepExecutionResult,
 ) -> Option<String> {

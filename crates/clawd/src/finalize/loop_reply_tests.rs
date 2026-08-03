@@ -7,16 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     agent_context_allows_observed_output_language_fallback,
-    append_compound_file_delivery_token_from_route,
-    attach_deterministic_observed_execution_status_answer, attach_execution_summary_to_delivery,
+    append_compound_file_delivery_token_from_route, attach_execution_summary_to_delivery,
     backfill_delivery_from_last_outputs, build_execution_summary_message,
     build_execution_summary_messages, build_pending_user_input_clarify_reason,
     content_evidence_missing_target_answer, content_evidence_step_failure_answer,
     content_evidence_terminal_respond_is_contractual_answer,
-    delivery_contract_suppresses_execution_summary, delivery_is_content_answer_candidate,
-    deterministic_matrix_observed_shape_answer, deterministic_missing_observed_target_answer,
-    deterministic_observed_execution_status_answer,
-    deterministic_observed_execution_status_summary, direct_exact_scalar_path_from_dry_run_payload,
+    delivery_contract_suppresses_execution_summary, deterministic_matrix_observed_shape_answer,
+    deterministic_missing_observed_target_answer, direct_exact_scalar_path_from_dry_run_payload,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
@@ -32,19 +29,16 @@ use super::{
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
-    output_text_from_execution_result, planned_delivery_identifies_failed_observed_step,
-    pre_execution_confirmation_checkpoint_seed, prefer_observed_answer_for_exact_contract,
-    preferred_route_clarify_question, preserve_compound_content_summary_with_file_token,
-    priority_last_respond_for_final_delivery,
-    replace_delivery_with_deterministic_observed_execution_status_answer,
+    output_text_from_execution_result, pre_execution_confirmation_checkpoint_seed,
+    prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
+    preserve_compound_content_summary_with_file_token, priority_last_respond_for_final_delivery,
     replace_delivery_with_latest_tail_read_range_answer,
     resolve_file_token_from_auto_locator_answer, route_allows_file_token_only_fallback,
     route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
     run_task_lifecycle_renderer_registry, should_drop_passthrough_delivery_for_content_evidence,
-    should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
-    structured_json_values_from_output, successful_delivery_final_status,
-    verify_summary_requires_resume_confirmation, visible_answer_is_machine_payload,
-    visible_answer_is_observed_machine_projection,
+    should_return_missing_file_delivery_reply, structured_json_values_from_output,
+    successful_delivery_final_status, verify_summary_requires_resume_confirmation,
+    visible_answer_is_machine_payload, visible_answer_is_observed_machine_projection,
     visible_machine_payload_should_remain_structured,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -429,27 +423,6 @@ fn finalization_prefers_latest_planner_contract_over_initial_context() {
             .map(|contract| contract.response_shape),
         Some(OutputResponseShape::Scalar)
     );
-}
-
-fn push_raw_plan_text(loop_state: &mut crate::agent_engine::LoopState, raw_plan_text: &str) {
-    loop_state
-        .round_traces
-        .push(crate::task_journal::TaskJournalRoundTrace {
-            round_no: 1,
-            goal: String::new(),
-            execution_recipe_summary: None,
-            plan_result: Some(crate::PlanResult {
-                goal: String::new(),
-                missing_slots: Vec::new(),
-                needs_confirmation: false,
-                output_contract: None,
-                steps: Vec::new(),
-                planner_notes: String::new(),
-                plan_kind: crate::PlanKind::Single,
-                raw_plan_text: raw_plan_text.to_string(),
-            }),
-            verify_result: None,
-        });
 }
 
 fn plan_result_with_steps(steps: Vec<crate::PlanStep>) -> crate::PlanResult {

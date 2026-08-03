@@ -522,7 +522,16 @@ pub(crate) fn finalizer_schema_answer(raw: &str) -> Option<(String, FinalizerSch
 
 pub(crate) fn looks_like_internal_trace_artifact(text: &str) -> bool {
     let trimmed = text.trim();
-    trimmed.starts_with("subtask#") || trimmed.starts_with("round=") || trimmed.starts_with("step=")
+    trimmed.starts_with("subtask#")
+        || trimmed.starts_with("round=")
+        || trimmed.starts_with("step=")
+        || (trimmed
+            .lines()
+            .any(|line| line.trim() == "reason_code=observed_execution_status")
+            && trimmed.lines().any(|line| {
+                let line = line.trim();
+                line.starts_with("step.") && line.contains(".status=")
+            }))
 }
 
 #[cfg(test)]
