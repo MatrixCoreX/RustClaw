@@ -749,7 +749,15 @@ fn async_poll_adapter_failure_keeps_machine_error_contract() {
         "message_key": "provider.job.failed",
         "failure_result_json": {
             "status": "error",
-            "error_code": "provider_job_failed"
+            "error_text": "The provider rejected this media request.",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "media_download",
+                "status": "error",
+                "error_code": "provider_job_failed",
+                "message_key": "provider.job.failed",
+                "retryable": false
+            }
         }
     })));
 
@@ -759,6 +767,14 @@ fn async_poll_adapter_failure_keeps_machine_error_contract() {
     assert_eq!(payload["error_code"], "provider_job_failed");
     assert_eq!(payload["message_key"], "provider.job.failed");
     assert_eq!(payload["failure_result_json"]["status"], "error");
+    assert_eq!(
+        payload["failure_result_json"]["error_text"],
+        "The provider rejected this media request."
+    );
+    assert_eq!(
+        payload["failure_result_json"]["extra"]["error_code"],
+        "provider_job_failed"
+    );
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
 }

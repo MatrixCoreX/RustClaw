@@ -198,7 +198,10 @@ fn terminal_delivery_content(
         .as_ref()
         .and_then(|result| result.get("resume_context"))
         .is_some_and(|value| !value.is_null());
-    let (notice_code, error_code, message_key, retryable) = if has_resume_context {
+    let failure_detail = (!has_resume_context && matches!(&status, TaskStatus::Failed))
+        .then(|| crate::visible_text::structured_task_failure_detail(record.result_json.as_ref()))
+        .flatten();
+    let (notice_code, error_code, message_key, default_retryable) = if has_resume_context {
         (
             "task.resume_interrupted",
             "task.resume_interrupted",
@@ -217,8 +220,21 @@ fn terminal_delivery_content(
             _ => ("task.failed", "task.failed", "channel.task.failed", true),
         }
     };
+    let retryable = failure_detail
+        .as_ref()
+        .map(|detail| detail.retryable)
+        .unwrap_or(default_retryable);
     let mut notice = ChannelNotice::error(notice_code, error_code, message_key, retryable);
     notice.diagnostic_id = Some(format!("task:{}", record.task.task_id));
+    if let Some(detail) = failure_detail.as_ref() {
+        notice
+            .params
+            .insert("reason_code".to_string(), detail.error_code.clone());
+        notice.params.insert(
+            "failure_message_key".to_string(),
+            detail.message_key.clone(),
+        );
+    }
     if retryable {
         notice.next_actions.push(ChannelNoticeNextAction {
             kind: ChannelNoticeActionKind::Retry,
@@ -226,10 +242,16 @@ fn terminal_delivery_content(
             params: Default::default(),
         });
     }
-    (
-        claw_core::channel_i18n::common_text_for_locale(locale, message_key),
-        Some(notice),
-    )
+    let mut text = claw_core::channel_i18n::common_text_for_locale(locale, message_key);
+    if let Some(detail) = failure_detail {
+        text.push('\n');
+        text.push_str(&claw_core::channel_i18n::common_text_for_locale(
+            locale,
+            "channel.task.failure_reason_label",
+        ));
+        text.push_str(&detail.reason);
+    }
+    (text, Some(notice))
 }
 
 fn project_terminal_delivery_content(text: &str, content: ChannelTaskDeliveryContent) -> String {

@@ -56,6 +56,49 @@ fn failed_terminal_content_uses_common_locale_not_raw_error() {
 }
 
 #[test]
+fn failed_terminal_content_includes_sanitized_protocol_failure_reason() {
+    let state = AppState::test_default_with_fixture_provider();
+    let record = record(
+        "failed",
+        Some(serde_json::json!({
+            "request_id": "media-1",
+            "status": "error",
+            "text": "",
+            "error_text": "转写引擎在当前平台不可用。 token=private-value",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "media_download",
+                "status": "error",
+                "error_code": "dependency_unavailable",
+                "message_key": "media_download.error.dependency_unavailable",
+                "retryable": false
+            }
+        })),
+    );
+    let payload: Value = serde_json::from_str(&record.task.payload_json).unwrap();
+
+    let (text, notice) = terminal_delivery_content(&state, &record, &payload, TaskStatus::Failed);
+
+    assert!(text.contains("失败原因：转写引擎在当前平台不可用。"));
+    assert!(text.contains("token=[REDACTED]"));
+    assert!(!text.contains("private-value"));
+    assert!(!text.contains("private provider detail"));
+    let notice = notice.expect("failure notice");
+    assert_eq!(notice.error_code.as_deref(), Some("task.failed"));
+    assert_eq!(
+        notice.params.get("reason_code").map(String::as_str),
+        Some("dependency_unavailable")
+    );
+    assert_eq!(
+        notice.params.get("failure_message_key").map(String::as_str),
+        Some("media_download.error.dependency_unavailable")
+    );
+    assert!(!notice.retryable);
+    assert!(notice.next_actions.is_empty());
+    notice.validate().expect("notice should remain valid");
+}
+
+#[test]
 fn daemon_request_rejects_schedule_and_proactive_sources() {
     for source in [
         ChannelDeliverySource::ScheduledTask,
