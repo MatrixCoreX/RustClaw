@@ -13,6 +13,7 @@ struct SkillStoreMutationRequest {
 struct SkillStoreDependencyStatus {
     id: String,
     kind: &'static str,
+    applicable: bool,
     installed: bool,
     status_code: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,6 +35,7 @@ fn inspect_declared_host_dependencies(
                 return SkillStoreDependencyStatus {
                     id: dependency_id.clone(),
                     kind: "host",
+                    applicable: true,
                     installed: false,
                     status_code: "unknown",
                     version: None,
@@ -43,6 +45,7 @@ fn inspect_declared_host_dependencies(
             SkillStoreDependencyStatus {
                 id: dependency_id.clone(),
                 kind: "host",
+                applicable: true,
                 installed: detected.is_some(),
                 status_code: if detected.is_some() {
                     "installed"
@@ -59,34 +62,60 @@ fn inspect_declared_runtime_assets(
     asset_ids: &[String],
     storage_directory: &Path,
 ) -> Vec<SkillStoreDependencyStatus> {
+    inspect_declared_runtime_assets_for_target(
+        asset_ids,
+        storage_directory,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
+fn inspect_declared_runtime_assets_for_target(
+    asset_ids: &[String],
+    storage_directory: &Path,
+    os: &str,
+    arch: &str,
+) -> Vec<SkillStoreDependencyStatus> {
     let catalog = managed_runtime_asset_catalog();
     let marker_directory = storage_directory.join("runtime-assets");
     let cache_directory = storage_directory.join("modelscope");
     asset_ids
         .iter()
-        .map(|asset_id| {
+        .filter_map(|asset_id| {
             let Some(definition) = catalog
                 .iter()
                 .find(|definition| definition.id == asset_id)
             else {
-                return SkillStoreDependencyStatus {
+                return Some(SkillStoreDependencyStatus {
                     id: asset_id.clone(),
                     kind: "runtime_asset",
+                    applicable: true,
                     installed: false,
                     status_code: "unknown",
                     version: None,
-                };
+                });
             };
+            if !runtime_asset_supported_on_target(definition, os, arch) {
+                return Some(SkillStoreDependencyStatus {
+                    id: asset_id.clone(),
+                    kind: "runtime_asset",
+                    applicable: false,
+                    installed: false,
+                    status_code: "not_applicable",
+                    version: None,
+                });
+            }
             let marker = marker_directory.join(format!("{}.json", definition.id));
             let installed =
                 runtime_asset_marker_is_valid(&marker, definition, &cache_directory);
-            SkillStoreDependencyStatus {
+            Some(SkillStoreDependencyStatus {
                 id: asset_id.clone(),
                 kind: "runtime_asset",
+                applicable: true,
                 installed,
                 status_code: if installed { "installed" } else { "missing" },
                 version: None,
-            }
+            })
         })
         .collect()
 }
@@ -160,7 +189,9 @@ async fn get_skill_store_dependency_status(
             ));
         }
     };
-    let all_installed = dependencies.iter().all(|dependency| dependency.installed);
+    let all_installed = dependencies
+        .iter()
+        .all(|dependency| !dependency.applicable || dependency.installed);
     (
         StatusCode::OK,
         Json(ApiResponse {

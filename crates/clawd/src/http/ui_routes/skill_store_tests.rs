@@ -9,7 +9,8 @@ use tower::ServiceExt;
 use super::{
     activate_imported_bundle, admission_service, begin_skill_store_mutation, build_ui_router,
     bundled_prompt_for_offline_repair, finish_imported_bundle_activation,
-    imported_bundle_staging_dir, imported_skill_machine_alias, precompiled_skill_package_root_for,
+    imported_bundle_staging_dir, imported_skill_machine_alias,
+    inspect_declared_runtime_assets_for_target, precompiled_skill_package_root_for,
     precompiled_source_fallback_allowed, remove_skill_registry_block, render_skill_store_config,
     skill_store_install_spec, skill_store_operation_store, transition_skill_store_operation,
     write_runtime_config_to_paths,
@@ -277,6 +278,32 @@ async fn dependency_status_checks_declared_items_without_creating_private_storag
         !storage.exists(),
         "status reads must remain side-effect free"
     );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn intel_macos_dependency_status_marks_funasr_assets_not_applicable() {
+    let (state, workspace) = isolated_skill_store_state();
+    let storage = state
+        .core
+        .skill_storage
+        .resolved_directory_path("media_download")
+        .expect("media storage");
+    let asset_ids = vec![
+        "modelscope_sensevoice_small".to_string(),
+        "modelscope_fsmn_vad".to_string(),
+    ];
+
+    let dependencies =
+        inspect_declared_runtime_assets_for_target(&asset_ids, &storage, "macos", "x86_64");
+
+    assert_eq!(dependencies.len(), 2);
+    assert!(dependencies.iter().all(|dependency| {
+        !dependency.applicable
+            && !dependency.installed
+            && dependency.status_code == "not_applicable"
+    }));
+    assert!(!storage.exists());
     let _ = std::fs::remove_dir_all(workspace);
 }
 
