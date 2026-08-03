@@ -1,11 +1,21 @@
 use std::sync::OnceLock;
 
-use claw_core::types::TaskQueryResponse;
+use claw_core::types::{TaskQueryResponse, TaskStatus};
 use regex::Regex;
+use serde_json::Value;
 
 const REDACTED: &str = "[REDACTED]";
 const REDACTED_INTERNAL_CONTEXT: &str = "[INTERNAL_CONTEXT_REDACTED]";
 const REDACTED_RUNTIME_TEMPLATE: &str = "[RUNTIME_TEMPLATE]";
+const MAX_TASK_FAILURE_REASON_CHARS: usize = 1_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StructuredTaskFailureDetail {
+    pub(crate) reason: String,
+    pub(crate) error_code: String,
+    pub(crate) message_key: String,
+    pub(crate) retryable: bool,
+}
 
 const INTERNAL_CONTEXT_MARKERS: &[&str] = &[
     "### MEMORY_USE_POLICY",
@@ -29,12 +39,61 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
 pub(crate) fn sanitize_task_query_response_for_delivery(
     mut task: TaskQueryResponse,
 ) -> TaskQueryResponse {
-    task.error_text = task.error_text.take().and_then(|error_text| {
-        let sanitized = sanitize_user_visible_text(&error_text);
-        let sanitized = sanitized.trim();
-        (!sanitized.is_empty()).then(|| sanitized.to_string())
+    let structured_reason = matches!(task.status, TaskStatus::Failed | TaskStatus::Timeout)
+        .then(|| structured_task_failure_detail(task.result_json.as_ref()))
+        .flatten()
+        .map(|detail| detail.reason);
+    task.error_text = structured_reason.or_else(|| {
+        task.error_text.take().and_then(|error_text| {
+            let sanitized = sanitize_user_visible_text(&error_text);
+            let sanitized = sanitized.trim();
+            (!sanitized.is_empty()).then(|| sanitized.to_string())
+        })
     });
     task
+}
+
+pub(crate) fn structured_task_failure_detail(
+    result: Option<&Value>,
+) -> Option<StructuredTaskFailureDetail> {
+    let result = result?.as_object()?;
+    let extra = result.get("extra")?.as_object()?;
+    if result.get("status").and_then(Value::as_str) != Some("error")
+        || extra.get("status").and_then(Value::as_str) != Some("error")
+        || extra
+            .get("schema_version")
+            .and_then(Value::as_u64)
+            .is_none()
+        || extra
+            .get("source_skill")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+    {
+        return None;
+    }
+    let error_code = nonempty_string(extra.get("error_code"))?;
+    let message_key = nonempty_string(extra.get("message_key"))?;
+    let retryable = extra.get("retryable").and_then(Value::as_bool)?;
+    let reason = nonempty_string(result.get("error_text"))?;
+    let reason = sanitize_user_visible_text(reason);
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    Some(StructuredTaskFailureDetail {
+        reason: truncate_chars(reason, MAX_TASK_FAILURE_REASON_CHARS),
+        error_code: error_code.to_string(),
+        message_key: message_key.to_string(),
+        retryable,
+    })
+}
+
+fn nonempty_string(value: Option<&Value>) -> Option<&str> {
+    value?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn redact_sensitive_text(text: &str) -> String {

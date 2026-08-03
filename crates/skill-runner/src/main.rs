@@ -690,8 +690,8 @@ fn materialize_child_secret_references(launch: &mut ChildLaunch) -> Result<(), S
 }
 
 struct DurableSlotLeases {
-    _global: File,
     _skill: File,
+    _global: File,
 }
 
 async fn acquire_durable_slots(
@@ -704,18 +704,38 @@ async fn acquire_durable_slots(
     let global_limit = durable_slot_limit(DURABLE_GLOBAL_MAX_CONCURRENCY_ENV)?;
     let skill_root = durable_slot_root(DURABLE_SKILL_SLOT_ROOT_ENV)?;
     let skill_limit = durable_slot_limit(DURABLE_SKILL_MAX_CONCURRENCY_ENV)?;
+    acquire_durable_slots_from_roots(
+        durable,
+        &skill_root,
+        skill_limit,
+        &global_root,
+        global_limit,
+    )
+    .await
+    .map(Some)
+}
+
+async fn acquire_durable_slots_from_roots(
+    durable: &DurableJobRuntime,
+    skill_root: &Path,
+    skill_limit: usize,
+    global_root: &Path,
+    global_limit: usize,
+) -> Result<DurableSlotLeases, String> {
     std::fs::create_dir_all(&global_root)
         .map_err(|error| format!("durable_global_slot_root_create_failed: {error}"))?;
     std::fs::create_dir_all(&skill_root)
         .map_err(|error| format!("durable_skill_slot_root_create_failed: {error}"))?;
     durable.mark_queue_waiting()?;
-    let (global_slot, global_lease) = acquire_durable_slot(&global_root, global_limit).await?;
+    // Wait for the skill-specific lane before occupying a global worker slot.
+    // A burst for one serialized skill must not starve unrelated skills.
     let (skill_slot, skill_lease) = acquire_durable_slot(&skill_root, skill_limit).await?;
+    let (global_slot, global_lease) = acquire_durable_slot(&global_root, global_limit).await?;
     durable.mark_slots_acquired(global_slot, skill_slot)?;
-    Ok(Some(DurableSlotLeases {
-        _global: global_lease,
+    Ok(DurableSlotLeases {
         _skill: skill_lease,
-    }))
+        _global: global_lease,
+    })
 }
 
 fn durable_slot_root(env_name: &str) -> Result<PathBuf, String> {

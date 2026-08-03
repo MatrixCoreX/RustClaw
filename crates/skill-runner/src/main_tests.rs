@@ -1,5 +1,59 @@
 use super::*;
 
+#[tokio::test]
+async fn queued_durable_skill_does_not_occupy_a_global_slot() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let job_root = root.path().join("job");
+    let skill_root = root.path().join("skill-slots");
+    let global_root = root.path().join("global-slots");
+    std::fs::create_dir_all(&job_root).expect("job root");
+    std::fs::create_dir_all(&skill_root).expect("skill root");
+    std::fs::create_dir_all(&global_root).expect("global root");
+
+    let occupied_skill_slot = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(skill_root.join("slot-0.lock"))
+        .expect("open occupied skill slot");
+    occupied_skill_slot
+        .try_lock_exclusive()
+        .expect("occupy skill slot");
+
+    let durable = DurableJobRuntime {
+        directory: job_root,
+    };
+    let queued = tokio::spawn({
+        let skill_root = skill_root.clone();
+        let global_root = global_root.clone();
+        async move { acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 1).await }
+    });
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let global_probe = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(global_root.join("slot-0.lock"))
+        .expect("open global probe");
+    global_probe
+        .try_lock_exclusive()
+        .expect("a skill-local waiter must leave the global slot available");
+    drop(global_probe);
+    drop(occupied_skill_slot);
+
+    let leases = tokio::time::timeout(Duration::from_secs(2), queued)
+        .await
+        .expect("queued acquisition should resume")
+        .expect("queued task should join")
+        .expect("queued acquisition should succeed");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("job/queue_state")).unwrap(),
+        "acquired"
+    );
+    drop(leases);
+}
+
 #[test]
 fn missing_runtime_timeout_limit_uses_manifest_timeout() {
     let configured = parse_configured_timeout_limit(None).expect("missing limit");

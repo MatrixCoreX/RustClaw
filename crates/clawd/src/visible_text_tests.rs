@@ -111,6 +111,63 @@ fn task_query_delivery_exposes_readable_error_without_internal_envelope() {
 }
 
 #[test]
+fn task_query_delivery_prefers_protocol_failure_reason_over_machine_error_code() {
+    let task = TaskQueryResponse {
+        task_id: Uuid::new_v4(),
+        status: TaskStatus::Failed,
+        execution_state: None,
+        goal: None,
+        task_plan: None,
+        skill_progress: None,
+        result_json: Some(serde_json::json!({
+            "request_id": "media-1",
+            "status": "error",
+            "text": "",
+            "error_text": "The requested transcription engine is unavailable. token=private-value",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "media_download",
+                "status": "error",
+                "error_code": "dependency_unavailable",
+                "message_key": "media_download.error.dependency_unavailable",
+                "retryable": false
+            }
+        })),
+        error_text: Some("dependency_unavailable".to_string()),
+        lifecycle: None,
+    };
+
+    let delivered = sanitize_task_query_response_for_delivery(task);
+
+    assert_eq!(
+        delivered.error_text.as_deref(),
+        Some("The requested transcription engine is unavailable. token=[REDACTED]")
+    );
+}
+
+#[test]
+fn task_query_delivery_does_not_promote_uncontracted_result_error_text() {
+    let task = TaskQueryResponse {
+        task_id: Uuid::new_v4(),
+        status: TaskStatus::Failed,
+        execution_state: None,
+        goal: None,
+        task_plan: None,
+        skill_progress: None,
+        result_json: Some(serde_json::json!({
+            "status": "error",
+            "error_text": "private worker diagnostic"
+        })),
+        error_text: Some("task.failed".to_string()),
+        lifecycle: None,
+    };
+
+    let delivered = sanitize_task_query_response_for_delivery(task);
+
+    assert_eq!(delivered.error_text.as_deref(), Some("task.failed"));
+}
+
+#[test]
 fn malformed_structured_skill_error_payload_does_not_leak_marker_tail() {
     let raw = r#"执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_text":"broken""#;
 
