@@ -344,6 +344,86 @@ fn host_scope_mutation_requires_server_authorization() {
 
     assert!(error.contains("invalid_target"));
     assert!(!path.exists());
+
+    let parsed = crate::skills::parse_structured_skill_error(&error)
+        .expect("structured pre-dispatch denial");
+    let extra = parsed.extra.expect("canonical error extra");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+    assert!(crate::skills::structured_skill_error_requests_replan(
+        &error
+    ));
+}
+
+#[test]
+fn runtime_state_target_is_rejected_as_retryable_before_operation() {
+    let workspace = TestWorkspace::new("runtime-state-target");
+    let target = workspace
+        .path()
+        .join(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
+        .join("generated")
+        .join("result.txt");
+    let operation_ran = std::cell::Cell::new(false);
+
+    let error = run_checkpointed_workspace_mutation(
+        workspace.path(),
+        "task-runtime-state-target",
+        "write_text",
+        &target,
+        || {
+            operation_ran.set(true);
+            fs::write(&target, "must not run").map_err(|error| error.to_string())
+        },
+    )
+    .expect_err("runtime state target must be rejected");
+
+    assert!(!operation_ran.get());
+    assert!(!target.exists());
+    let parsed =
+        crate::skills::parse_structured_skill_error(&error).expect("structured target rejection");
+    assert_eq!(parsed.error_code, "invalid_target_path");
+    let extra = parsed.extra.expect("canonical error extra");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &error
+    ));
+}
+
+#[test]
+fn verified_unchanged_operation_error_is_marked_no_effect() {
+    let workspace = TestWorkspace::new("verified-operation-no-effect");
+    let target = workspace.path().join("result.txt");
+    let operation_error = crate::skills::structured_skill_error_from_parts(
+        "write_file",
+        "permission_denied",
+        "write denied",
+        None,
+        None,
+    );
+
+    let error = run_checkpointed_workspace_mutation(
+        workspace.path(),
+        "task-operation-no-effect",
+        "write_text",
+        &target,
+        || Err(operation_error),
+    )
+    .expect_err("operation must fail");
+
+    let parsed =
+        crate::skills::parse_structured_skill_error(&error).expect("structured operation error");
+    let extra = parsed.extra.expect("canonical error extra");
+    assert_eq!(extra["failure_phase"], "execution_no_effect");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], false);
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &error
+    ));
 }
 
 #[cfg(unix)]

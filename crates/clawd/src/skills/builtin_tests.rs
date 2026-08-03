@@ -537,6 +537,31 @@ async fn write_file_append_preserves_existing_content() {
 }
 
 #[tokio::test]
+async fn write_file_accepts_text_larger_than_legacy_delivery_limit() {
+    let root = TempDirGuard::new("write_file_large_delivery");
+    let state = test_state(root.path.clone());
+    let content = "长文本。".repeat(40_000);
+
+    let output = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "large-delivery.txt",
+            "content": content,
+        }),
+    )
+    .await
+    .expect("large text delivery should be written");
+
+    assert_workspace_mutation(&output, "write_text", "document/large-delivery.txt");
+    assert_eq!(
+        fs::read_to_string(root.path.join("document/large-delivery.txt"))
+            .expect("read large delivery"),
+        content
+    );
+}
+
+#[tokio::test]
 async fn write_file_append_line_separates_existing_non_newline_tail() {
     let root = TempDirGuard::new("write_file_append_line_separator");
     let path = root.path.join("notes/memo.txt");
@@ -638,6 +663,11 @@ async fn write_file_rejects_conflicting_append_and_mode_tokens() {
         crate::skills::parse_structured_skill_error(&err).expect("structured write_file error");
     assert_eq!(structured.skill, "write_file");
     assert_eq!(structured.error_code, "invalid_args");
+    let extra = structured.extra.expect("canonical write_file error extra");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
 }
 
 #[tokio::test]
@@ -808,6 +838,11 @@ async fn remove_file_keeps_directory_delete_explicit() {
         crate::skills::parse_structured_skill_error(&err).expect("structured remove_file error");
     assert_eq!(structured.skill, "remove_file");
     assert_eq!(structured.error_code, "is_directory");
+    let extra = structured.extra.expect("canonical remove_file error extra");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
 
     let output = execute_builtin_skill(
         &state,

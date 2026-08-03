@@ -111,11 +111,12 @@ where
     F: FnOnce() -> Result<(), String>,
 {
     let mut checkpoint =
-        StructuredMutationCheckpoint::prepare(workspace_root, task_id, action, target)?;
+        StructuredMutationCheckpoint::prepare(workspace_root, task_id, action, target)
+            .map_err(pre_dispatch_replan_error)?;
     if let Err(operation_error) = operation() {
         if checkpoint.current_matches_before_state().unwrap_or(false) {
             remove_checkpoint_dir(&checkpoint.checkpoint_dir);
-            return Err(operation_error);
+            return Err(verified_no_effect_error(operation_error));
         }
         if let Err(restore_error) = checkpoint.restore_before_state() {
             return Err(mutation_error(
@@ -129,7 +130,7 @@ where
             ));
         }
         remove_checkpoint_dir(&checkpoint.checkpoint_dir);
-        return Err(operation_error);
+        return Err(verified_no_effect_error(operation_error));
     }
     checkpoint.finish()
 }
@@ -145,7 +146,7 @@ pub(super) fn run_authorized_mutation<F>(
 where
     F: FnOnce() -> Result<(), String>,
 {
-    let root = canonical_workspace_root(workspace_root)?;
+    let root = canonical_workspace_root(workspace_root).map_err(pre_dispatch_error)?;
     if target.starts_with(&root) || target.starts_with(workspace_root) {
         return run_checkpointed_workspace_mutation(
             workspace_root,
@@ -156,7 +157,7 @@ where
         );
     }
     if !host_scope_authorized {
-        return Err(invalid_target_error(target));
+        return Err(pre_dispatch_replan_error(invalid_target_error(target)));
     }
     operation()?;
     encode_result(json!({
@@ -175,6 +176,33 @@ where
         "changed_files": [target.display().to_string()],
         "artifact_refs": [],
     }))
+}
+
+fn pre_dispatch_error(error: String) -> String {
+    crate::skills::annotate_structured_skill_error_not_applied(
+        &error,
+        "pre_dispatch",
+        Some(false),
+        None,
+    )
+}
+
+pub(super) fn pre_dispatch_replan_error(error: String) -> String {
+    crate::skills::annotate_structured_skill_error_not_applied(
+        &error,
+        "pre_dispatch",
+        Some(true),
+        Some("replan_arguments"),
+    )
+}
+
+fn verified_no_effect_error(error: String) -> String {
+    crate::skills::annotate_structured_skill_error_not_applied(
+        &error,
+        "execution_no_effect",
+        None,
+        None,
+    )
 }
 
 pub(super) fn checkpoint_is_structured_mutation(checkpoint_dir: &Path) -> Result<bool, String> {

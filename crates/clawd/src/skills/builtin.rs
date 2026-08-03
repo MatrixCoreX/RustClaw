@@ -40,7 +40,9 @@ use builtin_run_cmd::{
     start_async_command, RunSafeCommandError,
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
-use builtin_workspace_mutation::{atomic_write_file, run_authorized_mutation};
+use builtin_workspace_mutation::{
+    atomic_write_file, pre_dispatch_replan_error, run_authorized_mutation,
+};
 use builtin_workspace_patch::execute_workspace_patch;
 
 fn builtin_error(
@@ -265,21 +267,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
             )?;
             let path = required_string(map, "path")?;
             let content = required_string(map, "content")?;
-            let append = write_file_append_flag(map)?;
-            let create_parents = write_file_create_parents_flag(map)?;
-            if content.len() > crate::MAX_WRITE_FILE_BYTES {
-                return Err(builtin_error(
-                    "write_file",
-                    "content_too_large",
-                    format!("content too large: {} bytes", content.len()),
-                    Some(path),
-                    None,
-                    Some(serde_json::json!({
-                        "content_bytes": content.len(),
-                        "max_content_bytes": crate::MAX_WRITE_FILE_BYTES,
-                    })),
-                ));
-            }
+            let append = write_file_append_flag(map).map_err(pre_dispatch_replan_error)?;
+            let create_parents =
+                write_file_create_parents_flag(map).map_err(pre_dispatch_replan_error)?;
             let effective_path =
                 crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
             let real_path = resolve_workspace_path(
@@ -946,7 +936,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() && !(target_kind.eq_ignore_ascii_case("directory") && recursive) {
-                return Err(builtin_error(
+                return Err(pre_dispatch_replan_error(builtin_error(
                     "remove_file",
                     "is_directory",
                     format!(
@@ -956,7 +946,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     Some(path),
                     Some(&real_path),
                     None,
-                ));
+                )));
             }
             run_authorized_mutation(
                 &state.skill_rt.workspace_root,
