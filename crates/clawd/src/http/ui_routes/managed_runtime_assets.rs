@@ -13,6 +13,10 @@ struct ManagedRuntimeAssetDefinition {
     /// damaged snapshot without re-hashing multi-gigabyte model weights on
     /// every repair/update request.
     required_files: &'static [&'static str],
+    /// Exact host targets where the corresponding private runtime package is
+    /// structurally unavailable. The skill can still be installed there with
+    /// its remaining engines and host dependencies.
+    unsupported_targets: &'static [(&'static str, &'static str)],
 }
 
 #[derive(Debug)]
@@ -38,6 +42,7 @@ fn managed_runtime_asset_catalog() -> &'static [ManagedRuntimeAssetDefinition] {
             remote_ref: "refs/heads/master",
             expected_commit: "7bf452403abd7353a300cd760f7adae7701c92c1",
             required_files: &["model.pt", "config.yaml"],
+            unsupported_targets: &[("macos", "x86_64")],
         },
         ManagedRuntimeAssetDefinition {
             id: "modelscope_fsmn_vad",
@@ -47,8 +52,28 @@ fn managed_runtime_asset_catalog() -> &'static [ManagedRuntimeAssetDefinition] {
             remote_ref: "refs/tags/v2.0.4^{}",
             expected_commit: "662fc7a38813d81305085696d59eb5b1141a204a",
             required_files: &["model.pt", "config.yaml"],
+            unsupported_targets: &[("macos", "x86_64")],
         },
     ]
+}
+
+fn runtime_asset_supported_on_target(
+    definition: &ManagedRuntimeAssetDefinition,
+    os: &str,
+    arch: &str,
+) -> bool {
+    !definition
+        .unsupported_targets
+        .iter()
+        .any(|(unsupported_os, unsupported_arch)| {
+            *unsupported_os == os && *unsupported_arch == arch
+        })
+}
+
+fn runtime_asset_supported_on_current_target(
+    definition: &ManagedRuntimeAssetDefinition,
+) -> bool {
+    runtime_asset_supported_on_target(definition, std::env::consts::OS, std::env::consts::ARCH)
 }
 
 fn resolve_declared_runtime_assets(
@@ -79,7 +104,13 @@ async fn install_declared_runtime_assets(
     if asset_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let definitions = resolve_declared_runtime_assets(asset_ids)?;
+    let definitions = resolve_declared_runtime_assets(asset_ids)?
+        .into_iter()
+        .filter(|definition| runtime_asset_supported_on_current_target(definition))
+        .collect::<Vec<_>>();
+    if definitions.is_empty() {
+        return Ok(Vec::new());
+    }
     control
         .phase("runtime_assets")
         .map_err(|error| ManagedRuntimeAssetError {
@@ -415,6 +446,27 @@ mod managed_runtime_asset_tests {
                 .expected_commit
                 .chars()
                 .all(|character| character.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn intel_macos_excludes_assets_for_the_unavailable_funasr_runtime() {
+        for definition in managed_runtime_asset_catalog() {
+            assert!(!runtime_asset_supported_on_target(
+                definition,
+                "macos",
+                "x86_64"
+            ));
+            assert!(runtime_asset_supported_on_target(
+                definition,
+                "macos",
+                "aarch64"
+            ));
+            assert!(runtime_asset_supported_on_target(
+                definition,
+                "linux",
+                "x86_64"
+            ));
         }
     }
 
