@@ -497,7 +497,12 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         throw new Error(body.error || `NNI config save failed (${res.status})`);
       }
       applyNniConfigResponse(body.data);
-      setNniConfigMessage(t("远程 NNI 节点已保存到配置文件。", "Remote NNI nodes were saved to the config file."));
+      setNniConfigMessage(
+        t(
+          "远程 NNI 节点已保存到独立运行数据，不会修改主配置文件。",
+          "Remote NNI nodes were saved to independent runtime data without changing the main config file.",
+        ),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniConfigError(message);

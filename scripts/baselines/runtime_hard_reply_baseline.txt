@@ -663,6 +663,7 @@ crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_heartbeat_all_nodes_faile
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_heartbeat_runtime_state_schema_unsupported:{}	"nni_heartbeat_runtime_state_schema_unsupported:{}",
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_bad_response: {err}	"error": format!("nni_remote_bad_response: {err}"),
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_remote_request_failed: {err}	"error": format!("nni_remote_request_failed: {err}"),
+crates/clawd/src/http/ui_routes/nni_remote_join.rs	nni_runtime_config_schema_unsupported:{}	"nni_runtime_config_schema_unsupported:{}",
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	signature helper returned error	.unwrap_or_else(|| "signature helper returned error".to_string())
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule Pi App restart: {err}	return Err(format!("failed to schedule Pi App restart: {err}"));
 crates/clawd/src/http/ui_routes/service_control.rs	failed to schedule restart: {err}	return Err(format!("failed to schedule restart: {err}"));
