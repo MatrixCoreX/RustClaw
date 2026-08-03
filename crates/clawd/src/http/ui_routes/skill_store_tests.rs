@@ -756,7 +756,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(store_item(&initial, "media_download")["installed"], false);
     assert_eq!(
         store_item(&initial, "media_download")["description_zh"],
-        "支持抖音、快手、小红书、TikTok 和 YouTube 的 App 复制分享文案、短链和网页分享链接；默认直接下载原始媒体。抖音和小红书图文帖会分别返回全部原图和平台正文；图片 OCR 仍需明确要求。本技能内正文和 OCR 少于 200 字直接对话交付，达到 200 字则发送文本文件。"
+        "媒体采集整理，方便后续查看和处理。"
     );
     assert_eq!(
         store_item(&initial, "media_download")["source_kind"],
