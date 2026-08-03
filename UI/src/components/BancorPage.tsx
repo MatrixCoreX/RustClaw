@@ -945,12 +945,12 @@ export function BancorQuoteDialog({
           <button
             ref={confirmButtonRef}
             type="button"
-            className="theme-primary-btn px-4 py-2 text-sm"
+            className="bancor-sign-trade-btn"
             disabled={tradeLoading}
             onClick={onConfirm}
           >
             <ShieldCheck className="h-4 w-4" />
-            {tradeLoading ? t("正在签名并提交...", "Signing and submitting...") : t("确认并使用设备签名", "Confirm and sign with device")}
+            {tradeLoading ? t("正在签名并提交...", "Signing and submitting...") : t("确认签名交易", "Confirm signed trade")}
           </button>
         </footer>
       </section>

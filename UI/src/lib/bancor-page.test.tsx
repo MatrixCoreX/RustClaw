@@ -222,7 +222,8 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /10\.0000 POINT/);
   assert.match(html, /0\.0010 USD/);
   assert.match(html, /0\.0500 POINT/);
-  assert.match(html, /确认并使用设备签名/);
+  assert.match(html, /bancor-sign-trade-btn/);
+  assert.match(html, /确认签名交易/);
   assert.match(html, /返回修改/);
 });
 
