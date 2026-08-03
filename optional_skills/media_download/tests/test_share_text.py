@@ -199,6 +199,154 @@ class ShareTextTest(unittest.TestCase):
         self.assertEqual(article.body, "第一段\n第二段")
         self.assertEqual(article.author, "图文作者")
 
+    def test_douyin_rendered_dom_extracts_complete_exact_post_article(self) -> None:
+        item_id = "7658893225607908651"
+        body = (
+            "杭州AI一人公司福利政策解读。第一段完整正文。\n"
+            "第二段不能因为图片数量多而遗漏。\n#政策解读#AI创业"
+        )
+        page = f"""
+        <html>
+          <head>
+            <title>杭州AI一人公司福利政策解读。第一段 - 抖音</title>
+            <meta name="description" content="杭州AI一人公司福利政策解读。第一段 - 栖云山者于20260803发布在抖音">
+          </head>
+          <body>
+            <h3>无关推荐内容，即使很长也不能被当成目标正文。</h3>
+            <img alt="{body}" src="https://p.test/target.webp">
+            <div data-e2e-vid="{item_id}"></div>
+          </body>
+        </html>
+        """
+
+        article = self.downloader.article_from_douyin_rendered_html(
+            page,
+            item_id,
+            source="test-rendered",
+        )
+
+        self.assertIsNotNone(article)
+        assert article is not None
+        self.assertEqual(article.body, body)
+        self.assertEqual(article.author, "栖云山者")
+        self.assertEqual(article.source, "test-rendered")
+
+    def test_douyin_rendered_dom_requires_exact_item_marker(self) -> None:
+        page = """
+        <title>目标正文开头足够长 - 抖音</title>
+        <img alt="目标正文开头足够长，但页面属于另一个作品。">
+        <div data-e2e-vid="9999999999999999999"></div>
+        """
+
+        article = self.downloader.article_from_douyin_rendered_html(
+            page,
+            "7658893225607908651",
+            source="test-rendered",
+        )
+
+        self.assertIsNone(article)
+
+    def test_douyin_rendered_dom_accepts_a_short_exact_caption(self) -> None:
+        item_id = "7658893225607908651"
+        page = f"""
+        <title>你好 - 抖音</title>
+        <h3>你好</h3>
+        <div data-e2e-vid="{item_id}"></div>
+        """
+
+        article = self.downloader.article_from_douyin_rendered_html(
+            page,
+            item_id,
+            source="test-rendered",
+        )
+
+        self.assertIsNotNone(article)
+        assert article is not None
+        self.assertEqual(article.body, "你好")
+
+    def test_douyin_exact_image_result_without_article_continues_browser_fallback(self) -> None:
+        images = [
+            self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        ]
+        article = self.downloader.ArticleContent("", "平台正文", "", "test")
+
+        self.assertFalse(
+            self.downloader.douyin_exact_browser_result_is_complete(
+                [],
+                images,
+                None,
+                require_audio=False,
+            )
+        )
+        self.assertTrue(
+            self.downloader.douyin_exact_browser_result_is_complete(
+                [],
+                images,
+                article,
+                require_audio=False,
+            )
+        )
+
+    def test_image_post_parser_retries_when_platform_article_is_missing(self) -> None:
+        image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        article = self.downloader.ArticleContent("", "完整平台正文", "", "test")
+        missing = ("douyin", "item-1", [], [image], None, [])
+        complete = ("douyin", "item-1", [], [image], article, [])
+        args = SimpleNamespace(
+            platform="auto",
+            timeout=1.0,
+            browser_fallback=True,
+            browser_timeout=1.0,
+            chrome_path=None,
+            system_browser_cookies=False,
+            extract_audio=False,
+            transcribe=False,
+            print_url=False,
+        )
+
+        with mock.patch.object(
+            self.downloader,
+            "gather_candidates_for_request",
+            side_effect=[missing, complete],
+        ) as gather:
+            result = self.downloader.gather_candidates_for_request_with_retries(
+                args,
+                "https://v.douyin.com/example/",
+                None,
+            )
+
+        self.assertEqual(result, complete)
+        self.assertEqual(gather.call_count, 2)
+
+    def test_image_post_download_refuses_silent_article_omission(self) -> None:
+        image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        args = SimpleNamespace(
+            verbose=False,
+            browser_fallback=True,
+            print_url=False,
+            extract_audio=False,
+            transcribe=False,
+        )
+
+        with mock.patch.object(self.downloader, "download_image_candidates") as download:
+            with self.assertRaisesRegex(
+                self.downloader.DouyinDownloadError,
+                "complete platform article text",
+            ):
+                self.downloader.handle_resolved_media(
+                    args,
+                    "https://www.douyin.com/note/7658893225607908651",
+                    None,
+                    "douyin",
+                    "7658893225607908651",
+                    [],
+                    [image],
+                    [],
+                    article=None,
+                )
+
+        download.assert_not_called()
+
     def test_xiaohongshu_article_matches_requested_note_only(self) -> None:
         requested_id = "66a1b2c3d4e5f60718293abc"
         state = {

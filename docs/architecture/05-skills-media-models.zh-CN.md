@@ -10,6 +10,8 @@
 
 <!-- ai-learning-navigation:end -->
 
+## 技能准入与执行
+
 Registry 是技能可用状态、capability、effect、risk、schema、安装模式和 manifest 引用的机器事实源。自然语言短语不得进入 alias 或 runtime 派发分支。
 
 ```mermaid
@@ -41,6 +43,19 @@ SkillLaunchSpec -> JSONL capability result`。固定/核心技能在普通构建
 提供 `skill.toml` 与 `INTERFACE.md`，通过同一 adapter、协议冒烟和回执验证后才
 注册。运行时不得根据扩展名、技能名或 `target/release` 约定推断入口。
 
+## 独立多模态模块
+
+模型页把文字主模型与七个多模态模块分开：图片编辑、图片生成、图片理解、语音合成、
+语音转写、视频生成和音乐生成。每个模块独立保存 provider、model、endpoint、凭据引用
+和启用开关。关闭一个模块只阻止它的新调用，不会清空设置，也不会改变其他模块。
+发行默认值为其中六个模块选择 MiniMax，语音转写默认使用 loopback 的
+`local-whisper` custom provider；用户仍可逐个模块独立修改。
+
+图片生成在调用 provider 前，会按所选 provider/model 声明的尺寸策略映射用户请求的
+宽高比或尺寸，避免把模型不支持的 size token 直接发送出去，并尽量保持用户要求的画面形状。
+
+## 多媒体任务与明确的转文字要求
+
 长尾多媒体能力使用 start、poll、cancel 合同。Provider 工作继续运行时，前台任务可以先返回 checkpoint。
 Preview 是独立的机器 capability；它的 registry policy 禁止网络、凭据访问、外部发布和文件写入。
 
@@ -70,6 +85,22 @@ flowchart TD
 签发一次性 token，并且日志只记录变量名。OpenAI-compatible MiniMax adapter
 可以同时获得 `MINIMAX_API_KEY` 和作为协议别名的 `OPENAI_API_KEY`，但不会
 获得父进程完整环境，也不会复用同一个 token。
+
+`media_download.download` 默认只交付原始媒体。抖音和小红书图文帖还会交付经过验证的
+平台标题与正文；最多 9 张图片逐张发送，10 张及以上按来源顺序打成一个 ZIP，并包含
+文章文本。只有同一条用户请求明确要求转文字时，才会进入图片识别或语音转写：图片文字
+优先使用 `image_vision.extract_text`，本地 Tesseract 只是明确调用的离线兜底；视频或音频
+使用语音转写，ZIP 和视频不会被误送给图片 OCR。
+
+## 网页提取与任务级浏览器交互
+
+`browser_web` 用于打开明确的公开 URL，返回有界的非可信正文、元数据、引用、截图和
+结构化的部分成功/失败证据，不保持用户会话。`browser_session` 是另一项任务级交互工具，
+用于导航、快照、点击、输入、选择、下载、截图和动作后条件验证。元素引用只在当前页面
+和快照 generation 内有效；它不会回退到无沙箱浏览器，也不会使用持久化个人 profile。
+只读观察可免确认，外部交互或写入动作仍必须通过 resolver/verifier policy。
+
+## 模型能力目录与就绪状态
 
 模型能力通过 catalog 投影，不能根据模型名称短语猜测。Catalog 明确提供 provider/model 身份、API style、可选模型、输入/输出模态、上下文长度、超时、凭据状态、多媒体理解/生成能力、当前文本 provider 状态，以及 async/dry-run 元数据；UI、CLI 和 runtime readiness 检查直接消费这些机器字段。
 

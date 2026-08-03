@@ -31,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field, replace
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -1261,6 +1262,111 @@ def article_from_douyin_payload(
     )
 
 
+class DouyinRenderedArticleParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title_parts: list[str] = []
+        self.heading_candidates: list[str] = []
+        self.alt_candidates: list[str] = []
+        self.meta_descriptions: list[str] = []
+        self._in_title = False
+        self._heading_parts: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        attributes = {key.lower(): value or "" for key, value in attrs}
+        if normalized_tag == "title":
+            self._in_title = True
+        elif normalized_tag == "h3":
+            self._heading_parts = []
+        elif normalized_tag == "br" and self._heading_parts is not None:
+            self._heading_parts.append("\n")
+
+        alt = attributes.get("alt", "").strip()
+        if alt:
+            self.alt_candidates.append(alt)
+            if self._heading_parts is not None:
+                self._heading_parts.append(alt)
+
+        meta_name = (attributes.get("name") or attributes.get("property") or "").lower()
+        if normalized_tag == "meta" and meta_name in {
+            "description",
+            "og:description",
+        }:
+            content = attributes.get("content", "").strip()
+            if content:
+                self.meta_descriptions.append(content)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag == "title":
+            self._in_title = False
+        elif normalized_tag == "h3" and self._heading_parts is not None:
+            self.heading_candidates.append("".join(self._heading_parts))
+            self._heading_parts = None
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title_parts.append(data)
+        if self._heading_parts is not None:
+            self._heading_parts.append(data)
+
+
+def article_from_douyin_rendered_html(
+    page_text: str,
+    item_id: str | None,
+    *,
+    source: str,
+) -> ArticleContent | None:
+    if not item_id or not re.search(
+        rf"\bdata-e2e-vid\s*=\s*(['\"])" + re.escape(item_id) + r"\1",
+        page_text,
+        re.IGNORECASE,
+    ):
+        return None
+
+    parser = DouyinRenderedArticleParser()
+    try:
+        parser.feed(page_text)
+        parser.close()
+    except (ValueError, AssertionError):
+        return None
+
+    page_title = normalize_article_field("".join(parser.title_parts))
+    page_title = re.sub(r"\s*-\s*抖音\s*$", "", page_title).strip()
+    anchor_source = page_title
+    if not anchor_source:
+        anchor_source = next(
+            (
+                normalize_article_field(value).partition(" - ")[0].strip()
+                for value in parser.meta_descriptions
+                if normalize_article_field(value)
+            ),
+            "",
+        )
+    anchor = re.sub(r"\s+", "", anchor_source)[:24]
+    if len(anchor) < 2:
+        return None
+
+    candidates: list[str] = []
+    for raw in [*parser.alt_candidates, *parser.heading_candidates]:
+        candidate = normalize_article_field(raw)
+        compact_prefix = re.sub(r"\s+", "", candidate[:160])
+        if candidate and anchor in compact_prefix and candidate not in candidates:
+            candidates.append(candidate)
+    if not candidates:
+        return None
+
+    body = max(candidates, key=lambda value: (len(value), value.count("\n")))
+    author = ""
+    for description in parser.meta_descriptions:
+        match = re.search(r"\s-\s([^\n]{1,80}?)于\d{8}发布在抖音", description)
+        if match:
+            author = normalize_article_field(match.group(1))
+            break
+    return ArticleContent("", body, author, source)
+
+
 def xiaohongshu_note_id(payload: dict[str, Any]) -> str:
     for key in ("noteId", "note_id", "itemId", "item_id", "id"):
         value = payload.get(key)
@@ -2084,6 +2190,22 @@ def browser_candidates_are_sufficient(
     return True
 
 
+def douyin_exact_browser_result_is_complete(
+    candidates: list[Candidate],
+    image_candidates: list[ImageCandidate],
+    article: ArticleContent | None,
+    *,
+    require_audio: bool,
+) -> bool:
+    if not browser_candidates_are_sufficient(
+        candidates,
+        image_candidates,
+        require_audio=require_audio,
+    ):
+        return False
+    return not image_candidates or article is not None
+
+
 DOUYIN_ITEM_RENDER_DATA_SCRIPT = r"""
 (() => {
   const node = document.querySelector('script#RENDER_DATA');
@@ -2402,9 +2524,10 @@ def gather_browser_candidates(
             use_system_browser_cookies=use_system_browser_cookies,
         )
         logs.extend(exact_logs)
-        if browser_candidates_are_sufficient(
+        if douyin_exact_browser_result_is_complete(
             exact_candidates,
             exact_images,
+            exact_article,
             require_audio=require_audio,
         ):
             return item_id, exact_candidates, exact_images, richer_article(article, exact_article), logs
@@ -2464,6 +2587,14 @@ def gather_browser_candidates(
 
             item_id = item_id or extract_platform_id(platform, target_url, completed.stdout)
             if platform == "douyin":
+                article = richer_article(
+                    article,
+                    article_from_douyin_rendered_html(
+                        completed.stdout,
+                        item_id,
+                        source="douyin.browser-rendered",
+                    ),
+                )
                 payload = find_douyin_aweme_payload_in_html(completed.stdout, item_id)
                 if payload is not None:
                     article = richer_article(
@@ -5257,6 +5388,20 @@ def handle_downloaded_video(path: Path, args: argparse.Namespace) -> None:
             raise DouyinDownloadError(f"X-compatible transcode failed: {exc}") from exc
 
 
+def image_post_article_is_missing(
+    args: argparse.Namespace,
+    platform: str,
+    image_candidates: list[ImageCandidate],
+    article: ArticleContent | None,
+) -> bool:
+    return (
+        not getattr(args, "print_url", False)
+        and normalize_platform(platform) in {"douyin", "xiaohongshu"}
+        and bool(image_candidates)
+        and article is None
+    )
+
+
 def gather_candidates_for_request_with_retries(
     args: argparse.Namespace,
     share_text: str,
@@ -5292,8 +5437,17 @@ def gather_candidates_for_request_with_retries(
             print(f"parse_failed: attempt {attempt}/{max_attempts}: {exc}", file=sys.stderr)
             continue
 
-        platform, _item_id, candidates, image_candidates, _article, _logs = result
+        platform, _item_id, candidates, image_candidates, article, _logs = result
         if candidates or image_candidates:
+            if image_post_article_is_missing(args, platform, image_candidates, article):
+                last_result = result
+                if attempt < max_attempts:
+                    print(
+                        f"parse_failed: attempt {attempt}/{max_attempts}: "
+                        f"platform article text was missing for image post platform={platform}",
+                        file=sys.stderr,
+                    )
+                    continue
             return result
 
         last_result = result
@@ -7696,6 +7850,12 @@ def handle_resolved_media(
             for candidate in image_candidates:
                 print(candidate.url)
         return 0
+
+    if image_post_article_is_missing(args, platform, image_candidates, article):
+        raise DouyinDownloadError(
+            "Image post media was found, but the complete platform article text could not be "
+            "verified; refusing partial delivery."
+        )
 
     if image_candidates and not candidates:
         output_dir = Path(args.output_dir).expanduser()

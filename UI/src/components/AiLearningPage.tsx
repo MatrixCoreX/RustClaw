@@ -39,6 +39,7 @@ import readmeEn from "../../../README.md?raw";
 import readmeZh from "../../../README.zh-CN.md?raw";
 import {
   classifyLearningLink,
+  LEARNING_STAGE_ORDER,
   learningHeadingId,
   orderLearningPagesByStage,
   parseReadmeLearningPages,
@@ -91,15 +92,6 @@ const ARCHITECTURE_DOCUMENTS = {
   en: architectureDocuments("en"),
   zh: architectureDocuments("zh"),
 } satisfies Record<UiLanguage, ArchitectureDocument[]>;
-
-const LEARNING_STAGE_ORDER = [
-  "foundations",
-  "agent-runtime",
-  "context-memory",
-  "safety-operations",
-  "capabilities-artifacts",
-  "development-release",
-] as const;
 
 interface LearningStageDefinition {
   id: string;
@@ -202,8 +194,8 @@ function stageDefinitions(t: Translate): LearningStageDefinition[] {
       title: t("能力与工件", "Capabilities & Artifacts"),
       level: t("扩展", "Extend"),
       description: t(
-        "了解技能、模型、多媒体、Office 工件和技能独立存储如何接入 Agent Loop。",
-        "See how skills, models, media, Office artifacts, and skill-owned storage join the agent loop.",
+        "了解技能、模型、多媒体、浏览器交互、任务工件和技能独立存储如何接入 Agent Loop。",
+        "See how skills, models, media, browser interaction, task artifacts, and skill-owned storage join the agent loop.",
       ),
       icon: Blocks,
     },
@@ -569,7 +561,20 @@ export function AiLearningPage({ lang, t }: AiLearningPageProps) {
   );
   const stages = useMemo<LearningStage[]>(() => {
     const definitions = stageDefinitions(t);
-    return definitions
+    const knownStageIds = new Set(definitions.map((definition) => definition.id));
+    const fallbackDefinitions = [...new Set(routePages.map(({ page }) => page.stageId))]
+      .filter((stageId) => !knownStageIds.has(stageId))
+      .map((stageId): LearningStageDefinition => ({
+        id: stageId,
+        title: t("其他学习内容", "Additional learning content"),
+        level: t("补充", "More"),
+        description: t(
+          "这些内容使用了较新的分类标记，仍可在这里正常阅读。",
+          "These pages use a newer category marker and remain available here.",
+        ),
+        icon: BookOpenCheck,
+      }));
+    return [...definitions, ...fallbackDefinitions]
       .map((definition) => {
         const stagePages = routePages
           .filter(({ page }) => page.stageId === definition.id);

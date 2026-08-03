@@ -6,6 +6,8 @@ fn connection_cfg(base_url: &str, api_key: &str) -> VendorConfig {
         api_key: api_key.to_string(),
         model: "multimodal-model".to_string(),
         timeout_seconds: None,
+        size_policy: None,
+        model_size_policies: BTreeMap::new(),
     }
 }
 
@@ -81,6 +83,114 @@ fn parse_vendor_aliases() {
     assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
     assert_eq!(parse_vendor("xai"), Some(VendorKind::Grok));
     assert_eq!(parse_vendor("qwen"), Some(VendorKind::Qwen));
+}
+
+#[test]
+fn provider_size_policy_maps_to_declared_supported_values() {
+    let policy = ImageSizePolicy {
+        default: "4:3".to_string(),
+        supported: ["1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+
+    assert_eq!(normalize_provider_size("1024x1792", Some(&policy)), "9:16");
+    assert_eq!(normalize_provider_size("1024X768", Some(&policy)), "4:3");
+    assert_eq!(normalize_provider_size("16:9", Some(&policy)), "16:9");
+    assert_eq!(normalize_provider_size("4:7", Some(&policy)), "9:16");
+}
+
+#[test]
+fn provider_size_policy_supports_pixel_dimension_catalogs() {
+    let policy = ImageSizePolicy {
+        default: "1024x1024".to_string(),
+        supported: ["1024x1024", "1536x1024", "1024x1536"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+
+    assert_eq!(
+        normalize_provider_size("1600x900", Some(&policy)),
+        "1536x1024"
+    );
+    assert_eq!(
+        normalize_provider_size("not-a-size", Some(&policy)),
+        "1024x1024"
+    );
+}
+
+#[test]
+fn provider_size_without_policy_is_passed_through() {
+    assert_eq!(normalize_provider_size("800x1200", None), "800x1200");
+    assert_eq!(normalize_provider_size("", None), "4:3");
+}
+
+#[test]
+fn provider_size_policy_is_loaded_from_toml() {
+    let provider: VendorConfig = toml::from_str(
+        r#"
+base_url = "https://images.example/v1"
+api_key = "test-key"
+model = "example-image-model"
+
+[size_policy]
+default = "4:3"
+supported = ["1:1", "4:3", "9:16"]
+"#,
+    )
+    .expect("provider config");
+
+    assert_eq!(
+        normalize_provider_size("1024x1792", provider.size_policy.as_ref()),
+        "9:16"
+    );
+}
+
+#[test]
+fn model_size_policy_overrides_provider_default() {
+    let provider: VendorConfig = toml::from_str(
+        r#"
+base_url = "https://images.example/v1"
+api_key = "test-key"
+model = "model-a"
+
+[size_policy]
+default = "4:3"
+supported = ["1:1", "4:3", "9:16"]
+
+[model_size_policies.model-b]
+default = "1024x1024"
+supported = ["1024x1024", "1536x1024", "1024x1536"]
+"#,
+    )
+    .expect("provider config");
+
+    assert_eq!(
+        normalize_provider_size("1600x900", provider_size_policy(&provider, "model-b")),
+        "1536x1024"
+    );
+    assert_eq!(
+        normalize_provider_size("1600x900", provider_size_policy(&provider, "model-a")),
+        "4:3"
+    );
+}
+
+#[test]
+fn provider_normalization_reaches_image_request_body() {
+    let policy = ImageSizePolicy {
+        default: "4:3".to_string(),
+        supported: ["1:1", "4:3", "9:16"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+    let normalized = normalize_provider_size("1024x1792", Some(&policy));
+    let body = minimax_request_body("image-model", "test", &normalized, 1);
+
+    assert_eq!(body["aspect_ratio"], "9:16");
+    assert_ne!(body["aspect_ratio"], "4:7");
 }
 
 #[test]

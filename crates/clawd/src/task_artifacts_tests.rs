@@ -73,6 +73,82 @@ fn materializes_structured_capability_output_into_task_delivery_storage() {
 }
 
 #[test]
+fn materializes_trusted_async_completion_artifact_without_model_file_token() {
+    let workspace = TempWorkspace::new();
+    let output = workspace.path().join("downloads").join("clip.mp4");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    fs::write(&output, b"video-fixture").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {
+            "capability_results": [{"status": "waiting"}],
+            "task_checkpoint": {"boundary_context": {
+                "async_job_terminal_observation": {
+                    "schema_version": 1,
+                    "source": "async_job_completion_checkpoint",
+                    "status": "succeeded",
+                    "final_result_json": {"extra": {
+                        "delivery": {"deliver_to_user": true, "intent": "artifact"},
+                        "artifacts": [{
+                            "path": output.display().to_string(),
+                            "filename": "clip.mp4",
+                            "mime_type": "video/mp4"
+                        }]
+                    }}
+                }
+            }}
+        }}
+    });
+
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), "task-async", &result.to_string())
+            .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let manifests = manifests_from_result(Some(&value));
+
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(manifests[0].filename, "clip.mp4");
+    assert_eq!(manifests[0].kind, "video");
+    assert_eq!(manifests[0].mime_type, "video/mp4");
+}
+
+#[test]
+fn rejects_untrusted_or_failed_async_completion_artifacts() {
+    let workspace = TempWorkspace::new();
+    let output = workspace.path().join("downloads").join("clip.mp4");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    fs::write(&output, b"video-fixture").unwrap();
+
+    for (source, status) in [
+        ("untrusted_completion", "succeeded"),
+        ("async_job_completion_checkpoint", "failed"),
+    ] {
+        let result = json!({
+            "text": "done",
+            "task_journal": {"trace": {"task_checkpoint": {"boundary_context": {
+                "async_job_terminal_observation": {
+                    "schema_version": 1,
+                    "source": source,
+                    "status": status,
+                    "final_result_json": {"extra": {"artifacts": [{
+                        "path": output.display().to_string(),
+                        "mime_type": "video/mp4"
+                    }]}}
+                }
+            }}}}
+        });
+        let materialized = materialize_task_result_artifacts(
+            workspace.path(),
+            "task-untrusted",
+            &result.to_string(),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&materialized).unwrap();
+        assert!(manifests_from_result(Some(&value)).is_empty());
+    }
+}
+
+#[test]
 fn legacy_manifest_is_normalized_only_by_the_central_decoder() {
     let value = json!({
         "artifacts": [{

@@ -1,7 +1,7 @@
 # 任务产物交付
 
-<!-- ai-learning-stage: architecture-guide -->
-<!-- ai-learning-audience: operator -->
+<!-- ai-learning-stage: capabilities-artifacts -->
+<!-- ai-learning-audience: operator,developer -->
 
 <!-- ai-learning-navigation:start -->
 上一页：[Web 入口与核心隔离](10-web-entry-security.zh-CN.md) |
@@ -18,6 +18,7 @@ Agent Runtime 会把成功任务输出的文件转换为经过鉴权、可持久
 flowchart LR
     A[Agent Loop]
     X[工具或技能执行]
+    P[可信异步终态 checkpoint]
     R[结构化任务结果]
     M[产物物化器]
     D[受控交付目录]
@@ -28,6 +29,7 @@ flowchart LR
     U[浏览器 UI]
 
     A --> X --> R
+    X -->|后台完成| P --> R
     R --> M --> D
     M --> J
     R --> C
@@ -44,6 +46,12 @@ flowchart LR
 
 dry-run 输出、工作区外路径、目录、缺失文件和超过交付上限的文件都不会暴露。产物
 物化失败不会把原本成功的工具或技能执行改成失败任务，而是记录结构化交付警告。
+
+异步 capability 可能在前台 turn 保存 checkpoint 以后才完成。此时终态 worker 结果保留在
+可信的 `async_job_completion_checkpoint` observation 下，不会复制进已经过期的恢复前
+capability result。产物物化与原生通信端交付共用同一个解码器，只接受有版本且成功的
+observation，再读取其中的结构化 final result 与 `deliver_to_user` 偏好。这样恢复后的媒体
+任务仍可下载，同时通信端不需要解析自然语言，也不用猜测 checkpoint 的嵌套位置。
 
 ## 浏览器访问
 
@@ -86,5 +94,5 @@ cargo test -p telegramd
 cd UI && node --import tsx --test src/lib/task-artifacts.test.ts src/lib/chat-history.test.ts
 ```
 
-这些检查覆盖路径约束、鉴权、字节范围、历史恢复、安全预览策略、长任务代理路径，以及
-通信端交付不受影响。
+这些检查覆盖路径约束、鉴权、字节范围、历史恢复、可信异步终态结果、安全预览策略、
+长任务代理路径，以及通信端交付不受影响。

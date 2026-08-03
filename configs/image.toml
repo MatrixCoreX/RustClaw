@@ -90,6 +90,10 @@ base_url = "https://api.minimaxi.com/v1"
 model = "image-01"
 timeout_seconds = 120
 
+[image_generation.providers.minimax.size_policy]
+default = "4:3"
+supported = ["1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"]
+
 [image_vision]
 adapter_mode = "compat"
 anthropic_models = ["claude-sonnet-4-6"]

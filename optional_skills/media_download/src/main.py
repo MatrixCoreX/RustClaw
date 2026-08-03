@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -31,9 +32,9 @@ SUPPORTED_ACTIONS = (
     "prepare_x",
 )
 SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
-MAX_ARTIFACTS = 32
 MAX_DIAGNOSTIC_CHARS = 4_000
 INLINE_TEXT_MAX_CHARS = 200
+IMAGE_ARCHIVE_THRESHOLD = 9
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
 CHILD_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
 PROGRESS_STEP_IDS = {
@@ -503,9 +504,9 @@ def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], out
 
 def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
     raw_paths = args.get("input_paths")
-    if not isinstance(raw_paths, list) or not raw_paths or len(raw_paths) > 32:
+    if not isinstance(raw_paths, list) or not raw_paths:
         raise SkillFailure(
-            "input_paths must be an array containing 1 to 32 image paths",
+            "input_paths must be a non-empty array of image paths",
             error_code="invalid_args",
             message_key="media_download.error.invalid_input_paths",
         )
@@ -611,9 +612,101 @@ def _artifact(path: Path) -> dict[str, Any]:
         artifact["artifact_role"] = "original_image"
     elif artifact["mime_type"].startswith("video/"):
         artifact["artifact_role"] = "original_video"
+    elif path.suffix.lower() == ".zip":
+        artifact["artifact_role"] = "archive"
     elif path.suffix.lower() == ".json":
         artifact["artifact_role"] = "metadata"
     return artifact
+
+
+def _available_archive_path(output_dir: Path) -> Path:
+    candidate = output_dir / "image_bundle.zip"
+    if not candidate.exists():
+        return candidate
+    for index in range(2, 1_000):
+        candidate = output_dir / f"image_bundle_{index}.zip"
+        if not candidate.exists():
+            return candidate
+    raise SkillFailure(
+        "cannot allocate an image archive filename",
+        error_code="artifact_packaging_failed",
+        message_key="media_download.error.artifact_packaging_failed",
+        details={"failure_phase": "execution_partial", "side_effect_applied": True},
+    )
+
+
+def _package_large_image_delivery(
+    artifacts: list[dict[str, Any]],
+    output_dir: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+    images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
+    if not images:
+        return artifacts, None, None
+
+    if len(images) <= IMAGE_ARCHIVE_THRESHOLD:
+        return artifacts, None, None
+
+    delivery = {
+        "mode": "archive",
+        "threshold": IMAGE_ARCHIVE_THRESHOLD,
+        "image_count": len(images),
+    }
+
+    article_files = [
+        item for item in artifacts if item.get("artifact_role") == "article_text"
+    ]
+    archive_path = _available_archive_path(output_dir)
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED) as archive:
+            for item in [*images, *article_files]:
+                path = Path(str(item["path"]))
+                archive.write(path, arcname=path.name)
+    except (OSError, KeyError, TypeError, zipfile.BadZipFile) as error:
+        try:
+            archive_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise SkillFailure(
+            f"image archive creation failed: {error}",
+            error_code="artifact_packaging_failed",
+            message_key="media_download.error.artifact_packaging_failed",
+            details={"failure_phase": "execution_partial", "side_effect_applied": True},
+        ) from error
+
+    archive_artifact = _artifact(archive_path)
+    archive_artifact.update(
+        {
+            "artifact_role": "image_archive",
+            "contained_image_count": len(images),
+            "contained_article_count": len(article_files),
+        }
+    )
+    delivery.update(
+        {
+            "archive_filename": archive_artifact["filename"],
+            "archive_path": archive_artifact["path"],
+            "article_included": bool(article_files),
+        }
+    )
+    processing_inputs = {
+        "images": [
+            {
+                "path": item["path"],
+                "filename": item["filename"],
+                "mime_type": item["mime_type"],
+                "size_bytes": item["size_bytes"],
+            }
+            for item in images
+        ],
+        "image_count": len(images),
+        "ordered": True,
+    }
+    return (
+        [archive_artifact]
+        + [item for item in artifacts if item.get("artifact_role") != "original_image"],
+        delivery,
+        processing_inputs,
+    )
 
 
 def _changed_artifact_paths(
@@ -661,6 +754,7 @@ def _profile_collection_summary(
 def _content_bundle(
     artifacts: list[dict[str, Any]],
     inline_article: dict[str, Any] | None = None,
+    image_delivery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     counts = {
         "image_count": 0,
@@ -674,7 +768,13 @@ def _content_bundle(
         "article_text": "article_count",
     }
     for artifact in artifacts:
-        count_key = roles.get(str(artifact.get("artifact_role") or ""), "other_file_count")
+        role = str(artifact.get("artifact_role") or "")
+        if role == "image_archive":
+            contained = artifact.get("contained_image_count")
+            if isinstance(contained, int) and not isinstance(contained, bool) and contained > 0:
+                counts["image_count"] += contained
+            continue
+        count_key = roles.get(role, "other_file_count")
         counts[count_key] += 1
     inline_article_count = 1 if inline_article is not None else 0
     counts["article_count"] += inline_article_count
@@ -692,6 +792,8 @@ def _content_bundle(
         **counts,
         "inline_article_count": inline_article_count,
     }
+    if image_delivery is not None:
+        bundle["image_delivery"] = image_delivery
     if kind == "video":
         bundle["followup_policy"] = {
             "text_conversion_action": "transcribe_audio",
@@ -938,7 +1040,7 @@ def _run_tool(
         stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
         after = _snapshot(output_dir)
         changed = _changed_artifact_paths(before, after)
-        artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
+        artifacts = [_artifact(path) for path in changed]
         output_rollback_ok = _rollback_output_changes(output_dir, before, after)
         profile_checkpoint = _changed_profile_checkpoint(
             checkpoint_before,
@@ -970,7 +1072,7 @@ def _run_tool(
         ) from error
     after = _snapshot(output_dir)
     changed = _changed_artifact_paths(before, after)
-    artifacts = [_artifact(path) for path in changed[:MAX_ARTIFACTS]]
+    artifacts = [_artifact(path) for path in changed]
     if completed.returncode != 0:
         output_rollback_ok = _rollback_output_changes(output_dir, before, after)
         profile_checkpoint = _changed_profile_checkpoint(
@@ -1177,8 +1279,6 @@ def _urls(stdout: str) -> list[str]:
         parsed = urlsplit(value)
         if parsed.scheme in {"http", "https"} and parsed.netloc and value not in urls:
             urls.append(value)
-        if len(urls) >= 32:
-            break
     return urls
 
 
@@ -1217,6 +1317,9 @@ def _capabilities_extra() -> dict[str, Any]:
             "platforms": ["douyin", "xiaohongshu"],
             "default_outputs": ["original_images", "article_text"],
             "inline_text_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
+            "individual_delivery_max_images": IMAGE_ARCHIVE_THRESHOLD,
+            "large_set_delivery": "ordered_zip",
+            "article_included_in_large_set_archive": True,
             "ocr_is_separate": True,
         },
         "installed_dependencies": {
@@ -1407,7 +1510,13 @@ def respond(
     deliver_to_user = not delivery_capable or _bool(args, "deliver_to_user", True)
     inline_article = None
     inline_recognition = None
+    image_delivery = None
+    processing_inputs = None
     if action == "download" and deliver_to_user:
+        artifacts, image_delivery, processing_inputs = _package_large_image_delivery(
+            artifacts,
+            output_dir,
+        )
         artifacts, inline_article = _inline_short_article(artifacts)
     elif action == "ocr" and deliver_to_user:
         artifacts, inline_recognition = _inline_short_ocr(artifacts)
@@ -1445,7 +1554,13 @@ def respond(
         "diagnostics": _diagnostics(stderr),
     }
     if action == "download":
-        extra["content_bundle"] = _content_bundle(artifacts, inline_article)
+        extra["content_bundle"] = _content_bundle(
+            artifacts,
+            inline_article,
+            image_delivery,
+        )
+        if processing_inputs is not None:
+            extra["processing_inputs"] = processing_inputs
         profile_collection = _profile_collection_summary(artifacts)
         if profile_collection is not None:
             extra["profile_collection"] = profile_collection

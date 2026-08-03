@@ -173,6 +173,7 @@ interface AgentAppSetupCardProps {
   lang: UiLanguage;
   t: Translate;
   platform: "feishu" | "lark";
+  className?: string;
   setup: AgentAppSetupState;
   isAdminIdentity: boolean;
   serviceActionLoading: Record<string, boolean>;
@@ -183,6 +184,7 @@ function AgentAppSetupCard({
   lang,
   t,
   platform,
+  className = "",
   setup,
   isAdminIdentity,
   serviceActionLoading,
@@ -194,7 +196,7 @@ function AgentAppSetupCard({
   const logName = isLark ? "larkd.log" : "feishud.log";
 
   return (
-    <div className="setup-channel-card channel-setup-card flex self-start flex-col">
+    <div className={`setup-channel-card channel-setup-card flex self-start flex-col ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h4 className="text-lg font-semibold text-white">{title}</h4>
@@ -394,7 +396,7 @@ export function CommunicationSetupPage({
         </div>
 
         <div className="mt-5 grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <div className="setup-channel-card channel-setup-card flex self-start flex-col">
+          <div className="setup-channel-card channel-setup-card order-1 flex self-start flex-col">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h4 className="text-lg font-semibold text-white">{t("微信", "WeChat")}</h4>
@@ -487,7 +489,7 @@ export function CommunicationSetupPage({
             </div>
           </div>
 
-          <div className="setup-channel-card channel-setup-card flex self-start flex-col">
+          <div className="setup-channel-card channel-setup-card order-3 flex self-start flex-col">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -498,8 +500,8 @@ export function CommunicationSetupPage({
                 </div>
                 <p className="mt-2 text-sm leading-7 text-white/65">
                   {t(
-                    "这是通过 Baileys 兼容桥实现的扫码连接，不是 Meta 官方 Bot API。客户端变化可能影响稳定性和账号可用性。每位聊天用户首次使用时，还需要在私聊中发送 /key <登录密钥> 完成账号绑定。",
-                    "This QR connection uses a Baileys-compatible bridge; it is not Meta's official Bot API. Client changes may affect stability and account availability. On first use, each chat user must privately send /key <login key> to bind their account.",
+                    "这是通过 Baileys 兼容桥实现的扫码连接，不是 Meta 官方 Bot API。客户端变化可能影响稳定性和账号可用性。",
+                    "This QR connection uses a Baileys-compatible bridge; it is not Meta's official Bot API. Client changes may affect stability and account availability.",
                   )}
                 </p>
               </div>
@@ -642,7 +644,7 @@ export function CommunicationSetupPage({
             </div>
           </div>
 
-          <div className="setup-channel-card channel-setup-card flex self-start flex-col">
+          <div className="setup-channel-card channel-setup-card order-2 flex self-start flex-col">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h4 className="text-lg font-semibold text-white">Telegram</h4>
@@ -720,6 +722,7 @@ export function CommunicationSetupPage({
             lang={lang}
             t={t}
             platform="feishu"
+            className="order-4"
             setup={feishuSetup}
             isAdminIdentity={isAdminIdentity}
             serviceActionLoading={serviceActionLoading}
@@ -729,6 +732,7 @@ export function CommunicationSetupPage({
             lang={lang}
             t={t}
             platform="lark"
+            className="order-5"
             setup={larkSetup}
             isAdminIdentity={isAdminIdentity}
             serviceActionLoading={serviceActionLoading}

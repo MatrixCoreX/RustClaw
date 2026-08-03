@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import {
   classifyLearningLink,
+  LEARNING_STAGE_ORDER,
   learningHeadingId,
   orderLearningPagesByStage,
   parseReadmeLearningPages,
@@ -10,6 +13,16 @@ import {
   parseStandaloneLearningPages,
   searchLearningPages,
 } from "./ai-learning";
+
+function repositoryRoot(): string {
+  const candidates = [process.cwd(), resolve(process.cwd(), "..")];
+  const root = candidates.find((candidate) =>
+    existsSync(resolve(candidate, "README.md"))
+      && existsSync(resolve(candidate, "docs/architecture"))
+  );
+  assert.ok(root, "repository root with bundled learning sources must exist");
+  return root;
+}
 
 test("groups level-three sections under chapters and omits repository preamble", () => {
   const pages = parseReadmeLearningPages(`# Product
@@ -214,6 +227,45 @@ Steps.
     ordered.map((page) => page.title),
     ["Overview", "Tests", "Release"],
   );
+});
+
+test("bundled learning sources use supported stage markers", () => {
+  const root = repositoryRoot();
+  const architectureRoot = resolve(root, "docs/architecture");
+  const sources = [
+    resolve(root, "README.md"),
+    resolve(root, "README.zh-CN.md"),
+    ...readdirSync(architectureRoot)
+      .filter((file) => /^[0-9]{2}-.*\.md$/.test(file))
+      .map((file) => resolve(architectureRoot, file)),
+  ];
+  const supported = new Set<string>(LEARNING_STAGE_ORDER);
+  const unknown = sources.flatMap((source) => {
+    const markdown = readFileSync(source, "utf8");
+    return [...markdown.matchAll(/<!--\s*ai-learning-stage:\s*([a-z0-9_-]+)\s*-->/gi)]
+      .map((match) => match[1].toLowerCase())
+      .filter((stageId) => !supported.has(stageId))
+      .map((stageId) => `${source}:${stageId}`);
+  });
+
+  assert.deepEqual(unknown, []);
+});
+
+test("task artifact guide is visible in operator and developer learning routes", () => {
+  const root = repositoryRoot();
+  for (const file of [
+    "11-task-artifact-delivery.md",
+    "11-task-artifact-delivery.zh-CN.md",
+  ]) {
+    const page = parseStandaloneLearningDocument({
+      id: file,
+      chapterId: "architecture-guide",
+      chapterTitle: "Architecture Guide",
+      markdown: readFileSync(resolve(root, "docs/architecture", file), "utf8"),
+    });
+    assert.equal(page.stageId, "capabilities-artifacts");
+    assert.deepEqual(page.audiences, ["operator", "developer"]);
+  }
 });
 
 test("applies explicit audience metadata and stage defaults", () => {

@@ -28,7 +28,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | generate | `prompt` | yes | string | - | Text prompt describing desired image. |
-| generate | `size` | no | string | `1024x1024` | Output size hint. |
+| generate | `size` | no | string | `4:3` | Output size or aspect-ratio hint. The selected provider/model policy maps it to the closest supported value. |
 | generate | `style` | no | string | impl default | Stylistic rendering hint. |
 | generate | `quality` | no | string | impl default | Quality/performance tradeoff hint. |
 | generate | `n` | no | number | `1` | Number of images to generate. |
@@ -41,7 +41,7 @@
 | generate | `poll_after_seconds` / `poll_after_ms` | no | integer | 5 seconds | Poll cadence hint for async-preferred dry-run contracts. |
 | generate | `expires_at` | no | integer(unix seconds) | now + 600 | Expiration timestamp for async-preferred dry-run contracts. |
 | preview_generate | `prompt` | yes | string | - | Text prompt used only to build the provider-neutral preview contract. |
-| preview_generate | `size` | no | string | `1024x1024` | Planned output dimensions. |
+| preview_generate | `size` | no | string | `4:3` | Planned output dimensions or aspect ratio. |
 | preview_generate | `output_path` | no | string(path) | auto | Planned path; no file or parent directory is created. |
 | preview_generate | `style` / `quality` / `n` | no | mixed | impl defaults | Planned render controls. |
 | preview_generate | `vendor` / `model` | no | string | config default | Optional structured selectors; otherwise the same config resolution as real generation is used. |
@@ -58,7 +58,7 @@
 | cancel | `dry_run` | no | boolean | `false` | Return synthetic cancellation evidence without provider calls. |
 
 ## Config Entry Points
-- `configs/image.toml` -> `[image_generation]` controls provider routing, model defaults, output limits, and `local_fallback_enabled`.
+- `configs/image.toml` -> `[image_generation]` controls provider routing, model defaults, output limits, and `local_fallback_enabled`. Each provider may declare `size_policy.default` and `size_policy.supported`; models with different constraints may override them under `model_size_policies.<model>`. Requested dimensions are normalized without provider/model lists in code.
 - `IMAGE_GENERATION_LOCAL_FALLBACK=1|true|on|yes` overrides `local_fallback_enabled` for explicit smoke/NL-test continuity when all configured providers fail.
 - Provider credentials use dedicated environment variables such as `IMAGE_GENERATION_MINIMAX_API_KEY`; do not reuse chat/model API key names for image generation.
 

@@ -15,8 +15,8 @@ Agent Runtime 面向“消息端或浏览器里就能完成日常使用和管理
 - 由 `clawd` 提供任务运行时、HTTP API、路由、记忆和调度
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
-- 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、工具/技能、
-  Skill Store 和 AI 学习等页面
+- 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
+  工具/技能、Skill Store、记忆、日志和 AI 学习等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 
 ### 先认识五个概念
@@ -541,6 +541,8 @@ flowchart LR
 - `POST /v1/admin/system-dependencies/install`：管理员按固定 `dependency_id` 启动受控异步安装，不接受任意命令或包名
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/{task_id}/artifacts`：返回经过鉴权的任务产物清单
+- `GET/HEAD /v1/tasks/{task_id}/artifacts/{artifact_id}/content`：预览、下载或只读取一个受控产物的元数据
 - `GET /v1/tasks/conversation-history`
 - `PUT /v1/tasks/conversations/{conversation_id}/title`
 - `POST /v1/tasks/active`
@@ -582,7 +584,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ### 能力目录回答什么
 
-模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness` 会为当前选中的 provider/model 渲染 compact 的 `model_readiness_summary`，task debug/教学 trace 和 `clawcli llm-trace` 也会用 `model_catalog_trace.readiness` 暴露同一组选中模型投影，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`，同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
+模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env`、`not_required_local` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness` 会为当前选中的 provider/model 渲染 compact 的 `model_readiness_summary`，task debug/教学 trace 和 `clawcli llm-trace` 也会用 `model_catalog_trace.readiness` 暴露同一组选中模型投影，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`，同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
 
 
 模型目录、readiness 与 provider 验证流程见[技能、多媒体与模型](docs/architecture/05-skills-media-models.zh-CN.md)和[发布验证](docs/architecture/06-release-validation.zh-CN.md)。
@@ -727,11 +729,20 @@ Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为
 - 系统与运维：`system_basic`、`process_basic`、`service_control`、`health_check`、`log_analyze`、`task_control`
 - 运行时与工作区基础工具：`run_cmd`、`read_file`、`write_file`、`list_dir`、`make_dir`、`remove_file`、`workspace_patch`、`task_plan`、`subagent`
 - 文件、配置与开发工具：`fs_basic`、`code_index`、`config_basic`、`config_edit`、`config_guard`、`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
-- 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`media_download`、`web_search_extract`
+- 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`browser_session`、`media_download`、`web_search_extract`
 - 文档与办公：`doc_parse`、`office_workspace`、`transform`
 - 多模态与媒体生成：`image_generate`（`image.preview_generate` / `image.generate` / `image.poll` / `image.cancel`）、`image_edit`、`image_vision`、`audio_transcribe`（`audio.preview_transcribe` / `audio.transcribe`）、`audio_synthesize`（`audio.preview_synthesize` / `audio.synthesize` / `audio.poll` / `audio.cancel`）、`video_generate`（`video.preview_generate` / `video.generate` / `video.poll` / `video.cancel`）、`music_generate`（`music.preview_generate` / `music.generate` / `music.poll` / `music.cancel`）
 - 工作流与发布类：`schedule`、`extension_manager`、`photo_organize`、`invest_copy`、`x`
 - 业务与知识类：`crypto`、`stock`、`weather`、`chinese_almanac`、`map_merchant`、`kb`
+
+打开明确的公开 URL 并提取有界证据时使用 `browser_web`。只有任务需要连续导航、点击、
+输入、选择、下载或验证页面跳转时，才使用独立的任务级 `browser_session`；它的元素引用
+绑定当前快照 generation，外部交互和写入动作仍受 policy 与确认控制。
+
+`media_download` 默认交付原始媒体。抖音和小红书图文帖还会交付经过验证的平台正文；
+最多 9 张图片逐张发送，更多图片按来源顺序打成一个 ZIP。只有用户明确要求把媒体转成
+文字时，才会执行 OCR 或语音转写。图片识别优先使用已配置的 `image_vision` 模型，也可
+明确使用本地 Tesseract 兜底；音频和视频则使用语音转写。
 
 技能“安装”和“启用”是两个独立状态。Skill Store 会从 registry 读取可选技能，
 并在展开安装信息时把该技能声明的宿主、运行时和模型依赖逐条显示为已安装、缺失或
@@ -798,6 +809,7 @@ timeout_seconds = 120
 
 - `configs/`：运行时、通道、模型、记忆、技能配置
 - `crates/`：Rust 服务、守护进程、CLI 和技能实现
+- `optional_skills/`：由 Skill Store 按需安装的内建技能包
 - `external_skills/`：外部提交技能与示例脚手架
 - `prompts/`：提示词分层和自动生成的技能提示词
 - `scripts/`：安装、回归、维护、技能调用辅助脚本
