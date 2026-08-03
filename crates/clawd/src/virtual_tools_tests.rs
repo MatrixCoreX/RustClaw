@@ -255,6 +255,41 @@ fn fs_basic_read_artifact_range_rewrites_to_system_basic() {
 }
 
 #[test]
+fn fs_basic_read_artifact_range_normalizes_numeric_string_cursor() {
+    let rewrite = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "read_artifact_range",
+            "path": ".agent-runtime/artifacts/task/transcript.txt",
+            "cursor": "65536",
+        }),
+    )
+    .expect("rewrite")
+    .expect("virtual tool");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(rewrite.runtime_args["cursor"], 65536);
+}
+
+#[test]
+fn fs_basic_list_dir_normalizes_numeric_string_cursor() {
+    let rewrite = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({
+            "action": "list_dir",
+            "path": ".agent-runtime/artifacts/skill-invocations",
+            "cursor": "8",
+        }),
+    )
+    .expect("rewrite")
+    .expect("virtual tool");
+
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(rewrite.runtime_args["action"], "inventory_dir");
+    assert_eq!(rewrite.runtime_args["cursor"], 8);
+}
+
+#[test]
 fn system_basic_read_artifact_range_canonicalizes_to_fs_basic() {
     let canonical = canonicalize_legacy_tool_call(
         "system_basic",

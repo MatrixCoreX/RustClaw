@@ -297,7 +297,7 @@ fn wechat_i18n_binding_keys_are_locale_specific_with_safe_fallback() {
 }
 
 #[test]
-fn wechat_media_progress_stays_transport_state_instead_of_chat_text() {
+fn wechat_media_progress_stays_transport_state_without_canned_replies() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let zh = test_wechat_section(
         "zh-CN",
@@ -305,7 +305,7 @@ fn wechat_media_progress_stays_transport_state_instead_of_chat_text() {
             .to_string_lossy()
             .to_string(),
     );
-    let task = TaskQueryResponse {
+    let mut task = TaskQueryResponse {
         task_id: Default::default(),
         status: TaskStatus::Running,
         execution_state: None,
@@ -321,7 +321,11 @@ fn wechat_media_progress_stays_transport_state_instead_of_chat_text() {
                 "frame": {
                     "record_type": "skill_progress",
                     "detail_key": "media_download.precheck.starting",
-                    "params": {"unsafe_display_text": "must not render"}
+                    "params": {
+                        "step_id": "media_precheck",
+                        "step_status": "in_progress",
+                        "unsafe_display_text": "must not render"
+                    }
                 }
             }
         })),
@@ -331,6 +335,54 @@ fn wechat_media_progress_stays_transport_state_instead_of_chat_text() {
     };
 
     assert!(skill_progress_message(&task, &zh).is_none());
+
+    task.task_plan = Some(serde_json::json!({
+        "schema_version": 1,
+        "source": "task_plan",
+        "status": "ok",
+        "data_only": true,
+        "render_owner": "ui_cli_channel_projection",
+        "plan_revision": 1,
+        "steps": [{
+            "step_id": "media_precheck",
+            "title": "检查本次媒体任务",
+            "status": "in_progress"
+        }]
+    }));
+    assert_eq!(
+        skill_progress_message(&task, &zh),
+        Some((9, "检查本次媒体任务".to_string()))
+    );
+    task.task_plan = None;
+
+    task.skill_progress
+        .as_mut()
+        .and_then(|event| event.pointer_mut("/payload/frame/detail_key"))
+        .map(|detail_key| *detail_key = serde_json::json!("skill_dispatch.queue.waiting"));
+    assert!(skill_progress_message(&task, &zh).is_none());
+
+    task.skill_progress
+        .as_mut()
+        .and_then(|event| event.pointer_mut("/payload/frame/detail_key"))
+        .map(|detail_key| *detail_key = serde_json::json!("skill_dispatch.queue.started"));
+    assert!(skill_progress_message(&task, &zh).is_none());
+
+    for detail_key in [
+        "media_download.download.starting",
+        "media_download.download.completed",
+        "media_download.transcribe.extracting_audio",
+        "media_download.transcribe.recognizing_speech",
+        "media_download.transcribe.completed",
+    ] {
+        task.skill_progress
+            .as_mut()
+            .and_then(|event| event.pointer_mut("/payload/frame/detail_key"))
+            .map(|value| *value = serde_json::json!(detail_key));
+        assert!(
+            skill_progress_message(&task, &zh).is_none(),
+            "detail_key={detail_key} must not become canned chat text"
+        );
+    }
 }
 
 #[test]

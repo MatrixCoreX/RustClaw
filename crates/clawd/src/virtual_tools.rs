@@ -197,6 +197,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         "list_dir" => {
             move_value_alias_if_missing(&mut obj, "path", &["root", "dir", "directory"]);
             move_value_alias_if_missing(&mut obj, "max_entries", &["limit"]);
+            normalize_numeric_cursor(&mut obj);
             obj.insert(
                 "action".to_string(),
                 Value::String("inventory_dir".to_string()),
@@ -223,6 +224,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         }
         "read_artifact_range" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path"]);
+            normalize_numeric_cursor(&mut obj);
             obj.insert(
                 "action".to_string(),
                 Value::String("read_artifact_range".to_string()),
@@ -851,6 +853,21 @@ fn normalize_read_text_range_args(obj: &mut serde_json::Map<String, Value>) -> b
         }
     }
     changed
+}
+
+fn normalize_numeric_cursor(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(Value::String(raw)) = obj.get("cursor") else {
+        return false;
+    };
+    let trimmed = raw.trim();
+    let Ok(cursor) = trimmed.parse::<u64>() else {
+        return false;
+    };
+    obj.insert(
+        "cursor".to_string(),
+        Value::Number(serde_json::Number::from(cursor)),
+    );
+    true
 }
 
 fn read_nonzero_u64_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<u64> {

@@ -1,5 +1,7 @@
 import importlib.util
+import io
 import json
+from contextlib import redirect_stdout
 from pathlib import Path
 import subprocess
 import sys
@@ -54,6 +56,49 @@ class AdapterTest(unittest.TestCase):
             200,
         )
         self.assertTrue(response["extra"]["transcription_engines"]["whisper"]["default"])
+
+    def test_progress_reporter_emits_ordered_machine_frames(self) -> None:
+        output = io.StringIO()
+        reporter = self.skill.ProgressReporter("progress-1")
+        with redirect_stdout(output):
+            reporter.emit(
+                "media_download.transcribe.extracting_audio",
+                current=1,
+                total=3,
+            )
+            reporter.emit(
+                "media_download.transcribe.recognizing_speech",
+                current=2,
+                total=3,
+            )
+
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([frame["sequence"] for frame in frames], [1, 2])
+        self.assertEqual(frames[0]["record_type"], "skill_progress")
+        self.assertEqual(frames[0]["params"]["step_id"], "extract_audio")
+        self.assertEqual(frames[0]["params"]["step_status"], "in_progress")
+        self.assertEqual(frames[1]["detail_key"], "media_download.transcribe.recognizing_speech")
+        self.assertEqual(frames[1]["params"]["step_id"], "transcribe_speech")
+        self.assertEqual(frames[1]["params"]["step_status"], "in_progress")
+        self.assertEqual((frames[1]["current"], frames[1]["total"]), (2, 3))
+
+    def test_child_progress_is_forwarded_without_user_prose(self) -> None:
+        forwarded: list[tuple[str, int, int]] = []
+        line = (
+            self.skill.CHILD_PROGRESS_PREFIX
+            + '{"detail_key":"media_download.transcribe.recognizing_speech","current":2,"total":3}'
+        )
+
+        consumed = self.skill._child_progress(
+            line,
+            lambda key, current, total: forwarded.append((key, current, total)),
+        )
+
+        self.assertTrue(consumed)
+        self.assertEqual(
+            forwarded,
+            [("media_download.transcribe.recognizing_speech", 2, 3)],
+        )
 
     def test_intel_macos_capabilities_keep_whisper_and_disable_funasr_package(self) -> None:
         with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
@@ -836,6 +881,8 @@ class JsonlProtocolTest(unittest.TestCase):
             self.assertEqual(progress["record_type"], "skill_progress")
             self.assertEqual(progress["request_id"], request["request_id"])
             self.assertEqual(progress["detail_key"], "media_download.precheck.starting")
+            self.assertEqual(progress["params"]["step_id"], "media_precheck")
+            self.assertEqual(progress["params"]["step_status"], "in_progress")
         return completed, json.loads(lines[-1])
 
     def test_emits_progress_before_exactly_one_final_json_line(self) -> None:

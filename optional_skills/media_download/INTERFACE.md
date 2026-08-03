@@ -11,10 +11,11 @@
 
 ## Progress Contract
 
-The manifest opts into versioned progress frames. A valid request emits a machine-only
-`media_download.precheck.starting` progress record before the final response, with
-`params.action` identifying the requested action. The host owns localization and display;
-this frame is only progress/stall evidence and never changes the final result.
+The manifest opts into versioned progress frames. A valid request emits machine-only
+progress records with stable `params.step_id` and `params.step_status` values. The host
+owns localization and display; frames are progress/stall evidence and never change the
+final result. A communication channel must not translate `detail_key` or generate canned
+progress prose from it.
 
 ## Planner Selection Notes
 
@@ -36,6 +37,7 @@ this frame is only progress/stall evidence and never changes the final result.
 - “把这个视频转成文字/提取音频” -> `transcribe`. When a share post is downloaded first, branch on the returned artifact type: a video plus a text-conversion request must pass that current video path to `media_download.transcribe`; it must never be sent to image OCR.
 - Only when the user explicitly requests image text recognition, prefer the host `image_vision.extract_text` multimodal capability and pass the downloaded/local image paths as `images`. It generates one UTF-8 `.txt` artifact and delivers it by default. Use this skill's `ocr` action only when multimodal vision is unavailable, returns a structured failure, or the user explicitly asks for offline/local OCR.
 - When one request explicitly asks both to download media and convert it to text, run `media_download.download` first and branch on `extra.content_bundle.kind`: pass current-task image artifacts to `image_vision.extract_text`, or pass the current-task video artifact to `media_download.transcribe` for audio extraction and speech recognition. Never send video/audio paths to image OCR. Use artifacts returned by the successful download step in this task; do not substitute a path recalled from an older task unless the user explicitly refers to that older artifact.
+- Before any potentially long media action (`download`, `resolve`, `transcribe`, `ocr`, or `prepare_x`), create a `task_plan` containing every applicable phase, even when the request uses only one skill action. Write every plan title in the user's current language; these model-authored titles are the only text that a communication channel may use for live step updates. Use the stable step IDs emitted by this skill when applicable: `media_precheck`, `download_media`, `resolve_media`, `extract_audio`, `transcribe_speech`, `recognize_images`, and `prepare_media`. The communication adapter may match a progress frame to any plan step by `step_id` even while the persisted plan status is still pending, then the planner updates statuses after the action returns. Never expose or translate a progress `detail_key`, and never invent a canned channel reply when the matching plan title is absent.
 - When this skill's local `ocr` fallback is used, recognized text shorter than 200 characters is returned inline and text of 200 or more characters remains a `.txt` artifact.
 - “检查或转换成可以发到 X/Twitter 的视频” -> `prepare_x`
 - Prefer a dedicated built-in media skill when the request is unrelated to this package's supported actions.

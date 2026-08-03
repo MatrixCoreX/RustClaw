@@ -1,10 +1,13 @@
 import importlib.util
+import io
+import json
 import os
 from pathlib import Path
 import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stderr
 from unittest import mock
 
 
@@ -50,6 +53,21 @@ class ManagedFunAsrModelTest(unittest.TestCase):
                     self.transcriber.resolve_managed_funasr_model("fsmn-vad"),
                     str(vad),
                 )
+
+    def test_parent_progress_marker_is_machine_readable(self) -> None:
+        output = io.StringIO()
+        with redirect_stderr(output):
+            self.transcriber.emit_parent_progress(
+                "media_download.transcribe.extracting_audio",
+                1,
+                3,
+            )
+
+        line = output.getvalue().strip()
+        self.assertTrue(line.startswith(self.transcriber.PARENT_PROGRESS_PREFIX))
+        payload = json.loads(line[len(self.transcriber.PARENT_PROGRESS_PREFIX) :])
+        self.assertEqual(payload["detail_key"], "media_download.transcribe.extracting_audio")
+        self.assertEqual((payload["current"], payload["total"]), (1, 3))
 
     def test_incomplete_managed_model_fails_without_runtime_download(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

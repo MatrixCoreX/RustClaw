@@ -512,14 +512,41 @@ pub(super) fn skill_progress_message(
         .pointer("/frame/detail_key")
         .and_then(serde_json::Value::as_str)?;
     let message_key = match detail_key {
-        // The typing heartbeat is the queue/working acknowledgement. Preserve
-        // media progress as machine data instead of emitting a canned message.
-        "media_download.precheck.starting" => return None,
+        // Media stages may only project a model-authored task-plan title. The
+        // frame itself remains machine data and is never translated here.
+        detail_key if detail_key.starts_with("media_download.") => {
+            let step_id = payload
+                .pointer("/frame/params/step_id")
+                .and_then(serde_json::Value::as_str)?;
+            return model_authored_plan_step_title(task, step_id).map(|title| (seq, title));
+        }
+        "skill_dispatch.queue.started" | "skill_dispatch.queue.waiting" => return None,
         "kb.operation.starting" => "telegram.progress.skill_kb",
         "package_manager.operation.starting" => "telegram.progress.skill_package",
         _ => "telegram.progress.skill_generic",
     };
     Some((seq, state.i18n.t(message_key)))
+}
+
+fn model_authored_plan_step_title(task: &TaskQueryResponse, step_id: &str) -> Option<String> {
+    let plan = task.task_plan.as_ref()?;
+    if plan.get("source").and_then(serde_json::Value::as_str) != Some("task_plan")
+        || plan.get("status").and_then(serde_json::Value::as_str) != Some("ok")
+        || plan.get("data_only").and_then(serde_json::Value::as_bool) != Some(true)
+        || plan.get("render_owner").and_then(serde_json::Value::as_str)
+            != Some("ui_cli_channel_projection")
+    {
+        return None;
+    }
+    let title = plan
+        .get("steps")?
+        .as_array()?
+        .iter()
+        .find(|step| step.get("step_id").and_then(serde_json::Value::as_str) == Some(step_id))?
+        .get("title")?
+        .as_str()?
+        .trim();
+    (!title.is_empty() && title.chars().count() <= 512).then(|| title.to_string())
 }
 
 pub(super) fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {
