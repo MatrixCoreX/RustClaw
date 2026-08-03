@@ -73,13 +73,8 @@ use structured_observation::{
 
 #[path = "loop_reply_execution_status.rs"]
 mod execution_status;
-#[cfg(test)]
-use execution_status::planned_delivery_identifies_failed_observed_step;
 use execution_status::{
-    attach_deterministic_observed_execution_status_answer, delivery_is_content_answer_candidate,
-    deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
-    deterministic_observed_execution_status_summary,
-    replace_delivery_with_deterministic_observed_execution_status_answer,
+    deterministic_missing_observed_target_answer, deterministic_observed_execution_status_summary,
     successful_content_observation_should_precede_status_summary,
 };
 
@@ -87,8 +82,8 @@ use execution_status::{
 mod execution_summary;
 use execution_summary::{
     attach_execution_summary_to_delivery, delivery_matches_latest_publishable_synthesis,
-    delivery_messages_include_delivery_token, exact_observation_arg_from_plan_step,
-    execution_summary_arg_is_sensitive, latest_publishable_synthesis_matches_written_file_path,
+    delivery_messages_include_delivery_token, execution_summary_arg_is_sensitive,
+    latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, output_text_from_execution_result,
     plan_step_for_execution, truncate_with_ellipsis,
 };
@@ -638,21 +633,6 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    if loop_state.delivery_messages.is_empty() {
-        if !successful_content_observation_should_precede_status_summary(
-            agent_run_context,
-            &loop_state,
-        ) {
-            attach_deterministic_observed_execution_status_answer(
-                state,
-                task,
-                user_text,
-                &mut loop_state,
-                &mut finalizer_summary,
-            );
-        }
-    }
-
     let replaced_scalar_placeholder_before_failure = run_deterministic_fallback_renderer_registry(
         state,
         task,
@@ -744,16 +724,6 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        attach_deterministic_observed_execution_status_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            &mut finalizer_summary,
-        );
-    }
-
-    if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
             direct_publishable_observed_answer(state, task, &loop_state, agent_run_context).await
         {
@@ -823,7 +793,7 @@ pub(crate) async fn finalize_loop_reply(
         } else {
             false
         };
-    let replaced_contract_answer = if !replaced_grounded_answer
+    if !replaced_grounded_answer
         && !replaced_deterministic_fallback
         && !replaced_direct_scalar
         && !replaced_direct_structured
@@ -832,31 +802,6 @@ pub(crate) async fn finalize_loop_reply(
             task,
             &mut loop_state,
             agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
-    if !replaced_grounded_answer
-        && !replaced_deterministic_fallback
-        && !replaced_direct_scalar
-        && !replaced_direct_structured
-        && !replaced_contract_answer
-        && !delivery_is_content_answer_candidate(
-            agent_run_context,
-            &loop_state,
-            &loop_state.delivery_messages,
-        )
-        && !successful_content_observation_should_precede_status_summary(
-            agent_run_context,
-            &loop_state,
-        )
-    {
-        replace_delivery_with_deterministic_observed_execution_status_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
             &mut finalizer_summary,
         );
     }
@@ -877,6 +822,16 @@ pub(crate) async fn finalize_loop_reply(
     }
     append_compound_file_delivery_token_from_route(state, task, &mut loop_state, agent_run_context);
     discard_non_answer_separator_delivery_for_broad_structured_read(&task.task_id, &mut loop_state);
+    loop_state
+        .delivery_messages
+        .retain(|message| !crate::finalize::looks_like_internal_trace_artifact(message));
+    if loop_state
+        .last_user_visible_respond
+        .as_deref()
+        .is_some_and(crate::finalize::looks_like_internal_trace_artifact)
+    {
+        loop_state.last_user_visible_respond = None;
+    }
     if let Some(reply) = content_evidence_step_failure_reply_from_loop(
         state,
         task,

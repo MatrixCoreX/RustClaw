@@ -4,7 +4,6 @@ use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
     deterministic_matrix_observed_shape_answer, deterministic_missing_observed_target_answer,
-    deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
     deterministic_structured_container_summary_answer,
     direct_exact_scalar_path_from_dry_run_payload, output_text_from_execution_result,
@@ -319,11 +318,6 @@ async fn missing_delivery_after_observation_message(
     clarify_reason: &str,
     observed_contract_evidence_complete: bool,
 ) -> String {
-    if let Some(answer) =
-        deterministic_observed_execution_status_answer(state, user_text, loop_state)
-    {
-        return answer;
-    }
     if let Some(answer) = deterministic_structured_container_summary_answer(
         state,
         user_text,
@@ -399,39 +393,32 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     clarify_reason: &str,
 ) -> Option<AskReply> {
     let status_summary = || deterministic_observed_execution_status_summary(loop_state);
-    let deterministic_answer =
-        deterministic_observed_execution_status_answer(state, user_text, loop_state)
-            .map(|answer| (answer, status_summary()))
-            .or_else(|| {
-                deterministic_structured_container_summary_answer(
-                    state,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                )
-                .map(|answer| (answer, status_summary()))
-            })
-            .or_else(|| {
-                direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context)
-            })
-            .or_else(|| {
-                deterministic_matrix_observed_shape_answer(
-                    state,
-                    task,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                )
-            })
-            .or_else(|| {
-                deterministic_missing_observed_target_answer(
-                    state,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                )
-                .map(|answer| (answer, status_summary()))
-            });
+    let deterministic_answer = deterministic_structured_container_summary_answer(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    )
+    .map(|answer| (answer, status_summary()))
+    .or_else(|| direct_exact_scalar_path_from_dry_run_payload(loop_state, agent_run_context))
+    .or_else(|| {
+        deterministic_matrix_observed_shape_answer(
+            state,
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+    })
+    .or_else(|| {
+        deterministic_missing_observed_target_answer(
+            state,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+        .map(|answer| (answer, status_summary()))
+    });
     let has_deterministic_answer = deterministic_answer.is_some();
     if !has_deterministic_answer
         && finalizer_summary
