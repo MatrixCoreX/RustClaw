@@ -101,7 +101,6 @@ google_models = [
     "gemini-2.5-pro",
 ]
 max_concurrency = 1
-max_images = 6
 max_input_bytes = 10485760
 mimo_models = [
     "mimo-v2.5",

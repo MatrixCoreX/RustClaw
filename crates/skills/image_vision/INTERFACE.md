@@ -24,7 +24,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported actions; `analyze` is normalized to `describe`. |
-| all | `images` / `image` | yes | array or single image | - | Provide exactly one form. Every array item/object must contain a non-empty `path`, `url`, or `base64` value (or valid string shorthand); empty objects are invalid. |
+| all | `images` / `image` | yes | array or single image | - | Provide exactly one form. `images` has no host-defined item-count ceiling: pass the complete ordered current-task image set in one call instead of splitting it to satisfy an arbitrary count. Every array item/object must contain a non-empty `path`, `url`, or `base64` value (or valid string shorthand); empty objects are invalid. Per-image byte, request timeout, provider context, and runtime cancellation limits still apply. |
 | all | `instruction` / `query` / `text` | no | string | - | Optional user instruction or question to guide the image analysis. |
 | all | `response_language` | no | string | - | Preferred language tag or name for the **final** user-visible text (e.g. `zh-CN`, `English`). |
 | all | `language` | no | string | - | Used only when `response_language` is absent or empty (not a parallel alias on the same tier). |
@@ -39,6 +39,7 @@
 - Form fields, tables, or other visually structured data extraction -> use `image_vision.extract`.
 - A plain media-download request is not an image-text-recognition request. Do not add `extract_text` after `media_download.download` unless the current user explicitly asks for conversion.
 - If images were produced by another capability in the same turn, pass those successful current-task artifact paths into `images`; do not ask the user to upload the same images again and do not substitute an older task's artifact unless the user explicitly refers to it.
+- Preserve every produced image in source order. Do not truncate or split the set merely because it contains more than six images; `image_vision` no longer has a host-side item-count ceiling.
 - On a structured provider/configuration/unsupported-input failure from `extract_text`, the planner may fall back to an available local OCR capability such as `media_download.ocr`.
 - Local OCR fallback accepts images only. If the downloaded artifact is video and the user requested text conversion, use `media_download.transcribe` to extract audio and recognize speech instead.
 - Do not use local OCR merely because the image originated from a media-download skill; capability selection follows the requested output, not the producing skill name.
