@@ -67,7 +67,37 @@ class AdapterTest(unittest.TestCase):
             extra["transcription_engines"]["funasr"]["unavailable_reason_code"],
             "platform_binary_unavailable",
         )
+        self.assertEqual(extra["available_transcription_engines"], ["whisper"])
         self.assertEqual(extra["installed_dependencies"]["transcription_alternative"], [])
+
+    def test_intel_macos_rejects_unavailable_funasr_before_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "sample.mp4"
+            input_path.write_bytes(b"video")
+            request = {
+                "context": {
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                }
+            }
+            with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
+                self.skill.platform, "machine", return_value="x86_64"
+            ), self.assertRaises(self.skill.SkillFailure) as raised:
+                self.skill._build_transcribe_command(
+                    request,
+                    {"input_path": "sample.mp4", "engine": "funasr"},
+                    root / "artifacts",
+                )
+
+        failure = raised.exception
+        self.assertEqual(failure.error_code, "dependency_unavailable")
+        self.assertEqual(failure.details["requested_engine"], "funasr")
+        self.assertEqual(failure.details["available_engines"], ["whisper"])
+        self.assertEqual(
+            failure.details["unavailable_reason_code"],
+            "platform_binary_unavailable",
+        )
 
     def test_intel_macos_requirement_roots_exclude_the_funasr_stack(self) -> None:
         requirements = (SKILL_ROOT / "requirements.in").read_text(encoding="utf-8")

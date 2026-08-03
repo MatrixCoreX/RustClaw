@@ -385,10 +385,22 @@ def _build_download_command(
 
 
 def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
+    engine = _choice(args, "engine", ("whisper", "funasr"), "whisper")
+    available_engines = _available_transcription_engines()
+    if engine not in available_engines:
+        raise SkillFailure(
+            f"transcription engine is unavailable on this platform: {engine}",
+            error_code="dependency_unavailable",
+            message_key="media_download.error.dependency_unavailable",
+            details={
+                "requested_engine": engine,
+                "available_engines": list(available_engines),
+                "unavailable_reason_code": "platform_binary_unavailable",
+            },
+        )
     raw = _string(args, "input_path", required=True, max_length=4_096)
     assert raw is not None
     input_path = _input_path(request, raw)
-    engine = _choice(args, "engine", ("whisper", "funasr"), "whisper")
     language = _string(args, "language", default="auto", max_length=32) or "auto"
     command = _tool("video_transcriber.py")
     command.extend(
@@ -970,8 +982,19 @@ def _funasr_prebuilt_supported(
     return not (system == "darwin" and architecture in {"x86_64", "amd64"})
 
 
+def _available_transcription_engines(
+    system_name: str | None = None,
+    machine: str | None = None,
+) -> tuple[str, ...]:
+    engines = ["whisper"]
+    if _funasr_prebuilt_supported(system_name, machine):
+        engines.append("funasr")
+    return tuple(engines)
+
+
 def _capabilities_extra() -> dict[str, Any]:
-    funasr_supported = _funasr_prebuilt_supported()
+    available_engines = _available_transcription_engines()
+    funasr_supported = "funasr" in available_engines
     return {
         "schema_version": SCHEMA_VERSION,
         "source_skill": SKILL_NAME,
@@ -1007,6 +1030,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "host_integrated_dependencies": {
             "default_transcription": ["whisper.cpp"],
         },
+        "available_transcription_engines": list(available_engines),
         "transcription_engines": {
             "whisper": {
                 "supported": True,

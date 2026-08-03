@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.6"
+version = "0.3.7"
 description = "For any supported public copied App share payload, short link, or website share URL, default immediately to downloading and returning the original media without asking which operation is wanted; Douyin and Xiaohongshu image-article posts return all extracted original images plus platform-provided article text by default, while image OCR remains explicit. This skill delivers article or OCR text inline below 200 characters and as a text artifact at 200 characters or more."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
