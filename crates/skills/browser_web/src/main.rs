@@ -156,7 +156,7 @@ fn emit_start_progress(stdout: &mut impl Write, request: &Request) -> anyhow::Re
             "action".to_string(),
             Value::String("open_extract".to_string()),
         )]),
-        current: Some(0),
+        current: requested.map(|_| 0),
         total: requested,
         reference: None,
     };

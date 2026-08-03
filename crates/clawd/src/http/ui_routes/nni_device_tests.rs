@@ -186,6 +186,16 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
     let state = workspace.state();
 
     let initial = read_nni_config(&state).expect("read initial NNI config");
+    assert_eq!(initial.remote_nodes, vec!["https://nni.example.test"]);
+    assert!(initial.joined);
+    assert_eq!(
+        initial.config_path,
+        workspace
+            .root
+            .join("data/nni/runtime-config.json")
+            .display()
+            .to_string()
+    );
     assert_eq!(initial.last_heartbeat_at_ts, None);
     assert_eq!(initial.heartbeat_request_count, 0);
     assert_eq!(initial.last_heartbeat_error, None);
@@ -210,6 +220,44 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
     assert_eq!(persisted.schema_version, 1);
     assert_eq!(persisted.last_heartbeat_at_ts, Some(222));
     assert_eq!(persisted.heartbeat_request_count, 10);
+    let migrated: NniRuntimeConfig = serde_json::from_str(
+        &std::fs::read_to_string(nni_runtime_config_path(&state))
+            .expect("read migrated NNI runtime config"),
+    )
+    .expect("parse migrated NNI runtime config");
+    assert_eq!(migrated.schema_version, 1);
+    assert_eq!(migrated.remote_nodes, vec!["https://nni.example.test"]);
+    assert!(migrated.joined);
+}
+
+#[test]
+fn nni_settings_use_data_root_without_mutating_main_config() {
+    let workspace = NniRuntimeStateTestWorkspace::new("runtime-config");
+    let main_config = "[llm]\nselected_vendor = \"minimax\"\n";
+    workspace.write_config(main_config);
+    let state = workspace.state();
+    let nodes = vec!["https://nni.example.test/v1".to_string()];
+
+    let response =
+        write_nni_config(&state, Some(&nodes), Some(true)).expect("persist NNI runtime config");
+
+    assert_eq!(workspace.read_config(), main_config);
+    assert_eq!(response.remote_nodes, vec!["https://nni.example.test"]);
+    assert!(response.joined);
+    assert_eq!(
+        response.config_path,
+        workspace
+            .root
+            .join("data/nni/runtime-config.json")
+            .display()
+            .to_string()
+    );
+    let persisted: NniRuntimeConfig = serde_json::from_str(
+        &std::fs::read_to_string(nni_runtime_config_path(&state)).expect("read NNI runtime config"),
+    )
+    .expect("parse NNI runtime config");
+    assert_eq!(persisted.remote_nodes, vec!["https://nni.example.test"]);
+    assert!(persisted.joined);
 }
 
 #[test]

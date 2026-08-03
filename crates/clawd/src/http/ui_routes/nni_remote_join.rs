@@ -5,6 +5,7 @@ const NNI_HEARTBEAT_NETWORK_RETRY_LIMIT: usize = 3;
 const NNI_HEARTBEAT_NETWORK_RETRY_DELAY_SECONDS: u64 = 2;
 const NNI_HEARTBEAT_USER_KEY: &str = "clawd-nni-heartbeat";
 const NNI_HEARTBEAT_ERROR_HISTORY_LIMIT: usize = 200;
+const NNI_RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 1;
 const NNI_HEARTBEAT_RUNTIME_STATE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize)]
@@ -27,6 +28,30 @@ struct NniConfigUpdateRequest {
     remote_nodes: Option<Vec<String>>,
     #[serde(default)]
     joined: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NniRuntimeConfig {
+    #[serde(default = "nni_runtime_config_schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    remote_nodes: Vec<String>,
+    #[serde(default)]
+    joined: bool,
+}
+
+impl Default for NniRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
+            remote_nodes: Vec::new(),
+            joined: false,
+        }
+    }
+}
+
+fn nni_runtime_config_schema_version() -> u32 {
+    NNI_RUNTIME_CONFIG_SCHEMA_VERSION
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -795,25 +820,12 @@ fn normalize_nni_node_url(raw: &str) -> Result<String, &'static str> {
 }
 
 fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
-    let path = state.skill_rt.workspace_root.join("configs/config.toml");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
-    let parsed: toml::Value =
-        toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
-    let remote_nodes = parsed
-        .get("nni")
-        .and_then(|value| value.get("remote_nodes"))
-        .and_then(toml_value_string_list)
-        .map(|values| normalize_nni_node_urls(&values).unwrap_or_default())
-        .unwrap_or_default();
-    let joined = parsed
-        .get("nni")
-        .and_then(|value| value.get("joined"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false);
+    let path = nni_runtime_config_path(state);
+    let config = read_nni_runtime_config(state)?;
     let heartbeat_state = read_nni_heartbeat_runtime_state(state)?;
     Ok(NniConfigResponse {
-        remote_nodes,
-        joined,
+        remote_nodes: config.remote_nodes,
+        joined: config.joined,
         heartbeat_interval_seconds: NNI_HEARTBEAT_INTERVAL_SECONDS,
         heartbeat_network_retry_limit: NNI_HEARTBEAT_NETWORK_RETRY_LIMIT,
         heartbeat_request_count: heartbeat_state.heartbeat_request_count,
@@ -823,6 +835,111 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
         last_heartbeat_network_failures: heartbeat_state.last_heartbeat_network_failures,
         config_path: path.display().to_string(),
     })
+}
+
+fn nni_runtime_config_path(state: &AppState) -> PathBuf {
+    state
+        .skill_rt
+        .workspace_root
+        .join("data")
+        .join("nni")
+        .join("runtime-config.json")
+}
+
+fn read_nni_runtime_config(state: &AppState) -> anyhow::Result<NniRuntimeConfig> {
+    let path = nni_runtime_config_path(state);
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(legacy) = read_legacy_nni_config(state)? {
+                write_nni_runtime_config(state, &legacy)?;
+                return Ok(legacy);
+            }
+            return Ok(NniRuntimeConfig::default());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if raw.trim().is_empty() {
+        return Ok(NniRuntimeConfig::default());
+    }
+    let mut config: NniRuntimeConfig = serde_json::from_str(&raw)?;
+    if config.schema_version != NNI_RUNTIME_CONFIG_SCHEMA_VERSION {
+        anyhow::bail!(
+            "nni_runtime_config_schema_unsupported:{}",
+            config.schema_version
+        );
+    }
+    config.remote_nodes = normalize_nni_node_urls(&config.remote_nodes)
+        .map_err(|error| anyhow::anyhow!(error))?;
+    Ok(config)
+}
+
+fn read_legacy_nni_config(state: &AppState) -> anyhow::Result<Option<NniRuntimeConfig>> {
+    let path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let parsed: toml::Value = toml::from_str(&raw)?;
+    let Some(nni) = parsed.get("nni") else {
+        return Ok(None);
+    };
+    let remote_nodes = nni
+        .get("remote_nodes")
+        .and_then(toml_value_string_list)
+        .map(|values| normalize_nni_node_urls(&values))
+        .transpose()
+        .map_err(|error| anyhow::anyhow!(error))?
+        .unwrap_or_default();
+    let joined = nni
+        .get("joined")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    Ok(Some(NniRuntimeConfig {
+        schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
+        remote_nodes,
+        joined,
+    }))
+}
+
+fn write_nni_runtime_config(
+    state: &AppState,
+    config: &NniRuntimeConfig,
+) -> anyhow::Result<()> {
+    let path = nni_runtime_config_path(state);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("nni_runtime_config_parent_missing"))?;
+    fs::create_dir_all(parent)?;
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = parent.join(format!(
+        ".runtime-config.{}.{}.tmp",
+        std::process::id(),
+        suffix
+    ));
+    let result = (|| -> anyhow::Result<()> {
+        let mut bytes = serde_json::to_vec_pretty(config)?;
+        bytes.push(b'\n');
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        fs::rename(&temporary, &path)?;
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn nni_heartbeat_runtime_state_path(state: &AppState) -> PathBuf {
@@ -974,28 +1091,15 @@ fn write_nni_config(
     remote_nodes: Option<&[String]>,
     joined: Option<bool>,
 ) -> anyhow::Result<NniConfigResponse> {
-    let path = state.skill_rt.workspace_root.join("configs/config.toml");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
-    let mut output = raw;
+    let mut config = read_nni_runtime_config(state)?;
     if let Some(remote_nodes) = remote_nodes {
-        let rendered_nodes = toml::Value::Array(
-            remote_nodes
-                .iter()
-                .map(|node| toml::Value::String(node.clone()))
-                .collect(),
-        )
-        .to_string();
-        output = upsert_section_key_line(&output, "nni", "remote_nodes", &rendered_nodes);
+        config.remote_nodes = normalize_nni_node_urls(remote_nodes)
+            .map_err(|error| anyhow::anyhow!(error))?;
     }
     if let Some(joined) = joined {
-        output = upsert_section_key_line(
-            &output,
-            "nni",
-            "joined",
-            if joined { "true" } else { "false" },
-        );
+        config.joined = joined;
     }
-    write_runtime_config_file(state, &output)?;
+    write_nni_runtime_config(state, &config)?;
     read_nni_config(state)
 }
 

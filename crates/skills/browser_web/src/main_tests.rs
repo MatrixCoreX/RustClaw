@@ -56,6 +56,25 @@ fn browser_progress_frames_use_requested_and_observed_page_counts() {
 }
 
 #[test]
+fn browser_progress_frame_omits_measure_for_invalid_or_empty_requests() {
+    let request = Request {
+        request_id: "progress-empty".to_string(),
+        args: json!({}),
+        context: None,
+        _user_id: 1,
+        _chat_id: 1,
+    };
+    let mut output = Vec::new();
+
+    emit_start_progress(&mut output, &request).expect("start frame");
+
+    let frame = skill_sdk::validate_progress_frame_line(&output, "progress-empty")
+        .expect("valid unmeasured start frame");
+    assert_eq!(frame.current, None);
+    assert_eq!(frame.total, None);
+}
+
+#[test]
 fn browser_node_candidates_include_platform_service_paths_and_path_fallback() {
     let candidates = browser_node_candidates();
     assert_eq!(candidates.last(), Some(&PathBuf::from("node")));
