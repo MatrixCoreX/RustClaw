@@ -67,6 +67,8 @@ Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。
 
 ### 请求与 Agent Loop 流程
 
+无论来自哪个通道，每个请求都先走同一条接入链：
+
 ```mermaid
 flowchart TD
     A[通道 / UI / API 请求] --> B[POST /v1/tasks]
@@ -76,8 +78,16 @@ flowchart TD
     D --> E0[worker_once 恢复 tick<br/>stale running + due checkpoint]
     E0 --> E1[认领下一个 queued 任务]
     E1 --> E{任务类型}
-    E -->|run_skill| RS[直接 run_skill 路径<br/>只接受显式 skill_name]
-    E -->|ask| F[物化文本/语音/附件]
+    E -->|ask| EA[Agent loop 路径<br/>见下图]
+    E -->|run_skill| EB[直接技能路径<br/>见下图]
+```
+
+被认领的任务接着进入下图：`kind=ask` 进入 agent loop；`kind=run_skill`
+走独立直通道，不经过 planner，直接汇入共享执行路径：
+
+```mermaid
+flowchart TD
+    F0[kind=ask 任务<br/>来自接入队列] --> F[物化文本/语音/附件]
     F --> G[TurnBoundaryEnvelope<br/>身份 + 显式机器事实 + 安全/预算 profile]
     G --> H[Ask 上下文包<br/>记忆 provenance + 最近执行 + goal/journal refs]
     H --> J[Agent loop<br/>普通语义权威]
@@ -90,7 +100,7 @@ flowchart TD
     Q -->|synthesize_answer| S[基于证据合成]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
     QP --> MG{非幂等变更?}
-    RS --> RSG[不经过 planner / resolver 选择<br/>不做 verifier 语义选择]
+    RS[kind=run_skill 任务<br/>来自接入队列，只接受显式 skill_name] --> RSG[不经过 planner / resolver 选择<br/>不做 verifier 语义选择]
     RSG --> MG
     MG -->|是| MI[调用前持久化 intent + 确定性 idempotency key<br/>再持久化 attempt]
     MG -->|否| EX{执行 adapter<br/>进程型执行附带沙箱后端诊断}
