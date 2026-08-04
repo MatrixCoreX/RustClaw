@@ -55,6 +55,8 @@ function props(): TaskResultPanelProps {
     onSubmitResume: () => {},
     onDecideTaskApproval: () => {},
     onControlTask: () => {},
+    onControlSubagent: () => {},
+    onViewTask: () => {},
     onControlTaskGoal: () => {},
   };
 }
@@ -73,4 +75,47 @@ test("renders the task plan as a clear step card with raw JSON collapsed", () =>
   assert.match(markup, /技术详情（原始 JSON）/);
   assert.match(markup, /<details/);
   assert.match(markup, />v2</);
+});
+
+test("renders a beginner-facing subagent panel with active and done controls", () => {
+  const base = props();
+  base.taskResult = {
+    task_id: "parent-1",
+    status: "running",
+    result_json: {
+      child_task_graph: {
+        schema_version: 2,
+        parent_task_id: "parent-1",
+        status: "active",
+        session_open_capacity: 4,
+        session_open_count: 2,
+        main_agent_counted: false,
+        nodes: [
+          {
+            child_task_id: "child-active",
+            role: "explorer",
+            required: true,
+            readiness: "running",
+            thread_state: "open",
+            execution_state: "running",
+          },
+          {
+            child_task_id: "child-done",
+            role: "verifier",
+            required: false,
+            readiness: "succeeded",
+            thread_state: "done",
+            execution_state: "succeeded",
+          },
+        ],
+      },
+    },
+  };
+  const markup = renderToStaticMarkup(<TaskResultPanel {...base} />);
+  assert.match(markup, /并行任务/);
+  assert.match(markup, /正在处理 1 项，已完成 1 项/);
+  assert.match(markup, /停止全部/);
+  assert.match(markup, /补充要求/);
+  assert.match(markup, /关闭/);
+  assert.match(markup, /主任务不计入并行容量/);
 });

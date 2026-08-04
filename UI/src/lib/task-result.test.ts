@@ -9,6 +9,7 @@ import {
   buildTaskOutcome,
   buildTaskPermissionView,
   buildTaskPlanView,
+  buildSubagentPanelView,
   buildTaskTraceEventView,
   extractTaskText,
   taskArtifactRefs,
@@ -300,8 +301,8 @@ test("summarizes persisted subagent graph events", () => {
         schema_version: 1,
         status: "active",
         nodes: [
-          { child_task_id: "child-1", readiness: "running" },
-          { child_task_id: "child-2", readiness: "blocked_dependency" },
+          { child_task_id: "child-1", readiness: "running", thread_state: "open", execution_state: "running" },
+          { child_task_id: "child-2", readiness: "blocked_dependency", thread_state: "open", execution_state: "queued_dependency" },
         ],
         edges: [
           {
@@ -313,8 +314,8 @@ test("summarizes persisted subagent graph events", () => {
     },
     "en",
   );
-  assert.equal(graphView.title, "Subagent task graph");
-  assert.equal(graphView.detail, "2 node(s), 1 dependency edge(s); status active.");
+  assert.equal(graphView.title, "Subagent progress");
+  assert.equal(graphView.detail, "2 total, 2 active, 0 done; 1 dependency edge(s).");
 
   const nodeView = buildTaskTraceEventView(
     {
@@ -323,7 +324,7 @@ test("summarizes persisted subagent graph events", () => {
         child_task_id: "child-2",
         graph: {
           nodes: [
-            { child_task_id: "child-2", readiness: "failed" },
+            { child_task_id: "child-2", readiness: "failed", thread_state: "done", execution_state: "failed" },
           ],
         },
       },
@@ -331,7 +332,7 @@ test("summarizes persisted subagent graph events", () => {
     "en",
   );
   assert.equal(nodeView.title, "Subagent task node");
-  assert.equal(nodeView.detail, "child-2 · failed");
+  assert.equal(nodeView.detail, "child-2 · done · failed · failed");
   assert.equal(nodeView.tone, "failed");
 
   const steeringView = buildTaskTraceEventView(
@@ -351,6 +352,54 @@ test("summarizes persisted subagent graph events", () => {
   assert.equal(steeringView.title, "Subagent steering updated");
   assert.equal(steeringView.detail, "child-2 · v2 · user_followup");
   assert.equal(steeringView.tone, "attention");
+});
+
+test("builds active and done subagent panel groups from machine graph fields", () => {
+  const view = buildSubagentPanelView({
+    task_id: "parent-1",
+    status: "running",
+    result_json: {
+      child_task_graph: {
+        schema_version: 2,
+        parent_task_id: "parent-1",
+        status: "active",
+        session_open_capacity: 4,
+        session_open_count: 2,
+        main_agent_counted: false,
+        nodes: [
+          {
+            child_task_id: "child-active",
+            role: "explorer",
+            required: true,
+            readiness: "running",
+            thread_state: "open",
+            execution_state: "running",
+            queue_reason: "running",
+            permission_profile: "read_only",
+          },
+          {
+            child_task_id: "child-done",
+            role: "verifier",
+            required: false,
+            readiness: "succeeded",
+            thread_state: "closed",
+            execution_state: "succeeded",
+            closed_at: "2026-08-04T00:00:00Z",
+          },
+        ],
+      },
+    },
+    error_text: null,
+  });
+
+  assert.ok(view);
+  assert.equal(view.parentTaskId, "parent-1");
+  assert.equal(view.sessionOpenCapacity, 4);
+  assert.equal(view.mainAgentCounted, false);
+  assert.deepEqual(view.active.map((node) => node.childTaskId), ["child-active"]);
+  assert.deepEqual(view.done.map((node) => node.childTaskId), ["child-done"]);
+  assert.equal(view.active[0]?.permissionProfile, "read_only");
+  assert.equal(view.done[0]?.closedAt, "2026-08-04T00:00:00Z");
 });
 
 test("distinguishes archive recovery from an irrecoverable event gap", () => {

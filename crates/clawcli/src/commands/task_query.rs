@@ -441,8 +441,12 @@ pub(crate) fn run_subagents(
     base_url: &str,
     key: &str,
     task_id: &str,
+    command: Option<&crate::SubagentCommand>,
     json_output: bool,
 ) -> Result<()> {
+    if let Some(command) = command {
+        return run_subagent_control(base_url, key, task_id, command, json_output);
+    }
     let task = task::get_task_status(base_url, key, task_id)?;
     let report = subagent_report_json(&task);
     if json_output {
@@ -453,4 +457,137 @@ pub(crate) fn run_subagents(
         }
     }
     Ok(())
+}
+
+fn run_subagent_control(
+    base_url: &str,
+    key: &str,
+    parent_task_id: &str,
+    command: &crate::SubagentCommand,
+    json_output: bool,
+) -> Result<()> {
+    match command {
+        crate::SubagentCommand::Open {
+            child_task_id,
+            events,
+        } => {
+            let child = task::get_task_status(base_url, key, child_task_id)?;
+            let report = task_report_json(&child, *events);
+            if json_output {
+                output::print_json_pretty(&report);
+            } else {
+                for line in task_report_text_lines(&child, &report) {
+                    println!("{line}");
+                }
+            }
+        }
+        crate::SubagentCommand::Steer {
+            child_task_id,
+            message,
+            constraints_json,
+        } => {
+            let new_constraints = constraints_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|_| anyhow::anyhow!("subagent_constraints_json_invalid"))?;
+            if message
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+                && new_constraints.is_none()
+            {
+                anyhow::bail!("subagent_steer_input_required");
+            }
+            let response = task::resume_task_by_id(
+                base_url,
+                key,
+                child_task_id,
+                task::TaskResumeRequest {
+                    resume_reason: Some("subagent_steered"),
+                    user_message: message.as_deref(),
+                    new_constraints,
+                    ..Default::default()
+                },
+            )?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                child_task_id,
+                "steer",
+                response,
+            ));
+        }
+        crate::SubagentCommand::Pause {
+            child_task_id,
+            pause_seconds,
+        } => {
+            let response = task::pause_task_by_id(base_url, key, child_task_id, *pause_seconds)?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                child_task_id,
+                "pause",
+                response,
+            ));
+        }
+        crate::SubagentCommand::Resume { child_task_id } => {
+            let response = task::resume_task_by_id(
+                base_url,
+                key,
+                child_task_id,
+                task::TaskResumeRequest {
+                    resume_reason: Some("subagent_resumed"),
+                    ..Default::default()
+                },
+            )?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                child_task_id,
+                "resume",
+                response,
+            ));
+        }
+        crate::SubagentCommand::Stop { child_task_id } => {
+            let response = task::cancel_task_by_id(base_url, key, child_task_id)?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                child_task_id,
+                "stop",
+                response,
+            ));
+        }
+        crate::SubagentCommand::StopAll => {
+            let response = task::stop_child_tasks_by_parent(base_url, key, parent_task_id)?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                "",
+                "stop_all",
+                response,
+            ));
+        }
+        crate::SubagentCommand::Close { child_task_id } => {
+            let response =
+                task::close_child_task_by_id(base_url, key, parent_task_id, child_task_id)?;
+            output::print_json_pretty(&subagent_control_result(
+                parent_task_id,
+                child_task_id,
+                "close",
+                response,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn subagent_control_result(
+    parent_task_id: &str,
+    child_task_id: &str,
+    operation: &str,
+    response: serde_json::Value,
+) -> serde_json::Value {
+    json!({
+        "schema_version": 1,
+        "operation": operation,
+        "parent_task_id": parent_task_id,
+        "child_task_id": (!child_task_id.is_empty()).then_some(child_task_id),
+        "response": response,
+    })
 }

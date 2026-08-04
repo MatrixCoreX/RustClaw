@@ -122,6 +122,90 @@ fn valid_checkpoint_json(checkpoint_id: &str, resume_entrypoint: &str) -> serde_
 }
 
 #[test]
+fn child_runtime_deadline_is_explicit_and_v1_compatibility_is_traceable() {
+    let v2 = json!({
+        "task_role": "subagent_child",
+        "child_task_contract": {
+            "schema_version": 2,
+            "budget": {"runtime_deadline_ms": 2500}
+        }
+    });
+    let deadline = super::child_runtime_deadline(&v2).expect("v2 deadline");
+    assert_eq!(deadline.duration_ms, 2500);
+    assert_eq!(deadline.source, "explicit_runtime_deadline");
+
+    let no_deadline = json!({
+        "task_role": "subagent_child",
+        "child_task_contract": {
+            "schema_version": 2,
+            "budget": {"max_rounds": 4}
+        }
+    });
+    assert_eq!(super::child_runtime_deadline(&no_deadline), None);
+
+    let v1 = json!({
+        "task_role": "subagent_child",
+        "child_task_contract": {
+            "schema_version": 1,
+            "budget": {"timeout_ms": 180000}
+        }
+    });
+    let legacy = super::child_runtime_deadline(&v1).expect("v1 deadline");
+    assert_eq!(legacy.duration_ms, 180000);
+    assert_eq!(legacy.source, "v1_budget_timeout_ms");
+}
+
+#[test]
+fn explicit_child_runtime_deadline_writes_timed_out_terminal_state() {
+    let temp = TempDirGuard::new("child_runtime_deadline");
+    let state = file_backed_state_with_schema(&temp.path.join("tasks.sqlite"));
+    let worker_id = state.worker.worker_id.clone();
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, channel, kind, payload_json, status,
+            result_json, error_text, created_at, updated_at, lease_owner,
+            lease_expires_at, claim_attempt, claimed_at
+         ) VALUES (
+            'deadline-child', 42, 7, 'ui', 'ask', '{}', 'running', '{}',
+            NULL, '1', '1', ?1, 9999999999, 3, 1
+         )",
+        rusqlite::params![worker_id],
+    )
+    .expect("insert running child");
+    drop(db);
+
+    crate::repo::update_task_runtime_timeout(
+        &state,
+        "deadline-child",
+        3,
+        1200,
+        "explicit_runtime_deadline",
+    )
+    .expect("record runtime timeout");
+
+    let db = state.core.db.get().expect("get db after timeout");
+    let (status, result, lease_owner, lease_expires_at): (String, String, Option<String>, i64) = db
+        .query_row(
+            "SELECT status, result_json, lease_owner, lease_expires_at
+             FROM tasks WHERE task_id = 'deadline-child'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read timed out child");
+    let result: serde_json::Value = serde_json::from_str(&result).expect("parse result");
+    assert_eq!(status, "timeout");
+    assert_eq!(result["task_lifecycle"]["execution_state"], "timed_out");
+    assert_eq!(result["task_lifecycle"]["timeout_class"], "operation");
+    assert_eq!(
+        result["task_lifecycle"]["timeout_source"],
+        "explicit_runtime_deadline"
+    );
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
+}
+
+#[test]
 fn wechat_payload_shape_keeps_context_token_available() {
     let payload = json!({
         "channel": "wechat",

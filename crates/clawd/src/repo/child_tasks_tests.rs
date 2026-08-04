@@ -6,6 +6,22 @@ use std::{
 use serde_json::{json, Value};
 
 use super::*;
+
+#[test]
+fn interactive_approval_availability_is_stamped_from_trusted_parent_metadata() {
+    assert!(!parent_interactive_approval_available(
+        &json!({"schedule_triggered": true}).to_string()
+    ));
+    assert!(!parent_interactive_approval_available(
+        &json!({
+            "child_execution": {"interactive_approval_available": false}
+        })
+        .to_string()
+    ));
+    assert!(parent_interactive_approval_available(
+        &json!({"schedule_triggered": false}).to_string()
+    ));
+}
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile,
 };
@@ -249,6 +265,45 @@ fn terminal_child_result_retains_task_scoped_execution_projection() {
 }
 
 #[test]
+fn child_budget_exhaustion_remains_distinct_from_runtime_timeout() {
+    let temp = TempDirGuard::new("child_budget_exhausted");
+    let state = file_backed_state_with_schema(&temp.path.join("tasks.sqlite"));
+    let spec = sample_child_spec("task-parent-budget-limit", "task-child-budget-limit", true);
+    let payload = child_payload(&spec);
+    insert_task(
+        &state,
+        "task-child-budget-limit",
+        "failed",
+        &payload,
+        &json!({
+            "status_code": "administrator_model_turn_budget_exhausted",
+            "error_code": "administrator_model_turn_budget_exhausted",
+            "message_key": "clawd.task.budget_exhausted",
+            "retryable": true,
+            "task_lifecycle": {
+                "state": "failed",
+                "reason_code": "budget_exhausted"
+            }
+        }),
+    );
+
+    assert!(
+        record_child_task_terminal_projection(&state, "task-child-budget-limit", &payload,)
+            .expect("record budget exhausted child")
+    );
+    let result = stored_result_json(&state, "task-child-budget-limit");
+    assert_eq!(result["child_task_result"]["status"], "failed");
+    assert_eq!(
+        result["child_task_result"]["error_code"],
+        "administrator_model_turn_budget_exhausted"
+    );
+    assert_eq!(result["child_task_result"]["retryable"], true);
+    assert_eq!(result["task_lifecycle"]["state"], "failed");
+    assert!(result["task_lifecycle"]["timeout_class"].is_null());
+    assert_ne!(result["task_lifecycle"]["execution_state"], "timed_out");
+}
+
+#[test]
 fn child_timeout_projection_blocks_required_parent_after_restart() {
     let temp = TempDirGuard::new("child_timeout_restart");
     let db_path = temp.path.join("tasks.sqlite");
@@ -291,7 +346,7 @@ fn child_timeout_projection_blocks_required_parent_after_restart() {
     .expect("record child timeout projection after restart"));
 
     let child = stored_result_json(&restarted_state, "task-child-timeout-restart");
-    assert_eq!(child["child_task_result"]["status"], "failed");
+    assert_eq!(child["child_task_result"]["status"], "timed_out");
     assert_eq!(child["child_task_result"]["required"], true);
     assert!(child["child_task_result"].get("text").is_none());
     assert!(child["child_task_result"].get("error_text").is_none());
@@ -376,6 +431,93 @@ fn parent_child_merge_recovers_child_ids_from_nested_journal_observations() {
 }
 
 #[test]
+fn child_completion_wakes_parent_once_without_respawning_across_repeated_waits() {
+    let temp = TempDirGuard::new("child_parent_wakeup");
+    let db_path = temp.path.join("tasks.sqlite");
+    let state = file_backed_state_with_schema(&db_path);
+    let parent_task_id = "task-parent-wakeup";
+    let child_task_id = "task-child-wakeup";
+    let checkpoint_id = "checkpoint-child-wait";
+    insert_task(
+        &state,
+        parent_task_id,
+        "running",
+        &json!({"text": "parent"}),
+        &json!({
+            "child_task_ids": [child_task_id],
+            "task_lifecycle": {
+                "schema_version": 2,
+                "state": "waiting",
+                "execution_state": "waiting",
+                "checkpoint_id": checkpoint_id,
+                "next_check_after": i64::MAX,
+                "join_wait_ms": 30_000,
+                "join_wait_expires_child": false
+            },
+            "task_checkpoint": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "boundary_context": {},
+                "last_successful_round": null,
+                "last_successful_step": null,
+                "pending_action": null,
+                "observations": [],
+                "capability_results": [],
+                "evidence_refs": [],
+                "artifact_refs": [],
+                "completed_side_effect_refs": [],
+                "budget": {
+                    "round": 1,
+                    "step": 1,
+                    "llm_calls": 1,
+                    "tool_calls": 0,
+                    "elapsed_ms": 10,
+                    "llm_elapsed_ms": 10,
+                    "tool_elapsed_ms": 0
+                },
+                "attempt_ledger": null,
+                "pending_async_job": null,
+                "repair_signal": null,
+                "resume_entrypoint": "next_planner_round"
+            }
+        }),
+    );
+    let spec = sample_child_spec(parent_task_id, child_task_id, true);
+    let payload = child_payload(&spec);
+    insert_task(
+        &state,
+        child_task_id,
+        "succeeded",
+        &payload,
+        &json!({"status_code": "ok"}),
+    );
+
+    assert!(
+        record_child_task_terminal_projection(&state, child_task_id, &payload)
+            .expect("first completion projection")
+    );
+    let first = stored_result_json(&state, parent_task_id);
+    assert_eq!(first["task_lifecycle"]["resume_due"], true);
+    assert_eq!(
+        first["task_lifecycle"]["resume_input"]["resume_reason"],
+        "child_tasks_settled"
+    );
+    assert_eq!(first["child_task_ids"], json!([child_task_id]));
+
+    assert!(
+        record_child_task_terminal_projection(&state, child_task_id, &payload)
+            .expect("repeated completion projection")
+    );
+    let repeated = stored_result_json(&state, parent_task_id);
+    assert_eq!(repeated["child_task_ids"], json!([child_task_id]));
+    assert_eq!(
+        repeated["task_lifecycle"]["control_request"]["requested_at"],
+        first["task_lifecycle"]["control_request"]["requested_at"]
+    );
+    assert_eq!(repeated["child_task_merge"]["terminal_child_count"], 1);
+}
+
+#[test]
 fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
     let temp = TempDirGuard::new("writer_profile_capacity");
     let db_path = temp.path.join("tasks.sqlite");
@@ -405,9 +547,10 @@ fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
         external_user_id: None,
         external_chat_id: None,
         execution_policy_stamp: None,
+        interactive_approval_available: true,
     };
 
-    let scheduled = enqueue_child_task_specs(&state, &parent, &[writer, worker], 4, 1)
+    let scheduled = enqueue_child_task_specs(&state, &parent, &[writer, worker], 4, 1, 2)
         .expect("schedule bounded writer children");
 
     assert_eq!(scheduled["queued_child_count"], 2);
@@ -450,6 +593,7 @@ fn inline_child_starts_with_independent_running_claim_and_graph_node() {
             "schema_version": 1,
             "execution_mode": "configured"
         })),
+        interactive_approval_available: true,
     };
 
     let (claimed, payload) =

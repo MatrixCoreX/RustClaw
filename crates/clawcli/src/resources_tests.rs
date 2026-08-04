@@ -7,7 +7,7 @@ fn locale_catalog_selects_chinese_from_machine_locale_tokens() {
         message_for_locale("tui.unknown_key", Some("zh_CN.UTF-8")),
         "无法识别这个操作键。"
     );
-    assert_eq!(list_for_locale("tui.help", Some("zh-CN")).len(), 2);
+    assert_eq!(list_for_locale("tui.help", Some("zh-CN")).len(), 3);
 }
 
 #[test]

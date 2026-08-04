@@ -673,6 +673,7 @@ export default function App() {
     revokeApprovalScopeGrant,
     cancelActiveTask,
     controlTaskById,
+    controlSubagentById,
     controlTaskGoalById,
     submitInteractionTask,
     markTaskSubmitted,
@@ -2155,6 +2156,7 @@ export default function App() {
               onViewTask={viewTask}
               onCancelTask={cancelActiveTask}
               onControlTask={controlTaskById}
+              onControlSubagent={controlSubagentById}
               onControlTaskGoal={controlTaskGoalById}
               onResumeDraftChange={setResumeDraftValue}
               onSubmitResume={submitResumeForTask}

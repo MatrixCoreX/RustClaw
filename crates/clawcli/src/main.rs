@@ -225,6 +225,8 @@ enum Command {
     /// Print subagent child-run summaries for a task.
     Subagents {
         task_id: String,
+        #[command(subcommand)]
+        command: Option<SubagentCommand>,
         #[arg(long)]
         json: bool,
     },
@@ -411,6 +413,38 @@ enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+#[derive(Subcommand)]
+enum SubagentCommand {
+    /// Open one child task and show its durable report.
+    Open {
+        child_task_id: String,
+        #[arg(long)]
+        events: bool,
+    },
+    /// Add guidance to one child and resume it from its latest checkpoint.
+    Steer {
+        child_task_id: String,
+        #[arg(short, long)]
+        message: Option<String>,
+        #[arg(long)]
+        constraints_json: Option<String>,
+    },
+    /// Pause one child task without affecting its siblings.
+    Pause {
+        child_task_id: String,
+        #[arg(long, default_value_t = 3600)]
+        pause_seconds: u64,
+    },
+    /// Resume one paused or waiting child task.
+    Resume { child_task_id: String },
+    /// Stop one active child task.
+    Stop { child_task_id: String },
+    /// Stop only the active children belonging to this parent task.
+    StopAll,
+    /// Close one terminal child thread without deleting its audit history.
+    Close { child_task_id: String },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1311,9 +1345,13 @@ fn main() -> Result<()> {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_review(base_url, k, task_id, *json, *events)
         }
-        Command::Subagents { task_id, json } => {
+        Command::Subagents {
+            task_id,
+            command,
+            json,
+        } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_subagents(base_url, k, task_id, *json)
+            commands::run_subagents(base_url, k, task_id, command.as_ref(), *json)
         }
         Command::LlmTrace {
             task_id,

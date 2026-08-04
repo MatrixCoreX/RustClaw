@@ -214,9 +214,10 @@ pub(crate) use system_health::{
     whatsappd_process_stats,
 };
 use task_admin_routes::{
-    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks, goal_by_task_id,
-    list_active_tasks, list_approval_scope_grants, list_automation_runs, pause_task_by_id,
-    resume_task_by_id, retry_child_task_by_id, revoke_approval_scope_grant,
+    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
+    close_child_task_by_id, goal_by_task_id, list_active_tasks, list_approval_scope_grants,
+    list_automation_runs, pause_task_by_id, resume_task_by_id, retry_child_task_by_id,
+    revoke_approval_scope_grant, stop_child_tasks_by_parent,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
@@ -1050,6 +1051,14 @@ async fn run() -> anyhow::Result<()> {
         .route(
             "/tasks/retry-child-by-task-id",
             post(retry_child_task_by_id),
+        )
+        .route(
+            "/tasks/stop-child-tasks-by-parent",
+            post(stop_child_tasks_by_parent),
+        )
+        .route(
+            "/tasks/close-child-by-task-id",
+            post(close_child_task_by_id),
         )
         .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))

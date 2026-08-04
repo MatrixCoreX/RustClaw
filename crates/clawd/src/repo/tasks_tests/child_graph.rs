@@ -19,6 +19,7 @@ fn enqueue_child_specs_persists_and_serializes_current_workspace_writers() {
         external_user_id: None,
         external_chat_id: None,
         execution_policy_stamp: None,
+        interactive_approval_available: true,
     };
     let mut first_write =
         sample_repo_child_spec("task-parent-role-profile", "task-child-role-write-1", true);
@@ -33,7 +34,7 @@ fn enqueue_child_specs_persists_and_serializes_current_workspace_writers() {
     let specs = vec![first_write, second_write, read_only];
 
     let summary =
-        enqueue_child_task_specs(&state, &parent, &specs, 3, 1).expect("enqueue child specs");
+        enqueue_child_task_specs(&state, &parent, &specs, 3, 1, 2).expect("enqueue child specs");
 
     assert_eq!(summary["status"], "scheduled");
     assert_eq!(summary["queued_child_count"], 3);
@@ -104,6 +105,7 @@ fn parent_failure_cancels_unfinished_graph_and_publishes_snapshot() {
         external_user_id: None,
         external_chat_id: None,
         execution_policy_stamp: None,
+        interactive_approval_available: true,
     };
     let mut verifier =
         sample_repo_child_spec("task-parent-graph-failure", "task-child-verifier", true);
@@ -112,7 +114,7 @@ fn parent_failure_cancels_unfinished_graph_and_publishes_snapshot() {
         sample_repo_child_spec("task-parent-graph-failure", "task-child-writer", true),
         verifier,
     ];
-    enqueue_child_task_specs(&state, &parent, &specs, 2, 1).expect("enqueue graph");
+    enqueue_child_task_specs(&state, &parent, &specs, 2, 1, 2).expect("enqueue graph");
 
     update_task_failure(&state, "task-parent-graph-failure", 1, "provider_failed")
         .expect("fail graph parent");

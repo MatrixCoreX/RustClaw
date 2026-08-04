@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use super::{subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig};
 use crate::agent_runtime_contract::SubagentRoleDefinition;
@@ -7,6 +8,9 @@ use crate::child_task_contract::{
 };
 use crate::repo::child_tasks::{enqueue_child_task_specs, ChildTaskParentContext};
 use crate::{AppState, ClaimedTask};
+
+#[path = "subagent_runtime_persistent_resume.rs"]
+mod resume;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING: &str = "subagent_child_tasks_waiting";
 pub(super) const SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED: &str =
@@ -26,17 +30,116 @@ pub(super) fn record_persistent_child_task_from_args(
     step_in_round: usize,
     args: &Value,
     config: &SubagentRuntimeConfig,
-) -> Result<&'static str, &'static str> {
-    let mut specs = persistent_child_specs(task, args, config)?;
+) -> Result<Option<&'static str>, &'static str> {
+    schedule_child_task_specs(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
+        config,
+        false,
+    )
+}
+
+pub(super) fn record_durable_readonly_child_task_from_args(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+) -> Result<Option<&'static str>, &'static str> {
+    schedule_child_task_specs(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
+        config,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn schedule_child_task_specs(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+    force_readonly: bool,
+) -> Result<Option<&'static str>, &'static str> {
+    if !config.enabled {
+        record_persistent_schedule_error(
+            loop_state,
+            global_step,
+            step_in_round,
+            "subagent_runtime_disabled",
+            None,
+        );
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    }
+    if let Some(outcome) = resume::reuse_checkpoint_child_graph(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        config,
+    )? {
+        return match outcome {
+            resume::CheckpointChildGraphOutcome::Waiting => {
+                Ok(Some(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING))
+            }
+            resume::CheckpointChildGraphOutcome::Ready => Ok(None),
+            resume::CheckpointChildGraphOutcome::Blocked => {
+                Err(super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
+            }
+        };
+    }
+    if let Some(outcome) = resume::reuse_existing_parent_child_graph(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        config,
+    )? {
+        return match outcome {
+            resume::CheckpointChildGraphOutcome::Waiting => {
+                Ok(Some(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING))
+            }
+            resume::CheckpointChildGraphOutcome::Ready => Ok(None),
+            resume::CheckpointChildGraphOutcome::Blocked => {
+                Err(super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
+            }
+        };
+    }
+    let mut specs = child_specs(task, args, config, force_readonly)?;
     let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs
         .iter()
         .any(|spec| spec.permission_profile == ChildTaskPermissionProfile::LocalWorktree);
     let parent = child_parent_context(state, task);
     let max_parallel = persistent_max_parallel(args, config);
+    let join_wait_ms = effective_join_wait_ms(args, config);
+    let global_running_count = state.worker.active_running_task_count();
     let recursion_depth = child_recursion_depth_from_payload(&task.payload_json);
-    let enqueue = enqueue_child_task_specs(state, &parent, &specs, max_parallel, recursion_depth)
-        .map_err(|err| {
+    let enqueue = enqueue_child_task_specs(
+        state,
+        &parent,
+        &specs,
+        max_parallel,
+        recursion_depth,
+        config.max_spawn_depth as usize,
+    )
+    .map_err(|err| {
         settle_rejected_child_allocations(loop_state, &allocation_ids);
         record_persistent_schedule_error(
             loop_state,
@@ -60,7 +163,7 @@ pub(super) fn record_persistent_child_task_from_args(
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
     }
 
-    install_child_waiting_checkpoint(state, task, loop_state, &enqueue);
+    install_child_waiting_checkpoint(state, task, loop_state, &enqueue, join_wait_ms);
     record_persistent_schedule_observation(
         loop_state,
         global_step,
@@ -68,14 +171,26 @@ pub(super) fn record_persistent_child_task_from_args(
         specs.len(),
         write_enabled,
         enqueue,
+        config,
+        join_wait_ms,
+        global_running_count,
     );
-    Ok(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING)
+    Ok(Some(SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING))
 }
 
 pub(super) fn persistent_child_specs(
     task: &ClaimedTask,
     args: &Value,
     config: &SubagentRuntimeConfig,
+) -> Result<Vec<ChildTaskSpec>, &'static str> {
+    child_specs(task, args, config, false)
+}
+
+fn child_specs(
+    task: &ClaimedTask,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+    force_readonly: bool,
 ) -> Result<Vec<ChildTaskSpec>, &'static str> {
     let child_args = args
         .get("children")
@@ -90,10 +205,18 @@ pub(super) fn persistent_child_specs(
                 index + 1,
                 Some(args),
                 config,
+                force_readonly,
             )?);
         }
     } else {
-        specs.push(persistent_child_spec(task, args, 1, None, config)?);
+        specs.push(persistent_child_spec(
+            task,
+            args,
+            1,
+            None,
+            config,
+            force_readonly,
+        )?);
     }
     if specs.is_empty() {
         Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)
@@ -117,7 +240,7 @@ pub(super) fn allocate_persistent_child_budgets(
             model_turns: spec.budget.max_rounds,
             tool_calls: spec.budget.max_tool_calls,
             tokens: spec.budget.max_tokens,
-            elapsed_ms: spec.budget.timeout_ms,
+            elapsed_ms: spec.budget.runtime_deadline_ms.unwrap_or_default(),
         };
         let Some(allocation) = slice.allocate(
             allocation_id.clone(),
@@ -136,7 +259,10 @@ pub(super) fn allocate_persistent_child_budgets(
         spec.budget.max_rounds = allocation.granted.model_turns.max(1);
         spec.budget.max_tool_calls = allocation.granted.tool_calls.max(1);
         spec.budget.max_tokens = allocation.granted.tokens.max(1);
-        spec.budget.timeout_ms = allocation.granted.elapsed_ms.max(1_000);
+        spec.budget.runtime_deadline_ms = spec
+            .budget
+            .runtime_deadline_ms
+            .map(|_| allocation.granted.elapsed_ms.max(1_000));
         if let Some(scope) = spec.scope.as_object_mut() {
             scope.insert(
                 "budget_allocation_id".to_string(),
@@ -167,6 +293,7 @@ fn persistent_child_spec(
     index: usize,
     top_level_args: Option<&Value>,
     config: &SubagentRuntimeConfig,
+    force_readonly: bool,
 ) -> Result<ChildTaskSpec, &'static str> {
     let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
     let role_kind = config
@@ -177,7 +304,11 @@ fn persistent_child_spec(
     if objective.is_empty() {
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
     }
-    let permission_profile = persistent_permission_profile(args, top_level_args, &role_kind)?;
+    let permission_profile = if force_readonly {
+        ChildTaskPermissionProfile::ReadOnly
+    } else {
+        persistent_permission_profile(args, top_level_args, &role_kind)?
+    };
     let allowed_capabilities = persistent_allowed_capabilities(&options, top_level_args)?;
     let required = args
         .get("required")
@@ -203,6 +334,7 @@ fn persistent_child_spec(
         "allowed_capabilities".to_string(),
         json!(allowed_capabilities.clone()),
     );
+    let session_ref = child_session_ref(task);
     let scope = json!({
         "node_id": node_id.clone(),
         "objective": objective,
@@ -214,6 +346,8 @@ fn persistent_child_spec(
         "model_policy": model_policy,
         "tool_policy": tool_policy,
         "recursion_depth": child_recursion_depth_from_payload(&task.payload_json),
+        "session_ref": session_ref,
+        "session_open_capacity": config.max_concurrent_threads_per_session,
     });
     Ok(ChildTaskSpec {
         parent_task_id: task.task_id.clone(),
@@ -227,7 +361,7 @@ fn persistent_child_spec(
         scope,
         permission_profile,
         required,
-        budget: persistent_child_budget(args, top_level_args),
+        budget: persistent_child_budget(task, args, top_level_args),
         result_contract,
         merge_policy: ChildTaskMergePolicy::StructuredFindings,
     })
@@ -365,7 +499,11 @@ fn machine_capability_token(value: &str) -> bool {
         })
 }
 
-fn persistent_child_budget(args: &Value, top_level_args: Option<&Value>) -> ChildTaskBudget {
+fn persistent_child_budget(
+    task: &ClaimedTask,
+    args: &Value,
+    top_level_args: Option<&Value>,
+) -> ChildTaskBudget {
     let budget_value = args.get("budget").or_else(|| top_level_args?.get("budget"));
     let mut budget = ChildTaskBudget::readonly_default();
     if let Some(value) = budget_value {
@@ -378,19 +516,36 @@ fn persistent_child_budget(args: &Value, top_level_args: Option<&Value>) -> Chil
         if let Some(max_tokens) = value.get("max_tokens").and_then(Value::as_u64) {
             budget.max_tokens = max_tokens.max(1);
         }
-        if let Some(timeout_ms) = value.get("timeout_ms").and_then(Value::as_u64) {
-            budget.timeout_ms = timeout_ms.max(1_000);
-        }
     }
+    // A planner may choose the parent wait window, but it cannot terminate a
+    // whole child operation. Only a structured field on the original parent
+    // task submission can opt into an operation deadline. Persisted v1 child
+    // tasks already carry their frozen deadline in their child contract and
+    // are handled by the worker compatibility reader.
+    budget.runtime_deadline_ms = serde_json::from_str::<Value>(&task.payload_json)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .pointer("/subagent_execution/runtime_deadline_ms")
+                .and_then(Value::as_u64)
+        })
+        .map(|deadline| deadline.max(1_000));
     budget
 }
 
 fn persistent_max_parallel(args: &Value, config: &SubagentRuntimeConfig) -> usize {
     args.get("max_parallel")
         .and_then(Value::as_u64)
-        .unwrap_or(config.max_parallel_readonly)
-        .min(config.max_parallel_readonly.max(1))
+        .unwrap_or(config.max_concurrent_threads_per_session)
+        .min(config.max_concurrent_threads_per_session.max(1))
         .max(1) as usize
+}
+
+fn effective_join_wait_ms(args: &Value, config: &SubagentRuntimeConfig) -> u64 {
+    args.pointer("/wait_policy/join_wait_ms")
+        .and_then(Value::as_u64)
+        .map(|value| value.clamp(100, 300_000))
+        .unwrap_or(config.join_wait_ms)
 }
 
 fn child_recursion_depth_from_payload(payload_json: &str) -> usize {
@@ -406,6 +561,38 @@ fn child_recursion_depth_from_payload(payload_json: &str) -> usize {
         .saturating_add(1)
 }
 
+fn child_session_ref(task: &ClaimedTask) -> String {
+    let payload = serde_json::from_str::<Value>(&task.payload_json).unwrap_or(Value::Null);
+    if let Some(inherited) = payload
+        .pointer("/child_task_contract/scope/session_ref")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        return inherited.to_string();
+    }
+    let conversation_ref = ["thread_id", "conversation_id", "session_id"]
+        .into_iter()
+        .find_map(|key| payload.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| task.external_chat_id.clone())
+        .unwrap_or_else(|| task.chat_id.to_string());
+    let principal_ref = task
+        .user_key
+        .clone()
+        .or_else(|| task.external_user_id.clone())
+        .unwrap_or_else(|| task.user_id.to_string());
+    let digest = Sha256::digest(
+        format!(
+            "{}\0{}\0{}\0{}",
+            task.channel, principal_ref, task.user_id, conversation_ref
+        )
+        .as_bytes(),
+    );
+    format!("subagent-session:{:x}", digest)[..41].to_string()
+}
+
 fn child_parent_context(state: &AppState, task: &ClaimedTask) -> ChildTaskParentContext {
     ChildTaskParentContext {
         parent_task_id: task.task_id.clone(),
@@ -416,14 +603,17 @@ fn child_parent_context(state: &AppState, task: &ClaimedTask) -> ChildTaskParent
         external_user_id: task.external_user_id.clone(),
         external_chat_id: task.external_chat_id.clone(),
         execution_policy_stamp: crate::task_execution_policy::inheritable_policy_stamp(state, task),
+        interactive_approval_available:
+            crate::repo::child_tasks::parent_interactive_approval_available(&task.payload_json),
     }
 }
 
-fn install_child_waiting_checkpoint(
+pub(super) fn install_child_waiting_checkpoint(
     state: &AppState,
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     enqueue: &Value,
+    join_wait_ms: u64,
 ) {
     super::super::support::publish_agent_loop_checkpoint_progress(
         state,
@@ -457,6 +647,12 @@ fn install_child_waiting_checkpoint(
                 .and_then(Value::as_str)
                 .unwrap_or_default()),
         );
+        lifecycle.insert("join_wait_ms".to_string(), json!(join_wait_ms));
+        lifecycle.insert("join_wait_expires_child".to_string(), json!(false));
+        lifecycle.insert(
+            "waiting_reason".to_string(),
+            json!("child_tasks_running_or_queued"),
+        );
     }
     if let Some(boundary_context) = loop_state
         .task_checkpoint
@@ -466,19 +662,23 @@ fn install_child_waiting_checkpoint(
     {
         boundary_context.insert("source".to_string(), json!("subagent_child_task_enqueue"));
         boundary_context.insert("child_task_enqueue".to_string(), enqueue.clone());
+        boundary_context.insert("join_wait_ms".to_string(), json!(join_wait_ms));
     }
 }
 
-fn record_persistent_schedule_observation(
+pub(super) fn record_persistent_schedule_observation(
     loop_state: &mut LoopState,
     global_step: usize,
     step_in_round: usize,
     requested_child_count: usize,
     write_enabled: bool,
     enqueue: Value,
+    config: &SubagentRuntimeConfig,
+    join_wait_ms: u64,
+    global_running_count: usize,
 ) {
     loop_state.task_observations.push(json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "owner_layer": "subagent_runtime",
         "output_format": "machine_json",
         "status": "waiting",
@@ -486,7 +686,26 @@ fn record_persistent_schedule_observation(
         "execution_mode": "persistent_child_task",
         "requested_child_count": requested_child_count,
         "child_task_ids": enqueue.get("child_task_ids").cloned().unwrap_or_else(|| json!([])),
-        "child_task_enqueue": enqueue,
+        "child_task_enqueue": enqueue.clone(),
+        "capacity": {
+            "schema_version": 2,
+            "main_agent_counted": false,
+            "session_open_capacity_source": "agent_guard.subagents.max_concurrent_threads_per_session",
+            "effective_session_open_capacity": config.max_concurrent_threads_per_session,
+            "effective_parent_parallel_capacity": enqueue
+                .pointer("/scheduler/max_parallel")
+                .and_then(Value::as_u64),
+            "queued_count": enqueue
+                .pointer("/scheduler/blocked_child_count")
+                .and_then(Value::as_u64),
+            "global_running_capacity_source": "worker_provider_admission",
+            "effective_global_running_capacity": config.max_running_threads_global,
+            "global_running_count": global_running_count,
+        },
+        "wait_policy": {
+            "join_wait_ms": join_wait_ms,
+            "join_wait_expires_child": false,
+        },
         "task_lifecycle": loop_state.task_lifecycle,
         "write_enabled": write_enabled,
         "write_scope": if write_enabled {

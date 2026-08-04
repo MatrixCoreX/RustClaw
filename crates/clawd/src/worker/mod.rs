@@ -9,6 +9,9 @@ mod ask_planner_frontdoor;
 mod ask_runtime;
 mod async_poll_executor;
 mod channels;
+#[cfg(test)]
+#[path = "child_approval_tests.rs"]
+mod child_approval_tests;
 mod child_task_execution_scope;
 pub(crate) mod conversation_compaction;
 mod locator;
@@ -171,7 +174,39 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         // jobs hand off through checkpoints, while explicit deadlines,
         // cancellation, adapter/tool timeouts and stale-lease recovery remain
         // independently enforceable.
-        let task_result = process_claimed_task_by_kind(state, &task, &mut payload).await;
+        let runtime_deadline = child_runtime_deadline(&payload);
+        let task_result = if let Some(deadline) = runtime_deadline {
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(deadline.duration_ms),
+                process_claimed_task_by_kind(state, &task, &mut payload),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    state.worker.cancel_active_task(&task.task_id);
+                    let result = repo::update_task_runtime_timeout(
+                        state,
+                        &task.task_id,
+                        task.claim_attempt,
+                        deadline.duration_ms,
+                        deadline.source,
+                    );
+                    if result.is_ok() && repo::child_tasks::is_child_subagent_payload(&payload) {
+                        repo::child_tasks::record_child_task_terminal_projection(
+                            state,
+                            &task.task_id,
+                            &payload,
+                        )
+                        .map(|_| ())
+                    } else {
+                        result
+                    }
+                }
+            }
+        } else {
+            process_claimed_task_by_kind(state, &task, &mut payload).await
+        };
         let _ = heartbeat_stop.send(());
         state.worker.unregister_active_task(&task.task_id);
 
@@ -204,6 +239,37 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
     }
     .instrument(call_span)
     .await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChildRuntimeDeadline {
+    duration_ms: u64,
+    source: &'static str,
+}
+
+fn child_runtime_deadline(payload: &Value) -> Option<ChildRuntimeDeadline> {
+    if payload.get("task_role").and_then(Value::as_str) != Some("subagent_child") {
+        return None;
+    }
+    let contract = payload.get("child_task_contract")?;
+    let schema_version = contract
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    let budget = contract.get("budget")?;
+    if let Some(duration_ms) = budget.get("runtime_deadline_ms").and_then(Value::as_u64) {
+        return Some(ChildRuntimeDeadline {
+            duration_ms: duration_ms.max(1_000),
+            source: "explicit_runtime_deadline",
+        });
+    }
+    (schema_version == 1)
+        .then(|| budget.get("timeout_ms").and_then(Value::as_u64))
+        .flatten()
+        .map(|duration_ms| ChildRuntimeDeadline {
+            duration_ms: duration_ms.max(1_000),
+            source: "v1_budget_timeout_ms",
+        })
 }
 
 fn finalize_worker_runtime_error(
@@ -250,6 +316,13 @@ async fn process_claimed_task_by_kind(
                 child_task_execution_scope::ChildTaskExecutionScope::prepare(state, task, payload)?;
             let process_result = process_ask_task(child_scope.state(state), task, payload).await;
             if process_result.is_ok() && repo::child_tasks::is_child_subagent_payload(payload) {
+                if child_requires_noninteractive_approval_failure(payload) {
+                    let _ = repo::fail_noninteractive_child_approval(
+                        state,
+                        &task.task_id,
+                        task.claim_attempt,
+                    )?;
+                }
                 let mut parent_owned_patch = false;
                 if let Some(projection) = child_scope.projection(state) {
                     parent_owned_patch = projection
@@ -295,6 +368,13 @@ async fn process_claimed_task_by_kind(
     }
     crate::task_event_transport::publish_persisted_task_events(state, &task.task_id);
     Ok(())
+}
+
+fn child_requires_noninteractive_approval_failure(payload: &Value) -> bool {
+    payload
+        .pointer("/child_execution/interactive_approval_available")
+        .and_then(Value::as_bool)
+        == Some(false)
 }
 
 #[cfg(test)]

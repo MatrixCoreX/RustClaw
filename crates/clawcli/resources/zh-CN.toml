@@ -6,6 +6,9 @@
 "tui.prompt" = "clawcli-控制台> "
 "tui.continue_prompt" = "clawcli-继续任务> "
 "tui.unknown_key" = "无法识别这个操作键。"
+"tui.subagent_id_prompt" = "子任务 ID> "
+"tui.subagent_steer_prompt" = "补充要求> "
+"tui.subagent_stop_confirm_prompt" = "输入 yes 确认停止> "
 "command.chat" = "打开可持续使用的交互对话任务"
 "command.health" = "检查 clawd 服务状态"
 "command.submit" = "提交一个任务"
@@ -56,4 +59,5 @@
 "tui.help" = [
   "操作键：r 刷新，w 监看，p 暂停，c 取消，u 恢复，n 继续",
   "        e 导出，1 报告，2 审查，3 子任务，4 权限，q 退出",
+  "        5 打开子任务，6 引导，7 暂停，8 恢复，9 停止，0 停止全部，x 关闭子任务",
 ]

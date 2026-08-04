@@ -1,4 +1,6 @@
 import {
+  Archive,
+  Bot,
   CheckCircle2,
   Circle,
   CircleSlash2,
@@ -9,9 +11,12 @@ import {
   Play,
   RefreshCw,
   Save,
+  Send,
   ShieldCheck,
   ShieldX,
+  Square,
   Trash2,
+  Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -24,6 +29,7 @@ import {
 } from "../lib/task-lifecycle";
 import {
   buildReplaySummary,
+  buildSubagentPanelView,
   buildTaskApprovalRequest,
   buildTaskGoalView,
   buildTaskOutcome,
@@ -34,6 +40,8 @@ import {
   taskTraceEvents,
   type TaskOutcomeView,
   type TaskPermissionView,
+  type SubagentNodeView,
+  type SubagentPanelView,
 } from "../lib/task-result";
 import { buildTaskCostGovernance, formatUsdNanos } from "../lib/task-cost";
 import type { TaskApprovalDecision, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
@@ -68,6 +76,13 @@ export interface TaskResultPanelProps {
     decision: TaskApprovalDecision,
   ) => unknown | Promise<unknown>;
   onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
+  onControlSubagent: (
+    control: "steer" | "pause" | "resume" | "stop" | "stop_all" | "close",
+    parentTaskId: string,
+    childTaskId?: string,
+    userMessage?: string,
+  ) => unknown | Promise<unknown>;
+  onViewTask: (taskId: string) => unknown | Promise<unknown>;
   onControlTaskGoal: (
     operation: "edit" | "clear",
     taskId: string,
@@ -80,6 +95,196 @@ function toneClassName(tone: Tone): string {
   if (tone === "running") return "border-sky-400/25 bg-sky-500/10 text-sky-50";
   if (tone === "attention") return "border-amber-400/25 bg-amber-500/10 text-amber-50";
   return "border-red-400/25 bg-red-500/10 text-red-50";
+}
+
+function SubagentPanel({
+  view,
+  t,
+  submittingId,
+  onControl,
+  onViewTask,
+}: {
+  view: SubagentPanelView;
+  t: Translate;
+  submittingId: string | null;
+  onControl: TaskResultPanelProps["onControlSubagent"];
+  onViewTask: TaskResultPanelProps["onViewTask"];
+}) {
+  const [steerDrafts, setSteerDrafts] = useState<Record<string, string>>({});
+  const groups: Array<{ key: string; title: string; nodes: SubagentNodeView[] }> = [
+    { key: "active", title: t("正在处理", "Active"), nodes: view.active },
+    { key: "done", title: t("已完成", "Done"), nodes: view.done },
+  ];
+  const confirmStop = (label: string) => window.confirm(
+    t(`确定停止${label}吗？已完成的工作会保留。`, `Stop ${label}? Completed work will be kept.`),
+  );
+  return (
+    <div className="mt-4 rounded-xl border border-violet-300/20 bg-violet-500/8 px-3 py-3 text-white">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <Users className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
+          <div>
+            <p className="font-semibold">{t("并行任务", "Subagents")}</p>
+            <p className="mt-1 text-xs text-white/65">
+              {t(
+                `正在处理 ${view.active.length} 项，已完成 ${view.done.length} 项。`,
+                `${view.active.length} active, ${view.done.length} done.`,
+              )}
+            </p>
+          </div>
+        </div>
+        {view.active.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmStop(t("全部并行任务", "all active parallel items"))) {
+                void onControl("stop_all", view.parentTaskId);
+              }
+            }}
+            disabled={submittingId === `subagent-stop_all:${view.parentTaskId}`}
+            className="theme-secondary-btn px-3 py-2 text-xs text-red-100 disabled:opacity-50"
+          >
+            <Square className="h-3.5 w-3.5" />
+            {t("停止全部", "Stop all")}
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {groups.map((group) => (
+          <section key={group.key} className="rounded-lg border border-white/10 bg-black/15 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-white/80">{group.title}</p>
+              <span className="rounded-full bg-white/8 px-2 py-0.5 text-[11px] text-white/60">
+                {group.nodes.length}
+              </span>
+            </div>
+            {group.nodes.length > 0 ? (
+              <div className="mt-2 space-y-2">
+                {group.nodes.map((node) => {
+                  const targetKey = `${node.childTaskId}`;
+                  const isPaused = node.executionState === "paused";
+                  const canResume = isPaused || node.executionState.startsWith("waiting");
+                  const isClosed = node.threadState === "closed";
+                  return (
+                    <article key={node.childTaskId} className="rounded-lg border border-white/8 bg-black/20 p-2.5">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-start gap-2">
+                          <Bot className="mt-0.5 h-4 w-4 shrink-0 text-violet-200" />
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium text-white">
+                              {node.role} · {node.childTaskId}
+                            </p>
+                            <p className="mt-1 text-[11px] text-white/55">
+                              {node.executionState} · {node.required ? t("必需", "Required") : t("可选", "Optional")}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void onViewTask(node.childTaskId)}
+                          className="theme-secondary-btn px-2 py-1 text-[11px]"
+                        >
+                          {t("打开", "Open")}
+                        </button>
+                      </div>
+                      {group.key === "active" ? (
+                        <>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {canResume ? (
+                              <button
+                                type="button"
+                                onClick={() => void onControl("resume", view.parentTaskId, node.childTaskId)}
+                                disabled={submittingId === `subagent-resume:${targetKey}`}
+                                className="theme-secondary-btn px-2 py-1 text-[11px] disabled:opacity-50"
+                              >
+                                <Play className="h-3 w-3" /> {t("恢复", "Resume")}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void onControl("pause", view.parentTaskId, node.childTaskId)}
+                                disabled={submittingId === `subagent-pause:${targetKey}`}
+                                className="theme-secondary-btn px-2 py-1 text-[11px] disabled:opacity-50"
+                              >
+                                <Pause className="h-3 w-3" /> {t("暂停", "Pause")}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirmStop(node.role)) void onControl("stop", view.parentTaskId, node.childTaskId);
+                              }}
+                              disabled={submittingId === `subagent-stop:${targetKey}`}
+                              className="theme-secondary-btn px-2 py-1 text-[11px] text-red-100 disabled:opacity-50"
+                            >
+                              <Square className="h-3 w-3" /> {t("停止", "Stop")}
+                            </button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-[1fr_auto] gap-1.5">
+                            <input
+                              className="theme-input min-w-0 px-2 py-1 text-[11px]"
+                              value={steerDrafts[node.childTaskId] ?? ""}
+                              onChange={(event) => setSteerDrafts((current) => ({
+                                ...current,
+                                [node.childTaskId]: event.target.value,
+                              }))}
+                              placeholder={t("补充要求", "Add guidance")}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const message = steerDrafts[node.childTaskId]?.trim();
+                                if (!message) return;
+                                void onControl("steer", view.parentTaskId, node.childTaskId, message);
+                                setSteerDrafts((current) => ({ ...current, [node.childTaskId]: "" }));
+                              }}
+                              disabled={!steerDrafts[node.childTaskId]?.trim() || submittingId === `subagent-steer:${targetKey}`}
+                              className="theme-secondary-btn px-2 py-1 text-[11px] disabled:opacity-50"
+                            >
+                              <Send className="h-3 w-3" /> {t("发送", "Send")}
+                            </button>
+                          </div>
+                        </>
+                      ) : !isClosed ? (
+                        <button
+                          type="button"
+                          onClick={() => void onControl("close", view.parentTaskId, node.childTaskId)}
+                          disabled={submittingId === `subagent-close:${targetKey}`}
+                          className="theme-secondary-btn mt-2 px-2 py-1 text-[11px] disabled:opacity-50"
+                        >
+                          <Archive className="h-3 w-3" /> {t("关闭", "Close")}
+                        </button>
+                      ) : null}
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[11px] text-white/45">
+                          {t("运行详情", "Runtime details")}
+                        </summary>
+                        <pre className="mt-2 max-h-40 overflow-auto rounded bg-black/25 p-2 text-[10px] text-white/60">
+                          {JSON.stringify(node.raw, null, 2)}
+                        </pre>
+                      </details>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-white/40">{t("暂无项目", "No items")}</p>
+            )}
+          </section>
+        ))}
+      </div>
+      <details className="mt-3 rounded-lg border border-white/8 bg-black/15 p-2.5">
+        <summary className="cursor-pointer text-[11px] text-white/45">
+          {t("容量与调度详情", "Capacity and scheduling details")}
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/60">
+          <span>{t("会话容量", "Session capacity")}: {view.sessionOpenCapacity ?? "--"}</span>
+          <span>{t("已打开", "Open")}: {view.sessionOpenCount ?? "--"}</span>
+          <span>{t("主任务不计入并行容量", "Main task is not counted")}</span>
+        </div>
+      </details>
+    </div>
+  );
 }
 
 export function TaskResultPanel({
@@ -103,6 +308,8 @@ export function TaskResultPanel({
   onSubmitResume,
   onDecideTaskApproval,
   onControlTask,
+  onControlSubagent,
+  onViewTask,
   onControlTaskGoal,
 }: TaskResultPanelProps) {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
@@ -111,6 +318,7 @@ export function TaskResultPanel({
   const taskPollingView = taskResult ? buildTaskPollingView(taskResult.lifecycle, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
   const taskPlanView = taskResult ? buildTaskPlanView(taskResult) : null;
+  const subagentPanelView = taskResult ? buildSubagentPanelView(taskResult) : null;
   const taskCostView = taskResult ? buildTaskCostGovernance(taskResult) : null;
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
@@ -268,6 +476,15 @@ export function TaskResultPanel({
                 </pre>
               </details>
             </div>
+          ) : null}
+          {subagentPanelView ? (
+            <SubagentPanel
+              view={subagentPanelView}
+              t={t}
+              submittingId={taskControlSubmittingId}
+              onControl={onControlSubagent}
+              onViewTask={onViewTask}
+            />
           ) : null}
           {taskCostView ? (
             <div className="mt-4 border-t border-white/10 pt-3">

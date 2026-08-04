@@ -362,6 +362,72 @@ export function useTaskRuntime({
     }
   };
 
+  const controlSubagentById = async (
+    control: "steer" | "pause" | "resume" | "stop" | "stop_all" | "close",
+    parentTaskId: string,
+    childTaskId?: string,
+    userMessage?: string,
+  ) => {
+    const normalizedParentId = parentTaskId.trim();
+    const normalizedChildId = childTaskId?.trim() ?? "";
+    if (!normalizedParentId || (control !== "stop_all" && !normalizedChildId)) return;
+    const targetId = normalizedChildId || normalizedParentId;
+    setTaskControlSubmittingId(`subagent-${control}:${targetId}`);
+    setTaskControlMessage(null);
+    setTaskControlError(null);
+    try {
+      let path = "/v1/tasks/resume-by-task-id";
+      let payload: Record<string, unknown> = { task_id: normalizedChildId };
+      if (control === "steer") {
+        payload = {
+          task_id: normalizedChildId,
+          resume_reason: "subagent_steered",
+          user_message: userMessage?.trim(),
+        };
+      } else if (control === "pause") {
+        path = "/v1/tasks/pause-by-task-id";
+        payload = { task_id: normalizedChildId, pause_seconds: 3600 };
+      } else if (control === "resume") {
+        payload = { task_id: normalizedChildId, resume_reason: "subagent_resumed" };
+      } else if (control === "stop") {
+        path = "/v1/tasks/cancel-by-task-id";
+        payload = { task_id: normalizedChildId };
+      } else if (control === "stop_all") {
+        path = "/v1/tasks/stop-child-tasks-by-parent";
+        payload = { parent_task_id: normalizedParentId };
+      } else if (control === "close") {
+        path = "/v1/tasks/close-child-by-task-id";
+        payload = {
+          parent_task_id: normalizedParentId,
+          child_task_id: normalizedChildId,
+        };
+      }
+      const res = await apiFetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `subagent control failed (${res.status})`);
+      }
+      setTaskControlMessage(
+        control === "stop_all"
+          ? t("已停止这个任务仍在运行的并行项。", "Active parallel items for this task were stopped.")
+          : control === "close"
+            ? t("已从活动视图关闭该并行项，历史记录仍会保留。", "The item was closed from the active view and its history was kept.")
+            : t("并行任务控制已提交。", "Parallel task control submitted."),
+      );
+      await fetchActiveTasks(true);
+      await queryTaskById(normalizedParentId, false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setTaskControlError(message);
+    } finally {
+      setTaskControlSubmittingId(null);
+    }
+  };
+
   const decideTaskApprovalById = async (
     controlTaskId: string,
     approvalRequestId: string,
@@ -701,6 +767,7 @@ export function useTaskRuntime({
     submitResumeForTask,
     cancelActiveTask,
     controlTaskById,
+    controlSubagentById,
     decideTaskApprovalById,
     fetchApprovalScopeGrants,
     revokeApprovalScopeGrant,

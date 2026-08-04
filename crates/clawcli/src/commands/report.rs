@@ -550,6 +550,26 @@ pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
     for event in &task.events {
         collect_subagent_event_fields(event, &mut signals);
     }
+    let active_count = signals
+        .items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.get("thread_state").and_then(Value::as_str),
+                Some("submitted" | "queued_capacity" | "open")
+            )
+        })
+        .count();
+    let done_count = signals
+        .items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.get("thread_state").and_then(Value::as_str),
+                Some("done" | "closed")
+            )
+        })
+        .count();
     json!({
         "report_kind": "agent_subagent_report",
         "task_id": task.task_id,
@@ -558,6 +578,8 @@ pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
         "lifecycle_state": task.lifecycle_state(),
         "team_count": signals.teams.len(),
         "teams": signals.teams,
+        "active_count": active_count,
+        "done_count": done_count,
         "subagent_count": signals.items.len(),
         "subagents": signals.items,
     })
@@ -580,6 +602,20 @@ pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
                 .and_then(Value::as_u64)
                 .unwrap_or(0)
         ),
+        format!(
+            "active_count: {}",
+            report
+                .get("active_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ),
+        format!(
+            "done_count: {}",
+            report
+                .get("done_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ),
     ];
     if let Some(items) = report.get("subagents").and_then(Value::as_array) {
         for item in items.iter().take(64) {
@@ -592,6 +628,18 @@ pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let status = item.get("status").and_then(Value::as_str).unwrap_or("");
+            let thread_state = item
+                .get("thread_state")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let execution_state = item
+                .get("execution_state")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let queue_reason = item
+                .get("queue_reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let finding_refs = report_string_array(item, "/finding_refs").join(",");
             let evidence_refs = report_string_array(item, "/evidence_refs").join(",");
             let conflict_count = item
@@ -614,9 +662,28 @@ pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
                 .get("write_isolation_status")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let timeout_ms = item.get("timeout_ms").and_then(Value::as_u64).unwrap_or(0);
+            let join_wait_ms = item
+                .get("join_wait_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let runtime_deadline_ms = item
+                .get("runtime_deadline_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let runtime_deadline_source = item
+                .get("runtime_deadline_source")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let timeout_class = item
+                .get("timeout_class")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let timeout_source = item
+                .get("timeout_source")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             lines.push(format!(
-                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} tool_permission_profile={tool_permission_profile} read_only_enforced={read_only_enforced} write_isolation_status={write_isolation_status} timeout_ms={timeout_ms} conflict_count={conflict_count} decision_status={decision_status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
+                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} thread_state={thread_state} execution_state={execution_state} queue_reason={queue_reason} tool_permission_profile={tool_permission_profile} read_only_enforced={read_only_enforced} write_isolation_status={write_isolation_status} join_wait_ms={join_wait_ms} runtime_deadline_ms={runtime_deadline_ms} runtime_deadline_source={runtime_deadline_source} timeout_class={timeout_class} timeout_source={timeout_source} conflict_count={conflict_count} decision_status={decision_status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
             ));
         }
     }
@@ -988,8 +1055,14 @@ fn collect_subagent_event_fields(
     let mut map = Map::new();
     for key in [
         "child_run_id",
+        "child_task_id",
+        "parent_task_id",
         "subagent_id",
         "status",
+        "thread_state",
+        "execution_state",
+        "queue_reason",
+        "waiting_reason",
         "role",
         "request_ref",
         "error_code",
@@ -1013,7 +1086,8 @@ fn collect_subagent_event_fields(
 }
 
 fn is_subagent_object(map: &Map<String, Value>) -> bool {
-    map.get("child_run_id").is_some()
+    map.get("child_task_id").is_some()
+        || map.get("child_run_id").is_some()
         || map.get("subagent_id").is_some()
         || map.get("subagent_results").is_some()
         || map.get("finding_refs").is_some()
@@ -1044,11 +1118,13 @@ fn push_subagent_team(map: &Map<String, Value>, signals: &mut SubagentReportSign
 }
 
 fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSignals) {
+    let child_task_id = machine_string_field(map, "child_task_id");
     let child_run_id = machine_string_field(map, "child_run_id");
     let subagent_id = machine_string_field(map, "subagent_id");
     let request_ref = machine_string_field(map, "request_ref");
     let identity = child_run_id
         .as_deref()
+        .or(child_task_id.as_deref())
         .or(subagent_id.as_deref())
         .or(request_ref.as_deref())
         .map(ToString::to_string)
@@ -1063,6 +1139,8 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         return;
     }
     signals.items.push(json!({
+        "child_task_id": child_task_id,
+        "parent_task_id": machine_string_field(map, "parent_task_id"),
         "child_run_id": child_run_id,
         "subagent_id": subagent_id,
         "request_ref": request_ref,
@@ -1071,7 +1149,21 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         "read_only_enforced": subagent_read_only_enforced(map),
         "write_isolation_status": subagent_write_isolation_status(map),
         "timeout_ms": subagent_timeout_ms(map),
-        "timeout_source": subagent_timeout_source(map),
+        "thread_state": machine_string_field(map, "thread_state"),
+        "execution_state": machine_string_field(map, "execution_state"),
+        "queue_reason": machine_string_field(map, "queue_reason"),
+        "waiting_reason": machine_string_field(map, "waiting_reason"),
+        "join_wait_ms": nested_u64_field(map, &["join_wait_ms", "wait_policy.join_wait_ms"]),
+        "runtime_deadline_ms": nested_u64_field(map, &["runtime_deadline_ms", "budget.runtime_deadline_ms"]),
+        "runtime_deadline_source": nested_string_value(map, &["runtime_deadline_source", "runtime.task_lifecycle.runtime_deadline_source"]),
+        "tool_timeout": nested_value_field(map, &["tool_timeout", "runtime.task_lifecycle.tool_timeout"]),
+        "stall_timeout": nested_value_field(map, &["stall_timeout", "runtime.task_lifecycle.stall_timeout"]),
+        "lease_expires_at": nested_value_field(map, &["lease_expires_at", "runtime.task_lifecycle.lease_expires_at"]),
+        "retention_expires_at": nested_value_field(map, &["retention_expires_at", "runtime.task_lifecycle.retention_expires_at"]),
+        "timeout_class": nested_string_value(map, &["timeout_class", "runtime.task_lifecycle.timeout_class"]),
+        "timeout_source": nested_string_value(map, &["timeout_source", "runtime.task_lifecycle.timeout_source"])
+            .or_else(|| subagent_timeout_source(map)),
+        "cancel_source": nested_string_value(map, &["cancel_source", "runtime.task_lifecycle.cancel_source"]),
         "status": machine_string_field(map, "status"),
         "result_status": machine_string_field(map, "result_status"),
         "outcome_code": machine_string_field(map, "outcome_code"),
@@ -1113,16 +1205,53 @@ fn subagent_timeout_source(map: &Map<String, Value>) -> Option<String> {
     machine_string_field(map, "timeout_source").or_else(|| {
         map.get("timeout_policy")
             .and_then(Value::as_object)
-            .and_then(|policy| machine_string_field(policy, "source"))
+            .and_then(|policy| {
+                machine_string_field(policy, "runtime_deadline_source")
+                    .or_else(|| machine_string_field(policy, "source"))
+            })
     })
 }
 
-fn subagent_tool_permission_profile(map: &Map<String, Value>) -> Option<String> {
-    machine_string_field(map, "tool_permission_profile").or_else(|| {
-        map.get("role_metadata")
-            .and_then(Value::as_object)
-            .and_then(|role| machine_string_field(role, "tool_permission_profile"))
+fn nested_u64_field(map: &Map<String, Value>, paths: &[&str]) -> Option<u64> {
+    paths.iter().find_map(|path| {
+        let mut value = map.get(path.split('.').next()?)?;
+        for segment in path.split('.').skip(1) {
+            value = value.get(segment)?;
+        }
+        value.as_u64()
     })
+}
+
+fn nested_string_value(map: &Map<String, Value>, paths: &[&str]) -> Option<String> {
+    nested_value_field(map, paths)
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn nested_value_field(map: &Map<String, Value>, paths: &[&str]) -> Value {
+    paths
+        .iter()
+        .find_map(|path| {
+            let mut segments = path.split('.');
+            let mut value = map.get(segments.next()?)?;
+            for segment in segments {
+                value = value.get(segment)?;
+            }
+            (!value.is_null()).then(|| value.clone())
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn subagent_tool_permission_profile(map: &Map<String, Value>) -> Option<String> {
+    machine_string_field(map, "tool_permission_profile")
+        .or_else(|| machine_string_field(map, "permission_profile"))
+        .or_else(|| {
+            map.get("role_metadata")
+                .and_then(Value::as_object)
+                .and_then(|role| machine_string_field(role, "tool_permission_profile"))
+        })
 }
 
 fn subagent_read_only_enforced(map: &Map<String, Value>) -> Option<bool> {
@@ -1140,6 +1269,12 @@ fn subagent_read_only_enforced(map: &Map<String, Value>) -> Option<bool> {
 }
 
 fn subagent_write_isolation_status(map: &Map<String, Value>) -> &'static str {
+    if matches!(
+        machine_string_field(map, "permission_profile").as_deref(),
+        Some("local_worktree" | "local_temp_workspace" | "remote_executor")
+    ) {
+        return "enabled";
+    }
     if matches!(
         machine_string_field(map, "write_isolation_status").as_deref(),
         Some("enabled")

@@ -482,6 +482,7 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
         external_user_id: Some("ui-user".to_string()),
         external_chat_id: Some("ui-chat".to_string()),
         execution_policy_stamp: None,
+        interactive_approval_available: true,
     };
     let specs = vec![
         sample_repo_child_spec("task-parent-enqueue", "task-child-enqueue-1", true),
@@ -489,7 +490,7 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
     ];
 
     let summary =
-        enqueue_child_task_specs(&state, &parent, &specs, 2, 1).expect("enqueue child specs");
+        enqueue_child_task_specs(&state, &parent, &specs, 2, 1, 2).expect("enqueue child specs");
 
     assert_eq!(summary["status"], "scheduled");
     assert_eq!(summary["queued_child_count"], 2);

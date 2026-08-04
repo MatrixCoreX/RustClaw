@@ -99,6 +99,10 @@ use tui::{
 mod tests;
 
 #[cfg(test)]
+#[path = "commands_subagent_tests.rs"]
+mod subagent_tests;
+
+#[cfg(test)]
 #[path = "commands_session_tests.rs"]
 mod session_tests;
 

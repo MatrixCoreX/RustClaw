@@ -153,21 +153,91 @@ pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Resu
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "SELECT task_id, result_json
-         FROM tasks
-         WHERE task_id = ?1
-           AND status IN ('queued', 'running')",
-    )?;
-    let records = stmt
-        .query_map(params![task_id], |row| {
-            Ok(CancelTaskRecord {
-                task_id: row.get(0)?,
-                result_json: row.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(state, &db, records, &now)
+    let records = {
+        let mut stmt = db.prepare(
+            "SELECT task_id, result_json
+             FROM tasks
+             WHERE task_id = ?1
+               AND status IN ('queued', 'running')",
+        )?;
+        let records = stmt
+            .query_map(params![task_id], |row| {
+                Ok(CancelTaskRecord {
+                    task_id: row.get(0)?,
+                    result_json: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        records
+    };
+    let affected = cancel_task_records(state, &db, records, &now)?;
+    drop(db);
+    if affected > 0 {
+        let _ = super::child_tasks::refresh_stored_child_terminal_projection(state, task_id)?;
+    }
+    Ok(affected)
+}
+
+pub(crate) fn cancel_child_tasks_for_parent(
+    state: &AppState,
+    parent_task_id: &str,
+) -> anyhow::Result<Value> {
+    let child_task_ids = {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+        super::child_task_graph::active_child_task_ids(&db, parent_task_id)?
+    };
+    let mut cancelled = 0_i64;
+    for child_task_id in &child_task_ids {
+        cancelled = cancelled.saturating_add(cancel_task_by_id(state, child_task_id)?);
+    }
+    let _ = super::child_tasks::refresh_parent_child_task_merge(state, parent_task_id)?;
+    let graph = {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+        super::child_task_graph::graph_snapshot(&db, parent_task_id)?
+    };
+    Ok(json!({
+        "schema_version": crate::child_task_contract::CHILD_TASK_SCHEMA_VERSION,
+        "status": "child_stop_all_applied",
+        "parent_task_id": parent_task_id,
+        "target_child_count": child_task_ids.len(),
+        "cancelled_child_count": cancelled,
+        "already_stopped_count": child_task_ids.len().saturating_sub(cancelled as usize),
+        "child_task_ids": child_task_ids,
+        "child_task_graph": graph,
+    }))
+}
+
+pub(crate) fn close_child_task_thread(
+    state: &AppState,
+    parent_task_id: &str,
+    child_task_id: &str,
+) -> anyhow::Result<Option<Value>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let now = now_ts();
+    let graph =
+        super::child_task_graph::close_child_thread(&db, parent_task_id, child_task_id, &now)?;
+    Ok(graph.map(|graph| {
+        json!({
+            "schema_version": crate::child_task_contract::CHILD_TASK_SCHEMA_VERSION,
+            "status": "child_thread_closed",
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
+            "closed_at": now,
+            "child_task_graph": graph,
+        })
+    }))
 }
 
 pub(crate) fn resume_task_with_input(
@@ -472,6 +542,7 @@ fn cancelled_task_result_json(
                 "state": "cancelled",
                 "source": TASK_CANCELLED_SOURCE,
                 "terminal_reason": reason,
+                "cancel_source": reason,
                 "message_key": message_key,
                 "cancel_adapter_kind": cancel_adapter_result
                     .and_then(|value| value.get("adapter_kind"))

@@ -10,6 +10,7 @@ use crate::repo::child_tasks::{start_inline_child_task, ChildTaskParentContext};
 
 const MAX_CHILD_ERROR_CHARS: usize = 512;
 
+#[allow(dead_code)]
 pub(super) async fn maybe_run_model_assisted_subagent(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -33,17 +34,18 @@ pub(super) async fn maybe_run_model_assisted_subagent(
     let Some(child_input) = child_loop_input(loop_state, global_step, step_in_round, args) else {
         return;
     };
-    let timeout_ms = child_input
-        .pointer("/timeout_policy/timeout_ms")
+    let runtime_deadline_ms = child_input
+        .pointer("/timeout_policy/runtime_deadline_ms")
         .and_then(Value::as_u64)
-        .unwrap_or(120_000)
-        .clamp(1_000, 3_600_000);
-    let child_result = run_readonly_child_agent_loop(state, task, &child_input, timeout_ms)
-        .await
-        .unwrap_or_else(|err| child_loop_error_result("subagent_child_loop_failed", &err));
+        .map(|value| value.max(1_000));
+    let child_result =
+        run_readonly_child_agent_loop(state, task, &child_input, runtime_deadline_ms)
+            .await
+            .unwrap_or_else(|err| child_loop_error_result("subagent_child_loop_failed", &err));
     apply_model_assisted_child_result(loop_state, global_step, step_in_round, child_result);
 }
 
+#[allow(dead_code)]
 async fn maybe_run_model_assisted_subagent_batch(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -59,12 +61,6 @@ async fn maybe_run_model_assisted_subagent_batch(
         return;
     };
     let config = super::load_subagent_runtime_config(state);
-    let requested_parallel = args
-        .get("max_parallel")
-        .and_then(Value::as_u64)
-        .unwrap_or(config.max_parallel_readonly)
-        .clamp(1, config.max_parallel_readonly) as usize;
-    let default_timeout_ms = config.default_timeout_ms;
     let parallel_batch_id = latest_subagent_observation(loop_state, global_step, step_in_round)
         .and_then(|value| value.get("parallel_batch_id"))
         .and_then(Value::as_str)
@@ -87,7 +83,6 @@ async fn maybe_run_model_assisted_subagent_batch(
             }
             Some((index, child.clone(), role.to_string()))
         })
-        .take(requested_parallel)
         .map(|(index, child, role)| {
             let child_run_id = format!(
                 "{}:{}:{}",
@@ -96,12 +91,11 @@ async fn maybe_run_model_assisted_subagent_batch(
                 super::normalize_machine_token(&role)
             );
             async move {
-                let timeout_ms = child
-                    .pointer("/budget/timeout_ms")
+                let runtime_deadline_ms = child
+                    .pointer("/budget/runtime_deadline_ms")
                     .and_then(Value::as_u64)
-                    .or(default_timeout_ms)
-                    .unwrap_or(120_000)
-                    .clamp(1_000, 3_600_000);
+                    .or_else(|| child.pointer("/budget/timeout_ms").and_then(Value::as_u64))
+                    .map(|value| value.max(1_000));
                 let child_input = json!({
                     "schema_version": 1,
                     "role": role,
@@ -115,19 +109,26 @@ async fn maybe_run_model_assisted_subagent_batch(
                     "allowed_capabilities": child.get("allowed_capabilities"),
                     "budget": child.get("budget").cloned().unwrap_or_else(|| json!({})),
                     "timeout_policy": {
-                        "policy": "bounded",
-                        "timeout_ms": timeout_ms,
+                        "schema_version": 2,
+                        "policy": if runtime_deadline_ms.is_some() {
+                            "explicit_runtime_deadline"
+                        } else {
+                            "no_operation_deadline"
+                        },
+                        "runtime_deadline_ms": runtime_deadline_ms,
+                        "join_wait_expires_child": false,
                     },
                     "result_contract": child
                         .get("result_contract")
                         .cloned()
                         .unwrap_or_else(|| json!({"output_format": "machine_json"})),
                 });
-                let result = run_readonly_child_agent_loop(state, task, &child_input, timeout_ms)
-                    .await
-                    .unwrap_or_else(|err| {
-                        child_loop_error_result("subagent_child_loop_failed", &err)
-                    });
+                let result =
+                    run_readonly_child_agent_loop(state, task, &child_input, runtime_deadline_ms)
+                        .await
+                        .unwrap_or_else(|err| {
+                            child_loop_error_result("subagent_child_loop_failed", &err)
+                        });
                 (
                     child_run_id,
                     child
@@ -146,6 +147,7 @@ async fn maybe_run_model_assisted_subagent_batch(
     apply_model_assisted_batch_results(loop_state, global_step, step_in_round, results);
 }
 
+#[allow(dead_code)]
 fn child_loop_input(
     loop_state: &LoopState,
     global_step: usize,
@@ -203,6 +205,7 @@ fn child_loop_input(
     }))
 }
 
+#[allow(dead_code)]
 fn latest_subagent_observation(
     loop_state: &LoopState,
     global_step: usize,
@@ -236,7 +239,7 @@ pub(super) async fn run_readonly_child_agent_loop(
     state: &AppState,
     task: &crate::ClaimedTask,
     child_input: &Value,
-    timeout_ms: u64,
+    runtime_deadline_ms: Option<u64>,
 ) -> Result<Value, String> {
     let objective = child_input
         .get("objective")
@@ -265,7 +268,7 @@ pub(super) async fn run_readonly_child_agent_loop(
         .cloned()
         .unwrap_or_else(|| json!({"output_format": "machine_json"}));
     let child_ref = format!("{}:inline:{}", task.task_id, uuid::Uuid::new_v4().simple());
-    let budget = inline_child_budget(child_input, timeout_ms);
+    let budget = inline_child_budget(child_input, runtime_deadline_ms);
     let runtime_config = super::load_subagent_runtime_config(state);
     let model_policy = runtime_config
         .resolve_role(role)
@@ -329,29 +332,44 @@ pub(super) async fn run_readonly_child_agent_loop(
         },
     })
     .to_string();
-    let child_run = tokio::time::timeout(
-        std::time::Duration::from_millis(budget.timeout_ms),
-        Box::pin(crate::agent_engine::run_agent_with_tools(
-            state,
-            &child_task,
-            &child_goal,
-            objective,
-            None,
-            &[child_boundary],
-        )),
-    )
-    .await;
+    let child_observations = [child_boundary];
+    let child_loop = crate::agent_engine::run_agent_with_tools(
+        state,
+        &child_task,
+        &child_goal,
+        objective,
+        None,
+        &child_observations,
+    );
+    let child_run = if let Some(runtime_deadline_ms) = budget.runtime_deadline_ms {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(runtime_deadline_ms),
+            Box::pin(child_loop),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                let error_code = "subagent_child_runtime_deadline_exceeded";
+                let result = child_loop_error_result(error_code, error_code);
+                finalize_inline_child_failure(
+                    state,
+                    &child_task,
+                    &child_payload,
+                    &result,
+                    error_code,
+                );
+                return Ok(result);
+            }
+        }
+    } else {
+        child_loop.await
+    };
     let reply = match child_run {
-        Ok(Ok(reply)) => reply,
-        Ok(Err(err)) => {
+        Ok(reply) => reply,
+        Err(err) => {
             let result = child_loop_error_result("subagent_child_loop_failed", &err);
             finalize_inline_child_failure(state, &child_task, &child_payload, &result, &err);
-            return Ok(result);
-        }
-        Err(_) => {
-            let error_code = "subagent_child_loop_timeout";
-            let result = child_loop_error_result(error_code, error_code);
-            finalize_inline_child_failure(state, &child_task, &child_payload, &result, error_code);
             return Ok(result);
         }
     };
@@ -386,7 +404,7 @@ pub(super) async fn run_readonly_child_agent_loop(
     Ok(result)
 }
 
-fn inline_child_budget(child_input: &Value, timeout_ms: u64) -> ChildTaskBudget {
+fn inline_child_budget(child_input: &Value, runtime_deadline_ms: Option<u64>) -> ChildTaskBudget {
     let budget = child_input.get("budget").unwrap_or(&Value::Null);
     ChildTaskBudget {
         max_rounds: budget
@@ -404,7 +422,7 @@ fn inline_child_budget(child_input: &Value, timeout_ms: u64) -> ChildTaskBudget 
             .and_then(Value::as_u64)
             .unwrap_or(1_000_000)
             .max(1),
-        timeout_ms: timeout_ms.max(1_000),
+        runtime_deadline_ms: runtime_deadline_ms.map(|value| value.max(1_000)),
     }
 }
 
@@ -421,6 +439,8 @@ fn child_parent_context(task: &crate::ClaimedTask) -> ChildTaskParentContext {
         external_user_id: task.external_user_id.clone(),
         external_chat_id: task.external_chat_id.clone(),
         execution_policy_stamp,
+        interactive_approval_available:
+            crate::repo::child_tasks::parent_interactive_approval_available(&task.payload_json),
     }
 }
 
