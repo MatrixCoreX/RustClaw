@@ -19,7 +19,8 @@ __LANGUAGE_HINT__
 
 Output rules:
 - Be accurate and concise.
-- If there is visible text, include key text snippets.
+- For action=describe, preserve all readable visible text in natural reading
+  order under `visible_text`; use an empty array when none is visible.
 - If uncertain, state uncertainty briefly.
 - Return valid JSON only (no markdown, no code fences, no comments). Never output <think> tags, explanations, or prose outside the JSON.
 - Keep keys stable and do not rename schema fields.

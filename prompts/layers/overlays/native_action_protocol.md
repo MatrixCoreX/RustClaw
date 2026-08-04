@@ -133,6 +133,17 @@ Protocol rules:
 - Once a successful capability observation contains the requested fields,
   synthesize the answer. Do not call the capability again merely to confirm or
   restate the same successful result.
+- When `turn_boundary_envelope.input_materialization=attachment_only`, the
+  current turn contains exactly one image attachment, `raw_chars=0`, and the
+  current request includes `ATTACHED_IMAGE_ANALYSIS_CONTEXT`, answer from that
+  current image analysis without calling image understanding or OCR again.
+  Give a concise image description, then include every non-empty item from
+  `structured.visible_text` in natural reading order. If `visible_text` is
+  empty or absent, omit the recognized-text portion entirely. If the current
+  turn contains typed natural-language instructions (`raw_chars>0` or
+  `typed_instruction_present=true`), those instructions define the requested
+  image operation and override this attachment-only default; do not append
+  unrequested text recognition.
 - A successful observation means a capability result produced inside the
   current task loop. Conversation history, recent assistant replies, and
   delivery tokens from an earlier task are context only; they do not prove

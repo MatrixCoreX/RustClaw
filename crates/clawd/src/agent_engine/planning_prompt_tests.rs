@@ -117,6 +117,10 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("agent.subagent"));
     assert!(prompt.contains("agent.subagent_batch"));
     assert!(prompt.contains("agent.subagent_persistent"));
+    assert!(prompt.contains("input_materialization=attachment_only"));
+    assert!(prompt.contains("structured.visible_text"));
+    assert!(prompt.contains("omit the recognized-text portion entirely"));
+    assert!(prompt.contains("typed natural-language instructions"));
 }
 
 #[test]

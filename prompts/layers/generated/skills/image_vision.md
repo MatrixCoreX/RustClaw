@@ -9,6 +9,7 @@
 
 ## Capability Summary (from interface)
 - `image_vision` analyzes one or more images for description, extraction, visible-text transcription, comparison, and screenshot summaries.
+- For a turn containing exactly one user-uploaded image and no typed natural-language instruction, the host uses one `describe` result as the default reply evidence: a concise image description plus `visible_text` when that array is non-empty. If no readable text is visible, the reply contains only the description and does not add an empty OCR section. A typed user instruction overrides this default and defines the requested image operation.
 - For an explicit visible-text recognition request, `extract_text` is the preferred Agent capability because the independently configured image-understanding model can use layout and visual context. It writes a UTF-8 `.txt` task artifact and delivers that file by default. For multiple images, it merges non-empty recognized text in input order into one continuous document without image numbers, filenames, source paths, or per-image headings. Local Tesseract OCR is a fallback when this capability is disabled, not configured, unavailable, or fails, or when the user explicitly requests offline processing.
 - Ordinary image/media download requests must not trigger `extract_text`; without an explicit conversion request, only the original images/videos are downloaded and returned.
 - It never mutates source images and writes generated text only to the runtime-provided task artifact directory.
