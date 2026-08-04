@@ -6,6 +6,7 @@ import {
   BANCOR_CANDLE_INTERVALS,
   BancorPage,
   BancorQuoteDialog,
+  BancorSwapTradePanel,
   CandleChart,
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
@@ -188,6 +189,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /价格 K 线.*每 15 秒自动刷新/);
   assert.doesNotMatch(html, /价格来自真实成交/);
   assert.match(html, /立即刷新 K 线/);
+  assert.match(html, /aria-label="交易模式"/);
+  assert.match(html, /aria-pressed="true"[^>]*>标准<\/button>/);
+  assert.match(html, /aria-pressed="false"[^>]*>SWAP<\/button>/);
+  assert.match(html, /class="theme-primary-btn mt-4 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
   assert.match(html, /全部真实 K 线已显示/);
   assert.match(html, /回到最新/);
@@ -204,6 +209,30 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
+  const html = renderToStaticMarkup(
+    <BancorSwapTradePanel
+      t={(zh) => zh}
+      side="sell"
+      inputAmount="100.0000"
+      inputAsset="POINT"
+      inputBalance="125.0000"
+      outputAsset="USD"
+      outputAmount="0.0099"
+      onInputChange={() => undefined}
+      onFillBalance={() => undefined}
+      onFlip={() => undefined}
+    />,
+  );
+
+  assert.match(html, /data-bancor-trade-layout="swap"/);
+  assert.ok(html.indexOf("支付") < html.indexOf("预计收到"));
+  assert.match(html, /100\.0000/);
+  assert.match(html, /0\.0099/);
+  assert.match(html, /切换为 USD 支付/);
+  assert.match(html, /最终到账以服务端签名报价为准/);
 });
 
 test("BANCOR candlesticks follow Chinese and English market color conventions", () => {

@@ -14,7 +14,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 
-import { calculateBancorInputFee, formatBancorApiError, validateBancorTradeInput } from "../hooks/useBancorRuntime";
+import { calculateBancorEstimatedOutput, calculateBancorInputFee, formatBancorApiError, validateBancorTradeInput } from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 
@@ -146,6 +146,7 @@ export function BancorPage({
   nniReady: boolean;
 }) {
   const [side, setSide] = useState<"buy" | "sell">("sell");
+  const [tradeLayout, setTradeLayout] = useState<"standard" | "swap">("standard");
   const [inputAmount, setInputAmount] = useState("");
   const {
     market,
@@ -187,6 +188,13 @@ export function BancorPage({
   const estimatedInputFee = market && inputAmount.trim()
     ? calculateBancorInputFee(inputAmount, market.fee_bps)
     : null;
+  const inputBalance = side === "buy" ? account?.usd_balance : account?.point_balance;
+  const estimatedSwapOutput = market && inputAmount.trim()
+    ? calculateBancorEstimatedOutput({ side, inputAmount, market })
+    : null;
+  const quotedOutput = quote?.side === side && quote.input_amount === inputAmount
+    ? quote.output_amount
+    : estimatedSwapOutput;
 
   const changeSide = (next: "buy" | "sell") => {
     setSide(next);
@@ -196,6 +204,10 @@ export function BancorPage({
   const fillBalance = (next: "buy" | "sell", amount: string) => {
     setSide(next);
     setInputAmount(amount);
+    clearQuote();
+  };
+  const changeTradeLayout = (next: "standard" | "swap") => {
+    setTradeLayout(next);
     clearQuote();
   };
   const confirmTrade = async () => {
@@ -338,9 +350,24 @@ export function BancorPage({
         </section>
 
         <div className="theme-shadow-card h-full p-5 sm:p-6">
-          <div className="flex items-center gap-2">
-            <ArrowDownUp className="h-5 w-5 text-sky-300" />
-            <h2 className="text-lg font-semibold text-white">{t("交易", "Trade")}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ArrowDownUp className="h-5 w-5 text-sky-300" />
+              <h2 className="text-lg font-semibold text-white">{t("交易", "Trade")}</h2>
+            </div>
+            <div className="flex rounded-lg border border-white/8 bg-white/[0.025] p-1" role="group" aria-label={t("交易模式", "Trade mode")}>
+              {(["standard", "swap"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={tradeLayout === mode}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${tradeLayout === mode ? "bg-sky-400/15 text-sky-100" : "text-white/45 hover:text-white/75"}`}
+                  onClick={() => changeTradeLayout(mode)}
+                >
+                  {mode === "standard" ? t("标准", "Standard") : "SWAP"}
+                </button>
+              ))}
+            </div>
           </div>
           <p className="mt-2 text-sm text-white/55">
             {t("先查看报价，确认数量和预计到账后再签名成交。", "Preview the quote first, then review the amounts before signing the trade.")}
@@ -382,35 +409,55 @@ export function BancorPage({
             ) : null}
           </div>
 
-          <div className="mt-5 grid grid-cols-2 rounded-xl bg-white/5 p-1">
-            {(["sell", "buy"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`rounded-lg px-4 py-2.5 text-sm font-medium transition ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
-                onClick={() => changeSide(value)}
-              >
-                {value === "sell" ? t("卖出 POINT", "Sell POINT") : t("买入 POINT", "Buy POINT")}
-              </button>
-            ))}
-          </div>
+          {tradeLayout === "standard" ? (
+            <>
+              <div className="mt-5 grid grid-cols-2 rounded-xl bg-white/5 p-1">
+                {(["sell", "buy"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`rounded-lg px-4 py-2.5 text-sm font-medium transition ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
+                    onClick={() => changeSide(value)}
+                  >
+                    {value === "sell" ? t("卖出 POINT", "Sell POINT") : t("买入 POINT", "Buy POINT")}
+                  </button>
+                ))}
+              </div>
 
-          <label className="mt-5 block text-sm text-white/70">
-            {t("支付数量", "Amount to pay")} ({inputAsset})
-            <div className="mt-2 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
-              <input
-                value={inputAmount}
-                inputMode="decimal"
-                placeholder="0.0000"
-                className="min-w-0 flex-1 bg-transparent py-3 text-lg text-white outline-none placeholder:text-white/25"
-                onChange={(event) => {
-                  setInputAmount(event.target.value);
-                  clearQuote();
-                }}
-              />
-              <span className="text-sm font-semibold text-white/55">{inputAsset}</span>
-            </div>
-          </label>
+              <label className="mt-5 block text-sm text-white/70">
+                {t("支付数量", "Amount to pay")} ({inputAsset})
+                <div className="mt-2 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
+                  <input
+                    value={inputAmount}
+                    inputMode="decimal"
+                    placeholder="0.0000"
+                    className="min-w-0 flex-1 bg-transparent py-3 text-lg text-white outline-none placeholder:text-white/25"
+                    onChange={(event) => {
+                      setInputAmount(event.target.value);
+                      clearQuote();
+                    }}
+                  />
+                  <span className="text-sm font-semibold text-white/55">{inputAsset}</span>
+                </div>
+              </label>
+            </>
+          ) : (
+            <BancorSwapTradePanel
+              t={t}
+              side={side}
+              inputAmount={inputAmount}
+              inputAsset={inputAsset}
+              inputBalance={inputBalance ?? null}
+              outputAsset={outputAsset}
+              outputAmount={quotedOutput}
+              onInputChange={(value) => {
+                setInputAmount(value);
+                clearQuote();
+              }}
+              onFillBalance={() => inputBalance && fillBalance(side, inputBalance)}
+              onFlip={() => changeSide(side === "sell" ? "buy" : "sell")}
+            />
+          )}
           {inputError ? (
             <p className="mt-2 text-xs leading-5 text-red-200" role="alert">{inputError}</p>
           ) : null}
@@ -427,7 +474,11 @@ export function BancorPage({
             disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || quoteLoading || tradeLoading}
             onClick={() => void preview(side, inputAmount)}
           >
-            {quoteLoading ? t("正在计算...", "Calculating...") : t("查看报价", "Preview quote")}
+            {quoteLoading
+              ? t("正在计算...", "Calculating...")
+              : side === "sell"
+                ? t("卖出", "Sell")
+                : t("买入", "Buy")}
           </button>
           {!marketOpen ? (
             <p className="mt-3 text-xs leading-5 text-amber-200/80">
@@ -544,6 +595,87 @@ export function BancorPage({
       </section>
 
       <BancorFormulaCard t={t} market={market} />
+    </div>
+  );
+}
+
+export function BancorSwapTradePanel({
+  t,
+  side,
+  inputAmount,
+  inputAsset,
+  inputBalance,
+  outputAsset,
+  outputAmount,
+  onInputChange,
+  onFillBalance,
+  onFlip,
+}: {
+  t: Translate;
+  side: "buy" | "sell";
+  inputAmount: string;
+  inputAsset: "POINT" | "USD";
+  inputBalance: string | null;
+  outputAsset: "POINT" | "USD";
+  outputAmount: string | null;
+  onInputChange: (value: string) => void;
+  onFillBalance: () => void;
+  onFlip: () => void;
+}) {
+  return (
+    <div className="mt-5" data-bancor-trade-layout="swap">
+      <div className="rounded-2xl border border-white/10 bg-black/10 p-4 focus-within:border-sky-400/45">
+        <div className="flex items-center justify-between gap-3 text-xs text-white/45">
+          <span>{t("支付", "Pay")}</span>
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 text-white/50 transition hover:bg-white/5 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!inputBalance}
+            onClick={onFillBalance}
+          >
+            {t("余额", "Balance")}：{inputBalance ?? "—"}
+          </button>
+        </div>
+        <label className="mt-2 flex items-center gap-3">
+          <span className="sr-only">{t("支付数量", "Amount to pay")}</span>
+          <input
+            value={inputAmount}
+            inputMode="decimal"
+            placeholder="0.0000"
+            className="min-w-0 flex-1 bg-transparent py-2 text-2xl font-medium text-white outline-none placeholder:text-white/20"
+            onChange={(event) => onInputChange(event.target.value)}
+          />
+          <span className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white/80">{inputAsset}</span>
+        </label>
+      </div>
+
+      <div className="relative z-10 -my-3 flex justify-center">
+        <button
+          type="button"
+          className="theme-icon-btn h-9 w-9 border border-sky-300/25 bg-slate-900 text-sky-200 shadow-lg"
+          onClick={onFlip}
+          aria-label={t(`切换为 ${outputAsset} 支付`, `Pay with ${outputAsset}`)}
+          title={t("切换兑换方向", "Reverse swap direction")}
+        >
+          <ArrowDownUp className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4 pt-5">
+        <div className="flex items-center justify-between gap-3 text-xs text-white/45">
+          <span>{t("预计收到", "Estimated output")}</span>
+          <span>{side === "sell" ? t("卖出 POINT", "Sell POINT") : t("买入 POINT", "Buy POINT")}</span>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <span className={`min-w-0 flex-1 py-2 text-2xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
+            {outputAmount ?? "—"}
+          </span>
+          <span className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white/80">{outputAsset}</span>
+        </div>
+        <p className="mt-1 text-[11px] leading-5 text-white/35">
+          {t("按当前储备预估，最终到账以服务端签名报价为准。", "Estimated from current reserves; the signed server quote is final.")}
+        </p>
+      </div>
     </div>
   );
 }

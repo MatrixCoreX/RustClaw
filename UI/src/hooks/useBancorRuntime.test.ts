@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS,
+  calculateBancorEstimatedOutput,
   calculateBancorInputFee,
   formatBancorApiError,
   validateBancorTradeInput,
@@ -86,4 +87,10 @@ test("BANCOR frontend fee preview uses the backend integer rounding rule", () =>
   assert.equal(calculateBancorInputFee("0.0001", 50), "0.0001");
   assert.equal(calculateBancorInputFee("1.0000", 0), "0.0000");
   assert.equal(calculateBancorInputFee("0", 50), null);
+});
+
+test("BANCOR swap preview follows the same integer reserve formula as the backend", () => {
+  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "1.0000", market }), "9949.0100");
+  assert.equal(calculateBancorEstimatedOutput({ side: "sell", inputAmount: "100.0000", market }), "0.0099");
+  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "0.0001", market }), null);
 });
