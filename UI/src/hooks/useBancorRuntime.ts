@@ -39,6 +39,30 @@ export function calculateBancorInputFee(inputAmount: string, feeBps: number): st
   return formatBancorUnits(feeUnits);
 }
 
+export function calculateBancorEstimatedOutput({
+  side,
+  inputAmount,
+  market,
+}: {
+  side: "buy" | "sell";
+  inputAmount: string;
+  market: NniBancorMarketResponse | null;
+}): string | null {
+  const inputUnits = parseBancorInputUnits(inputAmount);
+  if (inputUnits === null || !market || !Number.isSafeInteger(market.fee_bps) || market.fee_bps < 0 || market.fee_bps >= 10_000) {
+    return null;
+  }
+  const feeUnits = market.fee_bps === 0
+    ? 0n
+    : (inputUnits * BigInt(market.fee_bps) + 9_999n) / 10_000n;
+  const curveInputUnits = inputUnits - feeUnits;
+  if (curveInputUnits <= 0n) return null;
+  const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.point_reserve_units);
+  const outputReserveUnits = BigInt(side === "buy" ? market.point_reserve_units : market.usd_reserve_units);
+  const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
+  return outputUnits > 0n ? formatBancorUnits(outputUnits) : null;
+}
+
 export function validateBancorTradeInput({
   side,
   inputAmount,
