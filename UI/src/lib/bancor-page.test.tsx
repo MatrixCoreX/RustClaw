@@ -6,6 +6,7 @@ import {
   BANCOR_CANDLE_INTERVALS,
   BancorPage,
   BancorQuoteDialog,
+  CandleChart,
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
@@ -213,6 +214,60 @@ test("BANCOR candlesticks follow Chinese and English market color conventions", 
   const english = resolveBancorCandlePalette((_zh, en) => en);
   assert.equal(english.up.stroke, "#34d399");
   assert.equal(english.down.stroke, "#f87171");
+});
+
+test("BANCOR one-minute candles connect carried closes and hide empty-minute dots", () => {
+  const candles = [{
+    bucket_start_unix: 1_800_000_000,
+    bucket_end_unix: 1_800_000_060,
+    open: "0.00010000",
+    high: "0.00010010",
+    low: "0.00009990",
+    close: "0.00010005",
+    point_volume_units: "10000000",
+    point_volume: "1000.0000",
+    usd_volume_units: "999",
+    usd_volume: "0.0999",
+    trade_count: 1,
+    has_trades: true,
+  }, {
+    bucket_start_unix: 1_800_000_060,
+    bucket_end_unix: 1_800_000_120,
+    open: "0.00010005",
+    high: "0.00010005",
+    low: "0.00010005",
+    close: "0.00010005",
+    point_volume_units: "0",
+    point_volume: "0.0000",
+    usd_volume_units: "0",
+    usd_volume: "0.0000",
+    trade_count: 0,
+    has_trades: false,
+  }];
+  const minuteHtml = renderToStaticMarkup(
+    <CandleChart
+      candles={candles}
+      intervalSeconds={60}
+      priceDecimalPlaces={12}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      t={(zh) => zh}
+    />,
+  );
+  const longerHtml = renderToStaticMarkup(
+    <CandleChart
+      candles={candles}
+      intervalSeconds={300}
+      priceDecimalPlaces={12}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      t={(zh) => zh}
+    />,
+  );
+
+  assert.match(minuteHtml, /data-bancor-chart-layer="one-minute-close-line"/);
+  assert.match(minuteHtml, /<polyline[^>]+stroke="#7dd3fc"/);
+  assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
+  assert.doesNotMatch(longerHtml, /one-minute-close-line/);
+  assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 2);
 });
 
 test("BANCOR quote review and final confirmation use a centered modal", () => {

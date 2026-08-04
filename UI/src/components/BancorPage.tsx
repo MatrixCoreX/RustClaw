@@ -323,6 +323,7 @@ export function BancorPage({
             <CandleChart
               key={candleIntervalSeconds}
               candles={candles.candles}
+              intervalSeconds={candles.interval_seconds}
               priceDecimalPlaces={candles.price_decimal_places}
               formatUnixDateTime={formatUnixDateTime}
               t={t}
@@ -607,13 +608,15 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
   );
 }
 
-function CandleChart({
+export function CandleChart({
   candles,
+  intervalSeconds,
   priceDecimalPlaces,
   formatUnixDateTime,
   t,
 }: {
   candles: NniBancorCandle[];
+  intervalSeconds: number;
   priceDecimalPlaces: number;
   formatUnixDateTime: (value?: number | null) => string;
   t: Translate;
@@ -684,6 +687,12 @@ function CandleChart({
   const tickIndexes = new Set([0, Math.floor((values.length - 1) / 2), values.length - 1]);
   const palette = resolveBancorCandlePalette(t);
   const latestColor = last.close >= last.open ? palette.up : palette.down;
+  const showMinuteCloseLine = intervalSeconds === 60;
+  const minuteCloseLinePoints = showMinuteCloseLine
+    ? values
+      .map((value, index) => `${plotLeft + step * (index + 0.5)},${yForPrice(value.close)}`)
+      .join(" ")
+    : "";
   const maxRequestedVisibleCount = Math.min(160, allValues.length);
 
   const clampOffset = (value: number) => Math.max(0, Math.min(visibleWindow.maxOffset, value));
@@ -826,10 +835,26 @@ function CandleChart({
           })}
           <line x1={plotLeft} y1={volumeTop - 10} x2={plotRight} y2={volumeTop - 10} stroke="rgba(255,255,255,0.08)" />
           <line x1={plotLeft} y1={yForPrice(last.close)} x2={plotRight} y2={yForPrice(last.close)} stroke={latestColor.stroke} strokeOpacity="0.45" strokeDasharray="5 5" />
+          {showMinuteCloseLine && values.length > 1 ? (
+            <polyline
+              data-bancor-chart-layer="one-minute-close-line"
+              points={minuteCloseLinePoints}
+              fill="none"
+              stroke="#7dd3fc"
+              strokeOpacity="0.88"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+            />
+          ) : null}
           {values.map((value, index) => {
             const x = plotLeft + step * (index + 0.5);
             const up = value.close >= value.open;
             const color = up ? palette.up : palette.down;
+            const hasTrades = value.candle.has_trades ?? (value.candle.trade_count > 0);
+            const showCandleBody = !showMinuteCloseLine || hasTrades;
             const openY = yForPrice(value.open);
             const closeY = yForPrice(value.close);
             const bodyTop = Math.min(openY, closeY);
@@ -841,9 +866,9 @@ function CandleChart({
             return (
               <g key={`${value.candle.bucket_start_unix}-${index}`}>
                 <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.point_volume} POINT · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
-                {highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                {bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                <rect x={x - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={bodyHeight} rx="1" fill={color.stroke} stroke={color.stroke} strokeWidth="1.2" />
+                {showCandleBody && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                {showCandleBody && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                {showCandleBody ? <rect data-bancor-candle-body="true" x={x - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={bodyHeight} rx="1" fill={color.stroke} stroke={color.stroke} strokeWidth="1.2" /> : null}
                 <rect x={x - bodyWidth / 2} y={volumeBottom - volumeHeight} width={bodyWidth} height={volumeHeight} rx="1" fill={color.volumeFill} />
                 {tickIndexes.has(index) ? (
                   <text x={x} y={timeAxisY} textAnchor="middle" fill="rgba(255,255,255,0.38)" fontSize="10">
