@@ -116,25 +116,29 @@ ui_node_options() {
 
   local -a retained=()
   local -a existing_options=()
-  read -r -a existing_options <<< "${NODE_OPTIONS:-}"
   local skip_next=0
   local token
-  for token in "${existing_options[@]}"; do
-    if (( skip_next == 1 )); then
-      skip_next=0
-      continue
-    fi
-    case "$token" in
-      --max-old-space-size|--max_old_space_size)
-        skip_next=1
-        ;;
-      --max-old-space-size=*|--max_old_space_size=*)
-        ;;
-      *)
-        retained+=("$token")
-        ;;
-    esac
-  done
+  # Bash 3.2 on macOS treats an empty array expansion as unbound under
+  # `set -u`, even after `local -a`. Only expand the array when input exists.
+  if [[ -n "${NODE_OPTIONS:-}" ]]; then
+    read -r -a existing_options <<< "$NODE_OPTIONS"
+    for token in "${existing_options[@]}"; do
+      if (( skip_next == 1 )); then
+        skip_next=0
+        continue
+      fi
+      case "$token" in
+        --max-old-space-size|--max_old_space_size)
+          skip_next=1
+          ;;
+        --max-old-space-size=*|--max_old_space_size=*)
+          ;;
+        *)
+          retained+=("$token")
+          ;;
+      esac
+    done
+  fi
   retained+=("--max-old-space-size=${heap_mb}")
   printf '%s\n' "${retained[*]}"
 }
