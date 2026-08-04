@@ -1,10 +1,11 @@
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::policy_decision::PolicyDecision;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SubagentRoleDefinition {
     pub(crate) token: String,
     pub(crate) family: String,
@@ -12,8 +13,117 @@ pub(crate) struct SubagentRoleDefinition {
     pub(crate) default_permission_profile: String,
     pub(crate) allowed_permission_profiles: Vec<String>,
     pub(crate) result_contract_required: bool,
-    pub(crate) model_policy: Value,
+    pub(crate) model_policy: ModelPolicy,
     pub(crate) tool_policy: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct ModelPolicy {
+    pub(crate) model_class: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_output_tokens: Option<u64>,
+}
+
+impl Default for ModelPolicy {
+    fn default() -> Self {
+        Self {
+            model_class: "default".to_string(),
+            reasoning_effort: None,
+            max_output_tokens: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct ResolvedModelPolicy {
+    pub(crate) schema_version: u8,
+    pub(crate) model_class: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_output_tokens: Option<u64>,
+    pub(crate) model_policy_fallback: bool,
+    pub(crate) reasoning_effort_status: String,
+}
+
+pub(crate) fn parse_model_policy(value: Value) -> Result<ModelPolicy, &'static str> {
+    let policy: ModelPolicy =
+        serde_json::from_value(value).map_err(|_| "subagent_model_policy_schema_invalid")?;
+    if !matches!(
+        policy.model_class.as_str(),
+        "default" | "fast" | "reasoning"
+    ) {
+        return Err("subagent_model_class_invalid");
+    }
+    if policy
+        .reasoning_effort
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "low" | "medium" | "high"))
+    {
+        return Err("subagent_reasoning_effort_invalid");
+    }
+    if policy
+        .max_output_tokens
+        .is_some_and(|value| value == 0 || value > 1_000_000)
+    {
+        return Err("subagent_max_output_tokens_invalid");
+    }
+    Ok(policy)
+}
+
+pub(crate) fn resolve_model_policy(
+    llm: &claw_core::config::LlmConfig,
+    policy: &ModelPolicy,
+) -> Result<ResolvedModelPolicy, &'static str> {
+    let requested = llm.model_classes.get(&policy.model_class);
+    let fallback_mapping = llm.model_classes.get("default");
+    let mapping = requested.or(fallback_mapping);
+    let (provider, model, fallback) = if let Some(mapping) = mapping {
+        (
+            mapping.provider.trim().to_string(),
+            mapping.model.trim().to_string(),
+            requested.is_none(),
+        )
+    } else {
+        (
+            llm.selected_vendor
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or("subagent_default_model_provider_missing")?
+                .to_string(),
+            llm.selected_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or("subagent_default_model_id_missing")?
+                .to_string(),
+            true,
+        )
+    };
+    if provider.is_empty() || model.is_empty() {
+        return Err("subagent_model_class_mapping_invalid");
+    }
+    let reasoning_effort_status = match (policy.reasoning_effort.as_deref(), provider.as_str()) {
+        (None, _) => "not_requested",
+        (Some(_), "google") => "ignored_unsupported",
+        (Some(_), _) => "applied",
+    };
+    Ok(ResolvedModelPolicy {
+        schema_version: 1,
+        model_class: policy.model_class.clone(),
+        provider,
+        model,
+        reasoning_effort: policy.reasoning_effort.clone(),
+        max_output_tokens: policy.max_output_tokens,
+        model_policy_fallback: fallback,
+        reasoning_effort_status: reasoning_effort_status.to_string(),
+    })
 }
 
 impl SubagentRoleDefinition {
@@ -55,7 +165,7 @@ pub(crate) fn default_subagent_role_definitions() -> Vec<SubagentRoleDefinition>
                 vec!["read_only".to_string()]
             },
             result_contract_required,
-            model_policy: json!({}),
+            model_policy: ModelPolicy::default(),
             tool_policy: json!({}),
         }
     })
@@ -139,10 +249,15 @@ pub(crate) fn load_subagent_role_definitions(path: &Path) -> Vec<SubagentRoleDef
                 .get("result_contract_required")
                 .and_then(toml::Value::as_bool)
                 .unwrap_or(false),
-            model_policy: table
-                .get("model_policy")
-                .and_then(toml_to_json_object)
-                .unwrap_or_else(|| json!({})),
+            model_policy: match table.get("model_policy") {
+                Some(value) => match toml_to_json_object(value)
+                    .and_then(|value| parse_model_policy(value).ok())
+                {
+                    Some(policy) => policy,
+                    None => continue,
+                },
+                None => ModelPolicy::default(),
+            },
             tool_policy: table
                 .get("tool_policy")
                 .and_then(toml_to_json_object)
@@ -264,10 +379,53 @@ policy_class = "repository_read"
         assert_eq!(definitions[0].token, "architect");
         assert_eq!(definitions[0].family, "planner");
         assert_eq!(definitions[0].default_scope, "read_only_architecture");
-        assert_eq!(definitions[0].model_policy["model_class"], "reasoning");
+        assert_eq!(definitions[0].model_policy.model_class, "reasoning");
         assert_eq!(
             definitions[0].tool_policy["policy_class"],
             "repository_read"
         );
+    }
+
+    #[test]
+    fn model_policy_schema_is_closed_and_validated() {
+        assert_eq!(
+            parse_model_policy(json!({"model_class":"reasoning","reasoning_effort":"high","max_output_tokens":8192}))
+                .expect("valid policy")
+                .reasoning_effort
+                .as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            parse_model_policy(json!({"model_class":"reasoning","unexpected":true})),
+            Err("subagent_model_policy_schema_invalid")
+        );
+        assert_eq!(
+            parse_model_policy(json!({"reasoning_effort":"extreme"})),
+            Err("subagent_reasoning_effort_invalid")
+        );
+    }
+
+    #[test]
+    fn repository_review_role_resolves_the_reasoning_model_and_effort() {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let definitions =
+            load_subagent_role_definitions(&repository_root.join("configs/agent_guard.toml"));
+        let review = definitions
+            .iter()
+            .find(|definition| definition.token == "review")
+            .expect("review role");
+        let config_path = repository_root
+            .join("configs/config.toml")
+            .to_string_lossy()
+            .into_owned();
+        let config = claw_core::config::AppConfig::load(&config_path)
+            .expect("repository_runtime_config_missing");
+        let resolved = resolve_model_policy(&config.llm, &review.model_policy)
+            .expect("review_model_policy_resolution_failed");
+        assert_eq!(resolved.model_class, "reasoning");
+        assert_eq!(resolved.provider, "minimax");
+        assert_eq!(resolved.model, "MiniMax-M3");
+        assert_eq!(resolved.reasoning_effort.as_deref(), Some("high"));
+        assert!(!resolved.model_policy_fallback);
     }
 }

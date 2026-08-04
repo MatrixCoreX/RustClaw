@@ -230,10 +230,6 @@ fn terminal_delivery_content(
         notice
             .params
             .insert("reason_code".to_string(), detail.error_code.clone());
-        notice.params.insert(
-            "failure_message_key".to_string(),
-            detail.message_key.clone(),
-        );
     }
     if retryable {
         notice.next_actions.push(ChannelNoticeNextAction {
@@ -242,15 +238,7 @@ fn terminal_delivery_content(
             params: Default::default(),
         });
     }
-    let mut text = claw_core::channel_i18n::common_text_for_locale(locale, message_key);
-    if let Some(detail) = failure_detail {
-        text.push('\n');
-        text.push_str(&claw_core::channel_i18n::common_text_for_locale(
-            locale,
-            "channel.task.failure_reason_label",
-        ));
-        text.push_str(&detail.reason);
-    }
+    let text = claw_core::channel_i18n::common_text_for_locale(locale, message_key);
     (text, Some(notice))
 }
 

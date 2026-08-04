@@ -479,6 +479,7 @@ fn workspace_instruction_config_is_disabled_by_default_and_validates_enabled_bud
     let enabled = WorkspaceInstructionsConfig {
         enabled_for_coding: true,
         enabled_for_non_coding: false,
+        user_instruction_paths: Vec::new(),
         filenames: vec!["AGENTS.md".to_string()],
         max_total_bytes: 32_768,
         max_file_bytes: 131_072,

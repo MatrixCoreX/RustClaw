@@ -1108,6 +1108,14 @@ function ChatWorkingIndicator({
         return t("音频提取完成，正在转写文字", "Audio extraction is complete; transcribing speech");
       case "media_download.transcribe.completed":
         return t("文字转写完成，正在整理结果", "Transcription is complete; preparing the result");
+      case "browser_web.pages.starting":
+        return t("正在打开并读取网页", "Opening and reading web pages");
+      case "browser_web.pages.completed":
+        return t("网页读取已完成", "Web page reading is complete");
+      case "kb.operation.starting":
+        return t("正在准备知识库操作", "Preparing the knowledge-base operation");
+      case "package_manager.operation.starting":
+        return t("正在准备软件包操作", "Preparing the package operation");
       case "skill_dispatch.queue.waiting":
         return t("当前任务已进入队列，将按顺序处理", "This task is queued and will run in order");
       case "skill_dispatch.queue.started":
@@ -1196,8 +1204,8 @@ function ChatWorkingIndicator({
           {activity.progressCurrent !== null && activity.progressTotal !== null ? (
             <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
               {t(
-                `步骤 ${activity.progressCurrent}/${activity.progressTotal}`,
-                `Step ${activity.progressCurrent}/${activity.progressTotal}`,
+                `进度 ${activity.progressCurrent}/${activity.progressTotal}${activity.progressTotal > 0 ? ` · ${Math.min(100, Math.round((activity.progressCurrent / activity.progressTotal) * 100))}%` : ""}`,
+                `Progress ${activity.progressCurrent}/${activity.progressTotal}${activity.progressTotal > 0 ? ` · ${Math.min(100, Math.round((activity.progressCurrent / activity.progressTotal) * 100))}%` : ""}`,
               )}
             </span>
           ) : null}

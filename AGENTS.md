@@ -241,7 +241,22 @@ The runtime source of truth is the merge of the read-only base registry/prompts 
   - 运行时调用会被 `clawd` 拦截
     Runtime invocation is blocked by `clawd`
 
-## 5) Admission Criteria / 技能准入标准
+## 5) Channel Transport Adapter Rules / 通信端薄适配规则
+
+- 微信、WhatsApp Cloud、WhatsApp Web、Telegram、飞书和 Lark 只负责平台验签、去重、绑定、附件物化、locale 采集、任务提交和交付。所有普通文字与附件请求统一形成 `ChannelIngressEnvelope` 并提交 `TaskKind::Ask`。
+  WeChat, WhatsApp Cloud, WhatsApp Web, Telegram, Feishu, and Lark own only platform verification, deduplication, binding, attachment materialization, locale collection, task submission, and delivery. Every ordinary text or attachment request becomes a `ChannelIngressEnvelope` submitted as `TaskKind::Ask`.
+- 通信端不得按自然语言、斜杠文本、MIME、扩展名或平台类型选择 skill/tool/capability，不得创建 `TaskKind::RunSkill`、写 `skill_name`、直接调用业务技能或保存业务偏好到 tracked TOML。新增、删除、启停或升级技能不得改变通信端命令 catalog。
+  A channel adapter must not select a skill, tool, or capability from natural language, slash text, MIME, extension, or platform type. It must not create `TaskKind::RunSkill`, write `skill_name`, call a business skill directly, or persist business preferences in tracked TOML. Installing, removing, enabling, disabling, or upgrading a skill must not change the channel command catalog.
+- 共享命令合同只保留 `/help`（`/start` 为别名）、`/key`、`/cancel`，以及已由中央偏好与 delivery planner 完整接管的 `/voicemode`。`/run`、`/status` 和已绑定用户的未知斜杠文本按原文提交普通 `ask`。
+  The shared command contract keeps only `/help` (`/start` is an alias), `/key`, `/cancel`, and `/voicemode` only when central preferences and the delivery planner fully own it. `/run`, `/status`, and unknown slash text from a bound user are submitted unchanged as ordinary `ask` input.
+- 用户可见确定性通知使用 `ChannelNotice`、安全 `message_key` 和 public-safe 参数。原始 provider body、异常、路径、token、key、cookie、堆栈只进入结构化日志。任务终态通过统一 delivery service 投送；进度使用共享 capability descriptor，最多一条慢任务提示，终态后停止进度。
+  Deterministic user-visible notices use `ChannelNotice`, a safe `message_key`, and public-safe parameters. Raw provider bodies, exceptions, paths, tokens, keys, cookies, and stacks belong only in structured logs. Terminal task output goes through the shared delivery service; progress uses the shared capability descriptor, emits at most one slow-task notice, and stops after terminal state.
+- locale 优先级为中央用户偏好、平台 user/chat locale、固定 conversation/request locale、通信端 `default_locale`、产品安全默认语言。任务建立后的进度、notice 和终态必须使用同一 pinned locale；`default_locale` 只是无法识别用户语言时的兜底。
+  Locale precedence is central user preference, platform user/chat locale, pinned conversation/request locale, channel `default_locale`, then the product-safe default. Progress, notices, and terminal delivery after task creation must use the same pinned locale; `default_locale` is only a fallback when the user's language cannot be identified.
+- 修改通信端、命令 catalog、channel i18n 或通知边界后，运行 `python3 scripts/check_channel_i18n_completeness.py --self-test && python3 scripts/check_channel_i18n_completeness.py`、`python3 scripts/check_channel_provider_error_contracts.py --self-test && python3 scripts/check_channel_provider_error_contracts.py`、`python3 scripts/check_channel_thin_adapter_contracts.py --self-test && python3 scripts/check_channel_thin_adapter_contracts.py`。
+  After changing channels, the command catalog, channel i18n, or notice boundaries, run the channel i18n, provider-error, and thin-adapter self-tests and repository checks listed above.
+
+## 6) Admission Criteria / 技能准入标准
 
 PR 合并前至少满足：
 Before merge, at least the following must pass:
@@ -261,7 +276,7 @@ Before merge, at least the following must pass:
 只有当“request 合法 + 编译/协议通过 + receipt 完整 + 宿主 grant + generation 激活 + 路径可跑通”同时成立，才允许把技能视为已启用；缺少 grant 时只能视为已安装未授权。
 A skill is enabled only when its request is valid, build/protocol smoke passes, receipt is complete, host grant exists, generation activation succeeds, and the path is runnable. Without a grant it is installed but unauthorized, not enabled.
 
-## 6) Execution Principles (for agents) / 实施原则（给 agent）
+## 7) Execution Principles (for agents) / 实施原则（给 agent）
 
 - **`prompts/` 下所有真正的 prompt markdown 文件**在文件末尾保留统一的 **Multilingual Reinforcement** 区块（固定标题与注释模板），用于 zh-CN / en 等语言特有补充；通用规则仍写在正文。说明类 README（如 `prompts/layers/README.md`）不追加该区块，仅文档化规范。
   **All real prompt markdown files under `prompts/`** keep a unified **Multilingual Reinforcement** block at EOF (fixed heading + comment template) for language-specific nuance (e.g. zh-CN / en); general rules stay in the main body. Explainer READMEs (e.g. `prompts/layers/README.md`) do not get the block—document the convention only.

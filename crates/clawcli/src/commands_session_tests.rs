@@ -1,7 +1,7 @@
 use super::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
     session_store_delete_json, session_store_fork_json, session_store_persist_chat_session,
-    session_store_record_chat_cursor, session_store_record_chat_task,
+    session_store_record_chat_cursor, session_store_record_chat_task, session_store_rewind_json,
     session_store_select_chat_session, session_store_select_latest_chat_session,
     session_store_upsert_summary, SessionStore,
 };
@@ -134,6 +134,46 @@ fn session_store_archive_delete_and_fork_use_machine_metadata() {
     assert_eq!(delete["operation"], "session_delete");
     assert_eq!(delete["deleted"], true);
     assert_eq!(delete["store_session_count"], 1);
+}
+
+#[test]
+fn session_rewind_forks_a_new_thread_and_preserves_side_effect_refs() {
+    let mut store = SessionStore::default();
+    session_store_upsert_summary(
+        &mut store,
+        &serde_json::json!({
+            "session_id":"source-session",
+            "thread_id":"source-session",
+            "task_ids":["task-1"],
+            "latest_event_seq":"19"
+        }),
+    );
+    let anchor = serde_json::json!({
+        "schema_version":1,
+        "source_session_id":"source-session",
+        "source_task_id":"task-1",
+        "event_seq":12,
+        "checkpoint_id":"checkpoint-9"
+    });
+    let summary = session_store_rewind_json(
+        &mut store,
+        "source-session",
+        "rewound-session",
+        anchor.clone(),
+        vec!["mutation:already-completed".to_string()],
+    )
+    .expect("rewind session");
+
+    assert_eq!(summary["operation"], "session_rewind");
+    assert_eq!(summary["original_history_preserved"], true);
+    let rewound = session_store_select_latest_chat_session(&store).unwrap();
+    assert_eq!(rewound.conversation_id, "rewound-session");
+    assert_eq!(rewound.rewind_anchor, Some(anchor));
+    assert_eq!(
+        rewound.completed_side_effect_refs,
+        vec!["mutation:already-completed"]
+    );
+    assert_eq!(rewound.event_cursor, 12);
 }
 
 #[test]

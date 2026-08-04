@@ -615,8 +615,9 @@ pub(crate) async fn run_with_fallback_with_hints(
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
-    hints: crate::ChatRequestHints,
+    mut hints: crate::ChatRequestHints,
 ) -> Result<String, String> {
+    crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
     let task_providers = state.task_llm_providers(task);
     run_with_fallback_on_providers_with_hints(
         state,

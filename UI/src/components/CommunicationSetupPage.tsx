@@ -392,6 +392,12 @@ export function CommunicationSetupPage({
                 "Configure only the communication method you plan to use. WeChat and WhatsApp Web support QR sign-in, Telegram uses a bot token, and Feishu/Lark use official QR app setup followed by a bind code.",
               )}
             </p>
+            <p className="mt-2 text-xs leading-6 text-white/55">
+              {t(
+                "通信端的默认语言只在无法识别用户或会话语言时使用，不会强制所有用户使用同一种语言。",
+                "A channel's default language is used only when the user or conversation language cannot be identified; it does not force one language for everyone.",
+              )}
+            </p>
           </div>
         </div>
 

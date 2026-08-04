@@ -39,7 +39,7 @@ pub(crate) use run_skill::run_skill;
 pub(crate) use session::{
     load_or_create_chat_session, persist_chat_session, record_chat_session_cursor,
     record_chat_session_task, run_session_archive, run_session_continue_latest, run_session_delete,
-    run_session_fork, run_session_list, run_session_resume, run_session_show,
+    run_session_fork, run_session_list, run_session_resume, run_session_rewind, run_session_show,
 };
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
@@ -48,7 +48,8 @@ pub(crate) use task_control::{
     run_continue_task, run_pause_task, run_resume_task,
 };
 pub(crate) use task_query::{
-    run_events, run_get, run_logs, run_report, run_review, run_subagents, run_wait, run_watch,
+    run_events, run_get, run_logs, run_report, run_review, run_review_once, run_subagents,
+    run_wait, run_watch,
 };
 pub(crate) use tui::run_tui;
 
@@ -78,7 +79,7 @@ use report::{coding_review_json, subagent_report_json, task_report_json, task_re
 use session::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
     session_store_delete_json, session_store_fork_json, session_store_persist_chat_session,
-    session_store_record_chat_cursor, session_store_record_chat_task,
+    session_store_record_chat_cursor, session_store_record_chat_task, session_store_rewind_json,
     session_store_select_chat_session, session_store_select_latest_chat_session,
     session_store_upsert_summary, SessionStore,
 };

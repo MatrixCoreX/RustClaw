@@ -233,27 +233,6 @@ pub(super) fn build_wechat_inbox_rel_path(
     }
 }
 
-pub(super) fn wechat_media_agent_context(
-    media_kind: &str,
-    rel_path: &str,
-    file_name: Option<&str>,
-) -> String {
-    let mut event = json!({
-        "event_type": "channel_media_saved",
-        "channel": "wechat",
-        "media_kind": media_kind,
-        "workspace_relative_path": rel_path,
-        "locator": {
-            "kind": "workspace_relative_path",
-            "path": rel_path
-        }
-    });
-    if let Some(name) = file_name.map(str::trim).filter(|v| !v.is_empty()) {
-        event["file_name"] = json!(name);
-    }
-    event.to_string()
-}
-
 pub(super) fn inbound_image_decrypt_params(msg: &WeixinMessage) -> Option<(String, [u8; 16])> {
     let it = first_item_or_ref_item(msg, |it| {
         it.r#type == Some(2)
@@ -371,19 +350,6 @@ pub(super) fn sanitize_inbox_filename(name: &str) -> String {
         s.truncate(120);
     }
     s
-}
-
-pub(super) fn inbox_rel_suits_doc_parse(rel: &str) -> bool {
-    Path::new(rel)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| {
-            matches!(
-                e.to_ascii_lowercase().as_str(),
-                "pdf" | "docx" | "xlsx" | "pptx" | "md" | "txt" | "html" | "htm"
-            )
-        })
-        .unwrap_or(false)
 }
 
 pub(super) fn active_login_is_fresh(login: &ActiveLogin) -> bool {

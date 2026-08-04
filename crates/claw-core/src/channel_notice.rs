@@ -160,14 +160,58 @@ fn validate_params(params: &BTreeMap<String, String>) -> Result<(), ChannelNotic
         return Err(ChannelNoticeValidationError::InvalidParam);
     }
     for (name, value) in params {
-        if !is_machine_token(name, false) {
+        if !is_machine_token(name, false) || is_private_param_name(name) {
             return Err(ChannelNoticeValidationError::InvalidParam);
         }
-        if value.len() > 4096 {
+        if value.len() > 256 {
             return Err(ChannelNoticeValidationError::ParamValueTooLong);
+        }
+        if !is_public_param_value(value) {
+            return Err(ChannelNoticeValidationError::InvalidParam);
         }
     }
     Ok(())
+}
+
+fn is_private_param_name(name: &str) -> bool {
+    matches!(
+        name,
+        "error"
+            | "err"
+            | "body"
+            | "detail"
+            | "path"
+            | "token"
+            | "key"
+            | "cookie"
+            | "stack"
+            | "authorization"
+    ) || name.ends_with("_error")
+        || name.ends_with("_body")
+        || name.ends_with("_path")
+        || name.ends_with("_token")
+        || name.ends_with("_key")
+}
+
+fn is_public_param_value(value: &str) -> bool {
+    if value.chars().any(char::is_control) {
+        return false;
+    }
+    let lower = value.to_ascii_lowercase();
+    ![
+        "authorization:",
+        "bearer ",
+        "cookie:",
+        "token=",
+        "api_key=",
+        "api-key=",
+        "stack trace",
+        concat!("traceback (most recent", " call last)"),
+        "/home/",
+        "/users/",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 fn is_machine_token(value: &str, require_namespace: bool) -> bool {

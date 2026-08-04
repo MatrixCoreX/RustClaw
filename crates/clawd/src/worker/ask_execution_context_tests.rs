@@ -186,6 +186,7 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
         enabled_for_coding: true,
         enabled_for_non_coding: false,
         filenames: vec!["AGENTS.md".to_string()],
+        user_instruction_paths: Vec::new(),
         max_total_bytes: 4_096,
         max_file_bytes: 8_192,
         max_files: 8,
@@ -238,4 +239,53 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
     assert_eq!(attribution["sources"][0]["logical_path"], "AGENTS.md");
     assert!(attribution["injected_bytes_total"].as_u64().unwrap() <= 4_096);
     assert_eq!(attribution["sources"][0]["digest_scope"], "loaded_prefix");
+}
+
+#[test]
+fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replayable() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let result = json!({
+        "task_journal": {
+            "summary": {"coding_workflow": {
+                "completed_side_effect_refs": ["mutation:1"]
+            }},
+            "trace": {"event_stream": [
+                {"seq":1,"event_type":"task_started","payload":{}},
+                {"seq":2,"event_type":"tool_finished","payload":{"mutation_id":"mutation:1"}},
+                {"seq":3,"event_type":"task_final","payload":{}}
+            ]}
+        }
+    });
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "INSERT INTO tasks (task_id,user_id,chat_id,channel,kind,payload_json,status,result_json,created_at,updated_at) VALUES ('rewind-source',1,1,'ui','ask','{}','succeeded',?1,1,1)",
+            params![result.to_string()],
+        )
+        .unwrap();
+    let payload = json!({"session_rewind":{
+        "schema_version":1,
+        "anchor":{
+            "schema_version":1,
+            "source_session_id":"session-source",
+            "source_task_id":"rewind-source",
+            "event_seq":2,
+            "checkpoint_id":null
+        },
+        "completed_side_effect_refs":["client-value-is-not-authoritative"]
+    }});
+
+    let observation = super::session_rewind_observation(&state, &payload)
+        .unwrap()
+        .expect("rewind observation");
+    assert_eq!(observation["event_count"], 2);
+    assert_eq!(observation["completed_side_effect_refs"][0], "mutation:1");
+    assert_eq!(
+        observation["side_effect_replay_policy"],
+        "already_occurred_do_not_replay"
+    );
+    assert_eq!(observation["instruction_authority"], "none");
 }

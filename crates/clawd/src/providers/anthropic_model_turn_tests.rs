@@ -8,7 +8,7 @@ use claw_core::model_turn::{
 };
 use serde_json::json;
 
-use super::{build_anthropic_request, parse_anthropic_model_turn};
+use super::{build_anthropic_request, parse_anthropic_model_turn, ChatRequestHints};
 
 fn provider() -> crate::LlmProviderRuntime {
     crate::LlmProviderRuntime {
@@ -89,6 +89,57 @@ fn request_maps_system_tools_parallel_calls_and_results() {
     assert_eq!(body["messages"][1]["content"][0]["type"], "tool_use");
     assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
     assert!(body.get("stream").is_none());
+}
+
+#[test]
+fn reasoning_effort_maps_to_bounded_anthropic_thinking_budget() {
+    let request = ModelTurnRequest {
+        messages: vec![ModelMessage::text(ModelRole::User, "review")],
+        tools: Vec::new(),
+        tool_choice: ModelToolChoice::Auto,
+        response_schema: None,
+        stream: false,
+        metadata: BTreeMap::new(),
+    };
+    let body = build_anthropic_request(
+        &provider(),
+        &request,
+        &ChatRequestHints {
+            reasoning_effort: Some("high".to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.2),
+            ..Default::default()
+        },
+    )
+    .expect("build reasoning request");
+    assert_eq!(body["thinking"]["type"], "enabled");
+    assert_eq!(body["thinking"]["budget_tokens"], 4095);
+    assert!(body.get("temperature").is_none());
+}
+
+#[test]
+fn reasoning_effort_is_ignored_when_the_thinking_minimum_cannot_fit() {
+    let request = ModelTurnRequest {
+        messages: vec![ModelMessage::text(ModelRole::User, "review")],
+        tools: Vec::new(),
+        tool_choice: ModelToolChoice::Auto,
+        response_schema: None,
+        stream: false,
+        metadata: BTreeMap::new(),
+    };
+    let body = build_anthropic_request(
+        &provider(),
+        &request,
+        &ChatRequestHints {
+            reasoning_effort: Some("low".to_string()),
+            max_tokens: Some(1024),
+            temperature: Some(0.2),
+            ..Default::default()
+        },
+    )
+    .expect("build bounded request");
+    assert!(body.get("thinking").is_none());
+    assert_eq!(body["temperature"], 0.2);
 }
 
 #[test]

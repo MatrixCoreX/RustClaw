@@ -63,7 +63,7 @@ test("renders user-scoped skill queue progress", () => {
     "zh",
   );
 
-  assert.equal(view.detail, "当前任务已进入队列，将按顺序处理。 进度 0/1。");
+  assert.equal(view.detail, "当前任务已进入队列，将按顺序处理。 进度 0/1（0%）。");
 });
 
 test("renders browser page progress from machine counts", () => {
@@ -79,7 +79,7 @@ test("renders browser page progress from machine counts", () => {
       },
     },
   }, "en");
-  assert.equal(view.detail, "Web page reading is complete. Progress 4/4.");
+  assert.equal(view.detail, "Web page reading is complete. Progress 4/4 (100%).");
 });
 
 test("restores the latest skill progress event from the task query projection", () => {
@@ -792,6 +792,43 @@ test("extracts trace events and stable machine meta", () => {
     "llm_call_count=1",
     "child_trace_merge_status=merged",
   ]);
+});
+
+test("projects resolved subagent model policy and readonly review traces", () => {
+  const modelEvent = {
+    seq: 2,
+    event_type: "subagent_started",
+    payload: {
+      role: "reviewer",
+      resolved_model_policy: {
+        model_class: "reasoning",
+        provider: "minimax",
+        model: "MiniMax-M3",
+        reasoning_effort: "high",
+        reasoning_effort_status: "applied",
+        model_policy_fallback: false,
+      },
+    },
+  };
+  const meta = traceEventMeta(modelEvent);
+  assert.ok(meta.includes("model_class=reasoning"));
+  assert.ok(meta.includes("provider=minimax"));
+  assert.ok(meta.includes("model=MiniMax-M3"));
+  assert.ok(meta.includes("reasoning_effort=high"));
+  assert.ok(meta.includes("model_policy_fallback=false"));
+
+  const reviewView = buildTaskTraceEventView(
+    {
+      event_type: "auto_review",
+      payload: {
+        confirmation_required: true,
+        review_findings: [{ severity: "error", finding_code: "fixture" }],
+      },
+    },
+    "en",
+  );
+  assert.equal(reviewView.title, "Read-only code review");
+  assert.equal(reviewView.tone, "attention");
 });
 
 test("projects agent hook execution fields for teaching traces", () => {

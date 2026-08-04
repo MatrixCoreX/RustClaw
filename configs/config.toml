@@ -80,6 +80,18 @@ selected_model = "MiniMax-M3"
 # 默认厂商标识 / Default selected vendor.
 selected_vendor = "minimax"
 
+[llm.model_classes.default]
+provider = "minimax"
+model = "MiniMax-M3"
+
+[llm.model_classes.fast]
+provider = "minimax"
+model = "MiniMax-M2.7-highspeed"
+
+[llm.model_classes.reasoning]
+provider = "minimax"
+model = "MiniMax-M3"
+
 [llm.cost_governance]
 enabled = true
 soft_task_usd = 0.50
@@ -527,9 +539,15 @@ sandbox_mode = "workspace_write"
 enabled_for_coding = true
 enabled_for_non_coding = false
 filenames = ["AGENTS.md"]
+user_instruction_paths = ["<config_home>/<product_namespace>/instructions.md"]
 max_total_bytes = 32768
 max_file_bytes = 131072
 max_files = 16
+
+[auto_review]
+enabled = false
+review_role = "review"
+blocking = false
 
 # 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.
 # 建议修改/Recommended change: 可改，建议用于高风险提供商最小权限化.

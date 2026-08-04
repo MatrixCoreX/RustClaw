@@ -482,10 +482,7 @@ fn describe_default_reply_includes_visible_text_from_same_model_result() {
 
     let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), true);
 
-    assert_eq!(
-        rendered,
-        "一张店铺门口的照片。\n\n图片文字：\n营业时间\n09:00-18:00"
-    );
+    assert_eq!(rendered, "一张店铺门口的照片。\n\n营业时间\n09:00-18:00");
 }
 
 #[test]

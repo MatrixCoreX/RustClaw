@@ -1,13 +1,11 @@
 use super::{
-    build_lark_long_connection_config, extract_bind_key_candidate,
+    build_lark_long_connection_config, build_lark_submit_request, extract_bind_key_candidate,
     extract_pending_bind_token_candidate, install_tls_crypto_provider, is_unbound_allowed_command,
-    lark_delivery_error_text, lark_media_agent_context, lark_provider_http_error,
-    parse_im_text_from_event_body, LarkConfig, LarkSection, LARK_BIND_REQUIRED_FALLBACK,
-    LARK_I18N_BIND_REQUIRED_KEY,
+    lark_delivery_error_text, lark_provider_http_error, parse_im_text_from_event_body, LarkConfig,
+    LarkSection, LARK_BIND_REQUIRED_FALLBACK, LARK_I18N_BIND_REQUIRED_KEY,
 };
 use crate::config_helpers::lark_t;
 use serde_json::json;
-use serde_json::Value;
 
 #[test]
 fn tls_crypto_provider_installation_is_idempotent() {
@@ -170,17 +168,25 @@ fn unbound_media_like_empty_text_requires_binding_prompt() {
 }
 
 #[test]
-fn lark_media_agent_context_uses_machine_fields() {
-    let text = lark_media_agent_context("media", "data/larkd/video/chat/file.mp4");
-    let value: Value = serde_json::from_str(&text).expect("media context json");
-    assert_eq!(value["event_type"], "channel_media_saved");
-    assert_eq!(value["channel"], "lark");
-    assert_eq!(value["media_kind"], "video");
-    assert_eq!(value["source_message_type"], "media");
-    assert_eq!(
-        value["workspace_relative_path"],
-        "data/larkd/video/chat/file.mp4"
+fn lark_media_is_an_ask_attachment_without_synthetic_instruction() {
+    let attachment = claw_core::channel_ingress::ChannelIngressAttachment {
+        kind: "video".to_string(),
+        path: "data/larkd/video/chat/file.mp4".to_string(),
+        mime_type: Some("video/mp4".to_string()),
+        size: Some(84),
+    };
+    let request = build_lark_submit_request(
+        "en-US",
+        "open-1",
+        "chat-1",
+        "message-1",
+        String::new(),
+        vec![attachment.clone()],
+        Some("rk-test".to_string()),
     );
-    assert_eq!(value["locator"]["kind"], "workspace_relative_path");
-    assert_eq!(value["locator"]["path"], "data/larkd/video/chat/file.mp4");
+    assert!(matches!(request.kind, claw_core::types::TaskKind::Ask));
+    assert_eq!(request.payload["text"], "");
+    assert_eq!(request.payload["attachments"][0]["path"], attachment.path);
+    let ingress = request.ingress.expect("ingress");
+    assert_eq!(ingress.attachments, vec![attachment]);
 }

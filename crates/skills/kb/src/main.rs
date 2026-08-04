@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use skill_sdk::{SkillPathPolicy, SkillProgressFrame, SkillProgressKind};
+use skill_sdk::{SkillPathPolicy, SkillProgressEmitter};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -14,18 +14,19 @@ const DEFAULT_CHUNK_SIZE: usize = 1200;
 const DEFAULT_CHUNK_OVERLAP: usize = 180;
 const DEFAULT_TOP_K: usize = 5;
 const SKILL_NAME: &str = "kb";
+type KbProgressCallback<'a> = dyn FnMut(u64, u64) -> Result<()> + 'a;
 
 mod ingest;
 mod ingest_extract;
 mod ingest_scan;
 mod storage;
 
-#[cfg(test)]
-use ingest::parse_ingest_args;
 use ingest::{
-    do_cancel_ingest, do_ingest, do_ingest_job_status, do_reindex, do_resume_ingest,
-    parse_ingest_paths,
+    do_cancel_ingest, do_ingest_job_status, do_ingest_with_progress, do_reindex_with_progress,
+    do_resume_ingest_with_progress, parse_ingest_paths,
 };
+#[cfg(test)]
+use ingest::{do_ingest, do_reindex, do_resume_ingest, parse_ingest_args};
 #[cfg(test)]
 use ingest_scan::build_scan_targets;
 
@@ -157,8 +158,19 @@ fn main() -> Result<()> {
         let parsed: Result<SkillRequest, _> = serde_json::from_str(&line);
         let response = match parsed {
             Ok(req) => {
-                emit_start_progress(&mut stdout, &req)?;
-                execute_request(req)
+                let mut progress = SkillProgressEmitter::new(&mut stdout, &req.request_id);
+                emit_start_progress(&mut progress, &req)?;
+                let mut ingest_progress = |current, total| {
+                    progress
+                        .emit_progress(
+                            "kb.ingest.progress",
+                            BTreeMap::new(),
+                            Some(current),
+                            Some(total),
+                        )
+                        .map_err(anyhow::Error::from)
+                };
+                execute_request(req, Some(&mut ingest_progress))
             }
             Err(err) => SkillResponse {
                 request_id: "unknown".to_string(),
@@ -174,7 +186,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn emit_start_progress(stdout: &mut impl Write, request: &SkillRequest) -> Result<()> {
+fn emit_start_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    request: &SkillRequest,
+) -> Result<()> {
     let action = request
         .args
         .get("action")
@@ -196,24 +211,19 @@ fn emit_start_progress(stdout: &mut impl Write, request: &SkillRequest) -> Resul
             )
         })
         .unwrap_or("unknown");
-    let frame = SkillProgressFrame {
-        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
-        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
-        request_id: request.request_id.clone(),
-        sequence: 1,
-        kind: SkillProgressKind::Progress,
-        detail_key: "kb.operation.starting".to_string(),
-        params: BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
-        current: Some(0),
-        total: Some(1),
-        reference: None,
-    };
-    writeln!(stdout, "{}", frame.to_line()?)?;
-    stdout.flush()?;
+    progress.emit_progress(
+        "kb.operation.starting",
+        BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
+        Some(0),
+        Some(1),
+    )?;
     Ok(())
 }
 
-fn execute_request(req: SkillRequest) -> SkillResponse {
+fn execute_request(
+    req: SkillRequest,
+    mut progress: Option<&mut KbProgressCallback<'_>>,
+) -> SkillResponse {
     let runtime = build_runtime_context(&req);
     let action = req
         .args
@@ -222,14 +232,16 @@ fn execute_request(req: SkillRequest) -> SkillResponse {
         .unwrap_or("")
         .to_ascii_lowercase();
     let result = runtime.and_then(|runtime| match action.as_str() {
-        "ingest" => do_ingest(&runtime, &req.args),
+        "ingest" => do_ingest_with_progress(&runtime, &req.args, progress.as_deref_mut()),
         "search" => do_search(&runtime, &req.args),
         "list_namespaces" => do_list_namespaces(&runtime),
         "list_documents" => do_list_documents(&runtime, &req.args),
         "remove_documents" => do_remove_documents(&runtime, &req.args),
         "delete_namespace" => do_delete_namespace(&runtime, &req.args),
-        "reindex" => do_reindex(&runtime, &req.args),
-        "resume_ingest" => do_resume_ingest(&runtime, &req.args),
+        "reindex" => do_reindex_with_progress(&runtime, &req.args, progress.as_deref_mut()),
+        "resume_ingest" => {
+            do_resume_ingest_with_progress(&runtime, &req.args, progress.as_deref_mut())
+        }
         "ingest_job_status" => do_ingest_job_status(&runtime, &req.args),
         "cancel_ingest" => do_cancel_ingest(&runtime, &req.args),
         "stats" => do_stats(&runtime, &req.args),

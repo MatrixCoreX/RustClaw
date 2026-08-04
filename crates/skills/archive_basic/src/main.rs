@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -7,7 +8,7 @@ use serde_json::{json, Value};
 use skill_sdk::{
     extract_safe_archive, inspect_safe_archive, read_safe_archive_member, ArtifactSpill,
     BoundedResult, ContinuationDescriptor, ExpectedPathKind, SafeArchiveInspection,
-    SafeArchiveLimits, SkillPathPolicy, MAX_PROTOCOL_LINE_BYTES,
+    SafeArchiveLimits, SkillPathPolicy, SkillProgressEmitter, MAX_PROTOCOL_LINE_BYTES,
 };
 
 const SKILL_NAME: &str = "archive_basic";
@@ -79,22 +80,41 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute_with_context(req.args, req.context.as_ref()) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(error_extra_with_details(err.kind, err.extra)),
-                    error_text: Some(err.text),
-                },
-            },
+            Ok(req) => {
+                let mut progress = SkillProgressEmitter::new(&mut stdout, &req.request_id);
+                progress.emit_progress(
+                    "archive_basic.entries.progress",
+                    BTreeMap::new(),
+                    None,
+                    None,
+                )?;
+                match execute_with_context(req.args, req.context.as_ref()) {
+                    Ok((text, extra)) => {
+                        if let Some(total) = extra.get("member_count").and_then(Value::as_u64) {
+                            progress.emit_progress(
+                                "archive_basic.entries.progress",
+                                BTreeMap::new(),
+                                Some(total),
+                                Some(total),
+                            )?;
+                        }
+                        Resp {
+                            request_id: req.request_id,
+                            status: "ok".to_string(),
+                            text,
+                            extra: Some(extra),
+                            error_text: None,
+                        }
+                    }
+                    Err(err) => Resp {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        extra: Some(error_extra_with_details(err.kind, err.extra)),
+                        error_text: Some(err.text),
+                    },
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),

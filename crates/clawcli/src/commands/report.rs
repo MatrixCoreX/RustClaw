@@ -996,6 +996,12 @@ fn collect_subagent_event_fields(
         "tool_permission_profile",
         "write_isolation_status",
         "execution_mode",
+        "model_class",
+        "provider",
+        "model",
+        "reasoning_effort",
+        "reasoning_effort_status",
+        "model_policy_fallback",
     ] {
         if let Some(value) = event.fields.get(key) {
             map.insert(key.to_string(), Value::String(value.clone()));
@@ -1080,7 +1086,19 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         "confidence_max": subagent_confidence_value(map, "max"),
         "finding_refs": machine_ref_array(map.get("finding_refs")),
         "evidence_refs": machine_ref_array(map.get("evidence_refs")),
+        "resolved_model_policy": resolved_model_policy(map),
     }));
+}
+
+fn resolved_model_policy(map: &Map<String, Value>) -> Value {
+    map.get("resolved_model_policy")
+        .or_else(|| {
+            map.get("child_boundary")
+                .and_then(|value| value.get("resolved_model_policy"))
+        })
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn subagent_timeout_ms(map: &Map<String, Value>) -> Option<u64> {

@@ -232,7 +232,7 @@ fn latest_subagent_observation(
         })
 }
 
-async fn run_readonly_child_agent_loop(
+pub(super) async fn run_readonly_child_agent_loop(
     state: &AppState,
     task: &crate::ClaimedTask,
     child_input: &Value,
@@ -266,6 +266,11 @@ async fn run_readonly_child_agent_loop(
         .unwrap_or_else(|| json!({"output_format": "machine_json"}));
     let child_ref = format!("{}:inline:{}", task.task_id, uuid::Uuid::new_v4().simple());
     let budget = inline_child_budget(child_input, timeout_ms);
+    let runtime_config = super::load_subagent_runtime_config(state);
+    let model_policy = runtime_config
+        .resolve_role(role)
+        .map(|definition| definition.model_policy.clone())
+        .ok_or_else(|| "subagent_model_policy_role_missing".to_string())?;
     let spec = ChildTaskSpec {
         parent_task_id: task.task_id.clone(),
         child_task_id: child_ref.clone(),
@@ -274,6 +279,7 @@ async fn run_readonly_child_agent_loop(
             "objective": objective,
             "context_refs": context_refs,
             "allowed_capabilities": allowed_capabilities,
+            "model_policy": model_policy,
         }),
         permission_profile: ChildTaskPermissionProfile::ReadOnly,
         required: true,
@@ -296,6 +302,7 @@ async fn run_readonly_child_agent_loop(
         "budget": budget.to_json(),
         "runtime_policy": child_input.get("runtime_policy").cloned().unwrap_or_else(|| json!({})),
         "result_contract": result_contract,
+        "resolved_model_policy": child_payload.get("resolved_model_policy"),
     });
     let child_goal = json!({
         "objective": objective,

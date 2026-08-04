@@ -177,6 +177,27 @@ assert.strictEqual(body.payload.text, "hello");
 assert.strictEqual(body.ingress.adapter, "whatsapp_web");
 assert.strictEqual(body.ingress.message_id, "message-1");
 assert.strictEqual(body.idempotency_key, "whatsapp_web:message-1");
+const mediaBody = buildSubmitTaskBody(
+  "user@s.whatsapp.net",
+  "user@s.whatsapp.net",
+  "ask",
+  {
+    text: "/run image_vision {}",
+    attachments: [
+      {
+        kind: "image",
+        path: "data/whatsapp-web/inbox/image.jpg",
+        mime_type: "image/jpeg",
+        size: 42,
+      },
+    ],
+  },
+  { user_key: "rk-admin", user_id: 42 },
+  "message-2"
+);
+assert.strictEqual(mediaBody.kind, "ask");
+assert.strictEqual(mediaBody.payload.text, "/run image_vision {}");
+assert.deepStrictEqual(mediaBody.ingress.attachments, mediaBody.payload.attachments);
 assert.throws(
   () => buildSubmitTaskBody("user", "chat", "ask", { text: "x" }, null),
   /bound user key is required/

@@ -403,6 +403,40 @@ pub(crate) fn run_review(
     Ok(())
 }
 
+pub(crate) fn run_review_once(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    json_output: bool,
+    include_events: bool,
+    submission_options: task::TaskSubmissionOptions,
+) -> Result<()> {
+    let review_task_id = task::submit_auto_review(base_url, key, task_id, submission_options)?;
+    let review_task = super::common::wait_for_terminal_task(base_url, key, &review_task_id, 250)?;
+    let mut review = coding_review_json(&review_task, include_events);
+    if let Some(object) = review.as_object_mut() {
+        object.insert(
+            "review_target_task_id".to_string(),
+            serde_json::json!(task_id),
+        );
+        object.insert(
+            "review_task_id".to_string(),
+            serde_json::json!(review_task_id),
+        );
+        object.insert("triggered".to_string(), serde_json::json!(true));
+    }
+    if json_output {
+        output::print_json_pretty(&review);
+    } else {
+        for line in coding_review_text_lines(&review_task, &review) {
+            println!("{line}");
+        }
+        println!("review_target_task_id={task_id}");
+        println!("review_task_id={review_task_id}");
+    }
+    Ok(())
+}
+
 pub(crate) fn run_subagents(
     base_url: &str,
     key: &str,

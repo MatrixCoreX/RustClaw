@@ -9,6 +9,7 @@ mod arg_resolver;
 mod async_completion_checkpoint;
 mod async_start_checkpoint;
 mod attempt_ledger;
+pub(crate) mod auto_review;
 mod capability_catalog;
 mod capability_discovery;
 mod capability_result_synthesis;

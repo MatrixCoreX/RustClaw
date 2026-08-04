@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -7,6 +8,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use skill_sdk::SkillProgressEmitter;
 use toml::Value as TomlValue;
 
 const DEFAULT_MODEL: &str = "MiniMax-Hailuo-2.3";
@@ -171,16 +173,44 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => execution_error_response(req.request_id, err),
-            },
+            Ok(req) => {
+                let mut progress = SkillProgressEmitter::new(&mut stdout, &req.request_id);
+                let action = req
+                    .args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or("generate");
+                progress.emit_progress(
+                    "video_generate.preflight.progress",
+                    BTreeMap::from([("action".to_string(), json!(action))]),
+                    Some(1),
+                    Some(3),
+                )?;
+                progress.emit_progress(
+                    "video_generate.upload.progress",
+                    BTreeMap::new(),
+                    Some(2),
+                    Some(3),
+                )?;
+                match execute(&cfg, &workspace_root, req.args) {
+                    Ok((text, extra)) => {
+                        progress.emit_progress(
+                            "video_generate.provider.progress",
+                            BTreeMap::new(),
+                            Some(3),
+                            Some(3),
+                        )?;
+                        Resp {
+                            request_id: req.request_id,
+                            status: "ok".to_string(),
+                            text,
+                            extra: Some(extra),
+                            error_text: None,
+                        }
+                    }
+                    Err(err) => execution_error_response(req.request_id, err),
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),

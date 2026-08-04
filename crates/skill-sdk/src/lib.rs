@@ -13,6 +13,7 @@ pub mod path_policy;
 pub mod platform;
 mod prebuilt;
 mod process;
+pub mod progress;
 pub mod protocol;
 pub mod receipt;
 pub mod runtime;
@@ -50,6 +51,7 @@ pub use operation::{
 };
 pub use path_policy::{ExpectedPathKind, PathAuthority, SkillPathPolicy};
 pub use platform::HostPlatform;
+pub use progress::SkillProgressEmitter;
 pub use protocol::{
     validate_progress_frame_line, validate_protocol_output, validate_response_line,
     ProtocolRequest, ProtocolResponse, ProtocolStatus, SkillProgressFrame, SkillProgressKind,

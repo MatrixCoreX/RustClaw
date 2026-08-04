@@ -97,6 +97,10 @@ fn file_db_pool(path: &Path) -> crate::db_init::DbPool {
 fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.core.db = file_db_pool(db_path);
+    state.reload_ctx.config_path_for_reload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/config.toml")
+        .display()
+        .to_string();
     state.with_seeded_db_schema()
 }
 

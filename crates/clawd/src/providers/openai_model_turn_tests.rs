@@ -71,6 +71,22 @@ fn native_request_maps_messages_and_function_tools() {
 }
 
 #[test]
+fn reasoning_effort_is_forwarded_as_machine_provider_parameter() {
+    let body = build_openai_request(
+        &provider(),
+        &native_request(),
+        &ChatRequestHints {
+            reasoning_effort: Some("high".to_string()),
+            max_tokens: Some(8192),
+            ..Default::default()
+        },
+    )
+    .expect("build reasoning request");
+    assert_eq!(body["reasoning_effort"], "high");
+    assert_eq!(body["max_tokens"], 8192);
+}
+
+#[test]
 fn native_request_maps_assistant_tool_call_history_before_tool_result() {
     let mut request = native_request();
     request.messages.push(ModelMessage {

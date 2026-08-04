@@ -575,8 +575,13 @@ pub(crate) fn build_channel_ingress_snapshot(
         message_id,
         received_at_ts,
         reply_target,
+        platform_locale: locale.clone(),
         locale,
-        attachments: ingress_attachments(payload),
+        locale_source: None,
+        attachments: requested
+            .map(|ingress| ingress.attachments.clone())
+            .filter(|attachments| !attachments.is_empty())
+            .unwrap_or_else(|| ingress_attachments(payload)),
         context_token,
     }
 }

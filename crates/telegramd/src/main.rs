@@ -29,10 +29,9 @@ use claw_core::channel_i18n::safe_generic_text_for_path;
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
-    GatewayInstanceRuntimeStatus, HealthResponse, PendingChannelRequestStatus,
-    PendingChannelRequestStoreRequest, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
-    SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus,
-    TelegramBotRuntimeStatus,
+    GatewayInstanceRuntimeStatus, PendingChannelRequestStatus, PendingChannelRequestStoreRequest,
+    ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
+    SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus,
 };
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
@@ -63,8 +62,6 @@ struct BotState {
     video_inbox_dir: String,
     file_inbox_dir: String,
     audio_inbox_dir: String,
-    voice_reply_mode: String,
-    voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     max_audio_input_bytes: usize,
     pending_resume_by_chat: Arc<Mutex<HashMap<i64, PendingResumeContext>>>,
     pending_key_bind_by_chat: Arc<Mutex<HashSet<i64>>>,
@@ -86,13 +83,6 @@ struct PendingResumeContext {
 struct TextCatalog {
     current: HashMap<String, String>,
     safe_fallback: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VoiceReplyMode {
-    Voice,
-    Text,
-    Both,
 }
 
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
@@ -284,8 +274,6 @@ fn build_bot_state(
         video_inbox_dir: config.telegram.video_inbox_dir.clone(),
         file_inbox_dir: config.telegram.file_inbox_dir.clone(),
         audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
-        voice_reply_mode: config.telegram.voice_reply_mode.clone(),
-        voice_reply_mode_by_chat: Arc::new(Mutex::new(load_voice_reply_mode_by_chat(config))),
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
         pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
         pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
@@ -307,19 +295,6 @@ fn clawd_base_url_from_config(config: &AppConfig) -> String {
         .clawd_base_url
         .clone()
         .unwrap_or_else(|| claw_core::config::CLAWD_INTERNAL_BASE_URL.to_string())
-}
-
-fn load_voice_reply_mode_by_chat(config: &AppConfig) -> HashMap<i64, String> {
-    let mut voice_reply_mode_by_chat = HashMap::new();
-    for (chat_id_raw, mode_raw) in &config.telegram.voice_reply_mode_by_chat {
-        if let (Ok(chat_id), Some(mode)) = (
-            chat_id_raw.parse::<i64>(),
-            normalize_voice_reply_mode(mode_raw),
-        ) {
-            voice_reply_mode_by_chat.insert(chat_id, mode);
-        }
-    }
-    voice_reply_mode_by_chat
 }
 
 fn telegram_bot_status_file_path(workspace_root: &Path, bot_name: &str) -> PathBuf {

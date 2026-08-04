@@ -11,9 +11,11 @@ pub(super) fn unloaded_instruction_source(
     logical_path: String,
     depth: usize,
     precedence: usize,
+    source_layer: &'static str,
     status: &'static str,
 ) -> InstructionSource {
     InstructionSource {
+        source_layer,
         logical_path,
         depth,
         precedence,
@@ -37,6 +39,7 @@ pub(super) fn read_instruction_source(
     logical_path: String,
     depth: usize,
     precedence: usize,
+    source_layer: &'static str,
     max_file_bytes: usize,
 ) -> anyhow::Result<InstructionSource> {
     let source_bytes = path
@@ -76,6 +79,7 @@ pub(super) fn read_instruction_source(
         "full_source"
     };
     Ok(InstructionSource {
+        source_layer,
         logical_path,
         depth,
         precedence,

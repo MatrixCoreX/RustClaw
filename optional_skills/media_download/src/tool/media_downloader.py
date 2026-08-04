@@ -135,6 +135,7 @@ PROFILE_CHECKPOINT_SNAPSHOT_FOLDER = "manifests"
 PROFILE_CHECKPOINT_BLOB_FOLDER = "blobs"
 PROFILE_VIDEO_FOLDER = "videos"
 PROFILE_IMAGE_FOLDER = "images"
+PARENT_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
 DEFAULT_PROFILE_INTERVAL = 5.0
 INTERACTIVE_HISTORY_LIMIT = 1000
 INTERACTIVE_HISTORY_ENV = "MEDIA_DOWNLOADER_HISTORY"
@@ -4213,6 +4214,21 @@ def content_type_is_video(headers: dict[str, str]) -> bool:
     return content_type.startswith("video/") or "octet-stream" in content_type
 
 
+def emit_parent_download_progress(current: int, total: int) -> None:
+    if total <= 0 or current < 0 or current > total:
+        return
+    payload = {
+        "detail_key": "media_download.download.progress",
+        "current": current,
+        "total": total,
+    }
+    print(
+        PARENT_PROGRESS_PREFIX + json.dumps(payload, separators=(",", ":")),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def content_type_is_image(headers: dict[str, str]) -> bool:
     content_type = headers.get("content-type", "").lower()
     if not content_type:
@@ -4269,6 +4285,14 @@ def download_candidate(
                     f"Candidate returned non-video content ({content_type}) from {candidate.source}"
                 )
 
+            try:
+                total_bytes = int(response_headers.get("content-length") or 0)
+            except (TypeError, ValueError):
+                total_bytes = 0
+            downloaded_bytes = 0
+            last_reported_percent = -5
+            if total_bytes > 0:
+                emit_parent_download_progress(0, total_bytes)
             tmp_path = output_path.with_suffix(output_path.suffix + ".part")
             try:
                 with tmp_path.open("wb") as fp:
@@ -4278,6 +4302,14 @@ def download_candidate(
                         if not chunk:
                             break
                         fp.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        if total_bytes > 0:
+                            percent = min(100, int(downloaded_bytes * 100 / total_bytes))
+                            if percent >= last_reported_percent + 5 or percent == 100:
+                                last_reported_percent = percent
+                                emit_parent_download_progress(
+                                    min(downloaded_bytes, total_bytes), total_bytes
+                                )
             except OperationCancelled:
                 tmp_path.unlink(missing_ok=True)
                 raise

@@ -236,7 +236,7 @@ pub(super) fn normalize_extracted_text_newlines(text: &str) -> String {
 
 pub(super) fn render_structured_narrative_action_output(
     output: &StructuredNarrativeActionOutput,
-    response_language: Option<&str>,
+    _response_language: Option<&str>,
     include_visible_text: bool,
 ) -> String {
     match output {
@@ -251,19 +251,7 @@ pub(super) fn render_structured_narrative_action_output(
             if !include_visible_text || visible_text.is_empty() {
                 return summary.to_string();
             }
-            let response_language = response_language
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase();
-            let label = if response_language.starts_with("zh")
-                || response_language.contains("chinese")
-                || response_language.contains("中文")
-            {
-                "图片文字："
-            } else {
-                "Visible text:"
-            };
-            format!("{summary}\n\n{label}\n{}", visible_text.join("\n"))
+            format!("{summary}\n\n{}", visible_text.join("\n"))
         }
         StructuredNarrativeActionOutput::Compare(out) => out.summary.trim().to_string(),
         StructuredNarrativeActionOutput::ScreenshotSummary(out) => out.purpose.trim().to_string(),

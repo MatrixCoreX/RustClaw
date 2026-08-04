@@ -66,6 +66,15 @@ fn child_task_row(state: &crate::AppState, task_id: &str) -> (String, serde_json
     )
 }
 
+fn persistent_test_state() -> crate::AppState {
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.reload_ctx.config_path_for_reload = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/config.toml")
+        .display()
+        .to_string();
+    state
+}
+
 fn install_test_task_budget(loop_state: &mut LoopState) {
     loop_state.task_budget_slice = Some(crate::task_budget_contract::TaskBudgetSlice::new(
         crate::task_budget_contract::TaskBudgetProfile::MultiStepWorkspace,
@@ -318,7 +327,7 @@ fn subagent_action_projects_workspace_context_evidence() {
 
 #[test]
 fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let state = persistent_test_state();
     let admin_key = "rk-persistent-subagent-admin";
     let db = state.core.db.get().expect("get db");
     db.execute_batch(
@@ -385,7 +394,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
         }
     });
 
-    let stop_signal = record_persistent_child_task_from_args(
+    let schedule = record_persistent_child_task_from_args(
         &state,
         &task,
         &mut loop_state,
@@ -393,8 +402,13 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
         1,
         &args,
         &SubagentRuntimeConfig::default(),
-    )
-    .expect("schedule persistent child task");
+    );
+    assert!(
+        schedule.is_ok(),
+        "schedule persistent child task: {:?}",
+        loop_state.task_observations
+    );
+    let stop_signal = schedule.expect("checked persistent child schedule");
 
     assert_eq!(
         stop_signal,
@@ -454,7 +468,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
 
 #[test]
 fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let state = persistent_test_state();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
         task_id: "task-persistent-writer-parent".to_string(),
@@ -521,7 +535,7 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
 
 #[test]
 fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let state = persistent_test_state();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
         task_id: "task-persistent-dag-parent".to_string(),
@@ -590,7 +604,7 @@ fn persistent_subagent_batch_materializes_declared_dag_and_child_policy() {
         json!(["filesystem.write_text"])
     );
     assert_eq!(reviewer["readiness"], "blocked_dependency");
-    assert_eq!(reviewer["model_policy"], json!({}));
+    assert_eq!(reviewer["model_policy"], json!({"model_class": "default"}));
     assert_eq!(graph["edges"][0]["edge_kind"], "declared_dependency");
     assert_eq!(
         graph["edges"][0]["predecessor_task_id"],
@@ -858,6 +872,7 @@ fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
         max_parallel_readonly: 3,
         default_timeout_ms: Some(15_000),
         context_evidence_root: None,
+        resolved_model_policies: std::collections::BTreeMap::new(),
     };
 
     let stop_signal = record_subagent_action_with_config(
@@ -899,6 +914,7 @@ fn subagent_runtime_config_rejects_undefined_role_as_machine_state() {
         max_parallel_readonly: 1,
         default_timeout_ms: Some(5_000),
         context_evidence_root: None,
+        resolved_model_policies: std::collections::BTreeMap::new(),
     };
 
     let stop_signal = record_subagent_action_with_config(
@@ -1203,6 +1219,7 @@ fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
         max_parallel_readonly: 1,
         default_timeout_ms: Some(10_000),
         context_evidence_root: None,
+        resolved_model_policies: std::collections::BTreeMap::new(),
     };
     let args = serde_json::json!({
         "children": [

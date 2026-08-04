@@ -290,6 +290,7 @@ fn strict_json_overlay_prompts_are_classified_in_schema_inventory() {
         "observed_answer_fallback_compact_prompt.md",
         "observed_answer_fallback_prompt.md",
         "schedule_intent_prompt.md",
+        "transcript_revision_prompt.md",
     ]
     .into_iter()
     .map(str::to_string)

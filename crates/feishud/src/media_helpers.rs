@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::FeishuSection;
 
@@ -91,17 +91,11 @@ pub(super) fn feishu_media_kind_token(message_type: &str) -> &'static str {
     }
 }
 
-pub(super) fn feishu_media_agent_context(message_type: &str, rel_path: &str) -> String {
-    json!({
-        "event_type": "channel_media_saved",
-        "channel": "feishu",
-        "media_kind": feishu_media_kind_token(message_type),
-        "source_message_type": message_type,
-        "workspace_relative_path": rel_path,
-        "locator": {
-            "kind": "workspace_relative_path",
-            "path": rel_path
-        }
-    })
-    .to_string()
+pub(super) fn feishu_media_mime_type(message_type: &str) -> &'static str {
+    match message_type {
+        "image" | "sticker" => "image/jpeg",
+        "media" => "video/mp4",
+        "audio" => "audio/mp4",
+        _ => "application/octet-stream",
+    }
 }

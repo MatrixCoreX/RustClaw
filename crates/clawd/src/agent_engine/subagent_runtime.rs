@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{AppState, LoopState};
@@ -27,12 +28,23 @@ use subagent_runtime_context::{
     context_evidence_summary_from_items,
 };
 
+pub(super) async fn run_readonly_child_agent_loop(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    child_input: &Value,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    subagent_runtime_model::run_readonly_child_agent_loop(state, task, child_input, timeout_ms)
+        .await
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct SubagentRuntimeConfig {
     role_definitions: Vec<SubagentRoleDefinition>,
     max_parallel_readonly: u64,
     default_timeout_ms: Option<u64>,
     context_evidence_root: Option<PathBuf>,
+    resolved_model_policies: BTreeMap<String, crate::agent_runtime_contract::ResolvedModelPolicy>,
 }
 
 impl Default for SubagentRuntimeConfig {
@@ -42,6 +54,7 @@ impl Default for SubagentRuntimeConfig {
             max_parallel_readonly: DEFAULT_MAX_PARALLEL_READONLY,
             default_timeout_ms: None,
             context_evidence_root: None,
+            resolved_model_policies: BTreeMap::new(),
         }
     }
 }
@@ -65,6 +78,7 @@ impl SubagentRuntimeConfig {
                 .iter()
                 .map(role_definition_summary)
                 .collect::<Vec<_>>(),
+            "resolved_model_policies": self.resolved_model_policies,
             "max_parallel_readonly": self.max_parallel_readonly,
             "default_timeout_ms": self.default_timeout_ms,
             "context_evidence_enabled": self.context_evidence_root.is_some(),
@@ -86,6 +100,22 @@ pub(super) fn load_subagent_runtime_config(state: &AppState) -> SubagentRuntimeC
         .join("configs/agent_guard.toml");
     let mut config = load_subagent_runtime_config_from_path(&path);
     config.context_evidence_root = Some(state.skill_rt.workspace_root.clone());
+    if let Ok(app_config) =
+        claw_core::config::AppConfig::load(&state.reload_ctx.config_path_for_reload)
+    {
+        config.resolved_model_policies = config
+            .role_definitions
+            .iter()
+            .filter_map(|role| {
+                crate::agent_runtime_contract::resolve_model_policy(
+                    &app_config.llm,
+                    &role.model_policy,
+                )
+                .ok()
+                .map(|policy| (role.token.clone(), policy))
+            })
+            .collect();
+    }
     config
 }
 
@@ -611,6 +641,7 @@ fn role_metadata_summary(role: &SubagentRoleDefinition, config: &SubagentRuntime
         "parallel_eligible": config.max_parallel_readonly > 1,
         "max_parallel_readonly": config.max_parallel_readonly,
         "result_contract_required": role.result_contract_required,
+        "resolved_model_policy": config.resolved_model_policies.get(&role.token),
         "write_enabled": false,
         "external_publish_enabled": false,
     })

@@ -233,44 +233,6 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         return Ok(());
     }
 
-    if matches!(core_action, Some(CoreCommandAction::VoiceMode)) {
-        let mode = slash_command
-            .as_ref()
-            .map(|command| command.tail.as_str())
-            .unwrap_or_default();
-        let reply = handle_voicemode_command(&state, msg.chat.id.0, mode)?;
-        info!(
-            "voice mode command: source=slash chat_id={} user_id={} command={}",
-            msg.chat.id.0, user_id, mode
-        );
-        bot.send_message(msg.chat.id, reply)
-            .await
-            .context("send /voicemode reply failed")?;
-        return Ok(());
-    }
-
-    if matches!(core_action, Some(CoreCommandAction::Status)) {
-        match fetch_status_text(&state, msg.chat.id.0).await {
-            Ok(status_text) => {
-                bot.send_message(msg.chat.id, status_text)
-                    .await
-                    .context("send /status reply failed")?;
-            }
-            Err(err) => {
-                bot.send_message(
-                    msg.chat.id,
-                    state.i18n.t_with(
-                        "telegram.msg.read_status_failed",
-                        &[("error", &err.to_string())],
-                    ),
-                )
-                .await
-                .context("send /status error failed")?;
-            }
-        }
-        return Ok(());
-    }
-
     if matches!(core_action, Some(CoreCommandAction::Cancel)) {
         match cancel_tasks_for_chat(&state, user_id, msg.chat.id.0).await {
             Ok(canceled) => {
@@ -287,14 +249,10 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
                     .context("send /cancel reply failed")?;
             }
             Err(err) => {
-                bot.send_message(
-                    msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.cancel_failed", &[("error", &err.to_string())]),
-                )
-                .await
-                .context("send /cancel error failed")?;
+                warn!(chat_id = msg.chat.id.0, error = %err, "task cancellation failed");
+                bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.cancel_failed"))
+                    .await
+                    .context("send /cancel error failed")?;
             }
         }
         return Ok(());
@@ -353,12 +311,10 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
             );
         }
         Err(err) => {
+            warn!(chat_id = msg.chat.id.0, error = %err, "task submission failed");
             bot.send_message(
                 msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.process_failed_with_error",
-                    &[("error", &err.to_string())],
-                ),
+                state.i18n.t("telegram.msg.process_failed_with_error"),
             )
             .await
             .context("send ask error failed")?;

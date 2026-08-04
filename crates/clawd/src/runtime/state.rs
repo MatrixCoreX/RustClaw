@@ -127,6 +127,7 @@ pub(crate) struct ChannelConfig {
 pub(crate) struct ReloadContext {
     pub(crate) config_path_for_reload: String,
     pub(crate) workspace_instructions: claw_core::config::WorkspaceInstructionsConfig,
+    pub(crate) auto_review: claw_core::config::AutoReviewConfig,
 }
 
 /// P2.1 Stage 2 — `CoreServices` 簇：所有模块都需要的核心运行时句柄

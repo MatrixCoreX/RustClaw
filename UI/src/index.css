@@ -1018,11 +1018,17 @@
   :root[data-theme="light"] .theme-shell .text-white\/45,
   :root[data-theme="light"] .theme-shell .text-white\/42,
   :root[data-theme="light"] .theme-shell .text-white\/40,
-  :root[data-theme="light"] .theme-shell .text-white\/35 {
+  :root[data-theme="light"] .theme-shell .text-white\/35,
+  :root[data-theme="light"] .theme-shell .text-white\/25 {
     color: var(--theme-text-muted) !important;
   }
 
   :root[data-theme="light"] .theme-shell .placeholder\:text-white\/35::placeholder {
+    color: var(--theme-text-faint) !important;
+    opacity: 1;
+  }
+
+  :root[data-theme="light"] .theme-shell .placeholder\:text-white\/25::placeholder {
     color: var(--theme-text-faint) !important;
     opacity: 1;
   }

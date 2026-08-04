@@ -71,6 +71,9 @@ default_scope = "read_only_discovery"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only"]
 result_contract_required = false
+[agent.subagents.role_definitions.observe.model_policy]
+model_class = "fast"
+reasoning_effort = "low"
 
 [agent.subagents.role_definitions.explorer]
 family = "explorer"
@@ -78,6 +81,9 @@ default_scope = "read_only_discovery"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only"]
 result_contract_required = false
+[agent.subagents.role_definitions.explorer.model_policy]
+model_class = "fast"
+reasoning_effort = "low"
 
 [agent.subagents.role_definitions.worker]
 family = "worker"
@@ -85,6 +91,8 @@ default_scope = "read_only_worker"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only", "local_worktree"]
 result_contract_required = false
+[agent.subagents.role_definitions.worker.model_policy]
+model_class = "default"
 
 [agent.subagents.role_definitions.writer]
 family = "worker"
@@ -92,6 +100,8 @@ default_scope = "isolated_worktree_write"
 default_permission_profile = "local_worktree"
 allowed_permission_profiles = ["local_worktree"]
 result_contract_required = true
+[agent.subagents.role_definitions.writer.model_policy]
+model_class = "default"
 
 [agent.subagents.role_definitions.review]
 family = "reviewer"
@@ -99,6 +109,9 @@ default_scope = "read_only_review"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only"]
 result_contract_required = true
+[agent.subagents.role_definitions.review.model_policy]
+model_class = "reasoning"
+reasoning_effort = "high"
 
 [agent.subagents.role_definitions.reviewer]
 family = "reviewer"
@@ -106,6 +119,9 @@ default_scope = "read_only_review"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only"]
 result_contract_required = true
+[agent.subagents.role_definitions.reviewer.model_policy]
+model_class = "reasoning"
+reasoning_effort = "high"
 
 [agent.subagents.role_definitions.test]
 family = "verifier"
@@ -113,6 +129,9 @@ default_scope = "read_only_verification"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only", "local_worktree"]
 result_contract_required = true
+[agent.subagents.role_definitions.test.model_policy]
+model_class = "reasoning"
+reasoning_effort = "medium"
 
 [agent.subagents.role_definitions.verifier]
 family = "verifier"
@@ -120,6 +139,9 @@ default_scope = "read_only_verification"
 default_permission_profile = "read_only"
 allowed_permission_profiles = ["read_only"]
 result_contract_required = true
+[agent.subagents.role_definitions.verifier.model_policy]
+model_class = "reasoning"
+reasoning_effort = "medium"
 
 [agent.task_budget]
 # Interactive work uses resumable soft slices. These high administrator ceilings are

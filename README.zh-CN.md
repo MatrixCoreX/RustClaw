@@ -543,7 +543,8 @@ agentctl -key disable rk-xxxx
 Telegram 只承担消息传输、身份绑定和任务控制，不再维护技能专属配置或自然语言路由：
 
 - 文字、图片、语音、视频和文件统一提交为 `kind=ask`，由 agent loop 判断回答、澄清或调用能力。
-- 当前命令只有 `/help`（含 `/start`）、`/key`、`/status`、`/cancel` 和 `/voicemode`。
+- 当前命令只有 `/help`（含 `/start`）、`/key`、`/cancel` 和 `/voicemode`。
+- 已绑定用户发送的 `/status`、`/run` 和其他未知斜杠文本都作为普通 `ask` 输入；通信端不解析这些文本，也不查询主机或运行时内部状态。
 - `/voicemode` 只控制当前 Telegram 会话的文字/语音交付方式，不参与能力选择。
 - Skill Store 按需技能（包括 `crypto`）的安装、启停和配置由浏览器管理端或受控核心 API 负责；Telegram 不接收技能凭据，也不提供技能配置命令。
 - `telegramd` 启动时会通过 Telegram `setMyCommands` 刷新命令菜单，删除配置中的旧命令后需重启通信端才能更新客户端菜单。

@@ -2,7 +2,7 @@ locale = "en-US"
 
 [dict]
 "whatsapp_web.msg.bridge_process_exited" = "bridge process exited"
-"whatsapp_web.msg.bridge_wait_failed" = "bridge wait failed: {error}"
+"whatsapp_web.msg.bridge_wait_failed" = "The WhatsApp connection stopped unexpectedly. Please reconnect it."
 "whatsapp_web.msg.bind_help" = "Please send /key <your key> to bind this WhatsApp account before chatting or using features."
 "whatsapp_web.msg.bind_success" = "Key bound successfully. Your pending request will resume automatically."
 "whatsapp_web.msg.pending_resume_stopped" = "The pending request expired, lost an attachment, or no longer has permission. Please send the original request again."
@@ -10,4 +10,3 @@ locale = "en-US"
 "whatsapp_web.msg.bind_private" = "For security, bind your key in a private chat with this WhatsApp account before using it in a group."
 "whatsapp_web.msg.access_denied" = "This WhatsApp account is not allowed to use this channel."
 "whatsapp_web.msg.process_failed_safe" = "Processing could not be completed. Please try again."
-"whatsapp_web.msg.run_usage" = "Usage: /run <skill_name> <args>"

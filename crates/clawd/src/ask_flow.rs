@@ -89,7 +89,12 @@ fn attached_image_inputs(payload: &Value) -> Vec<Value> {
                     .get("mime_type")
                     .or_else(|| attachment.get("mimeType"))
                     .and_then(Value::as_str)
-                    .is_some_and(|mime| mime.trim().to_ascii_lowercase().starts_with("image/"))
+                    .is_some_and(|mime| {
+                        mime.trim()
+                            .to_ascii_lowercase()
+                            .strip_prefix("image/")
+                            .is_some()
+                    })
         })
         .filter_map(normalize_image_input)
         .collect()
@@ -128,7 +133,7 @@ fn attached_image_analysis_context(
         .unwrap_or(Value::Null);
     json!({
         "schema_version": 1,
-        "source": "image_vision",
+        "source": "ask_attachment_materialization",
         "image_count": image_count,
         "typed_instruction_present": typed_instruction_present,
         "analysis_text": outcome.text,

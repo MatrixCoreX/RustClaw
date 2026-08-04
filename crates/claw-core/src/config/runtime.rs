@@ -41,6 +41,9 @@ impl AppConfig {
         app.workspace_instructions
             .validate()
             .map_err(config::ConfigError::Message)?;
+        app.auto_review
+            .validate()
+            .map_err(config::ConfigError::Message)?;
 
         Ok(app)
     }

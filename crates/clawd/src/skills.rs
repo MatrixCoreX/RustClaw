@@ -9,7 +9,6 @@ use tokio::process::Command;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// §E2 step1: skill-runner 子进程在 strict 模式下允许从父进程继承的 env 白名单。
-///
 /// 设计原则：
 /// * 只放行子进程**最低运行所必需**的基础设施变量（locale / 临时目录 / TLS 根证书 /
 ///   PATH 之类），其它一切配置（API key、model、workspace 路径等）必须由 clawd 通过

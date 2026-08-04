@@ -98,6 +98,28 @@ pub(crate) fn providers_for_task_model_selection(
     ))
 }
 
+pub(crate) fn apply_task_model_policy_hints(
+    task: &ClaimedTask,
+    hints: &mut crate::ChatRequestHints,
+) {
+    let Some(policy) = serde_json::from_str::<Value>(&task.payload_json)
+        .ok()
+        .and_then(|payload| payload.get("resolved_model_policy").cloned())
+    else {
+        return;
+    };
+    if let Some(effort) = policy
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "low" | "medium" | "high"))
+    {
+        hints.reasoning_effort = Some(effort.to_string());
+    }
+    if let Some(limit) = policy.get("max_output_tokens").and_then(Value::as_u64) {
+        hints.max_tokens = Some(hints.max_tokens.map_or(limit, |current| current.min(limit)));
+    }
+}
+
 fn cached_task_selection(
     state: &AppState,
     task_id: &str,

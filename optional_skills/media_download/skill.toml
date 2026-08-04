@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.11"
+version = "0.3.12"
 description = "For any supported public copied App share payload, short link, or website share URL, default immediately to downloading and returning the original media without asking which operation is wanted; Douyin and Xiaohongshu image-article posts return all extracted original images plus platform-provided article text by default, while image OCR remains explicit. Up to nine images are delivered individually; larger image sets are preserved in one ordered ZIP. Article or OCR text is delivered inline below 200 characters and as a text artifact at 200 characters or more."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -34,7 +34,9 @@ min_free_disk_mb = 6144
 launcher = "python"
 entrypoint = "runtime/src/src/main.py"
 working_directory = "."
-timeout_seconds = 3600
+# The durable local-process adapter owns whole-operation lifetime and explicit
+# cancellation. This ceiling applies only to one synchronous runner invocation.
+timeout_seconds = 86400
 environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WHISPER_BIN", "WHISPER_CLI", "WHISPER_CPP_BIN", "WHISPER_CPP_MODEL", "WHISPER_MODEL", "WHISPER_MODEL_PATH", "WORKSPACE_ROOT"]
 smoke_args = { action = "capabilities" }
 progress_frames = true

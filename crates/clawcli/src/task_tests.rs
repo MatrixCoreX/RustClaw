@@ -1,8 +1,17 @@
 use super::{
-    async_final_result_value, capability_task_payload, exec_ask_payload,
+    async_final_result_value, auto_review_payload, capability_task_payload, exec_ask_payload,
     result_text_from_result_json, resume_task_payload, submit_ask, threaded_ask_payload,
     TaskResumeRequest, TaskStatusView, TaskSubmissionOptions, ThreadAskContext,
 };
+
+#[test]
+fn one_shot_review_uses_a_machine_entrypoint_and_never_enables_blocking() {
+    let payload = auto_review_payload("task-target");
+    assert_eq!(payload["entrypoint"], "auto_review");
+    assert_eq!(payload["source"], "clawcli_machine");
+    assert_eq!(payload["review_target_task_id"], "task-target");
+    assert_eq!(payload["auto_review_blocking"], false);
+}
 
 fn capture_submit_headers(options: TaskSubmissionOptions) -> String {
     use std::io::{Read, Write};
@@ -274,6 +283,8 @@ fn threaded_ask_payload_binds_conversation_and_safe_session_context() {
             model_override: None,
             compacted_context_ref: None,
             goal_ref: None,
+            rewind_anchor: None,
+            completed_side_effect_refs: &[],
             attachments: &[],
         },
     );
@@ -298,6 +309,12 @@ fn threaded_ask_payload_binds_conversation_and_safe_session_context() {
             model_override: Some(&model),
             compacted_context_ref: Some("context:1"),
             goal_ref: Some("goal:1"),
+            rewind_anchor: Some(&serde_json::json!({
+                "source_task_id": "task-previous",
+                "event_seq": 7,
+                "checkpoint_id": "checkpoint-1"
+            })),
+            completed_side_effect_refs: &["mutation:1".to_string()],
             attachments: &attachments,
         },
     );
@@ -307,6 +324,11 @@ fn threaded_ask_payload_binds_conversation_and_safe_session_context() {
     assert_eq!(followup["model_selection"]["model"], "MiniMax-M3");
     assert_eq!(followup["compacted_context_ref"], "context:1");
     assert_eq!(followup["goal_ref"], "goal:1");
+    assert_eq!(followup["session_rewind"]["anchor"]["event_seq"], 7);
+    assert_eq!(
+        followup["session_rewind"]["completed_side_effect_refs"][0],
+        "mutation:1"
+    );
     assert_eq!(followup["attachments"][0]["name"], "a.txt");
 }
 

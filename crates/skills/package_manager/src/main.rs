@@ -5,7 +5,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use skill_sdk::{ArtifactSpill, BoundedResult, SkillProgressFrame, SkillProgressKind};
+use skill_sdk::{ArtifactSpill, BoundedResult, SkillProgressEmitter};
 
 const SKILL_NAME: &str = "package_manager";
 
@@ -48,8 +48,9 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => {
-                emit_start_progress(&mut stdout, &req)?;
-                match execute(req.args) {
+                let mut progress = SkillProgressEmitter::new(&mut stdout, &req.request_id);
+                emit_start_progress(&mut progress, &req)?;
+                match execute_with_progress(req.args, &mut progress) {
                     Ok((text, extra)) => Resp {
                         request_id: req.request_id,
                         status: "ok".to_string(),
@@ -80,7 +81,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn emit_start_progress(stdout: &mut impl Write, request: &Req) -> anyhow::Result<()> {
+fn emit_start_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    request: &Req,
+) -> anyhow::Result<()> {
     let action = request
         .args
         .get("action")
@@ -92,20 +96,12 @@ fn emit_start_progress(stdout: &mut impl Write, request: &Req) -> anyhow::Result
             )
         })
         .unwrap_or("detect");
-    let frame = SkillProgressFrame {
-        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
-        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
-        request_id: request.request_id.clone(),
-        sequence: 1,
-        kind: SkillProgressKind::Progress,
-        detail_key: "package_manager.operation.starting".to_string(),
-        params: BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
-        current: Some(0),
-        total: Some(1),
-        reference: None,
-    };
-    writeln!(stdout, "{}", frame.to_line()?)?;
-    stdout.flush()?;
+    progress.emit_progress(
+        "package_manager.operation.starting",
+        BTreeMap::from([("action".to_string(), Value::String(action.to_string()))]),
+        Some(0),
+        Some(1),
+    )?;
     Ok(())
 }
 
@@ -120,7 +116,41 @@ fn error_extra(error_code: &str) -> Value {
     })
 }
 
+fn emit_measured_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    detail_key: &str,
+    current: u64,
+    total: u64,
+) -> Result<(), ExecutionError> {
+    progress
+        .emit_progress(detail_key, BTreeMap::new(), Some(current), Some(total))
+        .map_err(|error| ExecutionError {
+            message: error.to_string(),
+            extra: error_extra("progress_frame_failed"),
+        })
+}
+
+fn emit_completed_package_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    total: u64,
+) -> Result<(), ExecutionError> {
+    for current in 1..=total {
+        emit_measured_progress(progress, "package_manager.install.progress", current, total)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
+    let mut output = Vec::new();
+    let mut progress = SkillProgressEmitter::new(&mut output, "test-request");
+    execute_with_progress(args, &mut progress)
+}
+
+fn execute_with_progress(
+    args: Value,
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+) -> Result<(String, Value), ExecutionError> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -131,6 +161,7 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
 
     match action {
         "detect" => {
+            emit_measured_progress(progress, "package_manager.detect.progress", 0, 1)?;
             let project_path = detect_path_arg(obj)
                 .map(|path| resolve_path(&workspace_root(), &path))
                 .transpose()?;
@@ -144,7 +175,7 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
                         available,
                         version_present,
                     );
-                    return Ok((
+                    let result = Ok((
                         output.clone(),
                         json!({
                             "action":"detect",
@@ -162,6 +193,8 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
                             "output":output
                         }),
                     ));
+                    emit_measured_progress(progress, "package_manager.detect.progress", 1, 1)?;
+                    return result;
                 }
             }
             let mgr = detect_manager().unwrap_or_else(|| "unknown".to_string());
@@ -169,7 +202,7 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
             let available = mgr != "unknown";
             let version_present = version.is_some();
             let output = package_manager_detection_output(&mgr, available, version_present);
-            Ok((
+            let result = Ok((
                 output.clone(),
                 json!({
                     "action":"detect",
@@ -182,16 +215,22 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
                     "candidate_order":package_manager_candidates(),
                     "output":output
                 }),
-            ))
+            ));
+            emit_measured_progress(progress, "package_manager.detect.progress", 1, 1)?;
+            result
         }
         "smart_install" | "smart_install_preview" => {
+            emit_measured_progress(progress, "package_manager.detect.progress", 0, 1)?;
             let manager = obj
                 .get("manager")
                 .and_then(|value| value.as_str())
                 .map(str::to_ascii_lowercase)
                 .or_else(detect_manager)
                 .ok_or_else(|| "cannot detect package manager; install manually or set args.manager and use action=install".to_string())?;
+            emit_measured_progress(progress, "package_manager.detect.progress", 1, 1)?;
+            emit_measured_progress(progress, "package_manager.plan.progress", 0, 1)?;
             let packages = extract_safe_packages(obj)?;
+            emit_measured_progress(progress, "package_manager.plan.progress", 1, 1)?;
             let dry_run = action == "smart_install_preview"
                 || obj
                     .get("dry_run")
@@ -201,38 +240,54 @@ fn execute(args: Value) -> Result<(String, Value), ExecutionError> {
                 .get("use_sudo")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            manage_packages(
+            let total = packages.len() as u64;
+            emit_measured_progress(progress, "package_manager.install.progress", 0, total)?;
+            let result = manage_packages(
                 action,
                 PackageOperation::Install,
                 &manager,
                 &packages,
                 dry_run,
                 use_sudo,
-            )
+            );
+            if result.is_ok() {
+                emit_completed_package_progress(progress, total)?;
+            }
+            result
         }
         "install" => {
+            emit_measured_progress(progress, "package_manager.detect.progress", 0, 1)?;
             let manager = obj
                 .get("manager")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_ascii_lowercase())
                 .or_else(detect_manager)
                 .ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
+            emit_measured_progress(progress, "package_manager.detect.progress", 1, 1)?;
 
+            emit_measured_progress(progress, "package_manager.plan.progress", 0, 1)?;
             let packages = extract_safe_packages(obj)?;
+            emit_measured_progress(progress, "package_manager.plan.progress", 1, 1)?;
 
             let dry_run = obj.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
             let use_sudo = obj
                 .get("use_sudo")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            manage_packages(
+            let total = packages.len() as u64;
+            emit_measured_progress(progress, "package_manager.install.progress", 0, total)?;
+            let result = manage_packages(
                 "install",
                 PackageOperation::Install,
                 &manager,
                 &packages,
                 dry_run,
                 use_sudo,
-            )
+            );
+            if result.is_ok() {
+                emit_completed_package_progress(progress, total)?;
+            }
+            result
         }
         "uninstall" => {
             let manager = obj

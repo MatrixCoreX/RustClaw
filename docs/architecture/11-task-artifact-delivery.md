@@ -96,6 +96,29 @@ and retry model while the browser keeps authenticated preview and download
 semantics. Task history restores only artifact metadata and URLs; binary data is
 never persisted in browser local storage.
 
+Messaging daemons are transport adapters, not alternate agent runtimes. A new
+adapter owns platform verification, replay protection, binding, attachment
+materialization, locale collection, task submission, low-noise activity, and
+delivery receipts. Every ordinary bound-user message follows the same path:
+
+`platform event -> verify/deduplicate/bind -> ChannelIngressEnvelope -> TaskKind::Ask -> agent runtime`
+
+The envelope preserves original text and attachment facts. MIME and filename
+describe an attachment but do not select a skill or capability. The shared
+command catalog is limited to `/help` (`/start` alias), `/key`, `/cancel`, and
+`/voicemode` only when central preferences own the complete behavior. For a
+bound user, `/run`, `/status`, and unknown slash text remain unchanged ordinary
+`ask` input. Skill install, update, enable, disable, and removal must not change
+the command catalog digest.
+
+Deterministic failures use `ChannelNotice` and public-safe i18n parameters;
+raw provider bodies and diagnostics remain operator evidence. A transport uses
+native typing when available, emits at most one slow-task notice, deduplicates
+progress sequences, and stops progress after terminal state. Locale is pinned
+from central preference, platform locale, conversation/request locale, channel
+default, then the product-safe fallback. The channel default is not a forced
+language for every user.
+
 ## Lifecycle And Verification
 
 Deleting a task removes its controlled delivery directory. A background cleanup

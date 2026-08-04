@@ -430,6 +430,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_channel_provider_error_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_channel_i18n_completeness.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_channel_i18n_completeness.py"
+  python3 "${ROOT_DIR}/scripts/check_channel_thin_adapter_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_channel_thin_adapter_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_channel_delivery_token_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_channel_delivery_token_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_channel_delivery_history_contracts.py" --self-test

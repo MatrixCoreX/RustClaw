@@ -59,3 +59,21 @@ permission, and command-policy checks. Linux-only commands must not run
 implicitly on macOS. Missing sandbox support fails closed with a structured
 unsupported result rather than silently falling back to unrestricted
 execution.
+
+## Domain allowlist spike
+
+Bubblewrap and Seatbelt can deny or inherit the complete network path, but they
+cannot enforce a DNS-name allowlist by themselves. A one-time DNS-to-IP rule is
+not safe because answers change and CDNs share addresses. The current spike
+therefore validates 1–128 DNS names and then reports
+`network=unavailable`, `available=false`, `fail_closed=true`, and
+`sandbox_network_allowlist_unsupported`. Invalid entries return
+`sandbox_network_allowlist_invalid`; a valid but unsupported policy never
+becomes inherited networking.
+
+A production Linux/macOS implementation requires an audited host-controlled
+DNS/SNI or HTTP CONNECT proxy, task-lease-bound policy and DNS state, rejection
+of literal IP/unapproved targets, bounded connections and I/O, and verified
+helper packaging. Until that helper is admitted, domain allowlisting remains
+explicitly unavailable and fail-closed while existing `deny` and `inherit`
+behavior remains unchanged.

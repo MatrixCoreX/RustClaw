@@ -1,5 +1,12 @@
 use super::*;
 
+fn handle_for_test(request: Request) -> Response {
+    let request_id = request.request_id.clone();
+    let mut output = Vec::new();
+    let mut progress = SkillProgressEmitter::new(&mut output, request_id);
+    handle(request, &mut progress)
+}
+
 #[test]
 fn browser_progress_frames_use_requested_and_observed_page_counts() {
     let request = Request {
@@ -16,7 +23,11 @@ fn browser_progress_frames_use_requested_and_observed_page_counts() {
     };
     assert_eq!(requested_page_count(&request.args), Some(2));
     let mut output = Vec::new();
-    emit_start_progress(&mut output, &request).expect("start frame");
+    emit_start_progress(
+        &mut SkillProgressEmitter::new(&mut output, &request.request_id),
+        &request,
+    )
+    .expect("start frame");
     let start =
         skill_sdk::validate_progress_frame_line(&output, "progress-1").expect("valid start frame");
     assert_eq!(start.current, Some(0));
@@ -31,7 +42,11 @@ fn browser_progress_frames_use_requested_and_observed_page_counts() {
         buttons: None,
         extra: Some(json!({"success_count": 2, "failure_count": 1})),
     };
-    emit_completion_progress(&mut output, &response).expect("completion frame");
+    emit_completion_progress(
+        &mut SkillProgressEmitter::new(&mut output, &response.request_id),
+        &response,
+    )
+    .expect("completion frame");
     let completed = skill_sdk::validate_progress_frame_line(&output, "progress-1")
         .expect("valid completion frame");
     assert_eq!(completed.current, Some(3));
@@ -48,7 +63,11 @@ fn browser_progress_frames_use_requested_and_observed_page_counts() {
             "details": {"cause_details": {"success_count": 0, "failure_count": 2}}
         })),
     };
-    emit_completion_progress(&mut output, &partial_failure).expect("failure completion frame");
+    emit_completion_progress(
+        &mut SkillProgressEmitter::new(&mut output, &partial_failure.request_id),
+        &partial_failure,
+    )
+    .expect("failure completion frame");
     let failed = skill_sdk::validate_progress_frame_line(&output, "progress-1")
         .expect("valid failure completion frame");
     assert_eq!(failed.current, Some(2));
@@ -66,12 +85,39 @@ fn browser_progress_frame_omits_measure_for_invalid_or_empty_requests() {
     };
     let mut output = Vec::new();
 
-    emit_start_progress(&mut output, &request).expect("start frame");
+    emit_start_progress(
+        &mut SkillProgressEmitter::new(&mut output, &request.request_id),
+        &request,
+    )
+    .expect("start frame");
 
     let frame = skill_sdk::validate_progress_frame_line(&output, "progress-empty")
         .expect("valid unmeasured start frame");
     assert_eq!(frame.current, None);
     assert_eq!(frame.total, None);
+}
+
+#[test]
+fn browser_intermediate_frames_are_monotonic_per_observed_page() {
+    let mut output = Vec::new();
+    emit_page_progress_sequence(
+        &mut SkillProgressEmitter::new(&mut output, "page-sequence"),
+        3,
+    )
+    .expect("page progress");
+    let frames = String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            skill_sdk::validate_progress_frame_line(line.as_bytes(), "page-sequence").unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 3);
+    assert_eq!(
+        frames.iter().map(|frame| frame.current).collect::<Vec<_>>(),
+        vec![Some(1), Some(2), Some(3)]
+    );
+    assert!(frames.iter().all(|frame| frame.total == Some(3)));
 }
 
 #[test]
@@ -104,7 +150,7 @@ fn error_extra_exposes_machine_contract() {
 
 #[test]
 fn non_object_args_return_outer_error() {
-    let response = handle(Request {
+    let response = handle_for_test(Request {
         request_id: "test-1".to_string(),
         args: json!("not an object"),
         context: None,
@@ -125,7 +171,7 @@ fn non_object_args_return_outer_error() {
 
 #[test]
 fn browser_only_accepts_explicit_page_extraction_action() {
-    let response = handle(Request {
+    let response = handle_for_test(Request {
         request_id: "test-search".to_string(),
         args: json!({"action": "search_page", "query": "rust"}),
         context: None,

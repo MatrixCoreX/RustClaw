@@ -101,6 +101,21 @@ class AdapterTest(unittest.TestCase):
             [("media_download.transcribe.recognizing_speech", 2, 3)],
         )
 
+        download_line = (
+            self.skill.CHILD_PROGRESS_PREFIX
+            + '{"detail_key":"media_download.download.progress","current":524288,"total":1048576}'
+        )
+        self.assertTrue(
+            self.skill._child_progress(
+                download_line,
+                lambda key, current, total: forwarded.append((key, current, total)),
+            )
+        )
+        self.assertEqual(
+            forwarded[-1],
+            ("media_download.download.progress", 524288, 1048576),
+        )
+
     def test_transcript_target_language_prefers_explicit_then_task_locale(self) -> None:
         request = {"context": {"locale": "zh-CN", "language": "en"}}
 
