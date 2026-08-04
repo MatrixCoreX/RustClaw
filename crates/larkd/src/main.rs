@@ -291,19 +291,13 @@ fn lark_media_kind_token(message_type: &str) -> &'static str {
     }
 }
 
-fn lark_media_agent_context(message_type: &str, rel_path: &str) -> String {
-    json!({
-        "event_type": "channel_media_saved",
-        "channel": "lark",
-        "media_kind": lark_media_kind_token(message_type),
-        "source_message_type": message_type,
-        "workspace_relative_path": rel_path,
-        "locator": {
-            "kind": "workspace_relative_path",
-            "path": rel_path
-        }
-    })
-    .to_string()
+fn lark_media_mime_type(message_type: &str) -> &'static str {
+    match message_type {
+        "image" | "sticker" => "image/jpeg",
+        "media" => "video/mp4",
+        "audio" => "audio/mp4",
+        _ => "application/octet-stream",
+    }
 }
 
 /// 入站媒体（图片 / 文件 / 音频 / 视频）解析结果。
@@ -485,6 +479,7 @@ async fn handle_incoming_lark_text(
             chat_id,
             message_id,
             text,
+            Vec::new(),
             Some(ident.user_key),
             None,
         );
@@ -517,6 +512,7 @@ async fn handle_incoming_lark_text(
                             resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
                             message_id.clone(),
                             String::new(),
+                            Vec::new(),
                             Some(identity.user_key),
                             Some(task_id.to_string()),
                         );
@@ -592,6 +588,7 @@ async fn handle_incoming_lark_text(
                             resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
                             message_id.clone(),
                             String::new(),
+                            Vec::new(),
                             Some(bind_result.identity.user_key),
                             Some(task_id.to_string()),
                         );
@@ -775,13 +772,19 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         return;
     }
 
-    let hint = lark_media_agent_context(&ctx.message_type, &rel);
+    let attachment = claw_core::channel_ingress::ChannelIngressAttachment {
+        kind: lark_media_kind_token(&ctx.message_type).to_string(),
+        path: rel,
+        mime_type: Some(lark_media_mime_type(&ctx.message_type).to_string()),
+        size: Some(bytes.len() as u64),
+    };
     handle_text_message_to_clawd(
         state,
         ctx.open_id,
         ctx.chat_id,
         ctx.message_id,
-        hint,
+        String::new(),
+        vec![attachment],
         Some(ident.user_key),
         None,
     );
@@ -805,45 +808,61 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
 }
 
 /// 提交任务并 spawn 轮询与回发。
+fn build_lark_submit_request(
+    language: &str,
+    open_id: &str,
+    chat_id: &str,
+    message_id: &str,
+    text: String,
+    attachments: Vec<claw_core::channel_ingress::ChannelIngressAttachment>,
+    user_key: Option<String>,
+) -> SubmitTaskRequest {
+    let user_id = lark_id_to_i64(if open_id.is_empty() { chat_id } else { open_id });
+    let chat_id_i64 = lark_id_to_i64(chat_id);
+    let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
+        ChannelKind::Lark,
+        open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
+    )
+    .with_external_ids(open_id, chat_id)
+    .with_message_id(message_id)
+    .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
+        chat_id,
+    ))
+    .with_locale(language);
+    ingress.attachments = attachments.clone();
+    SubmitTaskRequest {
+        user_id: Some(user_id),
+        chat_id: Some(chat_id_i64),
+        user_key,
+        channel: Some(ChannelKind::Lark),
+        external_user_id: Some(open_id.to_string()),
+        external_chat_id: Some(chat_id.to_string()),
+        ingress: Some(ingress),
+        idempotency_key: Some(format!("lark:{message_id}")),
+        kind: TaskKind::Ask,
+        payload: json!({ "text": text, "attachments": attachments }),
+    }
+}
+
 fn handle_text_message_to_clawd(
     state: AppState,
     open_id: String,
     chat_id: String,
     message_id: String,
     text: String,
+    attachments: Vec<claw_core::channel_ingress::ChannelIngressAttachment>,
     user_key: Option<String>,
     existing_task_id: Option<String>,
 ) {
-    let user_id = lark_id_to_i64(if open_id.is_empty() {
-        &chat_id
-    } else {
-        &open_id
-    });
-    let chat_id_i64 = lark_id_to_i64(&chat_id);
-
-    let submit_req = SubmitTaskRequest {
-        user_id: Some(user_id),
-        chat_id: Some(chat_id_i64),
-        user_key: user_key.clone(),
-        channel: Some(ChannelKind::Lark),
-        external_user_id: Some(open_id.clone()),
-        external_chat_id: Some(chat_id.clone()),
-        ingress: Some(
-            claw_core::channel_ingress::ChannelIngressEnvelope::new(
-                ChannelKind::Lark,
-                open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
-            )
-            .with_external_ids(open_id.clone(), chat_id.clone())
-            .with_message_id(message_id.clone())
-            .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
-                chat_id.clone(),
-            ))
-            .with_locale(state.config.lark.language.clone()),
-        ),
-        idempotency_key: Some(format!("lark:{message_id}")),
-        kind: TaskKind::Ask,
-        payload: json!({ "text": text }),
-    };
+    let submit_req = build_lark_submit_request(
+        &state.config.lark.language,
+        &open_id,
+        &chat_id,
+        &message_id,
+        text,
+        attachments,
+        user_key.clone(),
+    );
 
     let submit_url = format!("{}/v1/tasks", state.config.lark.clawd_base_url);
     let client = state.client.clone();

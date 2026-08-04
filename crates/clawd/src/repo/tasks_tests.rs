@@ -44,7 +44,11 @@ impl Drop for TempDirGuard {
 }
 
 fn state_with_tasks_table() -> crate::AppState {
-    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.reload_ctx.config_path_for_reload = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/config.toml")
+        .display()
+        .to_string();
     let db = state.core.db.get().expect("get db");
     db.execute_batch(
         "CREATE TABLE tasks (

@@ -10,6 +10,7 @@ mod source_io;
 
 #[derive(Debug)]
 pub(super) struct InstructionSource {
+    pub(super) source_layer: &'static str,
     pub(super) logical_path: String,
     pub(super) depth: usize,
     pub(super) precedence: usize,
@@ -62,6 +63,25 @@ pub(super) fn discover_workspace_instructions(
     let directories = instruction_directories(&root, &cwd);
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
+    for template in &config.user_instruction_paths {
+        let Some(path) = expand_user_instruction_path(template) else {
+            continue;
+        };
+        let logical_path = format!("user:{}", path.display());
+        let canonical = path.canonicalize().ok();
+        let status = match canonical.as_ref() {
+            Some(path) if path.is_file() => None,
+            Some(_) => Some("not_file"),
+            None if path.exists() => Some("unreadable"),
+            None => Some("missing"),
+        };
+        let resolved = canonical.unwrap_or(path);
+        if !seen.insert(resolved.clone()) {
+            continue;
+        }
+        candidates.push((resolved, logical_path, 0, "user", status));
+    }
+    let workspace_precedence_offset = candidates.len();
     for (depth, directory) in directories.iter().enumerate() {
         for filename in &config.filenames {
             let candidate = directory.join(filename);
@@ -78,19 +98,31 @@ pub(super) fn discover_workspace_instructions(
                 .strip_prefix(&root)
                 .map(normalized_relative_path)
                 .unwrap_or_else(|_| filename.clone());
-            candidates.push((canonical, logical_path, depth));
+            candidates.push((canonical, logical_path, depth + 1, "workspace", None));
         }
     }
     let first_selected = candidates.len().saturating_sub(config.max_files);
     let mut sources = Vec::with_capacity(candidates.len());
-    for (precedence, (path, logical_path, depth)) in candidates.into_iter().enumerate() {
+    for (precedence, (path, logical_path, depth, source_layer, unavailable)) in
+        candidates.into_iter().enumerate()
+    {
         if precedence < first_selected {
             sources.push(unloaded_instruction_source(
                 &path,
                 logical_path,
                 depth,
                 precedence,
+                source_layer,
                 "omitted_file_limit",
+            ));
+        } else if let Some(status) = unavailable {
+            sources.push(unloaded_instruction_source(
+                &path,
+                logical_path,
+                depth,
+                precedence,
+                source_layer,
+                status,
             ));
         } else {
             let source = read_instruction_source(
@@ -98,14 +130,23 @@ pub(super) fn discover_workspace_instructions(
                 logical_path.clone(),
                 depth,
                 precedence,
+                source_layer,
                 config.max_file_bytes,
             )
             .unwrap_or_else(|_| {
-                unloaded_instruction_source(&path, logical_path, depth, precedence, "unreadable")
+                unloaded_instruction_source(
+                    &path,
+                    logical_path,
+                    depth,
+                    precedence,
+                    source_layer,
+                    "unreadable",
+                )
             });
             sources.push(source);
         }
     }
+    debug_assert!(workspace_precedence_offset <= sources.len());
     apply_total_budget(&mut sources, first_selected, config.max_total_bytes);
     let rendered_sources = render_sources(&sources);
     Ok(DiscoveryResult {
@@ -114,6 +155,23 @@ pub(super) fn discover_workspace_instructions(
         sources,
         rendered_sources,
     })
+}
+
+fn expand_user_instruction_path(template: &str) -> Option<PathBuf> {
+    let namespace = claw_core::product_identity::product_identity().release_artifact_id();
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    let expanded = template
+        .trim()
+        .replace("<product_namespace>", namespace)
+        .replace("<config_home>", &config_home.to_string_lossy());
+    let path = if let Some(relative) = expanded.strip_prefix("~/") {
+        std::env::var_os("HOME").map(PathBuf::from)?.join(relative)
+    } else {
+        PathBuf::from(expanded)
+    };
+    path.is_absolute().then_some(path)
 }
 
 fn resolve_working_directory(root: &Path, payload: &Value) -> (PathBuf, &'static str) {
@@ -163,7 +221,7 @@ fn apply_total_budget(
 ) {
     let mut remaining = max_total_bytes;
     for source in sources.iter_mut().skip(first_selected).rev() {
-        if matches!(source.status, "invalid_utf8" | "unreadable") {
+        if !matches!(source.status, "loaded" | "loaded_file_truncated") {
             continue;
         }
         let injected_bytes = utf8_prefix_len(
@@ -195,7 +253,15 @@ fn render_sources(sources: &[InstructionSource]) -> String {
         }
         rendered.push_str("--- WORKSPACE INSTRUCTION SOURCE BEGIN ---\n");
         rendered.push_str(&format!(
-            "logical_path: {}\nprecedence: {}\ncontent_sha256: {}\ninjected_bytes: {}\ncontent:\n",
+            concat!(
+                "source_layer: {}\n",
+                "logical_path: {}\n",
+                "precedence: {}\n",
+                "content_sha256: {}\n",
+                "injected_bytes: {}\n",
+                "content:\n"
+            ),
+            source.source_layer,
             source.logical_path,
             source.precedence,
             source.content_sha256.as_deref().unwrap_or(""),

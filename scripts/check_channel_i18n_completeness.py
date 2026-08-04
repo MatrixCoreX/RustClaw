@@ -23,11 +23,11 @@ class CatalogSpec:
 
 CATALOG_SPECS = (
     CatalogSpec("channel-common", ("en-US", "zh-CN", "ja", "ko"), 10),
-    CatalogSpec("telegramd", ("en-US", "zh-CN"), 77),
-    CatalogSpec("wechatd", ("en-US", "zh-CN"), 28),
-    CatalogSpec("feishud", ("en-US", "zh-CN"), 12),
-    CatalogSpec("larkd", ("en-US", "zh-CN"), 12),
-    CatalogSpec("whatsapp-cloud", ("en-US", "zh-CN"), 9),
+    CatalogSpec("telegramd", ("en-US", "zh-CN"), 49),
+    CatalogSpec("wechatd", ("en-US", "zh-CN"), 24),
+    CatalogSpec("feishud", ("en-US", "zh-CN"), 10),
+    CatalogSpec("larkd", ("en-US", "zh-CN"), 10),
+    CatalogSpec("whatsapp-cloud", ("en-US", "zh-CN"), 6),
     CatalogSpec("whatsapp-webd", ("en-US", "zh-CN"), 9),
 )
 
@@ -37,9 +37,16 @@ PRODUCTION_SOURCE_ROOTS = (
     "crates/telegramd/src",
     "crates/wechatd/src",
     "crates/whatsappd/src",
-    "crates/whatsapp-webd/src",
+    "crates/whatsapp_webd/src",
     "crates/feishud/src",
     "crates/larkd/src",
+    "services/wa-web-bridge",
+    "configs/channel_commands.toml",
+)
+
+PRODUCTION_SOURCE_SUFFIXES = (".rs", ".js", ".mjs", ".cjs", ".ts", ".toml")
+UNSAFE_PUBLIC_PLACEHOLDERS = frozenset(
+    {"error", "err", "body", "detail", "path", "token", "key", "cookie", "stack"}
 )
 
 PLACEHOLDER_RE = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
@@ -47,7 +54,7 @@ MESSAGE_KEY_RE = re.compile(
     r'''["']('''
     r'''(?:common\.[A-Za-z0-9_.-]+|'''
     r'''(?:channel|telegram|wechat|feishu|lark|whatsapp_cloud|whatsapp_web)'''
-    r'''\.(?:msg|error|menu|progress|log)\.[A-Za-z0-9_.-]+)'''
+    r'''\.(?:msg|error|menu|progress|log|task|notice)\.[A-Za-z0-9_.-]+)'''
     r''')["']'''
 )
 
@@ -95,20 +102,30 @@ def load_catalog(path: Path, expected_locale: str) -> tuple[dict[str, str], list
     return entries, findings
 
 
-def production_rust_files(root: Path, source_roots: Iterable[str]) -> Iterable[Path]:
+def production_source_files(root: Path, source_roots: Iterable[str]) -> Iterable[Path]:
     for relative in source_roots:
         source_root = root / relative
+        if source_root.is_file():
+            if source_root.suffix in PRODUCTION_SOURCE_SUFFIXES:
+                yield source_root
+            continue
         if not source_root.is_dir():
             continue
-        for path in sorted(source_root.rglob("*.rs")):
-            if path.name.endswith(("_tests.rs", "tests.rs")) or "tests" in path.parts:
+        for path in sorted(source_root.rglob("*")):
+            if not path.is_file() or path.suffix not in PRODUCTION_SOURCE_SUFFIXES:
+                continue
+            if (
+                path.name.endswith(("_tests.rs", "tests.rs", ".test.js", ".test.ts"))
+                or "tests" in path.parts
+                or "node_modules" in path.parts
+            ):
                 continue
             yield path
 
 
 def referenced_message_keys(root: Path, source_roots: Iterable[str]) -> set[str]:
     referenced: set[str] = set()
-    for path in production_rust_files(root, source_roots):
+    for path in production_source_files(root, source_roots):
         referenced.update(MESSAGE_KEY_RE.findall(path.read_text(encoding="utf-8")))
     return referenced
 
@@ -138,6 +155,16 @@ def validate(
             )
         reference_keys = set(reference)
         all_keys.update(reference_keys)
+        for locale, entries in catalogs.items():
+            for key, text in sorted(entries.items()):
+                unsafe = sorted(
+                    set(PLACEHOLDER_RE.findall(text)) & UNSAFE_PUBLIC_PLACEHOLDERS
+                )
+                if unsafe:
+                    findings.append(
+                        f"unsafe_public_placeholder:{spec.name}:{locale}:{key}:"
+                        f"placeholders={unsafe}"
+                    )
         for locale in spec.locales[1:]:
             localized = catalogs[locale]
             localized_keys = set(localized)
@@ -157,6 +184,8 @@ def validate(
     referenced = referenced_message_keys(root, source_roots)
     for key in sorted(referenced - all_keys):
         findings.append(f"production_message_key_missing:{key}")
+    for key in sorted(all_keys - referenced):
+        findings.append(f"unused_catalog_key:{key}")
     return findings, counts, len(referenced)
 
 
@@ -192,17 +221,47 @@ def run_self_test() -> int:
         source = root / "crates/clawd/src/main.rs"
         source.parent.mkdir(parents=True)
         source.write_text(
-            'let _ = "channel.error.provider_unavailable";\n', encoding="utf-8"
+            'let _ = "channel.error.provider_unavailable";\n'
+            'let _ = "common.safe_generic_error";\n',
+            encoding="utf-8",
+        )
+        bridge = root / "services/wa-web-bridge/index.js"
+        bridge.parent.mkdir(parents=True)
+        bridge.write_text(
+            'const key = "common.safe_generic_error";\n', encoding="utf-8"
         )
         findings, _, _ = validate(root, (spec,), ("crates/clawd/src",))
         expected_kinds = {
             "machine_copy_leak",
             "placeholder_mismatch",
             "production_message_key_missing",
+            "unused_catalog_key",
         }
         actual_kinds = {finding.split(":", 1)[0] for finding in findings}
         if actual_kinds != expected_kinds:
             print(f"SELF_TEST_FAIL findings={findings}")
+            return 1
+
+        write_fixture_catalog(
+            root / "configs/i18n/channel-common.en-US.toml",
+            "en-US",
+            {
+                "common.safe_generic_error": "Try again, {error}.",
+                "channel.error.delivery_failed": "Delivery failed.",
+            },
+        )
+        findings, _, referenced = validate(
+            root,
+            (spec,),
+            ("crates/clawd/src", "services/wa-web-bridge"),
+        )
+        if not any(
+            finding.startswith("unsafe_public_placeholder:") for finding in findings
+        ) or referenced != 2:
+            print(
+                "SELF_TEST_FAIL unsafe_or_js_scan "
+                f"findings={findings} referenced={referenced}"
+            )
             return 1
 
         repaired = {
@@ -210,15 +269,23 @@ def run_self_test() -> int:
             "channel.error.delivery_failed": "无法投送。",
         }
         write_fixture_catalog(
+            root / "configs/i18n/channel-common.en-US.toml",
+            "en-US",
+            {
+                "common.safe_generic_error": "Try again, {name}.",
+                "channel.error.delivery_failed": "Delivery failed.",
+            },
+        )
+        write_fixture_catalog(
             root / "configs/i18n/channel-common.zh-CN.toml", "zh-CN", repaired
         )
         source.write_text(
             'let _ = "channel.error.delivery_failed";\n', encoding="utf-8"
         )
         findings, counts, referenced = validate(
-            root, (spec,), ("crates/clawd/src",)
+            root, (spec,), ("crates/clawd/src", "services/wa-web-bridge")
         )
-        if findings or counts != {"channel-common": 2} or referenced != 1:
+        if findings or counts != {"channel-common": 2} or referenced != 2:
             print(
                 "SELF_TEST_FAIL repaired "
                 f"findings={findings} counts={counts} referenced={referenced}"

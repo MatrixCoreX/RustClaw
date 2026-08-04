@@ -372,7 +372,7 @@ pub(super) async fn submit_wechat_task_with_payload(
         external_user_id: Some(from_user_id.clone()),
         external_chat_id: Some(scoped_chat_id.clone()),
         ingress: Some({
-            claw_core::channel_ingress::ChannelIngressEnvelope::new(
+            let mut ingress = claw_core::channel_ingress::ChannelIngressEnvelope::new(
                 ChannelKind::Wechat,
                 "wechat_ilink",
             )
@@ -381,7 +381,18 @@ pub(super) async fn submit_wechat_task_with_payload(
                 from_user_id.clone(),
             ))
             .with_locale(state.config.language.clone())
-            .with_context_token(context_token.clone())
+            .with_context_token(context_token.clone());
+            if let Some(attachments) = payload.get("attachments").and_then(Value::as_array) {
+                ingress
+                    .attachments
+                    .extend(attachments.iter().filter_map(|attachment| {
+                        serde_json::from_value::<
+                        claw_core::channel_ingress::ChannelIngressAttachment,
+                    >(attachment.clone())
+                    .ok()
+                    }));
+            }
+            ingress
         }),
         idempotency_key: None,
         kind,
@@ -549,8 +560,13 @@ pub(super) async fn submit_wechat_task_with_payload(
             TaskStatus::Queued | TaskStatus::Running => {
                 if let Some((seq, message)) = skill_progress_message(&task, &state.config) {
                     if seq > last_skill_progress_seq {
-                        deliver_pinned_progress_text(&state, &context, &message).await;
                         last_skill_progress_seq = seq;
+                        if !timeout_notice_sent
+                            && started.elapsed() >= Duration::from_secs(delivery_timeout_secs)
+                        {
+                            deliver_pinned_progress_text(&state, &context, &message).await;
+                            timeout_notice_sent = true;
+                        }
                     }
                 }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
@@ -643,21 +659,6 @@ pub(super) async fn submit_wechat_task_and_reply(
     submit_wechat_task_with_payload(state, context, user_key, TaskKind::Ask, payload, None).await;
 }
 
-pub(super) async fn submit_wechat_run_skill_and_reply(
-    state: State,
-    context: PinnedWechatTaskContext,
-    user_key: Option<String>,
-    skill_name: &'static str,
-    args: Value,
-) {
-    let payload = json!({
-        "skill_name": skill_name,
-        "args": args,
-    });
-    submit_wechat_task_with_payload(state, context, user_key, TaskKind::RunSkill, payload, None)
-        .await;
-}
-
 pub(super) async fn spawn_existing_wechat_task_delivery(
     state: State,
     context: PinnedWechatTaskContext,
@@ -674,32 +675,30 @@ pub(super) async fn spawn_existing_wechat_task_delivery(
     ));
 }
 
-pub(super) async fn spawn_inbound_ask_flow(
+pub(super) async fn spawn_inbound_attachment_flow(
     state: State,
     context: PinnedWechatTaskContext,
-    ask_text: String,
+    kind: &'static str,
+    path: String,
+    mime_type: &'static str,
+    size: u64,
     user_key: String,
 ) {
-    tokio::spawn(submit_wechat_task_and_reply(
-        state,
-        context,
-        ask_text,
-        Some(user_key),
-    ));
-}
-
-pub(super) async fn spawn_inbound_skill_flow(
-    state: State,
-    context: PinnedWechatTaskContext,
-    skill_name: &'static str,
-    args: Value,
-    user_key: String,
-) {
-    tokio::spawn(submit_wechat_run_skill_and_reply(
+    let payload = json!({
+        "text": "",
+        "attachments": [{
+            "kind": kind,
+            "path": path,
+            "mime_type": mime_type,
+            "size": size,
+        }],
+    });
+    tokio::spawn(submit_wechat_task_with_payload(
         state,
         context,
         Some(user_key),
-        skill_name,
-        args,
+        TaskKind::Ask,
+        payload,
+        None,
     ));
 }

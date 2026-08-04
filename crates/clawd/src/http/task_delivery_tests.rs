@@ -56,7 +56,7 @@ fn failed_terminal_content_uses_common_locale_not_raw_error() {
 }
 
 #[test]
-fn failed_terminal_content_includes_sanitized_protocol_failure_reason() {
+fn failed_terminal_content_keeps_protocol_failure_reason_machine_only() {
     let state = AppState::test_default_with_fixture_provider();
     let record = record(
         "failed",
@@ -79,8 +79,9 @@ fn failed_terminal_content_includes_sanitized_protocol_failure_reason() {
 
     let (text, notice) = terminal_delivery_content(&state, &record, &payload, TaskStatus::Failed);
 
-    assert!(text.contains("失败原因：转写引擎在当前平台不可用。"));
-    assert!(text.contains("token=[REDACTED]"));
+    assert_eq!(text, "请求未能完成，请重试。");
+    assert!(!text.contains("转写引擎"));
+    assert!(!text.contains("token="));
     assert!(!text.contains("private-value"));
     assert!(!text.contains("private provider detail"));
     let notice = notice.expect("failure notice");
@@ -89,10 +90,7 @@ fn failed_terminal_content_includes_sanitized_protocol_failure_reason() {
         notice.params.get("reason_code").map(String::as_str),
         Some("dependency_unavailable")
     );
-    assert_eq!(
-        notice.params.get("failure_message_key").map(String::as_str),
-        Some("media_download.error.dependency_unavailable")
-    );
+    assert!(notice.params.get("failure_message_key").is_none());
     assert!(!notice.retryable);
     assert!(notice.next_actions.is_empty());
     notice.validate().expect("notice should remain valid");

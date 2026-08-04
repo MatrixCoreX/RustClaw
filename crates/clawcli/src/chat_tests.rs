@@ -12,6 +12,8 @@ fn session(mode: PermissionMode) -> ChatSessionState {
         attachments: Vec::new(),
         compacted_context_ref: None,
         goal_ref: None,
+        rewind_anchor: None,
+        completed_side_effect_refs: Vec::new(),
         event_cursor: 0,
         working_directory: WorkingDirectoryIdentity {
             canonical_path: "/tmp".to_string(),

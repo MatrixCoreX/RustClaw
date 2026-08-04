@@ -37,7 +37,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let prompt_label = super::classify_prompt_source(prompt_source);
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     let logical_call_index = state.task_llm_call_count(&task.task_id);
-    let hints = crate::ChatRequestHints {
+    let mut hints = crate::ChatRequestHints {
         requires_native_tools: true,
         timeout_seconds: request
             .metadata
@@ -45,6 +45,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
             .and_then(serde_json::Value::as_u64),
         ..crate::ChatRequestHints::default()
     };
+    crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
     let routing_plan = crate::providers::route_providers(task_providers, prompt, &hints);
     state.note_task_provider_routing_plan_with_label(
         &task.task_id,

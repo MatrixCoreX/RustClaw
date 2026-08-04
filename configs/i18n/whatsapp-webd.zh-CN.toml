@@ -2,7 +2,7 @@ locale = "zh-CN"
 
 [dict]
 "whatsapp_web.msg.bridge_process_exited" = "bridge 进程已退出"
-"whatsapp_web.msg.bridge_wait_failed" = "bridge 等待失败：{error}"
+"whatsapp_web.msg.bridge_wait_failed" = "WhatsApp 连接意外停止，请重新连接。"
 "whatsapp_web.msg.bind_help" = "请先发送 /key <你的 key> 绑定当前 WhatsApp 账号，再继续聊天或使用功能。"
 "whatsapp_web.msg.bind_success" = "Key 绑定成功，刚才的请求会自动继续。"
 "whatsapp_web.msg.pending_resume_stopped" = "刚才的请求已过期、附件不可用或权限发生变化，请重新发送原请求。"
@@ -10,4 +10,3 @@ locale = "zh-CN"
 "whatsapp_web.msg.bind_private" = "为避免 key 泄露，请先私聊当前 WhatsApp 账号完成绑定，再回到群聊使用。"
 "whatsapp_web.msg.access_denied" = "当前 WhatsApp 账号不在允许使用范围内。"
 "whatsapp_web.msg.process_failed_safe" = "处理未能完成，请重试。"
-"whatsapp_web.msg.run_usage" = "用法：/run <技能名称> <参数>"

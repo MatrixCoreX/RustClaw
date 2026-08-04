@@ -38,7 +38,6 @@ REQUIRED_TOKENS_BY_PATH = {
     "crates/telegramd/src/task_delivery.rs": (
         "request_terminal_delivery",
         "request_terminal_delivery_with_content",
-        "ChannelTaskDeliveryContent::MediaOnly",
     ),
 }
 FORBIDDEN_TOKENS_BY_PATH = {

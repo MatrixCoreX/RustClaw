@@ -59,9 +59,6 @@ REQUIRED_TOKENS_BY_PATH = {
         "strip_legacy_delivery_lines(text)",
         "legacy_delivery_lines(text)",
     ),
-    "crates/telegramd/src/task_delivery_format.rs": (
-        "strip_legacy_delivery_lines(answer)",
-    ),
 }
 
 

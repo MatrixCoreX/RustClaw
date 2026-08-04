@@ -7,9 +7,29 @@ use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 #[cfg(target_os = "linux")]
 use super::prepare_durable_process_command;
 use super::{
-    prepare_process_command, sandbox_backend_diagnostics, ProcessNetworkPolicy,
-    ProcessSandboxRequest,
+    network_allowlist_spike, prepare_process_command, sandbox_backend_diagnostics,
+    ProcessNetworkPolicy, ProcessSandboxRequest,
 };
+
+#[test]
+fn domain_allowlist_spike_is_validated_and_never_silently_inherits_network() {
+    let diagnostic = network_allowlist_spike(&[
+        "api.example.com".to_string(),
+        "static.example.com".to_string(),
+    ])
+    .expect("valid allowlist policy");
+    assert_eq!(diagnostic.network, "unavailable");
+    assert!(!diagnostic.available);
+    assert!(diagnostic.fail_closed);
+    assert_eq!(
+        diagnostic.error_code,
+        "sandbox_network_allowlist_unsupported"
+    );
+    assert_eq!(
+        network_allowlist_spike(&["https://example.com".to_string()]),
+        Err("sandbox_network_allowlist_invalid")
+    );
+}
 
 struct TestDir(PathBuf);
 

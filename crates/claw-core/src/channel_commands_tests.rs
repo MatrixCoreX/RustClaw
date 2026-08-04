@@ -11,9 +11,9 @@ allow_unbound = true
 order = 10
 
 [[commands]]
-name = "crypto"
-kind = "skill"
-skill_name = "crypto"
+name = "cancel"
+kind = "core"
+core_action = "cancel"
 channels = ["telegram"]
 menu_channels = ["telegram"]
 order = 20
@@ -36,7 +36,7 @@ fn match_command_supports_bot_suffix_and_tail() {
 fn allows_unbound_command_follows_catalog() {
     let catalog = ChannelCommandCatalog::from_toml_str(SAMPLE).expect("parse catalog");
     assert!(catalog.allows_unbound_command("/start", "telegram"));
-    assert!(!catalog.allows_unbound_command("/crypto price btc", "telegram"));
+    assert!(!catalog.allows_unbound_command("/cancel", "telegram"));
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn default_telegram_commands_only_expose_transport_controls() {
         .into_iter()
         .map(|command| command.name.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(menu_names, vec!["help", "status", "cancel", "voicemode"]);
+    assert_eq!(menu_names, vec!["help", "cancel"]);
 
     for removed in [
         "/ask hello",
@@ -113,9 +113,9 @@ menu_channels = ["telegram"]
 fn slash_prefixed_paths_and_non_whitespace_suffixes_are_not_commands() {
     let raw = r#"
 [[commands]]
-name = "run"
+name = "cancel"
 kind = "core"
-core_action = "run_skill"
+core_action = "cancel"
 channels = ["telegram", "whatsapp"]
 
 [[commands]]
@@ -129,9 +129,39 @@ channels = ["telegram", "whatsapp"]
     assert!(catalog
         .match_command("/home/testuser/project", "telegram")
         .is_none());
-    assert!(catalog.match_command("/run/logs", "telegram").is_none());
+    assert!(catalog.match_command("/cancel/logs", "telegram").is_none());
     assert!(catalog.match_command("/start/docs", "telegram").is_none());
-    assert!(catalog.match_command("/run logs", "telegram").is_some());
+    assert!(catalog.match_command("/cancel now", "telegram").is_some());
+}
+
+#[test]
+fn skill_command_schema_is_permanently_rejected() {
+    for raw in [
+        r#"[[commands]]
+name = "run"
+kind = "skill"
+core_action = "cancel"
+channels = ["telegram"]
+"#,
+        r#"[[commands]]
+name = "run"
+kind = "core"
+core_action = "cancel"
+skill_name = "weather"
+channels = ["telegram"]
+"#,
+        r#"[[commands]]
+name = "run"
+kind = "core"
+core_action = "run_skill"
+channels = ["telegram"]
+"#,
+    ] {
+        assert!(
+            ChannelCommandCatalog::from_toml_str(raw).is_err(),
+            "skill-linked command schema unexpectedly accepted: {raw}"
+        );
+    }
 }
 
 #[test]
@@ -151,4 +181,16 @@ fn command_examples_inside_ordinary_text_do_not_enter_the_control_plane() {
         );
     }
     assert!(catalog.match_command("/start", "telegram").is_some());
+}
+
+#[test]
+fn command_catalog_digest_is_stable_and_transport_only() {
+    let first = ChannelCommandCatalog::default();
+    let second = ChannelCommandCatalog::default();
+    assert_eq!(first.digest(), second.digest());
+    assert_eq!(first.digest().len(), 64);
+    assert!(first
+        .commands()
+        .iter()
+        .all(|command| command.core_action().is_some()));
 }

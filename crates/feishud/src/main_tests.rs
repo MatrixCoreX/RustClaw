@@ -1,12 +1,11 @@
 use super::{
-    build_feishu_long_connection_config, extract_bind_key_candidate,
+    build_feishu_long_connection_config, build_feishu_submit_request, extract_bind_key_candidate,
     extract_pending_bind_token_candidate, feishu_delivery_error_text, feishu_provider_http_error,
     handle_incoming_feishu_text, install_tls_crypto_provider, is_unbound_allowed_command,
     parse_im_text_from_event_body, AppState, FeishuConfig, FeishuSection,
     FEISHU_BIND_REQUIRED_FALLBACK, FEISHU_I18N_BIND_REQUIRED_KEY,
 };
 use crate::config_helpers::feishu_t;
-use crate::media_helpers::feishu_media_agent_context;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -143,19 +142,27 @@ fn unbound_media_like_empty_text_requires_binding_prompt() {
 }
 
 #[test]
-fn feishu_media_agent_context_uses_machine_fields() {
-    let text = feishu_media_agent_context("image", "data/feishud/image/chat/file.jpg");
-    let value: Value = serde_json::from_str(&text).expect("media context json");
-    assert_eq!(value["event_type"], "channel_media_saved");
-    assert_eq!(value["channel"], "feishu");
-    assert_eq!(value["media_kind"], "image");
-    assert_eq!(value["source_message_type"], "image");
-    assert_eq!(
-        value["workspace_relative_path"],
-        "data/feishud/image/chat/file.jpg"
+fn feishu_media_is_an_ask_attachment_without_synthetic_instruction() {
+    let attachment = claw_core::channel_ingress::ChannelIngressAttachment {
+        kind: "image".to_string(),
+        path: "data/feishud/image/chat/file.jpg".to_string(),
+        mime_type: Some("image/jpeg".to_string()),
+        size: Some(42),
+    };
+    let request = build_feishu_submit_request(
+        "zh-CN",
+        "open-1",
+        "chat-1",
+        "message-1",
+        String::new(),
+        vec![attachment.clone()],
+        Some("rk-test".to_string()),
     );
-    assert_eq!(value["locator"]["kind"], "workspace_relative_path");
-    assert_eq!(value["locator"]["path"], "data/feishud/image/chat/file.jpg");
+    assert!(matches!(request.kind, claw_core::types::TaskKind::Ask));
+    assert_eq!(request.payload["text"], "");
+    assert_eq!(request.payload["attachments"][0]["path"], attachment.path);
+    let ingress = request.ingress.expect("ingress");
+    assert_eq!(ingress.attachments, vec![attachment]);
 }
 
 #[test]

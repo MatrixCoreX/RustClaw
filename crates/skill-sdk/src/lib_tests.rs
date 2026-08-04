@@ -416,6 +416,41 @@ fn progress_frame_contract_is_strict_machine_only_and_request_scoped() {
 }
 
 #[test]
+fn progress_emitter_sequences_flushes_and_throttles_frames() {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    let mut output = Vec::new();
+    let mut emitter = crate::SkillProgressEmitter::new(&mut output, "r1");
+    emitter
+        .emit_progress("skill.fixture.starting", BTreeMap::new(), Some(0), Some(2))
+        .expect("first frame");
+    assert!(!emitter
+        .emit_progress_throttled(
+            "skill.fixture.working",
+            BTreeMap::new(),
+            Some(1),
+            Some(2),
+            Duration::from_secs(60),
+        )
+        .expect("throttled frame"));
+    emitter
+        .emit_progress("skill.fixture.completed", BTreeMap::new(), Some(2), Some(2))
+        .expect("completion frame");
+    assert_eq!(emitter.sequence(), 2);
+    drop(emitter);
+
+    let lines = String::from_utf8(output).expect("utf8 output");
+    let frames = lines
+        .lines()
+        .map(|line| validate_progress_frame_line(line.as_bytes(), "r1").expect("frame"))
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].sequence, 1);
+    assert_eq!(frames[1].sequence, 2);
+}
+
+#[test]
 fn progress_frames_are_manifest_opt_in_and_legacy_manifests_stay_unchanged() {
     let legacy = PackageManifest::from_toml_str(manifest_source()).expect("legacy manifest");
     assert!(!legacy.run.progress_frames);

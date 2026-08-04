@@ -678,6 +678,26 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   if (mergeStrategy) meta.push(`merge_strategy=${mergeStrategy}`);
   const mergeStatus = stringAt(payload, ["merge_contract", "child_trace_merge_status"]);
   if (mergeStatus) meta.push(`merge_status=${mergeStatus}`);
+  const policyPaths = [
+    ["resolved_model_policy"],
+    ["child_boundary", "resolved_model_policy"],
+    ["observation", "resolved_model_policy"],
+  ];
+  for (const path of policyPaths) {
+    const policy = path.reduce<unknown>((value, key) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      return (value as Record<string, unknown>)[key];
+    }, payload);
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) continue;
+    const record = policy as Record<string, unknown>;
+    for (const key of ["model_class", "provider", "model", "reasoning_effort", "reasoning_effort_status", "model_policy_fallback"]) {
+      const value = record[key];
+      if ((typeof value === "string" && value.trim()) || typeof value === "boolean") {
+        meta.push(`${key}=${String(value)}`);
+      }
+    }
+    break;
+  }
   return meta;
 }
 
@@ -952,7 +972,10 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
             : tLocal("技能仍在正常处理。", "The skill is still working.");
     const measured =
       current !== null && total !== null
-        ? tLocal(`进度 ${current}/${total}。`, `Progress ${current}/${total}.`)
+        ? tLocal(
+            `进度 ${current}/${total}${total > 0 ? `（${Math.min(100, Math.round((current / total) * 100))}%）` : ""}。`,
+            `Progress ${current}/${total}${total > 0 ? ` (${Math.min(100, Math.round((current / total) * 100))}%)` : ""}.`,
+          )
         : "";
     return {
       eventType,
@@ -1016,6 +1039,22 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
           ? tLocal(`记录了 ${changed} 个变更文件。`, `Recorded ${changed} changed file(s).`)
           : tLocal("代码任务进度已记录。", "Coding task progress was recorded."),
       tone,
+      meta,
+    };
+  }
+
+  if (eventType === "auto_review") {
+    const findingCount = Array.isArray(payload?.review_findings)
+      ? payload.review_findings.length
+      : 0;
+    const confirmationRequired = payload?.confirmation_required === true;
+    return {
+      eventType,
+      title: tLocal("只读代码审查", "Read-only code review"),
+      detail: confirmationRequired
+        ? tLocal(`发现 ${findingCount} 项问题，交付前需要确认。`, `${findingCount} finding(s); confirmation is required before delivery.`)
+        : tLocal(`审查完成，共 ${findingCount} 项发现。`, `Review completed with ${findingCount} finding(s).`),
+      tone: confirmationRequired ? "attention" : "ok",
       meta,
     };
   }

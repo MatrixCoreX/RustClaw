@@ -84,6 +84,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub workspace_instructions: WorkspaceInstructionsConfig,
     #[serde(default)]
+    pub auto_review: AutoReviewConfig,
+    #[serde(default)]
     pub image_vision: ImageSkillConfig,
     #[serde(default)]
     pub image_generation: ImageSkillConfig,
@@ -1005,6 +1007,11 @@ pub struct LlmConfig {
     pub selected_vendor: Option<String>,
     #[serde(default)]
     pub selected_model: Option<String>,
+    /// Trusted release mapping from a closed subagent model class to one
+    /// provider/model pair. Runtime policy selects only the class; credentials
+    /// continue to come from the configured provider and credential broker.
+    #[serde(default)]
+    pub model_classes: HashMap<String, LlmModelClassConfig>,
     /// Optional machine-readable pricing catalog. Entries are matched by exact
     /// provider/model identifiers; missing entries remain explicitly unknown.
     #[serde(default)]
@@ -1032,6 +1039,13 @@ pub struct LlmConfig {
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LlmModelClassConfig {
+    pub provider: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1575,6 +1589,10 @@ pub struct WorkspaceInstructionsConfig {
     pub enabled_for_non_coding: bool,
     #[serde(default)]
     pub filenames: Vec<String>,
+    /// Lower-precedence user instruction sources. Paths are trusted release
+    /// templates and may use `<config_home>` and `<product_namespace>`.
+    #[serde(default)]
+    pub user_instruction_paths: Vec<String>,
     #[serde(default)]
     pub max_total_bytes: usize,
     #[serde(default)]
@@ -1611,6 +1629,21 @@ impl WorkspaceInstructionsConfig {
         if unique_filenames.len() != self.filenames.len() {
             return Err("workspace_instruction_filenames_duplicate".to_string());
         }
+        if self.user_instruction_paths.len() > 8
+            || self.user_instruction_paths.iter().any(|path| {
+                let path = path.trim();
+                path.is_empty()
+                    || path.len() > 512
+                    || path.contains('\0')
+                    || path.contains("..")
+                    || path
+                        .replace("<config_home>", "")
+                        .replace("<product_namespace>", "")
+                        .contains(|ch| matches!(ch, '<' | '>'))
+            })
+        {
+            return Err("workspace_user_instruction_paths_invalid".to_string());
+        }
         if !(1_024..=262_144).contains(&self.max_total_bytes)
             || !(1_024..=1_048_576).contains(&self.max_file_bytes)
             || !(1..=64).contains(&self.max_files)
@@ -1618,6 +1651,38 @@ impl WorkspaceInstructionsConfig {
             return Err("workspace_instruction_budget_invalid".to_string());
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AutoReviewConfig {
+    pub enabled: bool,
+    pub review_role: String,
+    pub blocking: bool,
+}
+
+impl Default for AutoReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            review_role: "review".to_string(),
+            blocking: false,
+        }
+    }
+}
+
+impl AutoReviewConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        let valid_role = !self.review_role.is_empty()
+            && self.review_role.len() <= 80
+            && self
+                .review_role
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
+        valid_role
+            .then_some(())
+            .ok_or_else(|| "auto_review_role_invalid".to_string())
     }
 }
 

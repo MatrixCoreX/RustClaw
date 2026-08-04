@@ -51,3 +51,27 @@ fn status_notice_does_not_invent_error_state() {
     assert_eq!(notice.error_code, None);
     assert!(!notice.retryable);
 }
+
+#[test]
+fn notice_rejects_private_diagnostics_in_public_params() {
+    for (name, value) in [
+        ("error", "provider failed"),
+        ("detail", "request rejected"),
+        ("filename", "/home/user/private.txt"),
+        ("reason", "Authorization: Bearer secret"),
+        ("reason", "Traceback (most recent call last): boom"),
+    ] {
+        let mut notice = ChannelNotice::error(
+            "channel.delivery_failed",
+            "provider.unavailable",
+            "channel.error.retry_later",
+            true,
+        );
+        notice.params.insert(name.to_string(), value.to_string());
+        assert_eq!(
+            notice.validate(),
+            Err(ChannelNoticeValidationError::InvalidParam),
+            "unsafe public param unexpectedly accepted: {name}={value}"
+        );
+    }
+}

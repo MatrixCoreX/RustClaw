@@ -81,6 +81,23 @@ Telegram、微信、飞书、Lark、WhatsApp 等通信守护进程继续使用�
 预览与下载语义。历史记录只恢复产物元数据和 URL，不把二进制或 base64 内容写入浏览器
 本地存储。
 
+通信守护进程是传输适配器，不是另一套 Agent Runtime。新增通信端只负责平台验签、重放
+保护、绑定、附件物化、locale 采集、任务提交、低噪音活动提示和交付回执。已绑定用户的
+普通消息统一经过：
+
+`平台事件 -> 验签/去重/绑定 -> ChannelIngressEnvelope -> TaskKind::Ask -> Agent Runtime`
+
+Envelope 保留原文与附件事实；MIME 和扩展名只描述附件，不负责选择技能或 capability。
+共享命令只保留 `/help`（`/start` 别名）、`/key`、`/cancel`，以及中央偏好已完整接管时的
+`/voicemode`。已绑定用户发送的 `/run`、`/status` 和未知斜杠文本保持原样进入普通
+`ask`。技能安装、升级、启停和卸载不得改变命令 catalog digest。
+
+确定性失败使用 `ChannelNotice` 和 public-safe i18n 参数，原始 provider body 与诊断只
+作为运维证据。通信端优先使用平台原生 typing，同一任务最多发送一条慢任务提示，按序列
+去重进度，并在终态后停止进度。Locale 依次取中央偏好、平台 locale、固定会话/请求
+locale、通信端默认和产品安全默认；通信端默认语言只是识别失败时的兜底，不会强制所有
+用户使用同一种语言。
+
 ## 生命周期与验证
 
 删除任务时会删除对应的受控交付目录；后台清理也会移除找不到任务的孤立目录。原始工作区

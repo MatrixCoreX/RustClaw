@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use skill_sdk::{SkillProgressFrame, SkillProgressKind};
+use skill_sdk::SkillProgressEmitter;
 use url::Url;
 
 const SKILL_NAME: &str = "browser_web";
@@ -123,8 +123,11 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Request, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => {
-                emit_start_progress(&mut stdout, &req)?;
-                handle(req)
+                let mut progress = SkillProgressEmitter::new(&mut stdout, &req.request_id);
+                emit_start_progress(&mut progress, &req)?;
+                let response = handle(req, &mut progress);
+                emit_completion_progress(&mut progress, &response)?;
+                response
             }
             Err(err) => Response {
                 request_id: "unknown".to_string(),
@@ -135,7 +138,6 @@ fn main() -> anyhow::Result<()> {
                 extra: Some(error_extra("INVALID_INPUT", false, None)),
             },
         };
-        emit_completion_progress(&mut stdout, &resp)?;
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
     }
@@ -143,29 +145,27 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn emit_start_progress(stdout: &mut impl Write, request: &Request) -> anyhow::Result<()> {
+fn emit_start_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    request: &Request,
+) -> anyhow::Result<()> {
     let requested = requested_page_count(&request.args);
-    let frame = SkillProgressFrame {
-        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
-        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
-        request_id: request.request_id.clone(),
-        sequence: 1,
-        kind: SkillProgressKind::Progress,
-        detail_key: "browser_web.pages.starting".to_string(),
-        params: BTreeMap::from([(
+    progress.emit_progress(
+        "browser_web.pages.starting",
+        BTreeMap::from([(
             "action".to_string(),
             Value::String("open_extract".to_string()),
         )]),
-        current: requested.map(|_| 0),
-        total: requested,
-        reference: None,
-    };
-    writeln!(stdout, "{}", frame.to_line()?)?;
-    stdout.flush()?;
+        requested.map(|_| 0),
+        requested,
+    )?;
     Ok(())
 }
 
-fn emit_completion_progress(stdout: &mut impl Write, response: &Response) -> anyhow::Result<()> {
+fn emit_completion_progress(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    response: &Response,
+) -> anyhow::Result<()> {
     let Some(extra) = response.extra.as_ref() else {
         return Ok(());
     };
@@ -173,20 +173,29 @@ fn emit_completion_progress(stdout: &mut impl Write, response: &Response) -> any
         return Ok(());
     };
     let total = success.saturating_add(failure);
-    let frame = SkillProgressFrame {
-        schema_version: skill_sdk::SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
-        record_type: skill_sdk::SKILL_PROGRESS_FRAME_RECORD_TYPE.to_string(),
-        request_id: response.request_id.clone(),
-        sequence: 2,
-        kind: SkillProgressKind::Progress,
-        detail_key: "browser_web.pages.completed".to_string(),
-        params: BTreeMap::new(),
-        current: Some(total),
-        total: Some(total),
-        reference: None,
-    };
-    writeln!(stdout, "{}", frame.to_line()?)?;
-    stdout.flush()?;
+    progress.emit_progress(
+        "browser_web.pages.completed",
+        BTreeMap::new(),
+        Some(total),
+        Some(total),
+    )?;
+    Ok(())
+}
+
+fn emit_page_progress_sequence(
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
+    total: u64,
+) -> Result<(), SkillFailure> {
+    for current in 1..=total {
+        progress
+            .emit_progress(
+                "browser_web.pages.progress",
+                BTreeMap::new(),
+                Some(current),
+                Some(total),
+            )
+            .map_err(|_| SkillFailure::machine("PROGRESS_FRAME_FAILED"))?;
+    }
     Ok(())
 }
 
@@ -225,7 +234,7 @@ fn requested_page_count(args: &Value) -> Option<u64> {
     (count > 0).then(|| count.min(max_pages))
 }
 
-fn handle(req: Request) -> Response {
+fn handle(req: Request, progress: &mut SkillProgressEmitter<'_, impl Write>) -> Response {
     let workspace_root = std::env::var("WORKSPACE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -274,6 +283,7 @@ fn handle(req: Request) -> Response {
                     allow_path_outside_workspace,
                     artifact_output_directory.as_deref(),
                     &request_id,
+                    progress,
                 )
             }),
         _ => Err(SkillFailure::with_message(
@@ -646,6 +656,7 @@ fn open_extract_action(
     allow_path_outside_workspace: bool,
     artifact_output_directory: Option<&Path>,
     request_id: &str,
+    progress: &mut SkillProgressEmitter<'_, impl Write>,
 ) -> Result<String, SkillFailure> {
     let mut urls = Vec::new();
     if let Some(url) = args.url {
@@ -711,7 +722,14 @@ fn open_extract_action(
         "runId": request_id,
     });
 
-    call_browser_helper(workspace_root, helper_input)
+    let output = call_browser_helper(workspace_root, helper_input)?;
+    if let Some(extra) = browser_web_success_extra(&output) {
+        if let Some((success, failure)) = progress_page_counts(&extra) {
+            let total = success.saturating_add(failure);
+            emit_page_progress_sequence(progress, total)?;
+        }
+    }
+    Ok(output)
 }
 
 fn validate_browser_target(

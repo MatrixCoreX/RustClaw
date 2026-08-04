@@ -53,10 +53,15 @@ function readableName(payload: Record<string, unknown>): string | null {
   return null;
 }
 
-function positiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+function nonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed = nonNegativeInteger(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 function commandPreview(payload: Record<string, unknown>): string | null {
@@ -170,8 +175,8 @@ export function reduceChatActivity(
         typeof frame?.detail_key === "string" && frame.detail_key.trim()
           ? frame.detail_key.trim().slice(0, 128)
           : null,
-      progressCurrent: positiveInteger(frame?.current),
-      progressTotal: positiveInteger(frame?.total),
+      progressCurrent: nonNegativeInteger(frame?.current),
+      progressTotal: nonNegativeInteger(frame?.total),
     };
   }
   if (eventType === "tool_finished") {

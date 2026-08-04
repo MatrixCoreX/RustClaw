@@ -60,11 +60,17 @@ pub(crate) fn enqueue_child_task_specs(
     let tx = db.transaction()?;
     super::child_task_graph::persist_child_task_graph(&tx, &graph, &now)?;
     let mut queued_child_ids = Vec::new();
+    let mut queued_model_policies = Vec::new();
     for spec in specs {
         if spec.parent_task_id != parent.parent_task_id {
             anyhow::bail!("child_parent_mismatch");
         }
-        let payload = child_task_payload(spec, parent.execution_policy_stamp.as_ref())?;
+        let payload = child_task_payload(state, spec, parent.execution_policy_stamp.as_ref())?;
+        queued_model_policies.push(json!({
+            "child_task_id": spec.child_task_id,
+            "role": spec.role,
+            "resolved_model_policy": payload.get("resolved_model_policy"),
+        }));
         let result_json = queued_child_task_result(spec);
         tx.execute(
             "INSERT INTO tasks (
@@ -100,6 +106,21 @@ pub(crate) fn enqueue_child_task_specs(
             snapshot.clone(),
         );
     }
+    for policy in &queued_model_policies {
+        let _ = crate::task_event_transport::publish_event(
+            state,
+            &parent.parent_task_id,
+            "subagent_started",
+            json!({
+                "schema_version": CHILD_TASK_SCHEMA_VERSION,
+                "status": "queued",
+                "child_task_id": policy.get("child_task_id"),
+                "child_run_id": policy.get("child_task_id"),
+                "role": policy.get("role"),
+                "resolved_model_policy": policy.get("resolved_model_policy"),
+            }),
+        );
+    }
     Ok(json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "parent_task_id": parent.parent_task_id,
@@ -108,6 +129,7 @@ pub(crate) fn enqueue_child_task_specs(
         "child_task_ids": queued_child_ids,
         "scheduler": scheduler,
         "child_task_graph": graph_snapshot,
+        "resolved_model_policies": queued_model_policies,
     }))
 }
 
@@ -120,7 +142,7 @@ pub(crate) fn start_inline_child_task(
         anyhow::bail!("child_parent_mismatch");
     }
     let graph = super::child_task_graph::prepare_child_task_graph(std::slice::from_ref(spec), 1)?;
-    let payload = child_task_payload(spec, parent.execution_policy_stamp.as_ref())?;
+    let payload = child_task_payload(state, spec, parent.execution_policy_stamp.as_ref())?;
     let mut result_json = queued_child_task_result(spec);
     result_json["source"] = json!("inline_child_task_start");
     result_json["task_lifecycle"]["state"] = json!("running");
@@ -179,6 +201,19 @@ pub(crate) fn start_inline_child_task(
             snapshot,
         );
     }
+    let _ = crate::task_event_transport::publish_event(
+        state,
+        &parent.parent_task_id,
+        "subagent_started",
+        json!({
+            "schema_version": CHILD_TASK_SCHEMA_VERSION,
+            "status": "running",
+            "child_task_id": spec.child_task_id,
+            "child_run_id": spec.child_task_id,
+            "role": spec.role,
+            "resolved_model_policy": payload.get("resolved_model_policy"),
+        }),
+    );
 
     Ok((
         ClaimedTask {
@@ -993,6 +1028,7 @@ fn child_lifecycle_state(status: &str) -> &'static str {
 }
 
 fn child_task_payload(
+    state: &AppState,
     spec: &ChildTaskSpec,
     execution_policy_stamp: Option<&Value>,
 ) -> anyhow::Result<Value> {
@@ -1012,6 +1048,29 @@ fn child_task_payload(
             "merge_policy": spec.merge_policy.as_str(),
         },
     });
+    let raw_policy = spec
+        .scope
+        .get("model_policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let policy = crate::agent_runtime_contract::parse_model_policy(raw_policy)
+        .map_err(|code| anyhow::anyhow!(code))?;
+    let config = claw_core::config::AppConfig::load(&state.reload_ctx.config_path_for_reload)?;
+    let resolved = crate::agent_runtime_contract::resolve_model_policy(&config.llm, &policy)
+        .map_err(|code| anyhow::anyhow!(code))?;
+    let resolved_value = serde_json::to_value(&resolved)?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "_agent_model_selection".to_string(),
+            json!({
+                "schema_version": 1,
+                "provider": resolved.provider,
+                "model": resolved.model,
+                "authority": "server_validated_model_catalog",
+            }),
+        );
+        object.insert("resolved_model_policy".to_string(), resolved_value);
+    }
     if let (Some(object), Some(stamp)) = (payload.as_object_mut(), execution_policy_stamp) {
         object.insert(
             crate::task_execution_policy::POLICY_PAYLOAD_FIELD.to_string(),

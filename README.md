@@ -560,7 +560,8 @@ agentctl -key disable rk-xxxx
 Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:
 
 - Text, images, audio, video, and files are submitted uniformly as `kind=ask`; the agent loop decides whether to answer, clarify, or call a capability.
-- The command surface is limited to `/help` (including `/start`), `/key`, `/status`, `/cancel`, and `/voicemode`.
+- The command surface is limited to `/help` (including `/start`), `/key`, `/cancel`, and `/voicemode`.
+- `/status`, `/run`, and unknown slash text are ordinary `ask` input for bound users; the transport does not inspect them or query host/runtime internals.
 - `/voicemode` controls only text/voice delivery for the current Telegram chat and does not select capabilities.
 - Installation, enablement, and configuration of on-demand Skill Store skills, including `crypto`, belong to the browser management surface or controlled core APIs. Telegram does not accept skill credentials or expose skill configuration commands.
 - On startup, `telegramd` refreshes the Telegram command menu through `setMyCommands`; restart the channel daemon after removing old commands from configuration.

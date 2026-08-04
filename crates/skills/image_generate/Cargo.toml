@@ -15,4 +15,5 @@ claw-core = { path = "../../claw-core" }
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true
+skill-sdk = { package = "agent-skill-sdk", path = "../../skill-sdk" }
 toml.workspace = true

@@ -150,6 +150,9 @@ fn build_openai_request(
     if let Some(value) = hints.max_tokens.or(params.default_max_tokens) {
         body.insert("max_tokens".to_string(), json!(value));
     }
+    if let Some(value) = hints.reasoning_effort.as_deref() {
+        body.insert("reasoning_effort".to_string(), json!(value));
+    }
     if let Some(value) = params.top_p {
         body.insert("top_p".to_string(), json!(value));
     }

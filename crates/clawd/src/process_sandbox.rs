@@ -20,6 +20,58 @@ pub(crate) enum ProcessNetworkPolicy {
     Inherit,
 }
 
+/// Domain allowlisting cannot be implemented by the currently selected
+/// Bubblewrap/Seatbelt drivers alone. This spike boundary validates the
+/// machine policy and then fails closed until a host proxy helper is admitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct ProcessNetworkAllowlistDiagnostics {
+    pub(crate) schema_version: u8,
+    pub(crate) network: &'static str,
+    pub(crate) available: bool,
+    pub(crate) fail_closed: bool,
+    pub(crate) domain_count: usize,
+    pub(crate) error_code: &'static str,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn network_allowlist_spike(
+    domains: &[String],
+) -> Result<ProcessNetworkAllowlistDiagnostics, &'static str> {
+    if domains.is_empty()
+        || domains.len() > 128
+        || domains.iter().any(|domain| !valid_domain(domain))
+    {
+        return Err("sandbox_network_allowlist_invalid");
+    }
+    Ok(ProcessNetworkAllowlistDiagnostics {
+        schema_version: 1,
+        network: "unavailable",
+        available: false,
+        fail_closed: true,
+        domain_count: domains.len(),
+        error_code: "sandbox_network_allowlist_unsupported",
+    })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn valid_domain(value: &str) -> bool {
+    let value = value.trim().trim_end_matches('.');
+    !value.is_empty()
+        && value.len() <= 253
+        && !value.starts_with('.')
+        && !value.contains("..")
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        })
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProcessSandboxRequest<'a> {
     pub(crate) mode: ToolSandboxMode,

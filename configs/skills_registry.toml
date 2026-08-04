@@ -786,6 +786,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "archive_basic"
 enabled = true
 fixed_on = true
+progress_frames = true
 kind = "runner"
 planner_kind = "tool"
 group = "system"
@@ -1014,6 +1015,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 [[skills]]
 name = "image_generate"
 enabled = true
+progress_frames = true
 kind = "runner"
 planner_kind = "skill"
 group = "image"
@@ -1148,6 +1150,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 [[skills]]
 name = "video_generate"
 enabled = true
+progress_frames = true
 kind = "runner"
 planner_kind = "skill"
 group = "video"
@@ -1509,6 +1512,7 @@ input_schema = { type = "object", properties = { action = { type = "string", enu
 [[skills]]
 name = "doc_parse"
 enabled = true
+progress_frames = true
 kind = "runner"
 planner_kind = "tool"
 group = "filesystem"

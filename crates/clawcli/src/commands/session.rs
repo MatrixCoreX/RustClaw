@@ -107,6 +107,8 @@ pub(crate) fn run_session_continue_latest(
             model_override: session.model_override.as_ref(),
             compacted_context_ref: session.compacted_context_ref.as_deref(),
             goal_ref: session.goal_ref.as_deref(),
+            rewind_anchor: session.rewind_anchor.as_ref(),
+            completed_side_effect_refs: &session.completed_side_effect_refs,
             attachments: &attachments,
         },
         submission_options,
@@ -159,6 +161,129 @@ pub(crate) fn run_session_fork(
     save_session_store(&store)?;
     print_session_store_operation(&summary, json_output);
     Ok(())
+}
+
+pub(crate) fn run_session_rewind(
+    base_url: &str,
+    key: &str,
+    session_id: &str,
+    to_event: u64,
+    new_session_id: Option<&str>,
+    rewind_workspace: bool,
+    json_output: bool,
+    submission_options: task::TaskSubmissionOptions,
+) -> Result<()> {
+    if to_event == 0 {
+        anyhow::bail!("session_rewind_event_seq_invalid");
+    }
+    let mut store = load_session_store()?;
+    if !store.sessions.contains_key(session_id) {
+        let source_task = task::get_task_status(base_url, key, session_id)?;
+        let summary = session_show_json(&source_task);
+        session_store_upsert_summary(&mut store, &summary);
+    }
+    let source = store
+        .sessions
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("session_store_source_missing"))?;
+    let source_task_id = source
+        .current_task_id
+        .clone()
+        .or_else(|| source.task_ids.last().cloned())
+        .unwrap_or_else(|| session_id.to_string());
+    let source_task = task::get_task_status(base_url, key, &source_task_id)?;
+    let event_exists = source_task.events.iter().any(|event| {
+        event
+            .fields
+            .get("event_seq")
+            .or_else(|| event.fields.get("seq"))
+            .and_then(|value| value.parse::<u64>().ok())
+            == Some(to_event)
+    });
+    if !event_exists {
+        anyhow::bail!("session_rewind_event_not_found");
+    }
+    let checkpoint_id = source_task
+        .events
+        .iter()
+        .filter_map(|event| {
+            let seq = event
+                .fields
+                .get("event_seq")
+                .or_else(|| event.fields.get("seq"))?
+                .parse::<u64>()
+                .ok()?;
+            (seq <= to_event)
+                .then(|| event.fields.get("checkpoint_id").cloned())
+                .flatten()
+        })
+        .filter(|value| !value.trim().is_empty())
+        .last();
+    if rewind_workspace {
+        let checkpoint_id = checkpoint_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session_rewind_checkpoint_missing"))?;
+        let exit = super::run_code_capability(
+            base_url,
+            key,
+            "workspace.rewind",
+            super::workspace_rewind_args(checkpoint_id),
+            super::CodeCapabilityOptions {
+                detach: false,
+                json_output,
+                jsonl_output: false,
+                timeout_seconds: Some(300),
+                interval_ms: 500,
+                submission_options,
+            },
+        )?;
+        if exit != 0 {
+            anyhow::bail!("session_rewind_workspace_failed");
+        }
+    }
+    let completed_side_effect_refs = completed_side_effect_refs(&source_task.raw_data);
+    let new_session_id = new_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("rewind_{}", uuid::Uuid::new_v4().simple()));
+    let anchor = json!({
+        "schema_version": 1,
+        "source_session_id": session_id,
+        "source_task_id": source_task_id,
+        "event_seq": to_event,
+        "checkpoint_id": checkpoint_id,
+    });
+    let summary = session_store_rewind_json(
+        &mut store,
+        session_id,
+        &new_session_id,
+        anchor,
+        completed_side_effect_refs,
+    )?;
+    save_session_store(&store)?;
+    print_session_store_operation(&summary, json_output);
+    Ok(())
+}
+
+fn completed_side_effect_refs(data: &Value) -> Vec<String> {
+    [
+        "/result_json/task_journal/summary/coding_workflow/completed_side_effect_refs",
+        "/task_journal/summary/coding_workflow/completed_side_effect_refs",
+        "/result_json/task_checkpoint/completed_side_effect_refs",
+        "/task_checkpoint/completed_side_effect_refs",
+    ]
+    .iter()
+    .find_map(|pointer| data.pointer(pointer).and_then(Value::as_array))
+    .into_iter()
+    .flatten()
+    .filter_map(Value::as_str)
+    .map(str::trim)
+    .filter(|value| !value.is_empty() && value.len() <= 512)
+    .map(str::to_string)
+    .take(256)
+    .collect()
 }
 
 pub(super) fn session_list_json(user_id: i64, chat_id: i64, active: &Value) -> Value {
@@ -277,6 +402,10 @@ pub(super) struct StoredSession {
     attachments: Vec<SessionAttachmentRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compacted_context_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rewind_anchor: Option<Value>,
+    #[serde(default)]
+    completed_side_effect_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     working_directory: Option<WorkingDirectoryIdentity>,
     #[serde(default)]
@@ -438,6 +567,8 @@ pub(super) fn session_store_persist_chat_session(
     entry.permission_mode = state.permission_mode;
     entry.attachments = state.attachments.clone();
     entry.compacted_context_ref = state.compacted_context_ref.clone();
+    entry.rewind_anchor = state.rewind_anchor.clone();
+    entry.completed_side_effect_refs = state.completed_side_effect_refs.clone();
     entry.active_goal_id = state.goal_ref.clone();
     entry.latest_event_seq = Some(state.event_cursor.to_string());
     entry.working_directory = Some(state.working_directory.clone());
@@ -459,6 +590,8 @@ fn chat_session_state(session: &StoredSession) -> Result<ChatSessionState> {
         attachments: session.attachments.clone(),
         compacted_context_ref: session.compacted_context_ref.clone(),
         goal_ref: session.active_goal_id.clone(),
+        rewind_anchor: session.rewind_anchor.clone(),
+        completed_side_effect_refs: session.completed_side_effect_refs.clone(),
         event_cursor: session
             .latest_event_seq
             .as_deref()
@@ -522,6 +655,13 @@ pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &V
         compacted_context_ref: previous
             .as_ref()
             .and_then(|session| session.compacted_context_ref.clone()),
+        rewind_anchor: previous
+            .as_ref()
+            .and_then(|session| session.rewind_anchor.clone()),
+        completed_side_effect_refs: previous
+            .as_ref()
+            .map(|session| session.completed_side_effect_refs.clone())
+            .unwrap_or_default(),
         working_directory: previous.and_then(|session| session.working_directory),
         archived: summary
             .get("archived")
@@ -585,6 +725,48 @@ pub(super) fn session_store_fork_json(
         "session_id": new_session_id,
         "forked_from": session_id,
         "archived": false,
+        "store_session_count": store.sessions.len(),
+    }))
+}
+
+pub(super) fn session_store_rewind_json(
+    store: &mut SessionStore,
+    session_id: &str,
+    new_session_id: &str,
+    anchor: Value,
+    completed_side_effect_refs: Vec<String>,
+) -> Result<Value> {
+    if !valid_cli_conversation_ref(new_session_id) || store.sessions.contains_key(new_session_id) {
+        anyhow::bail!("session_rewind_target_invalid");
+    }
+    let Some(source) = store.sessions.get(session_id).cloned() else {
+        anyhow::bail!("session_store_source_missing");
+    };
+    let event_seq = anchor
+        .get("event_seq")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| anyhow::anyhow!("session_rewind_event_seq_invalid"))?;
+    let mut forked = source;
+    forked.session_id = new_session_id.to_string();
+    forked.thread_id = Some(new_session_id.to_string());
+    forked.archived = false;
+    forked.forked_from = Some(session_id.to_string());
+    forked.latest_event_seq = Some(event_seq.to_string());
+    forked.latest_checkpoint_id = anchor
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    forked.rewind_anchor = Some(anchor.clone());
+    forked.completed_side_effect_refs = completed_side_effect_refs;
+    store.sessions.insert(new_session_id.to_string(), forked);
+    store.latest_session_id = Some(new_session_id.to_string());
+    Ok(json!({
+        "operation": "session_rewind",
+        "session_id": new_session_id,
+        "forked_from": session_id,
+        "rewind_anchor": anchor,
+        "original_history_preserved": true,
         "store_session_count": store.sessions.len(),
     }))
 }
@@ -823,6 +1005,8 @@ fn stored_session_json(session: &StoredSession) -> Value {
         "permission_mode": session.permission_mode.as_token(),
         "attachments": session.attachments.clone(),
         "compacted_context_ref": session.compacted_context_ref.clone(),
+        "rewind_anchor": session.rewind_anchor.clone(),
+        "completed_side_effect_refs": session.completed_side_effect_refs.clone(),
         "working_directory": session.working_directory.clone(),
         "archived": session.archived,
         "forked_from": session.forked_from.clone(),

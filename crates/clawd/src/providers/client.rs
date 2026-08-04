@@ -330,6 +330,7 @@ pub(crate) enum LlmRoutingPreference {
 pub(crate) struct ChatRequestHints {
     pub(crate) temperature: Option<f64>,
     pub(crate) max_tokens: Option<u64>,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) timeout_seconds: Option<u64>,
     pub(crate) required_input_modalities: Vec<String>,
     pub(crate) minimum_context_window_tokens: Option<usize>,
@@ -342,6 +343,7 @@ impl Default for ChatRequestHints {
         Self {
             temperature: None,
             max_tokens: None,
+            reasoning_effort: None,
             timeout_seconds: None,
             required_input_modalities: vec!["text".to_string()],
             minimum_context_window_tokens: None,

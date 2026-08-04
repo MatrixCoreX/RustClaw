@@ -64,6 +64,13 @@ pub struct ChannelIngressEnvelope {
     pub reply_target: Option<ChannelReplyTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
+    /// Locale observed from the transport before the runtime pins the final
+    /// conversation locale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_locale: Option<String>,
+    /// Machine token describing which resolver layer selected `locale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale_source: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<ChannelIngressAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,6 +91,8 @@ impl ChannelIngressEnvelope {
             received_at_ts: None,
             reply_target: None,
             locale: None,
+            platform_locale: None,
+            locale_source: None,
             attachments: Vec::new(),
             context_token: None,
         }
@@ -115,7 +124,9 @@ impl ChannelIngressEnvelope {
     }
 
     pub fn with_locale(mut self, locale: impl Into<String>) -> Self {
-        self.locale = Some(locale.into());
+        let locale = locale.into();
+        self.locale = Some(locale.clone());
+        self.platform_locale = Some(locale);
         self
     }
 

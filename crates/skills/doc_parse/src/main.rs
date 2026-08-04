@@ -4,7 +4,8 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use skill_sdk::{BoundedResult, ContinuationDescriptor};
+use skill_sdk::{BoundedResult, ContinuationDescriptor, SkillProgressEmitter};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -159,6 +160,8 @@ fn main() -> Result<()> {
             .and_then(Value::as_str)
             .unwrap_or("parse_doc");
 
+        let mut progress = SkillProgressEmitter::new(&mut stdout, &request_id);
+        progress.emit_progress("doc_parse.chunks.progress", BTreeMap::new(), None, None)?;
         let payload = if normalize_action(raw_action).is_none() {
             ParsePayload {
                 text: String::new(),
@@ -172,6 +175,19 @@ fn main() -> Result<()> {
         } else {
             handle_parse_doc(&req)
         };
+        if payload.status == "ok" {
+            let chars = payload.text.chars().count() as u64;
+            let chunk_size = 16_384_u64;
+            let total = chars.max(1).div_ceil(chunk_size);
+            for current in 1..=total {
+                progress.emit_progress(
+                    "doc_parse.chunks.progress",
+                    BTreeMap::new(),
+                    Some(current),
+                    Some(total),
+                )?;
+            }
+        }
         let outer_status = payload.status.clone();
         let error_text = if outer_status == "error" {
             Value::String(

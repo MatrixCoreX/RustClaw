@@ -233,6 +233,8 @@ pub(crate) fn run_chat(
                 model_override: session.model_override.as_ref(),
                 compacted_context_ref: session.compacted_context_ref.as_deref(),
                 goal_ref: session.goal_ref.as_deref(),
+                rewind_anchor: session.rewind_anchor.as_ref(),
+                completed_side_effect_refs: &session.completed_side_effect_refs,
                 attachments: &attachments,
             },
             session_submission_options(&session),

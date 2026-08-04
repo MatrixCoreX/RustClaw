@@ -1,28 +1,26 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::Path;
 
 const DEFAULT_CHANNEL_COMMANDS_TOML: &str = include_str!("../../../configs/channel_commands.toml");
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelCommandKind {
     Core,
-    Skill,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CoreCommandAction {
     Start,
     BindKey,
-    Status,
     Cancel,
-    RunSkill,
-    VoiceMode,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChannelCommandDef {
     pub name: String,
     #[serde(default)]
@@ -30,8 +28,6 @@ pub struct ChannelCommandDef {
     pub kind: ChannelCommandKind,
     #[serde(default)]
     pub core_action: Option<CoreCommandAction>,
-    #[serde(default)]
-    pub skill_name: Option<String>,
     #[serde(default)]
     pub channels: Vec<String>,
     #[serde(default)]
@@ -73,10 +69,6 @@ impl ChannelCommandMatch {
 impl ChannelCommandDef {
     pub fn core_action(&self) -> Option<CoreCommandAction> {
         self.core_action
-    }
-
-    pub fn skill_name(&self) -> Option<&str> {
-        self.skill_name.as_deref()
     }
 
     pub fn description_key(&self) -> Option<&str> {
@@ -144,6 +136,15 @@ impl ChannelCommandCatalog {
 
     pub fn commands(&self) -> &[ChannelCommandDef] {
         &self.commands
+    }
+
+    /// Stable transport-control digest. Skill registry generations are not an
+    /// input, so install/enable/disable/update/uninstall operations cannot
+    /// change the channel command surface.
+    pub fn digest(&self) -> String {
+        let encoded = serde_json::to_vec(&self.commands)
+            .expect("channel_command_catalog_serialization_infallible");
+        format!("{:x}", Sha256::digest(encoded))
     }
 
     pub fn menu_commands_for_channel(&self, channel: &str) -> Vec<&ChannelCommandDef> {
@@ -276,29 +277,11 @@ fn validate_commands(commands: &[ChannelCommandDef]) -> Result<(), String> {
                 ));
             }
         }
-        match command.kind {
-            ChannelCommandKind::Core => {
-                if command.core_action.is_none() {
-                    return Err(format!(
-                        "core channel command `{}` is missing core_action",
-                        command.name
-                    ));
-                }
-            }
-            ChannelCommandKind::Skill => {
-                if command
-                    .skill_name
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .is_none()
-                {
-                    return Err(format!(
-                        "skill channel command `{}` is missing skill_name",
-                        command.name
-                    ));
-                }
-            }
+        if command.core_action.is_none() {
+            return Err(format!(
+                "core channel command `{}` is missing core_action",
+                command.name
+            ));
         }
         normalized_names_by_command.push(normalized_names);
     }

@@ -46,7 +46,6 @@ pub(super) async fn handle_image_message(
         "image",
         &normalized_ext,
         rel_path,
-        false,
     )
     .await
 }
@@ -101,7 +100,6 @@ pub(super) async fn handle_audio_message(
         "audio",
         &normalized_ext,
         rel_path,
-        true,
     )
     .await
 }
@@ -138,7 +136,6 @@ pub(super) async fn handle_file_message(
         "file",
         &normalized_ext,
         rel_path,
-        false,
     )
     .await
 }
@@ -175,7 +172,6 @@ pub(super) async fn handle_video_message(
         "video",
         &normalized_ext,
         rel_path,
-        false,
     )
     .await
 }
@@ -307,7 +303,6 @@ async fn submit_attachment_ask(
     kind: &str,
     ext: &str,
     rel_path: String,
-    voice_reply: bool,
 ) -> anyhow::Result<()> {
     let size = tokio::fs::metadata(&rel_path)
         .await
@@ -333,14 +328,6 @@ async fn submit_attachment_ask(
     )
     .await
     {
-        Ok(task_id) if voice_reply => spawn_voice_task_result_delivery(
-            bot.clone(),
-            state.clone(),
-            msg.chat.id,
-            user_id,
-            task_id,
-            state.i18n.t("telegram.msg.process_failed"),
-        ),
         Ok(task_id) => spawn_task_result_delivery(
             bot.clone(),
             state.clone(),
@@ -351,12 +338,10 @@ async fn submit_attachment_ask(
             state.i18n.t("telegram.msg.process_failed"),
         ),
         Err(err) => {
+            warn!(chat_id = msg.chat.id.0, error = %err, "attachment_task_submission_failed");
             bot.send_message(
                 msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.process_failed_with_error",
-                    &[("error", &err.to_string())],
-                ),
+                state.i18n.t("telegram.msg.process_failed_with_error"),
             )
             .await
             .context("send attachment task submit error failed")?;

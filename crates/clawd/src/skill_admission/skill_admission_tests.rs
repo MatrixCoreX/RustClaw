@@ -97,6 +97,8 @@ fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_to
         fs::read(service.root().join("current-generation.json")).expect("read current pointer");
     let mut invalid_grant = grant.clone();
     invalid_grant.permissions.privilege_escalation = true;
+    let command_catalog_digest =
+        claw_core::channel_commands::ChannelCommandCatalog::default().digest();
     let error = service
         .set_state(&skill_name, AdmissionState::Enabled, Some(invalid_grant))
         .expect_err("over-grant must fail");
@@ -157,6 +159,11 @@ fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_to
     let tombstoned = service
         .set_state(&skill_name, AdmissionState::Tombstoned, None)
         .expect("tombstone skill");
+    assert_eq!(
+        command_catalog_digest,
+        claw_core::channel_commands::ChannelCommandCatalog::default().digest(),
+        "skill lifecycle changes must not alter transport commands"
+    );
     InstallReceiptStore::new(root.join("data/skill-packages"))
         .remove_installed_versions(&skill_name)
         .expect("remove skill-owned package");

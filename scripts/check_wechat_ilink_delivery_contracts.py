@@ -67,7 +67,7 @@ REQUIRED_TOKENS_BY_PATH = {
         "pin_inbound_task_context",
         "msg.context_token.as_deref()",
         "start_typing_heartbeat_for_peer(&state, &task_context)",
-        "spawn_inbound_skill_flow(",
+        "spawn_inbound_attachment_flow(",
     ),
     "crates/wechatd/src/config_cache.rs": (
         "scope: &WechatConversationScope",

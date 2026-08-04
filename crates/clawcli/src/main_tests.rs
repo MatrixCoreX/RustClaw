@@ -425,6 +425,38 @@ fn clawcli_parses_session_subcommands() {
         }
         _ => panic!("expected session fork"),
     }
+
+    match Cli::try_parse_from([
+        "clawcli",
+        "session",
+        "rewind",
+        "task-1",
+        "--to-event",
+        "42",
+        "--new-session-id",
+        "rewound-1",
+        "--rewind-workspace",
+    ])
+    .expect("parse session rewind")
+    .cmd
+    {
+        Some(Command::Session {
+            command:
+                SessionCommand::Rewind {
+                    session_id,
+                    to_event,
+                    new_session_id,
+                    rewind_workspace,
+                    ..
+                },
+        }) => {
+            assert_eq!(session_id, "task-1");
+            assert_eq!(to_event, 42);
+            assert_eq!(new_session_id.as_deref(), Some("rewound-1"));
+            assert!(rewind_workspace);
+        }
+        _ => panic!("expected session rewind"),
+    }
 }
 
 #[test]

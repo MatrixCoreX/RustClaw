@@ -38,6 +38,7 @@ mod capability_result;
 mod channel_send;
 mod child_task_contract;
 mod clarify_state;
+mod communication_preferences;
 mod contract_matrix;
 mod conversation_state;
 #[cfg(test)]
@@ -926,9 +927,35 @@ async fn run() -> anyhow::Result<()> {
         reload_ctx: ReloadContext {
             config_path_for_reload: config_path.clone(),
             workspace_instructions: config.workspace_instructions.clone(),
+            auto_review: config.auto_review.clone(),
         },
         ask_states: AskStateRegistry::default(),
     };
+
+    match state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!(error))
+        .and_then(|db| {
+            communication_preferences::migrate_legacy_telegram_voice_preferences(
+                &db,
+                &config.telegram.voice_reply_mode_by_chat,
+            )
+        }) {
+        Ok(report) if report.discovered > 0 => info!(
+            discovered = report.discovered,
+            migrated = report.migrated,
+            already_current = report.already_current,
+            binding_missing = report.binding_missing,
+            invalid = report.invalid,
+            "legacy_communication_preference_migration_completed"
+        ),
+        Ok(_) => {}
+        Err(error) => {
+            warn!(error = %error, "legacy_communication_preference_migration_failed")
+        }
+    }
 
     let recovered_cancel_escalations = crate::local_process_job::recover_pending_cancel_escalations(
         &state.skill_rt.workspace_root,
@@ -973,6 +1000,11 @@ async fn run() -> anyhow::Result<()> {
         .route("/memory", get(get_memory_overview))
         .route("/memory/recent", get(list_memory_recent_handler))
         .route("/memory/preferences", get(list_memory_preferences_handler))
+        .route(
+            "/channel/preferences",
+            get(communication_preferences::get_handler)
+                .put(communication_preferences::update_handler),
+        )
         .route("/memory/facts", get(list_memory_facts_handler))
         .route("/memory/:memory_id", delete(delete_memory_handler))
         .route("/memory/:memory_id/expire", post(expire_memory_handler))
@@ -1351,7 +1383,7 @@ async fn submit_task(
         return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, err);
     }
     let kind = task_kind_name(&req.kind);
-    let ingress = build_channel_ingress_snapshot(
+    let mut ingress = build_channel_ingress_snapshot(
         req.ingress.as_ref(),
         channel,
         effective_user_id,
@@ -1360,6 +1392,38 @@ async fn submit_task(
         normalized_external_chat_id.as_deref(),
         &req.payload,
     );
+    let platform_locale = ingress
+        .platform_locale
+        .as_deref()
+        .or(ingress.locale.as_deref());
+    match state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!(error))
+        .and_then(|db| {
+            communication_preferences::resolve_locale(
+                &db,
+                effective_user_id,
+                effective_chat_id,
+                effective_user_key.as_deref(),
+                platform_locale,
+                &state.policy.command_intent.default_locale,
+            )
+        }) {
+        Ok(resolved) => {
+            ingress.locale = Some(resolved.locale);
+            ingress.locale_source = Some(resolved.source.to_string());
+        }
+        Err(error) => {
+            warn!(error = %error, "channel_locale_resolution_failed");
+            ingress.locale = communication_preferences::normalize_locale(
+                &state.policy.command_intent.default_locale,
+            )
+            .or_else(|| Some("en-US".to_string()));
+            ingress.locale_source = Some("safe_default".to_string());
+        }
+    }
     let whatsapp_cloud_inbound = (channel == ChannelKind::Whatsapp
         && ingress.adapter == "whatsapp_cloud")
         .then(|| {

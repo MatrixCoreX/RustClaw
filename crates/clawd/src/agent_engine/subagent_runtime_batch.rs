@@ -66,7 +66,10 @@ fn record_subagent_batch_action_with_config(
             normalize_machine_token(child.role.as_str())
         );
         let role_token = child.role.trim();
-        team_lifecycle_events.push(team_lifecycle_event(
+        let started_model_policy = config
+            .resolve_role(role_token)
+            .and_then(|role| config.resolved_model_policies.get(&role.token));
+        team_lifecycle_events.push(team_lifecycle_event_with_policy(
             "subagent_started",
             parallel_batch_id.as_str(),
             Some(child_run_id.as_str()),
@@ -74,6 +77,7 @@ fn record_subagent_batch_action_with_config(
             Some(machine_ref_or_empty(role_token)),
             Some(child.required),
             None,
+            started_model_policy,
         ));
         let Some(role) = config.resolve_role(role_token) else {
             rejected_count += 1;
@@ -202,7 +206,7 @@ fn record_subagent_batch_action_with_config(
             timeout_ms,
             "completed",
         ));
-        team_lifecycle_events.push(team_lifecycle_event(
+        team_lifecycle_events.push(team_lifecycle_event_with_policy(
             "subagent_finished",
             parallel_batch_id.as_str(),
             Some(child_run_id.as_str()),
@@ -210,6 +214,7 @@ fn record_subagent_batch_action_with_config(
             Some(&role.token),
             Some(child.required),
             None,
+            config.resolved_model_policies.get(&role.token),
         ));
         aggregated_evidence_refs.push(child_run_id.clone());
         if finding_count > 0 {
@@ -723,6 +728,31 @@ fn team_lifecycle_event(
         "reason_code": reason_code,
         "write_permission": "read_only",
     })
+}
+
+fn team_lifecycle_event_with_policy(
+    event_type: &'static str,
+    team_id: &str,
+    child_run_id: Option<&str>,
+    status: &str,
+    role: Option<&str>,
+    required: Option<bool>,
+    reason_code: Option<&str>,
+    resolved_model_policy: Option<&crate::agent_runtime_contract::ResolvedModelPolicy>,
+) -> Value {
+    let mut event = team_lifecycle_event(
+        event_type,
+        team_id,
+        child_run_id,
+        status,
+        role,
+        required,
+        reason_code,
+    );
+    if let (Some(object), Some(policy)) = (event.as_object_mut(), resolved_model_policy) {
+        object.insert("resolved_model_policy".to_string(), json!(policy));
+    }
+    event
 }
 
 fn subagent_child_actions_from_args(args: &Value) -> Option<Vec<SubagentChildAction>> {

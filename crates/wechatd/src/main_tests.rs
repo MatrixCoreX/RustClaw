@@ -1,11 +1,10 @@
 use super::{
     build_login_status_response, context_token_store_key, extract_bind_key_candidate,
     extract_text_message, is_unbound_allowed_command, qr_render_content, qr_svg_data_url,
-    skill_progress_message, wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
-    wechat_task_terminal_kind, workspace_root_from_config_path, ActiveLogin, MessageItem,
-    QRCodeResponse, TaskQueryResponse, TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus,
-    WechatSection, WechatTaskTerminalKind, WechatTypingHeartbeat, WeixinMessage,
-    TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
+    skill_progress_message, wechat_runtime_status_file_path, wechat_t, wechat_task_terminal_kind,
+    workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
+    TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WechatTaskTerminalKind,
+    WechatTypingHeartbeat, WeixinMessage, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
 };
 use axum::body::Bytes;
 use axum::extract::State as AxumState;
@@ -383,29 +382,6 @@ fn wechat_media_progress_stays_transport_state_without_canned_replies() {
             "detail_key={detail_key} must not become canned chat text"
         );
     }
-}
-
-#[test]
-fn wechat_media_agent_context_uses_machine_fields() {
-    let text = wechat_media_agent_context(
-        "file",
-        "data/wechatd/file/user/123_report.pdf",
-        Some("report.pdf"),
-    );
-    let value: Value = serde_json::from_str(&text).expect("media context json");
-    assert_eq!(value["event_type"], "channel_media_saved");
-    assert_eq!(value["channel"], "wechat");
-    assert_eq!(value["media_kind"], "file");
-    assert_eq!(
-        value["workspace_relative_path"],
-        "data/wechatd/file/user/123_report.pdf"
-    );
-    assert_eq!(value["locator"]["kind"], "workspace_relative_path");
-    assert_eq!(
-        value["locator"]["path"],
-        "data/wechatd/file/user/123_report.pdf"
-    );
-    assert_eq!(value["file_name"], "report.pdf");
 }
 
 #[test]

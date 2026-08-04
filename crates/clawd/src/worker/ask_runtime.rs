@@ -84,8 +84,14 @@ pub(super) async fn execute_ask_dispatch(
         "agent_loop_default_entry",
         None,
     );
+    let payload = serde_json::from_str::<Value>(&task.payload_json).unwrap_or(Value::Null);
+    if payload.get("entrypoint").and_then(Value::as_str) == Some("auto_review") {
+        return Ok(Ok(
+            crate::agent_engine::auto_review::run_one_shot_auto_review(state, task).await,
+        ));
+    }
     let agent_run_context = Some(build_agent_run_context_from_prepared_flow(prepared_flow));
-    Ok(crate::agent_engine::run_agent_with_tools(
+    let mut result = crate::agent_engine::run_agent_with_tools(
         state,
         task,
         &prepared_flow.prompt_with_memory_for_execution,
@@ -93,7 +99,11 @@ pub(super) async fn execute_ask_dispatch(
         agent_run_context,
         &prepared_flow.initial_task_observations,
     )
-    .await)
+    .await;
+    if let Ok(answer) = result.as_mut() {
+        crate::agent_engine::auto_review::attach_auto_review(state, task, answer).await;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

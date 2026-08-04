@@ -472,6 +472,9 @@ function buildSubmitTaskBody(
   const userKey = String(identity?.user_key || "").trim();
   if (!userKey) throw new Error("bound user key is required");
   const stableMessageId = String(messageId || "").trim();
+  const attachments = Array.isArray(payload?.attachments)
+    ? payload.attachments
+    : [];
   return {
     user_id: userId,
     chat_id: userId,
@@ -488,6 +491,7 @@ function buildSubmitTaskBody(
       ...(stableMessageId ? { message_id: stableMessageId } : {}),
       reply_target: { kind: "chat", external_id: externalChatId },
       locale: cfg.language,
+      ...(attachments.length ? { attachments } : {}),
     },
     idempotency_key:
       idempotencyKey ||
@@ -826,7 +830,13 @@ async function saveInboundMedia(message, jid, userId) {
     { logger: log, reuploadRequest: sock.updateMediaMessage }
   );
   fs.writeFileSync(absPath, buffer);
-  return { mediaType, absPath, relPath: buildRelPath(absPath) };
+  return {
+    mediaType,
+    absPath,
+    relPath: buildRelPath(absPath),
+    mimeType: mime || undefined,
+    size: buffer.length,
+  };
 }
 
 async function handleInboundMessage(msg, upsertType = "notify") {
@@ -945,63 +955,26 @@ async function handleInboundMessage(msg, upsertType = "notify") {
   }
   expectingKeyReply.delete(bindingScope);
 
-  if (text.startsWith("/run")) {
-    const rest = text.slice(4).trim();
-    const firstSpace = rest.indexOf(" ");
-    const skill = (firstSpace >= 0 ? rest.slice(0, firstSpace) : rest).trim();
-    const args = (firstSpace >= 0 ? rest.slice(firstSpace + 1) : "").trim();
-    if (!skill) {
-      await sendWaMessage(jid, {
-        text: tr(
-          "whatsapp_web.msg.run_usage",
-          "Usage: /run <skill_name> <args>"
-        ),
-      });
-      return;
-    }
-    await runTaskFlow(
-      jid,
-      externalUserId,
-      "run_skill",
-      { skill_name: skill, args },
-      identity,
-      cfg.quickResultWaitSeconds,
-      msg.key.id
-    );
-    return;
-  }
-
   const userId = Number(identity.user_id || stableUserId(externalUserId));
   const media = await saveInboundMedia(msg.message, jid, userId);
-  if (media?.mediaType === "image") {
-    await runTaskFlow(jid, externalUserId, "run_skill", {
-      skill_name: "image_vision",
-      args: {
-        action: "describe",
-        images: [{ path: media.relPath }],
-        detail_level: "normal",
-      },
-    }, identity, cfg.quickResultWaitSeconds, msg.key.id);
-    return;
-  }
-  if (media?.mediaType === "audio") {
-    await runTaskFlow(jid, externalUserId, "run_skill", {
-      skill_name: "audio_transcribe",
-      args: {
-        audio: { path: media.relPath },
-      },
-    }, identity, 120, msg.key.id);
-    return;
-  }
-
-  if (text) {
+  if (text || media) {
+    const attachments = media
+      ? [
+          {
+            kind: media.mediaType,
+            path: media.relPath,
+            ...(media.mimeType ? { mime_type: media.mimeType } : {}),
+            size: media.size,
+          },
+        ]
+      : [];
     await runTaskFlow(
       jid,
       externalUserId,
       "ask",
-      { text },
+      { text, attachments },
       identity,
-      cfg.quickResultWaitSeconds,
+      media?.mediaType === "audio" ? 120 : cfg.quickResultWaitSeconds,
       msg.key.id
     );
   }

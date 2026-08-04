@@ -12,7 +12,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
-use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
+use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
 use claw_core::types::{
@@ -34,7 +34,6 @@ const WA_I18N_BIND_SUCCESS_KEY: &str = "whatsapp_cloud.msg.bind_success";
 const WA_I18N_PENDING_RESUME_STOPPED_KEY: &str = "whatsapp_cloud.msg.pending_resume_stopped";
 const WA_I18N_BIND_INVALID_KEY: &str = "whatsapp_cloud.msg.bind_invalid";
 const WA_I18N_BIND_HELP_KEY: &str = "whatsapp_cloud.msg.bind_help";
-const WA_I18N_RUN_USAGE_KEY: &str = "whatsapp_cloud.msg.run_usage";
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str =
     "whatsapp_cloud.msg.request_timeout_retry_later";
@@ -45,7 +44,6 @@ const WA_PENDING_RESUME_STOPPED_FALLBACK: &str =
     "message_key=whatsapp_cloud.msg.pending_resume_stopped";
 const WA_BIND_INVALID_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_invalid";
 const WA_BIND_HELP_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_help";
-const WA_RUN_USAGE_FALLBACK: &str = "message_key=whatsapp_cloud.msg.run_usage";
 const WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
     "message_key=whatsapp_cloud.msg.request_timeout_retry_later task_id={task_id}";
 
@@ -617,12 +615,6 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
         .as_ref()
         .map(|v| v.body.trim().to_string())
         .unwrap_or_default();
-    let slash_command = state
-        .command_catalog
-        .match_command(&inbound_text, "whatsapp");
-    let core_action = slash_command
-        .as_ref()
-        .and_then(|command| command.definition.core_action());
     if let Some(candidate) = extract_bind_key_candidate(inbound_text.trim(), false) {
         if let Some(bind_result) = bind_whatsapp_identity(state, &msg.from, &candidate).await? {
             let identity = bind_result.identity;
@@ -721,29 +713,20 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
             if text.trim().is_empty() {
                 return Ok(());
             }
-            if matches!(core_action, Some(CoreCommandAction::RunSkill)) {
-                let command_tail = slash_command
-                    .as_ref()
-                    .map(|command| command.tail.as_str())
-                    .unwrap_or_default();
-                handle_run_command(state, &msg.from, user_id, chat_id, &msg.id, command_tail)
-                    .await?;
-            } else {
-                let payload = json!({ "text": text.trim() });
-                let task_id = submit_task_only(
-                    state,
-                    user_id,
-                    chat_id,
-                    &msg.from,
-                    Some(&msg.id),
-                    TaskKind::Ask,
-                    payload,
-                )
-                .await?;
-                let delivered = try_deliver_quick_result(state, &msg.from, &task_id, None).await?;
-                if !delivered {
-                    spawn_task_result_delivery(state.clone(), msg.from.clone(), task_id, None);
-                }
+            let payload = json!({ "text": text.trim() });
+            let task_id = submit_task_only(
+                state,
+                user_id,
+                chat_id,
+                &msg.from,
+                Some(&msg.id),
+                TaskKind::Ask,
+                payload,
+            )
+            .await?;
+            let delivered = try_deliver_quick_result(state, &msg.from, &task_id, None).await?;
+            if !delivered {
+                spawn_task_result_delivery(state.clone(), msg.from.clone(), task_id, None);
             }
         }
         "image" => {
@@ -775,49 +758,6 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
     Ok(())
 }
 
-async fn handle_run_command(
-    state: &AppState,
-    wa_id: &str,
-    user_id: i64,
-    chat_id: i64,
-    message_id: &str,
-    command_tail: &str,
-) -> anyhow::Result<()> {
-    let rest = command_tail.trim();
-    if rest.is_empty() {
-        let text = wa_t(state, WA_I18N_RUN_USAGE_KEY, WA_RUN_USAGE_FALLBACK);
-        send_whatsapp_text(state, wa_id, &text).await?;
-        return Ok(());
-    }
-    let mut parts = rest.splitn(2, ' ');
-    let skill_name = parts.next().unwrap_or_default().trim();
-    let args = parts.next().unwrap_or_default().trim();
-    if skill_name.is_empty() {
-        let text = wa_t(state, WA_I18N_RUN_USAGE_KEY, WA_RUN_USAGE_FALLBACK);
-        send_whatsapp_text(state, wa_id, &text).await?;
-        return Ok(());
-    }
-    let payload = json!({
-        "skill_name": skill_name,
-        "args": args
-    });
-    let task_id = submit_task_only(
-        state,
-        user_id,
-        chat_id,
-        wa_id,
-        Some(message_id),
-        TaskKind::RunSkill,
-        payload,
-    )
-    .await?;
-    let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
-    if !delivered {
-        spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
-    }
-    Ok(())
-}
-
 async fn handle_image_message(
     state: &AppState,
     wa_id: &str,
@@ -838,14 +778,15 @@ async fn handle_image_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_whatsapp_media(state, &media.id, &abs_path).await?;
+    let size = download_whatsapp_media(state, &media.id, &abs_path).await?;
     let payload = json!({
-        "skill_name": "image_vision",
-        "args": {
-            "action": "describe",
-            "images": [{"path": rel_path}],
-            "detail_level": "normal"
-        }
+        "text": "",
+        "attachments": [{
+            "kind": "image",
+            "path": rel_path,
+            "mime_type": media.mime_type.as_deref().unwrap_or("image/jpeg"),
+            "size": size,
+        }]
     });
     let task_id = submit_task_only(
         state,
@@ -853,7 +794,7 @@ async fn handle_image_message(
         chat_id,
         wa_id,
         Some(message_id),
-        TaskKind::RunSkill,
+        TaskKind::Ask,
         payload,
     )
     .await?;
@@ -884,12 +825,15 @@ async fn handle_audio_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_whatsapp_media(state, &media.id, &abs_path).await?;
-    let transcribe_payload = json!({
-        "skill_name": "audio_transcribe",
-        "args": {
-            "audio": {"path": rel_path}
-        }
+    let size = download_whatsapp_media(state, &media.id, &abs_path).await?;
+    let payload = json!({
+        "text": "",
+        "attachments": [{
+            "kind": "audio",
+            "path": rel_path,
+            "mime_type": media.mime_type.as_deref().unwrap_or("audio/ogg"),
+            "size": size,
+        }]
     });
     let task_id = submit_task_only(
         state,
@@ -897,8 +841,8 @@ async fn handle_audio_message(
         chat_id,
         wa_id,
         Some(message_id),
-        TaskKind::RunSkill,
-        transcribe_payload,
+        TaskKind::Ask,
+        payload,
     )
     .await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, Some(120)).await?;
@@ -943,7 +887,7 @@ async fn download_whatsapp_media(
     state: &AppState,
     media_id: &str,
     local_path: &Path,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u64> {
     let meta_url = format!("{}/v23.0/{}", state.api_base, media_id);
     let meta = state
         .client
@@ -976,7 +920,7 @@ async fn download_whatsapp_media(
         fs::create_dir_all(parent)?;
     }
     fs::write(local_path, &bytes)?;
-    Ok(())
+    Ok(bytes.len() as u64)
 }
 
 async fn submit_task_only(
@@ -1020,6 +964,16 @@ async fn submit_task_only(
             .with_locale(state.language.clone());
             if let Some(message_id) = message_id {
                 ingress = ingress.with_message_id(message_id);
+            }
+            if let Some(attachments) = payload.get("attachments").and_then(Value::as_array) {
+                ingress
+                    .attachments
+                    .extend(attachments.iter().filter_map(|attachment| {
+                        serde_json::from_value::<
+                        claw_core::channel_ingress::ChannelIngressAttachment,
+                    >(attachment.clone())
+                    .ok()
+                    }));
             }
             ingress
         }),

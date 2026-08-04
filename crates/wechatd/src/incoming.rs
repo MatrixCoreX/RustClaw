@@ -83,15 +83,13 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    return spawn_inbound_skill_flow(
+                    return spawn_inbound_attachment_flow(
                         state,
                         task_context.clone(),
-                        "image_vision",
-                        json!({
-                            "action": "describe",
-                            "images": [{"path": rel}],
-                            "detail_level": "normal"
-                        }),
+                        "image",
+                        rel,
+                        "image/jpeg",
+                        bytes.len() as u64,
                         bound_user_key.clone(),
                     )
                     .await;
@@ -130,11 +128,13 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    let hint = wechat_media_agent_context("video", &rel, None);
-                    return spawn_inbound_ask_flow(
+                    return spawn_inbound_attachment_flow(
                         state,
                         task_context.clone(),
-                        hint,
+                        "video",
+                        rel,
+                        "video/mp4",
+                        bytes.len() as u64,
                         bound_user_key.clone(),
                     )
                     .await;
@@ -173,27 +173,13 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    if inbox_rel_suits_doc_parse(&rel) {
-                        return spawn_inbound_skill_flow(
-                            state,
-                            task_context.clone(),
-                            "doc_parse",
-                            json!({
-                                "action": "parse_doc",
-                                "path": rel,
-                                "max_chars": 12000,
-                                "include_metadata": true,
-                                "table_mode": "basic"
-                            }),
-                            bound_user_key.clone(),
-                        )
-                        .await;
-                    }
-                    let hint = wechat_media_agent_context("file", &rel, Some(&safe_name));
-                    return spawn_inbound_ask_flow(
+                    return spawn_inbound_attachment_flow(
                         state,
                         task_context.clone(),
-                        hint,
+                        "file",
+                        rel,
+                        "application/octet-stream",
+                        bytes.len() as u64,
                         bound_user_key.clone(),
                     )
                     .await;
@@ -248,11 +234,18 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    return spawn_inbound_skill_flow(
+                    let mime_type = if rel.ends_with(".wav") {
+                        "audio/wav"
+                    } else {
+                        "application/octet-stream"
+                    };
+                    return spawn_inbound_attachment_flow(
                         state,
                         task_context.clone(),
-                        "audio_transcribe",
-                        json!({ "audio": { "path": rel } }),
+                        "audio",
+                        rel,
+                        mime_type,
+                        data_to_write.len() as u64,
                         bound_user_key.clone(),
                     )
                     .await;

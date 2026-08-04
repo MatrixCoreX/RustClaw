@@ -20,6 +20,8 @@ pub(crate) struct ThreadAskContext<'a> {
     pub(crate) model_override: Option<&'a ModelOverride>,
     pub(crate) compacted_context_ref: Option<&'a str>,
     pub(crate) goal_ref: Option<&'a str>,
+    pub(crate) rewind_anchor: Option<&'a Value>,
+    pub(crate) completed_side_effect_refs: &'a [String],
     pub(crate) attachments: &'a [Value],
 }
 
@@ -297,6 +299,27 @@ pub(crate) fn submit_ask(
     )
 }
 
+pub(crate) fn submit_auto_review(
+    base_url: &str,
+    key: &str,
+    target_task_id: &str,
+    options: TaskSubmissionOptions,
+) -> Result<String> {
+    submit_ask_with_payload(base_url, key, auto_review_payload(target_task_id), options)
+}
+
+pub(super) fn auto_review_payload(target_task_id: &str) -> Value {
+    json!({
+        "text": "auto_review",
+        "entrypoint": "auto_review",
+        "source": "clawcli_machine",
+        "execution_profile": "coding",
+        "auto_review_once": true,
+        "auto_review_blocking": false,
+        "review_target_task_id": target_task_id,
+    })
+}
+
 pub(crate) fn submit_resume_ask(
     base_url: &str,
     key: &str,
@@ -462,6 +485,16 @@ pub(super) fn threaded_ask_payload(text: &str, context: ThreadAskContext<'_>) ->
     }
     if let Some(reference) = context.goal_ref {
         object.insert("goal_ref".to_string(), json!(reference));
+    }
+    if let Some(anchor) = context.rewind_anchor {
+        object.insert(
+            "session_rewind".to_string(),
+            json!({
+                "schema_version": 1,
+                "anchor": anchor,
+                "completed_side_effect_refs": context.completed_side_effect_refs,
+            }),
+        );
     }
     if !context.attachments.is_empty() {
         object.insert(

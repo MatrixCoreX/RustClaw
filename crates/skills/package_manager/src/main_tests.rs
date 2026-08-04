@@ -115,6 +115,37 @@ fn dry_run_install_accepts_structured_module_alias() {
 }
 
 #[test]
+fn dry_run_install_emits_monotonic_progress_for_every_package() {
+    let mut output = Vec::new();
+    let mut emitter = SkillProgressEmitter::new(&mut output, "package-progress");
+    execute_with_progress(
+        serde_json::json!({
+            "action":"install",
+            "manager":"apt-get",
+            "packages":["jq","curl","git"],
+            "dry_run":true,
+            "use_sudo":false
+        }),
+        &mut emitter,
+    )
+    .expect("dry-run packages");
+    let frames = String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            skill_sdk::validate_progress_frame_line(line.as_bytes(), "package-progress").unwrap()
+        })
+        .filter(|frame| frame.detail_key == "package_manager.install.progress")
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 4);
+    assert_eq!(
+        frames.iter().map(|frame| frame.current).collect::<Vec<_>>(),
+        vec![Some(0), Some(1), Some(2), Some(3)]
+    );
+    assert!(frames.iter().all(|frame| frame.total == Some(3)));
+}
+
+#[test]
 fn smart_install_preview_forces_dry_run_and_does_not_write_a_local_log() {
     let root = TempDir::new("smart-preview-no-write");
 

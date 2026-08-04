@@ -1,22 +1,5 @@
 use super::*;
 
-pub(super) fn parse_voice_reply_mode(raw: &str) -> VoiceReplyMode {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "text" => VoiceReplyMode::Text,
-        "both" => VoiceReplyMode::Both,
-        _ => VoiceReplyMode::Voice,
-    }
-}
-
-pub(super) fn normalize_voice_reply_mode(raw: &str) -> Option<String> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "voice" => Some("voice".to_string()),
-        "text" => Some("text".to_string()),
-        "both" => Some("both".to_string()),
-        _ => None,
-    }
-}
-
 pub(super) fn should_expect_key_reply(state: &BotState, chat_id: i64) -> bool {
     state
         .pending_key_bind_by_chat
@@ -297,30 +280,11 @@ pub(super) async fn maybe_handle_resume_continuation(
             Ok(true)
         }
         Err(err) => {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.process_failed",
-                    &[("error", &err.to_string())],
-                ),
-            )
-            .await
-            .context("send resume submit error failed")?;
+            warn!(chat_id, error = %err, "resumed_task_submission_failed");
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.process_failed"))
+                .await
+                .context("send resume submit error failed")?;
             Ok(true)
         }
     }
-}
-
-pub(super) fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String {
-    let fallback =
-        normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
-    if let Ok(map) = state.voice_reply_mode_by_chat.lock() {
-        if let Some(mode) = map
-            .get(&chat_id)
-            .and_then(|v| normalize_voice_reply_mode(v))
-        {
-            return mode;
-        }
-    }
-    fallback
 }

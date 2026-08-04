@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +68,8 @@ pub(crate) struct ChatSessionState {
     pub(crate) attachments: Vec<SessionAttachmentRef>,
     pub(crate) compacted_context_ref: Option<String>,
     pub(crate) goal_ref: Option<String>,
+    pub(crate) rewind_anchor: Option<Value>,
+    pub(crate) completed_side_effect_refs: Vec<String>,
     pub(crate) event_cursor: u64,
     pub(crate) working_directory: WorkingDirectoryIdentity,
 }

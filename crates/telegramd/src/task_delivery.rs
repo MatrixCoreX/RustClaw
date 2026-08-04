@@ -40,59 +40,18 @@ pub(super) fn spawn_task_result_delivery(
     soft_notice_override_seconds: Option<u64>,
     fail_prefix: String,
 ) {
-    spawn_task_result_delivery_with_mode(
-        bot,
-        state,
-        chat_id,
-        user_id,
-        task_id,
-        soft_notice_override_seconds,
-        fail_prefix,
-        false,
-    );
-}
-
-pub(super) fn spawn_voice_task_result_delivery(
-    bot: Bot,
-    state: BotState,
-    chat_id: ChatId,
-    user_id: i64,
-    task_id: String,
-    fail_prefix: String,
-) {
-    spawn_task_result_delivery_with_mode(
-        bot,
-        state,
-        chat_id,
-        user_id,
-        task_id,
-        None,
-        fail_prefix,
-        true,
-    );
-}
-
-fn spawn_task_result_delivery_with_mode(
-    bot: Bot,
-    state: BotState,
-    chat_id: ChatId,
-    user_id: i64,
-    task_id: String,
-    soft_notice_override_seconds: Option<u64>,
-    fail_prefix: String,
-    voice_reply: bool,
-) {
     tokio::spawn(async move {
         let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), chat_id);
         let poll_interval_ms = state.poll_interval_ms.max(1);
         // 0 表示不发送“任务已运行超过 X 秒”的提示
         let soft_notice_seconds = soft_notice_override_seconds.unwrap_or(state.task_wait_seconds);
-        let hard_notice_seconds = state.task_wait_seconds;
         let started_at = tokio::time::Instant::now();
-        let mut soft_notice_sent = false;
-        let mut hard_notice_sent = false;
+        let capabilities = claw_core::channel_progress::ChannelProgressCapabilities::for_channel(
+            ChannelKind::Telegram,
+        );
+        let mut progress_projection =
+            claw_core::channel_progress::ChannelProgressProjectionState::default();
         let mut sent_progress_count = 0usize;
-        let mut last_skill_progress_seq = 0_u64;
 
         loop {
             match query_task_status(
@@ -105,9 +64,13 @@ fn spawn_task_result_delivery_with_mode(
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
                         if let Some((seq, message)) = skill_progress_message(&state, &task) {
-                            if seq > last_skill_progress_seq {
+                            if progress_projection.should_emit_progress(
+                                seq,
+                                started_at.elapsed().as_secs(),
+                                soft_notice_seconds,
+                                capabilities,
+                            ) {
                                 let _ = bot.send_message(chat_id, message).await;
-                                last_skill_progress_seq = seq;
                                 sent_progress_count = sent_progress_count.saturating_add(1);
                             }
                         }
@@ -130,10 +93,11 @@ fn spawn_task_result_delivery_with_mode(
                             );
                             sent_progress_count = progress_messages.len();
                         }
-                        if soft_notice_seconds > 0
-                            && !soft_notice_sent
-                            && started_at.elapsed() >= Duration::from_secs(soft_notice_seconds)
-                        {
+                        if progress_projection.should_emit_slow_notice(
+                            started_at.elapsed().as_secs(),
+                            soft_notice_seconds,
+                            capabilities,
+                        ) {
                             info!(
                                 "task still running notice: phase=quick task_id={} chat_id={} elapsed_seconds={}",
                                 task_id,
@@ -149,33 +113,11 @@ fn spawn_task_result_delivery_with_mode(
                                 ],
                             );
                             let _ = bot.send_message(chat_id, msg).await;
-                            soft_notice_sent = true;
-                        }
-                        if hard_notice_seconds > 0
-                            && !hard_notice_sent
-                            && hard_notice_seconds > soft_notice_seconds
-                            && started_at.elapsed() >= Duration::from_secs(hard_notice_seconds)
-                        {
-                            info!(
-                                "task still running notice: phase=worker_timeout task_id={} chat_id={} elapsed_seconds={}",
-                                task_id,
-                                chat_id.0,
-                                hard_notice_seconds
-                            );
-                            let hard_seconds = hard_notice_seconds.to_string();
-                            let msg = state.i18n.t_with(
-                                "telegram.msg.task_still_running_worker_timeout",
-                                &[
-                                    ("seconds", hard_seconds.as_str()),
-                                    ("task_id", task_id.as_str()),
-                                ],
-                            );
-                            let _ = bot.send_message(chat_id, msg).await;
-                            hard_notice_sent = true;
                         }
                         tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                     }
                     TaskStatus::Succeeded => {
+                        progress_projection.mark_terminal();
                         let answers = task_success_messages(&state, &task);
                         let resume_followup_decision = task
                             .result_json
@@ -202,33 +144,22 @@ fn spawn_task_result_delivery_with_mode(
                             sent_progress_count,
                             answers.len(),
                         );
-                        if voice_reply {
-                            deliver_voice_answers(
-                                &state,
-                                chat_id,
-                                user_id,
-                                &task_id,
-                                &answers,
-                                soft_notice_sent || hard_notice_sent,
-                            )
-                            .await;
-                        } else {
-                            request_terminal_delivery(
-                                &state,
-                                chat_id.0,
-                                &task_id,
-                                soft_notice_sent || hard_notice_sent,
-                            )
-                            .await;
-                        }
-                        break;
-                    }
-                    TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                         request_terminal_delivery(
                             &state,
                             chat_id.0,
                             &task_id,
-                            soft_notice_sent || hard_notice_sent,
+                            progress_projection.notice_sent(),
+                        )
+                        .await;
+                        break;
+                    }
+                    TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
+                        progress_projection.mark_terminal();
+                        request_terminal_delivery(
+                            &state,
+                            chat_id.0,
+                            &task_id,
+                            progress_projection.notice_sent(),
                         )
                         .await;
                         if let Some(resume_context) = task
@@ -254,100 +185,13 @@ fn spawn_task_result_delivery_with_mode(
                     }
                 },
                 Err(err) => {
-                    let _ = bot
-                        .send_message(chat_id, format!("{fail_prefix}：{}", err))
-                        .await;
+                    warn!(task_id = %task_id, chat_id = chat_id.0, error = %err, "task polling failed");
+                    let _ = bot.send_message(chat_id, fail_prefix.clone()).await;
                     break;
                 }
             }
         }
     });
-}
-
-async fn deliver_voice_answers(
-    state: &BotState,
-    chat_id: ChatId,
-    user_id: i64,
-    original_task_id: &str,
-    answers: &[String],
-    background: bool,
-) {
-    let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, chat_id.0));
-    let original_content = if matches!(mode, VoiceReplyMode::Voice) {
-        claw_core::channel_delivery::ChannelTaskDeliveryContent::MediaOnly
-    } else {
-        claw_core::channel_delivery::ChannelTaskDeliveryContent::Full
-    };
-    request_terminal_delivery_with_content(
-        state,
-        chat_id.0,
-        original_task_id,
-        background,
-        original_content,
-    )
-    .await;
-    if !matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
-        return;
-    }
-
-    let tts_input = terminal_tts_text(&answers.join("\n\n"));
-    if tts_input.is_empty() {
-        if matches!(mode, VoiceReplyMode::Voice) {
-            request_terminal_delivery_with_content(
-                state,
-                chat_id.0,
-                original_task_id,
-                background,
-                claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
-            )
-            .await;
-        }
-        return;
-    }
-    let payload = json!({
-        "skill_name": "audio_synthesize",
-        "args": {"text": tts_input, "response_format": "opus"}
-    });
-    let Ok(task_id) =
-        submit_task_only(state, user_id, chat_id.0, None, TaskKind::RunSkill, payload).await
-    else {
-        if matches!(mode, VoiceReplyMode::Voice) {
-            request_terminal_delivery_with_content(
-                state,
-                chat_id.0,
-                original_task_id,
-                background,
-                claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
-            )
-            .await;
-        }
-        return;
-    };
-    match poll_task_result(
-        state,
-        &task_id,
-        bound_user_key_for_chat(state, chat_id.0).as_deref(),
-        Some(90),
-    )
-    .await
-    {
-        Ok(_) => {
-            request_terminal_delivery(state, chat_id.0, &task_id, true).await;
-        }
-        Err(err) => {
-            warn!("telegram voice reply synthesis failed: {err}");
-            if matches!(mode, VoiceReplyMode::Voice) {
-                request_terminal_delivery_with_content(
-                    state,
-                    chat_id.0,
-                    original_task_id,
-                    background,
-                    claw_core::channel_delivery::ChannelTaskDeliveryContent::TextOnly,
-                )
-                .await;
-            }
-        }
-    }
 }
 
 async fn request_terminal_delivery(
@@ -549,28 +393,6 @@ fn model_authored_plan_step_title(task: &TaskQueryResponse, step_id: &str) -> Op
     (!title.is_empty() && title.chars().count() <= 512).then(|| title.to_string())
 }
 
-pub(super) fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {
-    if let Some(raw_detail) = task.error_text.as_deref() {
-        let detail = raw_detail.trim();
-        if !detail.is_empty() {
-            return detail.to_string();
-        }
-    }
-    state.i18n.t_with(
-        "telegram.error.task_finished_with_detail",
-        &[
-            ("status", &format!("{:?}", task.status)),
-            (
-                "detail",
-                &task
-                    .error_text
-                    .clone()
-                    .unwrap_or_else(|| state.i18n.t("telegram.msg.no_error_text")),
-            ),
-        ],
-    )
-}
-
 pub(super) async fn query_task_status(
     state: &BotState,
     task_id: &str,
@@ -658,6 +480,19 @@ pub(super) async fn submit_task_only(
             if let Some(message_id) = message_id.as_deref() {
                 ingress = ingress.with_message_id(message_id);
             }
+            if let Some(attachments) = payload
+                .get("attachments")
+                .and_then(serde_json::Value::as_array)
+            {
+                ingress
+                    .attachments
+                    .extend(attachments.iter().filter_map(|attachment| {
+                        serde_json::from_value::<
+                            claw_core::channel_ingress::ChannelIngressAttachment,
+                        >(attachment.clone())
+                        .ok()
+                    }));
+            }
             ingress
         }),
         idempotency_key: message_id
@@ -719,36 +554,6 @@ pub(super) async fn submit_task_only(
     Ok(task_id.to_string())
 }
 
-pub(super) async fn poll_task_result(
-    state: &BotState,
-    task_id: &str,
-    user_key: Option<&str>,
-    wait_override_seconds: Option<u64>,
-) -> anyhow::Result<Vec<String>> {
-    let poll_interval_ms = state.poll_interval_ms.max(1);
-    let wait_seconds = wait_override_seconds
-        .unwrap_or(state.task_wait_seconds)
-        .max(1);
-    let max_rounds = ((wait_seconds * 1000) / poll_interval_ms).max(1);
-
-    for _ in 0..max_rounds {
-        let task = query_task_status(state, task_id, user_key).await?;
-        match task.status {
-            TaskStatus::Queued | TaskStatus::Running => {
-                tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
-            }
-            TaskStatus::Succeeded => {
-                return Ok(task_success_messages(state, &task));
-            }
-            TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                return Err(anyhow!("{}", task_terminal_error_text(state, &task)));
-            }
-        }
-    }
-
-    Err(anyhow!("task_result_wait_timeout"))
-}
-
 pub(super) async fn cancel_tasks_for_chat(
     state: &BotState,
     user_id: i64,
@@ -791,50 +596,4 @@ pub(super) async fn cancel_tasks_for_chat(
         .and_then(|v| v.get("canceled").and_then(|n| n.as_i64()))
         .unwrap_or(0);
     Ok(canceled)
-}
-pub(super) async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow::Result<String> {
-    let url = format!("{}/v1/health", state.clawd_base_url);
-    let resp = maybe_with_user_key_header(
-        state.client.get(&url),
-        bound_user_key_for_chat(state, chat_id).as_deref(),
-    )
-    .send()
-    .await
-    .context("request health failed")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        let error = telegram_provider_http_error("health_check", status, &body);
-        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
-    }
-
-    let body: ApiResponse<HealthResponse> =
-        resp.json().await.context("decode health response failed")?;
-
-    if !body.ok {
-        let error = telegram_provider_invalid_response(
-            "health_check",
-            body.error.as_deref().unwrap_or("application_rejected"),
-        );
-        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
-    }
-
-    let data = body
-        .data
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.health_missing_data")))?;
-    Ok(state.i18n.t_with(
-        "telegram.msg.status_text",
-        &[
-            ("worker_state", &data.worker_state),
-            ("queue_length", &data.queue_length.to_string()),
-            ("running_length", &data.running_length.to_string()),
-            (
-                "running_oldest_age_seconds",
-                &data.running_oldest_age_seconds.to_string(),
-            ),
-            ("uptime_seconds", &data.uptime_seconds.to_string()),
-            ("version", &data.version),
-        ],
-    ))
 }

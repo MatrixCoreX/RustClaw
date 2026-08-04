@@ -607,6 +607,9 @@ enum CodeCommand {
     /// Alias for the coding-oriented review summary.
     Review {
         task_id: String,
+        /// Run a fresh read-only review before printing the report.
+        #[arg(long = "run")]
+        run: bool,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -705,6 +708,18 @@ enum SessionCommand {
     Fork {
         session_id: String,
         new_session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fork a session at a journal event without deleting the original history.
+    Rewind {
+        session_id: String,
+        #[arg(long = "to-event")]
+        to_event: u64,
+        #[arg(long = "new-session-id")]
+        new_session_id: Option<String>,
+        #[arg(long = "rewind-workspace")]
+        rewind_workspace: bool,
         #[arg(long)]
         json: bool,
     },
@@ -925,11 +940,23 @@ fn main() -> Result<()> {
             }
             CodeCommand::Review {
                 task_id,
+                run,
                 json,
                 events,
             } => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-                commands::run_review(base_url, k, task_id, *json, *events)
+                if *run {
+                    commands::run_review_once(
+                        base_url,
+                        k,
+                        task_id,
+                        *json,
+                        *events,
+                        submission_options,
+                    )
+                } else {
+                    commands::run_review(base_url, k, task_id, *json, *events)
+                }
             }
             CodeCommand::Continue {
                 task_id,
@@ -1137,6 +1164,25 @@ fn main() -> Result<()> {
                 new_session_id,
                 json,
             } => commands::run_session_fork(session_id, new_session_id, *json),
+            SessionCommand::Rewind {
+                session_id,
+                to_event,
+                new_session_id,
+                rewind_workspace,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_session_rewind(
+                    base_url,
+                    k,
+                    session_id,
+                    *to_event,
+                    new_session_id.as_deref(),
+                    *rewind_workspace,
+                    *json,
+                    submission_options,
+                )
+            }
         },
         Command::RunSkill {
             skill_name,

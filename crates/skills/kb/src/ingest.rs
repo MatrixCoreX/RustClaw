@@ -60,11 +60,29 @@ pub(super) struct IngestJob {
     pub(super) updated_at_epoch: i64,
 }
 
+#[cfg(test)]
 pub(super) fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
-    start_ingest_job(runtime, parse_ingest_args(args)?, "ingest")
+    do_ingest_with_progress(runtime, args, None)
 }
 
+pub(super) fn do_ingest_with_progress(
+    runtime: &KbRuntime,
+    args: &Value,
+    progress: Option<&mut super::KbProgressCallback<'_>>,
+) -> Result<Value> {
+    start_ingest_job(runtime, parse_ingest_args(args)?, "ingest", progress)
+}
+
+#[cfg(test)]
 pub(super) fn do_reindex(runtime: &KbRuntime, args: &Value) -> Result<Value> {
+    do_reindex_with_progress(runtime, args, None)
+}
+
+pub(super) fn do_reindex_with_progress(
+    runtime: &KbRuntime,
+    args: &Value,
+    progress: Option<&mut super::KbProgressCallback<'_>>,
+) -> Result<Value> {
     let namespace = super::required_namespace(args, "reindex")?;
     let index = storage::load_namespace(runtime, &namespace)
         .map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
@@ -94,14 +112,23 @@ pub(super) fn do_reindex(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             request[key] = value.clone();
         }
     }
-    let mut result = start_ingest_job(runtime, parse_ingest_args(&request)?, "reindex")?;
+    let mut result = start_ingest_job(runtime, parse_ingest_args(&request)?, "reindex", progress)?;
     if let Some(object) = result.as_object_mut() {
         object.insert("reindexed_from_revision".to_string(), json!(index.revision));
     }
     Ok(result)
 }
 
+#[cfg(test)]
 pub(super) fn do_resume_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
+    do_resume_ingest_with_progress(runtime, args, None)
+}
+
+pub(super) fn do_resume_ingest_with_progress(
+    runtime: &KbRuntime,
+    args: &Value,
+    progress: Option<&mut super::KbProgressCallback<'_>>,
+) -> Result<Value> {
     let job_id = required_job_id(args, "resume_ingest")?;
     let job = storage::load_ingest_job(runtime, &job_id)?;
     if job.status == "cancelled" || job.status == "completed" {
@@ -112,7 +139,7 @@ pub(super) fn do_resume_ingest(runtime: &KbRuntime, args: &Value) -> Result<Valu
     } else {
         empty_namespace(runtime, &job.request)
     };
-    process_job(runtime, job, index)
+    process_job(runtime, job, index, progress)
 }
 
 pub(super) fn do_ingest_job_status(runtime: &KbRuntime, args: &Value) -> Result<Value> {
@@ -133,7 +160,12 @@ pub(super) fn do_cancel_ingest(runtime: &KbRuntime, args: &Value) -> Result<Valu
     Ok(job_status_value(&job))
 }
 
-fn start_ingest_job(runtime: &KbRuntime, request: IngestArgs, operation: &str) -> Result<Value> {
+fn start_ingest_job(
+    runtime: &KbRuntime,
+    request: IngestArgs,
+    operation: &str,
+    progress: Option<&mut super::KbProgressCallback<'_>>,
+) -> Result<Value> {
     let targets = build_scan_targets(runtime, &request.paths)?;
     let scan = collect_target_files(&targets, request.max_depth)?;
     let now = now_epoch();
@@ -170,13 +202,14 @@ fn start_ingest_job(runtime: &KbRuntime, request: IngestArgs, operation: &str) -
         empty_namespace(runtime, &job.request)
     };
     job.status = "running".to_string();
-    process_job(runtime, job, index)
+    process_job(runtime, job, index, progress)
 }
 
 fn process_job(
     runtime: &KbRuntime,
     mut job: IngestJob,
     mut index: NamespaceIndex,
+    mut progress: Option<&mut super::KbProgressCallback<'_>>,
 ) -> Result<Value> {
     if job.owner_user_key != runtime.scope_user_key {
         return Err(anyhow!("ingest job owner mismatch"));
@@ -189,6 +222,9 @@ fn process_job(
     let mut run_ingested = 0usize;
     let mut run_skipped = 0usize;
     let mut run_removed = 0usize;
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(job.processed_files as u64, job.manifest.len() as u64)?;
+    }
 
     while job.next_file_index < job.manifest.len() {
         if run_files > 0
@@ -220,6 +256,9 @@ fn process_job(
         job.processed_bytes = job.processed_bytes.saturating_add(size);
         job.next_file_index += 1;
         job.last_completed_path = Some(path_str.clone());
+        if let Some(callback) = progress.as_deref_mut() {
+            callback(job.processed_files as u64, job.manifest.len() as u64)?;
+        }
 
         if (!job.request.file_types.is_empty() && !job.request.file_types.contains(&file_type))
             || size > job.request.max_file_size

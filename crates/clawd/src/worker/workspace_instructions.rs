@@ -56,7 +56,12 @@ pub(super) fn prepare_workspace_instructions(
     let prompt_skip_count = discovery
         .sources
         .iter()
-        .filter(|source| matches!(source.status, "invalid_utf8" | "unreadable"))
+        .filter(|source| {
+            matches!(
+                source.status,
+                "invalid_utf8" | "unreadable" | "missing" | "not_file"
+            )
+        })
         .count();
     let source_bytes_total = discovery
         .sources
@@ -125,6 +130,7 @@ fn source_attribution(source: &InstructionSource) -> Value {
     json!({
         "schema_version": 1,
         "prompt_kind": PROMPT_KIND,
+        "source_layer": source.source_layer,
         "logical_path": source.logical_path,
         "resolved_source": "workspace_file",
         "content_sha256": source.content_sha256,

@@ -24,7 +24,7 @@ struct BridgeHealth {
 const WA_WEB_I18N_BRIDGE_PROCESS_EXITED_KEY: &str = "whatsapp_web.msg.bridge_process_exited";
 const WA_WEB_I18N_BRIDGE_WAIT_FAILED_KEY: &str = "whatsapp_web.msg.bridge_wait_failed";
 const WA_WEB_BRIDGE_PROCESS_EXITED_FALLBACK: &str = "bridge process exited";
-const WA_WEB_BRIDGE_WAIT_FAILED_FALLBACK: &str = "bridge wait failed: {error}";
+const WA_WEB_BRIDGE_WAIT_FAILED_FALLBACK: &str = "message_key=whatsapp_web.msg.bridge_wait_failed";
 
 fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
     let lang = language.trim();
