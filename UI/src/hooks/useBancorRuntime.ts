@@ -5,6 +5,7 @@ import type {
   NniBancorAccountResponse,
   NniBancorCandlesResponse,
   NniBancorMarketResponse,
+  NniBancorMarketTradesResponse,
   NniBancorQuoteResponse,
   NniBancorTradeResponse,
 } from "../types/api";
@@ -142,6 +143,7 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
   const [market, setMarket] = useState<NniBancorMarketResponse | null>(null);
   const [candles, setCandles] = useState<NniBancorCandlesResponse | null>(null);
   const [account, setAccount] = useState<NniBancorAccountResponse | null>(null);
+  const [marketTrades, setMarketTrades] = useState<NniBancorMarketTradesResponse | null>(null);
   const [quote, setQuote] = useState<NniBancorQuoteResponse | null>(null);
   const [lastTrade, setLastTrade] = useState<NniBancorTradeResponse | null>(null);
   const [marketLoading, setMarketLoading] = useState(false);
@@ -149,6 +151,8 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
   const [candlesError, setCandlesError] = useState<string | null>(null);
   const [candleIntervalSeconds, setCandleIntervalSeconds] = useState(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [marketTradesLoading, setMarketTradesLoading] = useState(false);
+  const [marketTradesError, setMarketTradesError] = useState<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeLoading, setTradeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,6 +196,30 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
       return null;
     } finally {
       if (!silent) setAccountLoading(false);
+    }
+  };
+
+  const fetchMarketTrades = async (page = marketTrades?.page ?? 1, silent = false) => {
+    if (!silent) setMarketTradesLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(Math.max(1, page)), per_page: "20" });
+      const response = await apiFetch(`/v1/nni/bancor/trades?${params}`);
+      const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
+      if (!response.ok || !body.ok || !body.data) {
+        throw new Error(readError(body, `Market trades load failed (${response.status})`));
+      }
+      setMarketTrades(body.data);
+      setMarketTradesError(null);
+      return body.data;
+    } catch (cause) {
+      if (!silent) {
+        setMarketTradesError(
+          cause instanceof Error ? cause.message : t("市场成交记录读取失败。", "Market trades could not be loaded."),
+        );
+      }
+      return null;
+    } finally {
+      if (!silent) setMarketTradesLoading(false);
     }
   };
 
@@ -281,6 +309,7 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
       await Promise.all([
         fetchMarket(true),
         fetchAccount(1, true),
+        fetchMarketTrades(1, true),
         fetchCandles(candleIntervalSeconds, true),
       ]);
       return body.data;
@@ -301,6 +330,7 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
     market,
     candles,
     account,
+    marketTrades,
     quote,
     lastTrade,
     marketLoading,
@@ -308,6 +338,8 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
     candlesError,
     candleIntervalSeconds,
     accountLoading,
+    marketTradesLoading,
+    marketTradesError,
     quoteLoading,
     tradeLoading,
     error,
@@ -316,6 +348,7 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
     fetchCandles,
     changeCandleInterval,
     fetchAccount,
+    fetchMarketTrades,
     preview,
     trade,
     clearQuote,

@@ -1179,6 +1179,22 @@ export interface NniBancorTradeRecord {
   created_at_unix: number;
 }
 
+export interface NniBancorMarketTradeRecord extends NniBancorTradeRecord {
+  device_pubkey_masked: string;
+}
+
+export interface NniBancorMarketTradesResponse {
+  schema_version: 1;
+  status: string;
+  market_id: string;
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  trades: NniBancorMarketTradeRecord[];
+  node_url?: string;
+}
+
 export interface NniBancorAccountResponse {
   schema_version: 1;
   status: string;

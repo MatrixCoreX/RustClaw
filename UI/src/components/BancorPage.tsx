@@ -151,6 +151,7 @@ export function BancorPage({
     market,
     candles,
     account,
+    marketTrades,
     quote,
     lastTrade,
     marketLoading,
@@ -158,6 +159,8 @@ export function BancorPage({
     candlesError,
     candleIntervalSeconds,
     accountLoading,
+    marketTradesLoading,
+    marketTradesError,
     quoteLoading,
     tradeLoading,
     error,
@@ -166,6 +169,7 @@ export function BancorPage({
     fetchCandles,
     changeCandleInterval,
     fetchAccount,
+    fetchMarketTrades,
     preview,
     trade,
     clearQuote,
@@ -447,53 +451,95 @@ export function BancorPage({
         </div>
       </section>
 
-      <section className="theme-shadow-card p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-white">{t("我的成交记录", "My trade history")}</h2>
-            <p className="mt-1 text-sm text-white/50">{t("这里只显示当前设备公钥签署的交易。", "Only trades signed by this device key are shown.")}</p>
+      <section className="grid gap-5 lg:grid-cols-2 lg:items-start">
+        <article className="theme-shadow-card p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">{t("我的成交记录", "My trade history")}</h2>
+              <p className="mt-1 text-sm text-white/50">{t("这里只显示当前设备公钥签署的交易。", "Only trades signed by this device key are shown.")}</p>
+            </div>
+            <span className="text-xs text-white/40">{account?.total ?? 0} {t("笔", "trades")}</span>
           </div>
-          <span className="text-xs text-white/40">{account?.total ?? 0} {t("笔", "trades")}</span>
-        </div>
-        <div className="mt-4 grid gap-2">
-          {account?.trades.length ? account.trades.map((record) => (
-            <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
-              <div>
-                <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
-                <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
+          <div className="mt-4 grid gap-2">
+            {account?.trades.length ? account.trades.map((record) => (
+              <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
+                <div>
+                  <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
+                  <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
+                </div>
+                <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
+                <span className="font-medium text-emerald-200">+ {record.output_amount} {record.output_asset}</span>
               </div>
-              <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
-              <span className="font-medium text-emerald-200">+ {record.output_amount} {record.output_asset}</span>
-            </div>
-          )) : (
-            <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
-              {account ? t("还没有成交记录。", "No trades yet.") : t("点击“交易”卡片内的余额刷新按钮读取账户。", "Use the balance refresh button in the Trade card to load the account.")}
-            </div>
-          )}
-        </div>
-        {account && account.total_pages > 1 ? (
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <button
-              type="button"
-              className="theme-secondary-btn"
-              disabled={accountLoading || account.page <= 1}
-              onClick={() => void fetchAccount(account.page - 1)}
-            >
-              {t("上一页", "Previous")}
-            </button>
-            <span className="text-xs text-white/45">
-              {t("第", "Page")} {account.page} / {account.total_pages} {t("页", "")}
-            </span>
-            <button
-              type="button"
-              className="theme-secondary-btn"
-              disabled={accountLoading || account.page >= account.total_pages}
-              onClick={() => void fetchAccount(account.page + 1)}
-            >
-              {t("下一页", "Next")}
-            </button>
+            )) : (
+              <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
+                {account ? t("还没有成交记录。", "No trades yet.") : t("点击“交易”卡片内的余额刷新按钮读取账户。", "Use the balance refresh button in the Trade card to load the account.")}
+              </div>
+            )}
           </div>
-        ) : null}
+          {account && account.total_pages > 1 ? (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button type="button" className="theme-secondary-btn" disabled={accountLoading || account.page <= 1} onClick={() => void fetchAccount(account.page - 1)}>
+                {t("上一页", "Previous")}
+              </button>
+              <span className="text-xs text-white/45">{t("第", "Page")} {account.page} / {account.total_pages} {t("页", "")}</span>
+              <button type="button" className="theme-secondary-btn" disabled={accountLoading || account.page >= account.total_pages} onClick={() => void fetchAccount(account.page + 1)}>
+                {t("下一页", "Next")}
+              </button>
+            </div>
+          ) : null}
+        </article>
+
+        <article className="theme-shadow-card p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">{t("市场成交记录", "Market trade history")}</h2>
+              <p className="mt-1 text-sm text-white/50">{t("展示全市场成交，其他设备公钥已打码。", "Shows market-wide trades with device public keys masked.")}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-white/40">{marketTrades?.total ?? 0} {t("笔", "trades")}</span>
+              <button
+                type="button"
+                className="theme-icon-btn"
+                aria-label={t("刷新市场成交记录", "Refresh market trades")}
+                disabled={marketTradesLoading}
+                onClick={() => void fetchMarketTrades(marketTrades?.page ?? 1)}
+              >
+                <RefreshCw className={`h-4 w-4 ${marketTradesLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+          </div>
+          {marketTradesError ? <p className="mt-3 text-sm text-red-200" role="alert">{marketTradesError}</p> : null}
+          <div className="mt-4 grid gap-2">
+            {marketTrades?.trades.length ? marketTrades.trades.map((record) => (
+              <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
+                    <span className="max-w-full truncate font-mono text-[11px] text-white/35">{record.device_pubkey_masked}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
+                </div>
+                <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
+                <span className="font-medium text-emerald-200">+ {record.output_amount} {record.output_asset}</span>
+              </div>
+            )) : (
+              <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
+                {marketTradesLoading ? t("正在读取市场成交记录…", "Loading market trades…") : t("市场暂时还没有成交记录。", "No market trades yet.")}
+              </div>
+            )}
+          </div>
+          {marketTrades && marketTrades.total_pages > 1 ? (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button type="button" className="theme-secondary-btn" disabled={marketTradesLoading || marketTrades.page <= 1} onClick={() => void fetchMarketTrades(marketTrades.page - 1)}>
+                {t("上一页", "Previous")}
+              </button>
+              <span className="text-xs text-white/45">{t("第", "Page")} {marketTrades.page} / {marketTrades.total_pages} {t("页", "")}</span>
+              <button type="button" className="theme-secondary-btn" disabled={marketTradesLoading || marketTrades.page >= marketTrades.total_pages} onClick={() => void fetchMarketTrades(marketTrades.page + 1)}>
+                {t("下一页", "Next")}
+              </button>
+            </div>
+          ) : null}
+        </article>
       </section>
 
       <BancorFormulaCard t={t} market={market} />
