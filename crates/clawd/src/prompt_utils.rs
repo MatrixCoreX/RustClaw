@@ -83,6 +83,7 @@ pub(crate) enum PromptSchemaId {
     UserResponseContractValidator,
     PlanResult,
     FinalizerOut,
+    TranscriptRevision,
     DeliveryTextClassifier,
     ScheduleIntent,
     LongTermSummary,
@@ -97,6 +98,7 @@ impl PromptSchemaId {
             Self::UserResponseContractValidator => "user_response_contract_validator",
             Self::PlanResult => "plan_result",
             Self::FinalizerOut => "finalizer_out",
+            Self::TranscriptRevision => "transcript_revision",
             Self::DeliveryTextClassifier => "delivery_text_classifier",
             Self::ScheduleIntent => "schedule_intent",
             Self::LongTermSummary => "long_term_summary",
@@ -114,6 +116,7 @@ impl PromptSchemaId {
         static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
         static PLAN_RESULT: OnceLock<Value> = OnceLock::new();
         static FINALIZER_OUT: OnceLock<Value> = OnceLock::new();
+        static TRANSCRIPT_REVISION: OnceLock<Value> = OnceLock::new();
         static DELIVERY_TEXT_CLASSIFIER: OnceLock<Value> = OnceLock::new();
         static SCHEDULE_INTENT: OnceLock<Value> = OnceLock::new();
         static LONG_TERM_SUMMARY: OnceLock<Value> = OnceLock::new();
@@ -141,6 +144,11 @@ impl PromptSchemaId {
             Self::FinalizerOut => FINALIZER_OUT.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/finalizer_out.schema.json"
+                ))
+            }),
+            Self::TranscriptRevision => TRANSCRIPT_REVISION.get_or_init(|| {
+                parse_schema(include_str!(
+                    "../../../prompts/schemas/transcript_revision.schema.json"
                 ))
             }),
             Self::DeliveryTextClassifier => DELIVERY_TEXT_CLASSIFIER.get_or_init(|| {

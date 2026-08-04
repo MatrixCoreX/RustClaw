@@ -5,8 +5,10 @@ use claw_core::capability_result::{
 use serde_json::json;
 
 use super::{
-    bounded_result, eligible_for_capability_result_synthesis, synthesis_evidence_catalog,
-    MAX_RESULT_JSON_CHARS,
+    bounded_result, eligible_for_capability_result_synthesis, normalized_transcript_language,
+    pending_transcript_review, safe_transcript_filename, split_transcript_chunks,
+    synthesis_evidence_catalog, transcript_delivery_is_inline, transcript_review_contract,
+    FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
 
@@ -24,6 +26,115 @@ fn ordinary_free_response_uses_generic_synthesis() {
         &loop_state,
         Some(&AgentRunContext::default())
     ));
+}
+
+#[test]
+fn latest_successful_transcription_contract_drives_review() {
+    let results = vec![
+        CapabilityResultEnvelope::ok(
+            "audio.transcribe",
+            Some("transcribe".to_string()),
+            json!({
+                "extra": {
+                    "transcription_review": {
+                        "required": true,
+                        "raw_text": "first",
+                        "response_language": "en",
+                        "source": "configured_stt"
+                    }
+                }
+            }),
+        ),
+        CapabilityResultEnvelope::ok(
+            "media_download.transcribe",
+            Some("transcribe".to_string()),
+            json!({
+                "extra": {
+                    "transcription_review": {
+                        "required": true,
+                        "raw_text": "今天天汽很好",
+                        "response_language": "zh-CN",
+                        "source": "media_download_local_asr",
+                        "delivery": {
+                            "inline_max_characters_exclusive": 200,
+                            "long_text_filename": "transcript.txt"
+                        }
+                    }
+                }
+            }),
+        ),
+    ];
+
+    let contract = transcript_review_contract(&results).expect("review contract");
+    assert!(pending_transcript_review(&results));
+    assert_eq!(contract.result_index, 1);
+    assert_eq!(contract.raw_text, "今天天汽很好");
+    assert_eq!(contract.response_language, "zh-CN");
+    assert_eq!(contract.inline_max_chars, 200);
+    assert_eq!(contract.long_text_filename, "transcript.txt");
+
+    let loop_state = LoopState {
+        capability_results: results,
+        ..LoopState::default()
+    };
+    let context = AgentRunContext {
+        output_contract: Some(crate::IntentOutputContract {
+            delivery_required: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(!eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&context)
+    ));
+    assert!(pending_transcript_review(&loop_state.capability_results));
+}
+
+#[test]
+fn transcript_chunks_are_unicode_safe_and_bounded() {
+    let source = format!(
+        "{}。{}",
+        "甲".repeat(FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS),
+        "乙".repeat(500)
+    );
+    let chunks = split_transcript_chunks(&source, FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS);
+
+    assert!(chunks.len() >= 2);
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.chars().count() <= FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS));
+    assert_eq!(chunks.concat(), source);
+}
+
+#[test]
+fn transcript_language_and_filename_are_safely_normalized() {
+    assert_eq!(
+        normalized_transcript_language("request-language", "zh-CN"),
+        "zh-CN"
+    );
+    assert_eq!(normalized_transcript_language("ja-JP", "zh-CN"), "ja-JP");
+    let filename = safe_transcript_filename("../最终稿");
+    assert!(!filename.contains('/'));
+    assert!(filename.ends_with(".txt"));
+}
+
+#[test]
+fn transcript_delivery_switches_to_file_at_two_hundred_characters() {
+    assert!(transcript_delivery_is_inline(199, 200));
+    assert!(!transcript_delivery_is_inline(200, 200));
+    assert!(!transcript_delivery_is_inline(201, 200));
+}
+
+#[test]
+fn transcript_revision_schema_accepts_only_complete_review_output() {
+    let parsed = crate::prompt_utils::validate_against_schema::<super::TranscriptRevisionOutput>(
+        r#"{"reviewed_text":"校对后的文本。","delivery_message":"校对后的完整文本已作为附件发送。","qualified":true,"confidence":0.9,"reason":"complete"}"#,
+        crate::prompt_utils::PromptSchemaId::TranscriptRevision,
+    )
+    .expect("valid transcript revision output");
+
+    assert_eq!(parsed.value.reviewed_text, "校对后的文本。");
 }
 
 #[test]

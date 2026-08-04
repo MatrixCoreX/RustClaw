@@ -15,6 +15,8 @@ use toml::Value as TomlValue;
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -206,7 +208,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args) {
+            Ok(req) => match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -237,20 +239,33 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn error_extra(error_code: &str, retryable: bool) -> Value {
-    json!({
+    let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_code": error_code,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": retryable,
-    })
+    });
+    if matches!(
+        error_code,
+        "provider_not_configured"
+            | "provider_client_failed"
+            | "provider_request_failed"
+            | "provider_rejected"
+            | "input_too_large"
+    ) {
+        extra["fallback_capability"] = Value::String("media_download.transcribe".to_string());
+        extra["fallback_recommended"] = Value::Bool(true);
+    }
+    extra
 }
 
 fn execute(
     cfg: &RootConfig,
     workspace_root: &Path,
     args: Value,
+    context: Option<&Value>,
 ) -> Result<(String, Value), SkillFailure> {
     let args_obj = args.as_object();
     let action = args_obj
@@ -278,6 +293,7 @@ fn execute(
             &audio_input,
             vendor,
             vendor_name,
+            provider_cfg,
             &model,
         ));
     }
@@ -356,19 +372,39 @@ fn execute(
         AudioInput::LocalPath(p) => p.to_string_lossy().to_string(),
         AudioInput::Url(url) => url.clone(),
     };
+    let provider_location = transcription_provider_location(provider_cfg);
+    let response_language = transcript_response_language(args_obj, context);
+    let raw_character_count = text.chars().count();
     let extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "ok",
         "action": "transcribe",
         "provider": vendor_name,
+        "provider_location": provider_location,
         "model": model,
         "model_kind": model_kind,
         "audio_path": audio_source,
         "outputs": [{"type":"text","preview": truncate(&text, 800)}],
+        "transcription_review": {
+            "schema_version": 1,
+            "required": true,
+            "source": "configured_stt",
+            "source_engine": format!("{vendor_name}:{model}"),
+            "raw_text": text,
+            "raw_character_count": raw_character_count,
+            "response_language": response_language,
+            "corrections": ["recognition_errors", "typos", "broken_sentences"],
+            "preserve_meaning": true,
+            "delivery": {
+                "inline_max_characters_exclusive": 200,
+                "long_text_format": "text/plain; charset=utf-8",
+                "long_text_filename": "transcript.txt",
+            },
+        },
         "latency_ms": 0
     });
-    Ok((text, extra))
+    Ok(("AUDIO_TRANSCRIPTION_READY".to_string(), extra))
 }
 
 fn resolve_transcription_target<'a>(
@@ -404,6 +440,7 @@ fn preview_transcription(
     audio_input: &AudioInput,
     vendor: VendorKind,
     vendor_name: &str,
+    provider_cfg: &VendorConfig,
     model: &str,
 ) -> (String, Value) {
     let input_path = requested_audio_source(args).unwrap_or_else(|| match audio_input {
@@ -419,6 +456,12 @@ fn preview_transcription(
         AudioInput::Url(url) => ("url", url.clone(), Value::Null),
     };
     let model_kind = planned_model_kind(&cfg.audio_transcribe, vendor, model);
+    let provider_location = transcription_provider_location(provider_cfg);
+    let recommended_capability = if provider_location == "local" {
+        "media_download.transcribe"
+    } else {
+        "audio.transcribe"
+    };
     (
         "AUDIO_TRANSCRIBE_PREVIEW".to_string(),
         json!({
@@ -430,6 +473,9 @@ fn preview_transcription(
             "provider_call": false,
             "filesystem_write": false,
             "provider": vendor_name,
+            "provider_location": provider_location,
+            "recommended_capability": recommended_capability,
+            "fallback_capability": "media_download.transcribe",
             "model": model,
             "model_kind": model_kind,
             "input_kind": input_kind,
@@ -1655,6 +1701,39 @@ fn is_loopback_base_url(base_url: &str) -> bool {
         return false;
     };
     matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+}
+
+fn transcription_provider_location(cfg: &VendorConfig) -> &'static str {
+    if is_loopback_base_url(&cfg.base_url) {
+        "local"
+    } else {
+        "remote"
+    }
+}
+
+fn transcript_response_language(
+    args: Option<&Map<String, Value>>,
+    context: Option<&Value>,
+) -> String {
+    args.and_then(|args| args.get("response_language"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            context.and_then(Value::as_object).and_then(|context| {
+                ["locale", "language"].into_iter().find_map(|key| {
+                    context
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                })
+            })
+        })
+        .unwrap_or("request-language")
+        .chars()
+        .take(64)
+        .collect()
 }
 
 fn trim_trailing_slash(v: &str) -> String {

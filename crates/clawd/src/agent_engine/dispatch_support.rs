@@ -832,6 +832,10 @@ pub(super) async fn handle_synthesize_answer_action(
         step_in_round,
         crate::truncate_for_log(&refs_summary)
     );
+    let transcript_review_required = super::capability_result_synthesis::pending_transcript_review(
+        &loop_state.capability_results,
+    );
+    let mut capability_synthesis_error = None;
     let capability_synthesis =
         match super::capability_result_synthesis::synthesize_from_capability_results(
             state,
@@ -849,6 +853,7 @@ pub(super) async fn handle_synthesize_answer_action(
                     task.task_id,
                     error_code
                 );
+                capability_synthesis_error = Some(error_code);
                 None
             }
         };
@@ -859,6 +864,11 @@ pub(super) async fn handle_synthesize_answer_action(
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
             if let Some(answer) = capability_synthesis_answer {
                 return Ok(answer);
+            }
+            if transcript_review_required {
+                return Err(capability_synthesis_error.unwrap_or_else(|| {
+                    "transcript_revision_no_publishable_answer".to_string()
+                }));
             }
             if let Some(answer) =
                 synthesize_bounded_read_range_direct_answer(loop_state, agent_run_context)
