@@ -113,24 +113,26 @@ fn graph_queues_more_than_sixteen_independent_nodes_without_dropping_any() {
             )
         })
         .collect::<Vec<_>>();
-    let graph = prepare_child_task_graph(&specs, 3).expect("twenty-node graph");
-    assert_eq!(graph.nodes.len(), 20);
-    assert_eq!(
-        graph
-            .nodes
-            .iter()
-            .filter(|node| node.readiness == "ready")
-            .count(),
-        3
-    );
-    assert_eq!(
-        graph
-            .nodes
-            .iter()
-            .filter(|node| node.readiness == "blocked_capacity")
-            .count(),
-        17
-    );
+    for capacity in [1, 2, 4, 8] {
+        let graph = prepare_child_task_graph(&specs, capacity).expect("twenty-node graph");
+        assert_eq!(graph.nodes.len(), 20);
+        assert_eq!(
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.readiness == "ready")
+                .count(),
+            capacity
+        );
+        assert_eq!(
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.readiness == "blocked_capacity")
+                .count(),
+            20 - capacity
+        );
+    }
 }
 
 #[test]
@@ -302,4 +304,86 @@ fn restart_reconciliation_uses_task_rows_to_release_successor() {
         .expect("reviewer");
     assert_eq!(writer["readiness"], "succeeded");
     assert_eq!(reviewer["readiness"], "ready");
+}
+
+#[test]
+fn graph_projects_approval_and_tool_waits_from_machine_lifecycle_fields() {
+    let mut db = Connection::open_in_memory().expect("open db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            error_text TEXT,
+            lease_owner TEXT,
+            lease_expires_at INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );",
+    )
+    .expect("task schema");
+    ensure_child_task_graph_schema(&db).expect("graph schema");
+    let specs = vec![spec(
+        "parent",
+        "reviewer",
+        ChildTaskPermissionProfile::ReadOnly,
+        json!({}),
+    )];
+    let graph = prepare_child_task_graph(&specs, 1).expect("prepare graph");
+    let tx = db.transaction().expect("transaction");
+    persist_child_task_graph(&tx, &graph, "1").expect("persist graph");
+    tx.execute(
+        "INSERT INTO tasks(task_id, status, result_json, updated_at)
+         VALUES ('reviewer', 'running', ?1, '1')",
+        params![json!({
+            "task_lifecycle": {
+                "state": "needs_user",
+                "resume_reason": "confirmation_required"
+            },
+            "resume_context": {
+                "approval_request": {"status": "pending"}
+            }
+        })
+        .to_string()],
+    )
+    .expect("insert approval wait task");
+    tx.execute(
+        "UPDATE child_task_graph_nodes SET readiness = 'running'
+         WHERE child_task_id = 'reviewer'",
+        [],
+    )
+    .expect("mark running");
+    tx.commit().expect("commit");
+
+    let approval = graph_snapshot(&db, "parent")
+        .expect("approval snapshot")
+        .expect("graph");
+    assert_eq!(approval["nodes"][0]["execution_state"], "waiting_approval");
+    assert_eq!(
+        approval["nodes"][0]["waiting_reason"],
+        "confirmation_required"
+    );
+
+    db.execute(
+        "UPDATE tasks SET result_json = ?2 WHERE task_id = ?1",
+        params![
+            "reviewer",
+            json!({
+                "task_lifecycle": {
+                    "state": "waiting",
+                    "resume_entrypoint": "poll_async_job",
+                    "waiting_reason": "provider_job_running"
+                }
+            })
+            .to_string()
+        ],
+    )
+    .expect("set tool wait");
+    let tool_wait = graph_snapshot(&db, "parent")
+        .expect("tool snapshot")
+        .expect("graph");
+    assert_eq!(tool_wait["nodes"][0]["execution_state"], "waiting_tool");
+    assert_eq!(
+        tool_wait["nodes"][0]["waiting_reason"],
+        "provider_job_running"
+    );
 }

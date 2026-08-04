@@ -800,6 +800,7 @@ async fn compose_policy_block_delivery(
     .await
 }
 
+#[cfg(test)]
 fn normalize_subagent_stop_signal(stop_signal: Option<String>) -> (Option<String>, bool) {
     let recoverable_invalid_role =
         stop_signal.as_deref() == Some(super::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
@@ -890,19 +891,31 @@ pub(super) async fn execute_prepared_skill_action(
         )
         .await;
         let subagent_config = super::subagent_runtime::load_subagent_runtime_config(state);
-        if super::subagent_runtime::persistent_child_task_requested(&exec_args) {
-            let persistent_outcome =
-                super::subagent_runtime::record_persistent_child_task_from_args(
-                    state,
-                    task,
-                    loop_state,
-                    global_step,
-                    step_in_round,
-                    &exec_args,
-                    &subagent_config,
-                );
-            let (stop_signal, step_error_signal) = match persistent_outcome {
-                Ok(signal) => (Some(signal), None),
+        {
+            let durable_outcome =
+                if super::subagent_runtime::persistent_child_task_requested(&exec_args) {
+                    super::subagent_runtime::record_persistent_child_task_from_args(
+                        state,
+                        task,
+                        loop_state,
+                        global_step,
+                        step_in_round,
+                        &exec_args,
+                        &subagent_config,
+                    )
+                } else {
+                    super::subagent_runtime::record_durable_readonly_child_task_from_args(
+                        state,
+                        task,
+                        loop_state,
+                        global_step,
+                        step_in_round,
+                        &exec_args,
+                        &subagent_config,
+                    )
+                };
+            let (stop_signal, step_error_signal) = match durable_outcome {
+                Ok(signal) => (signal, None),
                 Err(signal) => (Some(signal), Some(signal)),
             };
             record_subagent_step_execution(
@@ -930,61 +943,13 @@ pub(super) async fn execute_prepared_skill_action(
                 },
             )
             .await;
+            super::support::refresh_agent_loop_checkpoint_snapshot(loop_state);
             return Ok(SkillActionOutcome {
                 ended_with_user_visible_output: false,
                 stop_signal: stop_signal.map(str::to_string),
                 continue_in_round: false,
             });
         }
-        let stop_signal = super::subagent_runtime::record_subagent_action_from_args_with_config(
-            loop_state,
-            global_step,
-            step_in_round,
-            &exec_args,
-            &subagent_config,
-        )
-        .map(str::to_string);
-        if stop_signal.is_none() {
-            super::subagent_runtime::maybe_run_model_assisted_subagent(
-                state,
-                task,
-                loop_state,
-                global_step,
-                step_in_round,
-                &exec_args,
-            )
-            .await;
-        }
-        record_subagent_step_execution(
-            task,
-            loop_state,
-            global_step,
-            step_in_round,
-            &exec_args,
-            action_trace_kind,
-            stop_signal.as_deref(),
-            fingerprint,
-        )?;
-        record_subagent_hook_stage(
-            state,
-            task,
-            loop_state,
-            crate::agent_hooks::HookStage::SubagentStop,
-            &exec_args,
-            global_step,
-            step_in_round,
-            if stop_signal.is_some() { "error" } else { "ok" },
-        )
-        .await;
-        let (stop_signal, recoverable_invalid_role) = normalize_subagent_stop_signal(stop_signal);
-        if recoverable_invalid_role {
-            loop_state.has_recoverable_failure_context = true;
-        }
-        return Ok(SkillActionOutcome {
-            ended_with_user_visible_output: false,
-            stop_signal,
-            continue_in_round: false,
-        });
     }
     if let Some(err) = skill_input_contract_error(state, normalized_skill, &exec_args) {
         return handle_preflight_argument_failure(

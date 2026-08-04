@@ -68,6 +68,17 @@ pub(super) struct RetryChildTaskByIdRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct StopChildTasksByParentRequest {
+    parent_task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CloseChildTaskByIdRequest {
+    parent_task_id: String,
+    child_task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct GoalByTaskIdRequest {
     task_id: String,
     operation: String,
@@ -667,6 +678,67 @@ pub(super) async fn retry_child_task_by_id(
                 parent.task_id, child.task_id, error_code
             );
             super::api_err::<serde_json::Value>(status, error_code)
+        }
+    }
+}
+
+pub(super) async fn stop_child_tasks_by_parent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<StopChildTasksByParentRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let parent = match authorized_task_admin_target_by_id(&state, &headers, &req.parent_task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    match crate::repo::cancel_child_tasks_for_parent(&state, &parent.task_id) {
+        Ok(result) => super::api_ok(result),
+        Err(error) => {
+            error!(
+                "child_stop_all_failed parent_task_id={} error={}",
+                parent.task_id, error
+            );
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "child_stop_all_failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn close_child_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CloseChildTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let parent = match authorized_task_admin_target_by_id(&state, &headers, &req.parent_task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    let child = match authorized_task_admin_target_by_id(&state, &headers, &req.child_task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    if parent.user_id != child.user_id || parent.chat_id != child.chat_id {
+        return super::api_err::<serde_json::Value>(
+            StatusCode::CONFLICT,
+            "child_parent_actor_mismatch",
+        );
+    }
+    match crate::repo::close_child_task_thread(&state, &parent.task_id, &child.task_id) {
+        Ok(Some(result)) => super::api_ok(result),
+        Ok(None) => {
+            super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "child_thread_not_closeable")
+        }
+        Err(error) => {
+            error!(
+                "child_thread_close_failed parent_task_id={} child_task_id={} error={}",
+                parent.task_id, child.task_id, error
+            );
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "child_thread_close_failed",
+            )
         }
     }
 }

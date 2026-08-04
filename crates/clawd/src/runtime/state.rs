@@ -436,6 +436,13 @@ impl WorkerConfig {
             .is_ok_and(|active| active.contains(task_id))
     }
 
+    pub(crate) fn active_running_task_count(&self) -> usize {
+        self.active_running_task_ids
+            .lock()
+            .map(|active| active.len())
+            .unwrap_or_default()
+    }
+
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         Self {

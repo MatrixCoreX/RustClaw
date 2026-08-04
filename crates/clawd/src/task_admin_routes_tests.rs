@@ -4,10 +4,11 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::{
-    cancel_task_by_id, goal_by_task_id, list_active_tasks, list_approval_scope_grants,
-    resume_task_by_id, retry_child_task_by_id, revoke_approval_scope_grant, ActiveTasksRequest,
-    CancelTaskByIdRequest, GoalByTaskIdRequest, ResumeTaskByIdRequest, RetryChildTaskByIdRequest,
-    RevokeApprovalScopeGrantRequest,
+    cancel_task_by_id, close_child_task_by_id, goal_by_task_id, list_active_tasks,
+    list_approval_scope_grants, resume_task_by_id, retry_child_task_by_id,
+    revoke_approval_scope_grant, stop_child_tasks_by_parent, ActiveTasksRequest,
+    CancelTaskByIdRequest, CloseChildTaskByIdRequest, GoalByTaskIdRequest, ResumeTaskByIdRequest,
+    RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest, StopChildTasksByParentRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -155,6 +156,107 @@ async fn cancel_task_by_id_is_idempotent_after_the_task_is_cancelled() {
     assert_eq!(second["canceled"], 0);
     assert_eq!(second["already_terminal"], true);
     assert_eq!(second["task_id"], task_id);
+}
+
+#[tokio::test]
+async fn child_stop_all_and_close_routes_are_parent_scoped_and_idempotent() {
+    let parent_task_id = "control-route-parent";
+    let active_child_id = "control-route-active-child";
+    let done_child_id = "control-route-done-child";
+    let state = state_with_goal_task(parent_task_id, json!({"text": "parent"}));
+    insert_child_task(&state, parent_task_id, active_child_id, "running");
+    insert_child_task(&state, parent_task_id, done_child_id, "succeeded");
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO child_task_graphs (
+                parent_task_id, schema_version, status, max_parallel,
+                session_ref, session_open_capacity, created_at, updated_at
+             ) VALUES (?1, 2, 'active', 2, 'route-session', 2, '1', '1')",
+            rusqlite::params![parent_task_id],
+        )
+        .expect("insert child graph");
+        for (child_task_id, readiness) in
+            [(active_child_id, "running"), (done_child_id, "succeeded")]
+        {
+            db.execute(
+                "INSERT INTO child_task_graph_nodes (
+                    parent_task_id, child_task_id, role, required, readiness,
+                    permission_profile, merge_policy, owned_paths_json,
+                    budget_json, model_policy_json, tool_policy_json,
+                    result_contract_json, created_at, updated_at
+                 ) VALUES (
+                    ?1, ?2, 'review', 1, ?3, 'read_only',
+                    'structured_findings', '[]', '{}', '{}', '{}', '{}', '1', '1'
+                 )",
+                rusqlite::params![parent_task_id, child_task_id, readiness],
+            )
+            .expect("insert child graph node");
+        }
+    }
+
+    let (first_status, Json(first_response)) = stop_child_tasks_by_parent(
+        State(state.clone()),
+        auth_headers(),
+        Json(StopChildTasksByParentRequest {
+            parent_task_id: parent_task_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(
+        first_response.data.expect("stop all data")["cancelled_child_count"],
+        1
+    );
+
+    let (repeat_status, Json(repeat_response)) = stop_child_tasks_by_parent(
+        State(state.clone()),
+        auth_headers(),
+        Json(StopChildTasksByParentRequest {
+            parent_task_id: parent_task_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(repeat_status, StatusCode::OK);
+    assert_eq!(
+        repeat_response.data.expect("repeat stop data")["cancelled_child_count"],
+        0
+    );
+
+    let (close_status, Json(close_response)) = close_child_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(CloseChildTaskByIdRequest {
+            parent_task_id: parent_task_id.to_string(),
+            child_task_id: done_child_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(close_status, StatusCode::OK);
+    let close_data = close_response.data.expect("close data");
+    assert_eq!(close_data["status"], "child_thread_closed");
+    assert!(close_data["child_task_graph"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .any(|node| {
+            node["child_task_id"] == done_child_id && node["thread_state"] == "closed"
+        }));
+
+    let (repeat_close_status, Json(repeat_close_response)) = close_child_task_by_id(
+        State(state),
+        auth_headers(),
+        Json(CloseChildTaskByIdRequest {
+            parent_task_id: parent_task_id.to_string(),
+            child_task_id: done_child_id.to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(repeat_close_status, StatusCode::OK);
+    assert_eq!(
+        repeat_close_response.data.expect("repeat close data")["status"],
+        "child_thread_closed"
+    );
 }
 
 fn insert_child_task(

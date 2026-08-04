@@ -65,6 +65,20 @@ fn clawcli_exposes_coding_workflow_command_surface() {
         assert!(command_names.contains(required), "missing {required}");
     }
 
+    let subagents = cmd.find_subcommand("subagents").expect("subagents command");
+    let subagent_command_names = subagents
+        .get_subcommands()
+        .map(|subcommand| subcommand.get_name().to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    for required in [
+        "open", "steer", "pause", "resume", "stop", "stop-all", "close",
+    ] {
+        assert!(
+            subagent_command_names.contains(required),
+            "missing subagents {required}"
+        );
+    }
+
     let permission = cmd
         .find_subcommand("permission")
         .expect("permission command");
@@ -119,6 +133,51 @@ fn clawcli_exposes_coding_workflow_command_surface() {
     for required in ["export", "run", "diff"] {
         assert!(replay_names.contains(required), "missing {required}");
     }
+}
+
+#[test]
+fn clawcli_subagents_keeps_report_compatibility_and_parses_controls() {
+    let report = Cli::try_parse_from(["clawcli", "subagents", "parent-1", "--json"])
+        .expect("parse legacy subagent report");
+    let Some(Command::Subagents {
+        task_id,
+        command,
+        json,
+    }) = report.cmd
+    else {
+        panic!("subagents report command");
+    };
+    assert_eq!(task_id, "parent-1");
+    assert!(command.is_none());
+    assert!(json);
+
+    let steer = Cli::try_parse_from([
+        "clawcli",
+        "subagents",
+        "parent-1",
+        "steer",
+        "child-2",
+        "--message",
+        "只跑目标测试",
+    ])
+    .expect("parse subagent steer");
+    assert!(matches!(
+        steer.cmd,
+        Some(Command::Subagents {
+            command: Some(SubagentCommand::Steer { child_task_id, .. }),
+            ..
+        }) if child_task_id == "child-2"
+    ));
+
+    let stop_all = Cli::try_parse_from(["clawcli", "subagents", "parent-1", "stop-all"])
+        .expect("parse subagent stop all");
+    assert!(matches!(
+        stop_all.cmd,
+        Some(Command::Subagents {
+            command: Some(SubagentCommand::StopAll),
+            ..
+        })
+    ));
 }
 
 #[test]

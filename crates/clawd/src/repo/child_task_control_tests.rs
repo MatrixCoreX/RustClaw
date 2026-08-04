@@ -501,3 +501,126 @@ fn child_pause_steer_resume_and_cancel_are_task_scoped() {
     assert_eq!(task_status(&state, steered_child_id), "running");
     assert_eq!(task_status(&state, parent_task_id), "running");
 }
+
+#[test]
+fn child_stop_all_and_close_are_parent_scoped_and_idempotent() {
+    let temp = TempDir::new();
+    let state = state_with_schema(&temp.path.join("tasks.sqlite"));
+    let parent_task_id = "parent-stop-all";
+    let running_child_id = "child-stop-all-running";
+    let queued_child_id = "child-stop-all-queued";
+    let done_child_id = "child-stop-all-done";
+    insert_task(
+        &state,
+        parent_task_id,
+        "running",
+        &json!({"text": "parent"}),
+        &json!({
+            "child_task_ids": [running_child_id, queued_child_id, done_child_id]
+        }),
+    );
+    for (task_id, status) in [
+        (running_child_id, "running"),
+        (queued_child_id, "queued"),
+        (done_child_id, "succeeded"),
+    ] {
+        insert_task(
+            &state,
+            task_id,
+            status,
+            &child_payload(parent_task_id, task_id),
+            &json!({"status_code": status}),
+        );
+    }
+    {
+        let db = state.core.db.get().expect("get database");
+        db.execute(
+            "INSERT INTO child_task_graphs (
+                parent_task_id, schema_version, status, max_parallel,
+                session_ref, session_open_capacity, created_at, updated_at
+             ) VALUES (?1, 2, 'active', 2, 'session-stop-all', 2, '1', '1')",
+            rusqlite::params![parent_task_id],
+        )
+        .expect("insert graph");
+        for (task_id, readiness) in [
+            (running_child_id, "running"),
+            (queued_child_id, "blocked_capacity"),
+            (done_child_id, "succeeded"),
+        ] {
+            db.execute(
+                "INSERT INTO child_task_graph_nodes (
+                    parent_task_id, child_task_id, role, required, readiness,
+                    permission_profile, merge_policy, owned_paths_json,
+                    budget_json, model_policy_json, tool_policy_json,
+                    result_contract_json, created_at, updated_at
+                 ) VALUES (
+                    ?1, ?2, 'review', 1, ?3, 'read_only',
+                    'structured_findings', '[]', '{}', '{}', '{}',
+                    '{}', '1', '1'
+                 )",
+                rusqlite::params![parent_task_id, task_id, readiness],
+            )
+            .expect("insert graph node");
+        }
+    }
+    assert!(
+        super::super::child_tasks::record_child_task_terminal_projection(
+            &state,
+            done_child_id,
+            &child_payload(parent_task_id, done_child_id),
+        )
+        .expect("record succeeded child projection")
+    );
+
+    assert!(super::super::task_admin::close_child_task_thread(
+        &state,
+        parent_task_id,
+        running_child_id,
+    )
+    .expect("running close check")
+    .is_none());
+
+    let stopped = super::super::task_admin::cancel_child_tasks_for_parent(&state, parent_task_id)
+        .expect("stop all children");
+    assert_eq!(stopped["cancelled_child_count"], 2);
+    assert_eq!(task_status(&state, running_child_id), "canceled");
+    assert_eq!(task_status(&state, queued_child_id), "canceled");
+    assert_eq!(task_status(&state, done_child_id), "succeeded");
+    assert_eq!(task_status(&state, parent_task_id), "running");
+    assert!(stopped["child_task_graph"]["nodes"]
+        .as_array()
+        .expect("stopped graph nodes")
+        .iter()
+        .all(|node| node["thread_state"] == "closed"));
+    assert_eq!(
+        task_result(&state, parent_task_id)["child_task_merge"]["auto_closed_child_count"],
+        3
+    );
+
+    let repeated = super::super::task_admin::cancel_child_tasks_for_parent(&state, parent_task_id)
+        .expect("repeat stop all");
+    assert_eq!(repeated["cancelled_child_count"], 0);
+
+    let closed =
+        super::super::task_admin::close_child_task_thread(&state, parent_task_id, running_child_id)
+            .expect("close canceled child")
+            .expect("close result");
+    let node = closed["child_task_graph"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["child_task_id"] == running_child_id)
+        .expect("closed node");
+    assert_eq!(node["thread_state"], "closed");
+    assert_eq!(
+        task_result(&state, running_child_id)["task_lifecycle"]["thread_state"],
+        "closed"
+    );
+    assert!(super::super::task_admin::close_child_task_thread(
+        &state,
+        parent_task_id,
+        running_child_id,
+    )
+    .expect("repeat close")
+    .is_some());
+}

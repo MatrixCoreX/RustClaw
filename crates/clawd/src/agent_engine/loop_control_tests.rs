@@ -103,10 +103,11 @@ fn child_loop_budget_comes_only_from_structured_child_contract() {
         &json!({
             "task_role": "subagent_child",
             "child_task_contract": {
+                "schema_version": 2,
                 "budget": {
                     "max_rounds": 7,
                     "max_tool_calls": 11,
-                    "timeout_ms": 180000
+                    "max_tokens": 500000
                 }
             }
         })
@@ -115,7 +116,24 @@ fn child_loop_budget_comes_only_from_structured_child_contract() {
     .expect("child limits");
     assert_eq!(limits.max_rounds, 7);
     assert_eq!(limits.max_tool_calls, 11);
-    assert_eq!(limits.timeout_ms, 180000);
+    assert_eq!(limits.max_tokens, 500000);
+    assert_eq!(limits.runtime_deadline_ms, None);
+    let legacy = child_loop_budget_limits(
+        &json!({
+            "task_role": "subagent_child",
+            "child_task_contract": {
+                "schema_version": 1,
+                "budget": {
+                    "max_rounds": 3,
+                    "max_tool_calls": 5,
+                    "timeout_ms": 180000
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("legacy child limits");
+    assert_eq!(legacy.runtime_deadline_ms, Some(180000));
     assert!(child_loop_budget_limits(
         &json!({
             "task_role": "ordinary",

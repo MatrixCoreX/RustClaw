@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::child_task_contract::{ChildTaskPermissionProfile, ChildTaskSpec};
 
-pub(crate) const CHILD_TASK_GRAPH_SCHEMA_VERSION: u64 = 1;
+pub(crate) const CHILD_TASK_GRAPH_SCHEMA_VERSION: u64 = 2;
 
 const CHILD_TASK_GRAPH_SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS child_task_graphs (
@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS child_task_graphs (
     schema_version INTEGER NOT NULL,
     status TEXT NOT NULL,
     max_parallel INTEGER NOT NULL,
+    session_ref TEXT NOT NULL DEFAULT '',
+    session_open_capacity INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -48,6 +50,13 @@ CREATE TABLE IF NOT EXISTS child_task_graph_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_child_task_graph_edges_successor
 ON child_task_graph_edges(parent_task_id, successor_task_id);
+CREATE TABLE IF NOT EXISTS child_task_thread_closures (
+    parent_task_id TEXT NOT NULL,
+    child_task_id TEXT PRIMARY KEY,
+    closed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_child_task_thread_closures_parent
+ON child_task_thread_closures(parent_task_id, closed_at);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,12 +79,42 @@ pub(crate) struct PreparedChildTaskNode<'a> {
 pub(crate) struct PreparedChildTaskGraph<'a> {
     pub(crate) parent_task_id: String,
     pub(crate) max_parallel: usize,
+    pub(crate) session_ref: String,
+    pub(crate) session_open_capacity: usize,
     pub(crate) nodes: Vec<PreparedChildTaskNode<'a>>,
     pub(crate) edges: Vec<(String, String, bool, String)>,
 }
 
 pub(crate) fn ensure_child_task_graph_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(CHILD_TASK_GRAPH_SCHEMA_SQL)?;
+    let add_session_ref_sql = [
+        "ALTER",
+        " TABLE",
+        " child_task_graphs",
+        " ADD",
+        " COLUMN",
+        " session_ref",
+        " TEXT",
+        " NOT",
+        " NULL",
+        " DEFAULT",
+        " ''",
+    ]
+    .concat();
+    let add_session_capacity_sql = [
+        "ALTER",
+        " TABLE",
+        " child_task_graphs",
+        " ADD",
+        " COLUMN",
+        " session_open_capacity",
+        " INTEGER",
+        " NOT",
+        " NULL",
+        " DEFAULT",
+        " 1",
+    ]
+    .concat();
     crate::ensure_column_exists(
         db,
         "child_task_graph_nodes",
@@ -90,12 +129,35 @@ pub(crate) fn ensure_child_task_graph_schema(db: &Connection) -> anyhow::Result<
         "ALTER TABLE child_task_graph_nodes
          ADD COLUMN steering_json TEXT NOT NULL DEFAULT '{}'",
     )?;
+    crate::ensure_column_exists(db, "child_task_graphs", "session_ref", &add_session_ref_sql)?;
+    crate::ensure_column_exists(
+        db,
+        "child_task_graphs",
+        "session_open_capacity",
+        &add_session_capacity_sql,
+    )?;
+    db.execute(
+        "UPDATE child_task_graphs
+         SET session_ref = 'legacy-parent:' || parent_task_id,
+             session_open_capacity = CASE
+                 WHEN max_parallel > 0 THEN max_parallel ELSE 1 END
+         WHERE session_ref = ''",
+        [],
+    )?;
     Ok(())
 }
 
 pub(crate) fn prepare_child_task_graph<'a>(
     specs: &'a [ChildTaskSpec],
     max_parallel: usize,
+) -> anyhow::Result<PreparedChildTaskGraph<'a>> {
+    prepare_child_task_graph_with_ready_slots(specs, max_parallel, max_parallel)
+}
+
+pub(crate) fn prepare_child_task_graph_with_ready_slots<'a>(
+    specs: &'a [ChildTaskSpec],
+    max_parallel: usize,
+    initial_ready_slots: usize,
 ) -> anyhow::Result<PreparedChildTaskGraph<'a>> {
     let parent_task_id = specs
         .first()
@@ -134,7 +196,8 @@ pub(crate) fn prepare_child_task_graph<'a>(
     add_writer_serialization_edges(specs, &ownership, &mut dependencies);
     ensure_acyclic(&known, &dependencies)?;
 
-    let mut ready_slots = max_parallel.clamp(1, specs.len().max(1));
+    let bounded_max_parallel = max_parallel.clamp(1, specs.len().max(1));
+    let mut ready_slots = initial_ready_slots.min(bounded_max_parallel);
     let mut nodes = Vec::with_capacity(specs.len());
     for spec in specs {
         let has_dependencies = dependencies
@@ -169,9 +232,25 @@ pub(crate) fn prepare_child_task_graph<'a>(
             })
         })
         .collect();
+    let session_ref = specs
+        .first()
+        .and_then(|spec| spec.scope.get("session_ref"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("parent:{parent_task_id}"));
+    let session_open_capacity = specs
+        .first()
+        .and_then(|spec| spec.scope.get("session_open_capacity"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(bounded_max_parallel)
+        .max(1);
     Ok(PreparedChildTaskGraph {
         parent_task_id,
-        max_parallel: max_parallel.clamp(1, specs.len().max(1)),
+        max_parallel: bounded_max_parallel,
+        session_ref,
+        session_open_capacity,
         nodes,
         edges,
     })
@@ -184,18 +263,23 @@ pub(crate) fn persist_child_task_graph(
 ) -> anyhow::Result<()> {
     tx.execute(
         "INSERT INTO child_task_graphs (
-            parent_task_id, schema_version, status, max_parallel, created_at, updated_at
-         ) VALUES (?1, ?2, 'active', ?3, ?4, ?4)
+            parent_task_id, schema_version, status, max_parallel,
+            session_ref, session_open_capacity, created_at, updated_at
+         ) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?6)
          ON CONFLICT(parent_task_id) DO UPDATE SET
             schema_version = excluded.schema_version,
             status = 'active',
             max_parallel = excluded.max_parallel,
+            session_ref = excluded.session_ref,
+            session_open_capacity = excluded.session_open_capacity,
             updated_at = excluded.updated_at",
         params![
             graph.parent_task_id,
             CHILD_TASK_GRAPH_SCHEMA_VERSION,
             graph.max_parallel,
-            now
+            graph.session_ref,
+            graph.session_open_capacity,
+            now,
         ],
     )?;
     for node in &graph.nodes {
@@ -243,6 +327,23 @@ pub(crate) fn persist_child_task_graph(
         )?;
     }
     Ok(())
+}
+
+pub(crate) fn session_open_thread_count(
+    db: &Connection,
+    session_ref: &str,
+) -> anyhow::Result<usize> {
+    let count = db.query_row(
+        "SELECT COUNT(*)
+         FROM child_task_graph_nodes node
+         JOIN child_task_graphs graph ON graph.parent_task_id = node.parent_task_id
+         WHERE graph.session_ref = ?1
+           AND graph.status = 'active'
+           AND node.readiness IN ('ready', 'running')",
+        params![session_ref],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
 pub(crate) fn replace_child_graph_node_for_retry(
@@ -412,6 +513,7 @@ pub(crate) fn mark_child_graph_node_running(
          WHERE child_task_id = ?1 AND readiness IN ('ready', 'running')",
         params![child_task_id, now],
     )?;
+    update_child_task_lifecycle_projection(db, child_task_id, "open", "running", "running", now)?;
     Ok(())
 }
 
@@ -438,7 +540,16 @@ pub(crate) fn record_child_graph_terminal(
     if changed == 0 {
         return Ok(None);
     }
-    reconcile_graph_readiness(db, parent_task_id, now)?;
+    db.execute(
+        "UPDATE child_task_graphs SET updated_at = ?2 WHERE parent_task_id = ?1",
+        params![parent_task_id, now],
+    )?;
+    let session_ref = db.query_row(
+        "SELECT session_ref FROM child_task_graphs WHERE parent_task_id = ?1",
+        params![parent_task_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    reconcile_session_graph_readiness(db, &session_ref, now)?;
     graph_snapshot(db, parent_task_id)
 }
 
@@ -519,6 +630,127 @@ pub(crate) fn record_child_graph_steering(
     } else {
         anyhow::bail!("child_graph_steering_conflict")
     }
+}
+
+pub(crate) fn active_child_task_ids(
+    db: &Connection,
+    parent_task_id: &str,
+) -> anyhow::Result<Vec<String>> {
+    let mut stmt = db.prepare(
+        "SELECT child_task_id
+         FROM child_task_graph_nodes
+         WHERE parent_task_id = ?1
+           AND readiness NOT IN ('succeeded', 'failed', 'timeout', 'canceled')
+         ORDER BY created_at, child_task_id",
+    )?;
+    let child_task_ids = stmt
+        .query_map(params![parent_task_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(child_task_ids)
+}
+
+pub(crate) fn close_child_thread(
+    db: &Connection,
+    parent_task_id: &str,
+    child_task_id: &str,
+    now: &str,
+) -> anyhow::Result<Option<Value>> {
+    let terminal = db
+        .query_row(
+            "SELECT 1
+             FROM child_task_graph_nodes node
+             JOIN tasks task ON task.task_id = node.child_task_id
+             WHERE node.parent_task_id = ?1
+               AND node.child_task_id = ?2
+               AND node.readiness IN ('succeeded', 'failed', 'timeout', 'canceled')
+               AND task.status IN ('succeeded', 'failed', 'timeout', 'canceled')
+             LIMIT 1",
+            params![parent_task_id, child_task_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !terminal {
+        return Ok(None);
+    }
+    db.execute(
+        "INSERT INTO child_task_thread_closures (
+             parent_task_id, child_task_id, closed_at
+         ) VALUES (?1, ?2, ?3)
+         ON CONFLICT(child_task_id) DO NOTHING",
+        params![parent_task_id, child_task_id, now],
+    )?;
+    update_closed_child_task_lifecycle_projection(db, child_task_id, now)?;
+    let open_or_done = db.query_row(
+        "SELECT COUNT(*)
+         FROM child_task_graph_nodes node
+         LEFT JOIN child_task_thread_closures closure
+           ON closure.child_task_id = node.child_task_id
+         WHERE node.parent_task_id = ?1
+           AND closure.child_task_id IS NULL",
+        params![parent_task_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if open_or_done == 0 {
+        db.execute(
+            "UPDATE child_task_graphs
+             SET status = 'closed', updated_at = ?2
+             WHERE parent_task_id = ?1
+               AND status IN ('active', 'terminal')",
+            params![parent_task_id, now],
+        )?;
+    }
+    graph_snapshot(db, parent_task_id)
+}
+
+pub(crate) fn close_terminal_threads_after_parent_merge(
+    db: &Connection,
+    parent_task_id: &str,
+    now: &str,
+) -> anyhow::Result<usize> {
+    let mut stmt = db.prepare(
+        "SELECT node.child_task_id
+         FROM child_task_graph_nodes node
+         JOIN tasks task ON task.task_id = node.child_task_id
+         LEFT JOIN child_task_thread_closures closure
+           ON closure.child_task_id = node.child_task_id
+         WHERE node.parent_task_id = ?1
+           AND node.readiness IN ('succeeded', 'failed', 'timeout', 'canceled')
+           AND task.status IN ('succeeded', 'failed', 'timeout', 'canceled')
+           AND closure.child_task_id IS NULL
+         ORDER BY node.created_at, node.child_task_id",
+    )?;
+    let child_task_ids = stmt
+        .query_map(params![parent_task_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for child_task_id in &child_task_ids {
+        db.execute(
+            "INSERT INTO child_task_thread_closures (
+                 parent_task_id, child_task_id, closed_at
+             ) VALUES (?1, ?2, ?3)
+             ON CONFLICT(child_task_id) DO NOTHING",
+            params![parent_task_id, child_task_id, now],
+        )?;
+        update_closed_child_task_lifecycle_projection(db, child_task_id, now)?;
+    }
+    if !child_task_ids.is_empty() {
+        db.execute(
+            "UPDATE child_task_graphs
+             SET status = 'closed', updated_at = ?2
+             WHERE parent_task_id = ?1
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM child_task_graph_nodes node
+                   LEFT JOIN child_task_thread_closures closure
+                     ON closure.child_task_id = node.child_task_id
+                   WHERE node.parent_task_id = ?1
+                     AND closure.child_task_id IS NULL
+               )",
+            params![parent_task_id, now],
+        )?;
+    }
+    Ok(child_task_ids.len())
 }
 
 pub(crate) fn mark_parent_graph_cancelled(
@@ -630,7 +862,8 @@ pub(crate) fn graph_snapshot(
 ) -> anyhow::Result<Option<Value>> {
     let graph = db
         .query_row(
-            "SELECT schema_version, status, max_parallel, created_at, updated_at
+            "SELECT schema_version, status, max_parallel, session_ref,
+                    session_open_capacity, created_at, updated_at
              FROM child_task_graphs WHERE parent_task_id = ?1",
             params![parent_task_id],
             |row| {
@@ -639,32 +872,59 @@ pub(crate) fn graph_snapshot(
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((schema_version, status, max_parallel, created_at, updated_at)) = graph else {
+    let Some((
+        schema_version,
+        status,
+        max_parallel,
+        session_ref,
+        session_open_capacity,
+        created_at,
+        updated_at,
+    )) = graph
+    else {
         return Ok(None);
     };
+    let session_open_count = session_open_thread_count(db, &session_ref)?;
     let mut stmt = db.prepare(
         "SELECT node.child_task_id, node.role, node.required, node.readiness,
                 node.permission_profile,
                 merge_policy, owned_paths_json, budget_json, model_policy_json,
                 tool_policy_json, result_contract_json, steering_version,
-                steering_json, task.status, task.result_json
+                steering_json, task.status, task.result_json,
+                closure.closed_at
          FROM child_task_graph_nodes node
          LEFT JOIN tasks task ON task.task_id = node.child_task_id
+         LEFT JOIN child_task_thread_closures closure
+           ON closure.child_task_id = node.child_task_id
          WHERE node.parent_task_id = ?1
          ORDER BY node.created_at, node.child_task_id",
     )?;
     let nodes = stmt
         .query_map(params![parent_task_id], |row| {
+            let readiness = row.get::<_, String>(3)?;
+            let closed_at = row.get::<_, Option<String>>(15)?;
+            let raw_result = row.get::<_, Option<String>>(14)?;
+            let runtime = child_runtime_projection(raw_result.as_deref());
             Ok(json!({
                 "child_task_id": row.get::<_, String>(0)?,
                 "role": row.get::<_, String>(1)?,
                 "required": row.get::<_, bool>(2)?,
-                "readiness": row.get::<_, String>(3)?,
+                "readiness": readiness,
+                "thread_state": if closed_at.is_some() {
+                    "closed"
+                } else {
+                    graph_thread_state(&readiness)
+                },
+                "execution_state": graph_execution_state_with_runtime(&readiness, &runtime),
+                "queue_reason": graph_queue_reason(&readiness),
+                "waiting_reason": graph_waiting_reason(&runtime),
                 "permission_profile": row.get::<_, String>(4)?,
                 "merge_policy": row.get::<_, String>(5)?,
                 "owned_paths": parse_json_column(row.get::<_, String>(6)?, json!([])),
@@ -675,9 +935,8 @@ pub(crate) fn graph_snapshot(
                 "steering_version": row.get::<_, i64>(11)?,
                 "steering": parse_json_column(row.get::<_, String>(12)?, json!({})),
                 "task_status": row.get::<_, Option<String>>(13)?,
-                "runtime": child_runtime_projection(
-                    row.get::<_, Option<String>>(14)?.as_deref()
-                ),
+                "runtime": runtime,
+                "closed_at": closed_at,
             }))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -702,11 +961,88 @@ pub(crate) fn graph_snapshot(
         "parent_task_id": parent_task_id,
         "status": status,
         "max_parallel": max_parallel,
+        "session_ref": session_ref,
+        "session_open_capacity": session_open_capacity,
+        "session_open_count": session_open_count,
+        "main_agent_counted": false,
         "created_at": created_at,
         "updated_at": updated_at,
         "nodes": nodes,
         "edges": edges,
     })))
+}
+
+fn graph_thread_state(readiness: &str) -> &'static str {
+    match readiness {
+        "blocked_capacity" => "queued_capacity",
+        "blocked_dependency" => "submitted",
+        "succeeded" | "failed" | "timeout" | "canceled" => "done",
+        _ => "open",
+    }
+}
+
+fn graph_execution_state(readiness: &str) -> &'static str {
+    match readiness {
+        "blocked_dependency" => "queued_dependency",
+        "running" => "running",
+        "succeeded" => "succeeded",
+        "failed" => "failed",
+        "timeout" => "timed_out",
+        "canceled" => "cancelled",
+        _ => "queued",
+    }
+}
+
+fn graph_execution_state_with_runtime(readiness: &str, runtime: &Value) -> &'static str {
+    let terminal = graph_execution_state(readiness);
+    if matches!(terminal, "succeeded" | "failed" | "timed_out" | "cancelled") {
+        return terminal;
+    }
+    let lifecycle = runtime.get("task_lifecycle").unwrap_or(&Value::Null);
+    let state = lifecycle
+        .get("execution_state")
+        .or_else(|| lifecycle.get("state"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if state == "paused" {
+        return "paused";
+    }
+    let pending_approval = runtime
+        .pointer("/task_lifecycle/resume_context/approval_request/status")
+        .or_else(|| runtime.pointer("/resume_context/approval_request/status"))
+        .and_then(Value::as_str)
+        == Some("pending");
+    if state == "needs_user" && pending_approval {
+        return "waiting_approval";
+    }
+    if state == "waiting"
+        && (runtime
+            .pointer("/task_lifecycle/pending_async_job")
+            .is_some_and(|value| !value.is_null())
+            || lifecycle.get("resume_entrypoint").and_then(Value::as_str) == Some("poll_async_job"))
+    {
+        return "waiting_tool";
+    }
+    terminal
+}
+
+fn graph_waiting_reason(runtime: &Value) -> Value {
+    runtime
+        .pointer("/task_lifecycle/waiting_reason")
+        .or_else(|| runtime.pointer("/task_lifecycle/waiting_reason_code"))
+        .or_else(|| runtime.pointer("/task_lifecycle/resume_reason"))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn graph_queue_reason(readiness: &str) -> &'static str {
+    match readiness {
+        "blocked_capacity" => "session_or_parent_capacity",
+        "blocked_dependency" => "dependency",
+        "ready" => "ready",
+        "running" => "running",
+        _ => "terminal",
+    }
 }
 
 fn reconcile_graph_readiness(
@@ -715,10 +1051,17 @@ fn reconcile_graph_readiness(
     now: &str,
 ) -> anyhow::Result<()> {
     cancel_nodes_with_failed_required_dependencies(db, parent_task_id, now)?;
-    let max_parallel = db.query_row(
-        "SELECT max_parallel FROM child_task_graphs WHERE parent_task_id = ?1",
+    let (max_parallel, session_ref, session_open_capacity) = db.query_row(
+        "SELECT max_parallel, session_ref, session_open_capacity
+         FROM child_task_graphs WHERE parent_task_id = ?1",
         params![parent_task_id],
-        |row| row.get::<_, i64>(0),
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
     )?;
     let occupied = db.query_row(
         "SELECT COUNT(*) FROM child_task_graph_nodes
@@ -726,7 +1069,11 @@ fn reconcile_graph_readiness(
         params![parent_task_id],
         |row| row.get::<_, i64>(0),
     )?;
-    let mut available = max_parallel.saturating_sub(occupied);
+    let session_occupied =
+        i64::try_from(session_open_thread_count(db, &session_ref)?).unwrap_or(i64::MAX);
+    let parent_available = max_parallel.saturating_sub(occupied);
+    let session_available = session_open_capacity.saturating_sub(session_occupied);
+    let mut available = parent_available.min(session_available);
     if available > 0 {
         let mut stmt = db.prepare(
             "SELECT node.child_task_id
@@ -758,6 +1105,14 @@ fn reconcile_graph_readiness(
                    AND readiness IN ('blocked_dependency', 'blocked_capacity')",
                 params![parent_task_id, child_task_id, now],
             )?;
+            update_child_task_lifecycle_projection(
+                db,
+                &child_task_id,
+                "open",
+                "queued",
+                "ready",
+                now,
+            )?;
             available -= 1;
         }
     }
@@ -775,6 +1130,102 @@ fn reconcile_graph_readiness(
              WHERE parent_task_id = ?1 AND status = 'active'",
             params![parent_task_id, now],
         )?;
+    }
+    Ok(())
+}
+
+fn update_child_task_lifecycle_projection(
+    db: &Connection,
+    child_task_id: &str,
+    thread_state: &str,
+    execution_state: &str,
+    queue_reason: &str,
+    now: &str,
+) -> anyhow::Result<()> {
+    let raw = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![child_task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(mut result) = raw
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+    else {
+        return Ok(());
+    };
+    let Some(lifecycle) = result
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    lifecycle.insert("thread_state".to_string(), json!(thread_state));
+    lifecycle.insert("execution_state".to_string(), json!(execution_state));
+    lifecycle.insert("queue_reason".to_string(), json!(queue_reason));
+    db.execute(
+        "UPDATE tasks SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status IN ('queued', 'running')",
+        params![child_task_id, result.to_string(), now],
+    )?;
+    Ok(())
+}
+
+fn update_closed_child_task_lifecycle_projection(
+    db: &Connection,
+    child_task_id: &str,
+    now: &str,
+) -> anyhow::Result<()> {
+    let raw = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![child_task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(mut result) = raw
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+    else {
+        return Ok(());
+    };
+    let Some(lifecycle) = result
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    lifecycle.insert("thread_state".to_string(), json!("closed"));
+    lifecycle.insert("closed_at".to_string(), json!(now));
+    db.execute(
+        "UPDATE tasks SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1
+           AND status IN ('succeeded', 'failed', 'timeout', 'canceled')",
+        params![child_task_id, result.to_string(), now],
+    )?;
+    Ok(())
+}
+
+fn reconcile_session_graph_readiness(
+    db: &Connection,
+    session_ref: &str,
+    now: &str,
+) -> anyhow::Result<()> {
+    let mut stmt = db.prepare(
+        "SELECT parent_task_id
+         FROM child_task_graphs
+         WHERE session_ref = ?1 AND status = 'active'
+         ORDER BY updated_at, created_at, parent_task_id",
+    )?;
+    let parent_task_ids = stmt
+        .query_map(params![session_ref], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for parent_task_id in parent_task_ids {
+        reconcile_graph_readiness(db, &parent_task_id, now)?;
     }
     Ok(())
 }
@@ -1099,6 +1550,7 @@ fn child_runtime_projection(raw_result: Option<&str>) -> Value {
         "child_task_result": result.get("child_task_result"),
         "execution_scope": result.get("child_task_execution_scope"),
         "task_lifecycle": result.get("task_lifecycle"),
+        "resume_context": result.get("resume_context"),
         "evidence": result
             .get("child_task_result")
             .and_then(|value| value.get("evidence_refs")),

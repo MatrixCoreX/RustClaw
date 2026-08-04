@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), allow(dead_code))]
+
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,7 @@ const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;
 const MAX_SUBAGENT_CAPABILITIES: usize = 32;
 const MAX_SUBAGENT_RESULT_CONTRACT_KEYS: usize = 16;
 const DEFAULT_MAX_PARALLEL_READONLY: u64 = 4;
+const DEFAULT_JOIN_WAIT_MS: u64 = 30_000;
 
 #[path = "subagent_runtime_batch.rs"]
 mod subagent_runtime_batch;
@@ -32,15 +35,28 @@ pub(super) async fn run_readonly_child_agent_loop(
     state: &AppState,
     task: &crate::ClaimedTask,
     child_input: &Value,
-    timeout_ms: u64,
+    runtime_deadline_ms: Option<u64>,
 ) -> Result<Value, String> {
-    subagent_runtime_model::run_readonly_child_agent_loop(state, task, child_input, timeout_ms)
-        .await
+    subagent_runtime_model::run_readonly_child_agent_loop(
+        state,
+        task,
+        child_input,
+        runtime_deadline_ms,
+    )
+    .await
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct SubagentRuntimeConfig {
     role_definitions: Vec<SubagentRoleDefinition>,
+    enabled: bool,
+    max_concurrent_threads_per_session: u64,
+    join_wait_ms: u64,
+    max_spawn_depth: u64,
+    interrupt_message: bool,
+    legacy_config_key_used: bool,
+    max_running_threads_global: Option<u64>,
+    // v1 replay compatibility only. New child requests never inherit it.
     max_parallel_readonly: u64,
     default_timeout_ms: Option<u64>,
     context_evidence_root: Option<PathBuf>,
@@ -51,6 +67,13 @@ impl Default for SubagentRuntimeConfig {
     fn default() -> Self {
         Self {
             role_definitions: crate::agent_runtime_contract::default_subagent_role_definitions(),
+            enabled: true,
+            max_concurrent_threads_per_session: DEFAULT_MAX_PARALLEL_READONLY,
+            join_wait_ms: DEFAULT_JOIN_WAIT_MS,
+            max_spawn_depth: 2,
+            interrupt_message: true,
+            legacy_config_key_used: false,
+            max_running_threads_global: None,
             max_parallel_readonly: DEFAULT_MAX_PARALLEL_READONLY,
             default_timeout_ms: None,
             context_evidence_root: None,
@@ -69,7 +92,7 @@ impl SubagentRuntimeConfig {
 
     fn trace_summary(&self) -> Value {
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "allowed_roles": self.role_definitions
                 .iter()
                 .map(|definition| definition.token.as_str())
@@ -79,8 +102,15 @@ impl SubagentRuntimeConfig {
                 .map(role_definition_summary)
                 .collect::<Vec<_>>(),
             "resolved_model_policies": self.resolved_model_policies,
+            "enabled": self.enabled,
+            "max_concurrent_threads_per_session": self.max_concurrent_threads_per_session,
+            "join_wait_ms": self.join_wait_ms,
+            "max_spawn_depth": self.max_spawn_depth,
+            "interrupt_message": self.interrupt_message,
+            "legacy_config_key_used": self.legacy_config_key_used,
+            "max_running_threads_global": self.max_running_threads_global,
             "max_parallel_readonly": self.max_parallel_readonly,
-            "default_timeout_ms": self.default_timeout_ms,
+            "legacy_default_timeout_ms": self.default_timeout_ms,
             "context_evidence_enabled": self.context_evidence_root.is_some(),
             "inline_write_enabled": false,
             "persistent_worktree_write_enabled": true,
@@ -103,6 +133,7 @@ pub(super) fn load_subagent_runtime_config(state: &AppState) -> SubagentRuntimeC
     if let Ok(app_config) =
         claw_core::config::AppConfig::load(&state.reload_ctx.config_path_for_reload)
     {
+        config.max_running_threads_global = Some(app_config.worker.concurrency.max(1) as u64);
         config.resolved_model_policies = config
             .role_definitions
             .iter()
@@ -135,18 +166,49 @@ fn load_subagent_runtime_config_from_path(path: &Path) -> SubagentRuntimeConfig 
         return config;
     };
     config.role_definitions = crate::agent_runtime_contract::load_subagent_role_definitions(path);
+    config.enabled = subagents
+        .get("enabled")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
     if let Some(value) = subagents
+        .get("max_concurrent_threads_per_session")
+        .and_then(toml::Value::as_integer)
+        .filter(|value| *value > 0)
+    {
+        config.max_concurrent_threads_per_session = value as u64;
+    } else if let Some(value) = subagents
         .get("max_parallel_readonly")
         .and_then(toml::Value::as_integer)
         .filter(|value| *value > 0)
     {
-        config.max_parallel_readonly = (value as u64).clamp(1, 16);
+        config.max_concurrent_threads_per_session = value as u64;
+        config.legacy_config_key_used = true;
     }
+    config.max_parallel_readonly = config.max_concurrent_threads_per_session;
+    config.join_wait_ms = subagents
+        .get("join_wait_ms")
+        .and_then(toml::Value::as_integer)
+        .filter(|value| *value > 0)
+        .map(|value| (value as u64).clamp(100, 300_000))
+        .unwrap_or(DEFAULT_JOIN_WAIT_MS);
+    config.max_spawn_depth = subagents
+        .get("max_spawn_depth")
+        .and_then(toml::Value::as_integer)
+        .filter(|value| *value > 0)
+        .map(|value| (value as u64).clamp(1, 16))
+        .unwrap_or(config.max_spawn_depth);
+    config.interrupt_message = subagents
+        .get("interrupt_message")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
+    // v1 compatibility only. A legacy value is traceable but never becomes
+    // the default v2 runtime deadline.
     config.default_timeout_ms = subagents
         .get("default_timeout_ms")
         .and_then(toml::Value::as_integer)
         .filter(|value| *value > 0)
         .map(|value| (value as u64).clamp(1_000, 3_600_000));
+    config.legacy_config_key_used |= config.default_timeout_ms.is_some();
     config
 }
 
@@ -417,7 +479,7 @@ pub(super) fn record_persistent_child_task_from_args(
     step_in_round: usize,
     args: &Value,
     config: &SubagentRuntimeConfig,
-) -> Result<&'static str, &'static str> {
+) -> Result<Option<&'static str>, &'static str> {
     subagent_runtime_persistent::record_persistent_child_task_from_args(
         state,
         task,
@@ -429,6 +491,27 @@ pub(super) fn record_persistent_child_task_from_args(
     )
 }
 
+pub(super) fn record_durable_readonly_child_task_from_args(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+) -> Result<Option<&'static str>, &'static str> {
+    subagent_runtime_persistent::record_durable_readonly_child_task_from_args(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
+        config,
+    )
+}
+
+#[allow(dead_code)]
 pub(super) async fn maybe_run_model_assisted_subagent(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -615,30 +698,38 @@ fn subagent_budget_summary(budget: Option<&Value>, config: &SubagentRuntimeConfi
     let Some(budget) = budget.and_then(Value::as_object) else {
         return json!({
             "present": false,
-            "default_timeout_ms": config.default_timeout_ms,
-            "effective_timeout_ms": config.default_timeout_ms,
+            "runtime_deadline_ms": null,
+            "join_wait_ms": config.join_wait_ms,
         });
     };
-    let timeout_ms = budget.get("timeout_ms").and_then(Value::as_u64);
+    let runtime_deadline_ms = budget
+        .get("runtime_deadline_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| budget.get("timeout_ms").and_then(Value::as_u64));
+    let legacy_timeout_key_used =
+        budget.get("timeout_ms").is_some() && budget.get("runtime_deadline_ms").is_none();
     json!({
         "present": true,
         "max_rounds": budget.get("max_rounds").and_then(Value::as_u64),
         "max_tool_calls": budget.get("max_tool_calls").and_then(Value::as_u64),
         "max_context_chars": budget.get("max_context_chars").and_then(Value::as_u64),
-        "timeout_ms": timeout_ms,
-        "default_timeout_ms": config.default_timeout_ms,
-        "effective_timeout_ms": timeout_ms.or(config.default_timeout_ms),
+        "max_tokens": budget.get("max_tokens").and_then(Value::as_u64),
+        "runtime_deadline_ms": runtime_deadline_ms,
+        "runtime_deadline_explicit": runtime_deadline_ms.is_some(),
+        "legacy_timeout_key_used": legacy_timeout_key_used,
+        "join_wait_ms": config.join_wait_ms,
     })
 }
 
 fn role_metadata_summary(role: &SubagentRoleDefinition, config: &SubagentRuntimeConfig) -> Value {
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "role": role.token,
         "role_family": role.family,
         "default_scope": role.default_scope,
         "tool_permission_profile": "read_only",
-        "parallel_eligible": config.max_parallel_readonly > 1,
+        "parallel_eligible": config.max_concurrent_threads_per_session > 1,
+        "max_concurrent_threads_per_session": config.max_concurrent_threads_per_session,
         "max_parallel_readonly": config.max_parallel_readonly,
         "result_contract_required": role.result_contract_required,
         "resolved_model_policy": config.resolved_model_policies.get(&role.token),
@@ -661,34 +752,38 @@ fn role_definition_summary(role: &SubagentRoleDefinition) -> Value {
 }
 
 fn subagent_timeout_policy(budget_summary: &Value) -> Value {
-    let timeout_ms = budget_summary
-        .get("effective_timeout_ms")
-        .and_then(Value::as_u64)
-        .or_else(|| budget_summary.get("timeout_ms").and_then(Value::as_u64))
-        .filter(|value| *value > 0);
-    let budget_timeout_ms = budget_summary
-        .get("timeout_ms")
+    let runtime_deadline_ms = budget_summary
+        .get("runtime_deadline_ms")
         .and_then(Value::as_u64)
         .filter(|value| *value > 0);
     json!({
-        "schema_version": 1,
-        "policy": "bounded",
-        "timeout_ms": timeout_ms,
-        "timeout_required": true,
-        "timeout_source": if budget_timeout_ms.is_some() {
-            "budget.timeout_ms"
-        } else if timeout_ms.is_some() {
-            "agent_guard.subagents.default_timeout_ms"
+        "schema_version": 2,
+        "policy": if runtime_deadline_ms.is_some() {
+            "explicit_runtime_deadline"
         } else {
-            "parent_loop_default"
+            "no_operation_deadline"
         },
-        "terminal_status_on_timeout": "timeout",
+        "runtime_deadline_ms": runtime_deadline_ms,
+        "runtime_deadline_source": if budget_summary
+            .get("legacy_timeout_key_used")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            "legacy_budget.timeout_ms"
+        } else if runtime_deadline_ms.is_some() {
+            "budget.runtime_deadline_ms"
+        } else {
+            "none"
+        },
+        "join_wait_ms": budget_summary.get("join_wait_ms").and_then(Value::as_u64),
+        "join_wait_expires_child": false,
+        "terminal_status_on_deadline": "timed_out",
     })
 }
 
 fn subagent_cancellation_policy(timeout_policy: &Value) -> Value {
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "cancellable": true,
         "cancel_status": "cancelled",
         "cancel_scope": "child_run",

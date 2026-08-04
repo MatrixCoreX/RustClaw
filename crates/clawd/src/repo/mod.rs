@@ -2,6 +2,7 @@ pub(crate) mod approval_scope;
 pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod channel_delivery_receipt;
+mod child_approval;
 pub(crate) mod child_patch;
 pub(crate) mod child_task_control;
 pub(crate) mod child_task_graph;
@@ -44,6 +45,7 @@ pub(crate) use channel_delivery_receipt::{
     whatsapp_cloud_conversation_window, ClaimChannelDeliveryDispatchOutcome,
     RecordWhatsappProviderStatusOutcome,
 };
+pub(crate) use child_approval::fail_noninteractive_child_approval;
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;
 #[cfg(test)]
 pub(crate) use crypto_storage::credential_context_for_user_key as crypto_credential_context_for_user_key;
@@ -60,9 +62,9 @@ pub(crate) use submit::{
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
 };
 pub(crate) use task_admin::{
-    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskAdminTarget,
-    TaskResumeControlInput,
+    cancel_child_tasks_for_parent, cancel_one_task_for_user_chat, cancel_task_by_id,
+    cancel_tasks_for_user_chat, close_child_task_thread, get_task_admin_target, pause_task_by_id,
+    resume_task_with_input, TaskAdminTarget, TaskResumeControlInput,
 };
 pub(crate) use task_approval::{
     consume_task_approval_grant, decide_task_approval_request_for_actor,
@@ -107,7 +109,8 @@ pub(crate) use tasks::{
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
-    update_task_progress_result, update_task_success, worker_task_lease_expires_at,
-    worker_task_write_rejection, ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask,
-    TaskViewerAccessError, WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
+    update_task_progress_result, update_task_runtime_timeout, update_task_success,
+    worker_task_lease_expires_at, worker_task_write_rejection,
+    ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask, TaskViewerAccessError,
+    WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
 };

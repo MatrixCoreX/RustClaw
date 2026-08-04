@@ -35,7 +35,7 @@ pub(crate) async fn attach_auto_review(
         .unwrap_or(&task.task_id);
     let role = state.reload_ctx.auto_review.review_role.trim();
     let child_input = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "role": role,
         "objective": "auto_review_coding_changes",
         "review_target_task_id": target_task_id,
@@ -54,7 +54,12 @@ pub(crate) async fn attach_auto_review(
             "max_tool_calls": 12,
             "max_tokens": 200000,
         },
-        "timeout_policy": {"policy":"bounded","timeout_ms":180000},
+        "timeout_policy": {
+            "schema_version": 2,
+            "policy": "no_operation_deadline",
+            "runtime_deadline_ms": null,
+            "join_wait_expires_child": false,
+        },
         "result_contract": {
             "output_format": "machine_json",
             "required_keys": ["review_findings"],
@@ -67,7 +72,7 @@ pub(crate) async fn attach_auto_review(
         state,
         task,
         &child_input,
-        180_000,
+        None,
     )
     .await
     {

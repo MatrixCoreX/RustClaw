@@ -796,6 +796,38 @@ pub(crate) fn pause_task_by_id(
     )
 }
 
+pub(crate) fn stop_child_tasks_by_parent(
+    base_url: &str,
+    key: &str,
+    parent_task_id: &str,
+) -> Result<serde_json::Value> {
+    task_control_by_id(
+        base_url,
+        key,
+        "/tasks/stop-child-tasks-by-parent",
+        "stop-subagents",
+        json!({ "parent_task_id": parent_task_id }),
+    )
+}
+
+pub(crate) fn close_child_task_by_id(
+    base_url: &str,
+    key: &str,
+    parent_task_id: &str,
+    child_task_id: &str,
+) -> Result<serde_json::Value> {
+    task_control_by_id(
+        base_url,
+        key,
+        "/tasks/close-child-by-task-id",
+        "close-subagent",
+        json!({
+            "parent_task_id": parent_task_id,
+            "child_task_id": child_task_id,
+        }),
+    )
+}
+
 fn non_empty_token(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }

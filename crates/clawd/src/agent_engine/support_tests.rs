@@ -3,8 +3,9 @@ use super::{
     attach_task_llm_metrics_checkpoint, build_agent_loop_checkpoint_progress_payload,
     build_agent_loop_user_input_checkpoint_progress_payload, checkpoint_continuation_actions,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
-    load_agent_loop_guard_policy, AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope,
-    LoopBudgetProfile, LoopRecipeOverrides, RegistryIdempotencyGuardScope,
+    load_agent_loop_guard_policy, refresh_agent_loop_checkpoint_snapshot, AgentLoopGuardPolicy,
+    AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile, LoopRecipeOverrides,
+    RegistryIdempotencyGuardScope,
 };
 use crate::agent_engine::{seed_loop_state_for_agent_run, AgentRunContext, LoopState};
 use crate::execution_recipe::{
@@ -17,6 +18,57 @@ use crate::{
 };
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
+
+#[test]
+fn checkpoint_snapshot_refreshes_actions_recorded_after_checkpoint_creation() {
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 2;
+    loop_state.task_checkpoint = Some(serde_json::json!({
+        "schema_version": 1,
+        "boundary_context": {
+            "schema_version": 1,
+            "agent_loop_resume_state": {
+                "schema_version": 1,
+                "stage": "planning",
+                "task_observations": [],
+                "executed_step_results": []
+            }
+        }
+    }));
+    loop_state
+        .task_observations
+        .push(serde_json::json!({"event_type": "subagent_stop", "status_code": "ok"}));
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "subagent".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(serde_json::json!({"status": "waiting"}).to_string()),
+            error: None,
+            started_at: 10,
+            finished_at: 11,
+        });
+
+    refresh_agent_loop_checkpoint_snapshot(&mut loop_state);
+
+    let checkpoint = loop_state.task_checkpoint.expect("checkpoint");
+    assert_eq!(
+        checkpoint
+            .pointer("/boundary_context/agent_loop_resume_state/executed_step_results/0/skill")
+            .and_then(serde_json::Value::as_str),
+        Some("subagent")
+    );
+    assert_eq!(
+        checkpoint
+            .pointer("/boundary_context/agent_loop_resume_state/task_observations/0/event_type")
+            .and_then(serde_json::Value::as_str),
+        Some("subagent_stop")
+    );
+    assert_eq!(checkpoint["last_successful_round"], 2);
+    assert_eq!(checkpoint["last_successful_step"], "step_1");
+    assert_eq!(checkpoint["evidence_refs"], serde_json::json!(["step_1"]));
+}
 
 #[test]
 fn checkpoint_continuation_keeps_only_unexecuted_verified_actions() {

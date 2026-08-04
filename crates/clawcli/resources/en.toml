@@ -6,6 +6,9 @@
 "tui.prompt" = "clawcli-tui> "
 "tui.continue_prompt" = "clawcli-tui-continue> "
 "tui.unknown_key" = "Unknown command key."
+"tui.subagent_id_prompt" = "Child task id> "
+"tui.subagent_steer_prompt" = "Guidance> "
+"tui.subagent_stop_confirm_prompt" = "Type yes to confirm this stop> "
 "command.chat" = "Open a persistent interactive chat thread"
 "command.health" = "Check the clawd service health"
 "command.submit" = "Submit a task"
@@ -56,4 +59,5 @@
 "tui.help" = [
   "Keys: r refresh, w watch, p pause, c cancel, u resume, n continue",
   "      e export, 1 report, 2 review, 3 subagents, 4 permission, q quit",
+  "      5 open child, 6 steer, 7 pause child, 8 resume child, 9 stop child, 0 stop all, x close child",
 ]

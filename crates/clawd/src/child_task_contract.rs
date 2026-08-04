@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 
-pub(crate) const CHILD_TASK_SCHEMA_VERSION: u64 = 1;
+pub(crate) const CHILD_TASK_SCHEMA_VERSION: u64 = 2;
 
 #[path = "child_task_contract_policy.rs"]
 mod child_task_contract_policy;
@@ -17,6 +17,58 @@ pub(crate) enum ChildTaskLifecycleEvent {
     Succeeded,
     Failed,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildThreadState {
+    Submitted,
+    QueuedCapacity,
+    Open,
+    Done,
+    Closed,
+}
+
+impl ChildThreadState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::QueuedCapacity => "queued_capacity",
+            Self::Open => "open",
+            Self::Done => "done",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildExecutionState {
+    Queued,
+    QueuedDependency,
+    Running,
+    WaitingTool,
+    WaitingApproval,
+    Paused,
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+
+impl ChildExecutionState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::QueuedDependency => "queued_dependency",
+            Self::Running => "running",
+            Self::WaitingTool => "waiting_tool",
+            Self::WaitingApproval => "waiting_approval",
+            Self::Paused => "paused",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
+        }
+    }
 }
 
 impl ChildTaskLifecycleEvent {
@@ -86,7 +138,9 @@ pub(crate) struct ChildTaskBudget {
     pub(crate) max_rounds: u64,
     pub(crate) max_tool_calls: u64,
     pub(crate) max_tokens: u64,
-    pub(crate) timeout_ms: u64,
+    /// Optional whole-operation deadline explicitly requested by a trusted
+    /// caller. Join waits, tool timeouts, leases, and retention are separate.
+    pub(crate) runtime_deadline_ms: Option<u64>,
 }
 
 impl ChildTaskBudget {
@@ -95,7 +149,7 @@ impl ChildTaskBudget {
             max_rounds: 2,
             max_tool_calls: 8,
             max_tokens: 1_000_000,
-            timeout_ms: 120_000,
+            runtime_deadline_ms: None,
         }
     }
 
@@ -104,7 +158,7 @@ impl ChildTaskBudget {
             "max_rounds": self.max_rounds,
             "max_tool_calls": self.max_tool_calls,
             "max_tokens": self.max_tokens,
-            "timeout_ms": self.timeout_ms,
+            "runtime_deadline_ms": self.runtime_deadline_ms,
         })
     }
 }

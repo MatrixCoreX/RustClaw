@@ -104,6 +104,31 @@ export interface TaskPlanView {
   raw: Record<string, unknown>;
 }
 
+export interface SubagentNodeView {
+  childTaskId: string;
+  role: string;
+  required: boolean;
+  threadState: string;
+  executionState: string;
+  readiness: string;
+  queueReason?: string;
+  waitingReason?: string;
+  permissionProfile?: string;
+  closedAt?: string;
+  raw: Record<string, unknown>;
+}
+
+export interface SubagentPanelView {
+  parentTaskId: string;
+  status: string;
+  sessionOpenCapacity?: number;
+  sessionOpenCount?: number;
+  mainAgentCounted: boolean;
+  active: SubagentNodeView[];
+  done: SubagentNodeView[];
+  raw: Record<string, unknown>;
+}
+
 export function extractTaskText(result: TaskQueryResponse): string {
   if (result.result_json && typeof result.result_json === "object") {
     const maybeText = (result.result_json as { text?: unknown }).text;
@@ -335,6 +360,82 @@ export function taskTraceEvents(result: TaskQueryResponse): Record<string, unkno
     const rightSeq = typeof right.seq === "number" ? right.seq : Number.MAX_SAFE_INTEGER;
     return leftSeq - rightSeq;
   });
+}
+
+export function buildSubagentPanelView(result: TaskQueryResponse): SubagentPanelView | null {
+  const candidates: Record<string, unknown>[] = [];
+  collectSubagentGraphCandidates(result.result_json, candidates, 0);
+  for (const event of taskTraceEvents(result)) {
+    collectSubagentGraphCandidates(event.payload, candidates, 0);
+  }
+  const graph = candidates.at(-1);
+  if (!graph) return null;
+  const parentTaskId = primitiveKeyValue(graph.parent_task_id) ?? result.task_id;
+  const nodes = Array.isArray(graph.nodes)
+    ? graph.nodes.flatMap((value): SubagentNodeView[] => {
+        const node = asRecord(value);
+        if (!node) return [];
+        const childTaskId = primitiveKeyValue(node.child_task_id);
+        if (!childTaskId) return [];
+        const runtime = asRecord(node.runtime);
+        return [{
+          childTaskId,
+          role: primitiveKeyValue(node.role) ?? "worker",
+          required: node.required === true,
+          threadState: primitiveKeyValue(node.thread_state) ?? "open",
+          executionState: primitiveKeyValue(node.execution_state) ?? "queued",
+          readiness: primitiveKeyValue(node.readiness) ?? "queued",
+          queueReason: primitiveKeyValue(node.queue_reason),
+          waitingReason:
+            primitiveKeyValue(node.waiting_reason)
+            ?? primitiveKeyValue(runtime?.waiting_reason)
+            ?? primitiveKeyValue(runtime?.waiting_reason_code),
+          permissionProfile: primitiveKeyValue(node.permission_profile),
+          closedAt: primitiveKeyValue(node.closed_at),
+          raw: node,
+        }];
+      })
+    : [];
+  if (nodes.length === 0) return null;
+  const doneStates = new Set(["done", "closed"]);
+  return {
+    parentTaskId,
+    status: primitiveKeyValue(graph.status) ?? "active",
+    sessionOpenCapacity: finiteNumber(graph.session_open_capacity),
+    sessionOpenCount: finiteNumber(graph.session_open_count),
+    mainAgentCounted: graph.main_agent_counted === true,
+    active: nodes.filter((node) => !doneStates.has(node.threadState)),
+    done: nodes.filter((node) => doneStates.has(node.threadState)),
+    raw: graph,
+  };
+}
+
+function collectSubagentGraphCandidates(
+  value: unknown,
+  candidates: Record<string, unknown>[],
+  depth: number,
+): void {
+  if (depth > 12 || value == null) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectSubagentGraphCandidates(item, candidates, depth + 1);
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) return;
+  if (
+    Array.isArray(record.nodes)
+    && record.nodes.some((node) => Boolean(asRecord(node)?.child_task_id))
+    && (record.parent_task_id != null || record.main_agent_counted === false)
+  ) {
+    candidates.push(record);
+  }
+  for (const child of Object.values(record)) {
+    collectSubagentGraphCandidates(child, candidates, depth + 1);
+  }
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function parseTaskPlanSnapshot(value: unknown): TaskPlanView | null {
@@ -1100,15 +1201,26 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
   }
 
   if (eventType === "subagent_graph") {
-    const nodeCount = Array.isArray(payload?.nodes) ? payload.nodes.length : 0;
+    const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+    const nodeCount = nodes.length;
     const edgeCount = Array.isArray(payload?.edges) ? payload.edges.length : 0;
     const graphStatus = field("status");
+    const activeCount = nodes.filter((node) => {
+      if (!node || typeof node !== "object") return false;
+      const state = String((node as Record<string, unknown>).thread_state || "");
+      return ["submitted", "queued_capacity", "open"].includes(state);
+    }).length;
+    const doneCount = nodes.filter((node) => {
+      if (!node || typeof node !== "object") return false;
+      const state = String((node as Record<string, unknown>).thread_state || "");
+      return ["done", "closed"].includes(state);
+    }).length;
     return {
       eventType,
-      title: tLocal("子任务图", "Subagent task graph"),
+      title: tLocal("子任务进度", "Subagent progress"),
       detail: tLocal(
-        `${nodeCount} 个节点，${edgeCount} 条依赖；状态 ${graphStatus || "active"}。`,
-        `${nodeCount} node(s), ${edgeCount} dependency edge(s); status ${graphStatus || "active"}.`,
+        `共 ${nodeCount} 项，进行中 ${activeCount} 项，已完成 ${doneCount} 项；${edgeCount} 条依赖。`,
+        `${nodeCount} total, ${activeCount} active, ${doneCount} done; ${edgeCount} dependency edge(s).`,
       ),
       tone: graphStatus.startsWith("parent_") || graphStatus === "canceled" ? "failed" : tone,
       meta,
@@ -1132,10 +1244,18 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       matchingNode && typeof matchingNode === "object"
         ? String((matchingNode as Record<string, unknown>).readiness || "")
         : "";
+    const threadState =
+      matchingNode && typeof matchingNode === "object"
+        ? String((matchingNode as Record<string, unknown>).thread_state || "")
+        : "";
+    const executionState =
+      matchingNode && typeof matchingNode === "object"
+        ? String((matchingNode as Record<string, unknown>).execution_state || "")
+        : "";
     return {
       eventType,
       title: tLocal("子任务节点", "Subagent task node"),
-      detail: [childTaskId, readiness].filter(Boolean).join(" · ") || eventType,
+      detail: [childTaskId, threadState, executionState, readiness].filter(Boolean).join(" · ") || eventType,
       tone: ["failed", "canceled", "timeout"].includes(readiness) ? "failed" : tone,
       meta,
     };

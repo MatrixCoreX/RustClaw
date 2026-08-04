@@ -555,7 +555,7 @@ struct ChildLoopBudgetLimits {
     max_rounds: u64,
     max_tool_calls: u64,
     max_tokens: u64,
-    timeout_ms: u64,
+    runtime_deadline_ms: Option<u64>,
 }
 
 fn child_loop_budget_limits(payload_json: &str) -> Option<ChildLoopBudgetLimits> {
@@ -563,7 +563,21 @@ fn child_loop_budget_limits(payload_json: &str) -> Option<ChildLoopBudgetLimits>
     if payload.get("task_role").and_then(Value::as_str) != Some("subagent_child") {
         return None;
     }
-    let budget = payload.pointer("/child_task_contract/budget")?;
+    let contract = payload.get("child_task_contract")?;
+    let schema_version = contract
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    let budget = contract.get("budget")?;
+    let runtime_deadline_ms = budget
+        .get("runtime_deadline_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            (schema_version == 1)
+                .then(|| budget.get("timeout_ms").and_then(Value::as_u64))
+                .flatten()
+        })
+        .map(|value| value.max(1_000));
     Some(ChildLoopBudgetLimits {
         max_rounds: budget.get("max_rounds")?.as_u64()?.max(1),
         max_tool_calls: budget.get("max_tool_calls")?.as_u64()?.max(1),
@@ -572,7 +586,7 @@ fn child_loop_budget_limits(payload_json: &str) -> Option<ChildLoopBudgetLimits>
             .and_then(Value::as_u64)
             .unwrap_or(1_000_000)
             .max(1),
-        timeout_ms: budget.get("timeout_ms")?.as_u64()?.max(1_000),
+        runtime_deadline_ms,
     })
 }
 
@@ -596,7 +610,9 @@ fn clamp_child_task_budget_policy(
     policy.hard_ceilings.model_turns = policy.hard_ceilings.model_turns.min(limits.max_rounds);
     policy.hard_ceilings.tool_calls = policy.hard_ceilings.tool_calls.min(limits.max_tool_calls);
     policy.hard_ceilings.total_tokens = policy.hard_ceilings.total_tokens.min(limits.max_tokens);
-    policy.hard_ceilings.elapsed_ms = policy.hard_ceilings.elapsed_ms.min(limits.timeout_ms);
+    if let Some(runtime_deadline_ms) = limits.runtime_deadline_ms {
+        policy.hard_ceilings.elapsed_ms = policy.hard_ceilings.elapsed_ms.min(runtime_deadline_ms);
+    }
 }
 
 fn initialize_task_budget_slice(

@@ -3,11 +3,10 @@ use super::{
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, goal_control_summary_json,
     goal_edit_patch_json, goal_request_payload, goal_status_summary_json, goal_status_text_lines,
-    permission_report_json, run_exec, subagent_report_json, task_event_output_lines,
-    task_report_json, task_report_text_lines, task_resume_control_summary_json,
-    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json,
-    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
-    TuiCommand,
+    permission_report_json, run_exec, task_event_output_lines, task_report_json,
+    task_report_text_lines, task_resume_control_summary_json, tui_command_from_input,
+    tui_export_json, tui_selected_task_lines, tui_snapshot_json, wait_until_matches,
+    watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
 };
 
 #[test]
@@ -535,132 +534,6 @@ fn coding_review_json_focuses_on_coding_evidence() {
 }
 
 #[test]
-fn subagent_report_json_collects_child_results_and_events() {
-    let task = crate::task::TaskStatusView {
-        task_id: "task-subagents".to_string(),
-        status: "running".to_string(),
-        raw_data: serde_json::json!({
-            "result_json": {
-                "child_results": [
-                    {
-                        "child_run_id": "subagent:1:2:explorer",
-                        "subagent_id": "explorer",
-                        "status": "succeeded",
-                        "result_status": "completed",
-                        "role_metadata": {
-                            "tool_permission_profile": "read_only"
-                        },
-                        "timeout_policy": {
-                            "timeout_ms": 30000,
-                            "source": "agent_guard.subagents.default_timeout_ms"
-                        },
-                        "outcome_code": "subagent_parallel_readonly_completed",
-                        "conflict_count": 1,
-                        "failure_isolated": true,
-                        "confidence_summary": {
-                            "min": 0.72,
-                            "max": 0.93
-                        },
-                        "main_thread_decision": {
-                            "decision_status": "needs_conflict_resolution"
-                        },
-                        "finding_refs": ["finding:1"],
-                        "evidence_refs": ["evidence:1"]
-                    }
-                ],
-                "team_spec": {
-                    "team_id": "subagent-batch:1:2",
-                    "parent_task_id": "task-subagents",
-                    "max_parallel": 2,
-                    "write_permission": "read_only",
-                    "conflict_policy": "parent_loop_resolution_required",
-                    "child_task_ids": ["subagent:1:2:explorer"],
-                    "children": [
-                        {"child_task_id": "subagent:1:2:explorer"}
-                    ]
-                }
-            }
-        }),
-        result_text: None,
-        error_text: None,
-        events: vec![crate::events::TaskEventLine {
-            event_type: "subagent".to_string(),
-            line: "type=subagent child_run_id=subagent:1:2:verifier".to_string(),
-            fields: std::collections::BTreeMap::from([
-                (
-                    "child_run_id".to_string(),
-                    "subagent:1:2:verifier".to_string(),
-                ),
-                ("subagent_id".to_string(), "verifier".to_string()),
-                ("status".to_string(), "succeeded".to_string()),
-                (
-                    "tool_permission_profile".to_string(),
-                    "read_only".to_string(),
-                ),
-                (
-                    "execution_mode".to_string(),
-                    "inline_readonly_child_run".to_string(),
-                ),
-            ]),
-        }],
-    };
-
-    let report = subagent_report_json(&task);
-
-    assert_eq!(report["report_kind"], "agent_subagent_report");
-    assert_eq!(report["task_id"], "task-subagents");
-    assert_eq!(report["team_count"], 1);
-    assert_eq!(report["teams"][0]["team_id"], "subagent-batch:1:2");
-    assert_eq!(report["teams"][0]["child_count"], 1);
-    assert_eq!(
-        report["teams"][0]["child_task_ids"][0],
-        "subagent:1:2:explorer"
-    );
-    assert_eq!(report["subagent_count"], 2);
-    assert_eq!(
-        report["subagents"][0]["child_run_id"],
-        "subagent:1:2:explorer"
-    );
-    assert_eq!(report["subagents"][0]["result_status"], "completed");
-    assert_eq!(
-        report["subagents"][0]["outcome_code"],
-        "subagent_parallel_readonly_completed"
-    );
-    assert_eq!(report["subagents"][0]["conflict_count"], 1);
-    assert_eq!(
-        report["subagents"][0]["decision_status"],
-        "needs_conflict_resolution"
-    );
-    assert_eq!(report["subagents"][0]["confidence_min"], 0.72);
-    assert_eq!(report["subagents"][0]["confidence_max"], 0.93);
-    assert_eq!(report["subagents"][0]["failure_isolated"], true);
-    assert_eq!(
-        report["subagents"][0]["tool_permission_profile"],
-        "read_only"
-    );
-    assert_eq!(report["subagents"][0]["read_only_enforced"], true);
-    assert_eq!(
-        report["subagents"][0]["write_isolation_status"],
-        "not_supported"
-    );
-    assert_eq!(report["subagents"][0]["timeout_ms"], 30000);
-    assert_eq!(
-        report["subagents"][0]["timeout_source"],
-        "agent_guard.subagents.default_timeout_ms"
-    );
-    assert_eq!(report["subagents"][0]["finding_refs"][0], "finding:1");
-    assert_eq!(
-        report["subagents"][1]["child_run_id"],
-        "subagent:1:2:verifier"
-    );
-    assert_eq!(
-        report["subagents"][1]["tool_permission_profile"],
-        "read_only"
-    );
-    assert_eq!(report["subagents"][1]["read_only_enforced"], true);
-}
-
-#[test]
 fn permission_report_json_collects_structured_decisions() {
     let task = crate::task::TaskStatusView {
         task_id: "task-permission".to_string(),
@@ -847,6 +720,19 @@ fn tui_command_parser_accepts_basic_key_tokens() {
     assert_eq!(tui_command_from_input("2"), Some(TuiCommand::Review));
     assert_eq!(tui_command_from_input("3"), Some(TuiCommand::Subagents));
     assert_eq!(tui_command_from_input("4"), Some(TuiCommand::Permission));
+    assert_eq!(tui_command_from_input("5"), Some(TuiCommand::SubagentOpen));
+    assert_eq!(tui_command_from_input("6"), Some(TuiCommand::SubagentSteer));
+    assert_eq!(tui_command_from_input("7"), Some(TuiCommand::SubagentPause));
+    assert_eq!(
+        tui_command_from_input("8"),
+        Some(TuiCommand::SubagentResume)
+    );
+    assert_eq!(tui_command_from_input("9"), Some(TuiCommand::SubagentStop));
+    assert_eq!(
+        tui_command_from_input("0"),
+        Some(TuiCommand::SubagentStopAll)
+    );
+    assert_eq!(tui_command_from_input("x"), Some(TuiCommand::SubagentClose));
     assert_eq!(tui_command_from_input("q"), Some(TuiCommand::Quit));
     assert_eq!(tui_command_from_input("watch"), None);
 }

@@ -630,6 +630,61 @@ fn checkpoint_resume_state(
     super::checkpoint_resume_state::build_checkpoint_resume_state(loop_state, stage)
 }
 
+pub(super) fn refresh_agent_loop_checkpoint_snapshot(loop_state: &mut super::LoopState) {
+    let resume_state = checkpoint_resume_state(
+        loop_state,
+        super::checkpoint_resume_state::AgentCheckpointStage::Planning,
+    );
+    let observations = checkpoint_step_observations(loop_state);
+    let capability_results = loop_state.capability_results.clone();
+    let evidence_refs = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok())
+        .map(|step| step.step_id.clone())
+        .collect::<Vec<_>>();
+    let last_successful_step = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.is_ok())
+        .map(|step| step.step_id.clone());
+    let artifact_refs = checkpoint_artifact_refs(loop_state);
+    let completed_side_effect_refs = completed_side_effect_refs(loop_state);
+    let attempt_ledger = super::attempt_ledger::build_attempt_ledger_snapshot(loop_state);
+    let Some(checkpoint) = loop_state
+        .task_checkpoint
+        .as_mut()
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(boundary) = checkpoint
+        .get_mut("boundary_context")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    boundary.insert("agent_loop_resume_state".to_string(), resume_state);
+    checkpoint.insert("observations".to_string(), json!(observations));
+    checkpoint.insert("capability_results".to_string(), json!(capability_results));
+    checkpoint.insert("evidence_refs".to_string(), json!(evidence_refs));
+    checkpoint.insert("artifact_refs".to_string(), json!(artifact_refs));
+    checkpoint.insert(
+        "completed_side_effect_refs".to_string(),
+        json!(completed_side_effect_refs),
+    );
+    checkpoint.insert("attempt_ledger".to_string(), json!(attempt_ledger));
+    checkpoint.insert(
+        "last_successful_round".to_string(),
+        json!((loop_state.round_no > 0).then_some(saturating_u32(loop_state.round_no))),
+    );
+    checkpoint.insert(
+        "last_successful_step".to_string(),
+        json!(last_successful_step),
+    );
+}
+
 #[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,

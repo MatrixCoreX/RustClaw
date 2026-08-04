@@ -27,6 +27,13 @@ pub(super) enum TuiCommand {
     Report,
     Review,
     Subagents,
+    SubagentOpen,
+    SubagentSteer,
+    SubagentPause,
+    SubagentResume,
+    SubagentStop,
+    SubagentStopAll,
+    SubagentClose,
     Permission,
     Quit,
 }
@@ -146,6 +153,81 @@ pub(crate) fn run_tui(
                         .context("selected_task_required_for_subagents")?;
                     output::print_json_pretty(&subagent_report_json(task));
                 }
+                TuiCommand::SubagentOpen => {
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    let child = task::get_task_status(base_url, key, child_task_id.trim())?;
+                    output::print_json_pretty(&task_report_json(&child, include_events));
+                }
+                TuiCommand::SubagentSteer => {
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    let message = read_tui_value("tui.subagent_steer_prompt")?;
+                    if message.trim().is_empty() {
+                        anyhow::bail!("subagent_steer_input_required");
+                    }
+                    output::print_json_pretty(&task::resume_task_by_id(
+                        base_url,
+                        key,
+                        child_task_id.trim(),
+                        task::TaskResumeRequest {
+                            resume_reason: Some("subagent_steered"),
+                            user_message: Some(message.trim()),
+                            ..Default::default()
+                        },
+                    )?);
+                }
+                TuiCommand::SubagentPause => {
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    output::print_json_pretty(&task::pause_task_by_id(
+                        base_url,
+                        key,
+                        child_task_id.trim(),
+                        TUI_DEFAULT_PAUSE_SECONDS,
+                    )?);
+                }
+                TuiCommand::SubagentResume => {
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    output::print_json_pretty(&task::resume_task_by_id(
+                        base_url,
+                        key,
+                        child_task_id.trim(),
+                        task::TaskResumeRequest {
+                            resume_reason: Some("subagent_resumed"),
+                            ..Default::default()
+                        },
+                    )?);
+                }
+                TuiCommand::SubagentStop => {
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    if read_tui_confirmation()? {
+                        output::print_json_pretty(&task::cancel_task_by_id(
+                            base_url,
+                            key,
+                            child_task_id.trim(),
+                        )?);
+                    }
+                }
+                TuiCommand::SubagentStopAll => {
+                    let parent_task_id =
+                        selected_task_id.context("selected_task_required_for_subagent_stop_all")?;
+                    if read_tui_confirmation()? {
+                        output::print_json_pretty(&task::stop_child_tasks_by_parent(
+                            base_url,
+                            key,
+                            parent_task_id,
+                        )?);
+                    }
+                }
+                TuiCommand::SubagentClose => {
+                    let parent_task_id =
+                        selected_task_id.context("selected_task_required_for_subagent_close")?;
+                    let child_task_id = read_tui_value("tui.subagent_id_prompt")?;
+                    output::print_json_pretty(&task::close_child_task_by_id(
+                        base_url,
+                        key,
+                        parent_task_id,
+                        child_task_id.trim(),
+                    )?);
+                }
                 TuiCommand::Permission => {
                     let task = selected
                         .as_ref()
@@ -190,6 +272,13 @@ pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
         "2" => Some(TuiCommand::Review),
         "3" => Some(TuiCommand::Subagents),
         "4" => Some(TuiCommand::Permission),
+        "5" => Some(TuiCommand::SubagentOpen),
+        "6" => Some(TuiCommand::SubagentSteer),
+        "7" => Some(TuiCommand::SubagentPause),
+        "8" => Some(TuiCommand::SubagentResume),
+        "9" => Some(TuiCommand::SubagentStop),
+        "0" => Some(TuiCommand::SubagentStopAll),
+        "x" => Some(TuiCommand::SubagentClose),
         "q" => Some(TuiCommand::Quit),
         _ => None,
     }
@@ -433,6 +522,22 @@ fn read_tui_continue_message() -> Result<String> {
         .read_line(&mut input)
         .context("read_tui_continue_message_failed")?;
     Ok(input)
+}
+
+fn read_tui_value(prompt_key: &'static str) -> Result<String> {
+    print!("{}", crate::resources::text(prompt_key));
+    io::stdout().flush().context("flush_tui_value_prompt")?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("read_tui_value_failed")?;
+    Ok(input)
+}
+
+fn read_tui_confirmation() -> Result<bool> {
+    Ok(read_tui_value("tui.subagent_stop_confirm_prompt")?
+        .trim()
+        .eq_ignore_ascii_case("yes"))
 }
 
 fn watch_selected_task(

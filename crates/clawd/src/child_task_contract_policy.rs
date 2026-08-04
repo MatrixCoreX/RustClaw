@@ -6,9 +6,10 @@ pub(crate) fn child_scheduler_decision(
     requested_count: usize,
     max_parallel: usize,
     recursion_depth: usize,
+    max_spawn_depth: usize,
 ) -> Value {
     let bounded_max_parallel = max_parallel.max(1);
-    let fanout = child_fanout_policy(recursion_depth, requested_count);
+    let fanout = child_fanout_policy(recursion_depth, requested_count, max_spawn_depth);
     if fanout.get("decision").and_then(Value::as_str) != Some("allowed") {
         return json!({
             "schema_version": CHILD_TASK_SCHEMA_VERSION,
@@ -40,12 +41,22 @@ pub(crate) fn child_scheduler_decision(
     })
 }
 
-pub(crate) fn child_fanout_policy(recursion_depth: usize, requested_count: usize) -> Value {
+pub(crate) fn child_fanout_policy(
+    recursion_depth: usize,
+    requested_count: usize,
+    max_spawn_depth: usize,
+) -> Value {
+    let allowed = recursion_depth <= max_spawn_depth.max(1);
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
-        "decision": "allowed",
-        "reason_code": "child_dag_validated",
+        "decision": if allowed { "allowed" } else { "rejected" },
+        "reason_code": if allowed {
+            "child_dag_validated"
+        } else {
+            "child_recursion_depth_exceeded"
+        },
         "recursion_depth": recursion_depth,
+        "max_spawn_depth": max_spawn_depth.max(1),
         "requested_child_count": requested_count,
         "topology_guard": "dependency_dag_cycle_and_conflict_validation",
     })

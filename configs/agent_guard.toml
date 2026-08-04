@@ -56,14 +56,16 @@
 # failure_policy = "deny"
 
 [agent.subagents]
-# 用途/Purpose: subagent 角色与并发预算；只消费机器 token，不解析用户自然语言。
-# Machine-only subagent role and parallel budget configuration. Inline children remain read-only;
-# persistent writers run only in parent-reviewed local worktrees.
-# Inline read-only children use this limit. Persistent local-worktree writers have a separate
-# persisted DAG boundary and may run concurrently only with disjoint path ownership.
-max_parallel_readonly = 4
-# 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
-default_timeout_ms = 180000
+# 用途/Purpose: subagent 角色、会话线程容量和前台等待策略；只消费机器 token。
+enabled = true
+# 每个会话同时打开的子 Agent 线程数；主 Agent 不计入此上限。
+max_concurrent_threads_per_session = 4
+# 主 Agent 单次等待子任务结果的窗口；到期只返回 waiting，不会停止子任务。
+join_wait_ms = 30000
+# 2 表示允许 main -> child -> grandchild，再深一层会被调度器拒绝。
+max_spawn_depth = 2
+# 允许父任务向运行中的子任务发送结构化引导消息。
+interrupt_message = true
 
 [agent.subagents.role_definitions.observe]
 family = "explorer"

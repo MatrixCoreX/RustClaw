@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use crate::{
     child_task_contract::{
-        child_scheduler_decision, merge_child_task_results, ChildTaskPermissionProfile,
-        ChildTaskSpec, CHILD_TASK_SCHEMA_VERSION,
+        child_scheduler_decision, merge_child_task_results, ChildExecutionState,
+        ChildTaskPermissionProfile, ChildTaskSpec, ChildThreadState, CHILD_TASK_SCHEMA_VERSION,
     },
     now_ts, now_ts_u64, AppState, ClaimedTask,
 };
@@ -22,6 +22,22 @@ pub(crate) struct ChildTaskParentContext {
     pub(crate) external_user_id: Option<String>,
     pub(crate) external_chat_id: Option<String>,
     pub(crate) execution_policy_stamp: Option<Value>,
+    pub(crate) interactive_approval_available: bool,
+}
+
+pub(crate) fn parent_interactive_approval_available(payload_json: &str) -> bool {
+    let payload = serde_json::from_str::<Value>(payload_json).unwrap_or(Value::Null);
+    if payload
+        .get("schedule_triggered")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    payload
+        .pointer("/child_execution/interactive_approval_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
 }
 
 pub(crate) fn enqueue_child_task_specs(
@@ -30,9 +46,14 @@ pub(crate) fn enqueue_child_task_specs(
     specs: &[ChildTaskSpec],
     max_parallel: usize,
     recursion_depth: usize,
+    max_spawn_depth: usize,
 ) -> anyhow::Result<Value> {
-    let scheduler_boundary =
-        child_scheduler_decision(specs.len(), specs.len().max(1), recursion_depth);
+    let scheduler_boundary = child_scheduler_decision(
+        specs.len(),
+        specs.len().max(1),
+        recursion_depth,
+        max_spawn_depth,
+    );
     if scheduler_boundary
         .get("scheduled_child_count")
         .and_then(Value::as_u64)
@@ -48,16 +69,36 @@ pub(crate) fn enqueue_child_task_specs(
             "scheduler": scheduler_boundary,
         }));
     }
-    let graph = super::child_task_graph::prepare_child_task_graph(specs, max_parallel)?;
-    let scheduler = graph_scheduler_projection(&graph, scheduler_boundary);
-
     let now = now_ts();
     let mut db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let tx = db.transaction()?;
+    let preliminary = super::child_task_graph::prepare_child_task_graph(specs, max_parallel)?;
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let open_count =
+        super::child_task_graph::session_open_thread_count(&tx, &preliminary.session_ref)?;
+    let available_session_slots = preliminary.session_open_capacity.saturating_sub(open_count);
+    let graph = super::child_task_graph::prepare_child_task_graph_with_ready_slots(
+        specs,
+        max_parallel,
+        available_session_slots,
+    )?;
+    let mut scheduler = graph_scheduler_projection(&graph, scheduler_boundary);
+    if let Some(object) = scheduler.as_object_mut() {
+        object.insert("session_ref".to_string(), json!(graph.session_ref));
+        object.insert(
+            "session_open_capacity".to_string(),
+            json!(graph.session_open_capacity),
+        );
+        object.insert("session_open_count".to_string(), json!(open_count));
+        object.insert(
+            "session_available_count".to_string(),
+            json!(available_session_slots),
+        );
+        object.insert("main_agent_counted".to_string(), json!(false));
+    }
     super::child_task_graph::persist_child_task_graph(&tx, &graph, &now)?;
     let mut queued_child_ids = Vec::new();
     let mut queued_model_policies = Vec::new();
@@ -65,13 +106,24 @@ pub(crate) fn enqueue_child_task_specs(
         if spec.parent_task_id != parent.parent_task_id {
             anyhow::bail!("child_parent_mismatch");
         }
-        let payload = child_task_payload(state, spec, parent.execution_policy_stamp.as_ref())?;
+        let payload = child_task_payload(
+            state,
+            spec,
+            parent.execution_policy_stamp.as_ref(),
+            parent.interactive_approval_available,
+        )?;
         queued_model_policies.push(json!({
             "child_task_id": spec.child_task_id,
             "role": spec.role,
             "resolved_model_policy": payload.get("resolved_model_policy"),
         }));
-        let result_json = queued_child_task_result(spec);
+        let readiness = graph
+            .nodes
+            .iter()
+            .find(|node| node.spec.child_task_id == spec.child_task_id)
+            .map(|node| node.readiness)
+            .unwrap_or("blocked_capacity");
+        let result_json = queued_child_task_result_with_readiness(spec, readiness);
         tx.execute(
             "INSERT INTO tasks (
                 task_id, user_id, chat_id, user_key, channel, external_user_id,
@@ -142,7 +194,12 @@ pub(crate) fn start_inline_child_task(
         anyhow::bail!("child_parent_mismatch");
     }
     let graph = super::child_task_graph::prepare_child_task_graph(std::slice::from_ref(spec), 1)?;
-    let payload = child_task_payload(state, spec, parent.execution_policy_stamp.as_ref())?;
+    let payload = child_task_payload(
+        state,
+        spec,
+        parent.execution_policy_stamp.as_ref(),
+        parent.interactive_approval_available,
+    )?;
     let mut result_json = queued_child_task_result(spec);
     result_json["source"] = json!("inline_child_task_start");
     result_json["task_lifecycle"]["state"] = json!("running");
@@ -289,7 +346,7 @@ fn schedule_child_specs<'a>(
     max_parallel: usize,
     recursion_depth: usize,
 ) -> (Vec<&'a ChildTaskSpec>, Value) {
-    let base = child_scheduler_decision(specs.len(), max_parallel, recursion_depth);
+    let base = child_scheduler_decision(specs.len(), max_parallel, recursion_depth, 2);
     let total_capacity = base
         .get("scheduled_child_count")
         .and_then(Value::as_u64)
@@ -417,6 +474,30 @@ pub(crate) fn is_child_subagent_payload(payload: &Value) -> bool {
             .is_some_and(Value::is_object)
 }
 
+pub(crate) fn refresh_stored_child_terminal_projection(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<bool> {
+    let payload = {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+        db.query_row(
+            "SELECT payload_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+    };
+    let Some(payload) = payload else {
+        return Ok(false);
+    };
+    record_child_task_terminal_projection(state, task_id, &payload)
+}
+
 pub(crate) fn record_child_task_terminal_projection(
     state: &AppState,
     task_id: &str,
@@ -456,7 +537,7 @@ pub(crate) fn record_child_task_terminal_projection(
         });
     }
     let child_result = child_task_result_projection(&status, payload, &result_json);
-    let lifecycle = child_terminal_lifecycle_projection(&status, payload);
+    let lifecycle = child_terminal_lifecycle_projection(&status, payload, &result_json);
     let Some(obj) = result_json.as_object_mut() else {
         return Ok(false);
     };
@@ -490,8 +571,28 @@ pub(crate) fn record_child_task_terminal_projection(
             &status,
             &now_ts(),
         )?;
-        refresh_parent_child_task_merge_from_db(&db, parent_task_id)?;
+        let parent_merge = refresh_parent_child_task_merge_from_db(&db, parent_task_id)?;
         drop(db);
+        if parent_merge.as_ref().is_some_and(|merge| {
+            matches!(
+                merge
+                    .pointer("/parent_continuation/status")
+                    .and_then(Value::as_str),
+                Some("ready" | "blocked")
+            )
+        }) {
+            let _ = super::task_admin::resume_task_with_input(
+                state,
+                super::task_admin::TaskResumeControlInput {
+                    task_id: parent_task_id.to_string(),
+                    checkpoint_id: None,
+                    resume_trigger: crate::task_lifecycle::ResumeTrigger::WorkerRecovery,
+                    resume_reason: Some("child_tasks_settled".to_string()),
+                    user_message: None,
+                    new_constraints: None,
+                },
+            )?;
+        }
         if let Some(snapshot) = graph_snapshot {
             let _ = crate::task_event_transport::publish_event(
                 state,
@@ -659,6 +760,20 @@ fn refresh_parent_child_task_merge_from_db(
         "ready" => "child_tasks_merged",
         _ => "required_child_failed",
     };
+    let newly_auto_closed_child_count = if pending_count == 0 && missing_count == 0 {
+        super::child_task_graph::close_terminal_threads_after_parent_merge(
+            db,
+            parent_task_id,
+            &now_ts(),
+        )?
+    } else {
+        0
+    };
+    let auto_closed_child_count = parent_result
+        .pointer("/child_task_merge/auto_closed_child_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        .saturating_add(newly_auto_closed_child_count as u64);
     let graph_snapshot = super::child_task_graph::graph_snapshot(db, parent_task_id)?;
     let projection = json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
@@ -668,6 +783,8 @@ fn refresh_parent_child_task_merge_from_db(
         "terminal_child_count": child_results.len(),
         "pending_child_count": pending_count,
         "missing_child_count": missing_count,
+        "auto_closed_child_count": auto_closed_child_count,
+        "newly_auto_closed_child_count": newly_auto_closed_child_count,
         "pending_child_ids": pending_child_ids,
         "missing_child_ids": missing_child_ids,
         "merge": merge,
@@ -840,13 +957,23 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         "error_code": if status == "succeeded" {
             Value::Null
         } else {
-            json!("child_task_terminal_not_succeeded")
+            result_json
+                .get("error_code")
+                .or_else(|| result_json.get("status_code"))
+                .cloned()
+                .unwrap_or_else(|| json!("child_task_terminal_not_succeeded"))
         },
         "message_key": if status == "succeeded" {
-            "clawd.child_task.succeeded"
+            json!("clawd.child_task.succeeded")
         } else {
-            "clawd.child_task.not_succeeded"
+            result_json
+                .get("message_key")
+                .cloned()
+                .unwrap_or_else(|| json!("clawd.child_task.not_succeeded"))
         },
+        "retryable": result_json.get("retryable").and_then(Value::as_bool).unwrap_or(
+            matches!(status, "failed" | "timed_out" | "cancelled")
+        ),
         "evidence_refs": evidence_refs,
         "artifact_refs": artifact_refs,
         "verification_artifact": verification_artifact,
@@ -976,11 +1103,33 @@ fn child_verification_artifact(child_task_id: &str, result_json: &Value) -> Opti
     }))
 }
 
-fn child_terminal_lifecycle_projection(status: &str, payload: &Value) -> Value {
+fn child_terminal_lifecycle_projection(
+    status: &str,
+    payload: &Value,
+    result_json: &Value,
+) -> Value {
     let contract = payload.get("child_task_contract").unwrap_or(&Value::Null);
-    json!({
+    let runtime_deadline_ms = contract
+        .pointer("/budget/runtime_deadline_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            (contract
+                .get("schema_version")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                == 1)
+                .then(|| {
+                    contract
+                        .pointer("/budget/timeout_ms")
+                        .and_then(Value::as_u64)
+                })
+                .flatten()
+        });
+    let mut lifecycle = json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "state": child_lifecycle_state(status),
+        "thread_state": ChildThreadState::Done.as_str(),
+        "execution_state": child_execution_state(status),
         "state_source": "child_task_terminal_projection",
         "parent_task_id": contract
             .get("parent_task_id")
@@ -1005,14 +1154,55 @@ fn child_terminal_lifecycle_projection(status: &str, payload: &Value) -> Value {
         "can_pause": false,
         "can_steer": false,
         "can_retry": matches!(status, "failed" | "timeout" | "canceled"),
-    })
+        "runtime_deadline_ms": runtime_deadline_ms,
+        "runtime_deadline_source": if runtime_deadline_ms.is_some() {
+            if contract.get("schema_version").and_then(Value::as_u64).unwrap_or(1) == 1 {
+                "v1_budget_timeout_ms"
+            } else {
+                "explicit_runtime_deadline"
+            }
+        } else {
+            "none"
+        },
+        "tool_timeout": null,
+        "stall_timeout": null,
+        "lease_expires_at": null,
+        "retention_expires_at": null,
+    });
+    let previous = result_json.get("task_lifecycle").unwrap_or(&Value::Null);
+    if let Some(object) = lifecycle.as_object_mut() {
+        for field in [
+            "timeout_class",
+            "timeout_source",
+            "tool_timeout",
+            "stall_timeout",
+            "lease_expires_at",
+            "retention_expires_at",
+            "cancel_source",
+            "runtime_deadline_at",
+        ] {
+            if let Some(value) = previous.get(field).filter(|value| !value.is_null()) {
+                object.insert(field.to_string(), value.clone());
+            }
+        }
+        if status == "canceled" && object.get("cancel_source").is_none() {
+            object.insert(
+                "cancel_source".to_string(),
+                result_json
+                    .get("terminal_reason")
+                    .cloned()
+                    .unwrap_or_else(|| json!("user_cancelled")),
+            );
+        }
+    }
+    lifecycle
 }
 
 fn child_terminal_status(status: &str) -> &'static str {
     match status {
         "succeeded" => "succeeded",
         "canceled" => "cancelled",
-        "timeout" => "failed",
+        "timeout" => "timed_out",
         "failed" => "failed",
         _ => "unknown",
     }
@@ -1022,8 +1212,19 @@ fn child_lifecycle_state(status: &str) -> &'static str {
     match status {
         "succeeded" => "succeeded",
         "canceled" => "cancelled",
-        "timeout" | "failed" => "failed",
+        "timeout" => "timed_out",
+        "failed" => "failed",
         _ => "unknown",
+    }
+}
+
+fn child_execution_state(status: &str) -> &'static str {
+    match status {
+        "succeeded" => ChildExecutionState::Succeeded.as_str(),
+        "canceled" => ChildExecutionState::Cancelled.as_str(),
+        "timeout" => ChildExecutionState::TimedOut.as_str(),
+        "failed" => ChildExecutionState::Failed.as_str(),
+        _ => ChildExecutionState::Failed.as_str(),
     }
 }
 
@@ -1031,6 +1232,7 @@ fn child_task_payload(
     state: &AppState,
     spec: &ChildTaskSpec,
     execution_policy_stamp: Option<&Value>,
+    interactive_approval_available: bool,
 ) -> anyhow::Result<Value> {
     let objective =
         child_task_objective(spec).ok_or_else(|| anyhow::anyhow!("child_objective_missing"))?;
@@ -1046,6 +1248,7 @@ fn child_task_payload(
             "permission_profile": spec.permission_profile.as_str(),
             "required": spec.required,
             "merge_policy": spec.merge_policy.as_str(),
+            "interactive_approval_available": interactive_approval_available,
         },
     });
     let raw_policy = spec
@@ -1094,6 +1297,12 @@ fn child_task_objective(spec: &ChildTaskSpec) -> Option<&str> {
 }
 
 fn queued_child_task_result(spec: &ChildTaskSpec) -> Value {
+    queued_child_task_result_with_readiness(spec, "ready")
+}
+
+fn queued_child_task_result_with_readiness(spec: &ChildTaskSpec, readiness: &str) -> Value {
+    let capacity_queued = readiness == "blocked_capacity";
+    let dependency_queued = readiness == "blocked_dependency";
     json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "source": "child_task_enqueue",
@@ -1102,7 +1311,36 @@ fn queued_child_task_result(spec: &ChildTaskSpec) -> Value {
         "task_lifecycle": {
             "schema_version": CHILD_TASK_SCHEMA_VERSION,
             "state": "queued",
+            "thread_state": if capacity_queued {
+                ChildThreadState::QueuedCapacity.as_str()
+            } else if dependency_queued {
+                ChildThreadState::Submitted.as_str()
+            } else {
+                ChildThreadState::Open.as_str()
+            },
+            "execution_state": if dependency_queued {
+                ChildExecutionState::QueuedDependency.as_str()
+            } else {
+                ChildExecutionState::Queued.as_str()
+            },
+            "queue_reason": if capacity_queued {
+                "session_or_parent_capacity"
+            } else if dependency_queued {
+                "dependency"
+            } else {
+                "ready"
+            },
             "state_source": "child_task_enqueue",
+            "runtime_deadline_ms": spec.budget.runtime_deadline_ms,
+            "runtime_deadline_source": if spec.budget.runtime_deadline_ms.is_some() {
+                "explicit_runtime_deadline"
+            } else {
+                "none"
+            },
+            "tool_timeout": null,
+            "stall_timeout": null,
+            "lease_expires_at": null,
+            "retention_expires_at": null,
             "parent_task_id": spec.parent_task_id,
             "child_task_id": spec.child_task_id,
             "role": spec.role,
