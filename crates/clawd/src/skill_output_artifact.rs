@@ -245,6 +245,56 @@ pub(crate) fn publish_existing_task_artifact(
     }))
 }
 
+pub(crate) fn publish_task_text_artifact(
+    workspace_root: &Path,
+    task_id: &str,
+    namespace: &str,
+    filename: &str,
+    text: &str,
+    metadata: Value,
+) -> io::Result<PublishedArtifact> {
+    let namespace_key = machine_path_component(namespace, "text-output");
+    let task_key = machine_path_component(task_id, "task");
+    let filename_key = machine_path_component(filename, "document.txt");
+    let relative_path = PathBuf::from(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
+        .join("artifacts")
+        .join(&namespace_key)
+        .join(task_key)
+        .join(filename_key);
+    let artifact_path = workspace_root.join(&relative_path);
+    let bytes = text.as_bytes();
+    atomic_write(&artifact_path, bytes)?;
+    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    let relative_path = relative_path.to_string_lossy().replace('\\', "/");
+    let artifact_id = format!("{namespace_key}:{}", &sha256[..24]);
+    let mut artifact_metadata = metadata.as_object().cloned().unwrap_or_default();
+    artifact_metadata.insert("size_bytes".to_string(), json!(bytes.len()));
+    artifact_metadata.insert("task_id".to_string(), Value::String(task_id.to_string()));
+    artifact_metadata.insert(
+        "provenance".to_string(),
+        Value::String(namespace_key.clone()),
+    );
+    artifact_metadata.insert("filename".to_string(), Value::String(filename.to_string()));
+    let artifact_ref = json!({
+        "id": artifact_id,
+        "path": relative_path,
+        "media_type": "text/plain; charset=utf-8",
+        "sha256": sha256,
+        "metadata": artifact_metadata,
+    });
+    let range_handle = json!({
+        "artifact_ref": artifact_ref["id"],
+        "path": artifact_ref["path"],
+        "start_byte": 0,
+        "end_byte": bytes.len(),
+        "read_capability": "artifact.read_range",
+    });
+    Ok(PublishedArtifact {
+        artifact_ref,
+        range_handle,
+    })
+}
+
 pub(crate) fn publish_canonical_evidence_artifact(
     workspace_root: &Path,
     task_id: &str,

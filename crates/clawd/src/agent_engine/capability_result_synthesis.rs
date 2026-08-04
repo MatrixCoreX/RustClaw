@@ -1,5 +1,5 @@
 use claw_core::capability_result::{
-    CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
+    ArtifactRef, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -9,6 +9,9 @@ use super::{AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
 
 const PROMPT_LOGICAL_PATH: &str = "prompts/capability_result_synthesis_prompt.md";
+const TRANSCRIPT_REVISION_PROMPT_LOGICAL_PATH: &str = "prompts/transcript_revision_prompt.md";
+const FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS: usize = 4_000;
+const DEFAULT_TRANSCRIPT_INLINE_MAX_CHARS: usize = 200;
 #[cfg(test)]
 const MAX_RESULT_JSON_CHARS: usize = 64 * 1024;
 #[cfg(test)]
@@ -32,6 +35,30 @@ struct CapabilitySynthesisOutput {
     _reason: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct TranscriptRevisionOutput {
+    #[serde(default)]
+    reviewed_text: String,
+    #[serde(default)]
+    delivery_message: String,
+    #[serde(default)]
+    qualified: bool,
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default, rename = "reason")]
+    _reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct TranscriptReviewContract {
+    result_index: usize,
+    raw_text: String,
+    response_language: String,
+    source: String,
+    inline_max_chars: usize,
+    long_text_filename: String,
+}
+
 pub(super) struct CapabilitySynthesis {
     pub(super) answer: String,
     pub(super) confidence: f64,
@@ -42,16 +69,7 @@ pub(super) fn eligible_for_capability_result_synthesis(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    if loop_state.capability_results.is_empty()
-        || loop_state.capability_results.iter().any(|result| {
-            result.delivery.intent != CapabilityDeliveryIntent::ModelSynthesis
-                || !matches!(
-                    result.status,
-                    CapabilityResultStatus::Ok | CapabilityResultStatus::Error
-                )
-                || result.continuation.is_some()
-        })
-    {
+    if !terminal_model_synthesis_results(&loop_state.capability_results) {
         return false;
     }
     agent_run_context
@@ -65,6 +83,22 @@ pub(super) fn eligible_for_capability_result_synthesis(
         })
 }
 
+pub(super) fn pending_transcript_review(results: &[CapabilityResultEnvelope]) -> bool {
+    terminal_model_synthesis_results(results) && transcript_review_contract(results).is_some()
+}
+
+fn terminal_model_synthesis_results(results: &[CapabilityResultEnvelope]) -> bool {
+    !results.is_empty()
+        && results.iter().all(|result| {
+            result.delivery.intent == CapabilityDeliveryIntent::ModelSynthesis
+                && matches!(
+                    result.status,
+                    CapabilityResultStatus::Ok | CapabilityResultStatus::Error
+                )
+                && result.continuation.is_none()
+        })
+}
+
 pub(super) async fn synthesize_from_capability_results(
     state: &AppState,
     task: &ClaimedTask,
@@ -72,7 +106,15 @@ pub(super) async fn synthesize_from_capability_results(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<Option<CapabilitySynthesis>, String> {
-    if !eligible_for_capability_result_synthesis(loop_state, agent_run_context) {
+    let transcript_contract = transcript_review_contract(&loop_state.capability_results);
+    if transcript_contract.is_none()
+        && !eligible_for_capability_result_synthesis(loop_state, agent_run_context)
+    {
+        return Ok(None);
+    }
+    if transcript_contract.is_some()
+        && !terminal_model_synthesis_results(&loop_state.capability_results)
+    {
         return Ok(None);
     }
     let results = synthesis_evidence_catalog(state, task, &loop_state.capability_results)?;
@@ -81,6 +123,20 @@ pub(super) async fn synthesize_from_capability_results(
         "owner_layer": "canonical_evidence_store",
         "catalog": results.clone(),
     }));
+    if let Some(contract) = transcript_contract {
+        return synthesize_reviewed_transcript(
+            state,
+            task,
+            user_text,
+            loop_state,
+            contract,
+            results["entries"]
+                .as_array()
+                .map_or(0, |entries| entries.len()),
+        )
+        .await
+        .map(Some);
+    }
     let result_json = serde_json::to_string(&results)
         .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
     let constraints = delivery_constraints(agent_run_context);
@@ -134,6 +190,297 @@ pub(super) async fn synthesize_from_capability_results(
             .as_array()
             .map_or(0, |entries| entries.len()),
     }))
+}
+
+fn transcript_review_contract(
+    results: &[CapabilityResultEnvelope],
+) -> Option<TranscriptReviewContract> {
+    results
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(result_index, result)| {
+            if result.status != CapabilityResultStatus::Ok {
+                return None;
+            }
+            let contract = result
+                .data
+                .get("extra")
+                .and_then(|extra| extra.get("transcription_review"))
+                .and_then(Value::as_object)?;
+            if contract.get("required").and_then(Value::as_bool) != Some(true) {
+                return None;
+            }
+            let raw_text = contract
+                .get("raw_text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())?
+                .to_string();
+            let delivery = contract.get("delivery").and_then(Value::as_object);
+            let inline_max_chars = delivery
+                .and_then(|delivery| delivery.get("inline_max_characters_exclusive"))
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| (1..=10_000).contains(value))
+                .unwrap_or(DEFAULT_TRANSCRIPT_INLINE_MAX_CHARS);
+            let long_text_filename = delivery
+                .and_then(|delivery| delivery.get("long_text_filename"))
+                .and_then(Value::as_str)
+                .map(safe_transcript_filename)
+                .filter(|filename| !filename.is_empty())
+                .unwrap_or_else(|| "transcript.txt".to_string());
+            Some(TranscriptReviewContract {
+                result_index,
+                raw_text,
+                response_language: contract
+                    .get("response_language")
+                    .and_then(Value::as_str)
+                    .unwrap_or("request-language")
+                    .to_string(),
+                source: contract
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or("speech_to_text")
+                    .to_string(),
+                inline_max_chars,
+                long_text_filename,
+            })
+        })
+}
+
+async fn synthesize_reviewed_transcript(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    contract: TranscriptReviewContract,
+    evidence_count: usize,
+) -> Result<CapabilitySynthesis, String> {
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
+    let target_language =
+        normalized_transcript_language(&contract.response_language, &request_language_hint);
+    let chunks =
+        split_transcript_chunks(&contract.raw_text, transcript_revision_chunk_chars(state));
+    if chunks.is_empty() {
+        return Err("transcript_revision_input_empty".to_string());
+    }
+    let (template, source) = crate::bootstrap::load_required_prompt_template_for_state(
+        state,
+        TRANSCRIPT_REVISION_PROMPT_LOGICAL_PATH,
+    )
+    .map_err(|_| "transcript_revision_prompt_unavailable".to_string())?;
+    let mut reviewed_chunks = Vec::with_capacity(chunks.len());
+    let mut delivery_message = String::new();
+    let mut confidence = 1.0_f64;
+    for (index, chunk) in chunks.iter().enumerate() {
+        let chunk_index = (index + 1).to_string();
+        let chunk_count = chunks.len().to_string();
+        let prompt = crate::render_prompt_template(
+            &template,
+            &[
+                ("__TARGET_LANGUAGE__", &target_language),
+                ("__CHUNK_INDEX__", &chunk_index),
+                ("__CHUNK_COUNT__", &chunk_count),
+                ("__RAW_TRANSCRIPT__", chunk),
+            ],
+        );
+        crate::log_prompt_render(
+            state,
+            &task.task_id,
+            "transcript_revision_prompt",
+            &source,
+            None,
+        );
+        let raw =
+            crate::llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &source)
+                .await
+                .map_err(|_| "transcript_revision_provider_unavailable".to_string())?;
+        let parsed = crate::prompt_utils::validate_against_schema::<TranscriptRevisionOutput>(
+            raw.trim(),
+            crate::prompt_utils::PromptSchemaId::TranscriptRevision,
+        )
+        .map_err(|_| "transcript_revision_schema_invalid".to_string())?
+        .value;
+        let reviewed = parsed.reviewed_text.trim();
+        if !parsed.qualified || reviewed.is_empty() {
+            return Err("transcript_revision_unqualified".to_string());
+        }
+        if delivery_message.is_empty() {
+            delivery_message = parsed.delivery_message.trim().to_string();
+        }
+        confidence = confidence.min(parsed.confidence.clamp(0.0, 1.0));
+        reviewed_chunks.push(reviewed.to_string());
+    }
+    let reviewed_text = reviewed_chunks.join("\n\n").trim().to_string();
+    if reviewed_text.is_empty() {
+        return Err("transcript_revision_empty".to_string());
+    }
+    let character_count = reviewed_text.chars().count();
+    let inline_delivery = transcript_delivery_is_inline(character_count, contract.inline_max_chars);
+    let answer = if inline_delivery {
+        reviewed_text.clone()
+    } else {
+        if delivery_message.is_empty() {
+            return Err("transcript_revision_delivery_message_empty".to_string());
+        }
+        let published = crate::skill_output_artifact::publish_task_text_artifact(
+            &state.skill_rt.workspace_root,
+            &task.task_id,
+            "transcript-review",
+            &contract.long_text_filename,
+            &(reviewed_text.clone() + "\n"),
+            json!({
+                "artifact_role": "transcript_text",
+                "reviewed_by_model": true,
+                "target_language": target_language,
+                "source": contract.source,
+                "character_count": character_count,
+            }),
+        )
+        .map_err(|_| "transcript_revision_artifact_write_failed".to_string())?;
+        let artifact = serde_json::from_value::<ArtifactRef>(published.artifact_ref)
+            .map_err(|_| "transcript_revision_artifact_invalid".to_string())?;
+        let result = loop_state
+            .capability_results
+            .get_mut(contract.result_index)
+            .ok_or_else(|| "transcript_revision_result_missing".to_string())?;
+        if !result
+            .artifacts
+            .iter()
+            .any(|existing| existing == &artifact)
+        {
+            result.artifacts.push(artifact);
+        }
+        delivery_message
+    };
+    if let Some(extra) = loop_state
+        .capability_results
+        .get_mut(contract.result_index)
+        .and_then(|result| result.data.get_mut("extra"))
+        .and_then(Value::as_object_mut)
+    {
+        extra.insert(
+            "transcription_delivery".to_string(),
+            json!({
+                "mode": if inline_delivery { "inline" } else { "artifact" },
+                "character_count": character_count,
+                "reviewed_by_model": true,
+                "target_language": target_language,
+                "source": contract.source,
+            }),
+        );
+        if let Some(transcription) = extra
+            .get_mut("transcription")
+            .and_then(Value::as_object_mut)
+        {
+            transcription.insert("reviewed_by_model".to_string(), Value::Bool(true));
+            transcription.insert("review_required".to_string(), Value::Bool(false));
+            transcription.insert("character_count".to_string(), json!(character_count));
+        }
+    }
+    loop_state.task_observations.push(json!({
+        "schema_version": 1,
+        "owner_layer": "transcript_revision",
+        "source": contract.source,
+        "target_language": target_language,
+        "raw_character_count": contract.raw_text.chars().count(),
+        "reviewed_character_count": character_count,
+        "chunk_count": chunks.len(),
+        "delivery_mode": if inline_delivery { "inline" } else { "artifact" },
+    }));
+    Ok(CapabilitySynthesis {
+        answer,
+        confidence,
+        evidence_count,
+    })
+}
+
+fn transcript_delivery_is_inline(character_count: usize, inline_max_chars: usize) -> bool {
+    character_count < inline_max_chars
+}
+
+fn normalized_transcript_language(requested: &str, fallback: &str) -> String {
+    let requested = requested.trim();
+    let selected = if requested.is_empty()
+        || matches!(
+            requested.to_ascii_lowercase().as_str(),
+            "request-language" | "preserve-source-language"
+        ) {
+        fallback.trim()
+    } else {
+        requested
+    };
+    let selected = selected
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(64)
+        .collect::<String>();
+    if selected.is_empty() {
+        "request-language".to_string()
+    } else {
+        selected
+    }
+}
+
+fn safe_transcript_filename(value: &str) -> String {
+    let mut filename = value
+        .trim()
+        .chars()
+        .take(96)
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    if !filename.to_ascii_lowercase().ends_with(".txt") {
+        filename.push_str(".txt");
+    }
+    filename
+}
+
+fn transcript_revision_chunk_chars(state: &AppState) -> usize {
+    state
+        .core
+        .llm_providers
+        .iter()
+        .map(|provider| provider.model_descriptor().output_reserve_tokens)
+        .filter(|tokens| *tokens > 0)
+        .min()
+        .map(|tokens| tokens.saturating_mul(3).saturating_div(5))
+        .unwrap_or(FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS)
+        .clamp(1_000, 12_000)
+}
+
+fn split_transcript_chunks(text: &str, max_chars: usize) -> Vec<String> {
+    let max_chars = max_chars.max(1);
+    let characters = text.trim().chars().collect::<Vec<_>>();
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    while start < characters.len() {
+        let mut end = (start + max_chars).min(characters.len());
+        if end < characters.len() {
+            let floor = start + max_chars / 2;
+            if let Some(boundary) = (floor..end).rev().find(|index| {
+                matches!(
+                    characters[*index],
+                    '\n' | '。' | '！' | '？' | '.' | '!' | '?'
+                )
+            }) {
+                end = boundary + 1;
+            }
+        }
+        let chunk = characters[start..end].iter().collect::<String>();
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk);
+        }
+        start = end;
+    }
+    chunks
 }
 
 fn delivery_constraints(agent_run_context: Option<&AgentRunContext>) -> Value {

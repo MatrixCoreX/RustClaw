@@ -138,6 +138,33 @@ fn existing_async_output_is_published_without_losing_source() {
 }
 
 #[test]
+fn reviewed_transcript_is_published_as_a_task_text_artifact() {
+    let workspace = TestWorkspace::new();
+    let published = publish_task_text_artifact(
+        &workspace.root,
+        "task:transcript",
+        "transcript-review",
+        "transcript.txt",
+        "校对后的完整文本。\n",
+        json!({"artifact_role": "transcript_text"}),
+    )
+    .expect("publish reviewed transcript");
+
+    let path = workspace
+        .root
+        .join(published.artifact_ref["path"].as_str().unwrap());
+    assert_eq!(fs::read_to_string(path).unwrap(), "校对后的完整文本。\n");
+    assert_eq!(
+        published.artifact_ref["media_type"],
+        "text/plain; charset=utf-8"
+    );
+    assert_eq!(
+        published.artifact_ref["metadata"]["filename"],
+        "transcript.txt"
+    );
+}
+
+#[test]
 fn sensitive_json_keeps_hashes_but_never_exposes_secret_values_to_the_model() {
     let source = json!({
         "endpoint": "https://example.com",

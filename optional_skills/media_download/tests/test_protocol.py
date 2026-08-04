@@ -101,6 +101,21 @@ class AdapterTest(unittest.TestCase):
             [("media_download.transcribe.recognizing_speech", 2, 3)],
         )
 
+    def test_transcript_target_language_prefers_explicit_then_task_locale(self) -> None:
+        request = {"context": {"locale": "zh-CN", "language": "en"}}
+
+        self.assertEqual(
+            self.skill._target_transcript_language(request, {}),
+            "zh-CN",
+        )
+        self.assertEqual(
+            self.skill._target_transcript_language(
+                request,
+                {"response_language": "ja-JP"},
+            ),
+            "ja-JP",
+        )
+
     def test_intel_macos_capabilities_keep_whisper_and_disable_funasr_package(self) -> None:
         with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
             self.skill.platform, "machine", return_value="x86_64"
@@ -218,6 +233,151 @@ class AdapterTest(unittest.TestCase):
                 run.call_args.kwargs["env"]["MODELSCOPE_CACHE"],
                 str(storage / "modelscope"),
             )
+
+    def test_transcribe_returns_local_text_for_shared_model_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            video = workspace / "clip.mp4"
+            video.write_bytes(b"video")
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "clip_audio.wav").write_bytes(b"audio")
+                (output_dir / "clip_transcript.txt").write_text(
+                    "今天天汽很好",
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "transcribe-short-1",
+                "args": {"action": "transcribe", "input_path": str(video)},
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "locale": "zh-CN",
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+            transcript = artifacts / "clip_transcript.txt"
+            self.assertEqual(transcript.read_text(encoding="utf-8"), "今天天汽很好")
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["text"], "MEDIA_TRANSCRIPTION_READY")
+        self.assertEqual(response["extra"]["artifacts"], [])
+        self.assertEqual(response["extra"]["delivery"]["intent"], "model_synthesis")
+        self.assertEqual(
+            response["extra"]["transcription_review"]["raw_text"],
+            "今天天汽很好",
+        )
+        self.assertEqual(
+            response["extra"]["transcription_review"]["response_language"],
+            "zh-CN",
+        )
+        self.assertFalse(response["extra"]["transcription"]["reviewed_by_model"])
+        self.assertTrue(response["extra"]["transcription"]["review_required"])
+        self.assertEqual(
+            {item["artifact_role"] for item in response["extra"]["saved_files"]},
+            {"extracted_audio", "transcript_text"},
+        )
+
+    def test_transcribe_preserves_complete_long_text_without_raw_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            video = workspace / "clip.mp4"
+            video.write_bytes(b"video")
+            raw_text = "效" * 12_000
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "clip_audio.wav").write_bytes(b"audio")
+                (output_dir / "clip_transcript.txt").write_text(
+                    raw_text,
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "transcribe-long-1",
+                "args": {"action": "transcribe", "input_path": str(video)},
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "locale": "zh-CN",
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["extra"]["artifacts"], [])
+        self.assertEqual(response["extra"]["delivery"]["intent"], "model_synthesis")
+        self.assertEqual(response["extra"]["transcription_review"]["raw_text"], raw_text)
+        self.assertEqual(response["extra"]["transcription_review"]["raw_character_count"], 12_000)
+        self.assertEqual(len(response["extra"]["saved_files"]), 2)
+        self.assertEqual(
+            {item["artifact_role"] for item in response["extra"]["saved_files"]},
+            {"extracted_audio", "transcript_text"},
+        )
+
+    def test_extract_audio_only_skips_model_review_and_delivers_wav(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            video = workspace / "clip.mp4"
+            video.write_bytes(b"video")
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "clip_audio.wav").write_bytes(b"audio")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "extract-audio-1",
+                "args": {
+                    "action": "transcribe",
+                    "input_path": str(video),
+                    "extract_audio_only": True,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "locale": "zh-CN",
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["extra"]["delivery"]["intent"], "artifact")
+        self.assertEqual(len(response["extra"]["artifacts"]), 1)
+        self.assertEqual(
+            response["extra"]["artifacts"][0]["artifact_role"],
+            "extracted_audio",
+        )
+        self.assertNotIn("transcription", response["extra"])
+        self.assertNotIn("transcription_review", response["extra"])
 
     def test_download_routes_profile_checkpoints_to_private_skill_storage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

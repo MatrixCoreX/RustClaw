@@ -612,6 +612,10 @@ def _artifact(path: Path) -> dict[str, Any]:
         artifact["artifact_role"] = "original_image"
     elif artifact["mime_type"].startswith("video/"):
         artifact["artifact_role"] = "original_video"
+    elif path.suffix.lower() == ".txt" and path.stem.endswith("_transcript"):
+        artifact["artifact_role"] = "transcript_text"
+    elif artifact["mime_type"].startswith("audio/"):
+        artifact["artifact_role"] = "extracted_audio"
     elif path.suffix.lower() == ".zip":
         artifact["artifact_role"] = "archive"
     elif path.suffix.lower() == ".json":
@@ -879,6 +883,81 @@ def _inline_short_ocr(
             "text": text,
         },
     )
+
+
+def _target_transcript_language(
+    request: dict[str, Any],
+    args: dict[str, Any],
+) -> str:
+    explicit = args.get("response_language")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    context = request.get("context")
+    if isinstance(context, dict):
+        for key in ("locale", "language"):
+            value = context.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    memory = args.get("_memory")
+    if isinstance(memory, dict):
+        value = memory.get("lang_hint")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "preserve-source-language"
+
+
+def _prepare_transcription_review_contract(
+    request: dict[str, Any],
+    args: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if _bool(args, "extract_audio_only", False):
+        return None
+    transcript_artifact = next(
+        (item for item in artifacts if item.get("artifact_role") == "transcript_text"),
+        None,
+    )
+    if transcript_artifact is None:
+        raise SkillFailure(
+            "transcription completed without a text artifact",
+            error_code="transcript_missing",
+            message_key="media_download.error.transcript_missing",
+            details={"failure_phase": "execution_partial", "side_effect_applied": True},
+        )
+    transcript_path = Path(str(transcript_artifact["path"]))
+    try:
+        raw_transcript = transcript_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise SkillFailure(
+            f"cannot read local transcript for review: {exc}",
+            error_code="transcript_read_failed",
+            message_key="media_download.error.transcript_read_failed",
+            details={"failure_phase": "execution_partial", "side_effect_applied": True},
+        ) from exc
+    if not raw_transcript:
+        raise SkillFailure(
+            "local transcription produced no text",
+            error_code="transcript_empty",
+            message_key="media_download.error.transcript_empty",
+            details={"failure_phase": "execution_partial", "side_effect_applied": True},
+        )
+    target_language = _target_transcript_language(request, args)
+    return {
+        "schema_version": 1,
+        "required": True,
+        "source": "media_download_local_asr",
+        "source_engine": _string(args, "engine", max_length=64) or "whisper",
+        "raw_text": raw_transcript,
+        "raw_character_count": len(raw_transcript),
+        "response_language": target_language,
+        "corrections": ["recognition_errors", "typos", "broken_sentences"],
+        "preserve_meaning": True,
+        "delivery": {
+            "inline_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
+            "long_text_format": "text/plain; charset=utf-8",
+            "long_text_filename": "transcript.txt",
+        },
+    }
 
 
 def _diagnostics(stderr: str) -> str:
@@ -1478,6 +1557,13 @@ def respond(
         storage_directory,
         progress.forward_child if progress is not None else None,
     )
+    transcription_review = None
+    if action == "transcribe":
+        transcription_review = _prepare_transcription_review_contract(
+            request,
+            args,
+            artifacts,
+        )
     if progress is not None:
         if action == "transcribe":
             total = 2 if _bool(args, "extract_audio_only", False) else 3
@@ -1506,7 +1592,7 @@ def respond(
             message_key="media_download.error.media_not_found",
             details={"diagnostics": _diagnostics(stderr)},
         )
-    delivery_capable = action in {"download", "ocr"}
+    delivery_capable = action in {"download", "transcribe", "ocr"}
     deliver_to_user = not delivery_capable or _bool(args, "deliver_to_user", True)
     inline_article = None
     inline_recognition = None
@@ -1530,7 +1616,21 @@ def respond(
     result_artifacts = artifacts
     delivery = None
     saved_files = None
-    if delivery_capable:
+    if action == "transcribe" and deliver_to_user:
+        if _bool(args, "extract_audio_only", False):
+            result_artifacts = [
+                item
+                for item in artifacts
+                if item.get("artifact_role") == "extracted_audio"
+            ]
+            delivery = {"intent": "artifact", "deliver_to_user": True}
+        else:
+            assert transcription_review is not None
+            result_artifacts = []
+            saved_files = artifacts
+            text = "MEDIA_TRANSCRIPTION_READY"
+            delivery = {"intent": "model_synthesis", "deliver_to_user": True}
+    elif delivery_capable:
         delivery = {
             "intent": (
                 "artifact"
@@ -1566,6 +1666,16 @@ def respond(
             extra["profile_collection"] = profile_collection
         if inline_article is not None:
             extra["article_delivery"] = inline_article
+    if action == "transcribe" and transcription_review is not None:
+        extra["transcription"] = {
+            "source": transcription_review["source"],
+            "source_engine": transcription_review["source_engine"],
+            "target_language": transcription_review["response_language"],
+            "raw_character_count": transcription_review["raw_character_count"],
+            "reviewed_by_model": False,
+            "review_required": True,
+        }
+        extra["transcription_review"] = transcription_review
     if delivery is not None:
         extra["delivery"] = delivery
     if saved_files is not None:

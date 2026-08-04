@@ -222,6 +222,7 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
             "action": "preview_transcribe",
             "file": "document/media_dry_run/audio_check.mp3"
         }),
+        None,
     )
     .expect("preview must not require the input file or provider credentials");
 
@@ -232,6 +233,9 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
     assert_eq!(extra["provider_call"], false);
     assert_eq!(extra["filesystem_write"], false);
     assert_eq!(extra["provider"], "qwen");
+    assert_eq!(extra["provider_location"], "remote");
+    assert_eq!(extra["recommended_capability"], "audio.transcribe");
+    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
     assert_eq!(extra["model"], "qwen3-asr-flash");
     assert_eq!(extra["model_kind"], "chat_audio");
     assert_eq!(
@@ -239,4 +243,55 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
         "document/media_dry_run/audio_check.mp3"
     );
     assert_eq!(extra["input_exists"], false);
+}
+
+#[test]
+fn preview_local_provider_selects_media_local_fallback() {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-audio-transcribe-local-preview-{}",
+        unix_ts()
+    ));
+    let cfg = RootConfig {
+        audio_transcribe: AudioTranscribeConfig {
+            default_vendor: Some("custom".to_string()),
+            default_model: Some("local-whisper".to_string()),
+            providers: AudioProviderOverrides {
+                custom: Some(vendor_cfg("http://127.0.0.1:8178/v1", "")),
+                ..AudioProviderOverrides::default()
+            },
+            ..AudioTranscribeConfig::default()
+        },
+        ..RootConfig::default()
+    };
+
+    let (_, extra) = execute(
+        &cfg,
+        &root,
+        json!({"action": "preview_transcribe", "file": "recordings/local.wav"}),
+        None,
+    )
+    .expect("local preview");
+
+    assert_eq!(extra["provider_location"], "local");
+    assert_eq!(extra["recommended_capability"], "media_download.transcribe");
+}
+
+#[test]
+fn response_language_prefers_explicit_then_request_context() {
+    let args = json!({"response_language": "ja-JP"});
+    let context = json!({"locale": "zh-CN", "language": "en"});
+
+    assert_eq!(
+        transcript_response_language(args.as_object(), Some(&context)),
+        "ja-JP"
+    );
+    assert_eq!(transcript_response_language(None, Some(&context)), "zh-CN");
+}
+
+#[test]
+fn provider_failure_recommends_local_media_fallback() {
+    let extra = error_extra("provider_request_failed", true);
+
+    assert_eq!(extra["fallback_recommended"], true);
+    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
 }
