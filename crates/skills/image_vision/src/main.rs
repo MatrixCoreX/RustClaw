@@ -342,7 +342,11 @@ fn execute(
                 let text = structured
                     .as_ref()
                     .map(|out| {
-                        render_structured_narrative_action_output(out, response_language.as_deref())
+                        render_structured_narrative_action_output(
+                            out,
+                            response_language.as_deref(),
+                            action == "describe" && user_instruction.is_none(),
+                        )
                     })
                     .unwrap_or(text);
                 let text = maybe_rewrite_image_vision_text_for_target_language(

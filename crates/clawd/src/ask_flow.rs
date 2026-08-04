@@ -17,17 +17,24 @@ pub(crate) async fn analyze_attached_images_for_ask(
     payload: &Value,
     resolved_prompt: &str,
 ) -> anyhow::Result<Option<String>> {
-    let Some(images) = payload.get("images").and_then(|v| v.as_array()) else {
-        return Ok(None);
-    };
+    let images = attached_image_inputs(payload);
     if images.is_empty() {
         return Ok(None);
     }
+    let typed_instruction_present = payload
+        .get("text")
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+        || payload.get("audio").is_some();
     let mut args = json!({
         "action": "describe",
         "images": images,
     });
-    let instruction = resolved_prompt.trim();
+    let instruction = if typed_instruction_present {
+        resolved_prompt.trim()
+    } else {
+        ""
+    };
     if let Some(obj) = args.as_object_mut() {
         if !instruction.is_empty() {
             obj.insert(
@@ -48,10 +55,87 @@ pub(crate) async fn analyze_attached_images_for_ask(
             );
         }
     }
-    crate::skills::run_skill_with_runner(state, task, "image_vision", args)
+    let outcome = crate::skills::run_skill_with_runner_outcome(state, task, "image_vision", args)
         .await
-        .map_err(anyhow::Error::msg)
-        .map(Some)
+        .map_err(anyhow::Error::msg)?;
+    Ok(Some(attached_image_analysis_context(
+        images.len(),
+        typed_instruction_present,
+        &outcome,
+    )))
+}
+
+fn attached_image_inputs(payload: &Value) -> Vec<Value> {
+    if let Some(images) = payload.get("images").and_then(Value::as_array) {
+        let normalized = images
+            .iter()
+            .filter_map(normalize_image_input)
+            .collect::<Vec<_>>();
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+    payload
+        .get("attachments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|attachment| {
+            attachment
+                .get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("image"))
+                || attachment
+                    .get("mime_type")
+                    .or_else(|| attachment.get("mimeType"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|mime| mime.trim().to_ascii_lowercase().starts_with("image/"))
+        })
+        .filter_map(normalize_image_input)
+        .collect()
+}
+
+fn normalize_image_input(value: &Value) -> Option<Value> {
+    if let Some(raw) = value.as_str().map(str::trim).filter(|raw| !raw.is_empty()) {
+        return Some(Value::String(raw.to_string()));
+    }
+    let object = value.as_object()?;
+    for key in ["path", "url", "base64", "$text"] {
+        if let Some(raw) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty())
+        {
+            let mut normalized = serde_json::Map::new();
+            normalized.insert(key.to_string(), Value::String(raw.to_string()));
+            return Some(Value::Object(normalized));
+        }
+    }
+    None
+}
+
+fn attached_image_analysis_context(
+    image_count: usize,
+    typed_instruction_present: bool,
+    outcome: &crate::skills::SkillRunOutcome,
+) -> String {
+    let structured = outcome
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("structured"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "schema_version": 1,
+        "source": "image_vision",
+        "image_count": image_count,
+        "typed_instruction_present": typed_instruction_present,
+        "analysis_text": outcome.text,
+        "structured": structured,
+        "instruction_authority": "none",
+    })
+    .to_string()
 }
 
 pub(crate) async fn transcribe_attached_audio_for_ask(

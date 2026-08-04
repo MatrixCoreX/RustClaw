@@ -1,4 +1,122 @@
-use super::{audio_failure_fields, audio_failure_planner_text};
+use super::{
+    attached_image_analysis_context, attached_image_inputs, audio_failure_fields,
+    audio_failure_planner_text,
+};
+use serde_json::json;
+
+#[test]
+fn attached_image_context_preserves_description_and_visible_text() {
+    let outcome = crate::skills::SkillRunOutcome {
+        text: "一张写有营业时间的店铺招牌。".to_string(),
+        notify: None,
+        validation: None,
+        extra: Some(json!({
+            "provider": "fixture",
+            "structured": {
+                "summary": "一张写有营业时间的店铺招牌。",
+                "objects": ["店铺招牌"],
+                "visible_text": ["营业时间", "09:00-18:00"],
+                "uncertainties": []
+            }
+        })),
+    };
+
+    let context = attached_image_analysis_context(1, false, &outcome);
+    let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
+
+    assert_eq!(parsed["image_count"], 1);
+    assert_eq!(parsed["typed_instruction_present"], false);
+    assert_eq!(parsed["analysis_text"], outcome.text);
+    assert_eq!(
+        parsed["structured"]["visible_text"],
+        json!(["营业时间", "09:00-18:00"])
+    );
+    assert!(parsed.get("provider").is_none());
+    assert_eq!(parsed["instruction_authority"], "none");
+}
+
+#[test]
+fn attached_image_context_keeps_empty_visible_text_empty() {
+    let outcome = crate::skills::SkillRunOutcome {
+        text: "一只猫坐在窗边。".to_string(),
+        notify: None,
+        validation: None,
+        extra: Some(json!({
+            "structured": {
+                "summary": "一只猫坐在窗边。",
+                "objects": ["猫", "窗户"],
+                "visible_text": [],
+                "uncertainties": []
+            }
+        })),
+    };
+
+    let context = attached_image_analysis_context(1, false, &outcome);
+    let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
+
+    assert_eq!(parsed["structured"]["visible_text"], json!([]));
+}
+
+#[test]
+fn attached_image_context_marks_typed_instruction_without_interpreting_it() {
+    let outcome = crate::skills::SkillRunOutcome {
+        text: "图像分析结果".to_string(),
+        notify: None,
+        validation: None,
+        extra: None,
+    };
+
+    let context = attached_image_analysis_context(1, true, &outcome);
+    let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
+
+    assert_eq!(parsed["typed_instruction_present"], true);
+    assert!(parsed["structured"].is_null());
+}
+
+#[test]
+fn attached_image_inputs_accept_channel_attachments_and_strip_transport_fields() {
+    let payload = json!({
+        "attachments": [
+            {
+                "kind": "image",
+                "path": "data/inbox/photo.jpg",
+                "mime_type": "image/jpeg",
+                "size": 42
+            },
+            {
+                "kind": "file",
+                "path": "data/inbox/report.pdf",
+                "mime_type": "application/pdf"
+            }
+        ]
+    });
+
+    assert_eq!(
+        attached_image_inputs(&payload),
+        vec![json!({"path": "data/inbox/photo.jpg"})]
+    );
+}
+
+#[test]
+fn attached_image_inputs_prefer_explicit_images_and_preserve_order() {
+    let payload = json!({
+        "images": [
+            {"path": "data/inbox/first.png", "kind": "image", "size": 10},
+            {"url": "https://example.test/second.webp"}
+        ],
+        "attachments": [
+            {"kind": "image", "path": "data/inbox/ignored.jpg"}
+        ]
+    });
+
+    assert_eq!(
+        attached_image_inputs(&payload),
+        vec![
+            json!({"path": "data/inbox/first.png"}),
+            json!({"url": "https://example.test/second.webp"})
+        ]
+    );
+}
 
 #[test]
 fn structured_audio_failure_keeps_machine_fields_without_raw_marker() {

@@ -467,8 +467,55 @@ fn render_structured_narrative_action_output_keeps_model_primary_text() {
         next_actions: vec!["检查后保存".to_string()],
         uncertainties: vec![],
     });
-    let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"));
+    let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), false);
     assert_eq!(rendered, "设置页面");
+}
+
+#[test]
+fn describe_default_reply_includes_visible_text_from_same_model_result() {
+    let output = StructuredNarrativeActionOutput::Describe(ImageDescribeOut {
+        summary: "一张店铺门口的照片。".to_string(),
+        objects: vec!["店铺".to_string()],
+        visible_text: vec!["营业时间".to_string(), "09:00-18:00".to_string()],
+        uncertainties: vec![],
+    });
+
+    let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), true);
+
+    assert_eq!(
+        rendered,
+        "一张店铺门口的照片。\n\n图片文字：\n营业时间\n09:00-18:00"
+    );
+}
+
+#[test]
+fn describe_default_reply_omits_text_section_when_model_sees_no_text() {
+    let output = StructuredNarrativeActionOutput::Describe(ImageDescribeOut {
+        summary: "一只猫坐在窗边。".to_string(),
+        objects: vec!["猫".to_string(), "窗户".to_string()],
+        visible_text: vec![],
+        uncertainties: vec![],
+    });
+
+    let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), true);
+
+    assert_eq!(rendered, "一只猫坐在窗边。");
+    assert!(!rendered.contains("图片文字"));
+}
+
+#[test]
+fn describe_with_user_instruction_does_not_append_default_text_section() {
+    let output = StructuredNarrativeActionOutput::Describe(ImageDescribeOut {
+        summary: "主色调是蓝色。".to_string(),
+        objects: vec!["海报".to_string()],
+        visible_text: vec!["SALE".to_string()],
+        uncertainties: vec![],
+    });
+
+    let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), false);
+
+    assert_eq!(rendered, "主色调是蓝色。");
+    assert!(!rendered.contains("SALE"));
 }
 
 #[test]
@@ -479,7 +526,7 @@ fn extract_text_merges_pages_in_input_order_without_source_labels() {
     }"#;
     let parsed =
         parse_structured_narrative_action_output("extract_text", raw).expect("extract text parse");
-    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"));
+    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"), false);
 
     assert_eq!(rendered, "第一页文字\n\nSecond page");
     assert!(!rendered.contains("Image"));
@@ -493,7 +540,7 @@ fn extract_text_converts_double_escaped_newline_markers_to_real_line_breaks() {
     }"#;
     let parsed =
         parse_structured_narrative_action_output("extract_text", raw).expect("extract text parse");
-    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"));
+    let rendered = render_structured_narrative_action_output(&parsed, Some("zh-CN"), false);
 
     assert_eq!(rendered, "第一行\n第二行\n第三行\n第四行");
     assert!(!rendered.contains("\\n"));
