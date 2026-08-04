@@ -100,6 +100,7 @@ async fn nni_bancor_routes_require_ui_authentication() {
             "/v1/nni/bancor/candles?interval_seconds=3600&limit=120",
             "",
         ),
+        ("GET", "/v1/nni/bancor/trades?page=1&per_page=20", ""),
         ("GET", "/v1/nni/bancor/account?page=1&per_page=20", ""),
         (
             "POST",
@@ -129,6 +130,36 @@ async fn nni_bancor_routes_require_ui_authentication() {
             "{method} {uri}"
         );
     }
+}
+
+#[test]
+fn nni_bancor_market_trade_pubkeys_are_masked_before_ui_delivery() {
+    let pubkey = "ab".repeat(64);
+    assert_eq!(
+        mask_bancor_device_pubkey(&pubkey),
+        format!("{}••••••••{}", &pubkey[..12], &pubkey[120..]),
+    );
+
+    let mut payload = json!({
+        "trades": [
+            {"trade_id": "raw", "device_pubkey": pubkey},
+            {"trade_id": "mislabelled", "device_pubkey_masked": "cd".repeat(64)},
+            {"trade_id": "masked", "device_pubkey_masked": "a2c887498554••••••••331016eb"}
+        ]
+    });
+    sanitize_bancor_market_trade_pubkeys(&mut payload);
+    let serialized = payload.to_string();
+    assert!(!serialized.contains(&"ab".repeat(64)));
+    assert!(!serialized.contains(&"cd".repeat(64)));
+    assert_eq!(
+        payload["trades"][2]["device_pubkey_masked"],
+        Value::String("a2c887498554••••••••331016eb".to_string()),
+    );
+    assert!(payload["trades"]
+        .as_array()
+        .expect("market trades")
+        .iter()
+        .all(|trade| trade.get("device_pubkey").is_none()));
 }
 
 struct NniRuntimeStateTestWorkspace {

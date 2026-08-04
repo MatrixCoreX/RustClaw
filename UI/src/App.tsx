@@ -1446,11 +1446,13 @@ export default function App() {
     if (!uiAuthReady || currentPage !== "bancor") return;
     void bancorRuntime.fetchMarket();
     void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
+    void bancorRuntime.fetchMarketTrades(1);
     void fetchNniDeviceStatus(true);
     void fetchNniConfig(true);
     const refreshCandlesWhileVisible = () => {
       if (document.visibilityState !== "visible") return;
       void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds, true);
+      void bancorRuntime.fetchMarketTrades(1, true);
     };
     const refreshMarketWhileVisible = () => {
       if (document.visibilityState !== "visible") return;

@@ -78,6 +78,32 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       }],
     },
     account: null,
+    marketTrades: {
+      schema_version: 1 as const,
+      status: "bancor_market_trades",
+      market_id: "point-usd-v1",
+      page: 1,
+      per_page: 20,
+      total: 1,
+      total_pages: 1,
+      trades: [{
+        trade_id: "trade-market-1",
+        quote_id: "quote-market-1",
+        market_id: "point-usd-v1",
+        device_pubkey_masked: "a2c887498554••••••••331016eb",
+        side: "sell" as const,
+        input_asset: "POINT" as const,
+        input_units: "3360000",
+        input_amount: "336.0000",
+        fee_units: "16800",
+        fee_amount: "1.6800",
+        output_asset: "USD" as const,
+        output_units: "334",
+        output_amount: "0.0334",
+        market_version: 228,
+        created_at_unix: 1_800_000_000,
+      }],
+    },
     quote: null,
     lastTrade: null,
     marketLoading: false,
@@ -85,6 +111,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     candlesError: null,
     candleIntervalSeconds: 3_600,
     accountLoading: false,
+    marketTradesLoading: false,
+    marketTradesError: null,
     quoteLoading: false,
     tradeLoading: false,
     error: null,
@@ -93,6 +121,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     fetchCandles: async () => null,
     changeCandleInterval: async () => null,
     fetchAccount: async () => null,
+    fetchMarketTrades: async () => null,
     preview: async () => null,
     trade: async () => null,
     clearQuote: () => undefined,
@@ -108,7 +137,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /100000000\.0000 POINT/);
   assert.match(html, /10000\.0000 USD/);
   assert.match(html, /BANCOR储备曲线市场/);
-  assert.equal((html.match(/theme-shadow-card/g) ?? []).length, 5);
+  assert.equal((html.match(/theme-shadow-card/g) ?? []).length, 6);
   assert.doesNotMatch(html, /theme-card border/);
   assert.match(html, /强制流动性算法/);
   assert.doesNotMatch(html, /<h1[^>]*>BANCOR<\/h1>/);
@@ -168,6 +197,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /<rect[^>]+fill="#34d399"/);
   assert.match(html, /0\.00010005/);
   assert.match(html, /真实成交 K 线图/);
+  assert.match(html, /市场成交记录/);
+  assert.match(html, /其他设备公钥已打码/);
+  assert.match(html, /a2c887498554••••••••331016eb/);
+  assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
+  assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
 });
 

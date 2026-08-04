@@ -21,6 +21,48 @@ struct NniBancorCandlesQuery {
     end_time_unix: Option<i64>,
 }
 
+fn mask_bancor_device_pubkey(value: &str) -> String {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.len() == 128 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return format!("{}••••••••{}", &normalized[..12], &normalized[120..]);
+    }
+    "••••••••".to_string()
+}
+
+fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
+    let Some(trades) = data.get_mut("trades").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for trade in trades {
+        let Some(record) = trade.as_object_mut() else {
+            continue;
+        };
+        let raw_pubkey = record
+            .remove("device_pubkey")
+            .or_else(|| record.remove("device_public_key"))
+            .or_else(|| record.remove("public_key"))
+            .and_then(|value| value.as_str().map(str::to_string));
+        let provided_mask = record
+            .get("device_pubkey_masked")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let masked = match raw_pubkey {
+            Some(pubkey) => mask_bancor_device_pubkey(&pubkey),
+            None if provided_mask.len() == 128
+                && provided_mask.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+            {
+                mask_bancor_device_pubkey(provided_mask)
+            }
+            None if !provided_mask.trim().is_empty() => provided_mask.to_string(),
+            None => "••••••••".to_string(),
+        };
+        record.insert(
+            "device_pubkey_masked".to_string(),
+            Value::String(masked),
+        );
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct NniBancorQuoteRequest {
     side: String,
@@ -240,6 +282,95 @@ async fn nni_bancor_candles(
         StatusCode::BAD_GATEWAY,
         "nni_bancor_candles_nodes_unavailable",
         json!({"status": "bancor_candles_nodes_unavailable", "attempts": attempts}),
+    )
+}
+
+async fn nni_bancor_market_trades(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<NniRequestRecordsQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
+    let config = match read_nni_config(&state) {
+        Ok(config) => config,
+        Err(err) => {
+            return nni_join_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "nni_config_read_failed",
+                json!({"status": "config_read_failed", "error": err.to_string()}),
+            )
+        }
+    };
+    let mut attempts = Vec::new();
+    for node_url in &config.remote_nodes {
+        let endpoint = format!(
+            "{node_url}/v1/nni/server/bancor/trades?page={page}&per_page={per_page}"
+        );
+        match state
+            .core
+            .http_client
+            .get(&endpoint)
+            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                match response.json::<ApiResponse<Value>>().await {
+                    Ok(body) if status.is_success() && body.ok => {
+                        if let Some(mut data) = body.data {
+                            sanitize_bancor_market_trade_pubkeys(&mut data);
+                            if let Some(object) = data.as_object_mut() {
+                                object.insert(
+                                    "node_url".to_string(),
+                                    Value::String(node_url.clone()),
+                                );
+                            }
+                            return (
+                                StatusCode::OK,
+                                Json(ApiResponse {
+                                    ok: true,
+                                    data: Some(data),
+                                    error: None,
+                                }),
+                            );
+                        }
+                    }
+                    Ok(body) => attempts.push(json!({
+                        "node_url": node_url,
+                        "http_status": status.as_u16(),
+                        "error_code": body.error.unwrap_or_else(|| "nni_bancor_market_trades_failed".to_string()),
+                    })),
+                    Err(err) => attempts.push(json!({
+                        "node_url": node_url,
+                        "http_status": status.as_u16(),
+                        "error_code": "nni_bancor_market_trades_body_invalid",
+                        "detail": err.to_string(),
+                    })),
+                }
+            }
+            Err(err) => attempts.push(json!({
+                "node_url": node_url,
+                "error_code": "nni_bancor_market_trades_network_failed",
+                "detail": err.to_string(),
+            })),
+        }
+    }
+    nni_join_error(
+        StatusCode::BAD_GATEWAY,
+        "nni_bancor_market_trades_nodes_unavailable",
+        json!({"status": "bancor_market_trades_nodes_unavailable", "attempts": attempts}),
     )
 }
 
