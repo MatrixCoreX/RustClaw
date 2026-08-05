@@ -545,7 +545,7 @@ export function BancorPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-white">{t("市场成交记录", "Market trade history")}</h2>
-              <p className="mt-1 text-sm text-white/50">{t("展示全市场成交，其他设备公钥已打码。", "Shows market-wide trades with device public keys masked.")}</p>
+              <p className="mt-1 text-sm text-white/50">{t("展示全市场成交和设备公钥的紧凑格式。", "Shows market-wide trades with compact device public keys.")}</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-white/40">{marketTrades?.total ?? 0} {t("笔", "trades")}</span>
@@ -567,7 +567,7 @@ export function BancorPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
-                    <span className="max-w-full truncate font-mono text-[11px] text-white/35">{record.device_pubkey_masked}</span>
+                    <span className="max-w-full truncate font-mono text-[11px] text-white/35">{record.device_pubkey_compact}</span>
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
