@@ -13,7 +13,7 @@ async fn local_embedding_outbox_commits_a_versioned_vector_after_source_write() 
     crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
     crate::repo::ensure_principal_ownership_schema(&db).unwrap();
     crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
-    super::super::vector_store::register_configured_profile(&db, &state.policy.memory).unwrap();
+    super::initialize_embedding_runtime(&db, &state.policy.memory).unwrap();
     crate::memory::indexing::index_preference_entries(
         &db,
         1,
@@ -158,6 +158,62 @@ async fn payload_413_is_split_without_losing_stable_item_order() {
     );
 }
 
+#[test]
+fn idle_claim_remains_read_only_while_another_connection_holds_the_writer_lock() {
+    let db_path = std::env::temp_dir().join(format!(
+        "agent-runtime-embedding-idle-{}.sqlite",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path).with_init(
+        |connection: &mut rusqlite::Connection| {
+            connection.busy_timeout(std::time::Duration::from_millis(50))?;
+            connection.pragma_update(None, "journal_mode", "WAL")?;
+            connection.pragma_update(None, "synchronous", "NORMAL")?;
+            connection.pragma_update(None, "foreign_keys", "ON")?;
+            Ok(())
+        },
+    );
+    let pool = r2d2::Pool::builder()
+        .max_size(2)
+        .build(manager)
+        .expect("build file-backed embedding test pool");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.db = pool;
+    let state = state.with_seeded_db_schema();
+    {
+        let db = state.core.db.get().expect("embedding setup connection");
+        super::initialize_embedding_runtime(&db, &state.policy.memory)
+            .expect("initialize embedding runtime");
+    }
+    {
+        let first = state.core.db.get().expect("prime first pool connection");
+        let second = state.core.db.get().expect("prime second pool connection");
+        drop((first, second));
+    }
+
+    let writer = rusqlite::Connection::open(&db_path).expect("open competing writer");
+    writer
+        .busy_timeout(std::time::Duration::from_millis(50))
+        .unwrap();
+    writer
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("hold sqlite writer lock");
+    let claimed = super::claim_embedding_batch(&state, "idle-read-only-worker")
+        .expect("idle claim must not need the writer lock");
+    assert!(claimed.is_empty());
+    writer.execute_batch("ROLLBACK").unwrap();
+    drop(writer);
+    drop(state);
+
+    for path in [
+        db_path.clone(),
+        db_path.with_extension("sqlite-wal"),
+        db_path.with_extension("sqlite-shm"),
+    ] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 #[tokio::test]
 async fn blue_green_reindex_activates_per_principal_and_keeps_old_generation_until_complete() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
@@ -171,6 +227,7 @@ async fn blue_green_reindex_activates_per_principal_and_keeps_old_generation_unt
     crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
     crate::repo::ensure_principal_ownership_schema(&db).unwrap();
     crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
+    super::initialize_embedding_runtime(&db, &state.policy.memory).unwrap();
     let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "reindex-user")
         .unwrap()
         .unwrap();

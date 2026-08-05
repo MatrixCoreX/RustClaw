@@ -480,7 +480,7 @@ async fn run() -> anyhow::Result<()> {
         memory::scope::ensure_memory_scope_schema(&db)?;
         memory::jobs::ensure_memory_job_schema(&db)?;
         memory::ux::ensure_memory_ux_schema(&db)?;
-        memory::vector_store::register_configured_profile(&db, &config.memory)?;
+        memory::embedding_jobs::initialize_embedding_runtime(&db, &config.memory)?;
         task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
         if config.memory.hybrid_recall_enabled
             && (config.memory.reindex_on_startup

@@ -54,6 +54,15 @@ pub(crate) fn spawn_embedding_workers(state: crate::AppState, concurrency: usize
     }
 }
 
+pub(crate) fn initialize_embedding_runtime(
+    db: &Connection,
+    config: &claw_core::config::MemoryConfig,
+) -> anyhow::Result<super::vector_store::MemoryEmbeddingProfile> {
+    let profile = super::vector_store::register_configured_profile(db, config)?;
+    ensure_embedding_control_schema(db)?;
+    Ok(profile)
+}
+
 pub(crate) async fn run_one_embedding_batch(
     state: &crate::AppState,
     worker_id: &str,
@@ -126,9 +135,13 @@ fn claim_embedding_batch(
         .db
         .get()
         .map_err(|error| anyhow!("memory_embedding_db_pool:{error}"))?;
-    super::vector_store::register_configured_profile(&db, &state.policy.memory)?;
-    ensure_embedding_control_schema(&db)?;
     let now = crate::now_ts_u64() as i64;
+    // Schema/profile setup is a startup invariant. Keep the frequent idle poll
+    // read-only so multiple embedding workers do not continuously contend for
+    // SQLite's single writer lock when there is no work to claim or maintain.
+    if !embedding_batch_needs_write(&db, now)? {
+        return Ok(Vec::new());
+    }
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "UPDATE memory_embedding_jobs
@@ -212,6 +225,37 @@ fn claim_embedding_batch(
         .collect::<anyhow::Result<Vec<_>>>()?;
     tx.commit()?;
     Ok(jobs)
+}
+
+fn embedding_batch_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM memory_embedding_jobs job
+             WHERE (job.status = 'running'
+                    AND job.lease_expires_at_ts <= ?1
+                    AND job.cancel_requested = 0)
+                OR (job.cancel_requested = 1
+                    AND job.status IN ('queued', 'retry_wait'))
+                OR (job.status IN ('queued', 'retry_wait')
+                    AND job.cancel_requested = 0
+                    AND job.not_before_ts <= ?1
+                    AND NOT EXISTS (
+                        SELECT 1 FROM memory_embedding_circuits circuit
+                        WHERE circuit.principal_id = job.principal_id
+                          AND circuit.profile_id = job.profile_id
+                          AND circuit.open_until_ts > ?1
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM memory_embedding_controls control
+                        WHERE control.principal_id = job.principal_id
+                          AND control.profile_id = job.profile_id
+                          AND control.state = 'paused'
+                    ))
+         )",
+        [now],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
 }
 
 async fn execute_embedding_batch(
