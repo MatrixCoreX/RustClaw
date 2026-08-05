@@ -16,8 +16,35 @@ export interface NniRuntimeTile {
 }
 
 const NNI_RAW_P256_PUBLIC_KEY_HEX_LENGTH = 128;
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-export function compressedNniPublicKeyBase64Url(value?: string | null): string | null {
+function encodeBase58(bytes: number[]): string {
+  const digits: number[] = [];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      const value = digits[index] * 256 + carry;
+      digits[index] = value % 58;
+      carry = Math.floor(value / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+
+  let leadingZeroes = 0;
+  while (leadingZeroes < bytes.length && bytes[leadingZeroes] === 0) {
+    leadingZeroes += 1;
+  }
+  let encoded = "1".repeat(leadingZeroes);
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    encoded += BASE58_ALPHABET[digits[index]];
+  }
+  return encoded;
+}
+
+export function compressedNniPublicKeyBase58(value?: string | null): string | null {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (
     normalized.length !== NNI_RAW_P256_PUBLIC_KEY_HEX_LENGTH ||
@@ -29,8 +56,7 @@ export function compressedNniPublicKeyBase64Url(value?: string | null): string |
   const yIsOdd = Number.parseInt(normalized.slice(-2), 16) % 2 === 1;
   const compressedHex = `${yIsOdd ? "03" : "02"}${normalized.slice(0, 64)}`;
   const bytes = compressedHex.match(/.{2}/g)?.map((pair) => Number.parseInt(pair, 16)) ?? [];
-  const binary = String.fromCharCode(...bytes);
-  return globalThis.btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return encodeBase58(bytes);
 }
 
 export type NniSimulationControlMode = "enable" | "disable" | null;
@@ -57,7 +83,7 @@ export function nniPayloadHexField(payload?: NniDevicePayload | null): NniPayloa
   if (!payload) return null;
   if (payload.signature) return { label: "signature", value: payload.signature };
   if (payload.pubkey) {
-    const compressed = compressedNniPublicKeyBase64Url(payload.pubkey);
+    const compressed = compressedNniPublicKeyBase58(payload.pubkey);
     return { label: "pubkey", value: compressed ?? payload.pubkey, size: compressed ? 33 : undefined };
   }
   if (payload.device_cert_hex) {

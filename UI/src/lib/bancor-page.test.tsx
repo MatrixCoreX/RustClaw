@@ -92,7 +92,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         trade_id: "trade-market-1",
         quote_id: "quote-market-1",
         market_id: "point-usd-v1",
-        device_pubkey_compact: "AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH",
+        device_pubkey_compact: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
         side: "sell" as const,
         input_asset: "POINT" as const,
         input_units: "3360000",
@@ -205,7 +205,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /真实成交 K 线图/);
   assert.match(html, /市场成交记录/);
   assert.match(html, /设备公钥的紧凑格式/);
-  assert.match(html, /AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH/);
+  assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);

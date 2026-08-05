@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   NNI_RUNTIME_TILES,
-  compressedNniPublicKeyBase64Url,
+  compressedNniPublicKeyBase58,
   findNniJoinErrorCode,
   nniActionLabel,
   nniDeviceMessage,
@@ -44,18 +44,18 @@ test("selects the first available NNI payload hex field", () => {
   });
 });
 
-test("shows raw P-256 NNI public keys as lossless compressed Base64URL", () => {
+test("shows raw P-256 NNI public keys as lossless compressed Base58", () => {
   const rawPublicKey =
     "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c" +
     "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0";
 
   assert.equal(
-    compressedNniPublicKeyBase64Url(rawPublicKey),
-    "AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH",
+    compressedNniPublicKeyBase58(rawPublicKey),
+    "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
   );
   assert.deepEqual(nniPayloadHexField({ pubkey: rawPublicKey }), {
     label: "pubkey",
-    value: "AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH",
+    value: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
     size: 33,
   });
 });
