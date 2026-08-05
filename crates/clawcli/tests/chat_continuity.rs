@@ -25,17 +25,32 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
             .as_nanos()
     ));
     let transcript_path = session_store.with_extension("transcript");
-    let command_line = format!(
-        "{} --base-url http://{} --key test-key chat --new",
+    let base_url = format!("http://{address}");
+    let transcript = transcript_path.to_str().expect("transcript path");
+    let mut pty_command = Command::new("script");
+    #[cfg(target_os = "macos")]
+    pty_command.args([
+        "-q",
+        transcript,
         env!("CARGO_BIN_EXE_clawcli"),
-        address
-    );
-    let mut child = Command::new("script")
-        .args([
-            "-qefc",
-            &command_line,
-            transcript_path.to_str().expect("transcript path"),
-        ])
+        "--base-url",
+        &base_url,
+        "--key",
+        "test-key",
+        "chat",
+        "--new",
+    ]);
+    #[cfg(not(target_os = "macos"))]
+    pty_command.args([
+        "-qefc",
+        &format!(
+            "{} --base-url {} --key test-key chat --new",
+            env!("CARGO_BIN_EXE_clawcli"),
+            base_url
+        ),
+        transcript,
+    ]);
+    let mut child = pty_command
         .env("APP_CLAWCLI_SESSION_STORE", &session_store)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
