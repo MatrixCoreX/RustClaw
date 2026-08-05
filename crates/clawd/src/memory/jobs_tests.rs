@@ -84,6 +84,47 @@ fn durable_job_schema_is_idempotent_and_has_required_constraints() {
 }
 
 #[test]
+fn outbox_reconciliation_uses_the_canonical_task_schema_and_terminal_status() {
+    let db = setup_db();
+    ensure_memory_job_schema(&db).expect("job schema");
+    db.execute(
+        "INSERT INTO tasks(
+            task_id, user_id, chat_id, user_key, principal_id, channel, kind,
+            payload_json, status, created_at, updated_at
+         ) VALUES (
+            'task-reconcile', 1, 2, 'fixture-key', 'principal-fixture', 'ui', 'ask',
+            '{}', 'succeeded', '100', '100'
+         )",
+        [],
+    )
+    .expect("canonical task");
+    db.execute(
+        "INSERT INTO memories(
+            memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+            channel, role, content, created_at, created_at_ts
+         ) VALUES (
+            'memory-reconcile', 1, 2, 'fixture-key', 'principal-fixture', 'principal',
+            'principal-fixture', 'ui', 'assistant', 'fixture', '100', 100
+         )",
+        [],
+    )
+    .expect("matching memory");
+
+    assert_eq!(
+        missing_turn_task_ids(&db).expect("canonical reconciliation query"),
+        vec!["task-reconcile"]
+    );
+    db.execute(
+        "UPDATE tasks SET status = 'failed' WHERE task_id = 'task-reconcile'",
+        [],
+    )
+    .expect("change terminal status");
+    assert!(missing_turn_task_ids(&db)
+        .expect("failed task query")
+        .is_empty());
+}
+
+#[test]
 fn cancellation_is_principal_and_scope_bounded() {
     let db = setup_db();
     ensure_memory_job_schema(&db).expect("job schema");
