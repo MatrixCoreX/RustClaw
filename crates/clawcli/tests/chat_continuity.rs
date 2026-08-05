@@ -2,6 +2,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -31,6 +32,8 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
     #[cfg(target_os = "macos")]
     pty_command.args([
         "-q",
+        "-t",
+        "0",
         transcript,
         env!("CARGO_BIN_EXE_clawcli"),
         "--base-url",
@@ -58,7 +61,8 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
         .spawn()
         .expect("spawn PTY chat");
     let mut stdin = child.stdin.take().expect("PTY stdin");
-    for line in [
+    wait_for_pty_prompt(&transcript_path, 1);
+    let turns = [
         "inspect workspace",
         "/approve-scope",
         "update one file",
@@ -68,10 +72,13 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
         "review the diff",
         "finish with verification",
         "/exit",
-    ] {
+    ];
+    for (index, line) in turns.into_iter().enumerate() {
         writeln!(stdin, "{line}").expect("write PTY turn");
         stdin.flush().expect("flush PTY turn");
-        thread::sleep(Duration::from_millis(700));
+        if line != "/exit" {
+            wait_for_pty_prompt(&transcript_path, index + 2);
+        }
     }
     drop(stdin);
 
@@ -108,6 +115,21 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
     assert!(stdout.contains("task_resume_requested"), "{stdout}");
     assert!(stdout.contains("checkpoint-coding-3"), "{stdout}");
     assert_eq!(stdout.matches("turn-6-complete").count(), 1, "{stdout}");
+}
+
+fn wait_for_pty_prompt(transcript_path: &Path, minimum_count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let transcript = std::fs::read_to_string(transcript_path).unwrap_or_default();
+        if transcript.matches("> ").count() >= minimum_count {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PTY prompt {minimum_count} did not appear: {transcript}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[test]
