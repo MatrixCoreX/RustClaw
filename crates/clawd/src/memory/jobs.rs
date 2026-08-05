@@ -931,22 +931,7 @@ pub(crate) fn request_cancel_for_scope(
 pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Result<usize> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
     ensure_memory_job_schema(&db)?;
-    let mut stmt = db.prepare(
-        "SELECT DISTINCT t.task_id
-         FROM tasks t
-         JOIN memories m ON m.principal_id = t.principal_id AND m.chat_id = t.chat_id
-         WHERE t.status = 'success' AND t.kind = 'ask'
-           AND m.created_at_ts >= COALESCE(CAST(t.updated_at AS INTEGER), 0) - 5
-           AND m.created_at_ts <= COALESCE(CAST(t.updated_at AS INTEGER), 0) + 5
-           AND NOT EXISTS (
-             SELECT 1 FROM memory_jobs j WHERE j.source_task_id = t.task_id
-           )
-         ORDER BY t.id DESC LIMIT 100",
-    )?;
-    let task_ids = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(stmt);
+    let task_ids = missing_turn_task_ids(&db)?;
     drop(db);
     let mut repaired = 0usize;
     for task_id in task_ids {
@@ -1000,6 +985,25 @@ pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Re
         }
     }
     Ok(repaired)
+}
+
+fn missing_turn_task_ids(db: &Connection) -> anyhow::Result<Vec<String>> {
+    let mut stmt = db.prepare(
+        "SELECT DISTINCT t.task_id
+         FROM tasks t
+         JOIN memories m ON m.principal_id = t.principal_id AND m.chat_id = t.chat_id
+         WHERE t.status = 'succeeded' AND t.kind = 'ask'
+           AND m.created_at_ts >= COALESCE(CAST(t.updated_at AS INTEGER), 0) - 5
+           AND m.created_at_ts <= COALESCE(CAST(t.updated_at AS INTEGER), 0) + 5
+           AND NOT EXISTS (
+             SELECT 1 FROM memory_jobs j WHERE j.source_task_id = t.task_id
+           )
+         ORDER BY CAST(t.updated_at AS INTEGER) DESC, t.task_id DESC LIMIT 100",
+    )?;
+    let task_ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(task_ids)
 }
 
 fn load_job(db: &Connection, job_id: &str) -> anyhow::Result<Option<MemoryJobSnapshot>> {
