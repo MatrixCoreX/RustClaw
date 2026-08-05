@@ -140,7 +140,11 @@ fn nni_bancor_market_trade_pubkeys_use_lossless_compact_display_format() {
     );
     assert_eq!(
         compact_bancor_device_pubkey(pubkey).as_deref(),
-        Some("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH"),
+        Some("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
+    );
+    assert_eq!(
+        compact_bancor_device_pubkey("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH").as_deref(),
+        Some("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
     );
 
     let mut payload = json!({
@@ -155,11 +159,11 @@ fn nni_bancor_market_trade_pubkeys_use_lossless_compact_display_format() {
     assert!(!serialized.contains(pubkey));
     assert_eq!(
         payload["trades"][0]["device_pubkey_compact"],
-        Value::String("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH".to_string()),
+        Value::String("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C".to_string()),
     );
     assert_eq!(
         payload["trades"][1]["device_pubkey_compact"],
-        Value::String("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH".to_string()),
+        Value::String("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C".to_string()),
     );
     assert_eq!(
         payload["trades"][2]["device_pubkey_compact"],

@@ -1,6 +1,9 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
 
+const BASE58_ALPHABET: &[u8; 58] =
+    b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
 const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] = [
     60,
     300,
@@ -22,6 +25,57 @@ struct NniBancorCandlesQuery {
     end_time_unix: Option<i64>,
 }
 
+fn encode_base58(bytes: &[u8]) -> String {
+    let mut digits = Vec::<u8>::new();
+    for &byte in bytes {
+        let mut carry = u32::from(byte);
+        for digit in &mut digits {
+            let value = u32::from(*digit) * 256 + carry;
+            *digit = (value % 58) as u8;
+            carry = value / 58;
+        }
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+
+    let leading_zeroes = bytes.iter().take_while(|&&byte| byte == 0).count();
+    let mut encoded = String::with_capacity(leading_zeroes + digits.len());
+    encoded.extend(std::iter::repeat('1').take(leading_zeroes));
+    encoded.extend(
+        digits
+            .iter()
+            .rev()
+            .map(|&digit| BASE58_ALPHABET[digit as usize] as char),
+    );
+    encoded
+}
+
+fn decode_base58(value: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::<u8>::new();
+    for character in value.bytes() {
+        let digit = BASE58_ALPHABET
+            .iter()
+            .position(|&candidate| candidate == character)? as u32;
+        let mut carry = digit;
+        for byte in &mut bytes {
+            let decoded = u32::from(*byte) * 58 + carry;
+            *byte = (decoded & 0xff) as u8;
+            carry = decoded >> 8;
+        }
+        while carry > 0 {
+            bytes.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+
+    let leading_zeroes = value.bytes().take_while(|&byte| byte == b'1').count();
+    let mut decoded = vec![0; leading_zeroes];
+    decoded.extend(bytes.into_iter().rev());
+    Some(decoded)
+}
+
 fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
     let normalized = value.trim();
     if normalized.len() == 128 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -29,12 +83,12 @@ fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
         let mut compressed = Vec::with_capacity(33);
         compressed.push(if raw[63] & 1 == 0 { 0x02 } else { 0x03 });
         compressed.extend_from_slice(&raw[..32]);
-        return Some(URL_SAFE_NO_PAD.encode(compressed));
+        return Some(encode_base58(&compressed));
     }
 
-    let compressed = URL_SAFE_NO_PAD.decode(normalized).ok()?;
+    let compressed = decode_base58(normalized).or_else(|| URL_SAFE_NO_PAD.decode(normalized).ok())?;
     (compressed.len() == 33 && matches!(compressed[0], 0x02 | 0x03))
-        .then(|| URL_SAFE_NO_PAD.encode(compressed))
+        .then(|| encode_base58(&compressed))
 }
 
 fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
