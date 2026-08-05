@@ -14,9 +14,43 @@ prompt_recall_limit = 3
 # Maximum number of memory rows returned by normal recall.
 recall_limit = 6
 
-# 单条记忆保存时的最大字符数，超出会截断。
-# Maximum characters stored for one memory item; longer content is truncated.
+# 单条候选记忆的 schema 上限；权威 transcript 不会因为 prompt 预算被截断。
+# Schema limit for one candidate memory; canonical transcripts are not truncated by prompt budgets.
 item_max_chars = 1200
+
+# 后台记忆作业 worker 数量；按主体公平领取持久化作业。
+# Number of durable memory workers; claims are scheduled fairly across principals.
+background_job_concurrency = 2
+
+# 对话最后写入后至少空闲多久，才允许领取提取/整合作业。
+# Minimum idle time after the last turn before extraction/consolidation may be claimed.
+background_idle_seconds = 5
+
+# worker 领取作业后的租约时长；进程崩溃后租约到期可恢复。
+# Job lease duration; expired leases are recoverable after a process crash.
+background_lease_seconds = 90
+
+# 后台作业最多尝试次数。
+# Maximum durable memory job attempts.
+background_max_attempts = 5
+
+# 未审核候选保留天数及每个主体的最大行数。
+# Raw candidate retention and per-principal row ceiling.
+raw_candidate_retention_days = 14
+raw_candidate_max_rows_per_principal = 2000
+
+# 记忆存储压力软上限，以及单主体 rows/bytes/background-cost 三维配额。
+# Storage-pressure soft limit and per-principal rows/bytes/background-cost quotas.
+storage_soft_limit_bytes = 536870912
+principal_max_bytes = 67108864
+principal_background_cost_microunits = 1000000
+
+# 留空表示继承当前 agent 已解析后的 provider/model；单独设置时需要允许远端上下文。
+# Empty values inherit the agent's resolved provider/model; independent selections require remote-context consent.
+extract_provider = ""
+extract_model = ""
+consolidation_provider = ""
+consolidation_model = ""
 
 # 记忆上下文注入 prompt 的总字符上限。
 # Maximum total characters used for memory context in prompts.
@@ -179,21 +213,73 @@ agent_memory_budget_chars = 2200
 # Memory budget in characters for route-trigger context.
 route_trigger_budget_chars = 900
 
-# 记忆索引使用的 embedding 模型标识；local-hash-v1 表示本地哈希向量。
-# Embedding model identifier for memory indexing; local-hash-v1 means local hash vectors.
-embedding_model = "local-hash-v1"
+# 记忆索引使用的 embedding 模型标识；local-hash-v2 表示多语言本地哈希向量。
+# Embedding model identifier for memory indexing; local-hash-v2 means multilingual local hash vectors.
+embedding_model = "local-hash-v2"
 
-# embedding 向量维度。local-hash-v1 固定为 24。
-# Embedding vector dimensions. local-hash-v1 is fixed at 24.
+# embedding 向量维度。local-hash-v2 固定为 24。
+# Embedding vector dimensions. local-hash-v2 is fixed at 24.
 embedding_dims = 24
 
 # embedding 索引版本；变更 provider 或维度时应同步变更并重建索引。
 # Embedding index version; change it with provider/dimension changes and rebuild the index.
-embedding_version = "local-hash-v1"
+embedding_version = "local-hash-v2"
 
 # embedding 批处理大小。
 # Batch size for embedding/indexing work.
 embedding_batch_size = 16
+
+# embedding provider 类型。默认 local 不发送任何外部请求；remote_http 还需要用户明确允许远端上下文。
+# Embedding provider kind. local never sends outbound requests; remote_http also requires explicit user consent.
+embedding_provider_kind = "local"
+
+# 远端 embedding endpoint 的配置引用。local 模式留空。
+# Config reference for a remote embedding endpoint. Keep empty for local mode.
+embedding_endpoint_ref = ""
+
+# 远端凭据引用（环境变量名或 credential broker ref），不得填写密钥原文。
+# Remote credential reference (environment variable name or credential-broker ref); never put the secret itself here.
+embedding_credential_ref = ""
+
+# 向量归一化合同。目前支持 unit_length 与 none。
+# Vector normalization contract. Supported values are unit_length and none.
+embedding_normalization = "unit_length"
+
+# 向量距离合同。目前仅支持 cosine，未知组合会在启动/注册 profile 时明确失败。
+# Vector distance contract. Only cosine is currently supported; unknown combinations fail validation.
+embedding_metric = "cosine"
+
+# 查询 embedding 的单次等待预算，超时后结构化降级到本地全文/精确检索。
+# Per-query embedding deadline; timeout falls back structurally to local lexical/exact retrieval.
+embedding_query_timeout_ms = 1500
+
+# 远端 embedding 的连接与单次读取空闲超时；它们只限制网络尝试，不限制整个后台任务生命周期。
+# Remote embedding connect and per-read idle timeouts; these bound one network attempt, not the whole job lifecycle.
+embedding_connect_timeout_ms = 1000
+embedding_idle_timeout_ms = 1500
+
+# 单批最大重试次数，以及连续可重试失败触发熔断的阈值和恢复等待时间。
+# Per-batch retry ceiling plus the retryable-failure threshold and reset delay for the circuit breaker.
+embedding_retry_max_attempts = 5
+embedding_circuit_failure_threshold = 3
+embedding_circuit_reset_seconds = 30
+
+# 查询向量只保存在内存中，并按 TTL 和总字节预算淘汰；不会持久化原始查询。
+# Query vectors stay in memory only and are evicted by TTL and a total byte budget; raw queries are never persisted.
+embedding_query_cache_ttl_seconds = 300
+embedding_query_cache_max_bytes = 1048576
+
+# 远端 embedding 单次请求体预算；过大批次会按稳定 item 顺序拆分。
+# Remote embedding request-body budget; oversized batches split while preserving stable item order.
+embedding_max_request_bytes = 2097152
+
+# 远端 embedding 必须取得 principal 级明确同意；配置本身不能授予同意。
+# Remote embeddings require explicit principal consent; configuration alone never grants consent.
+embedding_remote_opt_in_required = true
+
+# 可恢复 reindex 批次之间的节流间隔。
+# Throttle delay between recoverable reindex batches.
+embedding_reindex_batch_delay_ms = 25
 
 # 启动时是否重建记忆索引。
 # Whether to rebuild memory indexes at startup.

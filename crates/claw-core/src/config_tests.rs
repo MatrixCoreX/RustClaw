@@ -1,7 +1,7 @@
 use super::runtime::apply_llm_vendor_api_key_envs_with;
 use super::{
-    llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, SkillsConfig, ToolsConfig,
-    WorkspaceInstructionsConfig,
+    llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, MemoryConfig, SkillsConfig,
+    ToolsConfig, WorkspaceInstructionsConfig,
 };
 use std::fs;
 
@@ -520,5 +520,29 @@ fn skill_config_defaults_do_not_duplicate_registry_membership() {
     assert_eq!(
         skills.registry_path.as_deref(),
         Some("configs/skills_registry.toml")
+    );
+}
+
+#[test]
+fn memory_defaults_are_projected_from_the_tracked_release_toml() {
+    let defaults = MemoryConfig::default();
+    let tracked: MemoryConfig = toml::from_str(include_str!("../../../configs/memory.toml"))
+        .expect("tracked memory config");
+    assert_eq!(defaults.config_path, "configs/memory.toml");
+    assert_eq!(defaults.recall_limit, tracked.recall_limit);
+    assert_eq!(defaults.item_max_chars, tracked.item_max_chars);
+    assert_eq!(defaults.prompt_max_chars, tracked.prompt_max_chars);
+    assert_eq!(defaults.retention_days, tracked.retention_days);
+    assert_eq!(defaults.max_rows, tracked.max_rows);
+    assert_eq!(defaults.embedding_model, tracked.embedding_model);
+    assert_eq!(defaults.embedding_version, tracked.embedding_version);
+    assert_eq!(defaults.embedding_metric, tracked.embedding_metric);
+    assert_eq!(
+        defaults.embedding_query_cache_max_bytes,
+        tracked.embedding_query_cache_max_bytes
+    );
+    assert_eq!(
+        defaults.embedding_circuit_failure_threshold,
+        tracked.embedding_circuit_failure_threshold
     );
 }

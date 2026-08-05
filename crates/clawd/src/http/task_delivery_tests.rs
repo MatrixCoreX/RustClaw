@@ -147,13 +147,7 @@ fn interrupted_terminal_content_uses_shared_resume_notice() {
 #[test]
 fn delivery_authorization_requires_the_tasks_exact_active_key() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    let db = state.core.db.get().expect("db connection");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at) VALUES (?1, 'user', 1, '1')",
-        rusqlite::params!["key"],
-    )
-    .expect("insert active key");
-    drop(db);
+    state.seed_test_auth_identity("key", "user");
     let record = record("succeeded", Some(serde_json::json!({"text": "done"})));
 
     let mut headers = HeaderMap::new();

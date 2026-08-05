@@ -231,6 +231,13 @@ fn context_source_bundle(bundle: &TaskContextBundle, plan: &ContextCompactionPla
         "provider_context_window_tokens": plan.provider_context_window_tokens,
         "provider_compaction_threshold_tokens": plan.provider_compaction_threshold_tokens,
         "trigger_codes": plan.trigger_codes,
+        "compaction_focus": plan.compaction_focus.as_deref().map(|focus| json!({
+            "data_only": true,
+            "instruction_authority": "none",
+            "provenance": "authenticated_user_focus",
+            "delimiter": "COMPACTION_FOCUS_DATA",
+            "value": focus,
+        })),
         "source_char_budget": source_char_budget,
         "included_source_char_count": included_source_char_count,
         "sources": sources,

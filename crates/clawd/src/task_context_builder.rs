@@ -10,13 +10,23 @@ const CONTEXT_PROMPT_OVERHEAD_MAX_CHARS: usize = 1_800;
 
 #[path = "task_context_builder/compaction.rs"]
 mod compaction;
+pub(crate) mod context_compaction_lifecycle;
+mod context_window_policy;
 #[path = "task_context_builder/summary.rs"]
 mod summary;
 
 pub(crate) use compaction::{
-    apply_agent_loop_context_compaction, force_agent_loop_context_compaction_plan,
-    hydrate_agent_loop_context_compaction_plan,
-    plan_agent_loop_context_compaction_with_provider_window, ContextCompactionPlan,
+    apply_agent_loop_context_compaction, force_agent_loop_context_compaction_plan_with_policy,
+    hydrate_agent_loop_context_compaction_plan, plan_agent_loop_context_compaction_with_policy,
+    ContextCompactionPlan,
+};
+#[cfg(test)]
+pub(crate) use compaction::{
+    force_agent_loop_context_compaction_plan,
+    plan_agent_loop_context_compaction_with_provider_window,
+};
+pub(crate) use context_window_policy::{
+    note_context_token_usage, ContextTokenScope, ContextWindowPolicy,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -55,6 +65,7 @@ pub(crate) struct TaskContextBundle {
     pub(crate) task_plan_snapshot: Option<Value>,
     pub(crate) context_source_task_ids: Vec<String>,
     pub(crate) compaction_records: Vec<Value>,
+    pub(crate) memory_settings_snapshot: Option<memory::settings::MemoryEffectiveSettings>,
 }
 
 impl TaskContextBundle {
@@ -576,12 +587,16 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         has_active_session_state,
         chat_memory_budget_chars,
     );
-    let memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
+    let memory_settings_snapshot = memory::settings::resolve_task_memory_settings(state, task)
+        .ok()
+        .flatten();
+    let memory_ctx = memory::service::prepare_prompt_with_memory_for_policy_snapshot(
         state,
         task,
         planner_user_request,
         &planner_memory_decision,
         &chat_memory_decision,
+        memory_settings_snapshot.as_ref(),
     );
     let (recent_turns_full, context_source_task_ids) =
         memory::build_recent_turns_full_context_with_sources(
@@ -635,7 +650,40 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             }),
         context_source_task_ids,
         compaction_records: Vec::new(),
+        memory_settings_snapshot,
     }
+}
+
+pub(crate) async fn hydrate_async_memory_recall(
+    state: &AppState,
+    task: &ClaimedTask,
+    planner_user_request: &str,
+    chat_memory_budget_chars: usize,
+    bundle: &mut TaskContextBundle,
+) {
+    let Some(view) = bundle.execution_view.as_mut() else {
+        return;
+    };
+    let has_active_session_state = context_slot_present(&view.active_task_context)
+        || context_slot_present(&view.active_execution_anchor_context)
+        || context_slot_present(&view.session_alias_context);
+    let planner_memory_decision =
+        memory::use_policy::decide_planner_memory_use_policy(state, view.budget_tier);
+    let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
+        state,
+        view.budget_tier,
+        has_active_session_state,
+        chat_memory_budget_chars,
+    );
+    view.memory_ctx = memory::service::prepare_prompt_with_memory_for_policy_snapshot_async(
+        state,
+        task,
+        planner_user_request,
+        &planner_memory_decision,
+        &chat_memory_decision,
+        bundle.memory_settings_snapshot.as_ref(),
+    )
+    .await;
 }
 
 pub(crate) fn set_execution_image_context(

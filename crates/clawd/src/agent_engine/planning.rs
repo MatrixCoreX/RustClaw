@@ -25,6 +25,15 @@ use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResul
 #[path = "planning/native_capability_catalog_tool.rs"]
 mod native_capability_catalog_tool;
 use native_capability_catalog_tool::native_capability_loader_tool_definition;
+#[path = "planning/context_length_recovery.rs"]
+mod context_length_recovery;
+use context_length_recovery::{compact_text_to_token_budget, context_length_recovery_request};
+#[path = "planning/native_capability_tools.rs"]
+mod native_capability_tools;
+use native_capability_tools::{
+    native_capability_leaf_tool_name, native_capability_tool_definition,
+    native_capability_tool_map, native_group_leaf_tool_name, native_group_tool_definitions,
+};
 
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
@@ -421,15 +430,40 @@ pub(super) async fn plan_round_actions(
         selected_native_group_count,
         skill_context.disclosure_mode,
     );
-    if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback(
+    let native_turn_result = llm_gateway::run_native_model_turn_with_fallback(
         state,
         task,
         &native_prompt,
         &native_prompt_source,
         &native_request,
     )
-    .await?
-    {
+    .await;
+    let native_turn_result = match native_turn_result {
+        Err(error) if error == llm_gateway::CONTEXT_LENGTH_EXCEEDED_ERR => {
+            let (recovery_prompt, recovery_request, recovery_observation) =
+                context_length_recovery_request(state, task, &native_request, &native_prompt)
+                    .ok_or_else(|| "context_window_capability_missing".to_string())?;
+            loop_state
+                .task_observations
+                .push(recovery_observation.clone());
+            let _ = crate::task_event_transport::publish_claimed_event(
+                state,
+                task,
+                "context_length_recovery",
+                recovery_observation,
+            );
+            llm_gateway::run_native_model_turn_with_fallback(
+                state,
+                task,
+                &recovery_prompt,
+                &format!("{native_prompt_source}+context_length_recovery_v1"),
+                &recovery_request,
+            )
+            .await
+        }
+        result => result,
+    }?;
+    if let Some(native_turn) = native_turn_result {
         let mut native_turn = native_turn;
         let mut repair_reason_codes = Vec::new();
         let mut repair_progress = NativeRepairProgress::from_loop_state(loop_state);
@@ -640,17 +674,70 @@ pub(super) async fn plan_round_actions(
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
-    let plan_raw = llm_gateway::run_with_fallback_with_hints(
+    let fallback_hints = crate::ChatRequestHints {
+        timeout_seconds: provider_timeout_seconds,
+        ..Default::default()
+    };
+    let plan_result = llm_gateway::run_with_fallback_with_hints(
         state,
         task,
         &prompt_text,
         &prompt_source,
-        crate::ChatRequestHints {
-            timeout_seconds: provider_timeout_seconds,
-            ..Default::default()
-        },
+        fallback_hints.clone(),
     )
-    .await?;
+    .await;
+    let plan_raw = match plan_result {
+        Err(error) if error == llm_gateway::CONTEXT_LENGTH_EXCEEDED_ERR => {
+            let policy = crate::task_context_builder::ContextWindowPolicy::for_task(state, task)
+                .ok_or_else(|| "context_window_capability_missing".to_string())?;
+            let input_budget_tokens = policy
+                .context_window_tokens
+                .saturating_sub(policy.output_reserve_tokens)
+                .saturating_sub(policy.tool_observation_reserve_tokens)
+                .saturating_sub(policy.estimator_safety_margin_tokens);
+            let prompt_tokens =
+                crate::token_estimator::estimate_generic_tokens(&prompt_text).provider_tokens;
+            let recovery_headroom = policy
+                .output_reserve_tokens
+                .saturating_add(policy.tool_observation_reserve_tokens)
+                .saturating_add(policy.estimator_safety_margin_tokens)
+                .max(1_024);
+            let target_tokens = input_budget_tokens
+                .min(prompt_tokens)
+                .saturating_sub(recovery_headroom)
+                .max(1_024);
+            let recovery_prompt = compact_text_to_token_budget(&prompt_text, target_tokens);
+            let observation = json!({
+                "schema_version": 1,
+                "observation_kind": "context_length_recovery_snapshot",
+                "reason_code": "context_length_exceeded",
+                "source": "provider_structured_error",
+                "attempt": 1,
+                "retry_limit": 1,
+                "input_digest": format!("sha256:{:x}", Sha256::digest(prompt_text.as_bytes())),
+                "output_digest": format!("sha256:{:x}", Sha256::digest(recovery_prompt.as_bytes())),
+                "target_tokens": target_tokens,
+                "completed_side_effect_replay": false,
+                "canonical_task_events_preserved": true,
+            });
+            loop_state.task_observations.push(observation.clone());
+            let _ = crate::task_event_transport::publish_claimed_event(
+                state,
+                task,
+                "context_length_recovery",
+                observation,
+            );
+            llm_gateway::run_with_fallback_with_hints(
+                state,
+                task,
+                &recovery_prompt,
+                &format!("{prompt_source}+context_length_recovery_v1"),
+                fallback_hints,
+            )
+            .await?
+        }
+        result => result?,
+    };
     info!(
         "plan_llm_response task_id={} round={} raw={}",
         task.task_id,
@@ -888,163 +975,6 @@ fn native_planner_request(
         stream: true,
         metadata,
     }
-}
-
-fn native_capability_tool_definition(
-    tool_name: &str,
-    description: &str,
-    capability_names: &[String],
-    capability_argument_schemas: &BTreeMap<String, Value>,
-) -> ModelToolDefinition {
-    if tool_name != NATIVE_CALL_CAPABILITY_TOOL {
-        if let [capability] = capability_names {
-            if let Some(input_schema) = capability_argument_schemas.get(capability) {
-                return ModelToolDefinition {
-                    name: tool_name.to_string(),
-                    description: format!(
-                        "{description}; schema:direct_runtime_capability_arguments_v1; capability={capability}"
-                    ),
-                    input_schema: input_schema.clone(),
-                    strict: true,
-                };
-            }
-        }
-    }
-    let input_schema = if !capability_names.is_empty()
-        && capability_names
-            .iter()
-            .all(|name| capability_argument_schemas.contains_key(name))
-    {
-        let variants = capability_names
-            .iter()
-            .map(|capability| {
-                json!({
-                    "type": "object",
-                    "required": ["capability", "args"],
-                    "properties": {
-                        "capability": {
-                            "type": "string",
-                            "enum": [capability]
-                        },
-                        "args": &capability_argument_schemas[capability]
-                    },
-                    "additionalProperties": false
-                })
-            })
-            .collect::<Vec<_>>();
-        json!({
-            "type": "object",
-            "description": "schema:discriminated_runtime_capability_call_v1",
-            "oneOf": variants
-        })
-    } else {
-        json!({
-            "type": "object",
-            "required": ["capability", "args"],
-            "properties": {
-                "capability": {
-                    "type": "string",
-                    "description": "runtime_callable_capability_catalog_v1.token",
-                    "enum": capability_names
-                },
-                "args": {
-                    "type": "object",
-                    "description": "schema:structured_capability_arguments"
-                }
-            },
-            "additionalProperties": false
-        })
-    };
-    ModelToolDefinition {
-        name: tool_name.to_string(),
-        description: description.to_string(),
-        input_schema,
-        strict: true,
-    }
-}
-
-fn native_capability_leaf_tool_name(capability: &str) -> String {
-    let readable = capability
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    let direct_name = format!("call_{readable}");
-    if direct_name.len() <= MAX_NATIVE_TOOL_NAME_BYTES {
-        return direct_name;
-    }
-    let digest = Sha256::digest(capability.as_bytes());
-    let suffix = digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let suffix = format!("__{suffix}");
-    let mut prefix = direct_name;
-    prefix.truncate(MAX_NATIVE_TOOL_NAME_BYTES.saturating_sub(suffix.len()));
-    format!("{prefix}{suffix}")
-}
-
-fn native_group_leaf_tool_name(
-    group: &crate::capability_map::PlannerNativeCapabilityGroup,
-    capability: &str,
-) -> String {
-    if group.capability_names.len() == 1 {
-        group.tool_name.clone()
-    } else {
-        native_capability_leaf_tool_name(capability)
-    }
-}
-
-fn native_group_tool_definitions(
-    group: &crate::capability_map::PlannerNativeCapabilityGroup,
-) -> Vec<ModelToolDefinition> {
-    group
-        .capability_names
-        .iter()
-        .map(|capability| {
-            let description = if group.capability_names.len() == 1 {
-                group.description.clone()
-            } else {
-                group
-                    .capability_descriptions
-                    .get(capability)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        format!(
-                            "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",
-                            group.skill_name
-                        )
-                    })
-            };
-            native_capability_tool_definition(
-                &native_group_leaf_tool_name(group, capability),
-                &description,
-                std::slice::from_ref(capability),
-                &group.capability_argument_schemas,
-            )
-        })
-        .collect()
-}
-
-fn native_capability_tool_map(
-    groups: &[crate::capability_map::PlannerNativeCapabilityGroup],
-) -> BTreeMap<String, BTreeSet<String>> {
-    groups
-        .iter()
-        .flat_map(|group| {
-            group.capability_names.iter().map(|capability| {
-                (
-                    native_group_leaf_tool_name(group, capability),
-                    BTreeSet::from([capability.clone()]),
-                )
-            })
-        })
-        .collect()
 }
 
 #[cfg(test)]

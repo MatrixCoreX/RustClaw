@@ -16,6 +16,7 @@ pub(crate) use model_turn::run_native_model_turn_with_fallback;
 
 const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
 const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
+pub(crate) const CONTEXT_LENGTH_EXCEEDED_ERR: &str = "context_length_exceeded";
 
 fn llm_cost_policy_allows(
     state: &AppState,
@@ -687,6 +688,8 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
 
     let mut last_error = "unknown llm error".to_string();
     let mut any_provider_attempted = false;
+    let mut attempted_provider_count = 0_u64;
+    let mut context_length_error_count = 0_u64;
     let mut selected_provider_count = 0_u64;
     let mut skipped_providers: Vec<(String, u64)> = Vec::new();
     let mut recoverable_provider_blocker: Option<TaskProviderBlocker> = None;
@@ -780,6 +783,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
             return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
         }
         any_provider_attempted = true;
+        attempted_provider_count = attempted_provider_count.saturating_add(1);
         touch_llm_task_lease(
             state,
             &task.task_id,
@@ -923,6 +927,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                if err.kind == ProviderErrorKind::ContextLengthExceeded {
+                    context_length_error_count = context_length_error_count.saturating_add(1);
+                }
                 provider
                     .latency
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
@@ -1091,6 +1098,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
             .collect::<Vec<_>>()
             .join(", ");
         last_error = format!("{last_error}; skipped_in_cooldown=[{}]", skipped_detail);
+    }
+    if attempted_provider_count > 0 && context_length_error_count == attempted_provider_count {
+        return Err(CONTEXT_LENGTH_EXCEEDED_ERR.to_string());
     }
     if let Some(blocker) = recoverable_provider_blocker {
         state.note_task_provider_blocker(&task.task_id, blocker);

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "fixture_id": "memory-context-wp0-v1",
+  "captured_at": "2026-08-05",
+  "implementation": "pre-WP1 current behavior",
+  "command": "cargo test -p clawd wp0_fixture_measures_current_retrieval_and_lifecycle_baseline -- --nocapture",
+  "environment": {
+    "os": "linux",
+    "architecture": "x86_64",
+    "storage": "in-memory SQLite test database",
+    "provider": "local-hash-v1"
+  },
+  "retrieval": {
+    "query_count": 12,
+    "quality_query_count": 11,
+    "k": 3,
+    "recall_at_k": 0.9091,
+    "mrr": 0.8636,
+    "ndcg_at_k": 0.8755,
+    "false_positive_rate": 0.7222,
+    "cross_principal_leakage_rate": 0.0,
+    "cross_project_leakage_rate": 0.2222,
+    "expired_deleted_residual_count": 0,
+    "latency_us_observed": {
+      "p50": 1258,
+      "p95": 1716,
+      "stability": "informational; rerun on each target because wall-clock timing is hardware dependent"
+    }
+  },
+  "resources_observed": {
+    "sqlite_page_bytes": 606208,
+    "process_rss_bytes": 61083648,
+    "stability": "informational; record deltas on the same host and build profile"
+  },
+  "provider_calls": {
+    "recall_remote": 0,
+    "no_memory_extra": 0,
+    "normal_chat_provider_calls_are_excluded": true
+  },
+  "compaction": {
+    "repeat_count": 3,
+    "machine_ref_retention_rate": 1.0,
+    "covered": [
+      "goal",
+      "constraint",
+      "decision",
+      "open_work",
+      "completed_side_effect",
+      "artifact",
+      "evidence",
+      "exact_identifier",
+      "rewind_resume_refs"
+    ],
+    "known_gap": "trigger remains fixed at 75 percent of provider context window"
+  },
+  "known_risks_reproduced": {
+    "canonical_write_truncation": true,
+    "global_max_rows_cross_principal_eviction": true,
+    "source_delete_orphan_index": true,
+    "cleanup_job_commit_race": "not_measurable_before_durable_job_queue"
+  },
+  "interpretation": {
+    "quality": "current fixture has acceptable top-3 recall but excessive false positives",
+    "isolation": "credential-shaped principal isolation holds in this fixture; project scope does not",
+    "acceptance": "this is a historical non-regression baseline, not the final WP5/WP1 acceptance target"
+  }
+}

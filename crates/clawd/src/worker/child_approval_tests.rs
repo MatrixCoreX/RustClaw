@@ -52,6 +52,7 @@ fn noninteractive_child_approval_returns_stable_machine_failure() {
         result["task_lifecycle"]["waiting_reason"],
         "approval_unavailable"
     );
+    drop(db);
     assert!(
         !crate::repo::fail_noninteractive_child_approval(&state, "approval-child", 2)
             .expect("repeat unavailable approval")

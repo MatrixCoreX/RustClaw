@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "fixture_id": "memory-context-wp0-v1",
+  "synthetic_only": true,
+  "contains_production_data": false,
+  "retrieval": {
+    "k": 3,
+    "items": [
+      {
+        "id": "reply_language_zh",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "回复语言偏好：简体中文；answer language: Simplified Chinese",
+        "timestamp": 1001
+      },
+      {
+        "id": "reply_language_ja",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "日本語の説明では短い例を付ける",
+        "timestamp": 1002
+      },
+      {
+        "id": "reply_language_ko",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "한국어 설명에는 짧은 예시를 포함한다",
+        "timestamp": 1003
+      },
+      {
+        "id": "traditional_chinese",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "繁體中文介面偏好：使用臺灣常用詞",
+        "timestamp": 1004
+      },
+      {
+        "id": "emoji_preference",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "完成提醒可以使用 ✅，不要使用 🚨",
+        "timestamp": 1005
+      },
+      {
+        "id": "project_alpha_path",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "project",
+        "scope_ref": "project-alpha",
+        "project_ref": "project-alpha",
+        "namespace": "project_facts",
+        "text": "生产配置路径是 /srv/alpha/config.toml",
+        "timestamp": 1006
+      },
+      {
+        "id": "project_beta_path",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2002,
+        "scope_kind": "project",
+        "scope_ref": "project-beta",
+        "project_ref": "project-beta",
+        "namespace": "project_facts",
+        "text": "生产配置路径是 /srv/beta/config.toml",
+        "timestamp": 1007
+      },
+      {
+        "id": "project_alpha_url",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "project",
+        "scope_ref": "project-alpha",
+        "project_ref": "project-alpha",
+        "namespace": "project_facts",
+        "text": "项目状态页 https://status.invalid.example/alpha?view=full",
+        "timestamp": 1008
+      },
+      {
+        "id": "project_alpha_hash",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "project",
+        "scope_ref": "project-alpha",
+        "project_ref": "project-alpha",
+        "namespace": "project_facts",
+        "text": "发布制品摘要 SHA256:7A4D9C2E11B8F0AA",
+        "timestamp": 1009
+      },
+      {
+        "id": "timezone_fact",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-alpha",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "用户时区是 Asia/Shanghai；2026-08-05 的“明天”是 2026-08-06",
+        "timestamp": 1010
+      },
+      {
+        "id": "principal_beta_secret_marker",
+        "principal": "principal-beta",
+        "user_id": 1002,
+        "chat_id": 3001,
+        "scope_kind": "principal",
+        "scope_ref": "principal-beta",
+        "project_ref": null,
+        "namespace": "user_profile",
+        "text": "隔离测试标记 BETA-ONLY-4F91",
+        "timestamp": 1011
+      }
+    ],
+    "queries": [
+      {
+        "id": "zh_synonym",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "以后回答用哪种语言？",
+        "relevant_ids": ["reply_language_zh"]
+      },
+      {
+        "id": "english_synonym",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "What is my preferred answer language?",
+        "relevant_ids": ["reply_language_zh"]
+      },
+      {
+        "id": "japanese",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "日本語の説明には何を付けますか",
+        "relevant_ids": ["reply_language_ja"]
+      },
+      {
+        "id": "korean",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "한국어 설명 선호를 알려줘",
+        "relevant_ids": ["reply_language_ko"]
+      },
+      {
+        "id": "traditional",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "繁體中文介面要用什麼詞",
+        "relevant_ids": ["traditional_chinese"]
+      },
+      {
+        "id": "emoji",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "完成时用哪个 emoji？",
+        "relevant_ids": ["emoji_preference"]
+      },
+      {
+        "id": "exact_path",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "/srv/alpha/config.toml",
+        "relevant_ids": ["project_alpha_path"]
+      },
+      {
+        "id": "exact_url",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "https://status.invalid.example/alpha?view=full",
+        "relevant_ids": ["project_alpha_url"]
+      },
+      {
+        "id": "exact_hash",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "SHA256:7A4D9C2E11B8F0AA",
+        "relevant_ids": ["project_alpha_hash"]
+      },
+      {
+        "id": "cross_project_probe",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "生产配置路径",
+        "relevant_ids": ["project_alpha_path"]
+      },
+      {
+        "id": "cross_principal_probe",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "BETA-ONLY-4F91",
+        "relevant_ids": []
+      },
+      {
+        "id": "relative_time_timezone",
+        "principal": "principal-alpha",
+        "user_id": 1001,
+        "chat_id": 2001,
+        "project_ref": "project-alpha",
+        "text": "Asia/Shanghai 时区里 2026-08-05 的明天是哪天",
+        "relevant_ids": ["timezone_fact"]
+      }
+    ]
+  },
+  "compaction": {
+    "provider_context_window_tokens": 4000,
+    "repeat_count": 3,
+    "required_machine_refs": [
+      "goal:finish_memory_upgrade",
+      "constraint:no_cross_principal_access",
+      "decision:canonical_rows_are_source_of_truth",
+      "open:wire_runtime_settings",
+      "side_effect:migration_002_applied",
+      "artifact:reports/memory-baseline.json",
+      "evidence:test-run-42",
+      "fact:ExactCaseIdentifier_7A4D"
+    ],
+    "rewind_resume_refs": [
+      "window:event-120-event-180",
+      "next:resume_from_event_181"
+    ]
+  },
+  "coverage_cases": [
+    {"id": "conflicting_fact", "categories": ["conflict", "user_correction"]},
+    {"id": "expired_deleted", "categories": ["expired", "deleted", "lineage"]},
+    {"id": "sensitive_injection", "categories": ["sensitive_text", "prompt_injection", "secret_filter"]},
+    {"id": "channel_group", "categories": ["group_channel", "conversation_scope"]},
+    {"id": "scheduled_source", "categories": ["scheduled_task", "eligibility"]},
+    {"id": "subagent_source", "categories": ["subagent", "eligibility"]},
+    {"id": "attachment_source", "categories": ["attachment", "ocr", "stt", "eligibility"]},
+    {"id": "external_source", "categories": ["web", "mcp", "tool_evidence", "eligibility"]},
+    {"id": "short_typo", "categories": ["short_query", "typo", "lexical"]},
+    {"id": "multilingual", "categories": ["simplified_chinese", "traditional_chinese", "english", "japanese", "korean", "emoji"]},
+    {"id": "exact_identifiers", "categories": ["path", "url", "hash", "code_symbol", "case_sensitive"]},
+    {"id": "temporal", "categories": ["relative_time", "timezone", "observed_at", "valid_range"]},
+    {"id": "scope_matrix", "categories": ["principal", "chat", "project", "cross_scope"]}
+  ],
+  "no_memory_outbound": {
+    "cases": [
+      {"use_memory": false, "generate_memory": false, "remote_opt_in": false, "expected_extra_provider_calls": 0},
+      {"use_memory": true, "generate_memory": false, "remote_opt_in": false, "expected_extra_provider_calls": 0},
+      {"use_memory": false, "generate_memory": true, "remote_opt_in": false, "expected_extra_provider_calls": 0}
+    ]
+  },
+  "data_loss_probes": [
+    "canonical_write_truncation",
+    "global_max_rows_cross_principal_eviction",
+    "source_delete_orphan_index",
+    "cleanup_job_commit_race"
+  ],
+  "thresholds": {
+    "baseline_non_regression": {
+      "recall_at_3_min": 0.70,
+      "mrr_min": 0.65,
+      "ndcg_at_3_min": 0.65,
+      "false_positive_rate_max": 0.73,
+      "cross_principal_leakage_max": 0.0,
+      "cross_project_leakage_max": 0.23,
+      "expired_deleted_residual_max": 0.0,
+      "extra_provider_calls_max": 0
+    },
+    "final_acceptance": {
+      "recall_at_3_min": 0.90,
+      "mrr_min": 0.85,
+      "ndcg_at_3_min": 0.85,
+      "false_positive_rate_max": 0.20,
+      "scope_leakage_rate_max": 0.0,
+      "expired_deleted_residual_max": 0.0,
+      "compaction_machine_ref_retention_min": 1.0,
+      "cross_principal_evictions_max": 0,
+      "canonical_truncations_max": 0,
+      "extra_provider_calls_without_opt_in_max": 0
+    }
+  }
+}

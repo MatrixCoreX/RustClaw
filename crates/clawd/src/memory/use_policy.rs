@@ -209,6 +209,21 @@ pub(crate) fn decide_skill_memory_use_policy(
     )
 }
 
+pub(crate) fn decide_schedule_memory_use_policy(state: &AppState) -> MemoryUseDecision {
+    let mut decision = MemoryUseDecision::skill_scoped(
+        state.policy.memory.schedule_memory_max_chars.max(384),
+        "scheduled_context_compatibility_projection",
+    );
+    decision.mode = MemoryContextMode::Schedule;
+    decision.include_long_term_summary = state.policy.memory.schedule_memory_include_long_term;
+    decision.include_preferences = state.policy.memory.schedule_memory_include_preferences;
+    decision.include_recent_related_events = true;
+    decision.include_recent_snippets = false;
+    decision.include_assistant_results = false;
+    decision.include_unfinished_goals = false;
+    decision
+}
+
 fn decision_from_skill_memory_policy(
     policy: &SkillMemoryPolicyConfig,
     default_max_chars: usize,

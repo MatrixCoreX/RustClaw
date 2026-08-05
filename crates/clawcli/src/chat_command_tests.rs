@@ -96,6 +96,15 @@ fn parser_keeps_permissions_and_model_typed() {
 }
 
 #[test]
+fn compact_accepts_an_optional_one_shot_focus() {
+    assert_eq!(parse("/compact").unwrap(), ChatCommand::Compact(None));
+    assert_eq!(
+        parse("/compact 保留未完成验证和 artifact 引用").unwrap(),
+        ChatCommand::Compact(Some("保留未完成验证和 artifact 引用".to_string()))
+    );
+}
+
+#[test]
 fn ordinary_and_code_span_text_are_not_commands() {
     assert!(parse_chat_command("continue").is_none());
     assert!(parse_chat_command("`/status`").is_none());

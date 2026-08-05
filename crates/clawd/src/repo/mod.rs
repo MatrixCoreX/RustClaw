@@ -10,6 +10,7 @@ pub(crate) mod child_tasks;
 pub(crate) mod conversation_history;
 pub(crate) mod crypto_storage;
 pub(crate) mod pending_channel_requests;
+pub(crate) mod principal_ownership;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
@@ -53,6 +54,7 @@ pub(crate) use pending_channel_requests::{
     finish_pending_channel_resume, pending_channel_resume_candidate, request_attachment_paths,
     store_pending_channel_request,
 };
+pub(crate) use principal_ownership::ensure_principal_ownership_schema;
 pub(crate) use submit::{
     build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
     check_submit_task_access, check_submit_task_limits, find_task_by_idempotency_key,

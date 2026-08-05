@@ -394,6 +394,8 @@ async fn slo_handler_requires_admin_and_returns_windowed_machine_metrics() {
         ],
     )
     .expect("task row");
+    crate::repo::ensure_principal_ownership_schema(&db)
+        .expect("bind SLO fixture identity to stable principal");
     drop(db);
     let mut headers = HeaderMap::new();
     headers.insert(

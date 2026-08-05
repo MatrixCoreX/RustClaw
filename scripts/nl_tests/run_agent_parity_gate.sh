@@ -468,6 +468,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_agent_hook_runtime_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_context_compaction_runtime_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_context_compaction_runtime_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_memory_context_wp0_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_memory_context_wp0_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_context_token_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_context_token_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_model_input_surface.py" --self-test

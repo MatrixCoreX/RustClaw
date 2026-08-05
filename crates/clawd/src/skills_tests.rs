@@ -931,15 +931,7 @@ async fn builtin_run_cmd_async_start_outcome_exposes_pending_async_job_extra() {
 }
 
 fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
-    let db = state.core.db.get().expect("db pool");
-    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
-        .expect("create auth schema");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, ?2, 1, '123', NULL)",
-        params![user_key, role],
-    )
-    .expect("insert auth key");
+    state.seed_test_auth_identity(user_key, role);
 }
 
 #[test]

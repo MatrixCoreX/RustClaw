@@ -9,6 +9,7 @@ fn seed_channel_binding_rows(
     channel: &str,
     bindings: &[ChannelBindingConfig],
 ) -> anyhow::Result<()> {
+    super::super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let now = now_ts();
     for binding in bindings {
         let user_key = normalize_user_key(&binding.user_key);
@@ -22,10 +23,13 @@ fn seed_channel_binding_rows(
             continue;
         }
         db.execute(
-            "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, principal_id, bound_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4,
+                     (SELECT principal_id FROM auth_keys WHERE user_key = ?4), ?5, ?5)
              ON CONFLICT(channel, external_user_id, external_chat_id)
-             DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
+             DO UPDATE SET user_key=excluded.user_key,
+                           principal_id=excluded.principal_id,
+                           updated_at=excluded.updated_at",
             params![channel, external_user_id, external_chat_id, user_key, now],
         )?;
     }

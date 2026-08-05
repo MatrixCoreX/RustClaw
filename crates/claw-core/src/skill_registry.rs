@@ -10,6 +10,8 @@ use toml::Value as TomlValue;
 
 #[path = "skill_registry_overlay.rs"]
 mod overlay;
+#[path = "skill_registry_shape.rs"]
+mod shape;
 #[path = "skill_registry_validation.rs"]
 mod validation;
 use validation::validate_named_capability;
@@ -176,6 +178,10 @@ pub struct PlannerCapabilityMapping {
     pub optional: Vec<String>,
     #[serde(default)]
     pub risk_level: Option<SkillRiskLevel>,
+    #[serde(default)]
+    pub auto_invocable: Option<bool>,
+    #[serde(default)]
+    pub requires_confirmation: Option<bool>,
     #[serde(default)]
     pub preferred: bool,
     #[serde(default)]
@@ -942,6 +948,8 @@ fn normalize_planner_capabilities(
             required: normalize_schema_tokens(&mapping.required),
             optional: normalize_schema_tokens(&mapping.optional),
             risk_level: mapping.risk_level,
+            auto_invocable: mapping.auto_invocable,
+            requires_confirmation: mapping.requires_confirmation,
             preferred: mapping.preferred,
             once_per_task: mapping.once_per_task,
             dedup_scope: mapping.dedup_scope,
@@ -1014,6 +1022,8 @@ fn planner_capability_policy_equivalent(
     alias.action == target.action
         && alias.effect == target.effect
         && alias.risk_level == target.risk_level
+        && alias.auto_invocable == target.auto_invocable
+        && alias.requires_confirmation == target.requires_confirmation
         && alias.once_per_task == target.once_per_task
         && alias.dedup_scope == target.dedup_scope
         && alias.dedup_fields == target.dedup_fields
@@ -1879,6 +1889,28 @@ impl SkillsRegistry {
         legacy_once_per_task_default(entry)
     }
 
+    pub fn resolved_auto_invocable(
+        &self,
+        canonical_name: &str,
+        action: Option<&str>,
+    ) -> Option<bool> {
+        let entry = self.get(canonical_name)?;
+        matching_planner_capability(entry, action)
+            .and_then(|mapping| mapping.auto_invocable)
+            .or(entry.auto_invocable)
+    }
+
+    pub fn resolved_requires_confirmation(
+        &self,
+        canonical_name: &str,
+        action: Option<&str>,
+    ) -> Option<bool> {
+        let entry = self.get(canonical_name)?;
+        matching_planner_capability(entry, action)
+            .and_then(|mapping| mapping.requires_confirmation)
+            .or(entry.requires_confirmation)
+    }
+
     pub fn resolved_dedup_scope(
         &self,
         canonical_name: &str,
@@ -1968,61 +2000,6 @@ impl SkillsRegistry {
     /// 其他能力走变体相等。例：调用 `has_capability("image_generate", &Capability::Llm)`。
     pub fn has_capability(&self, canonical_name: &str, cap: &Capability) -> bool {
         self.capabilities(canonical_name).iter().any(|c| c == cap)
-    }
-
-    /// §P4.2：capability ↔ skill shape 一致性审计。
-    ///
-    /// 规则（PR 阶段就会触发，不会等到 runtime 才暴）：
-    /// - **R1** `exec.sudo` ⇒ 必须 `requires_confirmation = true`，禁止自动提权。
-    /// - **R2** `exec.sudo` ⇒ 必须 `risk_level = "high"`，让所有 risk 路由都把它当最高级。
-    /// - **R3** 含 `fs.write` / `exec` / `exec.sudo` ⇒ 禁止显式 `side_effect = false`
-    ///   （未声明时容忍，迁移友好；一旦显式关掉，必然是误配）。
-    ///
-    /// 返回违规列表（按字符串排序，便于 diff 稳定）。空列表表示通过。
-    /// CI 可单独调用；`load_from_path` 也会拒绝这里报告的所有违规。
-    pub fn validate_shape_consistency(&self) -> Vec<String> {
-        let mut violations: Vec<String> = Vec::new();
-
-        for (name, entry) in &self.by_name {
-            let caps = &entry.resolved_capabilities;
-            let has = |c: &Capability| caps.contains(c);
-
-            if has(&Capability::ExecSudo) {
-                if entry.requires_confirmation != Some(true) {
-                    violations.push(format!(
-                        "skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)"
-                    ));
-                }
-                if entry.risk_level != Some(SkillRiskLevel::High) {
-                    violations.push(format!(
-                        "skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)"
-                    ));
-                }
-            }
-
-            for capability in caps {
-                let Capability::LlmCredentialFallback(secret_name) = capability else {
-                    continue;
-                };
-                if !has(&Capability::Llm) || !has(&Capability::Secrets(secret_name.clone())) {
-                    violations.push(format!(
-                        "skill `{name}` declares `{}` without matching `llm` and `secrets.{secret_name}`",
-                        capability.as_token()
-                    ));
-                }
-            }
-
-            let has_write_or_exec =
-                has(&Capability::FsWrite) || has(&Capability::Exec) || has(&Capability::ExecSudo);
-            if has_write_or_exec && entry.side_effect == Some(false) {
-                violations.push(format!(
-                    "skill `{name}` declares fs.write/exec/exec.sudo but `side_effect = false` is set explicitly (R3)"
-                ));
-            }
-        }
-
-        violations.sort();
-        violations
     }
 }
 

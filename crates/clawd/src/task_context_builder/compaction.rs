@@ -1,12 +1,13 @@
 use serde_json::{json, Value};
+use sha2::Digest;
 
 use super::{
-    context_budget_slots, context_slot_present, ExecutionContextBudgetTier, TaskContextBundle,
+    context_budget_slots, context_slot_present, ContextTokenScope, ContextWindowPolicy,
+    ExecutionContextBudgetTier, TaskContextBundle,
 };
 use crate::memory;
 use crate::{AppState, ClaimedTask};
 
-const PROVIDER_CONTEXT_COMPACTION_PERCENT: usize = 75;
 const CONTINUITY_REF_NAMESPACES: &[&str] = &[
     "artifact",
     "child",
@@ -33,6 +34,20 @@ pub(crate) struct ContextCompactionPlan {
     pub(crate) threshold_chars: usize,
     pub(crate) provider_context_window_tokens: Option<usize>,
     pub(crate) provider_compaction_threshold_tokens: Option<usize>,
+    pub(crate) provider_name: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) token_scope: ContextTokenScope,
+    pub(crate) prefix_token_estimate: usize,
+    pub(crate) body_token_estimate: usize,
+    pub(crate) adjusted_token_estimate: usize,
+    pub(crate) reserved_output_tokens: usize,
+    pub(crate) reserved_tool_observation_tokens: usize,
+    pub(crate) estimator_safety_margin_tokens: usize,
+    pub(crate) estimator_multiplier_millis: usize,
+    pub(crate) trigger_basis: &'static str,
+    pub(crate) context_policy_digest: Option<String>,
+    pub(crate) compaction_focus: Option<String>,
+    pub(crate) focus_digest: Option<String>,
     pub(crate) trigger_codes: Vec<&'static str>,
     source_refs: Vec<Value>,
     source_task_ids: Vec<String>,
@@ -41,6 +56,19 @@ pub(crate) struct ContextCompactionPlan {
 }
 
 impl ContextCompactionPlan {
+    pub(crate) fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
+    }
+
+    pub(crate) fn source_snapshot(&self) -> Value {
+        json!({
+            "schema_version": 1,
+            "source_task_ids": self.source_task_ids,
+            "source_event_range": self.source_event_range,
+            "source_event_ranges": self.source_event_ranges,
+        })
+    }
+
     pub(crate) fn hook_metadata(&self) -> Value {
         json!({
             "compaction_kind": "deterministic_context_budget",
@@ -51,6 +79,21 @@ impl ContextCompactionPlan {
             "threshold_chars": self.threshold_chars,
             "provider_context_window_tokens": self.provider_context_window_tokens,
             "provider_compaction_threshold_tokens": self.provider_compaction_threshold_tokens,
+            "provider_name": self.provider_name,
+            "model": self.model,
+            "token_scope": self.token_scope,
+            "prefix_token_estimate": self.prefix_token_estimate,
+            "body_token_estimate": self.body_token_estimate,
+            "adjusted_token_estimate": self.adjusted_token_estimate,
+            "reserved_output_tokens": self.reserved_output_tokens,
+            "reserved_tool_observation_tokens": self.reserved_tool_observation_tokens,
+            "estimator_safety_margin_tokens": self.estimator_safety_margin_tokens,
+            "estimator_multiplier_millis": self.estimator_multiplier_millis,
+            "trigger_basis": self.trigger_basis,
+            "context_policy_digest": self.context_policy_digest,
+            "focus_present": self.compaction_focus.is_some(),
+            "focus_char_count": self.compaction_focus.as_deref().map(|value| value.chars().count()).unwrap_or(0),
+            "focus_digest": self.focus_digest,
             "trigger_codes": self.trigger_codes,
             "source_ref_count": self.source_refs.len(),
             "source_task_count": self.source_task_ids.len(),
@@ -63,20 +106,38 @@ pub(crate) fn plan_agent_loop_context_compaction_with_provider_window(
     bundle: &TaskContextBundle,
     provider_context_window_tokens: Option<usize>,
 ) -> Option<ContextCompactionPlan> {
-    plan_context_compaction(bundle, provider_context_window_tokens, false)
+    let policy = provider_context_window_tokens.map(provider_only_policy);
+    plan_context_compaction(bundle, policy.as_ref(), false, None)
+}
+
+pub(crate) fn plan_agent_loop_context_compaction_with_policy(
+    bundle: &TaskContextBundle,
+    policy: &ContextWindowPolicy,
+) -> Option<ContextCompactionPlan> {
+    plan_context_compaction(bundle, Some(policy), false, None)
 }
 
 pub(crate) fn force_agent_loop_context_compaction_plan(
     bundle: &TaskContextBundle,
     provider_context_window_tokens: Option<usize>,
 ) -> Option<ContextCompactionPlan> {
-    plan_context_compaction(bundle, provider_context_window_tokens, true)
+    let policy = provider_context_window_tokens.map(provider_only_policy);
+    plan_context_compaction(bundle, policy.as_ref(), true, None)
+}
+
+pub(crate) fn force_agent_loop_context_compaction_plan_with_policy(
+    bundle: &TaskContextBundle,
+    policy: Option<&ContextWindowPolicy>,
+    compaction_focus: Option<&str>,
+) -> Option<ContextCompactionPlan> {
+    plan_context_compaction(bundle, policy, true, compaction_focus)
 }
 
 fn plan_context_compaction(
     bundle: &TaskContextBundle,
-    provider_context_window_tokens: Option<usize>,
+    policy: Option<&ContextWindowPolicy>,
     force: bool,
+    compaction_focus: Option<&str>,
 ) -> Option<ContextCompactionPlan> {
     let view = bundle.execution_view.as_ref()?;
     let slots = context_budget_slots(view);
@@ -98,18 +159,22 @@ fn plan_context_compaction(
     .filter(|value| context_slot_present(value))
     .map(|value| value.chars().count())
     .sum::<usize>();
+    let prefix_token_estimate = [
+        view.runtime_context.as_str(),
+        view.goal_context.as_str(),
+        view.active_task_context.as_str(),
+        view.active_execution_anchor_context.as_str(),
+        view.session_alias_context.as_str(),
+        view.compacted_history_context.as_str(),
+    ]
+    .into_iter()
+    .filter(|value| context_slot_present(value))
+    .map(|value| crate::token_estimator::estimate_generic_tokens(value).provider_tokens)
+    .sum::<usize>();
     let mut trigger_codes = Vec::new();
-    let provider_compaction_threshold_tokens = provider_context_window_tokens
-        .filter(|tokens| *tokens > 0)
-        .map(|tokens| {
-            tokens
-                .saturating_mul(PROVIDER_CONTEXT_COMPACTION_PERCENT)
-                .saturating_div(100)
-                .max(1)
-        });
-    if provider_compaction_threshold_tokens
-        .is_some_and(|threshold| before_token_estimate >= threshold)
-    {
+    let decision =
+        policy.map(|policy| policy.evaluate(before_token_estimate, prefix_token_estimate));
+    if decision.as_ref().is_some_and(|decision| decision.trigger) {
         trigger_codes.push("provider_context_window_pressure");
     }
     if force {
@@ -118,6 +183,13 @@ fn plan_context_compaction(
     if trigger_codes.is_empty() {
         return None;
     }
+    let focus = compaction_focus
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let focus_digest = focus
+        .as_deref()
+        .map(|value| format!("sha256:{:x}", sha2::Sha256::digest(value.as_bytes())));
     let source_refs = slots
         .iter()
         .filter(|(_, value)| context_slot_present(value))
@@ -134,17 +206,55 @@ fn plan_context_compaction(
         before_char_count,
         before_token_estimate,
         transcript_char_count,
-        threshold_chars: provider_compaction_threshold_tokens
+        threshold_chars: decision
+            .as_ref()
+            .map(|decision| decision.scoped_input_budget_tokens)
             .map(|tokens| tokens.saturating_mul(4))
             .unwrap_or(usize::MAX),
-        provider_context_window_tokens,
-        provider_compaction_threshold_tokens,
+        provider_context_window_tokens: policy.map(|policy| policy.context_window_tokens),
+        provider_compaction_threshold_tokens: decision
+            .as_ref()
+            .map(|decision| decision.scoped_input_budget_tokens),
+        provider_name: policy.map(|policy| policy.provider_name.clone()),
+        model: policy.map(|policy| policy.model.clone()),
+        token_scope: policy.map_or(ContextTokenScope::Total, |policy| policy.token_scope),
+        prefix_token_estimate,
+        body_token_estimate: before_token_estimate.saturating_sub(prefix_token_estimate),
+        adjusted_token_estimate: decision.as_ref().map_or(before_token_estimate, |decision| {
+            decision.adjusted_token_estimate
+        }),
+        reserved_output_tokens: policy.map_or(0, |policy| policy.output_reserve_tokens),
+        reserved_tool_observation_tokens: policy
+            .map_or(0, |policy| policy.tool_observation_reserve_tokens),
+        estimator_safety_margin_tokens: policy
+            .map_or(0, |policy| policy.estimator_safety_margin_tokens),
+        estimator_multiplier_millis: policy
+            .map_or(1_000, |policy| policy.estimator_multiplier_millis),
+        trigger_basis: decision
+            .as_ref()
+            .map_or("explicit_compaction", |decision| decision.trigger_basis),
+        context_policy_digest: policy.map(|policy| policy.policy_digest.clone()),
+        compaction_focus: focus,
+        focus_digest,
         trigger_codes,
         source_refs,
         source_task_ids: bundle.context_source_task_ids.clone(),
         source_event_range: json!({"start": Value::Null, "end": Value::Null}),
         source_event_ranges: Vec::new(),
     })
+}
+
+fn provider_only_policy(context_window_tokens: usize) -> ContextWindowPolicy {
+    ContextWindowPolicy::new(
+        "provider-window-only".to_string(),
+        "unspecified".to_string(),
+        context_window_tokens,
+        0,
+        0,
+        0,
+        1_000,
+        ContextTokenScope::Total,
+    )
 }
 
 pub(crate) fn hydrate_agent_loop_context_compaction_plan(
@@ -281,6 +391,11 @@ pub(crate) fn apply_agent_loop_context_compaction(
     model_summary: Option<Value>,
     model_status_code: &'static str,
 ) -> Value {
+    let memory_settings_snapshot = memory::settings::revocation_fenced_task_memory_settings(
+        state,
+        task,
+        bundle.memory_settings_snapshot.as_ref(),
+    );
     let Some(view) = bundle.execution_view.as_mut() else {
         return Value::Null;
     };
@@ -301,12 +416,13 @@ pub(crate) fn apply_agent_loop_context_compaction(
         has_active_session_state,
         chat_memory_budget_chars,
     );
-    let compacted_memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
+    let compacted_memory_ctx = memory::service::prepare_prompt_with_memory_for_policy_snapshot(
         state,
         task,
         planner_user_request,
         &planner_memory_decision,
         &chat_memory_decision,
+        memory_settings_snapshot.as_ref(),
     );
     let compacted_last_turn_total_chars = plan
         .provider_compaction_threshold_tokens
@@ -365,6 +481,12 @@ pub(super) fn apply_context_compaction_with_inputs(
         }));
     }
     let continuity_summary_attached = compacted_summary.is_some();
+    let input_digest = sha256_json(&json!({
+        "source_refs": plan.source_refs,
+        "source_event_range": plan.source_event_range,
+        "source_event_ranges": plan.source_event_ranges,
+    }));
+    let output_digest = sha256_json(compacted_summary.as_ref().unwrap_or(&Value::Null));
     view.memory_ctx = compacted_memory_ctx;
     view.budget_tier = ExecutionContextBudgetTier::Light;
     view.recent_turns_full = "<none>".to_string();
@@ -395,8 +517,17 @@ pub(super) fn apply_context_compaction_with_inputs(
             task_id, plan.generation, plan.before_char_count, after_char_count
         ))
     );
-    let record = json!({
+    let mut record = json!({
         "schema_version": 1,
+        "record_schema_version": 1,
+        "prompt_logical_path": "prompts/context_compaction_prompt.md",
+        "prompt_version": "2026-08-05.1",
+        "tokenizer_version": "provider_token_estimator_v1",
+        "provider_name": plan.provider_name,
+        "model": plan.model,
+        "context_policy_digest": plan.context_policy_digest,
+        "input_digest": input_digest,
+        "output_digest": output_digest,
         "compaction_id": compaction_id,
         "generation": plan.generation,
         "source_task_ids": plan.source_task_ids,
@@ -416,12 +547,6 @@ pub(super) fn apply_context_compaction_with_inputs(
         "model_summary": model_summary.unwrap_or(Value::Null),
         "continuity_refs": continuity_refs,
         "current_state_refs": current_state_refs,
-        "before_char_count": plan.before_char_count,
-        "before_token_estimate": plan.before_token_estimate,
-        "after_char_count": after_char_count,
-        "threshold_chars": plan.threshold_chars,
-        "provider_context_window_tokens": plan.provider_context_window_tokens,
-        "provider_compaction_threshold_tokens": plan.provider_compaction_threshold_tokens,
         "trigger_codes": plan.trigger_codes,
         "facts": [],
         "open_questions": [],
@@ -431,6 +556,80 @@ pub(super) fn apply_context_compaction_with_inputs(
         "retained_refs": retained_refs(view),
         "risk_flags": ["budget_excluded_context", "old_assistant_output_not_instruction"],
     });
+    let record_object = record
+        .as_object_mut()
+        .expect("context_compaction_record_object_required");
+    record_object.extend([
+        (
+            "before_char_count".to_string(),
+            json!(plan.before_char_count),
+        ),
+        (
+            "before_token_estimate".to_string(),
+            json!(plan.before_token_estimate),
+        ),
+        ("after_char_count".to_string(), json!(after_char_count)),
+        ("threshold_chars".to_string(), json!(plan.threshold_chars)),
+        (
+            "provider_context_window_tokens".to_string(),
+            json!(plan.provider_context_window_tokens),
+        ),
+        (
+            "provider_compaction_threshold_tokens".to_string(),
+            json!(plan.provider_compaction_threshold_tokens),
+        ),
+        ("token_scope".to_string(), json!(plan.token_scope)),
+        (
+            "prefix_token_estimate".to_string(),
+            json!(plan.prefix_token_estimate),
+        ),
+        (
+            "body_token_estimate".to_string(),
+            json!(plan.body_token_estimate),
+        ),
+        (
+            "adjusted_token_estimate".to_string(),
+            json!(plan.adjusted_token_estimate),
+        ),
+        (
+            "reserved_output_tokens".to_string(),
+            json!(plan.reserved_output_tokens),
+        ),
+        (
+            "reserved_tool_observation_tokens".to_string(),
+            json!(plan.reserved_tool_observation_tokens),
+        ),
+        (
+            "estimator_safety_margin_tokens".to_string(),
+            json!(plan.estimator_safety_margin_tokens),
+        ),
+        (
+            "estimator_multiplier_millis".to_string(),
+            json!(plan.estimator_multiplier_millis),
+        ),
+        ("trigger_basis".to_string(), json!(plan.trigger_basis)),
+        (
+            "focus_present".to_string(),
+            json!(plan.compaction_focus.is_some()),
+        ),
+        (
+            "focus_char_count".to_string(),
+            json!(plan
+                .compaction_focus
+                .as_deref()
+                .map(|value| value.chars().count())
+                .unwrap_or(0)),
+        ),
+        ("focus_digest".to_string(), json!(plan.focus_digest)),
+        (
+            "coverage".to_string(),
+            json!({
+                "status": "projection_bounded_canonical_available",
+                "original_events_preserved": true,
+                "canonical_source_refs_available": true,
+            }),
+        ),
+    ]);
     bundle.compaction_records.push(record.clone());
     record
 }
@@ -486,7 +685,19 @@ fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Valu
         if !context_slot_present(value) {
             continue;
         }
-        for machine_ref in extract_machine_refs(value, CONTINUITY_REF_NAMESPACES) {
+        let machine_refs = if matches!(
+            source_ref,
+            "runtime_context"
+                | "goal_context"
+                | "active_task_context"
+                | "active_execution_anchor_context"
+                | "session_alias_context"
+        ) {
+            extract_complete_machine_refs(value, CONTINUITY_REF_NAMESPACES)
+        } else {
+            extract_machine_refs(value, CONTINUITY_REF_NAMESPACES)
+        };
+        for machine_ref in machine_refs {
             if refs.iter().any(|item: &Value| {
                 item.get("ref").and_then(Value::as_str) == Some(machine_ref.as_str())
             }) {
@@ -500,6 +711,13 @@ fn deterministic_continuity_refs(view: &super::ExecutionContextView) -> Vec<Valu
         }
     }
     refs
+}
+
+fn extract_complete_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
+    let mut complete = String::with_capacity(value.len().saturating_add(1));
+    complete.push_str(value);
+    complete.push('\n');
+    extract_machine_refs(&complete, namespaces)
 }
 
 fn extract_machine_refs(value: &str, namespaces: &[&str]) -> Vec<String> {
@@ -645,4 +863,9 @@ fn stable_context_hash(text: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv64:{hash:016x}")
+}
+
+fn sha256_json(value: &Value) -> String {
+    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    format!("sha256:{:x}", sha2::Sha256::digest(bytes))
 }

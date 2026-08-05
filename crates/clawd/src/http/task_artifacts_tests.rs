@@ -193,6 +193,7 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
             ],
         )
         .unwrap();
+    state.seed_test_auth_identity("owner-key", "user");
 
     let mut wrong_headers = HeaderMap::new();
     wrong_headers.insert("x-agent-key", HeaderValue::from_static("wrong-key"));

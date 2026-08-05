@@ -16,15 +16,7 @@ fn temp_workspace_root() -> PathBuf {
 }
 
 fn insert_ui_route_auth_key(state: &AppState) {
-    let db = state.core.db.get().expect("db pool");
-    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
-        .expect("create auth schema");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, 'admin', 1, '123', NULL)",
-        rusqlite::params![UI_ROUTE_TEST_USER_KEY],
-    )
-    .expect("insert auth key");
+    state.seed_test_auth_identity(UI_ROUTE_TEST_USER_KEY, "admin");
 }
 
 fn ui_route_auth_headers() -> HeaderMap {

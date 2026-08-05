@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 mod defaults;
+mod model_vendors;
 mod runtime;
 
 use defaults::*;
+pub use model_vendors::llm_vendor_api_key_env_names;
 
 pub const CLAWD_INTERNAL_LISTEN: &str = "127.0.0.1:8787";
 pub const CLAWD_INTERNAL_BASE_URL: &str = "http://127.0.0.1:8787";
@@ -32,21 +34,6 @@ pub fn normalize_agent_persona_profile(profile: &str) -> (&'static str, bool) {
         "reviewer" => ("reviewer", true),
         "custom" => ("custom", true),
         _ => ("inherit", false),
-    }
-}
-
-pub fn llm_vendor_api_key_env_names(vendor: &str) -> &'static [&'static str] {
-    match vendor.trim().to_ascii_lowercase().as_str() {
-        "openai" => &["OPENAI_API_KEY"],
-        "google" => &["GOOGLE_API_KEY"],
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "grok" => &["GROK_API_KEY"],
-        "deepseek" => &["DEEPSEEK_API_KEY"],
-        "qwen" => &["QWEN_API_KEY"],
-        "minimax" => &["MINIMAX_API_KEY"],
-        "mimo" => &["XIAOMI_API_KEY", "MIMO_API_KEY"],
-        "custom" => &["CUSTOM_API_KEY"],
-        _ => &[],
     }
 }
 
@@ -1280,6 +1267,10 @@ pub struct LimitsConfig {
     pub global_rpm: usize,
     #[serde(default = "default_user_rpm")]
     pub user_rpm: usize,
+    #[serde(default = "default_context_tool_observation_reserve_tokens")]
+    pub context_tool_observation_reserve_tokens: usize,
+    #[serde(default = "default_context_estimator_safety_margin_tokens")]
+    pub context_estimator_safety_margin_tokens: usize,
 }
 
 impl Default for LimitsConfig {
@@ -1287,6 +1278,10 @@ impl Default for LimitsConfig {
         Self {
             global_rpm: default_global_rpm(),
             user_rpm: default_user_rpm(),
+            context_tool_observation_reserve_tokens:
+                default_context_tool_observation_reserve_tokens(),
+            context_estimator_safety_margin_tokens: default_context_estimator_safety_margin_tokens(
+            ),
         }
     }
 }
@@ -1419,66 +1414,72 @@ pub struct MemoryConfig {
     pub embedding_version: String,
     #[serde(default = "default_memory_embedding_batch_size")]
     pub embedding_batch_size: usize,
+    #[serde(default = "default_memory_embedding_provider_kind")]
+    pub embedding_provider_kind: String,
+    #[serde(default)]
+    pub embedding_endpoint_ref: String,
+    #[serde(default)]
+    pub embedding_credential_ref: String,
+    #[serde(default = "default_memory_embedding_normalization")]
+    pub embedding_normalization: String,
+    #[serde(default = "default_memory_embedding_metric")]
+    pub embedding_metric: String,
+    #[serde(default = "default_memory_embedding_query_timeout_ms")]
+    pub embedding_query_timeout_ms: u64,
+    #[serde(default = "default_memory_embedding_connect_timeout_ms")]
+    pub embedding_connect_timeout_ms: u64,
+    #[serde(default = "default_memory_embedding_idle_timeout_ms")]
+    pub embedding_idle_timeout_ms: u64,
+    #[serde(default = "default_memory_embedding_retry_max_attempts")]
+    pub embedding_retry_max_attempts: usize,
+    #[serde(default = "default_memory_embedding_circuit_failure_threshold")]
+    pub embedding_circuit_failure_threshold: usize,
+    #[serde(default = "default_memory_embedding_circuit_reset_seconds")]
+    pub embedding_circuit_reset_seconds: u64,
+    #[serde(default = "default_memory_embedding_query_cache_ttl_seconds")]
+    pub embedding_query_cache_ttl_seconds: u64,
+    #[serde(default = "default_memory_embedding_query_cache_max_bytes")]
+    pub embedding_query_cache_max_bytes: usize,
+    #[serde(default = "default_memory_embedding_max_request_bytes")]
+    pub embedding_max_request_bytes: usize,
+    #[serde(default = "default_memory_embedding_remote_opt_in_required")]
+    pub embedding_remote_opt_in_required: bool,
+    #[serde(default = "default_memory_embedding_reindex_batch_delay_ms")]
+    pub embedding_reindex_batch_delay_ms: u64,
     #[serde(default = "default_memory_reindex_on_startup")]
     pub reindex_on_startup: bool,
+    #[serde(default = "default_memory_background_job_concurrency")]
+    pub background_job_concurrency: usize,
+    #[serde(default = "default_memory_background_idle_seconds")]
+    pub background_idle_seconds: u64,
+    #[serde(default = "default_memory_background_lease_seconds")]
+    pub background_lease_seconds: u64,
+    #[serde(default = "default_memory_background_max_attempts")]
+    pub background_max_attempts: usize,
+    #[serde(default = "default_memory_raw_candidate_retention_days")]
+    pub raw_candidate_retention_days: u64,
+    #[serde(default = "default_memory_raw_candidate_max_rows_per_principal")]
+    pub raw_candidate_max_rows_per_principal: usize,
+    #[serde(default = "default_memory_storage_soft_limit_bytes")]
+    pub storage_soft_limit_bytes: u64,
+    #[serde(default = "default_memory_principal_max_bytes")]
+    pub principal_max_bytes: u64,
+    #[serde(default = "default_memory_principal_background_cost_microunits")]
+    pub principal_background_cost_microunits: u64,
+    #[serde(default)]
+    pub extract_provider: String,
+    #[serde(default)]
+    pub extract_model: String,
+    #[serde(default)]
+    pub consolidation_provider: String,
+    #[serde(default)]
+    pub consolidation_model: String,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
-        Self {
-            config_path: default_memory_config_path(),
-            mark_llm_reply_in_short_term: default_memory_mark_llm_reply_in_short_term(),
-            prefer_llm_assistant_memory: default_memory_prefer_llm_assistant_memory(),
-            prompt_recall_limit: default_memory_prompt_recall_limit(),
-            recall_limit: default_memory_recall_limit(),
-            item_max_chars: default_memory_item_max_chars(),
-            prompt_max_chars: default_memory_prompt_max_chars(),
-            retention_days: default_memory_retention_days(),
-            max_rows: default_memory_max_rows(),
-            long_term_enabled: default_memory_long_term_enabled(),
-            long_term_every_rounds: default_memory_long_term_every_rounds(),
-            long_term_source_rounds: default_memory_long_term_source_rounds(),
-            long_term_summary_max_chars: default_memory_long_term_summary_max_chars(),
-            long_term_recall_max_chars: default_memory_long_term_recall_max_chars(),
-            long_term_retention_days: default_memory_long_term_retention_days(),
-            long_term_max_rows: default_memory_long_term_max_rows(),
-            write_filter_enabled: default_memory_write_filter_enabled(),
-            write_min_chars: default_memory_write_min_chars(),
-            enable_preference_extraction: default_memory_enable_preference_extraction(),
-            llm_preference_fallback_enabled: default_memory_llm_preference_fallback_enabled(),
-            llm_preference_min_confidence: default_memory_llm_preference_min_confidence(),
-            llm_preference_max_chars: default_memory_llm_preference_max_chars(),
-            preference_recall_limit: default_memory_preference_recall_limit(),
-            recent_relevance_enabled: default_memory_recent_relevance_enabled(),
-            recent_relevance_min_score: default_memory_recent_relevance_min_score(),
-            safety_filter_enabled: default_memory_safety_filter_enabled(),
-            long_term_refresh_min_new_chars: default_memory_long_term_refresh_min_new_chars(),
-            long_term_refresh_max_repeat_ratio: default_memory_long_term_refresh_max_repeat_ratio(),
-            route_memory_enabled: default_memory_route_memory_enabled(),
-            route_memory_max_chars: default_memory_route_memory_max_chars(),
-            skill_memory_enabled: default_memory_skill_memory_enabled(),
-            skill_memory_max_chars: default_memory_skill_memory_max_chars(),
-            schedule_memory_include_long_term: default_memory_schedule_memory_include_long_term(),
-            schedule_memory_include_preferences: default_memory_schedule_memory_include_preferences(
-            ),
-            schedule_memory_max_chars: default_memory_schedule_memory_max_chars(),
-            image_memory_include_long_term: default_memory_image_memory_include_long_term(),
-            image_memory_include_preferences: default_memory_image_memory_include_preferences(),
-            image_memory_max_chars: default_memory_image_memory_max_chars(),
-            hybrid_recall_enabled: default_memory_hybrid_recall_enabled(),
-            fts_candidate_limit: default_memory_fts_candidate_limit(),
-            vector_candidate_limit: default_memory_vector_candidate_limit(),
-            trigger_anchor_limit: default_memory_trigger_anchor_limit(),
-            fact_card_limit: default_memory_fact_card_limit(),
-            chat_memory_budget_chars: default_memory_chat_memory_budget_chars(),
-            agent_memory_budget_chars: default_memory_agent_memory_budget_chars(),
-            route_trigger_budget_chars: default_memory_route_trigger_budget_chars(),
-            embedding_model: default_memory_embedding_model(),
-            embedding_dims: default_memory_embedding_dims(),
-            embedding_version: default_memory_embedding_version(),
-            embedding_batch_size: default_memory_embedding_batch_size(),
-            reindex_on_startup: default_memory_reindex_on_startup(),
-        }
+        toml::from_str(include_str!("../../../configs/memory.toml"))
+            .expect("tracked configs/memory.toml must satisfy MemoryConfig")
     }
 }
 

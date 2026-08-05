@@ -332,24 +332,7 @@ fn subagent_action_projects_workspace_context_evidence() {
 fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() {
     let state = persistent_test_state();
     let admin_key = "rk-persistent-subagent-admin";
-    let db = state.core.db.get().expect("get db");
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS auth_keys (
-            user_key TEXT PRIMARY KEY,
-            role TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            last_used_at TEXT
-        );",
-    )
-    .expect("auth key table");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-         VALUES (?1, 'admin', 1, 'now')",
-        rusqlite::params![admin_key],
-    )
-    .expect("insert admin key");
-    drop(db);
+    state.seed_test_auth_identity(admin_key, "admin");
     let mut payload = serde_json::json!({
         "text": "parent task",
         "subagent_execution": {
@@ -360,6 +343,7 @@ fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() 
         &mut payload,
         Some(&claw_core::types::AuthIdentity {
             user_key: admin_key.to_string(),
+            principal_id: "principal-test-admin".to_string(),
             role: "admin".to_string(),
             user_id: 42,
             chat_id: 7,

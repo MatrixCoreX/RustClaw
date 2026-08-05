@@ -1,0 +1,10 @@
+-- Migration id: 010_memory_scope_contract_v1
+--
+-- Immutable manifest for the idempotent SQLite migration executor in
+-- `memory/scope.rs`. Canonical durable-memory tables receive opaque memory IDs,
+-- stable principal ownership, a closed scope kind, a scope reference, origin,
+-- revision, and an explicit legacy-scope inference marker. Retrieval rows copy
+-- the same ownership/scope projection.
+--
+-- Historical `project_facts` namespace rows remain principal scoped and use
+-- legacy_scope_inferred=0 because their original project cannot be proven.

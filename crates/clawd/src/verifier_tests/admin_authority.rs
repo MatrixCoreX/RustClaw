@@ -3,16 +3,7 @@ use super::*;
 #[test]
 fn unrestricted_admin_can_execute_enabled_non_planner_skill() {
     let state = test_state();
-    let db = state.core.db.get().expect("test db");
-    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
-        .expect("auth schema");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-         VALUES ('rk-verifier-admin', 'admin', 1, 'now')",
-        [],
-    )
-    .expect("insert admin key");
-    drop(db);
+    state.seed_test_auth_identity("rk-verifier-admin", "admin");
     let identity = crate::resolve_auth_identity_by_key(&state, "rk-verifier-admin")
         .expect("resolve admin")
         .expect("admin identity");

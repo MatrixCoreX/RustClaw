@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +8,6 @@ use super::{
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct MemoryOverview {
-    pub(crate) user_key: String,
-    pub(crate) user_id: i64,
-    pub(crate) chat_id: i64,
     pub(crate) long_term_enabled: bool,
     pub(crate) hybrid_recall_enabled: bool,
     pub(crate) counts: MemoryCounts,
@@ -30,6 +25,7 @@ pub(crate) struct MemoryCounts {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct MemoryPreferenceItem {
     pub(crate) id: String,
+    #[serde(skip)]
     pub(crate) raw_id: i64,
     pub(crate) key: String,
     pub(crate) value: String,
@@ -41,6 +37,7 @@ pub(crate) struct MemoryPreferenceItem {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct MemoryFactItem {
     pub(crate) id: String,
+    #[serde(skip)]
     pub(crate) raw_id: i64,
     pub(crate) namespace: String,
     pub(crate) fact_key: String,
@@ -59,6 +56,7 @@ pub(crate) struct MemoryFactItem {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct MemoryRecentItem {
     pub(crate) id: String,
+    #[serde(skip)]
     pub(crate) raw_id: i64,
     pub(crate) role: String,
     pub(crate) memory_type: String,
@@ -122,18 +120,6 @@ pub(crate) struct MemoryClearResult {
     pub(crate) facts_deleted: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub(crate) struct MemorySettingsRequest {
-    pub(crate) long_term_enabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub(crate) struct MemorySettingsResult {
-    pub(crate) config_path: String,
-    pub(crate) long_term_enabled: bool,
-    pub(crate) restart_required: bool,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemoryObjectKind {
     Fact,
@@ -141,36 +127,28 @@ enum MemoryObjectKind {
     Recent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct MemoryObjectRef {
     kind: Option<MemoryObjectKind>,
-    raw_id: i64,
+    raw_id: Option<i64>,
+    opaque_id: Option<String>,
 }
 
 pub(crate) fn memory_overview(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
     long_term_enabled: bool,
     hybrid_recall_enabled: bool,
 ) -> anyhow::Result<MemoryOverview> {
     let counts = MemoryCounts {
-        recent: count_recent(db, user_id, chat_id, user_key)?,
-        preferences: count_preferences(db, user_id, chat_id, user_key)?,
-        facts_active: count_facts(
-            db,
-            user_id,
-            user_key,
-            Some(super::MEMORY_FACT_STATUS_ACTIVE),
-        )?,
-        facts_total: count_facts(db, user_id, user_key, None)?,
-        long_term_summaries: count_long_term_summaries(db, user_id, chat_id, user_key)?,
+        recent: count_recent(db, chat_id, principal_id)?,
+        preferences: count_preferences(db, chat_id, principal_id)?,
+        facts_active: count_facts(db, principal_id, Some(super::MEMORY_FACT_STATUS_ACTIVE))?,
+        facts_total: count_facts(db, principal_id, None)?,
+        long_term_summaries: count_long_term_summaries(db, chat_id, principal_id)?,
     };
     Ok(MemoryOverview {
-        user_key: user_key.to_string(),
-        user_id,
-        chat_id,
         long_term_enabled,
         hybrid_recall_enabled,
         counts,
@@ -179,26 +157,28 @@ pub(crate) fn memory_overview(
 
 pub(crate) fn list_preferences(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
 ) -> anyhow::Result<Vec<MemoryPreferenceItem>> {
     let mut stmt = db.prepare(
-        "SELECT id, pref_key, pref_value, confidence, source, updated_at_ts
+        "SELECT id, memory_id, pref_key, pref_value, confidence, source, updated_at_ts
          FROM user_preferences
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3
-         ORDER BY updated_at_ts DESC, id DESC",
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2
+         ORDER BY updated_at_ts DESC, id DESC
+         LIMIT 100",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key], |row| {
+    let rows = stmt.query_map(params![principal_id, chat_id], |row| {
         let raw_id = row.get::<_, i64>(0)?;
+        let memory_id = row.get::<_, String>(1)?;
         Ok(MemoryPreferenceItem {
-            id: format!("preference:{raw_id}"),
+            id: memory_id,
             raw_id,
-            key: row.get(1)?,
-            value: row.get(2)?,
-            confidence: row.get::<_, f32>(3).unwrap_or(0.8),
-            source: row.get(4)?,
-            updated_at_ts: row.get::<_, i64>(5).unwrap_or(0),
+            key: row.get(2)?,
+            value: row.get(3)?,
+            confidence: row.get::<_, f32>(4).unwrap_or(0.8),
+            source: row.get(5)?,
+            updated_at_ts: row.get::<_, i64>(6).unwrap_or(0),
         })
     })?;
     collect_rows(rows)
@@ -206,36 +186,37 @@ pub(crate) fn list_preferences(
 
 pub(crate) fn list_facts(
     db: &Connection,
-    user_id: i64,
-    user_key: &str,
+    principal_id: &str,
 ) -> anyhow::Result<Vec<MemoryFactItem>> {
     let mut stmt = db.prepare(
-        "SELECT id, namespace, fact_key, fact_value, fact_text, confidence, source_kind, source_ref,
+        "SELECT id, memory_id, namespace, fact_key, fact_value, fact_text, confidence, source_kind, source_ref,
                 reason, updated_at_ts, expires_at_ts, conflict_group, status
          FROM memory_facts
-         WHERE user_id = ?1 AND user_key = ?2
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
          ORDER BY
            CASE status WHEN 'active' THEN 0 WHEN 'superseded' THEN 1 WHEN 'expired' THEN 2 ELSE 3 END,
            updated_at_ts DESC,
-           id DESC",
+           id DESC
+         LIMIT 100",
     )?;
-    let rows = stmt.query_map(params![user_id, user_key], |row| {
+    let rows = stmt.query_map([principal_id], |row| {
         let raw_id = row.get::<_, i64>(0)?;
+        let memory_id = row.get::<_, String>(1)?;
         Ok(MemoryFactItem {
-            id: format!("fact:{raw_id}"),
+            id: memory_id,
             raw_id,
-            namespace: row.get(1)?,
-            fact_key: row.get(2)?,
-            fact_value: row.get(3)?,
-            fact_text: row.get(4)?,
-            confidence: row.get::<_, f32>(5).unwrap_or(0.8),
-            source_kind: row.get(6)?,
-            source_ref: row.get(7)?,
-            reason: row.get(8)?,
-            updated_at_ts: row.get::<_, i64>(9).unwrap_or(0),
-            expires_at_ts: row.get::<_, Option<i64>>(10)?,
-            conflict_group: row.get::<_, Option<String>>(11)?,
-            status: row.get(12)?,
+            namespace: row.get(2)?,
+            fact_key: row.get(3)?,
+            fact_value: row.get(4)?,
+            fact_text: row.get(5)?,
+            confidence: row.get::<_, f32>(6).unwrap_or(0.8),
+            source_kind: row.get(7)?,
+            source_ref: row.get(8)?,
+            reason: row.get(9)?,
+            updated_at_ts: row.get::<_, i64>(10).unwrap_or(0),
+            expires_at_ts: row.get::<_, Option<i64>>(11)?,
+            conflict_group: row.get::<_, Option<String>>(12)?,
+            status: row.get(13)?,
         })
     })?;
     collect_rows(rows)
@@ -243,28 +224,29 @@ pub(crate) fn list_facts(
 
 pub(crate) fn list_recent(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
     limit: usize,
 ) -> anyhow::Result<Vec<MemoryRecentItem>> {
     let mut stmt = db.prepare(
-        "SELECT id, role, memory_type, content, created_at_ts, safety_flag
+        "SELECT id, memory_id, role, memory_type, content, created_at_ts, safety_flag
          FROM memories
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2
          ORDER BY id DESC
-         LIMIT ?4",
+         LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
+    let rows = stmt.query_map(params![principal_id, chat_id, limit as i64], |row| {
         let raw_id = row.get::<_, i64>(0)?;
+        let memory_id = row.get::<_, String>(1)?;
         Ok(MemoryRecentItem {
-            id: format!("memory:{raw_id}"),
+            id: memory_id,
             raw_id,
-            role: row.get(1)?,
-            memory_type: row.get(2)?,
-            content: row.get(3)?,
-            created_at_ts: row.get::<_, i64>(4).unwrap_or(0),
-            safety_flag: row.get(5)?,
+            role: row.get(2)?,
+            memory_type: row.get(3)?,
+            content: row.get(4)?,
+            created_at_ts: row.get::<_, i64>(5).unwrap_or(0),
+            safety_flag: row.get(6)?,
         })
     })?;
     collect_rows(rows)
@@ -275,32 +257,35 @@ pub(crate) fn delete_memory_object(
     user_id: i64,
     chat_id: i64,
     user_key: &str,
+    principal_id: &str,
     object_id: &str,
     now_ts: i64,
 ) -> anyhow::Result<Option<MemoryDeleteResult>> {
-    let object_ref = parse_memory_object_ref(object_id)?;
+    let object_ref =
+        resolve_memory_object_ref(db, principal_id, parse_memory_object_ref(object_id)?)?;
+    let Some(raw_id) = object_ref.raw_id else {
+        return Ok(None);
+    };
     match object_ref.kind {
         Some(MemoryObjectKind::Fact) => {
-            delete_fact(db, user_id, user_key, object_ref.raw_id, object_id, now_ts)
+            delete_fact(db, user_id, user_key, raw_id, object_id, now_ts)
         }
         Some(MemoryObjectKind::Preference) => {
-            delete_preference(db, user_id, chat_id, user_key, object_ref.raw_id, object_id)
+            delete_preference(db, user_id, chat_id, user_key, raw_id, object_id)
         }
         Some(MemoryObjectKind::Recent) => {
-            delete_recent_memory(db, user_id, chat_id, user_key, object_ref.raw_id, object_id)
+            delete_recent_memory(db, user_id, chat_id, user_key, raw_id, object_id)
         }
         None => {
-            if let Some(result) =
-                delete_fact(db, user_id, user_key, object_ref.raw_id, object_id, now_ts)?
-            {
+            if let Some(result) = delete_fact(db, user_id, user_key, raw_id, object_id, now_ts)? {
                 return Ok(Some(result));
             }
             if let Some(result) =
-                delete_preference(db, user_id, chat_id, user_key, object_ref.raw_id, object_id)?
+                delete_preference(db, user_id, chat_id, user_key, raw_id, object_id)?
             {
                 return Ok(Some(result));
             }
-            delete_recent_memory(db, user_id, chat_id, user_key, object_ref.raw_id, object_id)
+            delete_recent_memory(db, user_id, chat_id, user_key, raw_id, object_id)
         }
     }
 }
@@ -310,16 +295,29 @@ pub(crate) fn expire_memory_object(
     user_id: i64,
     chat_id: i64,
     user_key: &str,
+    principal_id: &str,
     object_id: &str,
     now_ts: i64,
 ) -> anyhow::Result<Option<MemoryExpireResult>> {
-    let object_ref = parse_memory_object_ref(object_id)?;
+    let object_ref =
+        resolve_memory_object_ref(db, principal_id, parse_memory_object_ref(object_id)?)?;
+    let Some(raw_id) = object_ref.raw_id else {
+        return Ok(None);
+    };
     match object_ref.kind {
         Some(MemoryObjectKind::Fact) => {
-            expire_fact(db, user_id, user_key, object_ref.raw_id, object_id, now_ts)
+            expire_fact(db, user_id, user_key, raw_id, object_id, now_ts)
         }
         Some(MemoryObjectKind::Preference) | Some(MemoryObjectKind::Recent) | None => {
-            let deleted = delete_memory_object(db, user_id, chat_id, user_key, object_id, now_ts)?;
+            let deleted = delete_memory_object(
+                db,
+                user_id,
+                chat_id,
+                user_key,
+                principal_id,
+                object_id,
+                now_ts,
+            )?;
             Ok(deleted.map(|result| MemoryExpireResult {
                 id: result.id,
                 kind: result.kind,
@@ -331,9 +329,8 @@ pub(crate) fn expire_memory_object(
 
 pub(crate) fn clear_memory_scope(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
     scope: MemoryClearScope,
     now_ts: i64,
 ) -> anyhow::Result<MemoryClearResult> {
@@ -344,39 +341,16 @@ pub(crate) fn clear_memory_scope(
         facts_deleted: 0,
     };
     if matches!(scope, MemoryClearScope::Recent | MemoryClearScope::All) {
-        result.recent_deleted = clear_recent_memories(db, user_id, chat_id, user_key)?;
+        result.recent_deleted = clear_recent_memories(db, chat_id, principal_id)?;
     }
     if matches!(scope, MemoryClearScope::Preferences | MemoryClearScope::All) {
-        result.preferences_deleted = clear_preferences(db, user_id, chat_id, user_key)?;
+        result.preferences_deleted = clear_preferences(db, chat_id, principal_id)?;
     }
     if matches!(scope, MemoryClearScope::Facts | MemoryClearScope::All) {
-        result.facts_deleted = clear_facts(db, user_id, user_key, now_ts)?;
+        result.facts_deleted = clear_facts(db, principal_id, now_ts)?;
     }
     cleanup_fts(db)?;
     Ok(result)
-}
-
-pub(crate) fn update_memory_settings_file(
-    workspace_root: &Path,
-    req: &MemorySettingsRequest,
-) -> anyhow::Result<MemorySettingsResult> {
-    let config_path = workspace_root.join("configs/memory.toml");
-    let mut raw = std::fs::read_to_string(&config_path)?;
-    let mut long_term_enabled = read_bool_setting(&raw, "long_term_enabled").unwrap_or(true);
-    let mut restart_required = false;
-    if let Some(next) = req.long_term_enabled {
-        if next != long_term_enabled {
-            raw = upsert_bool_setting(&raw, "long_term_enabled", next);
-            std::fs::write(&config_path, raw)?;
-            restart_required = true;
-        }
-        long_term_enabled = next;
-    }
-    Ok(MemorySettingsResult {
-        config_path: "configs/memory.toml".to_string(),
-        long_term_enabled,
-        restart_required,
-    })
 }
 
 fn delete_fact(
@@ -531,23 +505,24 @@ fn delete_recent_memory(
 
 fn clear_recent_memories(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
 ) -> anyhow::Result<usize> {
     let ids = collect_ids(
         db,
         "SELECT id FROM memories
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
     )?;
     if ids.is_empty() {
         return Ok(0);
     }
     db.execute(
         "DELETE FROM memories
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
     )?;
     for id in &ids {
         db.execute(
@@ -559,36 +534,29 @@ fn clear_recent_memories(
     Ok(ids.len())
 }
 
-fn clear_preferences(
-    db: &Connection,
-    user_id: i64,
-    chat_id: i64,
-    user_key: &str,
-) -> anyhow::Result<usize> {
+fn clear_preferences(db: &Connection, chat_id: i64, principal_id: &str) -> anyhow::Result<usize> {
     let count = db.execute(
         "DELETE FROM user_preferences
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
     )?;
     db.execute(
         "DELETE FROM memory_retrieval_index
-         WHERE source_kind = ?1 AND user_id = ?2 AND chat_id = ?3 AND COALESCE(user_key, '') = ?4",
-        params![RETRIEVAL_SOURCE_PREFERENCE, user_id, chat_id, user_key],
+         WHERE source_kind = ?1 AND principal_id = ?2
+           AND scope_kind = 'principal' AND scope_ref = ?2 AND chat_id = ?3",
+        params![RETRIEVAL_SOURCE_PREFERENCE, principal_id, chat_id],
     )?;
     Ok(count)
 }
 
-fn clear_facts(
-    db: &Connection,
-    user_id: i64,
-    user_key: &str,
-    now_ts: i64,
-) -> anyhow::Result<usize> {
+fn clear_facts(db: &Connection, principal_id: &str, now_ts: i64) -> anyhow::Result<usize> {
     let ids = collect_ids(
         db,
         "SELECT id FROM memory_facts
-         WHERE user_id = ?1 AND user_key = ?2 AND status != 'deleted'",
-        params![user_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND status != 'deleted'",
+        [principal_id],
     )?;
     if ids.is_empty() {
         return Ok(0);
@@ -596,8 +564,9 @@ fn clear_facts(
     db.execute(
         "UPDATE memory_facts
          SET status = ?1, updated_at_ts = ?2
-         WHERE user_id = ?3 AND user_key = ?4 AND status != ?1",
-        params![MEMORY_FACT_STATUS_DELETED, now_ts, user_id, user_key],
+         WHERE principal_id = ?3 AND scope_kind = 'principal' AND scope_ref = ?3
+           AND status != ?1",
+        params![MEMORY_FACT_STATUS_DELETED, now_ts, principal_id],
     )?;
     crate::memory::indexing::delete_memory_fact_retrieval_rows(db, &ids)?;
     Ok(ids.len())
@@ -613,123 +582,118 @@ fn collect_ids(
     collect_rows(rows)
 }
 
-fn read_bool_setting(raw: &str, key: &str) -> Option<bool> {
-    raw.lines().find_map(|line| {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            return None;
-        }
-        let (left, right) = trimmed.split_once('=')?;
-        if left.trim() != key {
-            return None;
-        }
-        match right.trim().split('#').next()?.trim() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        }
-    })
-}
-
-fn upsert_bool_setting(raw: &str, key: &str, value: bool) -> String {
-    let rendered = format!("{key} = {value}");
-    let mut replaced = false;
-    let mut lines = Vec::new();
-    for line in raw.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with('#') {
-            if let Some((left, _)) = trimmed.split_once('=') {
-                if left.trim() == key {
-                    let indent = &line[..line.len() - trimmed.len()];
-                    lines.push(format!("{indent}{rendered}"));
-                    replaced = true;
-                    continue;
-                }
-            }
-        }
-        lines.push(line.to_string());
-    }
-    if !replaced {
-        if !lines.is_empty() {
-            lines.push(String::new());
-        }
-        lines.push(rendered);
-    }
-    let mut out = lines.join("\n");
-    if raw.ends_with('\n') || !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out
-}
-
 fn parse_memory_object_ref(raw: &str) -> anyhow::Result<MemoryObjectRef> {
     let raw = raw.trim();
+    if raw.starts_with("memory_")
+        && raw.len() <= 96
+        && raw
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return Ok(MemoryObjectRef {
+            kind: None,
+            raw_id: None,
+            opaque_id: Some(raw.to_string()),
+        });
+    }
     let (kind, id_text) = match raw.split_once(':') {
         Some(("fact", id)) => (Some(MemoryObjectKind::Fact), id),
         Some(("preference", id)) => (Some(MemoryObjectKind::Preference), id),
         Some(("memory", id)) | Some(("recent", id)) => (Some(MemoryObjectKind::Recent), id),
-        Some((_, _)) => anyhow::bail!("unsupported memory id prefix"),
+        Some((_, _)) => anyhow::bail!("memory_id_prefix_unsupported"),
         None => (None, raw),
     };
     let raw_id = id_text
         .parse::<i64>()
-        .map_err(|_| anyhow::anyhow!("invalid memory id"))?;
+        .map_err(|_| anyhow::anyhow!("memory_id_invalid"))?;
     if raw_id <= 0 {
-        anyhow::bail!("invalid memory id");
+        anyhow::bail!("memory_id_invalid");
     }
-    Ok(MemoryObjectRef { kind, raw_id })
+    Ok(MemoryObjectRef {
+        kind,
+        raw_id: Some(raw_id),
+        opaque_id: None,
+    })
 }
 
-fn count_recent(
+fn resolve_memory_object_ref(
     db: &Connection,
-    user_id: i64,
-    chat_id: i64,
-    user_key: &str,
-) -> anyhow::Result<i64> {
+    principal_id: &str,
+    object_ref: MemoryObjectRef,
+) -> anyhow::Result<MemoryObjectRef> {
+    let Some(opaque_id) = object_ref.opaque_id.as_deref() else {
+        return Ok(object_ref);
+    };
+    let resolved = db
+        .query_row(
+            "SELECT raw_id, kind FROM (
+                SELECT id AS raw_id, 'fact' AS kind FROM memory_facts
+                 WHERE memory_id = ?1 AND principal_id = ?2
+                UNION ALL
+                SELECT id AS raw_id, 'preference' AS kind FROM user_preferences
+                 WHERE memory_id = ?1 AND principal_id = ?2
+                UNION ALL
+                SELECT id AS raw_id, 'recent' AS kind FROM memories
+                 WHERE memory_id = ?1 AND principal_id = ?2
+             ) LIMIT 1",
+            params![opaque_id, principal_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((raw_id, kind)) = resolved else {
+        return Ok(object_ref);
+    };
+    let kind = match kind.as_str() {
+        "fact" => MemoryObjectKind::Fact,
+        "preference" => MemoryObjectKind::Preference,
+        "recent" => MemoryObjectKind::Recent,
+        _ => anyhow::bail!("memory_object_kind_invalid"),
+    };
+    Ok(MemoryObjectRef {
+        kind: Some(kind),
+        raw_id: Some(raw_id),
+        opaque_id: object_ref.opaque_id,
+    })
+}
+
+fn count_recent(db: &Connection, chat_id: i64, principal_id: &str) -> anyhow::Result<i64> {
     db.query_row(
         "SELECT COUNT(*) FROM memories
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
         |row| row.get(0),
     )
     .map_err(Into::into)
 }
 
-fn count_preferences(
-    db: &Connection,
-    user_id: i64,
-    chat_id: i64,
-    user_key: &str,
-) -> anyhow::Result<i64> {
+fn count_preferences(db: &Connection, chat_id: i64, principal_id: &str) -> anyhow::Result<i64> {
     db.query_row(
         "SELECT COUNT(*) FROM user_preferences
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
         |row| row.get(0),
     )
     .map_err(Into::into)
 }
 
-fn count_facts(
-    db: &Connection,
-    user_id: i64,
-    user_key: &str,
-    status: Option<&str>,
-) -> anyhow::Result<i64> {
+fn count_facts(db: &Connection, principal_id: &str, status: Option<&str>) -> anyhow::Result<i64> {
     match status {
         Some(status) => db
             .query_row(
                 "SELECT COUNT(*) FROM memory_facts
-                 WHERE user_id = ?1 AND user_key = ?2 AND status = ?3",
-                params![user_id, user_key, status],
+                 WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+                   AND status = ?2",
+                params![principal_id, status],
                 |row| row.get(0),
             )
             .map_err(Into::into),
         None => db
             .query_row(
                 "SELECT COUNT(*) FROM memory_facts
-                 WHERE user_id = ?1 AND user_key = ?2",
-                params![user_id, user_key],
+                 WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1",
+                [principal_id],
                 |row| row.get(0),
             )
             .map_err(Into::into),
@@ -738,14 +702,14 @@ fn count_facts(
 
 fn count_long_term_summaries(
     db: &Connection,
-    user_id: i64,
     chat_id: i64,
-    user_key: &str,
+    principal_id: &str,
 ) -> anyhow::Result<i64> {
     db.query_row(
         "SELECT COUNT(*) FROM long_term_memories
-         WHERE user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3",
-        params![user_id, chat_id, user_key],
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+           AND chat_id = ?2",
+        params![principal_id, chat_id],
         |row| row.get(0),
     )
     .map_err(Into::into)

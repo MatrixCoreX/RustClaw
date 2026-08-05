@@ -12,6 +12,8 @@ mod builtin_child_task_patch;
 mod builtin_code_index;
 #[path = "builtin_list_dir.rs"]
 mod builtin_list_dir;
+#[path = "builtin_memory_store.rs"]
+mod builtin_memory_store;
 #[path = "builtin_pty_session.rs"]
 mod builtin_pty_session;
 #[path = "builtin_read_file.rs"]
@@ -184,6 +186,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
     let map = ensure_args_object(args)?;
     match skill_name {
         "browser_session" => builtin_browser_session::execute(state, task, map).await,
+        "memory_store" => builtin_memory_store::execute(state, task, map).await,
         "code_index" => {
             let workspace_root = state.skill_rt.workspace_root.clone();
             let args = args.clone();

@@ -137,14 +137,7 @@ fn isolated_skill_store_state() -> (AppState, PathBuf) {
         configs.join("config.toml").to_string_lossy().into_owned();
     reload_skill_views(&state).expect("load isolated skill views");
 
-    let db = state.core.db.get().expect("test database");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at) \
-         VALUES (?1, 'admin', 1, '1', NULL)",
-        rusqlite::params![STORE_TEST_KEY],
-    )
-    .expect("insert skill store test identity");
-    drop(db);
+    state.seed_test_auth_identity(STORE_TEST_KEY, "admin");
 
     (state, workspace)
 }

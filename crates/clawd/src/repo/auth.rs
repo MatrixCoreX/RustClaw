@@ -5,12 +5,15 @@ use tracing::{info, warn};
 use crate::db_init::DbPool;
 use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
+#[path = "auth_principal.rs"]
+mod auth_principal;
 #[path = "auth_seed.rs"]
 mod auth_seed;
 #[path = "auth_webd.rs"]
 mod auth_webd;
 mod schema;
 
+pub(crate) use auth_principal::{ensure_principal_identity_schema, principal_id_for_user_key};
 pub(crate) use auth_seed::seed_channel_bindings;
 pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
 pub(crate) use schema::ensure_key_auth_schema;
@@ -68,6 +71,7 @@ const DEFAULT_WEBD_USERNAME: &str = "admin";
 const DEFAULT_WEBD_PASSWORD: &str = "123456";
 
 pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
+    super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let existing_count: i64 =
         db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
     let bootstrap_key = if existing_count > 0 {
@@ -79,6 +83,7 @@ pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Opti
              VALUES (?1, 'admin', 1, ?2, NULL)",
             params![user_key, now_ts()],
         )?;
+        auth_principal::create_principal_for_auth_key(db, &user_key, "admin")?;
         Some(user_key)
     };
     ensure_default_webd_admin_login(db, bootstrap_key.as_deref())?;
@@ -122,8 +127,9 @@ fn ensure_default_webd_admin_login(
     let password_hash = auth_webd::hash_password_for_webd_login(DEFAULT_WEBD_PASSWORD)?;
     let now = now_ts();
     db.execute(
-        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+        "INSERT INTO webd_login_accounts (username, password_hash, user_key, principal_id, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3,
+                 (SELECT principal_id FROM auth_keys WHERE user_key = ?3), 1, ?4, ?4)
          ON CONFLICT(username) DO NOTHING",
         params![DEFAULT_WEBD_USERNAME, password_hash, admin_key, now],
     )?;
@@ -264,6 +270,9 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     let channel_bindings_deleted = delete_all_rows_if_exists(&tx, "channel_bindings")?;
     let pending_bind_sessions_deleted =
         delete_all_rows_if_exists(&tx, "pending_channel_bind_sessions")?;
+    let _ = delete_all_rows_if_exists(&tx, "credential_bindings")?;
+    let _ = delete_all_rows_if_exists(&tx, "memory_runtime_settings")?;
+    let _ = delete_all_rows_if_exists(&tx, "principals")?;
     let auth_keys_deleted = delete_all_rows_if_exists(&tx, "auth_keys")?;
 
     let recent_memories_deleted = delete_all_rows_if_exists(&tx, "memories")?;
@@ -284,9 +293,11 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
          VALUES (?1, 'admin', 1, ?2, NULL)",
         params![admin_user_key, now],
     )?;
+    auth_principal::create_principal_for_auth_key(&tx, &admin_user_key, "admin")?;
     tx.execute(
-        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)",
+        "INSERT INTO webd_login_accounts (username, password_hash, user_key, principal_id, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3,
+                 (SELECT principal_id FROM auth_keys WHERE user_key = ?3), 1, ?4, ?4)",
         params![DEFAULT_WEBD_USERNAME, password_hash, admin_user_key, now],
     )?;
 
@@ -406,6 +417,11 @@ fn rotate_auth_key_row(
     old_user_key: &str,
     new_user_key: &str,
 ) -> anyhow::Result<()> {
+    let principal_id = tx.query_row(
+        "SELECT principal_id FROM auth_keys WHERE rowid = ?1",
+        [key_rowid],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
     rebind_user_key_references(tx, old_user_key, new_user_key)?;
     tx.execute(
         "UPDATE auth_keys
@@ -416,6 +432,9 @@ fn rotate_auth_key_row(
          WHERE rowid = ?1",
         params![key_rowid, new_user_key, now_ts()],
     )?;
+    if let Some(principal_id) = principal_id.filter(|value| !value.trim().is_empty()) {
+        auth_principal::rotate_credential_binding(tx, &principal_id, old_user_key, new_user_key)?;
+    }
     Ok(())
 }
 
@@ -518,6 +537,7 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
          VALUES (?1, ?2, 1, ?3, NULL)",
         params![user_key, role, now_ts()],
     )?;
+    auth_principal::create_principal_for_auth_key(&db, &user_key, &role)?;
     Ok(user_key)
 }
 
@@ -528,6 +548,7 @@ fn upsert_channel_binding_row(
     external_chat_id: Option<&str>,
     user_key: &str,
 ) -> anyhow::Result<()> {
+    super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let external_user_id = normalize_external_id_opt(external_user_id);
     let external_chat_id =
         normalize_external_id_opt(external_chat_id).or_else(|| external_user_id.clone());
@@ -535,12 +556,22 @@ fn upsert_channel_binding_row(
         anyhow::bail!("external_user_id or external_chat_id is required");
     }
     let now = now_ts();
+    let principal_id = auth_principal::principal_id_for_user_key(db, user_key)?;
     db.execute(
-        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, principal_id, bound_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
          ON CONFLICT(channel, external_user_id, external_chat_id)
-         DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-        params![channel, external_user_id, external_chat_id, user_key, now],
+         DO UPDATE SET user_key=excluded.user_key,
+                       principal_id=excluded.principal_id,
+                       updated_at=excluded.updated_at",
+        params![
+            channel,
+            external_user_id,
+            external_chat_id,
+            user_key,
+            principal_id,
+            now
+        ],
     )?;
     Ok(())
 }
@@ -615,6 +646,7 @@ pub(crate) fn create_pending_channel_bind_session(
     user_key: &str,
     expires_at: &str,
 ) -> anyhow::Result<PendingChannelBindSession> {
+    super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let channel = channel.trim();
     let user_key = normalize_user_key(user_key);
     let expires_at = expires_at.trim();
@@ -629,15 +661,17 @@ pub(crate) fn create_pending_channel_bind_session(
     }
     let bind_token = format!("pb-{}", uuid::Uuid::new_v4().simple());
     let now = now_ts();
+    let principal_id = auth_principal::principal_id_for_user_key(db, &user_key)?;
     db.execute(
         "INSERT INTO pending_channel_bind_sessions (
-            channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+            channel, user_key, principal_id, bind_token, status, external_user_id, external_chat_id, error_text,
             install_device_code, install_verification_url, install_poll_interval_seconds,
             created_at, updated_at, expires_at
-        ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, NULL, NULL, NULL, ?5, ?5, ?6)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL, NULL, NULL, ?6, ?6, ?7)",
         params![
             channel,
             user_key,
+            principal_id,
             bind_token,
             PENDING_CHANNEL_BIND_STATUS_PENDING,
             now,
@@ -1043,21 +1077,23 @@ pub(crate) fn upsert_exchange_credential_for_user_key(
 
 fn build_auth_identity(
     user_key: &str,
+    principal_id: &str,
     role: &str,
     channel: &str,
     external_user_id: Option<&str>,
     external_chat_id: Option<&str>,
 ) -> AuthIdentity {
-    let user_id = crate::stable_i64_from_key(user_key);
+    let user_id = crate::stable_i64_from_key(principal_id);
     AuthIdentity {
         user_key: user_key.to_string(),
+        principal_id: principal_id.to_string(),
         role: role.to_string(),
         user_id,
         chat_id: crate::build_conversation_chat_id(
             channel,
             external_user_id,
             external_chat_id,
-            user_key,
+            principal_id,
         ),
     }
 }
@@ -1077,12 +1113,17 @@ pub(crate) fn resolve_auth_identity_by_key(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = db
         .query_row(
-            "SELECT role FROM auth_keys WHERE user_key = ?1 AND enabled = 1 LIMIT 1",
+            "SELECT role, principal_id
+             FROM auth_keys
+             WHERE user_key = ?1 AND enabled = 1 AND principal_id IS NOT NULL
+             LIMIT 1",
             params![user_key],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
-    Ok(row.map(|role| build_auth_identity(&user_key, &role, "ui", None, Some("console"))))
+    Ok(row.map(|(role, principal_id)| {
+        build_auth_identity(&user_key, &principal_id, &role, "ui", None, Some("console"))
+    }))
 }
 
 fn touch_auth_key_usage(db: &Connection, user_key: &str) -> anyhow::Result<()> {
@@ -1112,7 +1153,7 @@ pub(crate) fn resolve_channel_binding_identity(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut row = if external_user_id.is_some() && external_chat_id.is_some() {
         db.query_row(
-            "SELECT k.user_key, k.role
+            "SELECT k.user_key, k.principal_id, k.role
              FROM channel_bindings b
              JOIN auth_keys k ON k.user_key = b.user_key
              WHERE b.channel = ?1
@@ -1122,12 +1163,18 @@ pub(crate) fn resolve_channel_binding_identity(
              ORDER BY b.id DESC
              LIMIT 1",
             params![channel, external_user_id, external_chat_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?
     } else if external_chat_id.is_some() {
         db.query_row(
-            "SELECT k.user_key, k.role
+            "SELECT k.user_key, k.principal_id, k.role
              FROM channel_bindings b
              JOIN auth_keys k ON k.user_key = b.user_key
              WHERE b.channel = ?1
@@ -1136,12 +1183,18 @@ pub(crate) fn resolve_channel_binding_identity(
              ORDER BY b.id DESC
              LIMIT 1",
             params![channel, external_chat_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?
     } else {
         db.query_row(
-            "SELECT k.user_key, k.role
+            "SELECT k.user_key, k.principal_id, k.role
              FROM channel_bindings b
              JOIN auth_keys k ON k.user_key = b.user_key
              WHERE b.channel = ?1
@@ -1150,14 +1203,20 @@ pub(crate) fn resolve_channel_binding_identity(
              ORDER BY b.id DESC
              LIMIT 1",
             params![channel, external_user_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?
     };
     if row.is_none() && external_user_id.is_some() && external_chat_id.is_some() {
         row = db
             .query_row(
-                "SELECT k.user_key, k.role
+                "SELECT k.user_key, k.principal_id, k.role
                  FROM channel_bindings b
                  JOIN auth_keys k ON k.user_key = b.user_key
                  WHERE b.channel = ?1
@@ -1166,14 +1225,21 @@ pub(crate) fn resolve_channel_binding_identity(
                  ORDER BY b.id DESC
                  LIMIT 1",
                 params![channel, external_user_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
             )
             .optional()?;
     }
-    if let Some((user_key, role)) = row {
+    if let Some((user_key, principal_id, role)) = row {
         touch_auth_key_usage(&db, &user_key)?;
         return Ok(Some(build_auth_identity(
             &user_key,
+            &principal_id,
             &role,
             channel,
             external_user_id.as_deref(),
@@ -1279,6 +1345,7 @@ pub(crate) fn bind_channel_identity(
     touch_auth_key_usage(&db, &identity.user_key)?;
     Ok(Some(build_auth_identity(
         &identity.user_key,
+        &identity.principal_id,
         &identity.role,
         channel,
         external_user_id.as_deref(),

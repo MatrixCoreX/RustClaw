@@ -105,6 +105,16 @@ fn provider_error_kind_does_not_parse_misleading_message_text() {
 }
 
 #[test]
+fn context_length_detector_uses_machine_fields_only() {
+    assert!(super::is_context_length_exceeded_response(
+        "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"opaque\"}}"
+    ));
+    assert!(!super::is_context_length_exceeded_response(
+        "{\"error\":{\"message\":\"context_length_exceeded\"}}"
+    ));
+}
+
+#[test]
 fn rate_limit_retry_policy_uses_longer_structured_backoff() {
     let rate_limited = ProviderError::rate_limited_with_response(
         "http 429".to_string(),

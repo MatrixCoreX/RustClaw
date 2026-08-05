@@ -162,6 +162,43 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["status", "action"], properties = { status = { type = "string" }, action = { type = "string" }, patch_id = { type = "string" }, checkpoint_id = { type = "string" }, changed_files = { type = "array", items = { type = "string" } }, patch = { type = "string" } } }
 
 [[skills]]
+name = "memory_store"
+enabled = true
+fixed_on = true
+planner_eager_load = true
+kind = "builtin"
+planner_kind = "tool"
+group = "memory"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/memory_store.md"
+output_kind = "text"
+description = "Search, save, correct, forget, or list durable memory within the authenticated current conversation, principal, or project scope."
+description_zh = "在当前已认证对话、个人或项目范围内搜索、保存、纠正、遗忘或列出记忆。"
+semantic_tags = ["durable_memory", "remember", "recall", "correct_memory", "forget_memory", "memory_search"]
+risk_level = "medium"
+auto_invocable = true
+requires_confirmation = true
+confirmation_exempt_when = [
+  { action = "search" },
+  { action = "list_recent" },
+  { action = "save" },
+  { action = "correct" },
+]
+side_effect = true
+retryable = true
+supported_os = ["linux", "macos", "windows"]
+planner_capabilities = [
+  { name = "memory.search", action = "search", description = "Search durable memory only when older or detailed remembered context would help the current task.", semantic_tags = ["memory_recall", "older_context", "durable_memory_search"], effect = "observe", required = ["query"], optional = ["scope", "limit", "cursor"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "memory.save", action = "save", description = "Save a stable preference, fact, or temporary conversation note when it is supported by the current user message. Use project documentation for authoritative project rules.", semantic_tags = ["explicit_remember", "durable_memory_save", "stable_preference"], effect = "mutate", required = ["scope", "kind", "content", "idempotency_key"], optional = ["key", "evidence_refs"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "memory.forget", action = "forget", description = "Forget one previously returned opaque memory item at its expected revision.", semantic_tags = ["explicit_forget", "memory_delete"], effect = "mutate", required = ["scope", "memory_id", "expected_revision"], optional = [], risk_level = "medium", auto_invocable = false, requires_confirmation = true, preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "memory.correct", action = "correct", description = "Create a user-confirmed corrected revision and supersede the old memory item.", semantic_tags = ["memory_correction", "fact_correction"], effect = "mutate", required = ["scope", "memory_id", "expected_revision", "content"], optional = [], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "memory.list_recent", action = "list_recent", description = "List recent durable memory items in one authenticated scope.", semantic_tags = ["memory_inventory", "recent_memory"], effect = "observe", optional = ["scope", "limit", "cursor"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
+input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["search", "save", "forget", "correct", "list_recent"] }, scope = { type = "string", enum = ["current_conversation", "current_principal", "current_project"] }, query = { type = "string", minLength = 1, maxLength = 4000 }, limit = { type = "integer", minimum = 1, maximum = 50 }, cursor = { type = "string", minLength = 1, maxLength = 512 }, kind = { type = "string", enum = ["fact", "preference", "session_note"] }, key = { type = "string", minLength = 1, maxLength = 256 }, content = { type = "string", minLength = 1, maxLength = 16000 }, idempotency_key = { type = "string", minLength = 8, maxLength = 160, pattern = "^[A-Za-z0-9][A-Za-z0-9_.:-]*$" }, evidence_refs = { type = "array", maxItems = 16, items = { type = "string", minLength = 1, maxLength = 512 } }, memory_id = { type = "string", minLength = 16, maxLength = 128, pattern = "^memory_[A-Za-z0-9_]+$" }, expected_revision = { type = "integer", minimum = 1 } } }
+output_schema = { type = "object", required = ["schema_version", "source_skill", "status", "action", "retryable", "data"], properties = { schema_version = { type = "integer", const = 1 }, source_skill = { type = "string", const = "memory_store" }, status = { type = "string", enum = ["ok", "error"] }, action = { type = "string", enum = ["search", "save", "forget", "correct", "list_recent", "unknown"] }, error_code = { type = "string" }, message_key = { type = "string" }, retryable = { type = "boolean" }, data = { type = "object" } } }
+
+[[skills]]
 name = "task_plan"
 enabled = true
 fixed_on = true

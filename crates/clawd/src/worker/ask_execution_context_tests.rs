@@ -15,6 +15,17 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
     state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     {
         let db = state.core.db.get().expect("database");
+        db.execute(
+            "INSERT OR IGNORE INTO auth_keys(user_key, role, enabled, created_at)
+             VALUES ('context-user', 'user', 1, '1')",
+            [],
+        )
+        .expect("auth key");
+        crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
+        crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
+        let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "context-user")
+            .expect("principal query")
+            .expect("principal id");
         for index in 0..52_i64 {
             let result_json = if index == 24 {
                 json!({
@@ -30,11 +41,12 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
             };
             db.execute(
                 "INSERT INTO tasks (
-                    task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                    task_id, user_id, chat_id, user_key, principal_id, channel, kind, payload_json,
                     status, result_json, created_at, updated_at
-                 ) VALUES (?1, 7, 9, 'context-user', 'ui', 'ask', ?2, 'succeeded', ?3, ?4, ?4)",
+                 ) VALUES (?1, 7, 9, 'context-user', ?2, 'ui', 'ask', ?3, 'succeeded', ?4, ?5, ?5)",
                 params![
                     format!("context-history-{index}"),
+                    principal_id,
                     json!({"text": format!("request-{index}-{}", "u".repeat(300))}).to_string(),
                     result_json.to_string(),
                     index + 1,
@@ -53,20 +65,23 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         }
         db.execute(
             "INSERT INTO tasks (
-                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                task_id, user_id, chat_id, user_key, principal_id, channel, kind, payload_json,
                 status, result_json, created_at, updated_at
              ) VALUES (
-                'task-live-context-compaction', 7, 9, 'context-user', 'ui', 'ask',
-                '{}', 'running', ?1, 53, 53
+                'task-live-context-compaction', 7, 9, 'context-user', ?1, 'ui', 'ask',
+                '{}', 'running', ?2, 53, 53
              )",
-            params![json!({
-                "task_journal": {
-                    "summary": {
-                        "transcript_compaction_records": [{"generation": 7}]
+            params![
+                principal_id,
+                json!({
+                    "task_journal": {
+                        "summary": {
+                            "transcript_compaction_records": [{"generation": 7}]
+                        }
                     }
-                }
-            })
-            .to_string()],
+                })
+                .to_string()
+            ],
         )
         .expect("insert resumable current task record");
     }
@@ -146,7 +161,8 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         .context_bundle
         .summary()
         .contains("transcript_compaction_records="));
-    assert_eq!(record["generation"], 8);
+    assert_eq!(record["generation"], 1);
+    assert_eq!(record["lifecycle"]["base_generation"], 0);
     assert_eq!(record["source_task_ids"].as_array().unwrap().len(), 52);
     assert_eq!(record["source_task_ids"][0], "context-history-0");
     assert_eq!(record["source_task_ids"][51], "context-history-51");
@@ -256,16 +272,14 @@ fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replaya
             ]}
         }
     });
-    state
-        .core
-        .db
-        .get()
-        .unwrap()
-        .execute(
+    {
+        let db = state.core.db.get().unwrap();
+        db.execute(
             "INSERT INTO tasks (task_id,user_id,chat_id,channel,kind,payload_json,status,result_json,created_at,updated_at) VALUES ('rewind-source',1,1,'ui','ask','{}','succeeded',?1,1,1)",
             params![result.to_string()],
         )
         .unwrap();
+    }
     let payload = json!({"session_rewind":{
         "schema_version":1,
         "anchor":{
@@ -278,7 +292,19 @@ fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replaya
         "completed_side_effect_refs":["client-value-is-not-authoritative"]
     }});
 
-    let observation = super::session_rewind_observation(&state, &payload)
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "rewind-current".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let observation = super::session_rewind_observation(&state, &task, &payload)
         .unwrap()
         .expect("rewind observation");
     assert_eq!(observation["event_count"], 2);

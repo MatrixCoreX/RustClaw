@@ -78,6 +78,7 @@ pub struct DirectClassifyResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthIdentity {
     pub user_key: String,
+    pub principal_id: String,
     pub role: String,
     pub user_id: i64,
     pub chat_id: i64,

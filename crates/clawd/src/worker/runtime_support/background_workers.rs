@@ -39,21 +39,6 @@ pub(crate) fn start_task_heartbeat(
     stop_tx
 }
 
-pub(crate) fn spawn_long_term_summary_refresh(
-    state: AppState,
-    task: crate::ClaimedTask,
-    force_refresh: bool,
-) {
-    tokio::spawn(async move {
-        if let Err(err) =
-            crate::memory::service::maybe_refresh_long_term_summary(&state, &task, force_refresh)
-                .await
-        {
-            warn!("refresh long-term memory summary failed: {err}");
-        }
-    });
-}
-
 pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
     let worker_count = concurrency.max(1);
     info!(
@@ -424,41 +409,40 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         )?;
     }
 
-    let memory_cutoff = now - (state.policy.memory.retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM memories
-         WHERE COALESCE(created_at_ts, CAST(created_at AS INTEGER)) < ?1",
-        rusqlite::params![memory_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM memories WHERE id IN (
-             SELECT id FROM memories
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.policy.memory.max_rows as i64],
-    )?;
-    if state.policy.memory.hybrid_recall_enabled {
-        let index_max_rows = state.policy.memory.max_rows.saturating_mul(3).max(2000);
-        crate::memory::indexing::cleanup_retrieval_index(&db, memory_cutoff, index_max_rows)?;
+    let memory_cleanup =
+        crate::memory::retention::cleanup_memory_data(&db, &state.policy.memory, now)?;
+    crate::memory::ux::scrub_expired_deletion_grace(&db, now)?;
+    let principal_ids = {
+        let mut statement = db.prepare(
+            "SELECT DISTINCT principal_id FROM (
+                SELECT principal_id FROM memory_revisions
+                UNION ALL SELECT principal_id FROM memory_jobs
+                UNION ALL SELECT principal_id FROM memory_retrieval_index
+             ) WHERE principal_id IS NOT NULL AND TRIM(principal_id) != ''",
+        )?;
+        let principal_ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        principal_ids
+    };
+    for principal_id in principal_ids {
+        let report = crate::memory::ux::check_memory_consistency(&db, &principal_id, true, now)?;
+        if report.repaired_rows > 0 {
+            warn!(
+                repaired_rows = report.repaired_rows,
+                orphan_retrieval_rows = report.orphan_retrieval_rows,
+                stale_jobs = report.stale_jobs,
+                "memory_consistency_sweeper_repaired_residual_state"
+            );
+        }
     }
-
-    let long_term_cutoff = now - (state.policy.memory.long_term_retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM long_term_memories
-         WHERE COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) < ?1",
-        rusqlite::params![long_term_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM long_term_memories WHERE id IN (
-             SELECT id FROM long_term_memories
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.policy.memory.long_term_max_rows as i64],
-    )?;
+    if memory_cleanup.storage_pressure_state != "normal" {
+        warn!(
+            state = memory_cleanup.storage_pressure_state,
+            observed_bytes = memory_cleanup.observed_bytes,
+            "memory_storage_pressure_active"
+        );
+    }
     drop(db);
 
     // model_io.log：不再每次 append 后做全量 prune（会 O(N²) 磁盘）。

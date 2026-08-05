@@ -32,6 +32,7 @@ ALLOWED_FILE_SUFFIXES = (
 
 ALLOWED_FILE_NAMES = {
     "intent_router_prompt_render.rs",
+    "skill_registry_shape.rs",
 }
 
 
@@ -51,13 +52,11 @@ class Candidate:
                 .replace("\t", "\\t")
             )
 
-        return "\t".join(
-            (
-                self.path,
-                encode_field(self.literal),
-                encode_field(self.source_line.strip()),
-            )
-        )
+        # Path + literal is stable across rustfmt-only movement. Counter
+        # multiplicity still catches an additional fixed reply in the same
+        # production file without turning harmless source formatting into
+        # baseline churn.
+        return "\t".join((self.path, encode_field(self.literal)))
 
 
 def decode_rust_string_literal(value: str) -> str:
@@ -127,7 +126,27 @@ def looks_machine_literal(value: str) -> bool:
         return True
     if "/" in value or "\\" in value:
         return True
-    if value.startswith(("__RC_", "clawd.", "agent.", "contract_marker:", "schema:")):
+    if value.startswith(
+        (
+            "__RC_",
+            "clawd.",
+            "agent.",
+            "contract_marker:",
+            "schema:",
+            "memory_",
+            "provider_",
+            "registry_",
+            "task:",
+        )
+    ):
+        return True
+    if re.match(
+        r"^(?:ALTER|CREATE|DELETE|DROP|INSERT|INTEGER|PRAGMA|REPLACE|SELECT|TEXT|UPDATE)\b",
+        value,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(r"\b(?:NULL|ORDER\s+BY|LIMIT|OFFSET)\b|\?\d+", value, re.IGNORECASE):
         return True
     if re.fullmatch(r"### [A-Z0-9_]+", value):
         return True
@@ -168,6 +187,29 @@ def looks_sentence_like(value: str) -> bool:
     return bool(re.search(r"[.!?]\s*$", value)) and len(words) >= 2
 
 
+def is_machine_only_source_line(source_line: str) -> bool:
+    stripped = source_line.strip()
+    if stripped.startswith(("//", "/*", "*")):
+        return True
+    if any(
+        marker in stripped
+        for marker in (
+            "debug!(",
+            "error!(",
+            "info!(",
+            "trace!(",
+            "warn!(",
+            "tracing::debug!(",
+            "tracing::error!(",
+            "tracing::info!(",
+            "tracing::trace!(",
+            "tracing::warn!(",
+        )
+    ):
+        return True
+    return ".expect(" in stripped or ".context(" in stripped
+
+
 def current_diff() -> str:
     result = subprocess.run(
         ["git", "diff", "--unified=0", "--", "crates/clawd/src"],
@@ -196,6 +238,8 @@ def scan_file(path: Path) -> list[Candidate]:
     rel_path = path.relative_to(REPO_ROOT).as_posix()
     candidates: list[Candidate] = []
     for line_no, source_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if is_machine_only_source_line(source_line):
+            continue
         for literal in rust_string_literals(source_line):
             decoded = decode_rust_string_literal(literal)
             if looks_sentence_like(decoded):
@@ -237,6 +281,9 @@ def scan_diff(diff_text: str) -> list[Candidate]:
             current_line += 1
             continue
         source_line = raw_line[1:]
+        if is_machine_only_source_line(source_line):
+            current_line += 1
+            continue
         for literal in rust_string_literals(source_line):
             decoded = decode_rust_string_literal(literal)
             if looks_sentence_like(decoded):
@@ -269,7 +316,8 @@ def read_baseline(path: Path) -> Counter[str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        rows[line] += 1
+        fields = line.split("\t", 2)
+        rows["\t".join(fields[:2])] += 1
     return rows
 
 

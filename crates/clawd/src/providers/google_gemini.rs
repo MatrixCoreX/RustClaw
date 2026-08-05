@@ -12,7 +12,8 @@ use serde_json::{json, Value};
 use tracing::warn;
 
 use super::client::{
-    is_quota_exhausted_response, ChatRequestHints, LlmProviderResponse, ProviderError,
+    is_context_length_exceeded_response, is_quota_exhausted_response, ChatRequestHints,
+    LlmProviderResponse, ProviderError,
 };
 use super::gemini_usage_snapshot;
 use crate::LlmProviderRuntime;
@@ -119,6 +120,14 @@ pub(super) async fn call_google_gemini(
         ));
     }
 
+    if is_context_length_exceeded_response(&body_text) {
+        return Err(ProviderError::context_length_exceeded_with_response(
+            format!("provider_context_length_exceeded:http_{}", status.as_u16()),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
+    }
     if !status.is_success() {
         return Err(ProviderError::non_retryable_with_response(
             format!("http {}: {}", status.as_u16(), body_text),

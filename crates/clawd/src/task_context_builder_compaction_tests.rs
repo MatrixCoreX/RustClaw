@@ -36,11 +36,22 @@ fn context_bundle(recent_turns_chars: usize) -> TaskContextBundle {
         }),
         task_plan_snapshot: None,
         compaction_records: Vec::new(),
+        memory_settings_snapshot: None,
     }
 }
 
 fn adaptive_plan(bundle: &TaskContextBundle) -> Option<super::ContextCompactionPlan> {
-    plan_agent_loop_context_compaction_with_provider_window(bundle, Some(4_000))
+    let policy = super::ContextWindowPolicy::new(
+        "fixture".to_string(),
+        "fixture-model".to_string(),
+        4_000,
+        500,
+        500,
+        0,
+        1_000,
+        super::ContextTokenScope::Total,
+    );
+    super::plan_agent_loop_context_compaction_with_policy(bundle, &policy)
 }
 
 #[test]
@@ -79,10 +90,10 @@ fn provider_context_window_pressure_triggers_from_token_estimate() {
     )
     .expect("provider token pressure should trigger compaction");
 
-    assert_eq!(plan.threshold_chars, 3_000);
-    assert!(plan.before_token_estimate >= 750);
+    assert_eq!(plan.threshold_chars, 4_000);
+    assert!(plan.before_token_estimate >= 1_000);
     assert_eq!(plan.provider_context_window_tokens, Some(1_000));
-    assert_eq!(plan.provider_compaction_threshold_tokens, Some(750));
+    assert_eq!(plan.provider_compaction_threshold_tokens, Some(1_000));
     assert!(plan
         .trigger_codes
         .contains(&"provider_context_window_pressure"));
@@ -173,6 +184,77 @@ fn model_summary_is_attached_as_data_only_compacted_history() {
     assert!(context.contains(r#""instruction_authority": "none""#));
     assert_eq!(record["compaction_source"], "model_assisted");
     assert_eq!(record["model_summary_attached"], true);
+}
+
+#[test]
+fn repeated_compaction_retains_stable_refs_and_reloads_authoritative_slots() {
+    let mut bundle = context_bundle(0);
+    {
+        let view = bundle.execution_view.as_mut().unwrap();
+        view.runtime_context = "runtime:authoritative-v2".to_string();
+        view.goal_context = "goal:ship_memory_plan".to_string();
+        view.active_task_context = "constraint:no_duplicate_side_effect".to_string();
+        view.recent_turns_full = format!(
+            "decision:keep_schema artifact:report-1 evidence:test-1 {}",
+            "history ".repeat(2_000)
+        );
+    }
+    let first_plan = adaptive_plan(&bundle).expect("first compaction");
+    let first = apply_context_compaction_with_inputs(
+        "task-context-repeat-1",
+        &mut bundle,
+        &first_plan,
+        empty_prompt_memory_context(),
+        "last turn with side_effect:write-1".to_string(),
+        None,
+        "context_compaction_provider_failed",
+    );
+    assert_eq!(first["generation"], 1);
+
+    {
+        let view = bundle.execution_view.as_mut().unwrap();
+        view.recent_turns_full = format!(
+            "artifact:report-2 evidence:test-2 open:verify-release {}",
+            "new tail ".repeat(2_000)
+        );
+    }
+    let second_plan = force_agent_loop_context_compaction_plan(&bundle, None)
+        .expect("explicit second compaction");
+    let second = apply_context_compaction_with_inputs(
+        "task-context-repeat-2",
+        &mut bundle,
+        &second_plan,
+        empty_prompt_memory_context(),
+        "last turn".to_string(),
+        None,
+        "context_compaction_provider_failed",
+    );
+    let view = bundle.execution_view.as_ref().unwrap();
+    let retained = second["continuity_refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item.get("ref").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert_eq!(second["generation"], 2);
+    for machine_ref in [
+        "goal:ship_memory_plan",
+        "constraint:no_duplicate_side_effect",
+        "decision:keep_schema",
+        "artifact:report-1",
+        "evidence:test-1",
+        "artifact:report-2",
+        "evidence:test-2",
+    ] {
+        assert!(retained.contains(&machine_ref), "missing {machine_ref}");
+    }
+    assert_eq!(view.runtime_context, "runtime:authoritative-v2");
+    assert_eq!(view.goal_context, "goal:ship_memory_plan");
+    assert_eq!(
+        view.active_task_context,
+        "constraint:no_duplicate_side_effect"
+    );
 }
 
 #[test]
@@ -469,4 +551,69 @@ fn deterministic_reference_extraction_rejects_truncated_tokens() {
     assert!(!values.contains(&"decision:canary_b"));
     assert!(!values.contains(&"fact:build_green"));
     assert!(!values.contains(&"decision:ca"));
+}
+
+#[test]
+fn wp0_compaction_fixture_preserves_machine_refs_across_repeated_compaction() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../scripts/fixtures/memory_context/wp0_baseline_v1.json"
+    ))
+    .expect("memory/context WP0 fixture");
+    let compaction = &fixture["compaction"];
+    let repeat_count = compaction["repeat_count"].as_u64().expect("repeat_count") as usize;
+    let provider_window = compaction["provider_context_window_tokens"]
+        .as_u64()
+        .expect("provider context window") as usize;
+    let required_refs = compaction["required_machine_refs"]
+        .as_array()
+        .expect("required refs")
+        .iter()
+        .chain(
+            compaction["rewind_resume_refs"]
+                .as_array()
+                .expect("rewind/resume refs"),
+        )
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+
+    let mut bundle = context_bundle(0);
+    let mut carried_context = required_refs.join("\n");
+    let current_state = required_refs
+        .iter()
+        .copied()
+        .filter(|machine_ref| machine_ref.starts_with("open:") || machine_ref.starts_with("next:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for generation in 1..=repeat_count {
+        let view = bundle.execution_view.as_mut().expect("execution view");
+        view.recent_turns_full = format!("{carried_context}\n{}", "x".repeat(18_000));
+        view.last_turn_full = format!(
+            "resume fixture from current authoritative state\n{current_state}\nend of state snapshot"
+        );
+        let plan =
+            plan_agent_loop_context_compaction_with_provider_window(&bundle, Some(provider_window))
+                .expect("fixture should trigger provider-window compaction");
+        let record = apply_context_compaction_with_inputs(
+            "task-context-wp0-repeat",
+            &mut bundle,
+            &plan,
+            empty_prompt_memory_context(),
+            "last_turn".to_string(),
+            None,
+            "context_compaction_provider_failed",
+        );
+        assert_eq!(record["generation"], generation as u64);
+        carried_context = bundle
+            .execution_view
+            .as_ref()
+            .expect("compacted view")
+            .compacted_history_context
+            .clone();
+        for machine_ref in &required_refs {
+            assert!(
+                carried_context.contains(machine_ref),
+                "generation {generation} dropped {machine_ref}"
+            );
+        }
+    }
 }

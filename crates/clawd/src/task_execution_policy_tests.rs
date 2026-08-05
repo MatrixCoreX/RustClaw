@@ -3,6 +3,7 @@ use super::*;
 fn identity(role: &str) -> AuthIdentity {
     AuthIdentity {
         user_key: "rk-test".to_string(),
+        principal_id: "principal-test-owner".to_string(),
         role: role.to_string(),
         user_id: 1,
         chat_id: 2,
@@ -26,25 +27,7 @@ fn claimed_task(user_key: &str, payload: Value) -> ClaimedTask {
 
 fn state_with_admin_key(user_key: &str) -> AppState {
     let state = AppState::test_default_with_fixture_provider();
-    let db = state.core.db.get().expect("test db");
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS auth_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_key TEXT NOT NULL UNIQUE,
-            role TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT '',
-            last_used_at TEXT
-        );",
-    )
-    .expect("auth key table");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-         VALUES (?1, 'admin', 1, 'now')",
-        rusqlite::params![user_key],
-    )
-    .expect("insert admin key");
-    drop(db);
+    state.seed_test_auth_identity(user_key, "admin");
     state
 }
 

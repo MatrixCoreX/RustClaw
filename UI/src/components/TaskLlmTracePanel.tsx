@@ -214,6 +214,8 @@ export function TaskLlmTracePanel({
   const budgetReport = contextBudgetReport(taskResult);
   const compactionRecords = transcriptCompactionRecords(taskResult);
   const showContextBudgetPanel = budgetReport || compactionRecords.length > 0;
+  const excludedContextCount = Number(budgetReport?.excluded_ref_count ?? 0);
+  const contextWasCompacted = compactionRecords.length > 0;
 
   return (
     <div className="mt-4 rounded-xl border border-white/10 bg-[#12151f] p-3">
@@ -239,6 +241,24 @@ export function TaskLlmTracePanel({
         <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
           {tSlash("模型调用明细查询失败 / LLM trace query failed")}: {taskLlmDebugError}
         </p>
+      ) : null}
+
+      {showContextBudgetPanel ? (
+        <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/8 px-3 py-2 text-xs text-amber-50/85">
+          <p className="font-medium">
+            {contextWasCompacted
+              ? t("较早的对话已整理", "Earlier context was compacted")
+              : excludedContextCount > 0
+                ? t("对话正在接近当前模型的上下文窗口", "The conversation is approaching the current model context window")
+                : t("上下文容量正常", "Context capacity is healthy")}
+          </p>
+          <p className="mt-1 text-amber-50/65">
+            {t(
+              "当前目标、规则、记忆和未完成事项会从权威来源重新载入；较早的原始任务事件仍会保留。",
+              "Current goals, rules, memory, and open work are reloaded from authoritative sources; older canonical task events remain preserved.",
+            )}
+          </p>
+        </div>
       ) : null}
 
       {taskLlmDebug ? (

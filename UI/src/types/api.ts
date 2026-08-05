@@ -666,9 +666,6 @@ export interface MemoryCounts {
 }
 
 export interface MemoryOverviewResponse {
-  user_key: string;
-  user_id: number;
-  chat_id: number;
   long_term_enabled: boolean;
   hybrid_recall_enabled: boolean;
   counts: MemoryCounts;
@@ -676,7 +673,6 @@ export interface MemoryOverviewResponse {
 
 export interface MemoryPreferenceItem {
   id: string;
-  raw_id: number;
   key: string;
   value: string;
   confidence: number;
@@ -686,7 +682,6 @@ export interface MemoryPreferenceItem {
 
 export interface MemoryFactItem {
   id: string;
-  raw_id: number;
   namespace: string;
   fact_key: string;
   fact_value: string;
@@ -703,7 +698,6 @@ export interface MemoryFactItem {
 
 export interface MemoryRecentItem {
   id: string;
-  raw_id: number;
   role: string;
   memory_type: string;
   content: string;
@@ -730,10 +724,136 @@ export interface MemoryClearResult {
   facts_deleted: number;
 }
 
+export interface MemoryClearPreview {
+  schema_version: number;
+  mode: "transcript" | "transcript_and_derived";
+  transcript_rows: number;
+  derived_rows: number;
+  pending_jobs: number;
+}
+
 export interface MemorySettingsResult {
-  config_path: string;
-  long_term_enabled: boolean;
+  schema_version: number;
+  scope: "admin" | "principal" | "conversation";
+  target_principal_id: string;
+  conversation_id?: string | null;
+  requested: {
+    use_mode: "inherit" | "enabled" | "disabled";
+    generate_mode: "inherit" | "enabled" | "disabled";
+    external_context_policy: "inherit" | "exclude" | "evidence_only" | "allow";
+  };
+  use_memory: boolean;
+  generate_memory: boolean;
+  external_context_policy: "inherit" | "exclude" | "evidence_only" | "allow";
+  use_source: string;
+  generate_source: string;
+  external_context_source: string;
+  managed_deny_reason?: string | null;
+  revision: number;
+  policy_digest: string;
   restart_required: boolean;
+}
+
+export interface MemoryListItem {
+  id: string;
+  revision: number;
+  kind: "fact" | "preference" | "recent" | string;
+  scope_kind: "conversation" | "principal" | "project" | string;
+  origin: string;
+  status: string;
+  content: string;
+  source: string;
+  evidence_available: boolean;
+  trust_tier: string;
+  updated_at_ts: number;
+  expires_at_ts?: number | null;
+  supersedes_memory_id?: string | null;
+  last_recalled_at_ts?: number | null;
+  freshness: "fresh" | "stale" | string;
+}
+
+export interface MemoryPageResult {
+  schema_version: number;
+  items: MemoryListItem[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
+}
+
+export interface MemoryMutationResult {
+  status: string;
+  memory_id: string;
+  replacement_memory_id?: string | null;
+  revision: number;
+  revision_id?: string | null;
+  undo_until_ts?: number | null;
+}
+
+export interface MemoryExportResult {
+  schema_version: number;
+  exported_at_ts: number;
+  scope_kind: string;
+  items: MemoryListItem[];
+  checksum: string;
+}
+
+export interface MemoryMarkdownExportResult {
+  schema_version: number;
+  exported_at_ts: number;
+  content_type: string;
+  content: string;
+  checksum: string;
+}
+
+export interface MemoryImportPreviewResult {
+  schema_version: number;
+  import_id: string;
+  payload_digest: string;
+  accepted_items: number;
+  skipped_items: number;
+  duplicate_items: number;
+  trust_tier: "imported_legacy";
+  scope_kind: "principal";
+}
+
+export interface MemoryImportResult {
+  schema_version: number;
+  import_id: string;
+  status: "confirmed";
+  imported_items: number;
+  existing_items: number;
+}
+
+export interface RemoteMemoryDisclosure {
+  schema_version: number;
+  consent_state: "inherit" | "exclude" | "evidence_only" | "allow";
+  extraction_provider: string;
+  extraction_model: string;
+  consolidation_provider: string;
+  consolidation_model: string;
+  extraction_sends: string[];
+  embedding_sends: string[];
+  withdrawal_effect: string;
+}
+
+export interface MemoryVectorStatus {
+  schema_version: number;
+  provider_location: "local" | "remote";
+  state: "ready" | "building" | "paused" | string;
+  active_generation: number;
+  queued_jobs: number;
+  running_jobs: number;
+  failed_jobs: number;
+  indexed_rows: number;
+  remote_consent: "inherit" | "exclude" | "evidence_only" | "allow";
+}
+
+export interface MemoryVectorMutationResult {
+  schema_version: number;
+  status: string;
+  queued_rows: number;
+  generation: number;
 }
 
 export interface FactoryResetResponse {

@@ -55,7 +55,7 @@ fn text_json_planner_prompt_is_built_only_after_native_turn_declines() {
     )
     .expect("read planner source");
     let native_turn = source
-        .find("if let Some(native_turn) = llm_gateway::run_native_model_turn_with_fallback")
+        .find("let native_turn_result = llm_gateway::run_native_model_turn_with_fallback")
         .expect("native model turn branch");
     let fallback_prompt = source
         .find("let (prompt_name, prompt_source, prompt_version, prompt_text) =")

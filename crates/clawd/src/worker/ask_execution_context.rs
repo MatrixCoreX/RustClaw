@@ -32,6 +32,14 @@ pub(super) async fn prepare_ask_execution_context(
     })
     .await
     .map_err(|error| anyhow::anyhow!("task_context_build_join_failed:{error}"))?;
+    crate::task_context_builder::hydrate_async_memory_recall(
+        state,
+        task,
+        planner_user_request,
+        chat_memory_budget_chars,
+        &mut context_bundle,
+    )
+    .await;
     if let Some(image_context) =
         crate::analyze_attached_images_for_ask(state, task, payload, planner_user_request).await?
     {
@@ -41,7 +49,7 @@ pub(super) async fn prepare_ask_execution_context(
         );
     }
     let mut initial_task_observations = Vec::new();
-    if let Some(rewind) = session_rewind_observation(state, payload)? {
+    if let Some(rewind) = session_rewind_observation(state, task, payload)? {
         initial_task_observations.push(rewind);
     }
     if let Some(task_plan_snapshot) = context_bundle.task_plan_snapshot.as_ref() {
@@ -54,79 +62,118 @@ pub(super) async fn prepare_ask_execution_context(
             "snapshot": task_plan_snapshot,
         }));
     }
-    let provider_context_window_tokens = state
-        .task_llm_providers(task)
-        .iter()
-        .filter_map(|provider| provider.config.context_window_tokens)
-        .min();
-    if let Some(mut compaction_plan) =
-        crate::task_context_builder::plan_agent_loop_context_compaction_with_provider_window(
+    let context_window_policy =
+        crate::task_context_builder::ContextWindowPolicy::for_task(state, task);
+    if let Some(mut compaction_plan) = context_window_policy.as_ref().and_then(|policy| {
+        crate::task_context_builder::plan_agent_loop_context_compaction_with_policy(
             &context_bundle,
-            provider_context_window_tokens,
+            policy,
         )
-    {
+    }) {
         crate::task_context_builder::hydrate_agent_loop_context_compaction_plan(
             state,
             task,
             &mut compaction_plan,
         );
-        let pre_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
-            state,
-            &task.task_id,
-            crate::agent_hooks::HookStage::PreCompact,
-            "agent_loop.context_compaction",
-            compaction_plan.hook_metadata(),
-        )
-        .await;
-        initial_task_observations
-            .extend(pre_compact.machine_observations("agent_loop.context_compaction"));
-        let (model_summary, model_status_code) =
-            crate::agent_engine::run_model_assisted_context_compaction(
-                state,
-                task,
-                &context_bundle,
-                &compaction_plan,
-            )
-            .await;
-        let compaction_record = crate::task_context_builder::apply_agent_loop_context_compaction(
+        let lease = match crate::task_context_builder::context_compaction_lifecycle::begin_context_compaction(
             state,
             task,
-            planner_user_request,
-            chat_memory_budget_chars,
-            &mut context_bundle,
-            &compaction_plan,
-            model_summary,
-            model_status_code,
-        );
-        initial_task_observations.push(crate::task_journal::context_compaction_record_observation(
-            compaction_record.clone(),
-        ));
-        let post_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
-            state,
-            &task.task_id,
-            crate::agent_hooks::HookStage::PostCompact,
-            "agent_loop.context_compaction",
-            json!({
-                "compaction_kind": "deterministic_context_budget",
-                "generation": compaction_record.get("generation"),
-                "compaction_id": compaction_record.get("compaction_id"),
-                "before_char_count": compaction_record.get("before_char_count"),
-                "after_char_count": compaction_record.get("after_char_count"),
-                "model_status_code": compaction_record.get("model_status_code"),
-                "model_summary_attached": compaction_record.get("model_summary_attached"),
-                "source_ref_count": compaction_record
-                    .get("source_refs")
-                    .and_then(Value::as_array)
-                    .map(Vec::len),
-                "retained_ref_count": compaction_record
-                    .get("retained_refs")
-                    .and_then(Value::as_array)
-                    .map(Vec::len),
-            }),
-        )
-        .await;
-        initial_task_observations
-            .extend(post_compact.machine_observations("agent_loop.context_compaction"));
+            &mut compaction_plan,
+        ) {
+            Ok(lease) => Some(lease),
+            Err(error) if error.to_string() == "context_compaction_lease_busy" => {
+                initial_task_observations.push(json!({
+                    "schema_version": 1,
+                    "observation_kind": "context_compaction_deferred",
+                    "reason_code": "context_compaction_lease_busy",
+                    "retry_policy": "next_turn",
+                }));
+                None
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(lease) = lease {
+            let pre_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+                state,
+                &task.task_id,
+                crate::agent_hooks::HookStage::PreCompact,
+                "agent_loop.context_compaction",
+                compaction_plan.hook_metadata(),
+            )
+            .await;
+            initial_task_observations
+                .extend(pre_compact.machine_observations("agent_loop.context_compaction"));
+            let (model_summary, model_status_code) =
+                crate::agent_engine::run_model_assisted_context_compaction(
+                    state,
+                    task,
+                    &context_bundle,
+                    &compaction_plan,
+                )
+                .await;
+            let compaction_record =
+                crate::task_context_builder::apply_agent_loop_context_compaction(
+                    state,
+                    task,
+                    planner_user_request,
+                    chat_memory_budget_chars,
+                    &mut context_bundle,
+                    &compaction_plan,
+                    model_summary,
+                    model_status_code,
+                );
+            let commit = match crate::task_context_builder::context_compaction_lifecycle::complete_context_compaction(
+                state,
+                task,
+                &lease,
+                &compaction_record,
+            ) {
+                Ok(commit) => commit,
+                Err(error) => {
+                    let _ = crate::task_context_builder::context_compaction_lifecycle::abandon_context_compaction(
+                        state,
+                        &lease,
+                    );
+                    return Err(error);
+                }
+            };
+            let compaction_record = commit.record;
+            if let Some(last) = context_bundle.compaction_records.last_mut() {
+                *last = compaction_record.clone();
+            }
+            initial_task_observations.push(
+                crate::task_journal::context_compaction_record_observation(
+                    compaction_record.clone(),
+                ),
+            );
+            let post_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
+                state,
+                &task.task_id,
+                crate::agent_hooks::HookStage::PostCompact,
+                "agent_loop.context_compaction",
+                json!({
+                    "compaction_kind": "deterministic_context_budget",
+                    "generation": compaction_record.get("generation"),
+                    "compaction_id": compaction_record.get("compaction_id"),
+                    "before_char_count": compaction_record.get("before_char_count"),
+                    "after_char_count": compaction_record.get("after_char_count"),
+                    "model_status_code": compaction_record.get("model_status_code"),
+                    "model_summary_attached": compaction_record.get("model_summary_attached"),
+                    "source_ref_count": compaction_record
+                        .get("source_refs")
+                        .and_then(Value::as_array)
+                        .map(Vec::len),
+                    "retained_ref_count": compaction_record
+                        .get("retained_refs")
+                        .and_then(Value::as_array)
+                        .map(Vec::len),
+                    "uncovered_tail_task_count": commit.uncovered_tail_task_count,
+                }),
+            )
+            .await;
+            initial_task_observations
+                .extend(post_compact.machine_observations("agent_loop.context_compaction"));
+        }
     }
     let execution_view = context_bundle
         .execution_view
@@ -189,7 +236,11 @@ pub(super) async fn prepare_ask_execution_context(
     })
 }
 
-fn session_rewind_observation(state: &AppState, payload: &Value) -> anyhow::Result<Option<Value>> {
+fn session_rewind_observation(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+) -> anyhow::Result<Option<Value>> {
     let Some(rewind) = payload.get("session_rewind") else {
         return Ok(None);
     };
@@ -274,6 +325,24 @@ fn session_rewind_observation(state: &AppState, payload: &Value) -> anyhow::Resu
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     let completed_side_effect_refs = authoritative_completed_side_effect_refs(&result);
+    drop(db);
+    let invalidated_compaction_records = match crate::task_context_builder::context_compaction_lifecycle::invalidate_compactions_after_rewind(
+        state,
+        task,
+        &source_task_id,
+    ) {
+        Ok(count) => count,
+        Err(error)
+            if matches!(
+                error.to_string().as_str(),
+                "context_compaction_principal_missing"
+                    | "context_compaction_rewind_source_missing"
+            ) =>
+        {
+            0
+        }
+        Err(error) => return Err(error),
+    };
     Ok(Some(json!({
         "schema_version": 1,
         "observation_kind": "session_rewind_boundary",
@@ -287,6 +356,7 @@ fn session_rewind_observation(state: &AppState, payload: &Value) -> anyhow::Resu
         "original_history_preserved": true,
         "completed_side_effect_refs": completed_side_effect_refs,
         "side_effect_replay_policy": "already_occurred_do_not_replay",
+        "invalidated_compaction_records": invalidated_compaction_records,
         "event_count": bounded_events.len(),
         "events": bounded_events,
     })))

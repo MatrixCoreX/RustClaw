@@ -193,6 +193,25 @@ impl ProviderError {
         }
     }
 
+    pub(super) fn context_length_exceeded_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: false,
+            kind: ProviderErrorKind::ContextLengthExceeded,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+            attempts: 1,
+            retryable_error_count: 0,
+            breaker_impact: BreakerImpact::Healthy,
+        }
+    }
+
     pub(super) fn rate_limited_with_response(
         message: String,
         request_payload: Value,
@@ -308,6 +327,35 @@ pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
     .filter_map(Value::as_str)
     .map(str::trim)
     .any(|code| QUOTA_CODES.contains(&code))
+}
+
+pub(crate) fn is_context_length_exceeded_response(body_text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(body_text) else {
+        return false;
+    };
+    const CONTEXT_CODES: &[&str] = &[
+        "context_length_exceeded",
+        "context_window_exceeded",
+        "input_too_long",
+        "max_context_length_exceeded",
+        "prompt_too_long",
+        "token_limit_exceeded",
+    ];
+    [
+        "/error/code",
+        "/error/type",
+        "/error/status",
+        "/code",
+        "/type",
+        "/status",
+        "/status_code",
+        "/base_resp/status_code",
+    ]
+    .iter()
+    .filter_map(|pointer| value.pointer(pointer))
+    .filter_map(Value::as_str)
+    .map(str::trim)
+    .any(|code| CONTEXT_CODES.contains(&code))
 }
 
 /// Optional per-call generation hints (`temperature` / `max_tokens`).

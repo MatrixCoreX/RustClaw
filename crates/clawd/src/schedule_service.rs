@@ -250,6 +250,7 @@ pub(crate) async fn parse_schedule_intent(
 ) -> Option<ScheduleIntentOutput> {
     let tz = parse_timezone(&state.policy.schedule.timezone);
     let now_local = Utc::now().with_timezone(&tz);
+    let schedule_memory_policy = memory::use_policy::decide_schedule_memory_use_policy(state);
     let structured = memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
@@ -257,13 +258,15 @@ pub(crate) async fn parse_schedule_intent(
         task.chat_id,
         request,
         state.policy.memory.recall_limit.max(1),
-        state.policy.memory.schedule_memory_include_long_term,
-        state.policy.memory.schedule_memory_include_preferences,
+        schedule_memory_policy.include_long_term_summary,
+        schedule_memory_policy.include_preferences,
     );
+    let structured =
+        memory::use_policy::filter_structured_memory_context(structured, &schedule_memory_policy);
     let memory_context = memory::service::structured_memory_context_block(
         &structured,
         memory::retrieval::MemoryContextMode::Schedule,
-        state.policy.memory.schedule_memory_max_chars.max(384),
+        schedule_memory_policy.max_chars,
     );
     let skill_catalog = render_schedule_skill_catalog(state);
     let skill_contracts = render_schedule_skill_contracts(state);
@@ -1255,11 +1258,13 @@ pub(crate) async fn try_handle_schedule_request(
             let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
             db.execute(
                 "INSERT INTO scheduled_jobs (
-                    job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
+                    job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, principal_id, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
                     timezone, task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
                     last_run_at, next_run_at, isolation_profile, permission_policy_json,
                     thread_resume_enabled, last_thread_task_id, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, 1, 1, 1, NULL, ?16, 'local_current_workspace', '{}', 1, NULL, ?17, ?17)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                          (SELECT principal_id FROM auth_keys WHERE user_key = ?7),
+                          ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, 1, 1, 1, NULL, ?16, 'local_current_workspace', '{}', 1, NULL, ?17, ?17)",
                 params![
                     job_id,
                     task.user_id,

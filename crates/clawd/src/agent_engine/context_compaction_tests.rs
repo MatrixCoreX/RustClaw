@@ -32,6 +32,7 @@ fn source_bundle_fixture() -> crate::task_context_builder::TaskContextBundle {
         }),
         task_plan_snapshot: None,
         compaction_records: Vec::new(),
+        memory_settings_snapshot: None,
     }
 }
 
@@ -92,8 +93,8 @@ fn context_compaction_source_bundle_enforces_total_budget() {
         .expect("large source fixture should require compaction");
     let source = context_source_bundle(&bundle, &plan);
 
-    assert_eq!(source["source_char_budget"], 48_000);
-    assert!(source["included_source_char_count"].as_u64().unwrap() <= 48_000);
+    assert_eq!(source["source_char_budget"], 64_000);
+    assert!(source["included_source_char_count"].as_u64().unwrap() <= 64_000);
     assert_eq!(source["sources"][0]["ref"], "runtime_context");
     assert!(source["sources"]
         .as_array()

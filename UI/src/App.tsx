@@ -339,6 +339,7 @@ export default function App() {
   } = useNniRuntime({ apiFetch, t, lang });
   const {
     memoryOverview,
+    memorySettings,
     memoryPreferences,
     memoryFacts,
     memoryRecent,
@@ -347,13 +348,27 @@ export default function App() {
     memoryMessage,
     memoryActionLoading,
     memorySettingsSaving,
+    memorySettingScope,
     memoryClearScope,
+    memoryPage,
+    memoryFilters,
+    memoryRemoteDisclosure,
+    memoryVectorStatus,
+    memoryUndoRevisionId,
     setMemoryClearScope,
     fetchMemoryData,
-    deleteMemoryItem,
-    expireMemoryItem,
+    fetchMemoryPage,
+    correctMemoryItem,
+    sendMemoryFeedback,
+    deleteMemoryItemWithRevision,
+    undoMemoryMutation,
+    exportMemory,
+    importMemory,
     clearMemoryScope,
-    updateMemoryLongTermEnabled,
+    updateMemorySetting,
+    updateMemoryExternalPolicy,
+    selectMemorySettingScope,
+    controlMemoryVector,
   } = useMemoryRuntime({ apiFetch, t });
   const {
     selectedLogFile,
@@ -705,6 +720,7 @@ export default function App() {
     activeChatAgentId,
     activeChatCanChangeAgent,
     chatSending,
+    chatCompacting,
     chatWorking,
     chatActivity,
     chatRecording,
@@ -736,6 +752,7 @@ export default function App() {
     cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
+    compactChatContext,
     queryChatTeachingLlmDebug,
   } = useChatRuntime({
     apiFetch,
@@ -1681,6 +1698,7 @@ export default function App() {
               chatTeachingRuns={chatTeachingRuns}
               activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
+              chatCompacting={chatCompacting}
               chatWorking={chatWorking}
               chatActivity={chatActivity}
               chatRecording={chatRecording}
@@ -1713,6 +1731,7 @@ export default function App() {
               onCancelVoiceRecording={cancelChatVoiceRecording}
               onAudioInputDeviceChange={setChatAudioInputDeviceId}
               onSendMessage={sendChatMessage}
+              onCompactContext={compactChatContext}
               onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}
             />
           ) : null}
@@ -2090,18 +2109,34 @@ export default function App() {
               memoryError={memoryError}
               memoryMessage={memoryMessage}
               memoryOverview={memoryOverview}
+              memorySettings={memorySettings}
+              memorySettingScope={memorySettingScope}
+              activeConversationId={activeChatThreadId}
               memoryPreferences={memoryPreferences}
               memoryFacts={memoryFacts}
               memoryRecent={memoryRecent}
               memoryActionLoading={memoryActionLoading}
               memorySettingsSaving={memorySettingsSaving}
               memoryClearScope={memoryClearScope}
+              memoryPage={memoryPage}
+              memoryFilters={memoryFilters}
+              memoryRemoteDisclosure={memoryRemoteDisclosure}
+              memoryVectorStatus={memoryVectorStatus}
+              memoryUndoRevisionId={memoryUndoRevisionId}
               onMemoryClearScopeChange={setMemoryClearScope}
               onFetchMemoryData={fetchMemoryData}
-              onDeleteMemoryItem={deleteMemoryItem}
-              onExpireMemoryItem={expireMemoryItem}
+              onFetchMemoryPage={fetchMemoryPage}
+              onCorrectMemoryItem={correctMemoryItem}
+              onSendMemoryFeedback={sendMemoryFeedback}
+              onDeleteMemoryItemWithRevision={deleteMemoryItemWithRevision}
+              onUndoMemoryMutation={undoMemoryMutation}
+              onExportMemory={exportMemory}
+              onImportMemory={importMemory}
               onClearMemoryScope={clearMemoryScope}
-              onUpdateMemoryLongTermEnabled={updateMemoryLongTermEnabled}
+              onUpdateMemorySetting={updateMemorySetting}
+              onUpdateMemoryExternalPolicy={updateMemoryExternalPolicy}
+              onSelectMemorySettingScope={selectMemorySettingScope}
+              onControlMemoryVector={controlMemoryVector}
             />
           ) : null}
 
